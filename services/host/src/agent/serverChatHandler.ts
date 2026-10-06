@@ -275,7 +275,7 @@ export class ServerChatHandler {
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
-    const session = this.tuiSessions.getActiveSession(deps.petId);
+    const session = await this.tuiSessions.getActiveSession(deps.petId);
     const threadId = session.threadId;
     const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
@@ -296,7 +296,7 @@ export class ServerChatHandler {
       // A settlement that fails leaves the thread in an unknown state, so it
       // takes the failure path rather than being reported as a clean
       // interruption. The caller decides how that failure is surfaced.
-      const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
+      const setup = await this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
       const settled = await this.graphService.settleAbortedRun(setup);
       if (settled) {
         this.inflightRequests.finish(peer, inflight, 'interrupted');
@@ -306,7 +306,6 @@ export class ServerChatHandler {
           pendingInterrupt: projectPendingInterrupt(settled),
         });
         this.inflightRequests.clear(peer, inflight);
-        await this.tuiSessions.refreshActiveSessionSummary(deps);
         return 'waiting';
       }
       finalizeInterrupted();
@@ -393,7 +392,7 @@ export class ServerChatHandler {
         return 'interrupted';
       }
 
-      const setup = this.tuiSessions.buildChatSetup(deps, ctx, threadId);
+      const setup = await this.tuiSessions.buildChatSetup(deps, ctx, threadId);
       configureInflightOperationRegistry(
         inflight,
         createOperationRegistryForAgentSetup(setup),
@@ -432,7 +431,6 @@ export class ServerChatHandler {
         // interrupt.requested event already told the interface what it is
         // waiting on and under which id.
         this.inflightRequests.finish(peer, inflight, 'interrupted');
-        await this.tuiSessions.refreshActiveSessionSummary(deps);
         console.log(`[local-server] interrupt.requested requestId=${requestId}`);
         this.inflightRequests.clear(peer, inflight);
         return 'waiting';
@@ -442,8 +440,6 @@ export class ServerChatHandler {
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
-      await this.tuiSessions.refreshActiveSessionSummary(deps);
-
       console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
     } catch (err) {
@@ -494,13 +490,13 @@ export class ServerChatHandler {
     });
   }
 
-  private acceptReviewRoute(
+  private async acceptReviewRoute(
     peer: ServerPeer,
     route: PendingInterruptRoute,
     message: InterruptResumeMessage,
     deps: ServerDeps,
   ) {
-    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.petId);
+    const activeSessionId = await this.tuiSessions.getActiveSessionId(deps.petId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
       console.warn(
         `[local-server] interrupt.resume rejected: route sessionId=${route.sessionId} `

@@ -87,7 +87,7 @@ test('production host handlers drive the v2 host vertical slice', async () => {
   writeFileSync(attachmentPath, ATTACHMENT_CONTENT);
   const runtimeConfig = buildHostRuntimeConfig(workdir);
   const graphFixture = createHostGraphFixture();
-  const localServerHandlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
+  const localServerHandlers = await createLocalServerHandlers(createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
     petId: 'pet-host-integration',
     petName: 'PinPawo',

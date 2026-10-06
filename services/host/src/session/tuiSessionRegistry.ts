@@ -40,15 +40,15 @@ export function createEmptyTuiSessionState(): TuiSessionState {
   };
 }
 
-export function loadTuiSessionState(
+export async function loadTuiSessionState(
   defaultModelProfileId: string,
   filePath = DEFAULT_TUI_SESSION_STATE_PATH,
-): TuiSessionState {
+): Promise<TuiSessionState> {
   return loadSessionRegistryCompatibility(defaultModelProfileId, filePath);
 }
 
-export function saveTuiSessionState(state: TuiSessionState, filePath = DEFAULT_TUI_SESSION_STATE_PATH) {
-  saveSessionRegistryCompatibility(state, filePath);
+export async function saveTuiSessionState(state: TuiSessionState, filePath = DEFAULT_TUI_SESSION_STATE_PATH) {
+  await saveSessionRegistryCompatibility(state, filePath);
 }
 
 export function ensureActiveTuiSession(

@@ -3,43 +3,42 @@ import test from 'node:test';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHostPersistence } from './hostPersistence';
+import { createMemoryHostPersistence } from './memoryHostPersistence';
 import { createFileHostPersistence } from './fileHostPersistence';
 import { ServerTuiSessionService } from '../session/serverTuiSessions';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
 import type { UsageFilter, UsageObservation, UsageStorePort } from '../hostRuntime';
 
-function admitted(p = createHostPersistence({ defaultModelProfileId: 'profile' })) {
-  const session = p.sessions.register('pet', 'pet:12345678', true);
+async function admitted(p = createMemoryHostPersistence({ defaultModelProfileId: 'profile' })) {
+  const session = (await p.sessions.register('pet', 'pet:12345678', true));
   const input = { dispatchId: 'dispatch', petId: 'pet', sessionId: session.id, threadId: session.threadId,
     request: 'inspect', scope: { namespace: 'channel', id: 'a' }, idempotencyKey: 'key', fingerprint: 'request-a' };
-  const record = p.invocations.admit(input).record;
+  const record = (await p.invocations.admit(input)).record;
   return { p, session, input, record };
 }
 const identity = (threadId: string) => ({ threadId, taskId: 'runtime-task', runId: 'runtime-run' });
 
-test('usage is unavailable by default, including the existing file adapter after restart', () => {
-  assert.equal(createHostPersistence({ defaultModelProfileId: 'profile' }).usage, undefined);
+test('usage is unavailable by default, including the existing file adapter after restart', async () => {
+  assert.equal(createMemoryHostPersistence({ defaultModelProfileId: 'profile' }).usage, undefined);
   const root = mkdtempSync(join(tmpdir(), 'host-usage-unavailable-'));
   try {
     const file = join(root, 'registry.json');
-    const { p, input } = admitted(createFileHostPersistence(file, 'profile'));
+    const { p, input } = (await admitted((await createFileHostPersistence(file, 'profile'))));
     assert.equal(p.usage, undefined);
     const raw = JSON.parse(readFileSync(file, 'utf8'));
     assert.deepEqual(Object.keys(raw).sort(), ['activeSessionIds', 'hostPersistenceVersion', 'invocations', 'sessions', 'version']);
     assert.equal(raw.hostPersistenceVersion, 1);
-    const reopened = createFileHostPersistence(file, 'profile');
+    const reopened = (await createFileHostPersistence(file, 'profile'));
     assert.equal(reopened.usage, undefined);
-    assert.equal(reopened.invocations.read(input.dispatchId)?.scope?.id, 'a');
+    assert.equal((await reopened.invocations.read(input.dispatchId))?.scope?.id, 'a');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('injected usage adapter preserves async results/errors and stays outside invocation commits', async () => {
   const observation: UsageObservation = {
-    sourceId: 'runtime-source', eventId: 'event', revision: 1, modelCallId: 'call', attemptId: 'attempt',
+    sourceId: 'runtime-source', eventId: 'event', revision: 1, attemptId: 'attempt',
     runtime: identity('opaque-thread'), requestId: 'resume-request', planItemId: 'plan-item', delegationId: 'delegation',
-    phase: 'capability', provider: 'test-provider', model: 'test-model', startedAt: '2026-10-06T00:00:00Z',
-    outcome: 'failed', usage: { input: null, output: 0, total: null }, missingReason: 'stream_incomplete',
+    usage: { input: null, output: 0, total: null },
   };
   const filter: UsageFilter = { runtime: observation.runtime, requestId: observation.requestId,
     planItemId: observation.planItemId, delegationId: observation.delegationId };
@@ -59,8 +58,8 @@ test('injected usage adapter preserves async results/errors and stays outside in
       return { records: [observation], nextCursor: 'opaque-next' };
     },
   };
-  const { p, input } = admitted(createHostPersistence({ defaultModelProfileId: 'profile', usage, commit: () => { commits++; } }));
-  const before = p.invocations.read(input.dispatchId);
+  const { p, input } = (await admitted(createMemoryHostPersistence({ defaultModelProfileId: 'profile', usage, commit: async () => { commits++; } })));
+  const before = (await p.invocations.read(input.dispatchId));
   const admissionCommits = commits;
   assert.equal(p.usage, usage);
   for (const expected of outcomes) assert.equal(await p.usage.record(observation), expected);
@@ -70,83 +69,83 @@ test('injected usage adapter preserves async results/errors and stays outside in
   assert.equal(page.nextCursor, 'opaque-next');
   await assert.rejects(p.usage.record(observation), error => error === unavailable);
   assert.equal(commits, admissionCommits);
-  assert.deepEqual(p.invocations.read(input.dispatchId), before);
-  assert.equal(p.invocations.claimStart(input.dispatchId, before!.revision, 'start').state, 'running');
+  assert.deepEqual((await p.invocations.read(input.dispatchId)), before);
+  assert.equal((await p.invocations.claimStart(input.dispatchId, before!.revision, 'start')).state, 'running');
 });
 
-test('durable admission is idempotent and rejects changed identities; failed commit leaves no execution claim', () => {
+test('durable admission is idempotent and rejects changed identities; failed commit leaves no execution claim', async () => {
   let fail = false;
-  const p = createHostPersistence({ defaultModelProfileId: 'profile', commit: () => { if (fail) throw Error('disk unavailable'); } });
-  const { input } = admitted(p);
-  assert.equal(p.invocations.admit({ ...input, dispatchId: 'other' }).created, false);
-  assert.throws(() => p.invocations.admit({ ...input, fingerprint: 'changed' }), /conflict/);
+  const p = createMemoryHostPersistence({ defaultModelProfileId: 'profile', commit: async () => { if (fail) throw Error('disk unavailable'); } });
+  const { input } = (await admitted(p));
+  assert.equal((await p.invocations.admit({ ...input, dispatchId: 'other' })).created, false);
+  await assert.rejects(async () => (await p.invocations.admit({ ...input, fingerprint: 'changed' })), /conflict/);
   fail = true;
-  assert.throws(() => p.invocations.claimStart(input.dispatchId, 0, 'chunk'), /disk unavailable/);
-  assert.equal(p.invocations.read(input.dispatchId)?.state, 'queued');
-  assert.equal(p.invocations.read(input.dispatchId)?.revision, 0);
-  assert.throws(() => p.invocations.admit({ ...input, idempotencyKey: 'new', dispatchId: 'new' }), /disk unavailable/);
-  assert.equal(p.invocations.read('new'), null);
+  await assert.rejects(async () => (await p.invocations.claimStart(input.dispatchId, 0, 'chunk')), /disk unavailable/);
+  assert.equal((await p.invocations.read(input.dispatchId))?.state, 'queued');
+  assert.equal((await p.invocations.read(input.dispatchId))?.revision, 0);
+  await assert.rejects(async () => (await p.invocations.admit({ ...input, idempotencyKey: 'new', dispatchId: 'new' })), /disk unavailable/);
+  assert.equal((await p.invocations.read('new')), null);
 });
 
-test('waiting resumes by runtime identity/revision, clears pending on settlement and rejects stale chunks', () => {
-  const { p, record, session } = admitted();
+test('waiting resumes by runtime identity/revision, clears pending on settlement and rejects stale chunks', async () => {
+  const { p, record, session } = (await admitted());
   const store = p.invocations;
-  let current = store.claimStart(record.dispatchId, record.revision, 'start');
-  current = store.attachRuntimeIdentity(current.dispatchId, current.revision, identity(session.threadId));
+  let current = (await store.claimStart(record.dispatchId, record.revision, 'start'));
+  current = (await store.attachRuntimeIdentity(current.dispatchId, current.revision, identity(session.threadId)));
   const pending = { interruptId: 'interrupt', payload: { kind: 'human_review', reviews: [] } } as never;
-  current = store.markWaiting(current.dispatchId, current.revision, pending);
-  assert.throws(() => store.claimResume(current.dispatchId, current.revision, 'resume', { ...identity(session.threadId), runId: 'wrong' }, 'interrupt'), /identity/);
-  assert.throws(() => store.claimResume(current.dispatchId, current.revision, 'resume', identity(session.threadId), 'wrong'), /identity/);
+  current = (await store.markWaiting(current.dispatchId, current.revision, pending));
+  await assert.rejects(async () => (await store.claimResume(current.dispatchId, current.revision, 'resume', { ...identity(session.threadId), runId: 'wrong' }, 'interrupt')), /identity/);
+  await assert.rejects(async () => (await store.claimResume(current.dispatchId, current.revision, 'resume', identity(session.threadId), 'wrong')), /identity/);
   const waiting = current;
-  current = store.claimResume(current.dispatchId, current.revision, 'resume', identity(session.threadId), 'interrupt');
-  assert.throws(() => store.claimResume(waiting.dispatchId, waiting.revision, 'duplicate', identity(session.threadId), 'interrupt'), /conflict/);
-  assert.throws(() => store.settle(current.dispatchId, waiting.revision, { state: 'completed', reply: 'old' }), /conflict/);
-  current = store.settle(current.dispatchId, current.revision, { state: 'completed', reply: 'done' });
+  current = (await store.claimResume(current.dispatchId, current.revision, 'resume', identity(session.threadId), 'interrupt'));
+  await assert.rejects(async () => (await store.claimResume(waiting.dispatchId, waiting.revision, 'duplicate', identity(session.threadId), 'interrupt')), /conflict/);
+  await assert.rejects(async () => (await store.settle(current.dispatchId, waiting.revision, { state: 'completed', reply: 'old' })), /conflict/);
+  current = (await store.settle(current.dispatchId, current.revision, { state: 'completed', reply: 'done' }));
   assert.equal(current.pendingInterrupt, undefined);
   assert.equal(current.scope?.id, 'a');
-  assert.deepEqual(store.settle(current.dispatchId, current.revision, { state: 'completed', reply: 'done' }), current);
-  assert.throws(() => store.settle(current.dispatchId, current.revision, { state: 'failed', error: 'late' }), /settlement conflict/);
+  assert.deepEqual((await store.settle(current.dispatchId, current.revision, { state: 'completed', reply: 'done' })), current);
+  await assert.rejects(async () => (await store.settle(current.dispatchId, current.revision, { state: 'failed', error: 'late' })), /settlement conflict/);
 });
 
-test('legacy registry migrates in place; service and invocation adapter share one authority across restart', () => {
+test('legacy registry migrates in place; service and invocation adapter share one authority across restart', async () => {
   const root = mkdtempSync(join(tmpdir(), 'host-migration-'));
   try {
     const file = join(root, 'sessions.json');
-    const legacy = createHostPersistence({ defaultModelProfileId: 'profile' });
-    const session = legacy.sessions.register('pet', 'pet:12345678', true);
+    const legacy = createMemoryHostPersistence({ defaultModelProfileId: 'profile' });
+    const session = (await legacy.sessions.register('pet', 'pet:12345678', true));
     writeFileSync(file, JSON.stringify({ version: 2, activeSessionIds: { pet: session.id }, sessions: { [session.id]: {
       ...session, modelProfileId: undefined, requiredInputModalities: undefined,
     } } }));
-    const persistence = createFileHostPersistence(file, 'profile');
-    const service = new ServerTuiSessionService({ runtimeConfig: buildHostRuntimeConfig(root), persistence, defaultModelProfileId: 'profile' });
-    assert.equal(service.getActiveSession('pet').id, session.id);
-    assert.equal(service.getChatThreadId('pet'), session.threadId);
-    const { input } = admitted(persistence);
-    service.selectModelProfile('pet', session.id, 'second');
+    const persistence = (await createFileHostPersistence(file, 'profile'));
+    const service = new ServerTuiSessionService({ runtimeConfig: buildHostRuntimeConfig(root), registry: persistence.sessions });
+    assert.equal((await service.getActiveSession('pet')).id, session.id);
+    assert.equal((await service.getChatThreadId('pet')), session.threadId);
+    const { input } = (await admitted(persistence));
+    (await service.selectModelProfile('pet', session.id, 'second'));
     const raw = JSON.parse(readFileSync(file, 'utf8'));
     assert.equal(raw.version, 4);
     assert.equal(raw.hostPersistenceVersion, 1);
     assert.equal(raw.invocations[input.dispatchId].sessionId, session.id);
     assert.equal(raw.sessions[session.id].modelProfileId, 'second');
-    const reopened = createFileHostPersistence(file, 'profile');
-    assert.equal(reopened.invocations.read(input.dispatchId)?.scope?.id, 'a');
-    assert.equal(reopened.sessions.active('pet')?.modelProfileId, 'second');
-    assert.equal(reopened.sessions.list().length, 1);
+    const reopened = (await createFileHostPersistence(file, 'profile'));
+    assert.equal((await reopened.invocations.read(input.dispatchId))?.scope?.id, 'a');
+    assert.equal((await reopened.sessions.active('pet'))?.modelProfileId, 'second');
+    assert.equal((await reopened.sessions.list()).length, 1);
     writeFileSync(file, '{broken');
-    assert.throws(() => createFileHostPersistence(file, 'profile'));
-    assert.throws(() => persistence.sessions.updateProfile(session.id, 'lost'), /single writer/);
-    assert.equal(persistence.sessions.read(session.id)?.modelProfileId, 'second');
+    await assert.rejects(async () => (await createFileHostPersistence(file, 'profile')));
+    await assert.rejects(async () => (await persistence.sessions.updateProfile(session.id, 'lost')), /single writer/);
+    assert.equal((await persistence.sessions.read(session.id))?.modelProfileId, 'second');
     assert.equal(readFileSync(file, 'utf8'), '{broken');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('session identity conflicts and removal of unresolved invocation fail closed', () => {
-  const { p, session } = admitted();
-  assert.throws(() => p.sessions.register('other', session.id, true), /another Pet/);
-  assert.throws(() => p.sessions.remove(session.id), /unresolved/);
-  const detached = p.sessions.read(session.id)!;
+test('session identity conflicts and removal of unresolved invocation fail closed', async () => {
+  const { p, session } = (await admitted());
+  await assert.rejects(async () => (await p.sessions.register('other', session.id, true)), /another Pet/);
+  await assert.rejects(async () => (await p.sessions.remove(session.id)), /unresolved/);
+  const detached = (await p.sessions.read(session.id))!;
   detached.threadId = 'tampered';
-  assert.equal(p.sessions.read(session.id)?.threadId, session.threadId);
+  assert.equal((await p.sessions.read(session.id))?.threadId, session.threadId);
 });
 
 test('compatibility session writes preserve invocation facts and refuse orphaning them', async () => {
@@ -154,26 +153,98 @@ test('compatibility session writes preserve invocation facts and refuse orphanin
   const root = mkdtempSync(join(tmpdir(), 'host-legacy-facade-'));
   try {
     const file = join(root, 'registry.json');
-    const { input } = admitted(createFileHostPersistence(file, 'profile'));
-    const registry = loadTuiSessionState('profile', file);
-    saveTuiSessionState(registry, file);
-    assert.equal(createFileHostPersistence(file, 'profile').invocations.read(input.dispatchId)?.dispatchId, input.dispatchId);
+    const { input } = (await admitted((await createFileHostPersistence(file, 'profile'))));
+    const registry = (await loadTuiSessionState('profile', file));
+    (await saveTuiSessionState(registry, file));
+    assert.equal((await (await createFileHostPersistence(file, 'profile')).invocations.read(input.dispatchId))?.dispatchId, input.dispatchId);
     delete registry.sessions[input.sessionId];
-    assert.throws(() => saveTuiSessionState(registry, file), /orphan/);
-    assert.ok(createFileHostPersistence(file, 'profile').sessions.read(input.sessionId));
+    await assert.rejects(async () => (await saveTuiSessionState(registry, file)), /orphan/);
+    assert.ok(await (await createFileHostPersistence(file, 'profile')).sessions.read(input.sessionId));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('only unstarted legacy calls can persist active-session selection at dequeue', () => {
-  const p = createHostPersistence({ defaultModelProfileId: 'profile' });
-  const first = p.sessions.create('pet');
-  const next = p.sessions.create('pet');
-  let record = p.invocations.admit({ dispatchId: 'legacy', petId: 'pet', sessionId: first.id,
-    threadId: first.threadId, request: 'legacy', fingerprint: 'legacy' }).record;
-  record = p.invocations.bindLegacyQueuedSession(record.dispatchId, record.revision, next.id);
+test('only unstarted legacy calls can persist active-session selection at dequeue', async () => {
+  const p = createMemoryHostPersistence({ defaultModelProfileId: 'profile' });
+  const first = (await p.sessions.create('pet'));
+  const next = (await p.sessions.create('pet'));
+  let record = (await p.invocations.admit({ dispatchId: 'legacy', petId: 'pet', sessionId: first.id,
+    threadId: first.threadId, request: 'legacy', fingerprint: 'legacy' })).record;
+  record = (await p.invocations.bindLegacyQueuedSession(record.dispatchId, record.revision, next.id));
   assert.equal(record.threadId, next.threadId);
-  record = p.invocations.claimStart(record.dispatchId, record.revision, 'start');
-  assert.throws(() => p.invocations.bindLegacyQueuedSession(record.dispatchId, record.revision, first.id), /conflict/);
-  const { record: scoped } = admitted(p);
-  assert.throws(() => p.invocations.bindLegacyQueuedSession(scoped.dispatchId, scoped.revision, next.id), /legacy/);
+  record = (await p.invocations.claimStart(record.dispatchId, record.revision, 'start'));
+  await assert.rejects(async () => (await p.invocations.bindLegacyQueuedSession(record.dispatchId, record.revision, first.id)), /conflict/);
+  const { record: scoped } = (await admitted(p));
+  await assert.rejects(async () => (await p.invocations.bindLegacyQueuedSession(scoped.dispatchId, scoped.revision, next.id)), /legacy/);
+});
+
+test('async commit serializes duplicate admissions and competing resume claims; failed settlement publishes nothing', async () => {
+  let enter!: () => void, release!: () => void;
+  let entered = new Promise<void>(resolve => { enter = resolve; });
+  let pending = new Promise<void>(resolve => { release = resolve; });
+  let hold = false, fail = false, commits = 0;
+  const p = createMemoryHostPersistence({ defaultModelProfileId: 'profile', commit: async () => {
+    if (fail) throw new Error('durable settlement unavailable');
+    commits++;
+    if (hold) { enter(); await pending; }
+  } });
+  const session = await p.sessions.register('pet', 'pet:12345678', true);
+  const input = { dispatchId: 'first', petId: 'pet', sessionId: session.id, threadId: session.threadId,
+    request: 'once', idempotencyKey: 'stable', fingerprint: 'same' };
+  const baseline = commits;
+  hold = true;
+  const admissions = Promise.all([p.invocations.admit(input), p.invocations.admit({ ...input, dispatchId: 'redelivery' })]);
+  await entered; release();
+  const [first, duplicate] = await admissions;
+  hold = false;
+  assert.equal(first.created, true); assert.equal(duplicate.created, false);
+  assert.equal(duplicate.record.dispatchId, first.record.dispatchId); assert.equal(commits - baseline, 1);
+  await assert.rejects(p.invocations.admit({ ...input, dispatchId: 'changed', fingerprint: 'different metadata' }), /identity conflict/);
+  let record = await p.invocations.claimStart(first.record.dispatchId, first.record.revision, 'start');
+  record = await p.invocations.attachRuntimeIdentity(record.dispatchId, record.revision, identity(session.threadId));
+  record = await p.invocations.markWaiting(record.dispatchId, record.revision, { interruptId: 'review', payload: { kind: 'human_review', reviews: [] } } as never);
+  entered = new Promise<void>(resolve => { enter = resolve; });
+  pending = new Promise<void>(resolve => { release = resolve; });
+  hold = true;
+  const claims = Promise.allSettled([
+    p.invocations.claimResume(record.dispatchId, record.revision, 'resume', identity(session.threadId), 'review'),
+    p.invocations.claimResume(record.dispatchId, record.revision, 'duplicate-resume', identity(session.threadId), 'review'),
+  ]);
+  await entered; release();
+  const results = await claims;
+  hold = false;
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter(result => result.status === 'rejected').length, 1);
+  const before = await p.invocations.read(record.dispatchId);
+  const { HostInvocationService } = await import('./hostInvocationService');
+  const events: unknown[] = [];
+  const service = new HostInvocationService(p.invocations, event => events.push(event));
+  fail = true;
+  await assert.rejects(service.observe({ dispatchId: record.dispatchId, request: input.request, requestId: 'resume', state: 'completed', reply: 'done' }), /durable settlement unavailable/);
+  assert.deepEqual(await p.invocations.read(record.dispatchId), before);
+  assert.deepEqual(events, []);
+});
+
+test('a resume result commit failure preserves its running claim and original scope', async () => {
+  let fail = false;
+  const p = createMemoryHostPersistence({ defaultModelProfileId: 'profile', commit: async state => {
+    if (fail && state.invocations.dispatch.state === 'completed') throw new Error('resume result unavailable');
+  } });
+  const { record, session } = await admitted(p);
+  let current = await p.invocations.claimStart(record.dispatchId, record.revision, 'start');
+  current = await p.invocations.attachRuntimeIdentity(current.dispatchId, current.revision, identity(session.threadId));
+  const pending = { interruptId: 'review', payload: { kind: 'human_review', reviews: [] } } as never;
+  await p.invocations.markWaiting(current.dispatchId, current.revision, pending);
+  const { HostInvocationService } = await import('./hostInvocationService');
+  const events: string[] = [];
+  const service = new HostInvocationService(p.invocations, event => events.push(event.state));
+  const options = { sessionId: session.id, setup: { input: { threadId: session.threadId } },
+    request: { kind: 'resume', requestId: 'resume', resume: { interruptId: 'review' } },
+    graphService: { readExecutionDescriptor: async () => ({ state: 'waiting', identity: identity(session.threadId), pendingInterrupt: pending }) },
+    emitEvent: () => {},
+  } as never;
+  fail = true;
+  await assert.rejects(service.runTurn(options, 'pet', async () => ({ status: 'completed', reply: 'done' })), /resume result unavailable/);
+  const preserved = await p.invocations.read(record.dispatchId);
+  assert.equal(preserved?.state, 'running'); assert.equal(preserved?.requestId, 'resume');
+  assert.deepEqual(preserved?.scope, record.scope); assert.deepEqual(events, ['running']);
 });

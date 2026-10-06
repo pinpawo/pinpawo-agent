@@ -87,12 +87,12 @@ test('session.new returns an authoritative empty snapshot for a unique session',
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -140,7 +140,7 @@ test('session.compact is a v2 session command and returns the authoritative snap
       throw new Error('empty context must not be written');
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -149,7 +149,7 @@ test('session.compact is a v2 session command and returns the authoritative snap
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
-  });
+  }));
 
   try {
     const peer = createPeer(sent);
@@ -220,7 +220,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
       inputModalities: ['text', 'image'],
     },
   ], 'primary');
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -230,7 +230,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -335,7 +335,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
       throw new Error('checkpoint unavailable');
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -349,7 +349,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -398,7 +398,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   ], 'primary');
   const initialSent: HostServerMessage[] = [];
   const initialPeer = createPeer(initialSent);
-  const initialHandlers = createLocalServerHandlers({
+  const initialHandlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -406,7 +406,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
-  }, { loadContext: loadTestContext });
+  }, { loadContext: loadTestContext }));
 
   let sessionId = '';
   try {
@@ -432,7 +432,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
 
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -442,7 +442,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
-  }, { loadContext: loadTestContext });
+  }, { loadContext: loadTestContext }));
   try {
     await handlers.peerHandlers.onSessionSnapshotGet(peer, {
       type: 'session.snapshot.get',
@@ -515,7 +515,7 @@ test('model selection is rejected while the active session is running', async ()
   const peer = createPeer(sent);
   const started = deferred<void>();
   const release = deferred<void>();
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -533,7 +533,7 @@ test('model selection is rejected while the active session is running', async ()
       await release.promise;
       return { status: 'interrupted' };
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -615,7 +615,7 @@ test('a run claims the register for the whole admitted turn', async () => {
   const graphService = {
     readThreadState: async () => ({ messages: [], pendingInterrupt: null }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -630,7 +630,7 @@ test('a run claims the register for the whole admitted turn', async () => {
       await releaseTurn.promise;
       return { status: 'completed', reply: 'done' };
     },
-  });
+  }));
 
   try {
     assert.equal(activeRuns.read(), null);
@@ -691,7 +691,7 @@ test('completion snapshot does not reintroduce a settled active run', async () =
       };
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -701,7 +701,7 @@ test('completion snapshot does not reintroduce a settled active run', async () =
     chatGraphService: graphService,
     loadContext: loadTestContext,
     runAgentTurn: async () => ({ status: 'completed', reply: 'done' }),
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -713,16 +713,18 @@ test('completion snapshot does not reintroduce a settled active run', async () =
       requestId: 'chat-settled',
       message: 'finish',
     });
-    await refreshStarted.promise;
-    releaseRefresh.resolve();
     await running;
+    assert.equal(checkpointReads, 0, 'a completed turn does not rewrite derived summaries');
 
     // Snapshot after the run settles: commands are refused while one is in
     // flight, and /refresh exists precisely to re-read the UI once it ends.
-    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+    const refreshing = handlers.peerHandlers.onSessionSnapshotGet(peer, {
       type: 'session.snapshot.get',
       requestId: 'snapshot-settled',
     });
+    await refreshStarted.promise;
+    releaseRefresh.resolve();
+    await refreshing;
     const snapshot = sent.find((message) => (
       message.type === 'session.snapshot.result'
       && message.requestId === 'snapshot-settled'
@@ -758,7 +760,7 @@ test('model selection blocks a chat admitted by another peer until the selection
       };
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -778,7 +780,7 @@ test('model selection blocks a chat admitted by another peer until the selection
       await releaseChat.promise;
       return { status: 'interrupted' };
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(selectionPeer, {
@@ -846,7 +848,7 @@ test('model selection is rejected while checkpoint state has pending review', as
       pendingInterrupt: { review },
     }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -860,7 +862,7 @@ test('model selection is rejected while checkpoint state has pending review', as
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -910,7 +912,7 @@ test('admitted images gate model selection through the transcript', async () => 
       pendingInterrupt: null,
     }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -941,7 +943,7 @@ test('admitted images gate model selection through the transcript', async () => 
       }
       return { status: 'interrupted' };
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -1056,7 +1058,7 @@ test('text-only selected profile rejects image admission before graph invocation
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
   let graphInvocations = 0;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -1076,7 +1078,7 @@ test('text-only selected profile rejects image admission before graph invocation
       graphInvocations += 1;
       return { status: 'interrupted' };
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -1133,7 +1135,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1144,7 +1146,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
       persisted.push({ mode, safetyLevel });
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
@@ -1200,7 +1202,7 @@ test('runtime config update preserves the configured safety level when the messa
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1212,7 +1214,7 @@ test('runtime config update preserves the configured safety level when the messa
     persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
       persisted.push({ mode, safetyLevel });
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
@@ -1260,7 +1262,7 @@ test('runtime config update reports persistence failures without changing runtim
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1271,7 +1273,7 @@ test('runtime config update reports persistence failures without changing runtim
     persistGlobalReviewPolicyMode: () => {
       throw new Error('config is read-only');
     },
-  });
+  }));
 
   try {
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
@@ -1309,7 +1311,7 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
   const { FileSaver } = await import('./fileSaver');
   const checkpointer = new FileSaver(join(workdir, 'host-owned.json'));
   let actual: unknown;
-  const handlers = createLocalServerHandlers({
+  const handlers = (await createLocalServerHandlers({
     ...createTestModelServerDeps(),
     serverMode: 'chat', petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1321,7 +1323,7 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
       actual = setup.graphConfig.checkpoint;
       return { status: 'completed', reply: 'done' };
     },
-  });
+  }));
   try {
     await handlers.peerHandlers.onChatRequest(createPeer([]), {
       type: 'chat_request', requestId: 'checkpoint', message: 'inspect',

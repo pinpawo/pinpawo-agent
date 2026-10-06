@@ -14,8 +14,8 @@ import {
   updateTuiSessionSummary,
 } from './tuiSessionRegistry';
 
-test('tui session registry creates, lists, and resumes sessions without deleting old records', () => {
-  const state = loadTuiSessionState('test-profile', '/path/that/does/not/exist.json');
+test('tui session registry creates, lists, and resumes sessions without deleting old records', async () => {
+  const state = (await loadTuiSessionState('test-profile', '/path/that/does/not/exist.json'));
   const first = ensureActiveTuiSession(
     state,
     'pet-a',
@@ -58,7 +58,7 @@ test('tui session registry rejects unversioned and unsupported persisted state',
 
   for (const persisted of unsupportedStates) {
     await writeFile(filePath, JSON.stringify(persisted), 'utf8');
-    assert.deepEqual(loadTuiSessionState('test-profile', filePath), {
+    assert.deepEqual((await loadTuiSessionState('test-profile', filePath)), {
       version: 4,
       activeSessionIds: {},
       sessions: {},
@@ -101,7 +101,7 @@ test('tui session registry drops malformed current records', async () => {
       activeSessionIds: { 'pet-a': sessionId },
       sessions: { [sessionId]: record },
     }), 'utf8');
-    assert.deepEqual(loadTuiSessionState('test-profile', filePath), {
+    assert.deepEqual((await loadTuiSessionState('test-profile', filePath)), {
       version: 4,
       activeSessionIds: {},
       sessions: {},
@@ -112,7 +112,7 @@ test('tui session registry drops malformed current records', async () => {
 test('tui session registry persists an adopted opaque checkpoint thread', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
-  const state = loadTuiSessionState('test-profile', '/missing.json');
+  const state = (await loadTuiSessionState('test-profile', '/missing.json'));
   const adopted = createTuiSessionForThread(
     state,
     'planner',
@@ -121,8 +121,8 @@ test('tui session registry persists an adopted opaque checkpoint thread', async 
     new Date('2026-06-01T01:00:00.000Z'),
   );
 
-  saveTuiSessionState(state, filePath);
-  const restored = loadTuiSessionState('test-profile', filePath);
+  (await saveTuiSessionState(state, filePath));
+  const restored = (await loadTuiSessionState('test-profile', filePath));
 
   assert.equal(restored.activeSessionIds.planner, adopted.id);
   assert.equal(restored.sessions[adopted.id]?.threadId, 'studio:legacy:pet:planner');
@@ -131,7 +131,7 @@ test('tui session registry persists an adopted opaque checkpoint thread', async 
 test('tui session registry persists versioned state', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
-  const state = loadTuiSessionState('test-profile', '/missing.json');
+  const state = (await loadTuiSessionState('test-profile', '/missing.json'));
   const session = ensureActiveTuiSession(
     state,
     'pet-a',
@@ -143,9 +143,9 @@ test('tui session registry persists versioned state', async () => {
   // even though modalities are now derived from the transcript.
   state.sessions[session.id]!.requiredInputModalities = ['text', 'image'];
 
-  saveTuiSessionState(state, filePath);
+  (await saveTuiSessionState(state, filePath));
   const raw = JSON.parse(await readFile(filePath, 'utf8')) as { version?: number };
-  const restored = loadTuiSessionState('test-profile', filePath);
+  const restored = (await loadTuiSessionState('test-profile', filePath));
 
   assert.equal(raw.version, 4);
   assert.equal(restored.sessions[session.id]?.title, 'persisted');
@@ -178,7 +178,7 @@ test('tui session registry migrates v2 sessions to the current default profile',
     },
   }), 'utf8');
 
-  const restored = loadTuiSessionState('new-default', filePath);
+  const restored = (await loadTuiSessionState('new-default', filePath));
 
   assert.equal(restored.version, 4);
   assert.equal(restored.sessions[sessionId]?.modelProfileId, 'new-default');
@@ -210,7 +210,7 @@ test('tui session registry migrates v3 sessions to a text-only requirement', asy
     },
   }), 'utf8');
 
-  const restored = loadTuiSessionState('new-default', filePath);
+  const restored = (await loadTuiSessionState('new-default', filePath));
 
   assert.equal(restored.sessions[sessionId]?.modelProfileId, 'saved-profile');
   assert.deepEqual(

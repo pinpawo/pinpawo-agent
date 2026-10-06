@@ -52,7 +52,7 @@ redirectConsoleToStdioDiagnostics();
 
 const runtimeConfig = buildHostRuntimeConfig(workdir);
 const graphFixture = createHostGraphFixture();
-const handlers = createLocalServerHandlers(
+const handlers = await createLocalServerHandlers(
   createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
     petId: 'pet-embedded-host',

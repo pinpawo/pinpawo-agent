@@ -81,7 +81,7 @@ export type AgentSessionTurnOptions = {
    */
   prepareUserMessage?: () => Promise<BaseMessage>;
   /** Commit the runtime-provided identity before any graph execution. */
-  onExecutionIdentity?: (identity: RuntimeExecutionIdentity) => void;
+  onExecutionIdentity?: (identity: RuntimeExecutionIdentity) => Promise<void>;
 };
 
 async function waitForGraphRunSettlement(run: HostGraphEventStream | null) {

@@ -129,7 +129,7 @@ export class HostGraphService {
   async streamEvents(
     setup: AgentChannelSetup,
     resume?: InterruptResume,
-    onIdentity?: (identity: RuntimeExecutionIdentity) => void,
+    onIdentity?: (identity: RuntimeExecutionIdentity) => Promise<void>,
   ): Promise<HostGraphEventStream> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
@@ -146,7 +146,7 @@ export class HostGraphService {
     const identity = prepared?.identity ?? (resume && threadId ? (await this.readExecutionDescriptor(setup)).identity : null);
     if (onIdentity) {
       if (!identity) throw new Error('Durable runtime execution requires an execution identity.');
-      onIdentity(identity);
+      await onIdentity(identity);
     }
     return await graph.streamEvents(
       (prepared ? prepared.input : buildResumeCommand(resume!)) as Parameters<OrchestratorGraph['streamEvents']>[0],

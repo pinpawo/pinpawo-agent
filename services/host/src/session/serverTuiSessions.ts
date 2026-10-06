@@ -32,10 +32,8 @@ import {
 } from '../agent/chatMessageInput';
 import { ImageAttachmentAdmission } from '../agent/attachmentAdmission';
 import type { HostRuntimeConfig } from '../config/runtimeConfig';
-import { type TuiSessionRecord, type TuiSessionState } from './tuiSessionRegistry';
-import type { HostPersistence, SessionRegistryPort } from '../persistence/contracts';
-import { createHostPersistence } from '../persistence/hostPersistence';
-import { createFileHostPersistence } from '../persistence/fileHostPersistence';
+import { type TuiSessionRecord } from './tuiSessionRegistry';
+import type { SessionRegistryPort } from '../persistence/contracts';
 
 
 import {
@@ -75,37 +73,23 @@ type TuiSessionGraphService = Pick<HostGraphService, 'readThreadState'>;
 
 
 export class ServerTuiSessionService {
-  readonly persistence: HostPersistence;
   private readonly registry: SessionRegistryPort;
   private readonly checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
-  private readonly defaultModelProfileId: string;
   private readonly imageAdmission = new ImageAttachmentAdmission();
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
-    artifacts?: import('@pinpawo/pet-agent').CapabilityArtifactStore;
-    persistence?: HostPersistence;
-    state?: TuiSessionState;
-    saveState?: (state: TuiSessionState) => void;
+    registry: SessionRegistryPort;
     checkpointer?: TuiSessionCheckpointer;
     graphService?: TuiSessionGraphService;
     loadContext?: typeof loadAgentContext;
     runtimeConfig: HostRuntimeConfig;
-    sessionStatePath?: string;
     checkpointPath?: string;
-    defaultModelProfileId: string;
   }) {
     const runtimeConfig = options.runtimeConfig;
-    const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
-    this.defaultModelProfileId = options.defaultModelProfileId;
-    this.persistence = options.persistence ?? (options.state || options.saveState
-      ? createHostPersistence({ defaultModelProfileId: this.defaultModelProfileId, artifacts: options.artifacts,
-          initial: options.state ? { sessions: options.state, invocations: {} } : undefined,
-          commit: options.saveState ? state => options.saveState!(state.sessions) : undefined })
-      : createFileHostPersistence(sessionStatePath, this.defaultModelProfileId, options.artifacts));
-    this.registry = this.persistence.sessions;
+    this.registry = options.registry;
     this.checkpointer = options.checkpointer ?? new FileSaver(
       options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,
     );
@@ -114,33 +98,33 @@ export class ServerTuiSessionService {
   }
 
   getActiveSession(petId: string) { return this.registry.ensureActive(petId); }
-  hasActiveSession(petId: string): boolean { return !!this.registry.active(petId); }
-  adoptInitialThread(petId: string, threadId: string) {
-    return this.registry.active(petId) ?? this.registry.create(petId, threadId);
+  async hasActiveSession(petId: string): Promise<boolean> { return !!await this.registry.active(petId); }
+  async adoptInitialThread(petId: string, threadId: string) {
+    return await this.registry.active(petId) ?? this.registry.create(petId, threadId);
   }
-  getChatThreadId(petId: string) { return this.getActiveSession(petId).threadId; }
-  getActiveSessionId(petId: string) { return this.getActiveSession(petId).id; }
-  getSession(petId: string, sessionId: string) {
-    const session = this.registry.read(sessionId);
+  async getChatThreadId(petId: string) { return (await this.getActiveSession(petId)).threadId; }
+  async getActiveSessionId(petId: string) { return (await this.getActiveSession(petId)).id; }
+  async getSession(petId: string, sessionId: string) {
+    const session = await this.registry.read(sessionId);
     return session?.petId === petId ? session : null;
   }
   ensureDispatchSession(petId: string, sessionId: string, create = false) {
     return this.registry.register(petId, sessionId, create);
   }
 
-  buildSessionSetup(deps: ServerDeps, ctx: Awaited<ReturnType<typeof loadAgentContext>>, sessionId: string) {
-    const session = this.getSession(deps.petId, sessionId);
+  async buildSessionSetup(deps: ServerDeps, ctx: Awaited<ReturnType<typeof loadAgentContext>>, sessionId: string) {
+    const session = await this.getSession(deps.petId, sessionId);
     if (!session) throw new Error('Target session does not exist or belongs to another Pet.');
     return this.buildChatSetup(deps, ctx, session.threadId);
   }
 
   createNewSession(petId: string) { return this.registry.create(petId); }
   async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
-    const previous = this.getActiveSession(petId);
+    const previous = await this.getActiveSession(petId);
     if (options.deletePrevious) {
       // Remove registration first; unresolved invocations fail closed before
       // runtime deletion can erase their thread.
-      this.registry.remove(previous.id);
+      await this.registry.remove(previous.id);
       await this.checkpointer.deleteThread(previous.threadId);
     }
     return this.registry.create(petId);
@@ -153,15 +137,16 @@ export class ServerTuiSessionService {
    * Assembling the graph belongs to agent, which is why the work below lives
    * in agent/buildChatSetup rather than here.
    */
-  buildChatSetup(
+  async buildChatSetup(
     deps: ServerDeps,
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
-    threadId = this.getChatThreadId(deps.petId),
+    threadId?: string,
     modelProfileIdOverride?: string,
   ) {
-    const session = this.registry.list(deps.petId)
+    threadId ??= await this.getChatThreadId(deps.petId);
+    const session = (await this.registry.list(deps.petId))
       .find((candidate) => candidate.threadId === threadId)
-      ?? this.getActiveSession(deps.petId);
+      ?? await this.getActiveSession(deps.petId);
     return buildChatSetup({
       deps,
       context: ctx,
@@ -183,7 +168,7 @@ export class ServerTuiSessionService {
     if (attachments.length === 0) {
       return createLocalChatHumanMessage(message);
     }
-    const session = this.getActiveSession(deps.petId);
+    const session = await this.getActiveSession(deps.petId);
     const profile = deps.modelProfiles.resolve(session.modelProfileId);
     const admitted = await this.imageAdmission.admit(attachments, {
       allowImages: (profile.inputModalities ?? ['text']).includes('image'),
@@ -193,14 +178,14 @@ export class ServerTuiSessionService {
     return createAdmittedLocalChatHumanMessage(message, admitted);
   }
 
-  selectModelProfile(
+  async selectModelProfile(
     petId: string,
     sessionId: string,
     modelProfileId: string,
   ) {
-    const session = this.getSession(petId, sessionId);
+    const session = await this.getSession(petId, sessionId);
     if (!session) throw new Error('session not found');
-    if (this.registry.active(petId)?.id !== sessionId) throw new Error('model selection requires the active session');
+    if ((await this.registry.active(petId))?.id !== sessionId) throw new Error('model selection requires the active session');
     return this.registry.updateProfile(sessionId, modelProfileId);
   }
 
@@ -218,7 +203,7 @@ export class ServerTuiSessionService {
       // resumed, inspected, and repaired by an explicit model selection.
       checkpointReaderProfileId = deps.modelProfiles.defaultProfileId;
     }
-    const setup = this.buildChatSetup(
+    const setup = await this.buildChatSetup(
       deps,
       ctx,
       session.threadId,
@@ -250,43 +235,38 @@ export class ServerTuiSessionService {
     session: TuiSessionRecord,
     messages: TuiCheckpointMessage[],
   ) {
-    this.registry.updateSummary(session.id, summarizeTuiCheckpointMessages(messages));
+    return this.registry.updateSummary(session.id, summarizeTuiCheckpointMessages(messages));
   }
 
   async refreshActiveSessionSummary(deps: ServerDeps) {
     try {
-      const session = this.getActiveSession(deps.petId);
+      const session = await this.getActiveSession(deps.petId);
       const messages = await this.readSessionCheckpointMessages(deps, session);
-      this.updateSessionSummaryFromCheckpoint(session, messages);
+      await this.updateSessionSummaryFromCheckpoint(session, messages);
     } catch (err) {
       console.warn('[local-server] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
     }
   }
 
   async readActivePendingInterrupt(deps: ServerDeps): Promise<ActivePendingInterrupt | null> {
-    const session = this.getActiveSession(deps.petId);
+    const session = await this.getActiveSession(deps.petId);
     return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
   }
 
   async readActiveCheckpointPoint(deps: ServerDeps) {
-    const session = this.getActiveSession(deps.petId);
+    const session = await this.getActiveSession(deps.petId);
     const checkpoint = await this.readSessionCheckpointPoint(deps, session);
-    this.registry.updateSummary(
-      session.id,
-      summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
-    );
     return checkpoint;
   }
 
   async listSessions(deps: ServerDeps) {
-    this.getActiveSession(deps.petId);
-    const sessions = this.registry.list(deps.petId).map(s => ({ ...s, active: s.id === this.registry.active(deps.petId)?.id }));
+    const active = await this.getActiveSession(deps.petId);
+    const sessions = (await this.registry.list(deps.petId)).map(s => ({ ...s, active: s.id === active.id }));
     const enriched = await Promise.all(sessions.map(async (session) => {
       const messages = await this.readSessionCheckpointMessages(deps, session);
       const summary = summarizeTuiCheckpointMessages(messages, session.updatedAt);
-      const updated = this.registry.updateSummary(session.id, summary) ?? session;
       return {
-        ...updated,
+        ...session,
         active: session.active,
         messageCount: summary.messageCount,
         title: summary.title,
@@ -297,22 +277,22 @@ export class ServerTuiSessionService {
   }
 
   async resumeSession(deps: ServerDeps, sessionId: string) {
-    const candidate = this.registry.read(sessionId);
+    const candidate = await this.registry.read(sessionId);
     if (!candidate || candidate.petId !== deps.petId) {
       throw new Error('session not found');
     }
     const checkpoint = await this.readSessionCheckpointPoint(deps, candidate);
-    const session = this.registry.select(deps.petId, sessionId);
+    const session = await this.registry.select(deps.petId, sessionId);
     if (!session) {
       throw new Error('session not found');
     }
-    this.registry.updateSummary(
+    await this.registry.updateSummary(
       session.id,
       summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
     );
     return {
       session: {
-        ...(this.registry.read(session.id) ?? session),
+        ...(await this.registry.read(session.id) ?? session),
         // Report what the restored transcript actually holds, not the value
         // the record was persisted with.
         requiredInputModalities: checkpoint.requiredInputModalities,

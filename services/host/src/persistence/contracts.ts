@@ -7,16 +7,16 @@ import type { TuiSessionRecord, TuiSessionSummaryInput } from '../session/tuiSes
 
 /** Host business operations; backend paths and serialization are adapter concerns. */
 export interface SessionRegistryPort {
-  read(sessionId: string): TuiSessionRecord | null;
-  active(petId: string): TuiSessionRecord | null;
-  list(petId?: string): TuiSessionRecord[];
-  ensureActive(petId: string): TuiSessionRecord;
-  register(petId: string, sessionId: string, create: boolean): TuiSessionRecord;
-  create(petId: string, threadId?: string): TuiSessionRecord;
-  select(petId: string, sessionId: string): TuiSessionRecord;
-  updateProfile(sessionId: string, profileId: string): TuiSessionRecord;
-  updateSummary(sessionId: string, summary: TuiSessionSummaryInput): TuiSessionRecord;
-  remove(sessionId: string): void;
+  read(sessionId: string): Promise<TuiSessionRecord | null>;
+  active(petId: string): Promise<TuiSessionRecord | null>;
+  list(petId?: string): Promise<TuiSessionRecord[]>;
+  ensureActive(petId: string): Promise<TuiSessionRecord>;
+  register(petId: string, sessionId: string, create: boolean): Promise<TuiSessionRecord>;
+  create(petId: string, threadId?: string): Promise<TuiSessionRecord>;
+  select(petId: string, sessionId: string): Promise<TuiSessionRecord>;
+  updateProfile(sessionId: string, profileId: string): Promise<TuiSessionRecord>;
+  updateSummary(sessionId: string, summary: TuiSessionSummaryInput): Promise<TuiSessionRecord>;
+  remove(sessionId: string): Promise<void>;
 }
 export type InvocationState = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'interrupted' | 'blocked';
 export type InvocationAdmission = {
@@ -29,20 +29,19 @@ export type HostInvocation = InvocationAdmission & {
   state: InvocationState; revision: number; createdAt: string; updatedAt: string;
   requestId?: string; runtime?: RuntimeExecutionIdentity;
   pendingInterrupt?: PendingInterruptProjection; reply?: string; error?: string;
-  settlementId?: string;
 };
 export interface InvocationStorePort {
-  admit(input: InvocationAdmission): { record: HostInvocation; created: boolean };
-  read(dispatchId: string): HostInvocation | null;
-  findAdmission(idempotencyKey: string): HostInvocation | null;
-  list(petId: string): HostInvocation[];
-  bindLegacyQueuedSession(dispatchId: string, revision: number, sessionId: string): HostInvocation;
-  claimStart(dispatchId: string, revision: number, requestId: string): HostInvocation;
-  attachRuntimeIdentity(dispatchId: string, revision: number, identity: RuntimeExecutionIdentity): HostInvocation;
-  markWaiting(dispatchId: string, revision: number, pending: PendingInterruptProjection): HostInvocation;
-  claimResume(dispatchId: string, revision: number, requestId: string, identity: RuntimeExecutionIdentity, interruptId: string): HostInvocation;
-  settle(dispatchId: string, revision: number, result: { state: 'completed' | 'failed' | 'interrupted'; reply?: string; error?: string }): HostInvocation;
-  block(dispatchId: string, revision: number, reason: string): HostInvocation;
+  admit(input: InvocationAdmission): Promise<{ record: HostInvocation; created: boolean }>;
+  read(dispatchId: string): Promise<HostInvocation | null>;
+  findAdmission(idempotencyKey: string): Promise<HostInvocation | null>;
+  list(petId: string): Promise<HostInvocation[]>;
+  bindLegacyQueuedSession(dispatchId: string, revision: number, sessionId: string): Promise<HostInvocation>;
+  claimStart(dispatchId: string, revision: number, requestId: string): Promise<HostInvocation>;
+  attachRuntimeIdentity(dispatchId: string, revision: number, identity: RuntimeExecutionIdentity): Promise<HostInvocation>;
+  markWaiting(dispatchId: string, revision: number, pending: PendingInterruptProjection): Promise<HostInvocation>;
+  claimResume(dispatchId: string, revision: number, requestId: string, identity: RuntimeExecutionIdentity, interruptId: string): Promise<HostInvocation>;
+  settle(dispatchId: string, revision: number, result: { state: 'completed' | 'failed' | 'interrupted'; reply?: string; error?: string }): Promise<HostInvocation>;
+  block(dispatchId: string, revision: number, reason: string): Promise<HostInvocation>;
 }
 
 /** null is unknown; a provider-reported zero is known consumption. */
@@ -52,30 +51,17 @@ export type UsageObservation = {
   sourceId: string;
   eventId: string;
   revision: number;
-  modelCallId: string;
   attemptId: string;
   runtime: RuntimeExecutionIdentity;
   /** Existing start/resume operation identity, retained on each fact. */
   requestId: string;
   planItemId?: string;
   delegationId?: string;
-  phase: 'entry' | 'supervisor' | 'capability' | 'compaction';
-  provider: string;
-  model: string;
-  startedAt: string;
-  endedAt?: string;
-  outcome: 'pending' | 'completed' | 'failed' | 'cancelled' | 'unknown';
   usage: {
     input: UsageQuantity;
     output: UsageQuantity;
     total: UsageQuantity;
-    totalSource?: 'provider' | 'derived';
-    cacheHit?: UsageQuantity;
-    cacheMiss?: UsageQuantity;
-    cacheWrite?: UsageQuantity;
-    reasoning?: UsageQuantity;
   };
-  missingReason?: 'not_reported' | 'stream_incomplete' | 'observation_lost';
 };
 export type UsageFilter = {
   runtime?: Partial<RuntimeExecutionIdentity>;

@@ -47,7 +47,7 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
 
     const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
     const loaded = await loadUserCapabilities();
-    const manifests = readUserCapabilityManifests();
+    const manifests = (await readUserCapabilityManifests());
     const item = loaded.find(
       ({ activation }) => activation.id === 'unit_test_capability',
     );
@@ -255,7 +255,7 @@ test('resolveCapabilityDirs parses environment entries with the platform delimit
   process.env.PINPAWO_CAPABILITY_DIRS = [first, first, second].join(delimiter);
   try {
     const { resolveCapabilityDirs } = await import('./capabilityLoader');
-    const dirs = resolveCapabilityDirs();
+    const dirs = (await resolveCapabilityDirs());
     assert.deepEqual(dirs.slice(-2), [first, second]);
   } finally {
     if (previousDirs === undefined) {
@@ -421,7 +421,7 @@ test('legacy capability directories emit one migration warning instead of disapp
       false,
     );
     assert.equal(
-      readUserCapabilityManifests().some(({ id }) => id === 'legacy_capability'),
+      (await readUserCapabilityManifests()).some(({ id }) => id === 'legacy_capability'),
       false,
     );
   } finally {

@@ -75,7 +75,7 @@ export async function runAgent(options: RunAgentOptions) {
     }
 
     if (options.stdio) {
-      const transport = startLocalStdioServer(deps);
+      const transport = await startLocalStdioServer(deps);
       closeLocalTransport = transport.close;
       console.log('[local-server] stdio JSONL transport ready');
       await transport.closed;

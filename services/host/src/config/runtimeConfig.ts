@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
-import { loadStoredConfig, type StoredConfig } from '../storage';
+import { startupStoredConfig, type StoredConfig } from '../storage';
 
 export type AgentWorkspaceConfig = Readonly<{
   id: string;
@@ -69,7 +69,7 @@ export function resolveUserDir(input: string): string {
 
 export function resolveDefaultWorkdir(
   env: Record<string, string | undefined> = process.env,
-  stored: Pick<StoredConfig, 'workdir'> = loadStoredConfig(),
+  stored: Pick<StoredConfig, 'workdir'> = startupStoredConfig,
 ): string {
   return env.PINPAWO_WORKDIR?.trim()
     || (typeof stored.workdir === 'string' ? stored.workdir.trim() : '')

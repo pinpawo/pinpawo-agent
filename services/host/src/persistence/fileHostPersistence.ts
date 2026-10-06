@@ -1,13 +1,13 @@
+import type { HostConfigurationPort } from './configuration';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
-import { existsSync, readFileSync } from 'node:fs';
-import { atomicWriteHostFile } from './atomicFile';
+import { atomicWriteHostFile, readOptionalHostFile } from './atomicFile';
 import { parseTuiSessionState, createEmptyTuiSessionState } from '../session/tuiSessionRegistry';
-import { createHostPersistence, type HostPersistenceState } from './hostPersistence';
+import { createMemoryHostPersistence, type HostPersistenceState } from './memoryHostPersistence';
 import type { HostInvocation } from './contracts';
 
 /** Single-writer local adapter. Never silently replace malformed or externally changed state. */
-export function createFileHostPersistence(filePath: string, defaultModelProfileId: string, artifacts?: CapabilityArtifactStore) {
-  let expected = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
+export async function createFileHostPersistence(filePath: string, defaultModelProfileId: string, artifacts?: CapabilityArtifactStore, configuration?: HostConfigurationPort) {
+  let expected = await readOptionalHostFile(filePath);
   let initial: HostPersistenceState = { sessions: createEmptyTuiSessionState(), invocations: {} };
   if (expected !== null) {
     const value = JSON.parse(expected);
@@ -29,33 +29,34 @@ export function createFileHostPersistence(filePath: string, defaultModelProfileI
         || (i.scope && (typeof i.scope.namespace !== 'string' || typeof i.scope.id !== 'string'))
         || (i.pendingInterrupt && typeof i.pendingInterrupt.interruptId !== 'string')
         || (i.state === 'waiting' && !i.pendingInterrupt)
-        || (['completed', 'failed', 'interrupted'].includes(i.state) && i.settlementId !== `${id}:settled`)
         || (i.idempotencyKey && keys.has(i.idempotencyKey))) throw new Error('Invalid Host invocation identity/state.');
       if (i.idempotencyKey) keys.add(i.idempotencyKey);
+      // Older records stored this derivable field; it is no longer part of state.
+      delete (i as HostInvocation & { settlementId?: string }).settlementId;
     }
     initial = { sessions, invocations };
   }
-  return createHostPersistence({ defaultModelProfileId, artifacts, initial, commit: state => {
-    const actual = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
+  return createMemoryHostPersistence({ defaultModelProfileId, artifacts, configuration, initial, commit: async state => {
+    const actual = await readOptionalHostFile(filePath);
     if (actual !== expected) throw new Error('Host persistence changed outside its single writer.');
     const data = JSON.stringify({ ...state.sessions, hostPersistenceVersion: 1, invocations: state.invocations }, null, 2);
-    atomicWriteHostFile(filePath, data);
+    await atomicWriteHostFile(filePath, data);
     expected = data;
   } });
 }
 
 /** Legacy API compatibility is adapter-owned and never discards invocation data. */
-export function loadSessionRegistryCompatibility(defaultModelProfileId: string, filePath: string) {
-  try {
-    return existsSync(filePath) ? parseTuiSessionState(JSON.parse(readFileSync(filePath, 'utf8')), defaultModelProfileId) : createEmptyTuiSessionState();
-  } catch { return createEmptyTuiSessionState(); }
+export async function loadSessionRegistryCompatibility(defaultModelProfileId: string, filePath: string) {
+  const value = await readOptionalHostFile(filePath);
+  return value === null ? createEmptyTuiSessionState() : parseTuiSessionState(JSON.parse(value), defaultModelProfileId);
 }
-export function saveSessionRegistryCompatibility(state: import('../session/tuiSessionRegistry').TuiSessionState, filePath: string) {
-  const existing = existsSync(filePath) ? JSON.parse(readFileSync(filePath, 'utf8')) : {};
+export async function saveSessionRegistryCompatibility(state: import('../session/tuiSessionRegistry').TuiSessionState, filePath: string) {
+  const value = await readOptionalHostFile(filePath);
+  const existing = value === null ? {} : JSON.parse(value);
   if (existing.hostPersistenceVersion !== undefined && existing.hostPersistenceVersion !== 1) throw new Error('Unsupported Host persistence version.');
   for (const record of Object.values(existing.invocations ?? {}) as HostInvocation[]) {
     const session = state.sessions[record.sessionId];
     if (!session || session.petId !== record.petId || session.threadId !== record.threadId) throw new Error('Legacy registry write would orphan a Host invocation.');
   }
-  atomicWriteHostFile(filePath, JSON.stringify({ ...existing, ...state }, null, 2));
+  await atomicWriteHostFile(filePath, JSON.stringify({ ...existing, ...state }, null, 2));
 }

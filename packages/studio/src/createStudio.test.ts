@@ -35,6 +35,28 @@ function binding(
   };
 }
 
+test('Studio waits for async lifecycle replay after plugin activation and rolls back on replay failure', async () => {
+  for (const fail of [false, true]) {
+    const entered = deferred(), release = deferred();
+    const pet = binding('worker');
+    const phases: string[] = [];
+    pet.dispatch.replayDispatchLifecycle = async () => {
+      phases.push('replay'); entered.resolve(); await release.promise;
+      if (fail) throw new Error('replay unavailable');
+    };
+    let ready = false;
+    const starting = createStudio({ studioId: 'replay', entryPetId: 'worker', pets: [pet], plugins: [{
+      name: 'projection', toolkits: [], start: () => { phases.push('start'); }, stop: () => { phases.push('stop'); },
+    }] }).then(studio => { ready = true; return studio; });
+    await entered.promise;
+    assert.equal(ready, false); assert.deepEqual(phases, ['start', 'replay']);
+    release.resolve();
+    if (fail) await assert.rejects(starting, /replay unavailable/);
+    else await (await starting).shutdown();
+    assert.deepEqual(phases, ['start', 'replay', 'stop']);
+  }
+});
+
 test('Studio dispatches request-only input and returns no thread or continuation data', async () => {
   const seen: unknown[] = [];
   const events: unknown[] = [];

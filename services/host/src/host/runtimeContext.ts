@@ -17,7 +17,7 @@ import type { LocalServerPeerHandlers } from '../wire/messageDispatcher';
 import type { ServerTuiSessionService, TuiSessionCheckpointer } from '../session/serverTuiSessions';
 import type { ServerRuntimeDepsStore } from '../serverTypes';
 import type { HostInvocationService } from '../persistence/hostInvocationService';
-import type { HostPersistence } from '../persistence/contracts';
+import type { HostPersistence, InvocationStorePort } from '../persistence/contracts';
 import type { HostExecutionConfig } from '../config/hostExecutionConfig';
 import type { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from '../config/llmConfig';
@@ -82,8 +82,9 @@ export type ResidentPetRuntimeContext = {
   loadContext: typeof loadAgentContext;
   sessions: ServerTuiSessionService;
   invocations: HostInvocationService;
+  invocationStore: InvocationStorePort;
   coordinator: ResidentPetCoordinator;
-  localHandlers: ReturnType<typeof createLocalServerHandlers>;
+  localHandlers: Awaited<ReturnType<typeof createLocalServerHandlers>>;
   peerHandlers: LocalServerPeerHandlers;
   /** One WebSocket client; passive readers and Host-owned HTTP commands do not claim it. */
   interactivePeer: { current: AgentSessionPeer | null };

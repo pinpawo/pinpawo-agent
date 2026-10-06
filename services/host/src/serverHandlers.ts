@@ -1,3 +1,5 @@
+import { createFileHostPersistence } from './persistence/fileHostPersistence';
+import { hostConfiguration, type HostConfigurationPort } from './persistence/configuration';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './config/agentConfig';
@@ -47,7 +49,8 @@ export type ServerHandlers = {
 };
 
 export type ServerHandlerOptions = {
-  persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
+  persistGlobalReviewPolicyMode?: (mode: Parameters<typeof persistGlobalReviewPolicyMode>[0], safety: Parameters<typeof persistGlobalReviewPolicyMode>[1]) => void | Promise<void>;
+  configuration?: HostConfigurationPort;
   /** Composition hook for embedded hosts and deterministic integration tests. */
   chatGraphService?: HostGraphService;
   /** Host-owned session service shared with another surface of the same resident Pet. */
@@ -98,20 +101,19 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * the outer boundary. HTTP endpoints and stdio session commands call the same
  * checkpoint-backed operations below.
  */
-export function createLocalServerHandlers(
+export async function createLocalServerHandlers(
   runtimeDeps: ServerRuntimeDepsStore,
   options: ServerHandlerOptions = {},
-): ServerHandlers {
+): Promise<ServerHandlers> {
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
   const chatGraphService = options.chatGraphService ?? new HostGraphService();
   const tuiSessions = options.tuiSessions ?? new ServerTuiSessionService({
     graphService: chatGraphService,
-    artifacts: initialDeps.capabilityArtifactStore,
+    registry: (await createFileHostPersistence(effectiveRuntimeConfig.tuiSessionPath, initialDeps.modelProfiles.defaultProfileId, initialDeps.capabilityArtifactStore, options.configuration)).sessions,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
     ...(initialDeps.chatCheckpointer ? { checkpointer: initialDeps.chatCheckpointer } : {}),
-    defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
   const publishRuntimeEvent = options.publishRuntimeEvent
     ?? ((peer: ServerPeer, event: AgentRuntimeEvent) => {
@@ -200,8 +202,8 @@ export function createLocalServerHandlers(
 
   const listModelProfiles = async (sessionId: string) => {
     const requestDeps = runtimeDeps.get();
-    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
-    if (!tuiSessions.getSession(requestDeps.petId, sessionId)) {
+    const activeSession = await tuiSessions.getActiveSession(requestDeps.petId);
+    if (!await tuiSessions.getSession(requestDeps.petId, sessionId)) {
       throw Object.assign(
         new Error('session not found'),
         { code: 'session_not_found' },
@@ -314,8 +316,8 @@ export function createLocalServerHandlers(
     let selectionCommitted = false;
     try {
       const requestDeps = runtimeDeps.get();
-      const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
-      if (!tuiSessions.getSession(requestDeps.petId, message.sessionId)) {
+      const activeSession = await tuiSessions.getActiveSession(requestDeps.petId);
+      if (!await tuiSessions.getSession(requestDeps.petId, message.sessionId)) {
         sendModelSelectionError(
           peer,
           message,
@@ -393,7 +395,7 @@ export function createLocalServerHandlers(
         pendingInterrupt: null,
         currentPlan: checkpoint.currentPlan,
       });
-      const session = tuiSessions.selectModelProfile(
+      const session = await tuiSessions.selectModelProfile(
         requestDeps.petId,
         message.sessionId,
         message.modelProfileId,
@@ -432,7 +434,7 @@ export function createLocalServerHandlers(
 
   const createSession = () => sessionAdmission.transact(async () => {
     const requestDeps = runtimeDeps.get();
-    const session = tuiSessions.createNewSession(requestDeps.petId);
+    const session = await tuiSessions.createNewSession(requestDeps.petId);
     return {
       session: projectChatSessionSummary({
         ...session,
@@ -491,16 +493,16 @@ export function createLocalServerHandlers(
 
   const compactSession = (sessionId: string) => sessionAdmission.transact(async () => {
     const requestDeps = runtimeDeps.get();
-    const session = tuiSessions.getSession(requestDeps.petId, sessionId);
+    const session = await tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
       throw new Error('session not found');
     }
-    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+    const activeSession = await tuiSessions.getActiveSession(requestDeps.petId);
     if (activeSession.id !== session.id) {
       throw new Error('context compaction requires the active session');
     }
     const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
-    const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
+    const setup = await tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
     const state = await chatGraphService.readThreadState(setup);
     if (state.pendingInterrupt) {
       throw new Error('cannot compact context while human review is pending');
@@ -602,9 +604,9 @@ export function createLocalServerHandlers(
         console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
       }
     },
-    onNewSession: () => {
+    onNewSession: async () => {
       const petId = runtimeDeps.get().petId;
-      tuiSessions.createNewSession(petId);
+      await tuiSessions.createNewSession(petId);
       console.log(`[local-server] new session created for pet ${petId}`);
     },
     onRuntimeConfigUpdate: (client, message) => runSessionCommand(
@@ -612,10 +614,11 @@ export function createLocalServerHandlers(
         try {
           const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
             ?? runtimeDeps.get().autoAuthorizationSafetyLevel;
-          (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
-            message.globalReviewPolicyMode,
-            autoAuthorizationSafetyLevel,
-          );
+          if (options.persistGlobalReviewPolicyMode) {
+            await options.persistGlobalReviewPolicyMode(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
+          } else {
+            await persistGlobalReviewPolicyMode(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel, options.configuration ?? hostConfiguration);
+          }
           runtimeDeps.updateReviewPolicy(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
           if (message.requestId) {
             client.send({

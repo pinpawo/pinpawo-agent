@@ -68,10 +68,10 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
       async readExecutionDescriptor(setup: AgentChannelSetup) {
         return readRuntimeRecoveryDescriptor(await graph.getState(config(setup)), setup.input.threadId!);
       },
-      async streamEvents(setup: AgentChannelSetup, resume?: InterruptResume, onIdentity?: (identity: import('@pinpawo/pet-agent').RuntimeExecutionIdentity) => void) {
+      async streamEvents(setup: AgentChannelSetup, resume?: InterruptResume, onIdentity?: (identity: import('@pinpawo/pet-agent').RuntimeExecutionIdentity) => Promise<void>) {
         const prepared = resume ? undefined : prepareRuntimeExecution(setup.input.messages, setup.input.threadId!);
         const identity = prepared?.identity ?? (await this.readExecutionDescriptor(setup)).identity;
-        if (identity) onIdentity?.(identity);
+        if (identity) await onIdentity?.(identity);
         return graph.streamEvents(resume ? new Command({ resume: { [resume.interruptId]: resume.value } }) : prepared!.input,
           { ...config(setup), version: 'v3' });
       },
@@ -316,7 +316,7 @@ test('Host restart restores waiting invocation; duplicate approval and result re
     assert.equal(outputs(f, id)[0]!.source?.invocationId, receipt.invocationId);
     assert.equal(f.channel.service.readExecutions(id).executions[0]!.state, 'completed');
     assert.equal(f.calls.length, 1);
-    f.hosts[0]!.resident.dispatch.replayDispatchLifecycle!();
+    await f.hosts[0]!.resident.dispatch.replayDispatchLifecycle!();
     await f.close();
     f = await fixture(root);
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -325,7 +325,7 @@ test('Host restart restores waiting invocation; duplicate approval and result re
     const record = JSON.parse(await readFile(buildHostRuntimeConfig(join(root, 'one')).tuiSessionPath, 'utf8')).invocations[receipt.invocationId];
     assert.equal(record.scope.id, id);
     assert.equal(record.pendingInterrupt, undefined);
-    assert.equal(record.settlementId, `${receipt.invocationId}:settled`);
+    assert.equal('settlementId' in record, false);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 

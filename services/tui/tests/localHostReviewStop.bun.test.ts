@@ -25,7 +25,7 @@ test('real Host transport completes cancelled review and accepts the next ordina
   const root = mkdtempSync(join(tmpdir(), 'tui-review-stop-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   const fixture = createHostGraphFixture();
-  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
+  const handlers = await createLocalServerHandlers(createLocalServerRuntimeDepsStore({
     serverMode: 'chat', petId: 'one', petName: 'One', runtimeConfig,
     ...createTestModelServerDeps({ apiKey: 'offline', baseUrl: 'http://127.0.0.1:1/v1', model: 'test', contextWindowTokens: 32_000 }),
     toolkitInventory: createTestHostToolkitInventory([]),

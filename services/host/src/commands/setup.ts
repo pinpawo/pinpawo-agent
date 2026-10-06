@@ -7,7 +7,7 @@ import { loadStoredConfig } from '../storage';
 
 export async function runSetupGuide(options: { workdir?: string } = {}): Promise<void> {
   const guide = buildSetupGuide({
-    stored: loadStoredConfig(),
+    stored: await loadStoredConfig(),
     env: loadSetupEnvironment(),
     workdir: options.workdir,
   });

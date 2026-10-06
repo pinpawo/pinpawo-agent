@@ -1,3 +1,4 @@
+import { hostConfiguration, type HostConfigurationPort } from './persistence/configuration';
 /**
  * Loads directory-authored capabilities from CAPABILITY.md.
  *
@@ -74,9 +75,9 @@ function isDirectoryEntry(root: string, entryName: string): boolean {
   }
 }
 
-export function resolveCapabilityDirs(): string[] {
+export async function resolveCapabilityDirs(configuration: HostConfigurationPort = hostConfiguration): Promise<string[]> {
   const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(delimiter).filter(Boolean) ?? [];
-  const fromStored = loadStoredConfig().capability_dirs ?? [];
+  const fromStored = (await loadStoredConfig(configuration)).capability_dirs ?? [];
   const all = [
     DEFAULT_CAPABILITIES_DIR,
     ...fromEnv.map((dir) => resolve(expandHome(dir))),
@@ -291,9 +292,9 @@ function warnLegacyCapabilityDirectory(dir: string, name: string) {
   );
 }
 
-export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
+export async function loadUserCapabilities(configuration: HostConfigurationPort = hostConfiguration): Promise<LoadedUserCapability[]> {
   const loaded: LoadedUserCapability[] = [];
-  for (const dir of resolveCapabilityDirs()) {
+  for (const dir of await resolveCapabilityDirs(configuration)) {
     // Preserve duplicates across configured roots. The Host catalog owns the
     // collision policy and needs every definition plus its source identity.
     loaded.push(...await loadCapabilitiesFromDir(dir));
@@ -301,10 +302,10 @@ export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
   return loaded;
 }
 
-export function readUserCapabilityManifests(): CapabilityMeta[] {
+export async function readUserCapabilityManifests(configuration: HostConfigurationPort = hostConfiguration): Promise<CapabilityMeta[]> {
   const seenIds = new Set<string>();
   const metas: CapabilityMeta[] = [];
-  for (const dir of resolveCapabilityDirs()) {
+  for (const dir of await resolveCapabilityDirs(configuration)) {
     if (!existsSync(dir)) continue;
     const entries = readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryEntry(dir, entry.name)));

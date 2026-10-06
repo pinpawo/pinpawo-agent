@@ -28,7 +28,7 @@ import {
   buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
 } from './config/llmConfig';
-import { loadStoredConfig, saveStoredConfig } from './storage';
+import { startupStoredConfig } from './storage';
 import {
   createHostBaselineCapabilities,
 } from './hostCapabilityCatalog';
@@ -139,7 +139,7 @@ export class HostCapabilityAssembly {
     this.executionConfig = resolveHostExecutionConfig(options.runtimeConfig);
     this.sourceId = options.sourceId;
     const browserSelected = options.includeBrowser
-      ?? loadStoredConfig().capabilities?.browser !== false;
+      ?? startupStoredConfig.capabilities?.browser !== false;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.

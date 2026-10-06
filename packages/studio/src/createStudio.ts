@@ -90,7 +90,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           petId: pet.registration.petId,
           request: event.request,
           ...(event.revision !== undefined ? { revision: event.revision } : {}),
-          ...(event.settlementId ? { settlementId: event.settlementId } : {}),
           ...(event.requestId ? { requestId: event.requestId } : {}),
           ...(event.sessionId ? { sessionId: event.sessionId } : {}),
           ...(event.scope ? { scope: { ...event.scope } } : {}),
@@ -225,7 +224,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           startedPlugins.push(plugin);
           await plugin.start(buildPluginContext(plugin));
         }
-        for (const pet of petsById.values()) pet.dispatch.replayDispatchLifecycle?.();
+        for (const pet of petsById.values()) await pet.dispatch.replayDispatchLifecycle?.();
       } catch (error) {
         stopped = true;
         await stopStartedPlugins();

@@ -6,11 +6,11 @@ import {
 } from './wire/stdioTransport';
 import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
 
-export function startLocalStdioServer(
+export async function startLocalStdioServer(
   deps: ServerDeps,
   options: ServerStdioTransportOptions = {},
 ) {
-  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps));
+  const handlers = await createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps));
   const transport = attachLocalServerStdioTransport(handlers.peerHandlers, options);
   return {
     ...transport,

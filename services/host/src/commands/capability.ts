@@ -120,10 +120,10 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
   }, null, 2) + '\n');
 }
 
-function listCommand(): void {
+async function listCommand(): Promise<void> {
   process.stdout.write(JSON.stringify({
     defaultDir: DEFAULT_CAPABILITIES_DIR,
-    capabilities: readUserCapabilityManifests(),
+    capabilities: await readUserCapabilityManifests(),
   }, null, 2) + '\n');
 }
 
@@ -135,8 +135,8 @@ export function registerCapabilityCommand(program: Command): void {
   capability
     .command('list')
     .description('List installed user capabilities')
-    .action(() => {
-      listCommand();
+    .action(async () => {
+      await listCommand();
     });
 
   capability

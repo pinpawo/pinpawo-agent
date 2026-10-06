@@ -1,3 +1,4 @@
+import { hostConfiguration, type HostConfigurationPort } from './persistence/configuration';
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
@@ -36,7 +37,7 @@ export type HostCapabilityCatalogDeps = {
   createHostCapabilities: () => AgentCapability[];
 };
 
-export type HostCapabilityCatalogOptions = Partial<HostCapabilityCatalogDeps>;
+export type HostCapabilityCatalogOptions = Partial<HostCapabilityCatalogDeps> & { configuration?: HostConfigurationPort };
 
 const defaultDeps: HostCapabilityCatalogDeps = {
   loadConfiguredCapabilities: loadUserCapabilities,
@@ -129,14 +130,18 @@ function createSnapshot(
  */
 export class HostCapabilityCatalog {
   private readonly deps: HostCapabilityCatalogDeps;
+  private readonly configuration: HostConfigurationPort;
+  private stored: StoredConfig = {};
   private hostCapabilities: readonly AgentCapability[] = [];
   private configuredCapabilities: readonly LoadedUserCapability[] = [];
 
   constructor(options: HostCapabilityCatalogOptions = {}) {
-    this.deps = { ...defaultDeps, ...options };
+    this.configuration = options.configuration ?? hostConfiguration;
+    this.deps = { ...defaultDeps, loadConfiguredCapabilities: () => loadUserCapabilities(this.configuration), ...options };
   }
 
   async load(): Promise<void> {
+    this.stored = await loadStoredConfig(this.configuration);
     const hostCapabilities = this.deps.createHostCapabilities();
     const configuredCapabilities = await this.deps.loadConfiguredCapabilities();
     this.assertConfiguredCapabilities(hostCapabilities, configuredCapabilities);
@@ -146,7 +151,7 @@ export class HostCapabilityCatalog {
 
   /** Resolve the configured Host snapshot using the current Chat configuration. */
   getSnapshot(
-    config: Pick<StoredConfig, 'capabilities'> = loadStoredConfig(),
+    config: Pick<StoredConfig, 'capabilities'> = this.stored,
   ): CapabilityCatalogSnapshot {
     return createSnapshot(
       [

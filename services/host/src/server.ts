@@ -31,7 +31,7 @@ export async function startLocalServer(
   options: ServerOptions = {},
 ): Promise<ServerTransport> {
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
-  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps), options.handlerOptions ?? {});
+  const handlers = await createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps), options.handlerOptions ?? {});
   return startLocalServerTransport(port, handlers.peerHandlers, {
     authToken,
     handleHttpRequest: (req, res) => {

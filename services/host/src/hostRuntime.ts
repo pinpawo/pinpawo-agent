@@ -78,5 +78,5 @@ export { allocatePetSessionId } from './session/tuiSessionRegistry';
 
 export type { HostPersistence, SessionRegistryPort, InvocationStorePort, HostInvocation } from './persistence/contracts';
 export type { UsageQuantity, UsageObservation, UsageFilter, UsagePage, UsageStorePort } from './persistence/contracts';
-export { createHostPersistence } from './persistence/hostPersistence';
+export { createMemoryHostPersistence } from './persistence/memoryHostPersistence';
 export { createFileHostPersistence } from './persistence/fileHostPersistence';

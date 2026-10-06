@@ -1,3 +1,4 @@
+import { createMemoryHostPersistence } from '../persistence/memoryHostPersistence';
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,51 +54,47 @@ test('ServerTuiSessionService creates and resets active sessions', async () => {
     },
   } as TuiSessionCheckpointer;
   const service = new ServerTuiSessionService({
-    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
-    state,
-    saveState: () => {
+    registry: createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: state, invocations: {} }, commit: async () => {
       saved.push(1);
-    },
+    } }).sessions,
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
     checkpointer,
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
-  const first = service.getActiveSession('pet-a');
-  const second = service.createNewSession('pet-a');
+  const first = (await service.getActiveSession('pet-a'));
+  const second = (await service.createNewSession('pet-a'));
   const third = await service.resetSession('pet-a', {
     deletePrevious: true,
   });
 
-  assert.equal(service.getChatThreadId('pet-a'), third.threadId);
-  assert.equal(service.getSession('pet-a', first.id) !== null, true);
-  assert.equal(service.getSession('pet-a', second.id), null);
+  assert.equal((await service.getChatThreadId('pet-a')), third.threadId);
+  assert.equal((await service.getSession('pet-a', first.id)) !== null, true);
+  assert.equal((await service.getSession('pet-a', second.id)), null);
   assert.deepEqual(deletedThreads, [second.threadId]);
   assert.equal(saved.length >= 4, true);
 });
 
-test('ServerTuiSessionService rolls back a model selection when persistence fails', () => {
+test('ServerTuiSessionService rolls back a model selection when persistence fails', async () => {
   const state = createEmptyTuiSessionState();
   let failSave = false;
   const service = new ServerTuiSessionService({
-    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
-    state,
-    saveState: () => {
+    registry: createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: state, invocations: {} }, commit: async () => {
       if (failSave) {
         throw new Error('session store unavailable');
       }
-    },
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+    } }).sessions,
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
   });
-  const session = service.getActiveSession('pet-a');
+  const session = (await service.getActiveSession('pet-a'));
   failSave = true;
 
-  assert.throws(
-    () => service.selectModelProfile('pet-a', session.id, 'secondary'),
+  await assert.rejects(
+    async () => (await service.selectModelProfile('pet-a', session.id, 'secondary')),
     /session store unavailable/,
   );
-  assert.deepEqual(service.getSession('pet-a', session.id), session);
+  assert.deepEqual((await service.getSession('pet-a', session.id)), session);
   assert.equal(
-    service.getSession('pet-a', session.id)?.modelProfileId,
+    (await service.getSession('pet-a', session.id))?.modelProfileId,
     TEST_MODEL_PROFILE_ID,
   );
 });
@@ -112,16 +109,14 @@ test('attachment admission reads the session without an incidental registry writ
   const state = createEmptyTuiSessionState();
   let failSave = false;
   const service = new ServerTuiSessionService({
-    state,
-    saveState: () => {
+    registry: createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: state, invocations: {} }, commit: async () => {
       if (failSave) {
         throw new Error('session store unavailable');
       }
-    },
+    } }).sessions,
     runtimeConfig: buildHostRuntimeConfig(root),
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
-  const session = service.getActiveSession('pet-a');
+  const session = (await service.getActiveSession('pet-a'));
   failSave = true;
 
   try {
@@ -137,9 +132,9 @@ test('attachment admission reads the session without an incidental registry writ
         path: imagePath,
         name: 'image.png',
       }]);
-    assert.deepEqual(service.getSession('pet-a', session.id), session);
+    assert.deepEqual((await service.getSession('pet-a', session.id)), session);
     assert.deepEqual(
-      service.getSession('pet-a', session.id)?.requiredInputModalities,
+      (await service.getSession('pet-a', session.id))?.requiredInputModalities,
       ['text'],
     );
   } finally {
@@ -147,16 +142,14 @@ test('attachment admission reads the session without an incidental registry writ
   }
 });
 
-test('ServerTuiSessionService injects active session createdAt into runtime environment', () => {
+test('ServerTuiSessionService injects active session createdAt into runtime environment', async () => {
   const state = createEmptyTuiSessionState();
   const service = new ServerTuiSessionService({
+    registry: createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: state, invocations: {} }, commit: async () => {} }).sessions,
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
-    state,
-    saveState: () => {},
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
-  const session = service.getActiveSession('pet-a');
-  const setup = service.buildChatSetup({
+  const session = (await service.getActiveSession('pet-a'));
+  const setup = (await service.buildChatSetup({
     petId: 'pet-a',
     ...createTestModelServerDeps(),
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-tui-workdir'),
@@ -166,7 +159,7 @@ test('ServerTuiSessionService injects active session createdAt into runtime envi
       id: 'pet-a',
       name: 'Paw',
     },
-  });
+  }));
 
   assert.ok(setup.input.context?.systemPromptSections?.some(({ content }) => content.includes(session.createdAt)));
   assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-tui-workdir');
@@ -190,12 +183,10 @@ test('chat setup requires an artifact store at the type boundary', () => {
   assert.equal(missing.capabilityArtifactStore, undefined);
 });
 
-test('runtime config updates reach the next chat setup through the normalized deps store', () => {
+test('runtime config updates reach the next chat setup through the normalized deps store', async () => {
   const service = new ServerTuiSessionService({
+    registry: createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: createEmptyTuiSessionState(), invocations: {} }, commit: async () => {} }).sessions,
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
-    state: createEmptyTuiSessionState(),
-    saveState: () => {},
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
@@ -216,10 +207,10 @@ test('runtime config updates reach the next chat setup through the normalized de
   };
 
   const beforeDeps = runtimeDeps.get();
-  const before = service.buildChatSetup(beforeDeps, context);
+  const before = (await service.buildChatSetup(beforeDeps, context));
   runtimeDeps.updateReviewPolicy('auto_authorization', 'strict');
   const afterDeps = runtimeDeps.get();
-  const after = service.buildChatSetup(afterDeps, context);
+  const after = (await service.buildChatSetup(afterDeps, context));
 
   assert.notEqual(afterDeps, beforeDeps);
   assert.equal(Object.isFrozen(afterDeps), true);
@@ -242,9 +233,8 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
     deleteThread: async () => {},
   } as unknown as TuiSessionCheckpointer;
   const service = new ServerTuiSessionService({
+    registry: createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: state, invocations: {} }, commit: async () => {} }).sessions,
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
-    state,
-    saveState: () => {},
     checkpointer,
     graphService: {
       readThreadState: async (setup: { input: { threadId?: string } }) => {
@@ -263,10 +253,9 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
         name: 'Paw',
       },
     }),
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
-  const session = service.getActiveSession('pet-a');
+  const session = (await service.getActiveSession('pet-a'));
   const checkpoint = await service.readActiveCheckpointPoint({
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
     petId: 'pet-a',
@@ -285,24 +274,52 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.equal(readCount, 1);
 });
 
-test('reserved dispatch sessions retry failed persistence without changing the active TUI session', () => {
+test('reserved dispatch sessions retry failed persistence without changing the active TUI session', async () => {
   const state = createEmptyTuiSessionState();
   let fail = false;
-  const service = new ServerTuiSessionService({ state, runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-reserved-test'),
-    saveState: () => { if (fail) throw Error('disk unavailable'); },
+  const registry = createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, initial: { sessions: state, invocations: {} }, commit: async () => { if (fail) throw Error('disk unavailable'); } }).sessions;
+  const service = new ServerTuiSessionService({
+    registry,
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-reserved-test'),
     checkpointer: new MemorySaver(),
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
-  const active = service.getActiveSession('pet-a');
+  const active = (await service.getActiveSession('pet-a'));
   const id = 'pet-a:12345678';
   fail = true;
-  assert.throws(() => service.ensureDispatchSession('pet-a', id, true), /disk/);
-  assert.equal(service.getSession('pet-a', id), null);
+  await assert.rejects(async () => (await service.ensureDispatchSession('pet-a', id, true)), /disk/);
+  assert.equal((await service.getSession('pet-a', id)), null);
   fail = false;
-  const reserved = service.ensureDispatchSession('pet-a', id, true);
-  assert.deepEqual(service.ensureDispatchSession('pet-a', id, true), reserved);
-  assert.equal(service.getActiveSessionId('pet-a'), active.id);
-  assert.throws(() => service.ensureDispatchSession('pet-b', id), /another Pet/);
-  service.persistence.sessions.remove(id);
-  assert.throws(() => service.ensureDispatchSession('pet-a', id), /no longer exists/);
+  const reserved = (await service.ensureDispatchSession('pet-a', id, true));
+  assert.deepEqual((await service.ensureDispatchSession('pet-a', id, true)), reserved);
+  assert.equal((await service.getActiveSessionId('pet-a')), active.id);
+  await assert.rejects(async () => (await service.ensureDispatchSession('pet-b', id)), /another Pet/);
+  await registry.remove(id);
+  await assert.rejects(async () => (await service.ensureDispatchSession('pet-a', id)), /no longer exists/);
+});
+
+test('listing existing sessions and reading snapshots performs zero summary commits; unchanged updates do not write', async () => {
+  let commits = 0;
+  const persistence = createMemoryHostPersistence({ defaultModelProfileId: TEST_MODEL_PROFILE_ID, commit: async () => { commits++; } });
+  const records = [];
+  for (let i = 0; i < 4; i++) records.push(await persistence.sessions.create('pet-a'));
+  const service = new ServerTuiSessionService({ registry: persistence.sessions,
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-summary-projection-test'), checkpointer: new MemorySaver(),
+    graphService: { readThreadState: async () => ({ messages: [new HumanMessage('fresh title'), new AIMessage('reply')], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    loadContext: async () => ({ pet: { id: 'pet-a', name: 'Pet' } }),
+  });
+  const baseline = commits;
+  const deps = { ...createTestModelServerDeps(), petId: 'pet-a', runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-summary-projection-test') } as never;
+  const first = await service.listSessions(deps);
+  const second = await service.listSessions(deps);
+  await service.readActiveCheckpointPoint(deps);
+  assert.equal(first.length, 4); assert.deepEqual(first, second);
+  assert.ok(first.every(record => record.messageCount === 2));
+  assert.equal(commits - baseline, 0, '4-session lists plus snapshot read: zero writes rather than per-session writes');
+  const record = records[0];
+  await persistence.sessions.updateProfile(record.id, record.modelProfileId);
+  await persistence.sessions.ensureActive('pet-a');
+  const summary = { title: record.title, messageCount: record.messageCount, updatedAt: record.updatedAt, requiredInputModalities: record.requiredInputModalities };
+  await persistence.sessions.updateSummary(record.id, summary);
+  await persistence.sessions.updateSummary(record.id, summary);
+  assert.equal(commits - baseline, 0, 'unchanged updates: zero writes');
 });

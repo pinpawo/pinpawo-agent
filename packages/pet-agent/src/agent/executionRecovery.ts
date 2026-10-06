@@ -1,3 +1,4 @@
+import type { RunScope } from '../types/scope';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { OrchestratorGraph } from './orchestrator/runtime/graph';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
@@ -5,7 +6,7 @@ import { buildOrchestratorRunInput, type BuildOrchestratorRunOptions } from './o
 import { readPendingInterrupt, type PendingInterrupt } from './orchestrator/interrupt';
 
 /** Public runtime identities: independent of Host invocation and protocol request IDs. */
-export type RuntimeExecutionIdentity = { threadId: string; taskId: string; runId: string };
+export type RuntimeExecutionIdentity = RunScope & { threadId: string };
 export type RuntimeRecoveryDescriptor = {
   identity: RuntimeExecutionIdentity | null;
   state: 'empty' | 'waiting' | 'completed' | 'failed' | 'unknown';

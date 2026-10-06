@@ -42,9 +42,9 @@ function deferred<T = void>() {
 }
 
 async function waitFor(predicate: () => boolean, message: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
     if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error(message);
 }
@@ -306,7 +306,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
       if (request.kind === 'user_message') {
         const identity = prepareRuntimeExecution([], threadId).identity;
         identities.set(threadId, identity);
-        onExecutionIdentity?.(identity);
+        await onExecutionIdentity?.(identity);
         const review = buildReviewSpec({
           id: 'review-1',
           view: { kind: 'plain', body: 'Approve this dispatch?' },
@@ -503,6 +503,8 @@ test('dispatch and conversation publish the same Agent Session event stream', as
       (dispatchCallerMetadata as { caller?: string } | undefined)?.caller,
       undefined,
     );
+    await waitFor(() => lifecycleEvents.some(event => event.dispatchId === 'studio-dispatch-1' && event.state === 'completed'),
+      'completed runtime result was not durably published');
     assert.deepEqual(lifecycleEvents.slice(0, 3), [
       { state: 'queued', dispatchId: 'studio-dispatch-1' },
       { state: 'running', dispatchId: 'studio-dispatch-1' },

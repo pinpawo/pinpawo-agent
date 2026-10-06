@@ -1,3 +1,4 @@
+import { createFileHostPersistence } from './persistence/fileHostPersistence';
 import { HostInvocationService } from './persistence/hostInvocationService';
 import { withoutPetInvocationContext } from './host/petInvocationContext';
 import { ActiveRunRegister } from './agent/activeRunRegister';
@@ -135,6 +136,7 @@ export async function createResidentPetRuntime(
   options: CreateResidentPetRuntimeOptions,
 ): Promise<ResidentPetRuntime> {
   const modelProfiles = withDefaultModelProfile(options.modelProfiles, options.modelProfileId);
+  const persistence = options.persistence ?? await createFileHostPersistence(options.sessionStatePath, modelProfiles.defaultProfileId, options.capabilityArtifactStore);
   const deps: ServerDeps & {
     chatCheckpointer: TuiSessionCheckpointer;
     capabilityArtifactStore: CapabilityArtifactStore;
@@ -155,7 +157,7 @@ export async function createResidentPetRuntime(
       ? { defaultCapabilityName: options.defaultCapabilityName }
       : {}),
     ...(options.petDocument ? { petDocument: options.petDocument } : {}),
-    capabilityArtifactStore: options.capabilityArtifactStore,
+    capabilityArtifactStore: persistence.artifacts ?? options.capabilityArtifactStore,
   };
   const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
   const graphService = options.graphService ?? new HostGraphService();
@@ -168,26 +170,21 @@ export async function createResidentPetRuntime(
     graphService,
     loadContext,
     runtimeConfig: deps.runtimeConfig,
-    sessionStatePath: options.sessionStatePath,
-    persistence: options.persistence,
-    artifacts: options.capabilityArtifactStore,
+    registry: persistence.sessions,
     checkpointer: options.checkpointer,
-    defaultModelProfileId: deps.modelProfiles.defaultProfileId,
   });
 
-  if (sessions.persistence.artifacts) deps.capabilityArtifactStore = sessions.persistence.artifacts;
-
-  if (!sessions.hasActiveSession(deps.petId) && options.adoptThreadId) {
+  if (!await sessions.hasActiveSession(deps.petId) && options.adoptThreadId) {
     const legacy = await options.checkpointer.getTuple({
       configurable: { thread_id: options.adoptThreadId },
     });
-    if (legacy) sessions.adoptInitialThread(deps.petId, options.adoptThreadId);
+    if (legacy) await sessions.adoptInitialThread(deps.petId, options.adoptThreadId);
   }
-  sessions.getActiveSession(deps.petId);
+  await sessions.getActiveSession(deps.petId);
 
   const readSettledState = async (): Promise<PetDispatchSettledState> => {
     const context = await loadContext(deps.petId);
-    const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
+    const setup = await sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
     // Only a pending native review holds dispatch. Retained plans alone
     // do not block new input or require recovery.
@@ -228,13 +225,14 @@ export async function createResidentPetRuntime(
       }
     }
   };
-  const invocations = new HostInvocationService(sessions.persistence.invocations, publishDispatchLifecycle);
+  const invocations = new HostInvocationService(persistence.invocations, publishDispatchLifecycle);
   const runner = options.runAgentTurn ?? runAgentSessionTurn;
   const runAgentTurn: typeof runner = input => invocations.runTurn(input, deps.petId, runner);
-  const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
+  const localHandlers: Awaited<ReturnType<typeof createLocalServerHandlers>> = await createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
+    configuration: persistence.configuration,
     loadContext,
     runAgentTurn: input => withoutPetInvocationContext(() => runAgentTurn(input)),
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
@@ -275,6 +273,7 @@ export async function createResidentPetRuntime(
     loadContext,
     sessions,
     invocations,
+    invocationStore: persistence.invocations,
     coordinator,
     localHandlers,
     peerHandlers,

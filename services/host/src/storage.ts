@@ -1,4 +1,4 @@
-import { hostConfiguration, HOST_CONFIGURATION_PATH } from './persistence/configuration';
+import { hostConfiguration, HOST_CONFIGURATION_PATH, type HostConfigurationPort } from './persistence/configuration';
 import type { StoredModelProfilesV1 } from './config/modelProfiles';
 
 export type StoredConfig = {
@@ -34,7 +34,13 @@ export type StoredConfig = {
   capability_dirs?: string[];
 };
 
-/** Compatibility facade: Host configuration has one adapter and one path. */
-export function loadStoredConfig(): StoredConfig { return hostConfiguration.readConfiguration(); }
-export function saveStoredConfig(config: StoredConfig) { hostConfiguration.replaceConfiguration(config); }
+/** Compatibility facade delegates to the selected port; the CLI default is explicit. */
+export function loadStoredConfig(configuration: HostConfigurationPort = hostConfiguration): Promise<StoredConfig> {
+  return configuration.readConfiguration();
+}
+export function saveStoredConfig(config: StoredConfig, configuration: HostConfigurationPort = hostConfiguration): Promise<void> {
+  return configuration.replaceConfiguration(config);
+}
 export function configPath() { return HOST_CONFIGURATION_PATH; }
+// CLI bootstrap snapshot for synchronous, pure builders. Not a durable read/write cache.
+export const startupStoredConfig = await loadStoredConfig(hostConfiguration);

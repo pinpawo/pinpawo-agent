@@ -69,7 +69,6 @@ export type PetDispatchLifecycleEvent = {
   request: string;
   state: PetDispatchLifecycleState;
   revision?: number;
-  settlementId?: string;
   requestId?: string;
   error?: string;
   sessionId?: string;
@@ -81,7 +80,7 @@ export type PetDispatchLifecycleEvent = {
 export interface PetDispatchPort {
   readonly persistentAdmissions?: boolean;
   /** Re-publish durable observations after Plugin startup; never replay execution. */
-  replayDispatchLifecycle?(): void;
+  replayDispatchLifecycle?(): Promise<void>;
   getQueueSnapshot(): PetDispatchQueueSnapshot;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;

@@ -7,7 +7,7 @@ import {
   resolveModelProfile,
   type ModelProfileRegistrySnapshot,
 } from './modelProfiles';
-import { loadStoredConfig } from '../storage';
+import { startupStoredConfig } from '../storage';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
 } from '@pinpawo/pet-agent';
@@ -39,7 +39,7 @@ function loadDotEnv() {
 
 loadDotEnv();
 
-const stored = loadStoredConfig();
+const stored = startupStoredConfig;
 
 function get(envKey: string, storedKey: keyof typeof stored): string {
   const storedVal = stored[storedKey];

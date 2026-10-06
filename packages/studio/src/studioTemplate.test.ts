@@ -132,12 +132,12 @@ test('shipped Pet Capabilities support explicit planning, execution, review, and
     'capabilities',
   ));
   assert.deepEqual(executorCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
-    { name: 'studio_execution', uses: ['bash', 'git', 'channel'] },
+    { name: 'studio_execution', uses: ['files', 'shell', 'web', 'git', 'github', 'channel'] },
   ]);
   assert.deepEqual(reviewerCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
-    { name: 'studio_review', uses: ['bash', 'git', 'channel'] },
+    { name: 'studio_review', uses: ['files', 'shell', 'web', 'git', 'github', 'channel'] },
   ]);
   assert.deepEqual(wikiCapabilities.map(({ capability }) => capability.uses), [
-    ['bash', 'git', 'channel'],
+    ['files', 'shell', 'web', 'git', 'github', 'channel'],
   ]);
 });

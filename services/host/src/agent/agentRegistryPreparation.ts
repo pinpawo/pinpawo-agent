@@ -8,7 +8,7 @@ import {
   type CompiledAgentRegistry,
   type ExecutorCompilationIssue,
 } from '@pinpawo/pet-agent';
-import { createArtifactDiscoveryToolkit } from '../toolkits/local';
+import { createArtifactDiscoveryToolkit } from '../toolkits/artifactDiscovery';
 import type { ToolkitInventoryEntry } from '../toolkits/toolkitInventory';
 
 /**

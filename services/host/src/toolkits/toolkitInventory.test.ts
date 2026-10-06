@@ -8,7 +8,9 @@ import {
   HostToolkitInventoryStore,
   reportUnavailableToolkitAvailability,
 } from './toolkitInventory';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './local';
+import { createGitToolkit } from './git';
+import { createShellToolkit } from './shell';
+import { PosixShellRS } from './shellRS';
 import { createOperationRegistryForLocalServerDeps } from '../runtimeOperationRegistry';
 
 function toolkit(name: string, available = true): AgentToolkit {
@@ -205,9 +207,9 @@ test('operation registry derives only from the effective Host inventory', async 
     sources: [{
       id: 'host',
       kind: 'host_builtin',
-      definitions: [createBashToolkit({ shell }), createGitToolkit({ shell })],
+      definitions: [createShellToolkit({ shell }), createGitToolkit({ shell })],
     }],
-    resolveAvailability: async (definition) => definition.name === 'bash'
+    resolveAvailability: async (definition) => definition.name === 'shell'
       ? { available: true }
       : { available: false, reason: 'git unavailable' },
   });
@@ -215,6 +217,6 @@ test('operation registry derives only from the effective Host inventory', async 
     toolkitInventory: new HostToolkitInventoryStore(inventory),
   });
 
-  assert.equal(registry.resolveToolOperation('run_shell')?.source.name, 'bash');
+  assert.equal(registry.resolveToolOperation('run_shell')?.source.name, 'shell');
   assert.equal(registry.resolveToolOperation('git_status'), null);
 });

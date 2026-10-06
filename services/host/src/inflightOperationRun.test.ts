@@ -8,11 +8,15 @@ import {
   finishInflightOperations,
 } from './inflightOperationRun';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './toolkits/local';
+import { createFilesToolkit } from './toolkits/files';
+import { createGitToolkit } from './toolkits/git';
+import { createShellToolkit } from './toolkits/shell';
+import { PosixShellRS } from './toolkits/shellRS';
 
 const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
-  createBashToolkit({ shell: sharedShell }),
+  createFilesToolkit(),
+  createShellToolkit({ shell: sharedShell }),
   createGitToolkit({ shell: sharedShell }),
 ]);
 
@@ -31,7 +35,7 @@ test('inflight operation run emits tool stream events as operations', () => {
   assert.equal(event.requestId, 'req-1');
   assert.equal(event.phase, 'started');
   assert.equal(event.operation.id, 'tool-1');
-  assert.equal(event.operation.kind, 'bash.read_file');
+  assert.equal(event.operation.kind, 'files.read_file');
   assert.deepEqual(emitted, [event]);
 });
 

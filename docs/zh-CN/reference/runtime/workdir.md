@@ -42,11 +42,11 @@ execution scope 读取同一个结构化值。Host 的机器和会话信息走�
 每次调用都需要重新提供 context，包括 checkpoint resume。它不从对话历史恢复，通用
 agent runtime 也不会从进程全局状态猜测目录。
 
-workdir 是路径解析基准，不是文件系统 sandbox。本地 bash、project-inspection 和 Git
-Toolkit 的绑定会将受支持的相对路径，以及相对或省略的 `cwd`，解析到执行目录下；绝对
+workdir 是路径解析基准，不是文件系统 sandbox。files、shell、web、git、github 和
+project-inspection Toolkit 的绑定会将受支持的相对路径，以及相对或省略的 `cwd`，解析到执行目录下；绝对
 路径保持绝对路径。绑定不会修改进程 cwd，因此同一进程里的不同 Host 可以保持各自的
 执行范围。实现见
-[executionContext.ts](../../../../services/host/src/toolkits/local/executionContext.ts)
+[executionContext.ts](../../../../services/host/src/toolkits/executionContext.ts)
 中的 `withExecutionWorkdir()`。
 
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见

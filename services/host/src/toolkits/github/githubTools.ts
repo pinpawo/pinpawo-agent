@@ -3,20 +3,24 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { quote } from 'shell-quote';
-import {
-  createAbortError,
-  type NamedStructuredTool,
-  type ToolOperationMetadata,
-} from '@pinpawo/pet-agent';
+import { createAbortError, type NamedStructuredTool, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
-import { requireAgentSession } from './executionContext';
-import { readTextFileChunkResult } from './fileTools';
-import type { ShellExecResult, ShellRS } from './shellRS';
-import { classifyGhArgs, classifyGitArgs } from './vcsCommands';
+import {
+  CLI_SHELL_TIMEOUT_MS,
+  cliArgsSchema,
+  createCliRunner,
+  formatCliResult,
+  readCliArgs,
+  summarizeCliCall,
+  truncateCliOutput,
+  type CliCommandResult,
+  type CliRunner,
+} from '../cli/cliRunner';
+import { readTextFileChunkResult } from '../files/fileTools';
+import type { ShellExecResult, ShellRS } from '../shellRS/shellRS';
+import { classifyGhArgs } from './ghCommands';
 
-const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
 const MAX_INLINE_GH_COMMENTS_CHARS = 100_000;
 const MAX_GH_MARKDOWN_LINE_CHARS = 2_000;
@@ -26,82 +30,9 @@ const MAX_GH_CONTENT_LINE_COUNT = 200;
 const DEFAULT_GH_COMMENTS_PER_PAGE = 3;
 const MAX_GH_COMMENTS_PER_PAGE = 5;
 const MAX_GH_BUFFER_BYTES = 1024 * 1024 * 4;
-const DEFAULT_GIT_TIMEOUT_MS = 15_000;
-const GIT_PUSH_TIMEOUT_MS = 120_000;
-const MAX_GIT_CAPTURE_CHARS = 1024 * 256;
 const GH_TIMEOUT_MS = 20_000;
-/** git_shell / gh_shell cover fetch, pull, push and run logs, so they get longer. */
-const VCS_SHELL_TIMEOUT_MS = 120_000;
-/**
- * Non-interactive by construction: a command that would open an editor or a
- * credential/confirmation prompt fails instead of hanging until the timeout.
- */
-const GIT_SHELL_ENV = { GIT_EDITOR: 'false', GIT_SEQUENCE_EDITOR: 'false', GIT_TERMINAL_PROMPT: '0' };
+/** Prompts disabled: a command missing a required flag fails instead of hanging. */
 const GH_SHELL_ENV = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' };
-
-/**
- * Runs one CLI invocation as argv through ShellRS, on behalf of the Agent
- * session of the calling tool. Git and gh never go through a shell string.
- */
-type CliRunner = (
-  argv: readonly [string, ...string[]],
-  options: {
-    cwd: string;
-    timeoutMs: number;
-    maxOutputChars: number;
-    env?: Readonly<Record<string, string>>;
-  },
-) => Promise<ShellExecResult>;
-
-function createCliRunner(shell: ShellRS, runtime: ToolRuntime): CliRunner {
-  return async (argv, options) => await shell.exec(requireAgentSession(runtime), {
-    command: { argv },
-    cwd: options.cwd,
-    waitMs: options.timeoutMs,
-    onTimeout: 'terminate',
-    maxOutputChars: options.maxOutputChars,
-    ...(options.env ? { env: options.env } : {}),
-    ...(runtime.signal ? { signal: runtime.signal } : {}),
-  });
-}
-
-function toError(error: unknown) {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-type GitCommandResult = {
-  stdout?: unknown;
-  stderr?: unknown;
-  status?: number | null;
-  error?: Error;
-};
-
-function truncateOutput(output: string) {
-  if (output.length <= MAX_GIT_OUTPUT_CHARS) return output;
-  return `${output.slice(0, MAX_GIT_OUTPUT_CHARS)}\n[truncated ${output.length - MAX_GIT_OUTPUT_CHARS} chars]`;
-}
-
-function normalizePathspecs(pathspecs: string[] | undefined) {
-  return Array.isArray(pathspecs)
-    ? pathspecs.map((item) => item.trim()).filter(Boolean)
-    : [];
-}
-
-function formatGitResult(result: GitCommandResult) {
-  const stdout = typeof result.stdout === 'string' ? result.stdout.trimEnd() : '';
-  const stderr = typeof result.stderr === 'string' ? result.stderr.trimEnd() : '';
-  const output = [stdout, stderr].filter(Boolean).join('\n');
-
-  if (result.status && result.status !== 0) {
-    return `Error (exit ${result.status}):\n${truncateOutput(output || 'git command failed')}`;
-  }
-
-  if (result.error) {
-    return `Error: ${result.error.message}`;
-  }
-
-  return truncateOutput(output || '(no output)');
-}
 
 function formatGhError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -115,7 +46,7 @@ function formatGhError(error: unknown) {
   };
   const stdout = typeof errorRecord.stdout === 'string' ? errorRecord.stdout.trimEnd() : '';
   const stderr = typeof errorRecord.stderr === 'string' ? errorRecord.stderr.trimEnd() : '';
-  const output = truncateOutput([stdout, stderr].filter(Boolean).join('\n'));
+  const output = truncateCliOutput([stdout, stderr].filter(Boolean).join('\n'));
   const prefix = typeof errorRecord.code === 'number'
     ? `gh command failed (exit ${errorRecord.code})`
     : `gh command failed: ${error.message}`;
@@ -132,52 +63,6 @@ function createGhToolError(name: string, error: unknown, runtime: ToolRuntime) {
     name,
     tool_call_id: runtime.toolCallId,
   });
-}
-
-export async function runGit(
-  cli: CliRunner,
-  args: string[],
-  cwd?: string,
-  timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
-  env: Readonly<Record<string, string>> = {},
-) {
-  const repo = cwd?.trim() || process.cwd();
-  let result: ShellExecResult;
-  try {
-    result = await cli(['git', ...args], {
-      cwd: repo,
-      env: { LC_ALL: 'C', ...env },
-      timeoutMs,
-      maxOutputChars: MAX_GIT_CAPTURE_CHARS,
-    });
-  } catch (err) {
-    return formatGitResult({ error: toError(err) });
-  }
-  switch (result.status) {
-    case 'exited':
-      // Only exit code 0 is success. A null code means the process was ended
-      // by a signal, which is a failure even with no output.
-      return formatGitResult({
-        stdout: result.stdout,
-        stderr: result.stderr,
-        status: result.code,
-        ...(result.code === null
-          ? { error: new Error(`git ${args[0] ?? ''} was terminated by a signal`) }
-          : {}),
-      });
-    case 'timeout':
-      return formatGitResult({
-        stdout: result.stdout,
-        stderr: result.stderr,
-        error: new Error(`git ${args[0] ?? ''} timed out after ${(timeoutMs / 1000).toString()}s`),
-      });
-    case 'aborted':
-      throw createAbortError();
-    case 'spawn_failed':
-      return formatGitResult({ error: result.error });
-    case 'yielded':
-      return formatGitResult({ error: new Error('git command unexpectedly kept running') });
-  }
 }
 
 function resolveGhWorkdir(cwd?: string) {
@@ -211,7 +96,7 @@ async function executeGh(cli: CliRunner, args: string[], cwd?: string, options: 
           code: result.code ?? undefined,
         }));
       }
-      return { stdout: result.stdout, stderr: result.stderr } satisfies GitCommandResult;
+      return { stdout: result.stdout, stderr: result.stderr } satisfies CliCommandResult;
     case 'timeout':
       throw formatGhError(Object.assign(
         new Error(`timed out after ${(timeoutMs / 1000).toString()}s`),
@@ -235,7 +120,7 @@ async function runGh(
 ) {
   const result = await executeGh(cli, args, cwd, options);
 
-  const output = formatGitResult(result);
+  const output = formatCliResult(result);
   if (output === '(no output)') {
     if (emptyOutput !== undefined) return emptyOutput;
     throw new Error('gh command returned no output');
@@ -573,205 +458,14 @@ function normalizeGhTarget(value: string | undefined, label: string) {
   return trimmed;
 }
 
-const gitPathspecSchema = z.array(z.string().min(1)).optional();
-
-/** Arguments after the program name, exactly as the model gave them. */
-function readCliArgs(input: unknown): string[] {
-  const args = readRecord(input)?.args;
-  return Array.isArray(args) ? args.filter((arg): arg is string => typeof arg === 'string') : [];
+/** Only risky gh_shell calls are reviewed; reads and everyday collaboration run directly. */
+export function ghShellCallNeedsReview(input: unknown) {
+  return classifyGhArgs(readCliArgs(input)).level === 'risky';
 }
 
-/** Only risky git_shell / gh_shell calls are reviewed; reads and everyday writes run directly. */
-export function vcsShellCallNeedsReview(toolName: 'git_shell' | 'gh_shell', input: unknown) {
-  const args = readCliArgs(input);
-  return (toolName === 'git_shell' ? classifyGitArgs(args) : classifyGhArgs(args)).level === 'risky';
-}
-
-function summarizeCliCall(program: 'git' | 'gh', input: unknown) {
-  const record = readRecord(input);
-  const args = readCliArgs(input);
-  return {
-    target: readString(record, 'cwd'),
-    summary: quote([program, ...args]),
-    details: { level: (program === 'git' ? classifyGitArgs(args) : classifyGhArgs(args)).level },
-  };
-}
-
-const cliArgsSchema = (program: 'git' | 'gh', example: string) => z.array(z.string())
-  .min(1)
-  .refine((args) => args[0] !== program, { message: `args 不包含 ${program} 本身` })
-  .describe(`${program} 之后的参数数组，每个参数一项，不经 shell 解析，例如 ${example}`);
-
-/**
- * Git and GitHub tools, running every git/gh invocation as argv through the
- * injected ShellRS. Several Toolkits may share one ShellRS instance or use
- * separate ones; the tools behave the same either way.
- */
-export function createGitTools(shell: ShellRS) {
+/** GitHub tools, running every gh invocation as argv through the injected ShellRS. */
+export function createGithubTools(shell: ShellRS) {
   const cliFor = (runtime: ToolRuntime) => createCliRunner(shell, runtime);
-
-  const gitStatusTool = tool(
-    async ({ cwd, short = true }: { cwd?: string; short?: boolean }, runtime: ToolRuntime) =>
-      runGit(cliFor(runtime), ['status', short ? '--short' : '--branch'], cwd),
-    {
-      name: 'git_status',
-      description: '查看当前 git 仓库状态。默认返回短格式；cwd 可指定仓库目录，默认当前 workdir。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        short: z.boolean().optional().describe('是否使用 git status --short，默认 true'),
-      }),
-    },
-  );
-
-  const gitDiffTool = tool(
-    async ({ cwd, pathspecs, staged = false, stat = false }: {
-      cwd?: string;
-      pathspecs?: string[];
-      staged?: boolean;
-      stat?: boolean;
-    }, runtime: ToolRuntime) => {
-      const args = ['diff'];
-      if (staged) args.push('--staged');
-      if (stat) args.push('--stat');
-      const paths = normalizePathspecs(pathspecs);
-      if (paths.length > 0) args.push('--', ...paths);
-      return runGit(cliFor(runtime), args, cwd);
-    },
-    {
-      name: 'git_diff',
-      description: '查看工作区或暂存区 diff。支持限制 pathspecs；默认查看未暂存 diff。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        pathspecs: gitPathspecSchema.describe('可选路径列表，用于限制 diff 范围'),
-        staged: z.boolean().optional().describe('查看暂存区 diff，相当于 git diff --staged'),
-        stat: z.boolean().optional().describe('仅返回 diff 统计'),
-      }),
-    },
-  );
-
-  const gitLogTool = tool(
-    async ({ cwd, maxCount = 10, oneline = true, pathspecs }: {
-      cwd?: string;
-      maxCount?: number;
-      oneline?: boolean;
-      pathspecs?: string[];
-    }, runtime: ToolRuntime) => {
-      const count = Math.max(1, Math.min(50, Math.trunc(maxCount)));
-      const args = ['log', `--max-count=${count}`];
-      if (oneline) args.push('--oneline', '--decorate');
-      const paths = normalizePathspecs(pathspecs);
-      if (paths.length > 0) args.push('--', ...paths);
-      return runGit(cliFor(runtime), args, cwd);
-    },
-    {
-      name: 'git_log',
-      description: '查看 git 提交历史。默认返回最近 10 条 oneline 记录，可按路径过滤。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        maxCount: z.number().int().positive().max(50).optional().describe('最多返回提交数，默认 10，最大 50'),
-        oneline: z.boolean().optional().describe('是否使用 oneline 输出，默认 true'),
-        pathspecs: gitPathspecSchema.describe('可选路径列表，用于限制历史范围'),
-      }),
-    },
-  );
-
-  const gitBranchTool = tool(
-    async ({ cwd, all = false }: { cwd?: string; all?: boolean }, runtime: ToolRuntime) =>
-      runGit(cliFor(runtime), ['branch', all ? '--all' : '--list'], cwd),
-    {
-      name: 'git_branch',
-      description: '列出 git 分支。默认列出本地分支；all=true 时包含远端分支。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        all: z.boolean().optional().describe('是否包含远端分支'),
-      }),
-    },
-  );
-
-  const gitShowTool = tool(
-    async ({ cwd, revision = 'HEAD', stat = false }: {
-      cwd?: string;
-      revision?: string;
-      stat?: boolean;
-    }, runtime: ToolRuntime) => {
-      const args = ['show', '--no-ext-diff'];
-      if (stat) args.push('--stat');
-      args.push(revision);
-      return runGit(cliFor(runtime), args, cwd);
-    },
-    {
-      name: 'git_show',
-      description: '查看指定 revision 的提交、对象或 diff。默认 revision=HEAD；输出会截断。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        revision: z.string().optional().describe('git revision，例如 HEAD、提交 SHA 或 branch:path'),
-        stat: z.boolean().optional().describe('仅返回统计信息'),
-      }),
-    },
-  );
-
-  const gitAddTool = tool(
-    async ({ cwd, pathspecs }: { cwd?: string; pathspecs: string[] }, runtime: ToolRuntime) => {
-      const paths = normalizePathspecs(pathspecs);
-      if (paths.length === 0) return 'Error: git_add requires at least one pathspec';
-      return runGit(cliFor(runtime), ['add', '--', ...paths], cwd);
-    },
-    {
-      name: 'git_add',
-      description: '暂存指定文件或路径。必须显式传 pathspecs，不支持隐式 git add .。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        pathspecs: z.array(z.string().min(1)).min(1).describe('要暂存的文件或路径列表'),
-      }),
-    },
-  );
-
-  const gitCommitTool = tool(
-    async ({ cwd, message }: { cwd?: string; message: string }, runtime: ToolRuntime) => {
-      const trimmed = message.trim();
-      if (!trimmed) return 'Error: git_commit requires a non-empty message';
-      return runGit(cliFor(runtime), ['commit', '-m', trimmed], cwd);
-    },
-    {
-      name: 'git_commit',
-      description: '创建本地 git commit。只支持 -m message；不会 push，也不会自动 add 文件。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        message: z.string().min(1).describe('commit message'),
-      }),
-    },
-  );
-
-  const gitPushTool = tool(
-    async ({
-      cwd,
-      remote = 'origin',
-      refspec = 'HEAD',
-      setUpstream = true,
-    }: {
-      cwd?: string;
-      remote?: string;
-      refspec?: string;
-      setUpstream?: boolean;
-    }, runtime: ToolRuntime) => {
-      const args = ['-c', 'protocol.ext.allow=never', 'push'];
-      if (setUpstream) args.push('--set-upstream');
-      args.push('--', remote.trim(), refspec.trim());
-      return runGit(cliFor(runtime), args, cwd, GIT_PUSH_TIMEOUT_MS);
-    },
-    {
-      name: 'git_push',
-      description: '执行普通、非 force 的 git push。默认将当前 HEAD 推送到 origin 并设置 upstream；不提供 force、删除远端引用、ext command transport 或额外参数入口。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        remote: z.string().trim().min(1).optional().describe('远端名称或地址，默认 origin'),
-        refspec: z.string().trim().min(1).refine((value) => !value.startsWith('+') && !value.startsWith(':'), {
-          message: 'force and delete refspecs are not supported',
-        }).optional().describe('要推送的 refspec，默认 HEAD；不支持 force 或删除 refspec'),
-        setUpstream: z.boolean().optional().describe('是否设置 upstream，默认 true'),
-      }),
-    },
-  );
 
   const ghPrCreateTool = tool(
     async ({ cwd, title, body = '', base, head, repository, draft = false }: {
@@ -1025,27 +719,11 @@ export function createGitTools(shell: ShellRS) {
     },
   );
 
-  const gitShellTool = tool(
-    async ({ cwd, args }: { cwd?: string; args: string[] }, runtime: ToolRuntime) =>
-      runGit(cliFor(runtime), args, cwd, VCS_SHELL_TIMEOUT_MS, GIT_SHELL_ENV),
-    {
-      name: 'git_shell',
-      description: '执行一条 git 命令，用于 git_* 专用工具没有覆盖的操作。直接以参数数组执行，不经 shell：不支持管道、重定向或 && 串联；需要配合管道的只读查询用 inspect_shell。'
-        + '查询和日常操作（commit、checkout/switch 分支、stash、fetch、pull、merge、rebase、普通 push 等）直接执行。'
-        + '会丢数据或改写共享历史的操作要审批：reset --hard、clean、checkout/restore 覆盖改动、stash drop/clear、强制删除分支、删除标签、强推或删除远端引用。这类操作确是任务需要时再做，执行前先用 git status / git log 看清影响；能保留数据时优先用可恢复的做法（先 stash；强推用 --force-with-lease）。被拒绝后不要换工具绕过。'
-        + '不会打开编辑器或凭据提示：rebase -i、不带 -m 的 commit 这类需要交互的命令会直接失败。仓库目录用 cwd 指定，不要用 -c 注入配置。超时 120 秒。',
-      schema: z.object({
-        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-        args: cliArgsSchema('git', '["reset", "--hard", "HEAD"]'),
-      }),
-    },
-  );
-
   const ghShellTool = tool(
     async ({ cwd, args }: { cwd?: string; args: string[] }, runtime: ToolRuntime) => {
       try {
         return await runGh(cliFor(runtime), args, cwd, '(no output)', {
-          timeoutMs: VCS_SHELL_TIMEOUT_MS,
+          timeoutMs: CLI_SHELL_TIMEOUT_MS,
           env: GH_SHELL_ENV,
         });
       } catch (error) {
@@ -1065,16 +743,7 @@ export function createGitTools(shell: ShellRS) {
     },
   );
 
-  const gitTools = [
-    gitStatusTool as NamedStructuredTool<'git_status'>,
-    gitDiffTool as NamedStructuredTool<'git_diff'>,
-    gitLogTool as NamedStructuredTool<'git_log'>,
-    gitBranchTool as NamedStructuredTool<'git_branch'>,
-    gitShowTool as NamedStructuredTool<'git_show'>,
-    gitAddTool as NamedStructuredTool<'git_add'>,
-    gitCommitTool as NamedStructuredTool<'git_commit'>,
-    gitPushTool as NamedStructuredTool<'git_push'>,
-    gitShellTool as NamedStructuredTool<'git_shell'>,
+  const githubTools = [
     ghPrCreateTool as NamedStructuredTool<'gh_pr_create'>,
     ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
     ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
@@ -1087,12 +756,8 @@ export function createGitTools(shell: ShellRS) {
     ghShellTool as NamedStructuredTool<'gh_shell'>,
   ] as const;
 
-  const gitInspectionTools = [
-    gitStatusTool as NamedStructuredTool<'git_status'>,
-    gitDiffTool as NamedStructuredTool<'git_diff'>,
-    gitLogTool as NamedStructuredTool<'git_log'>,
-    gitBranchTool as NamedStructuredTool<'git_branch'>,
-    gitShowTool as NamedStructuredTool<'git_show'>,
+  /** The read-only subset, composed into project-inspection. */
+  const githubInspectionTools = [
     ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
     ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
     ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
@@ -1102,87 +767,10 @@ export function createGitTools(shell: ShellRS) {
     ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
   ] as const;
 
-  return { gitTools, gitInspectionTools };
+  return { githubTools, githubInspectionTools };
 }
 
-export const gitOperationMetadata = {
-  git_status: {
-    title: '查看 git 状态',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
-  },
-  git_diff: {
-    title: '查看 git diff',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      return {
-        target: readString(record, 'cwd'),
-        details: {
-          staged: readBoolean(record, 'staged'),
-          stat: readBoolean(record, 'stat'),
-        },
-      };
-    },
-  },
-  git_log: {
-    title: '查看 git 历史',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
-  },
-  git_branch: {
-    title: '查看 git 分支',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
-  },
-  git_show: {
-    title: '查看 git 对象',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      return {
-        target: readString(record, 'revision') ?? readString(record, 'cwd'),
-      };
-    },
-  },
-  git_add: {
-    title: '暂存 git 文件',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      return {
-        target: readString(record, 'cwd'),
-        summary: normalizePathspecs(Array.isArray(record?.pathspecs)
-          ? record.pathspecs.filter((item): item is string => typeof item === 'string')
-          : undefined).join(' '),
-      };
-    },
-  },
-  git_commit: {
-    title: '创建 git commit',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      return {
-        target: readString(record, 'cwd'),
-        summary: readString(record, 'message'),
-      };
-    },
-  },
-  git_push: {
-    title: '推送 git 分支',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      return {
-        target: readString(record, 'remote') ?? 'origin',
-        summary: readString(record, 'refspec') ?? 'HEAD',
-        details: {
-          setUpstream: readBoolean(record, 'setUpstream') ?? true,
-        },
-      };
-    },
-  },
-  git_shell: {
-    title: '执行 git 命令',
-    summarizeInput: (input) => summarizeCliCall('git', input),
-  },
-  gh_shell: {
-    title: '执行 gh 命令',
-    summarizeInput: (input) => summarizeCliCall('gh', input),
-  },
+export const githubOperationMetadata = {
   gh_pr_create: {
     title: '创建 GitHub PR',
     summarizeInput: (input) => {
@@ -1271,7 +859,11 @@ export const gitOperationMetadata = {
       };
     },
   },
+  gh_shell: {
+    title: '执行 gh 命令',
+    summarizeInput: (input) => summarizeCliCall('gh', input, classifyGhArgs),
+  },
 } satisfies Record<
-  ReturnType<typeof createGitTools>['gitTools'][number]['name'],
+  ReturnType<typeof createGithubTools>['githubTools'][number]['name'],
   ToolOperationMetadata
 >;

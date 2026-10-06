@@ -1,8 +1,8 @@
 import { connectRSService, currentRSServiceBuild } from '../rsService/launcher';
 import { resolveRSServicePaths, type RSServicePaths } from '../rsService/paths';
 import type { RSServiceStatus } from '../rsService/server';
-import { SHELL_RS_CONTRACT } from '../toolkits/local/shellRS';
-import { SHELL_RS_MANAGEMENT } from '../toolkits/local/shellRSService';
+import { SHELL_RS_CONTRACT } from '../toolkits/shellRS/shellRS';
+import { SHELL_RS_MANAGEMENT } from '../toolkits/shellRS/shellRSService';
 
 /**
  * `pinpawo rs <action>`: management of the standalone RS service (#853).

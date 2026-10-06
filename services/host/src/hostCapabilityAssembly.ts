@@ -39,12 +39,13 @@ import {
 } from './config/runtimeConfig';
 import { resolveHostExecutionConfig, type HostExecutionConfig } from './config/hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
-import {
-  createBashToolkit,
-  createGitToolkit,
-  createProjectInspectionToolkit,
-  ShellRSClient,
-} from './toolkits/local';
+import { createFilesToolkit } from './toolkits/files';
+import { createGitToolkit } from './toolkits/git';
+import { createGithubToolkit } from './toolkits/github';
+import { createProjectInspectionToolkit } from './toolkits/projectInspection';
+import { createShellToolkit } from './toolkits/shell';
+import { ShellRSClient } from './toolkits/shellRS';
+import { createWebToolkit } from './toolkits/web';
 import { BrowserRSClient } from './toolkits/browserRSClient';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import {
@@ -140,8 +141,9 @@ export class HostCapabilityAssembly {
     const browserSelected = options.includeBrowser
       ?? loadStoredConfig().capabilities?.browser !== false;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
-    // it through one client. Bash, Git and project-inspection share that
-    // client, and so one logical session per Agent session across them.
+    // it through one client. Shell, git, github and project-inspection share
+    // that client, and so one logical session per Agent session across them.
+    // Files and web run in the Host process and need no RS.
     const shell = this.rsInstances.add('shell', new ShellRSClient());
     // BrowserRS also runs only in the RS service, which holds the one
     // extension bridge for every Host (#862).
@@ -149,8 +151,11 @@ export class HostCapabilityAssembly {
       ? this.rsInstances.add('browser', new BrowserRSClient())
       : null;
     this.hostBuiltInToolkits = [
-      this.rsInstances.assemble(createBashToolkit, { shell }),
+      createFilesToolkit(),
+      createWebToolkit(),
+      this.rsInstances.assemble(createShellToolkit, { shell }),
       this.rsInstances.assemble(createGitToolkit, { shell }),
+      this.rsInstances.assemble(createGithubToolkit, { shell }),
       this.rsInstances.assemble(createProjectInspectionToolkit, { shell }),
       createCapabilityCreatorToolkit(),
       ...(browser

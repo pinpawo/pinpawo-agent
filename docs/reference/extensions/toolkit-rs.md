@@ -11,8 +11,8 @@
   [`types/toolExecution.ts`](../../../packages/pet-agent/src/types/toolExecution.ts)
   （`readToolExecutionContext`）。
 - ShellRS 契约与 POSIX 实现：
-  [`services/host/src/toolkits/local/shellRS.ts`](../../../services/host/src/toolkits/local/shellRS.ts)、
-  [`posixShellRS.ts`](../../../services/host/src/toolkits/local/posixShellRS.ts)。
+  [`services/host/src/toolkits/shellRS/shellRS.ts`](../../../services/host/src/toolkits/shellRS/shellRS.ts)、
+  [`posixShellRS.ts`](../../../services/host/src/toolkits/shellRS/posixShellRS.ts)。
 - BrowserRS 契约与 Chrome Extension 实现：
   [`toolkits/browser/src/browserRS.ts`](../../../toolkits/browser/src/browserRS.ts)、
   [`chromeExtensionBrowserRS.ts`](../../../toolkits/browser/src/chromeExtensionBrowserRS.ts)；
@@ -21,8 +21,8 @@
 - Host 端连接的公共部分：[`rsService/contractClient.ts`](../../../services/host/src/rsService/contractClient.ts)。
 - ShellRS 独立服务：服务框架
   [`services/host/src/rsService/`](../../../services/host/src/rsService/)、
-  服务端 [`shellRSService.ts`](../../../services/host/src/toolkits/local/shellRSService.ts)、
-  Host 端连接 [`shellRSClient.ts`](../../../services/host/src/toolkits/local/shellRSClient.ts)、
+  服务端 [`shellRSService.ts`](../../../services/host/src/toolkits/shellRS/shellRSService.ts)、
+  Host 端连接 [`shellRSClient.ts`](../../../services/host/src/toolkits/shellRS/shellRSClient.ts)、
   入口 [`rsServiceEntry.ts`](../../../services/host/src/rsServiceEntry.ts)、
   管理命令 [`commands/rs.ts`](../../../services/host/src/commands/rs.ts)。
 - Host 装配：[`services/host/src/toolkits/hostRS.ts`](../../../services/host/src/toolkits/hostRS.ts)。
@@ -58,7 +58,7 @@ Toolkit 通过类型化工厂接收 RS 实例，并在定义中声明依赖：
 
 ```ts
 defineToolkit({
-  name: 'bash',
+  name: 'shell',
   tools: /* 基于注入的 shell 构建的静态 Tool */,
   requires: { shell: { contract: 'pinpawo.shell-rs', version: 1, session: 'agent-session' } },
   availability: () => shell.status(),
@@ -120,17 +120,19 @@ Toolkit 用原始参数和该上下文在执行时解释目标：local 工具经
   `wait_process` / `list_processes` / `terminate_process` 管理。超时不回滚副作用，
   未确认终止或断连结果未知时不能直接重跑。设计迁移见
   [Process Runtime 草稿](../../design/host/process-runtime.md)。
-- bash、git、project-inspection 共享 Host 的同一个 ShellRS 实例。git/gh 以 argv
-  经 ShellRS 运行。
+- shell、git、github、project-inspection 共享 Host 的同一个 ShellRS 实例；git/gh
+  以 argv 经 ShellRS 运行。files 与 web 在 Host 进程内执行，不依赖 RS，ShellRS
+  不可用时仍然可用。
 - 权限按工具划分。`inspect_shell` 免审批，只用黑名单拦底线：不可逆操作（rm、dd、
-  提权、强制 kill 等）提示改用 `run_shell`；git/gh 写操作提示改用 git toolkit。
-  git toolkit 的 `git_shell` / `gh_shell` 接受任意子命令的 argv，按调用判定审批，
-  整体偏宽松：`vcsCommands.ts` 分 read / change / risky 三级，查询和日常写操作
+  提权、强制 kill 等）提示改用 `run_shell`；git/gh 写操作提示改用 git / github
+  Toolkit。`git_shell` / `gh_shell` 接受任意子命令的 argv，按调用判定审批，整体
+  偏宽松：`gitCommands.ts` / `ghCommands.ts` 分 read / change / risky 三级（定义在
+  `toolkits/cli/cliLevels.ts`），查询和日常写操作
   （commit、rebase、普通 push、评论、review、关闭 PR 等）直接执行；只有丢数据、
   改写共享历史、合并、删除、发布、凭据与权限，以及无法识别的子命令走审批。
 - 外部命令只经 ShellRS 执行。代码搜索和 JSON 查询没有专用工具（原 `grep_search` /
-  `glob_search` / `jq_query` 已删除），由 `inspect_shell` 运行 `rg` / `jq`；
-  project-inspection 也提供 `inspect_shell`。
+  `glob_search` / `jq_query` 已删除），由 shell Toolkit 的 `inspect_shell` 运行
+  `rg` / `jq`；project-inspection 也包含 `inspect_shell`。
 - RS 提供自己的命令目录，放在每条命令 PATH 的最前面：其中的 `rg` 是打包自带的
   ripgrep，默认排除 `.pinpawo`（Agent 自己的 checkpoint 存储）并截断超过 2000 列的
   长行，调用方参数追加在默认参数之后。因此 shell 里的 `rg` 总是可用、版本一致。

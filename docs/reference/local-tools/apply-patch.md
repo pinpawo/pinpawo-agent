@@ -1,7 +1,7 @@
 # Apply Patch Tool Implementation
 
 > The `local-tools/` path is retained for reference compatibility. `apply_patch`
-> is an operation of the local Host's `bash` Toolkit; “local tools” is not a
+> is an operation of the Host's `files` Toolkit; “local tools” is not a
 > domain layer parallel to Toolkit. See the accepted
 > [domain constraints](../../design/host-agent-capability-toolkit.md).
 
@@ -149,9 +149,9 @@ V4A 先完整解析，再按 hunk 顺序在同一份内存内容上匹配：
 
 ## 9. 代码所有权与验证
 
-- `services/host/src/toolkits/local/applyPatch.ts`：V4A 解析、匹配和部分应用。
-- `services/host/src/toolkits/local/fileTools.ts`：工具 schema、目标校验、原子写入和结构化输出。
-- `services/host/src/toolkits/local/index.ts`：工具包级模型使用说明。
+- `services/host/src/toolkits/files/applyPatch.ts`：V4A 解析、匹配和部分应用。
+- `services/host/src/toolkits/files/fileTools.ts`：工具 schema、目标校验、原子写入和结构化输出。
+- `services/host/src/toolkits/files/index.ts`：files Toolkit 的模型使用说明与审核策略。
 - `services/tui/src/timeline/operationDisplay.ts`：生产 TUI 的输入 patch 预览和通用工具输出渲染。
 - `services/host/src/localToolsFile.test.ts`：协议、匹配、部分应用、错误结构和工具注册测试。
 - `services/tui/src/timeline/operationDisplay.test.ts`：当前 TUI 的输入 diff 与原始结果输出测试。

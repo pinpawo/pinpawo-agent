@@ -16,11 +16,12 @@ import {
 import {
   createTestHostToolkitInventory,
 } from '../../../host/src/testing/toolkitInventory';
-import {
-  createBashToolkit,
-  createGitToolkit,
-  PosixShellRS,
-} from '../../../host/src/toolkits/local/index';
+import { createFilesToolkit } from '../../../host/src/toolkits/files/index';
+import { createGitToolkit } from '../../../host/src/toolkits/git/index';
+import { createGithubToolkit } from '../../../host/src/toolkits/github/index';
+import { createShellToolkit } from '../../../host/src/toolkits/shell/index';
+import { PosixShellRS } from '../../../host/src/toolkits/shellRS/index';
+import { createWebToolkit } from '../../../host/src/toolkits/web/index';
 import { createPersistentHostGraphService } from './persistentHostGraphService';
 import {
   createProductionToolkitHostGraphService,
@@ -49,7 +50,7 @@ const graphService = fixture === 'toolkit'
   ? createProductionToolkitHostGraphService()
   : createPersistentHostGraphService();
 const shell = new PosixShellRS();
-const toolkits = [createBashToolkit({ shell }), createGitToolkit({ shell })];
+const toolkits = [createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell })];
 const transport = await startLocalServer(requestedPort, {
   petId: 'pet-process-restart',
   petName: 'PinPawo',

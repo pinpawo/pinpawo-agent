@@ -263,7 +263,7 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
         }
 
         const rootDir = resolveCapabilityRoot(input.rootDir, capabilityId);
-        const uses = input.uses ?? ['bash'];
+        const uses = input.uses ?? ['files', 'shell', 'web'];
         const files = [
           { path: resolve(rootDir, 'CAPABILITY.md'), content: renderCapabilityDocument({
             id: capabilityId,

@@ -13,7 +13,8 @@ import {
   shellOperationMetadata,
   truncateShellOutput,
 } from './shellTools';
-import { createBashToolkit, PosixShellRS } from './index';
+import { PosixShellRS } from '../shellRS';
+import { createShellToolkit } from './index';
 
 const runShellTool = createRunShellTool(new PosixShellRS());
 /** A call made within an Agent session, as the Host supplies it. */
@@ -58,7 +59,7 @@ test('get_current_time returns current time details for a requested timezone', a
 });
 
 test('bash toolkit exposes get_current_time without command review', () => {
-  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
+  const toolkit = createShellToolkit({ shell: new PosixShellRS() });
 
   assert.equal(Array.isArray(toolkit.tools), true);
   assert.equal(
@@ -70,12 +71,12 @@ test('bash toolkit exposes get_current_time without command review', () => {
 });
 
 test('shell review policy reviews configured command execution', async () => {
-  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
+  const toolkit = createShellToolkit({ shell: new PosixShellRS() });
   const policy = definition(toolkit, 'run_shell')?.review;
   assert.ok(policy);
 
   const context = {
-    toolkitName: 'bash',
+    toolkitName: 'shell',
     toolName: 'run_shell',
     input: { command: 'pwd' },
     operation: definition(toolkit, 'run_shell')?.operation,
@@ -226,7 +227,7 @@ test('truncateShellOutput keeps head and tail with a marker', () => {
 });
 
 test('start_process is reviewed with the original command and cwd', async () => {
-  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
+  const toolkit = createShellToolkit({ shell: new PosixShellRS() });
   const item = definition(toolkit, 'start_process');
   assert.ok(item?.review);
   assert.ok(item.operation);
@@ -234,7 +235,7 @@ test('start_process is reviewed with the original command and cwd', async () => 
     target: 'relative', summary: 'npm test',
   });
   const context = {
-    toolkitName: 'bash', toolName: 'start_process',
+    toolkitName: 'shell', toolName: 'start_process',
     input: { command: 'npm test', cwd: 'relative' },
     operation: item.operation,
     reviewCapabilities: { humanReview: true, sessionAuthorization: true },
@@ -250,7 +251,7 @@ test('start_process is reviewed with the original command and cwd', async () => 
 });
 
 test('shell tools keep connection uncertainty distinct from timeout', async () => {
-  const { ShellRSError } = await import('./shellRS');
+  const { ShellRSError } = await import('../shellRS/shellRS');
   const { createStartProcessTool } = await import('./shellTools');
   const shell = new PosixShellRS();
   shell.exec = async () => { throw new ShellRSError('result_unknown', 'connection lost'); };

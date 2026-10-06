@@ -7,7 +7,7 @@ import { RSServiceConnection } from '../../rsService/connection';
 import type { RSContractClient } from '../../rsService/contractClient';
 import { ensureToken, resolveRSServicePaths } from '../../rsService/paths';
 import { startRSService } from '../../rsService/server';
-import { createBashToolkit } from './index';
+import { createShellToolkit } from '../shell';
 import { PosixShellRS } from './posixShellRS';
 import { ShellRSClient } from './shellRSClient';
 import { SHELL_RS_CONTRACT, SHELL_RS_VERSION, ShellRSError } from './shellRS';
@@ -171,7 +171,7 @@ test('an unreachable service makes shell Toolkits unavailable without failing', 
   assert.equal(availability.available, false);
   assert.match(availability.available ? '' : availability.reason, /ShellRS service is unavailable: no service/);
 
-  const toolkit = createBashToolkit({ shell });
+  const toolkit = createShellToolkit({ shell });
   assert.equal((await toolkit.availability!()).available, false);
   await assert.rejects(
     shell.exec('s1', { ...exec, command: { shell: 'true' } }),
@@ -234,7 +234,7 @@ test('stopping the service ends its sessions and reports what it cleaned up', { 
 test('short and managed tools keep their semantics across the RS service', { skip: isWindows }, async (t) => {
   const { host } = await setup(t);
   const first = host();
-  const toolkit = createBashToolkit({ shell: first });
+  const toolkit = createShellToolkit({ shell: first });
   const config = { context: { executionScope: {
     threadId: 'tool-session', taskId: 'task', runId: 'run', delegationId: 'delegation', workdir: process.cwd(),
   } } };
@@ -248,7 +248,7 @@ test('short and managed tools keep their semantics across the RS service', { ski
   assert.equal(started.stdout + finished.stdout, 'early\nlate\n');
   await assert.rejects(next.read('other-session', started.processId), { code: 'other_session' });
 
-  const nextToolkit = createBashToolkit({ shell: next });
+  const nextToolkit = createShellToolkit({ shell: next });
   const run = nextToolkit.tools.find((item) => item.tool.name === 'run_shell')!.tool;
   const timeout = JSON.parse(String(await run.invoke({ command: 'echo partial; sleep 30', timeoutSeconds: 1 }, config)));
   assert.equal(timeout.status, 'timeout');

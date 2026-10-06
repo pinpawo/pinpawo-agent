@@ -1,19 +1,14 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import {
-  createBashToolkit,
-  createGitToolkit,
-  createProjectInspectionToolkit,
-  PosixShellRS,
-} from './index';
-import { createGitTools } from './gitTools';
-import type { ShellRS } from './shellRS';
+import { PosixShellRS } from '../shellRS';
+import type { ShellRS } from '../shellRS/shellRS';
+import { createGithubToolkit } from './index';
+import { createGithubTools } from './githubTools';
 
 const sessionContext = {
   executionScope: {
@@ -21,9 +16,9 @@ const sessionContext = {
   },
 };
 
-/** Git tools run through ShellRS on behalf of an Agent session. */
+/** Tools run through ShellRS on behalf of an Agent session. */
 function sessionTool(name: string) {
-  const found = createGitTools(new PosixShellRS()).gitTools.find((item) => item.name === name);
+  const found = createGithubTools(new PosixShellRS()).githubTools.find((item) => item.name === name);
   assert.ok(found, `missing ${name}`);
   return {
     invoke: (input: Record<string, unknown>, config: Record<string, unknown> = {}) => found.invoke(
@@ -33,10 +28,10 @@ function sessionTool(name: string) {
   };
 }
 
-const gitAddTool = sessionTool('git_add');
-const gitCommitTool = sessionTool('git_commit');
-const gitDiffTool = sessionTool('git_diff');
-const gitPushTool = sessionTool('git_push');
+function definition(toolkit: AgentToolkit, toolName: string) {
+  return toolkit.tools.find((item) => item.tool.name === toolName);
+}
+
 const ghIssueCreateTool = sessionTool('gh_issue_create');
 const ghIssueListTool = sessionTool('gh_issue_list');
 const ghIssueCommentsTool = sessionTool('gh_issue_comments');
@@ -46,21 +41,7 @@ const ghPrCreateTool = sessionTool('gh_pr_create');
 const ghPrDiffTool = sessionTool('gh_pr_diff');
 const ghPrViewTool = sessionTool('gh_pr_view');
 const ghReadContentTool = sessionTool('gh_read_content');
-const gitStatusTool = sessionTool('git_status');
-const gitShellTool = sessionTool('git_shell');
 const ghShellTool = sessionTool('gh_shell');
-
-function definition(toolkit: AgentToolkit, toolName: string) {
-  return toolkit.tools.find((item) => item.tool.name === toolName);
-}
-
-function createRepo() {
-  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-git-tools-'));
-  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
-  execFileSync('git', ['config', 'user.name', 'PinPawo Test'], { cwd: dir });
-  return dir;
-}
 
 function createFakeGh(t: TestContext, script: string) {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-gh-tool-'));
@@ -80,83 +61,6 @@ function createFakeGh(t: TestContext, script: string) {
   return executable;
 }
 
-test('git tools inspect and stage a repository without shell command strings', async () => {
-  const repo = createRepo();
-  const file = join(repo, 'README.md');
-  writeFileSync(file, 'hello\n', 'utf-8');
-
-  assert.match(
-    String(await gitStatusTool.invoke({ cwd: repo })),
-    /README\.md/,
-  );
-
-  assert.match(
-    String(await gitAddTool.invoke({ cwd: repo, pathspecs: ['README.md'] })),
-    /\(no output\)/,
-  );
-
-  assert.match(
-    String(await gitDiffTool.invoke({ cwd: repo, staged: true, stat: true })),
-    /README\.md/,
-  );
-
-  assert.match(
-    String(await gitCommitTool.invoke({ cwd: repo, message: 'test: add readme' })),
-    /test: add readme/,
-  );
-});
-
-test('git_add requires explicit pathspecs', async () => {
-  await assert.rejects(
-    () => gitAddTool.invoke({ pathspecs: [] }),
-    /Too small|at least/,
-  );
-});
-
-test('git_push performs a normal push without exposing force or delete options', async (t) => {
-  const repo = createRepo();
-  const remote = mkdtempSync(join(tmpdir(), 'pinpawo-git-remote-'));
-  const extMarker = join(repo, 'ext-helper-ran');
-  t.after(() => {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(remote, { recursive: true, force: true });
-  });
-
-  writeFileSync(join(repo, 'README.md'), 'hello\n', 'utf-8');
-  execFileSync('git', ['add', 'README.md'], { cwd: repo });
-  execFileSync('git', ['commit', '-m', 'test: initial commit'], { cwd: repo, stdio: 'ignore' });
-  execFileSync('git', ['init', '--bare'], { cwd: remote, stdio: 'ignore' });
-  const branch = execFileSync('git', ['branch', '--show-current'], { cwd: repo, encoding: 'utf-8' }).trim();
-
-  assert.match(
-    String(await gitPushTool.invoke({ cwd: repo, remote })),
-    /new branch/,
-  );
-  assert.equal(
-    execFileSync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: remote, encoding: 'utf-8' }).trim().length,
-    40,
-  );
-  await assert.rejects(
-    () => gitPushTool.invoke({ cwd: repo, remote, refspec: '+HEAD:main' }),
-    /force and delete refspecs are not supported/,
-  );
-
-  assert.match(
-    String(await gitPushTool.invoke({
-      cwd: repo,
-      remote: `ext::touch ${extMarker}`,
-    })),
-    /transport 'ext' not allowed/,
-  );
-  assert.equal(existsSync(extMarker), false);
-
-  execFileSync('git', ['remote', 'add', 'unsafe-ext', `ext::touch ${extMarker}`], { cwd: repo });
-  assert.match(
-    String(await gitPushTool.invoke({ cwd: repo, remote: 'unsafe-ext' })),
-    /transport 'ext' not allowed/,
-  );
-  assert.equal(existsSync(extMarker), false);
-});
 
 test('GitHub create tools pass structured arguments to gh without a shell', async (t) => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-gh-create-'));
@@ -481,143 +385,48 @@ esac`);
   );
 });
 
-test('createBashToolkit does not own git tools or operation metadata', () => {
-  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
-  assert.equal(Array.isArray(toolkit.tools), true);
-  const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
-  assert.equal(tools.some((item) => item.tool.name === 'git_status'), false);
-  assert.equal(tools.some((item) => item.tool.name === 'git_commit'), false);
-  assert.equal(definition(toolkit, 'git_status'), undefined);
-  assert.equal(definition(toolkit, 'git_commit'), undefined);
-});
-
-test('createGitToolkit exposes a dedicated git capability surface', async () => {
-  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
-  assert.equal(toolkit.name, 'git');
-  assert.equal(Array.isArray(toolkit.tools), true);
-  const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
+test('createGithubToolkit exposes the GitHub surface', () => {
+  const toolkit = createGithubToolkit({ shell: new PosixShellRS() });
+  assert.equal(toolkit.name, 'github');
   assert.deepEqual(
-    tools.map((item) => item.tool.name),
-    [
-      'git_status',
-      'git_diff',
-      'git_log',
-      'git_branch',
-      'git_show',
-      'git_add',
-      'git_commit',
-      'git_push',
-      'git_shell',
-      'gh_pr_create',
-      'gh_pr_view',
-      'gh_pr_comments',
-      'gh_pr_diff',
-      'gh_issue_create',
-      'gh_issue_list',
-      'gh_issue_view',
-      'gh_issue_comments',
-      'gh_read_content',
-      'gh_shell',
-    ],
+    toolkit.tools.map((item) => item.tool.name),
+    ['gh_pr_create', 'gh_pr_view', 'gh_pr_comments', 'gh_pr_diff', 'gh_issue_create', 'gh_issue_list',
+      'gh_issue_view', 'gh_issue_comments', 'gh_read_content', 'gh_shell'],
   );
-  assert.equal(definition(toolkit, 'git_diff')?.operation?.title, '查看 git diff');
-  assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
-  assert.equal(definition(toolkit, 'git_push')?.operation?.title, '推送 git 分支');
   assert.equal(definition(toolkit, 'gh_pr_create')?.operation?.title, '创建 GitHub PR');
   assert.equal(definition(toolkit, 'gh_pr_view')?.operation?.title, '查看 GitHub PR');
   assert.equal(definition(toolkit, 'gh_pr_comments')?.operation?.title, '查看 GitHub PR 评论');
   assert.equal(definition(toolkit, 'gh_pr_diff')?.operation?.title, '查看 GitHub PR diff');
   assert.equal(definition(toolkit, 'gh_issue_comments')?.operation?.title, '查看 GitHub issue 评论');
   assert.equal(definition(toolkit, 'gh_read_content')?.operation?.title, '读取 GitHub 临时内容');
-  // Dedicated tools exclude dangerous forms by schema and run unreviewed.
-  for (const name of ['git_add', 'git_commit', 'git_push', 'gh_pr_create', 'gh_issue_create']) {
+  for (const name of ['gh_pr_create', 'gh_issue_create']) {
     assert.equal(definition(toolkit, name)?.review, undefined, `${name} runs without review`);
   }
-
-  const gitShellPolicy = definition(toolkit, 'git_shell')?.review;
-  assert.ok(gitShellPolicy);
-  const reviewContext = {
-    toolkitName: 'git',
-    toolName: 'git_shell',
-    input: { cwd: '/repo', args: ['reset', '--hard', 'HEAD'] },
-    operation: definition(toolkit, 'git_shell')?.operation,
-    reviewCapabilities: {
-      humanReview: true,
-      sessionAuthorization: true,
-    },
-  };
-  const buildMatcher = gitShellPolicy.authorization?.buildMatcher;
-  assert.ok(buildMatcher);
-  const authorizationMatcher = await buildMatcher(reviewContext);
-  const review = await gitShellPolicy.request({
-    ...reviewContext,
-    authorizationMatcher,
-  });
-  assert.deepEqual(
-    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
-    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
-  );
 });
 
-test('git_shell and gh_shell review only risky calls', async () => {
-  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
-  const reviewOf = async (toolName: 'git_shell' | 'gh_shell', args: string[]) => {
-    const found = definition(toolkit, toolName);
+test('gh_shell reviews only risky calls', async () => {
+  const toolkit = createGithubToolkit({ shell: new PosixShellRS() });
+  const reviewOf = async (args: string[]) => {
+    const found = definition(toolkit, 'gh_shell');
     assert.ok(found?.review);
     return found.review.request({
-      toolkitName: 'git',
-      toolName,
+      toolkitName: 'github',
+      toolName: 'gh_shell',
       input: { cwd: '/repo', args },
       operation: found.operation,
       reviewCapabilities: { humanReview: true, sessionAuthorization: true },
     });
   };
-  assert.equal(await reviewOf('git_shell', ['log', '--oneline', '-5']), null);
-  assert.equal(await reviewOf('git_shell', ['branch', '-a']), null);
-  assert.equal(await reviewOf('gh_shell', ['pr', 'checks', '12']), null);
-  assert.equal(await reviewOf('gh_shell', ['api', 'repos/o/r/pulls']), null);
-  // Everyday writes lean permissive.
-  assert.equal(await reviewOf('git_shell', ['commit', '-m', 'wip']), null);
-  assert.equal(await reviewOf('git_shell', ['rebase', 'main']), null);
-  assert.equal(await reviewOf('gh_shell', ['pr', 'comment', '12', '--body', 'LGTM']), null);
-  assert.equal(await reviewOf('gh_shell', ['pr', 'close', '12']), null);
-  for (const [toolName, args] of [
-    ['git_shell', ['reset', '--hard', 'HEAD']],
-    ['git_shell', ['push', '--force', 'origin', 'HEAD']],
-    ['git_shell', ['clean', '-fd']],
-    ['git_shell', ['-c', 'core.pager=sh', 'log']],
-    ['gh_shell', ['pr', 'merge', '12', '--squash']],
-    ['gh_shell', ['api', '-X', 'DELETE', 'repos/o/r']],
-  ] as const) {
-    const review = await reviewOf(toolName, [...args]);
-    assert.ok(review && 'schemaVersion' in review, `${toolName} ${args.join(' ')} must be reviewed`);
-    assert.equal(review.view.kind === 'plain' ? review.view.title : '', definition(toolkit, toolName)?.operation?.title);
+  assert.equal(await reviewOf(['pr', 'checks', '12']), null);
+  assert.equal(await reviewOf(['api', 'repos/o/r/pulls']), null);
+  // Everyday collaboration leans permissive.
+  assert.equal(await reviewOf(['pr', 'comment', '12', '--body', 'LGTM']), null);
+  assert.equal(await reviewOf(['pr', 'close', '12']), null);
+  for (const args of [['pr', 'merge', '12', '--squash'], ['api', '-X', 'DELETE', 'repos/o/r']]) {
+    const review = await reviewOf(args);
+    assert.ok(review && 'schemaVersion' in review, `gh ${args.join(' ')} must be reviewed`);
+    assert.equal(review.view.kind === 'plain' ? review.view.title : '', definition(toolkit, 'gh_shell')?.operation?.title);
   }
-  assert.deepEqual(
-    definition(toolkit, 'git_shell')?.operation?.summarizeInput?.({ cwd: '/repo', args: ['commit', '-m', 'a b'] }),
-    { target: '/repo', summary: "git commit -m 'a b'", details: { level: 'change' } },
-  );
-});
-
-test('git_shell runs argv without a shell and fails instead of opening an editor', async () => {
-  const repo = createRepo();
-  writeFileSync(join(repo, 'a.txt'), 'one\n', 'utf-8');
-  execFileSync('git', ['add', 'a.txt'], { cwd: repo });
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: repo, stdio: 'ignore' });
-  writeFileSync(join(repo, 'a.txt'), 'changed\n', 'utf-8');
-
-  assert.match(String(await gitShellTool.invoke({ cwd: repo, args: ['status', '--short'] })), /a\.txt/);
-  assert.match(String(await gitShellTool.invoke({ cwd: repo, args: ['log', '--oneline', '|', 'head'] })), /^Error/);
-  await gitShellTool.invoke({ cwd: repo, args: ['reset', '--hard', 'HEAD'] });
-  assert.equal(readFileSync(join(repo, 'a.txt'), 'utf-8'), 'one\n');
-
-  writeFileSync(join(repo, 'b.txt'), 'b\n', 'utf-8');
-  execFileSync('git', ['add', 'b.txt'], { cwd: repo });
-  const started = Date.now();
-  assert.match(String(await gitShellTool.invoke({ cwd: repo, args: ['commit'] })), /^Error/);
-  assert.ok(Date.now() - started < 10_000, 'editor-requiring commit must fail fast');
-
-  await assert.rejects(() => gitShellTool.invoke({ cwd: repo, args: ['git', 'status'] }), /args 不包含 git/);
 });
 
 test('gh_shell passes argv through with prompts disabled', async (t) => {
@@ -630,35 +439,8 @@ test('gh_shell passes argv through with prompts disabled', async (t) => {
   );
 });
 
-test('project-inspection Toolkit exposes only read-only project evidence tools', () => {
-  const toolkit = createProjectInspectionToolkit({ shell: new PosixShellRS() });
-  const names = toolkit.tools.map(({ tool }) => tool.name);
 
-  assert.equal(toolkit.name, 'project-inspection');
-  assert.equal(names.includes('inspect_shell'), true);
-  assert.equal(names.includes('git_diff'), true);
-  assert.equal(names.includes('gh_issue_list'), true);
-  assert.equal(names.includes('gh_issue_view'), true);
-  for (const forbidden of [
-    'write_file',
-    'apply_patch',
-    'download_file',
-    'http_fetch',
-    'run_shell',
-    'start_process',
-    'git_add',
-    'git_commit',
-    'git_push',
-    'gh_pr_create',
-    'gh_issue_create',
-    'git_shell',
-    'gh_shell',
-  ]) {
-    assert.equal(names.includes(forbidden), false, `${forbidden} must remain outside read-only inspection`);
-  }
-});
-
-test('git and gh ended by a signal report an error, not an empty success', async () => {
+test('gh ended by a signal reports an error, not an empty success', async () => {
   // ShellRS reports a signal-terminated process as exited with no code.
   const shell: ShellRS = {
     contract: 'pinpawo.shell-rs',
@@ -671,14 +453,9 @@ test('git and gh ended by a signal report an error, not an empty success', async
     terminate: async () => { throw new Error('unused'); },
     list: async () => [],
   };
-  const tools = createGitTools(shell).gitTools;
-  const invoke = (name: string, input: Record<string, unknown>) => tools
-    .find((item) => item.name === name)!
-    .invoke(input as never, { context: sessionContext });
-
-  assert.equal(await invoke('git_status', {}), 'Error: git status was terminated by a signal');
+  const ghPrView = createGithubTools(shell).githubTools.find((item) => item.name === 'gh_pr_view')!;
   await assert.rejects(
-    () => invoke('gh_pr_view', { pr: '1' }),
+    () => ghPrView.invoke({ pr: '1' } as never, { context: sessionContext }),
     /gh command failed: terminated by a signal/,
   );
 });

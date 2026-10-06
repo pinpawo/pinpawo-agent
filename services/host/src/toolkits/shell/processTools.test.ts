@@ -9,7 +9,9 @@ import {
   WAIT_PROCESS_TOOL_NAME,
 } from './processTools';
 import { createRunShellTool, createStartProcessTool } from './shellTools';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './index';
+import { createGitToolkit } from '../git';
+import { PosixShellRS } from '../shellRS';
+import { createShellToolkit } from './index';
 
 // End-to-end through the POSIX executor (sh commands, pgrep/pkill probes).
 const isWindows = process.platform === 'win32';
@@ -210,7 +212,7 @@ test('another session cannot reach or list a process it did not start', { skip: 
 
 test('Bash and Git sharing one ShellRS share one logical session per Agent session', { skip: isWindows }, async () => {
   const shell = new PosixShellRS();
-  const bash = createBashToolkit({ shell });
+  const bash = createShellToolkit({ shell });
   const git = createGitToolkit({ shell });
   const started = String(await toolFrom(bash, 'start_process').invoke({
     command: 'sleep 4',
@@ -232,7 +234,7 @@ test('Bash and Git sharing one ShellRS share one logical session per Agent sessi
 test('Bash and Git on separate ShellRS instances are isolated', { skip: isWindows }, async () => {
   const bashShell = new PosixShellRS();
   const gitShell = new PosixShellRS();
-  const bash = createBashToolkit({ shell: bashShell });
+  const bash = createShellToolkit({ shell: bashShell });
   const git = createGitToolkit({ shell: gitShell });
   const started = String(await toolFrom(bash, 'start_process').invoke({
     command: 'sleep 4',

@@ -6,10 +6,10 @@ import test from 'node:test';
 import { RSServiceConnection } from '../rsService/connection';
 import { ensureToken, resolveRSServicePaths } from '../rsService/paths';
 import { startRSService } from '../rsService/server';
-import { PosixShellRS } from '../toolkits/local/posixShellRS';
-import { ShellRSClient } from '../toolkits/local/shellRSClient';
-import { SHELL_RS_CONTRACT, SHELL_RS_VERSION } from '../toolkits/local/shellRS';
-import { createShellRSServiceHandler } from '../toolkits/local/shellRSService';
+import { PosixShellRS } from '../toolkits/shellRS/posixShellRS';
+import { ShellRSClient } from '../toolkits/shellRS/shellRSClient';
+import { SHELL_RS_CONTRACT, SHELL_RS_VERSION } from '../toolkits/shellRS/shellRS';
+import { createShellRSServiceHandler } from '../toolkits/shellRS/shellRSService';
 import { runRSCommand } from './rs';
 
 const isWindows = process.platform === 'win32';

@@ -13,9 +13,9 @@ import { resolveRSServicePaths } from './rsService/paths';
 import { serveRSService } from './rsService/serve';
 import { ChromeExtensionBrowserRS } from '@pinpawo-toolkit/browser';
 import { createBrowserRSServiceHandler } from './toolkits/browserRSService';
-import { PosixShellRS } from './toolkits/local/posixShellRS';
-import { prepareShellCommandDir } from './toolkits/local/shellCommandDir';
-import { createShellRSServiceHandler } from './toolkits/local/shellRSService';
+import { PosixShellRS } from './toolkits/shellRS/posixShellRS';
+import { prepareShellCommandDir } from './toolkits/shellRS/shellCommandDir';
+import { createShellRSServiceHandler } from './toolkits/shellRS/shellRSService';
 
 function readRoot(argv: readonly string[]): string | undefined {
   const index = argv.indexOf('--root');

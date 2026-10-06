@@ -43,6 +43,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const activity = useRef<HTMLElement>(null);
   const createDialog = useRef<HTMLFormElement>(null);
   const followLatest = useRef(true);
+  const viewerPosition = useRef<{ top: number; follow: boolean } | null>(null);
   const focusComposer = useRef(false);
   const [atLatest, setAtLatest] = useState(true);
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -244,10 +245,20 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               onScroll={() => {
                 const element = timeline.current!;
                 const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-                followLatest.current = latest; setAtLatest(latest);
+                if (!viewerPosition.current) { followLatest.current = latest; setAtLatest(latest); }
               }}>
               <ChannelTimeline entries={entries} pets={pets} petsReady={petsReady} executions={executions} connected={connected} highlighted={highlightedMessage}
                 participants={context.participants} viewerParticipantId={context.viewerParticipantId}
+                onViewerChange={open => {
+                  if (open) {
+                    viewerPosition.current = { top: timeline.current?.scrollTop ?? 0, follow: followLatest.current };
+                    followLatest.current = false;
+                  } else if (viewerPosition.current) {
+                    if (timeline.current) timeline.current.scrollTop = viewerPosition.current.top;
+                    followLatest.current = viewerPosition.current.follow;
+                    viewerPosition.current = null;
+                  }
+                }}
                 pending={pending || !connected} onLocateMessage={locateMessage} onLocateExecution={locateExecution}
                 onReply={item => { setReply(item); setRecipientId(channelReplyRecipientId(item.author, context.participants)); setBody(''); composer.current?.focus(); }} />
               {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}

@@ -29,9 +29,9 @@ export function createMemoryHostPersistence(options: {
       const draft = structuredClone(state);
       const result = fn(draft);
       if (!isDeepStrictEqual(draft, state)) {
-        await options.commit?.(draft);
-        // Domain inputs and a commit hook may retain references to this draft.
-        state = structuredClone(draft);
+        // The writer owns its snapshot; retained references cannot mutate our draft.
+        await options.commit?.(structuredClone(draft));
+        state = draft;
       }
       return structuredClone(result);
     });
@@ -58,10 +58,13 @@ export function createMemoryHostPersistence(options: {
       if (!record) throw new Error('session not found');
       return record.modelProfileId === profile ? record : updateTuiSessionModelProfile(s.sessions, id, profile)!;
     }),
-    updateSummary: (id, summary) => change(s => {
-      if (!s.sessions.sessions[id]) throw new Error('session not found');
-      return updateTuiSessionSummary(s.sessions, id, summary)!;
-    }),
+    updateSummary: (id, value) => {
+      const summary = structuredClone(value);
+      return change(s => {
+        if (!s.sessions.sessions[id]) throw new Error('session not found');
+        return updateTuiSessionSummary(s.sessions, id, summary)!;
+      });
+    },
     remove: id => change(s => {
       if (Object.values(s.invocations).some(i => i.sessionId === id && !terminal(i))) {
         throw new Error('Cannot remove a session with an unresolved Host invocation.');
@@ -84,50 +87,65 @@ export function createMemoryHostPersistence(options: {
     read: id => read(s => s.invocations[id] ?? null),
     findAdmission: key => read(s => Object.values(s.invocations).find(i => i.idempotencyKey === key) ?? null),
     list: pet => read(s => Object.values(s.invocations).filter(i => i.petId === pet)),
-    admit: input => change(s => {
-      const prior = s.invocations[input.dispatchId] ?? (input.idempotencyKey
-        ? Object.values(s.invocations).find(i => i.idempotencyKey === input.idempotencyKey) : undefined);
-      if (prior) {
-        if (prior.fingerprint !== input.fingerprint || prior.request !== input.request
-          || prior.scope?.namespace !== input.scope?.namespace || prior.scope?.id !== input.scope?.id
-          || prior.petId !== input.petId || prior.sessionId !== input.sessionId || prior.threadId !== input.threadId) {
-          throw new Error('Host invocation idempotency identity conflict.');
+    admit: value => {
+      const input = structuredClone(value);
+      return change(s => {
+        const prior = s.invocations[input.dispatchId] ?? (input.idempotencyKey
+          ? Object.values(s.invocations).find(i => i.idempotencyKey === input.idempotencyKey) : undefined);
+        if (prior) {
+          if (prior.fingerprint !== input.fingerprint || prior.request !== input.request
+            || prior.scope?.namespace !== input.scope?.namespace || prior.scope?.id !== input.scope?.id
+            || prior.petId !== input.petId || prior.sessionId !== input.sessionId || prior.threadId !== input.threadId) {
+            throw new Error('Host invocation idempotency identity conflict.');
+          }
+          return { record: prior, created: false };
         }
-        return { record: prior, created: false };
-      }
-      const session = s.sessions.sessions[input.sessionId];
-      if (!session || session.petId !== input.petId || session.threadId !== input.threadId) throw new Error('Host invocation session identity conflict.');
-      const now = new Date().toISOString();
-      const record: HostInvocation = { ...input, state: 'queued', revision: 0, createdAt: now, updatedAt: now };
-      s.invocations[input.dispatchId] = record;
-      return { record, created: true };
-    }),
+        const session = s.sessions.sessions[input.sessionId];
+        if (!session || session.petId !== input.petId || session.threadId !== input.threadId) throw new Error('Host invocation session identity conflict.');
+        const now = new Date().toISOString();
+        const record: HostInvocation = { ...input, state: 'queued', revision: 0, createdAt: now, updatedAt: now };
+        s.invocations[input.dispatchId] = record;
+        return { record, created: true };
+      });
+    },
     bindLegacyQueuedSession: (id, rev, sessionId) => transition(id, rev, ['queued'], (i, s) => {
       const session = s.sessions.sessions[sessionId];
       if (i.scope || i.runtime || !session || session.petId !== i.petId) throw new Error('Only an unstarted legacy invocation may select its active session.');
       i.sessionId = session.id; i.threadId = session.threadId;
     }),
     claimStart: (id, rev, requestId) => transition(id, rev, ['queued'], i => { i.state = 'running'; i.requestId = requestId; }),
-    attachRuntimeIdentity: (id, rev, identity) => transition(id, rev, ['running'], i => {
-      if (i.threadId !== identity.threadId || (i.runtime && !sameRuntimeIdentity(i.runtime, identity))) throw new Error('Runtime execution identity conflict.');
-      i.runtime = identity;
-    }),
-    markWaiting: (id, rev, pending) => transition(id, rev, ['running'], i => { i.state = 'waiting'; i.pendingInterrupt = pending; }),
-    claimResume: (id, rev, requestId, identity, interruptId) => transition(id, rev, ['waiting'], i => {
-      if (!sameRuntimeIdentity(i.runtime, identity) || i.pendingInterrupt?.interruptId !== interruptId) throw new Error('Host invocation resume identity conflict.');
-      i.state = 'running'; i.requestId = requestId; delete i.pendingInterrupt;
-    }),
-    settle: (id, rev, result) => change(s => {
-      const record = s.invocations[id];
-      if (record && terminal(record)) {
-        if (record.state !== result.state || record.reply !== result.reply || record.error !== result.error) throw new Error('Host invocation settlement conflict.');
+    attachRuntimeIdentity: (id, rev, value) => {
+      const identity = structuredClone(value);
+      return transition(id, rev, ['running'], i => {
+        if (i.threadId !== identity.threadId || (i.runtime && !sameRuntimeIdentity(i.runtime, identity))) throw new Error('Runtime execution identity conflict.');
+        i.runtime = identity;
+      });
+    },
+    markWaiting: (id, rev, value) => {
+      const pending = structuredClone(value);
+      return transition(id, rev, ['running'], i => { i.state = 'waiting'; i.pendingInterrupt = pending; });
+    },
+    claimResume: (id, rev, requestId, value, interruptId) => {
+      const identity = structuredClone(value);
+      return transition(id, rev, ['waiting'], i => {
+        if (!sameRuntimeIdentity(i.runtime, identity) || i.pendingInterrupt?.interruptId !== interruptId) throw new Error('Host invocation resume identity conflict.');
+        i.state = 'running'; i.requestId = requestId; delete i.pendingInterrupt;
+      });
+    },
+    settle: (id, rev, value) => {
+      const result = structuredClone(value);
+      return change(s => {
+        const record = s.invocations[id];
+        if (record && terminal(record)) {
+          if (record.state !== result.state || record.reply !== result.reply || record.error !== result.error) throw new Error('Host invocation settlement conflict.');
+          return record;
+        }
+        if (!record || record.revision !== rev || !['running', 'waiting'].includes(record.state)) throw new Error('Host invocation revision/state conflict.');
+        Object.assign(record, result); delete record.pendingInterrupt;
+        record.revision++; record.updatedAt = new Date().toISOString();
         return record;
-      }
-      if (!record || record.revision !== rev || !['running', 'waiting'].includes(record.state)) throw new Error('Host invocation revision/state conflict.');
-      Object.assign(record, result); delete record.pendingInterrupt;
-      record.revision++; record.updatedAt = new Date().toISOString();
-      return record;
-    }),
+      });
+    },
     block: (id, rev, error) => transition(id, rev, ['queued', 'running', 'waiting'], i => { i.state = 'blocked'; i.error = error; delete i.pendingInterrupt; }),
   };
   return { sessions, invocations, configuration: options.configuration ?? hostConfiguration, artifacts: options.artifacts, usage: options.usage };

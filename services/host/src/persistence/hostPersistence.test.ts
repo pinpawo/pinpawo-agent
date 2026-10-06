@@ -8,6 +8,7 @@ import { createFileHostPersistence } from './fileHostPersistence';
 import { ServerTuiSessionService } from '../session/serverTuiSessions';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
 import type { UsageFilter, UsageObservation, UsageStorePort } from '../hostRuntime';
+import type { HostPersistenceState } from './memoryHostPersistence';
 
 async function admitted(p = createMemoryHostPersistence({ defaultModelProfileId: 'profile' })) {
   const session = (await p.sessions.register('pet', 'pet:12345678', true));
@@ -250,3 +251,108 @@ test('a resume result commit failure preserves its running claim and original sc
   assert.equal(preserved?.state, 'running'); assert.equal(preserved?.requestId, 'resume');
   assert.deepEqual(preserved?.scope, record.scope); assert.deepEqual(events, ['running']);
 });
+
+for (const outcome of ['completed', 'waiting'] as const) {
+  test(`restart ${outcome} recovery commit failure preserves the record for retry across another restart`, async () => {
+    const { HostInvocationService } = await import('./hostInvocationService');
+    let durable: HostPersistenceState | undefined, failRecovery = false, blockedCommits = 0;
+    const unavailable = new Error(`${outcome} recovery commit unavailable`);
+    const open = () => createMemoryHostPersistence({ defaultModelProfileId: 'profile', initial: durable,
+      commit: async draft => {
+        if (failRecovery && draft.invocations.dispatch?.state === outcome) {
+          failRecovery = false;
+          throw unavailable;
+        }
+        if (draft.invocations.dispatch?.state === 'blocked') blockedCommits++;
+        durable = structuredClone(draft);
+      },
+    });
+    const { p, session, record } = await admitted(open());
+    let running = await p.invocations.claimStart(record.dispatchId, record.revision, 'start');
+    running = await p.invocations.attachRuntimeIdentity(record.dispatchId, running.revision, identity(session.threadId));
+    const before = structuredClone(durable);
+    const pending = { interruptId: 'review', payload: { kind: 'human_review', reviews: [] } } as const;
+    const descriptor = { identity: identity(session.threadId), state: outcome,
+      ...(outcome === 'completed' ? { reply: 'original reply' } : { pendingInterrupt: pending }) };
+    const sessions = { getSession: async () => session } as never;
+    const graph = { readExecutionDescriptor: async () => descriptor } as never;
+    const setup = async () => ({ input: { threadId: session.threadId } }) as never;
+    const events: Array<{ state: string; reply?: string }> = [];
+    const reopened = open();
+    const recovery = new HostInvocationService(reopened.invocations, event => events.push(event));
+    failRecovery = true;
+    const failedAttempt = await recovery.reconcile('pet', sessions, graph, setup).then(() => null, error => error);
+    assert.equal((await reopened.invocations.read(record.dispatchId))?.state, 'running');
+    assert.equal(failedAttempt, unavailable);
+    assert.deepEqual(durable, before);
+    assert.equal(blockedCommits, 0);
+    assert.equal(events.length, 0);
+    await recovery.replay('pet');
+    assert.deepEqual(events.map(event => event.state), ['running']);
+    events.length = 0;
+    const retry = open();
+    const restarted = new HostInvocationService(retry.invocations, event => events.push(event));
+    await restarted.reconcile('pet', sessions, graph, setup);
+    const restored = await retry.invocations.read(record.dispatchId);
+    assert.equal(restored?.state, outcome);
+    assert.deepEqual(restored?.scope, running.scope);
+    if (outcome === 'completed') assert.equal(restored?.reply, 'original reply');
+    else assert.equal(restored?.pendingInterrupt?.interruptId, pending.interruptId);
+    await restarted.replay('pet');
+    assert.deepEqual(events.map(event => event.state), [outcome]);
+    if (outcome === 'completed') assert.equal(events[0]?.reply, 'original reply');
+    assert.equal(blockedCommits, 0);
+  });
+}
+
+test('admission captures nested input before it waits behind another commit', async () => {
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  let hold = false;
+  const p = createMemoryHostPersistence({ defaultModelProfileId: 'profile', commit: async () => {
+    if (hold) { enter(); await pending; }
+  } });
+  const session = await p.sessions.register('pet', 'pet:12345678', true);
+  hold = true;
+  const previous = p.sessions.updateProfile(session.id, 'next');
+  await entered;
+  const input = { dispatchId: 'captured', petId: 'pet', sessionId: session.id, threadId: session.threadId,
+    request: 'original', fingerprint: 'original', scope: { namespace: 'channel', id: 'original-channel' } };
+  const admission = p.invocations.admit(input);
+  input.scope.id = 'changed-while-queued'; input.request = 'changed request';
+  hold = false; release(); await previous;
+  const receipt = await admission;
+  assert.equal(receipt.record.scope?.id, 'original-channel');
+  assert.equal(receipt.record.request, 'original');
+  assert.deepEqual(await p.invocations.read(input.dispatchId), receipt.record);
+});
+
+for (const source of ['caller', 'writer'] as const) {
+  test(`pending admission commit isolates ${source} references from its accepted and durable snapshots`, async () => {
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let durable: HostPersistenceState | undefined, writerSnapshot: HostPersistenceState | undefined;
+    const p = createMemoryHostPersistence({ defaultModelProfileId: 'profile', commit: async draft => {
+      // Like the file adapter: serialize the write before awaiting its I/O.
+      const serialized = JSON.stringify(draft);
+      if (draft.invocations.captured) { writerSnapshot = draft; enter(); await pending; }
+      durable = JSON.parse(serialized);
+    } });
+    const session = await p.sessions.register('pet', 'pet:12345678', true);
+    const input = { dispatchId: 'captured', petId: 'pet', sessionId: session.id, threadId: session.threadId,
+      request: 'original', fingerprint: 'original', scope: { namespace: 'channel', id: 'original-channel' } };
+    const admission = p.invocations.admit(input);
+    try {
+      await entered;
+      if (source === 'caller') input.scope.id = 'changed-during-commit';
+      else (writerSnapshot!.invocations.captured.scope! as { id: string }).id = 'writer-local-change';
+      release();
+      const receipt = await admission;
+      assert.equal(durable?.invocations.captured.scope?.id, 'original-channel');
+      assert.equal(receipt.record.scope?.id, 'original-channel');
+      assert.deepEqual(await p.invocations.read(input.dispatchId), durable?.invocations.captured);
+    } finally { release(); await admission.catch(() => {}); }
+  });
+}

@@ -38,12 +38,19 @@ plugins activate; Channel's unique invocation output makes replay idempotent.
 This is recoverable at-least-once result publication, not exactly-once tool
 execution. Unknown start windows, mismatched identities and queued work after
 restart are blocked for explicit repair; external effects are never replayed
-automatically. All actual I/O ports return Promises. Admission, start/resume
+automatically. A recovery read or settlement/waiting commit failure propagates as
+a startup failure, preserving the prior record for the next startup attempt;
+it does not establish a bad runtime association or publish a false failure.
+All actual I/O ports return Promises. Admission, start/resume
 claims, runtime identity attachment and settlement are awaited before queue
 receipts, execution or lifecycle publication. Studio awaits recovery replay
 after plugin activation. The local adapter serializes validation, draft, awaited
 commit and publication; failed commits leave the prior state visible, and
-unchanged drafts do not write. This is a snapshot adapter
+unchanged drafts do not write. Object inputs are copied before queueing, and the
+writer receives its own snapshot before awaited I/O. Caller and writer references
+cannot change the accepted Host draft while a commit is pending. The writer still
+owns correct durable serialization; no generic freezing framework is introduced.
+This is a snapshot adapter
 (`createMemoryHostPersistence`), not a generic backend factory; an injected DB
 implementation must provide the same atomic domain operations and durability
 guarantees. No DB, generic transaction framework or background flush is

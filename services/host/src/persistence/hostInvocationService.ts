@@ -108,23 +108,31 @@ export class HostInvocationService {
 
   async reconcile(petId: string, sessions: ServerTuiSessionService, graph: HostGraphService,
     setup: (sessionId: string) => Promise<AgentSessionTurnOptions['setup']>): Promise<void> {
-    for (let record of await this.store.list(petId)) {
+    for (const record of await this.store.list(petId)) {
       if (!['queued', 'running', 'waiting'].includes(record.state)) continue;
-      try {
-        const session = await sessions.getSession(petId, record.sessionId);
-        if (!session || session.threadId !== record.threadId || !record.runtime) throw new Error('Host restart has no confirmed runtime association; explicit repair required.');
-        const descriptor = await graph.readExecutionDescriptor(await setup(record.sessionId));
-        if (!descriptor.identity || !sameRuntimeIdentity(record.runtime, descriptor.identity)) throw new Error('Host restart runtime identity mismatch; explicit repair required.');
-        if (descriptor.state === 'waiting' && descriptor.pendingInterrupt) {
-          const pending = projectPendingInterrupt(descriptor.pendingInterrupt);
-          if (record.state === 'running') record = await this.store.markWaiting(record.dispatchId, record.revision, pending);
-          else if (record.state !== 'waiting' || record.pendingInterrupt?.interruptId !== pending.interruptId) throw new Error('Host restart pending interrupt mismatch.');
-        } else if (descriptor.state === 'completed' || descriptor.state === 'failed') {
-          record = await this.store.settle(record.dispatchId, record.revision, { state: descriptor.state,
-            ...(descriptor.reply !== undefined ? { reply: descriptor.reply } : {}), ...(descriptor.error ? { error: descriptor.error } : {}) });
-        } else throw new Error('Host restart execution outcome unknown; external actions will not be replayed.');
-      } catch (error) {
-        record = await this.store.block(record.dispatchId, record.revision, error instanceof Error ? error.message : 'Host recovery failed.');
+      // I/O failures are retryable startup failures, not evidence of a bad association.
+      // Only confirmed mismatches/unknown outcomes transition the invocation to blocked.
+      const session = await sessions.getSession(petId, record.sessionId);
+      if (!session || session.threadId !== record.threadId || !record.runtime) {
+        await this.store.block(record.dispatchId, record.revision, 'Host restart has no confirmed runtime association; explicit repair required.');
+        continue;
+      }
+      const descriptor = await graph.readExecutionDescriptor(await setup(record.sessionId));
+      if (!descriptor.identity || !sameRuntimeIdentity(record.runtime, descriptor.identity)) {
+        await this.store.block(record.dispatchId, record.revision, 'Host restart runtime identity mismatch; explicit repair required.');
+        continue;
+      }
+      if (descriptor.state === 'waiting' && descriptor.pendingInterrupt) {
+        const pending = projectPendingInterrupt(descriptor.pendingInterrupt);
+        if (record.state === 'running') await this.store.markWaiting(record.dispatchId, record.revision, pending);
+        else if (record.state !== 'waiting' || record.pendingInterrupt?.interruptId !== pending.interruptId) {
+          await this.store.block(record.dispatchId, record.revision, 'Host restart pending interrupt mismatch.');
+        }
+      } else if (descriptor.state === 'completed' || descriptor.state === 'failed') {
+        await this.store.settle(record.dispatchId, record.revision, { state: descriptor.state,
+          ...(descriptor.reply !== undefined ? { reply: descriptor.reply } : {}), ...(descriptor.error ? { error: descriptor.error } : {}) });
+      } else {
+        await this.store.block(record.dispatchId, record.revision, 'Host restart execution outcome unknown; external actions will not be replayed.');
       }
     }
   }

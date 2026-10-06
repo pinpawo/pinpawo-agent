@@ -51,3 +51,42 @@ and unacknowledged settlements.
 Supervisor contract errors, automatic Channel history and UI duplicate-click
 handling are outside this change. A Supervisor failure does settle the original
 invocation as failed, without claiming to fix that separate error.
+
+## Optional usage domain seam (design, reserved interface only)
+
+`HostPersistence.usage?: UsageStorePort` reserves a domain entry for future token
+accounting alongside the existing four ports. `createHostPersistence` passes
+through an injected adapter; the default and current file adapter leave usage
+undefined. Undefined means unavailable, not zero consumed. This change does not
+add a writer, change the session/invocation file schema, or promise usage durability
+under their commit boundary. Usage types are exported through `pinpawo/host-runtime`.
+
+The reserved operations are asynchronous `record(UsageObservation)` returning
+`recorded | duplicate | stale`, and `list(UsageFilter, cursor?)` returning current
+per-attempt facts and an opaque next cursor. A future adapter keys physical provider
+requests by `(sourceId, attemptId)` and compares revisions: redelivery is a duplicate,
+older observations are stale, and different content at the same revision is an
+error. A later observation updates one attempt's contribution rather than counting
+another request. Adapter concurrency and durability guarantees remain to be specified.
+
+Observations reuse `RuntimeExecutionIdentity`, `requestId` for the start/resume
+segment, and optional `planItemId`/`delegationId`. There are no extra chunk/Step IDs.
+Host invocation and original Channel scope remain in the invocation store; future
+queries join through its formal runtime association, never an active session or
+checkpoint contents. `modelCallId` identifies a logical call, while `attemptId`
+identifies each actual request including retries. The eventual runtime producer
+must retain stable source/event identities for redelivery.
+
+Each fact carries phase, provider/model, timestamps, outcome and input/output/total,
+with optional cache/reasoning breakdowns and missing reason. Null means unknown;
+reported zero is known. Empty results mean no recorded matching requests, not
+complete historical zero. Only reported numeric usage belongs here, never prompts,
+response bodies or credentials. Future totals sum physical requests once across
+start/resume, failure/cancellation and compaction; capability aggregates are
+projections, not additional consumption. Context occupancy is a separate metric.
+
+Runtime instrumentation at the actual retry boundary, a real persistence adapter,
+replay/coverage contracts, aggregation, HTTP routes and Console views are deferred.
+Until those exist, this seam provides neither capture nor complete historical
+accounting. A crash between provider consumption and durable observation remains
+an explicit coverage gap; do not infer missing usage or rerun models to recover it.

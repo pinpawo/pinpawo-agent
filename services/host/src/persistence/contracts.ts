@@ -44,9 +44,58 @@ export interface InvocationStorePort {
   settle(dispatchId: string, revision: number, result: { state: 'completed' | 'failed' | 'interrupted'; reply?: string; error?: string }): HostInvocation;
   block(dispatchId: string, revision: number, reason: string): HostInvocation;
 }
+
+/** null is unknown; a provider-reported zero is known consumption. */
+export type UsageQuantity = number | null;
+/** One physical provider request; later revisions update that attempt, not its count. */
+export type UsageObservation = {
+  sourceId: string;
+  eventId: string;
+  revision: number;
+  modelCallId: string;
+  attemptId: string;
+  runtime: RuntimeExecutionIdentity;
+  /** Existing start/resume operation identity, retained on each fact. */
+  requestId: string;
+  planItemId?: string;
+  delegationId?: string;
+  phase: 'entry' | 'supervisor' | 'capability' | 'compaction';
+  provider: string;
+  model: string;
+  startedAt: string;
+  endedAt?: string;
+  outcome: 'pending' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+  usage: {
+    input: UsageQuantity;
+    output: UsageQuantity;
+    total: UsageQuantity;
+    totalSource?: 'provider' | 'derived';
+    cacheHit?: UsageQuantity;
+    cacheMiss?: UsageQuantity;
+    cacheWrite?: UsageQuantity;
+    reasoning?: UsageQuantity;
+  };
+  missingReason?: 'not_reported' | 'stream_incomplete' | 'observation_lost';
+};
+export type UsageFilter = {
+  runtime?: Partial<RuntimeExecutionIdentity>;
+  requestId?: string;
+  planItemId?: string;
+  delegationId?: string;
+};
+/** Current per-attempt facts; the next cursor is opaque, not a replay checkpoint. */
+export type UsagePage = { records: UsageObservation[]; nextCursor?: string };
+export interface UsageStorePort {
+  /** Key by (sourceId, attemptId); conflicting content at the same revision must reject. */
+  record(value: UsageObservation): Promise<'recorded' | 'duplicate' | 'stale'>;
+  /** Empty results establish no matching records, not complete historical zero. */
+  list(filter: UsageFilter, cursor?: string): Promise<UsagePage>;
+}
 export interface HostPersistence {
   readonly configuration: HostConfigurationPort;
   readonly artifacts?: CapabilityArtifactStore;
   readonly sessions: SessionRegistryPort;
   readonly invocations: InvocationStorePort;
+  /** Absent means unsupported/unavailable, never zero consumed. */
+  readonly usage?: UsageStorePort;
 }

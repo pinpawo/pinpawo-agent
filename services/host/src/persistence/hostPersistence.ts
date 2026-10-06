@@ -3,7 +3,7 @@ import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import { createEmptyTuiSessionState, createTuiSession, createTuiSessionForThread, ensureActiveTuiSession,
   ensureDispatchSession, resumeTuiSession, updateTuiSessionModelProfile, updateTuiSessionSummary,
   type TuiSessionState } from '../session/tuiSessionRegistry';
-import type { HostInvocation, HostPersistence, InvocationStorePort, SessionRegistryPort } from './contracts';
+import type { HostInvocation, HostPersistence, InvocationStorePort, SessionRegistryPort, UsageStorePort } from './contracts';
 import type { RuntimeExecutionIdentity } from '@pinpawo/pet-agent';
 
 export type HostPersistenceState = { sessions: TuiSessionState; invocations: Record<string, HostInvocation> };
@@ -15,6 +15,8 @@ const terminal = (record: HostInvocation) => ['completed', 'failed', 'interrupte
 /** Commit-before-publish and rollback semantics shared by deterministic and file adapters. */
 export function createHostPersistence(options: {
   configuration?: HostConfigurationPort; artifacts?: CapabilityArtifactStore;
+  /** Inject a real domain adapter; usage is outside this session/invocation commit. */
+  usage?: UsageStorePort;
   defaultModelProfileId: string; initial?: HostPersistenceState;
   commit?: (state: HostPersistenceState) => void;
 }): HostPersistence {
@@ -127,5 +129,5 @@ export function createHostPersistence(options: {
     },
     block: (id, rev, error) => transition(id, rev, ['queued', 'running', 'waiting'], i => { i.state = 'blocked'; i.error = error; delete i.pendingInterrupt; }),
   };
-  return { sessions, invocations, configuration: options.configuration ?? hostConfiguration, artifacts: options.artifacts };
+  return { sessions, invocations, configuration: options.configuration ?? hostConfiguration, artifacts: options.artifacts, usage: options.usage };
 }

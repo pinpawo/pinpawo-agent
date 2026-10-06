@@ -7,6 +7,7 @@ import { createHostPersistence } from './hostPersistence';
 import { createFileHostPersistence } from './fileHostPersistence';
 import { ServerTuiSessionService } from '../session/serverTuiSessions';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
+import type { UsageFilter, UsageObservation, UsageStorePort } from '../hostRuntime';
 
 function admitted(p = createHostPersistence({ defaultModelProfileId: 'profile' })) {
   const session = p.sessions.register('pet', 'pet:12345678', true);
@@ -16,6 +17,62 @@ function admitted(p = createHostPersistence({ defaultModelProfileId: 'profile' }
   return { p, session, input, record };
 }
 const identity = (threadId: string) => ({ threadId, taskId: 'runtime-task', runId: 'runtime-run' });
+
+test('usage is unavailable by default, including the existing file adapter after restart', () => {
+  assert.equal(createHostPersistence({ defaultModelProfileId: 'profile' }).usage, undefined);
+  const root = mkdtempSync(join(tmpdir(), 'host-usage-unavailable-'));
+  try {
+    const file = join(root, 'registry.json');
+    const { p, input } = admitted(createFileHostPersistence(file, 'profile'));
+    assert.equal(p.usage, undefined);
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    assert.deepEqual(Object.keys(raw).sort(), ['activeSessionIds', 'hostPersistenceVersion', 'invocations', 'sessions', 'version']);
+    assert.equal(raw.hostPersistenceVersion, 1);
+    const reopened = createFileHostPersistence(file, 'profile');
+    assert.equal(reopened.usage, undefined);
+    assert.equal(reopened.invocations.read(input.dispatchId)?.scope?.id, 'a');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('injected usage adapter preserves async results/errors and stays outside invocation commits', async () => {
+  const observation: UsageObservation = {
+    sourceId: 'runtime-source', eventId: 'event', revision: 1, modelCallId: 'call', attemptId: 'attempt',
+    runtime: identity('opaque-thread'), requestId: 'resume-request', planItemId: 'plan-item', delegationId: 'delegation',
+    phase: 'capability', provider: 'test-provider', model: 'test-model', startedAt: '2026-10-06T00:00:00Z',
+    outcome: 'failed', usage: { input: null, output: 0, total: null }, missingReason: 'stream_incomplete',
+  };
+  const filter: UsageFilter = { runtime: observation.runtime, requestId: observation.requestId,
+    planItemId: observation.planItemId, delegationId: observation.delegationId };
+  const outcomes = ['recorded', 'duplicate', 'stale'] as const;
+  let commits = 0, records = 0;
+  const unavailable = new Error('usage adapter unavailable');
+  const usage: UsageStorePort = {
+    record: async value => {
+      assert.equal(value, observation);
+      const result = outcomes[records++];
+      if (!result) throw unavailable;
+      return result;
+    },
+    list: async (query, cursor) => {
+      assert.equal(query, filter);
+      assert.equal(cursor, 'opaque-cursor');
+      return { records: [observation], nextCursor: 'opaque-next' };
+    },
+  };
+  const { p, input } = admitted(createHostPersistence({ defaultModelProfileId: 'profile', usage, commit: () => { commits++; } }));
+  const before = p.invocations.read(input.dispatchId);
+  const admissionCommits = commits;
+  assert.equal(p.usage, usage);
+  for (const expected of outcomes) assert.equal(await p.usage.record(observation), expected);
+  const page = await p.usage.list(filter, 'opaque-cursor');
+  assert.equal(page.records[0].usage.input, null);
+  assert.equal(page.records[0].usage.output, 0);
+  assert.equal(page.nextCursor, 'opaque-next');
+  await assert.rejects(p.usage.record(observation), error => error === unavailable);
+  assert.equal(commits, admissionCommits);
+  assert.deepEqual(p.invocations.read(input.dispatchId), before);
+  assert.equal(p.invocations.claimStart(input.dispatchId, before!.revision, 'start').state, 'running');
+});
 
 test('durable admission is idempotent and rejects changed identities; failed commit leaves no execution claim', () => {
   let fail = false;

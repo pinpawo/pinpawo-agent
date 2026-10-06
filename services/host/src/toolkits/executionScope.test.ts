@@ -5,7 +5,10 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './index';
+import { createFilesToolkit } from './files';
+import { createGitToolkit } from './git';
+import { createShellToolkit } from './shell';
+import { PosixShellRS, type ShellRS } from './shellRS';
 
 function call(workdir: string, suffix: string) {
   return {
@@ -21,13 +24,18 @@ function call(workdir: string, suffix: string) {
   };
 }
 
-function toolFrom(toolkit: AgentToolkit, name: string) {
+/** The files and shell tools a Host offers on one ShellRS. */
+function fileAndShellTools(shell: ShellRS): Pick<AgentToolkit, 'tools'> {
+  return { tools: [...createFilesToolkit().tools, ...createShellToolkit({ shell }).tools] };
+}
+
+function toolFrom(toolkit: Pick<AgentToolkit, 'tools'>, name: string) {
   const definition = toolkit.tools.find(({ tool }) => tool.name === name);
   assert.ok(definition, `missing ${name} tool`);
   return definition.tool;
 }
 
-test('static local tools interpret relative inputs against each call\'s workdir', async (t) => {
+test('static file and shell tools interpret relative inputs against each call\'s workdir', async (t) => {
   const workdirA = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-a-'));
   const workdirB = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-b-'));
   const shellA = new PosixShellRS();
@@ -39,8 +47,8 @@ test('static local tools interpret relative inputs against each call\'s workdir'
   });
 
   // Two Hosts in one process, each with its own ShellRS instance.
-  const toolkitA = createBashToolkit({ shell: shellA });
-  const toolkitB = createBashToolkit({ shell: shellB });
+  const toolkitA = fileAndShellTools(shellA);
+  const toolkitB = fileAndShellTools(shellB);
   const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.cwd())"`;
 
   assert.equal(
@@ -92,7 +100,7 @@ test('an invalid path returns a recoverable tool error through the normal path',
     await shell.dispose();
     rmSync(workdir, { recursive: true, force: true });
   });
-  const toolkit = createBashToolkit({ shell });
+  const toolkit = fileAndShellTools(shell);
 
   const result = await toolFrom(toolkit, 'view_file_chunk').invoke({
     name: 'view_file_chunk',
@@ -113,7 +121,7 @@ test('start_process resolves default and relative cwd from the call workdir', as
     await shell.dispose();
     rmSync(workdir, { recursive: true, force: true });
   });
-  const toolkit = createBashToolkit({ shell });
+  const toolkit = fileAndShellTools(shell);
   for (const cwd of [undefined, 'child']) {
     const result = JSON.parse(String(await toolFrom(toolkit, 'start_process').invoke({
       command: 'pwd', ...(cwd ? { cwd } : {}),

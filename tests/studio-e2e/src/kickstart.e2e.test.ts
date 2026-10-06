@@ -78,13 +78,18 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   });
   const { compileAgentRegistry } = await import('@pinpawo/pet-agent');
   const { loadCapabilityDirectory } = await import('pinpawo/host-runtime');
-  const { createBashToolkit, createGitToolkit, createProjectInspectionToolkit, PosixShellRS }
-    = await import('../../../services/host/src/toolkits/local/index');
+  const { createFilesToolkit } = await import('../../../services/host/src/toolkits/files/index');
+  const { createShellToolkit } = await import('../../../services/host/src/toolkits/shell/index');
+  const { createWebToolkit } = await import('../../../services/host/src/toolkits/web/index');
+  const { createGitToolkit } = await import('../../../services/host/src/toolkits/git/index');
+  const { createGithubToolkit } = await import('../../../services/host/src/toolkits/github/index');
+  const { createProjectInspectionToolkit } = await import('../../../services/host/src/toolkits/projectInspection');
+  const { PosixShellRS } = await import('../../../services/host/src/toolkits/shellRS/index');
   const { createStudioContextToolkit } = await import('../../../packages/studio/src/host/studioContextToolkit');
   const shell = new PosixShellRS();
   t.after(() => shell.dispose());
   const toolkits = [
-    createBashToolkit({ shell }), createGitToolkit({ shell }), createProjectInspectionToolkit({ shell }),
+    createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }), createProjectInspectionToolkit({ shell }),
     createStudioContextToolkit(() => configuration.resolved.pets.map(({ petId, name }) => ({ petId, name }))),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];

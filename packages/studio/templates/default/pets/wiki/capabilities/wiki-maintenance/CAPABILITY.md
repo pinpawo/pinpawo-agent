@@ -2,8 +2,11 @@
 name: wiki_maintenance
 description: 根据代码、审查与任务进度维护项目 Wiki 的整体概览。
 uses:
-  - bash
+  - files
+  - shell
+  - web
   - git
+  - github
   - channel
 version: 1
 ---

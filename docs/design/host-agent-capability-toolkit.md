@@ -146,19 +146,23 @@ Inventory 合并必须是确定性的：来源和顺序可追溯，重复 Capabi
 
 ## 5. Browser 与 local-machine Toolkit 的归位
 
-Browser、bash、git 都是普通 Toolkit：
+Browser、files、shell、web、git、github 都是普通 Toolkit：
 
 - Browser backend/driver、bridge、session、ownership 和 live state 属于
   `ChromeExtensionBrowserRS`；Browser Capability 只声明 `uses: ['browser']`。
 - Browser 包分别导出 Capability、Toolkit 工厂、BrowserRS 契约与实现。host 的
-  composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；bash、git、
+  composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；shell、git、github、
   project-inspection 共享 Host 到本机 RS 服务的同一个 ShellRS 连接
-  （`ShellRSClient`，见 #853）。
+  （`ShellRSClient`，见 #853）；files、web 在 Host 进程内执行，不依赖 RS。
 - 当前所谓 `local tools` 不是领域概念。它们是 local-machine / Node Host 提供的
   Toolkit definitions；CLI 只是其中一类 Host 入口。
-- `bash` 当前包含文件、搜索、JSON、网络、shell、process 等工具，`git` 同时包含
-  本地 git 与 GitHub 操作。后续是否拆分必须按 authority、availability、review
-  policy 和 RS 依赖决定，不能按目录或现有名称机械拆分。
+- 本机 Toolkit 按作用对象划分（#907）：`files`（工作区文件）、`shell`（命令与
+  进程）、`web`（HTTP）、`git`（本地仓库）、`github`（GitHub）。`project-inspection`
+  由它们各自声明的只读子集组合。原 `bash` 把文件、网络和任意 shell 绑在一起授予，
+  并让文件与 HTTP 工具随 ShellRS 一起不可用；原 `git` 混合本地仓库与需要凭据的
+  外部服务，已拆分。后续再拆分仍按 authority、availability、review policy 和 RS
+  依赖决定，不按目录或现有名称机械拆分。工具清单见
+  [Host 内置 Toolkit](../reference/extensions/capability-toolkit.md)。
 - operation registry 必须由最终 Toolkit definitions 派生，不能维护一份平级的
   flat tools inventory。
 

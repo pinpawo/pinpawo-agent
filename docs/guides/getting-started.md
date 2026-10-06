@@ -101,8 +101,10 @@ Create a directory with `CAPABILITY.md`:
 name: repository-audit
 description: "Inspect a repository and report verified risks."
 uses:
-  - bash
+  - files
+  - shell
   - git
+  - github
 version: 1
 ---
 

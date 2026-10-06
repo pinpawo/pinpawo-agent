@@ -5,7 +5,7 @@ import type {
 
 /**
  * ShellRS: the shell/CLI execution contract that shell-dependent Toolkits
- * (bash, git, project-inspection) are written against.
+ * (shell, git, github, project-inspection) are written against.
  *
  * The contract names shell semantics, not a platform. `PosixShellRS` is the
  * only implementation today; a Windows implementation must satisfy the same

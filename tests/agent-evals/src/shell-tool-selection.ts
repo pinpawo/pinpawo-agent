@@ -1,5 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import { createGitTools } from '../../../services/host/src/toolkits/git/gitTools';
+import { createGithubTools } from '../../../services/host/src/toolkits/github/githubTools';
 import { createInspectShellTool, createRunShellTool, createStartProcessTool } from '../../../services/host/src/toolkits/shell/shellTools';
 import type { ShellRS } from '../../../services/host/src/toolkits/shellRS/shellRS';
 
@@ -53,7 +54,10 @@ export function buildShellSelectionMockTools(outputs: Record<string, unknown> = 
   const unavailable = new Proxy({} as ShellRS, {
     get() { throw new Error('Shell selection eval must never access a real executor'); },
   });
-  const gitTools = createGitTools(unavailable).gitTools.filter((item) => ['git_shell', 'gh_shell'].includes(item.name));
+  const gitTools = [
+    ...createGitTools(unavailable).gitTools.filter((item) => item.name === 'git_shell'),
+    ...createGithubTools(unavailable).githubTools.filter((item) => item.name === 'gh_shell'),
+  ];
   const definitions = [createInspectShellTool(unavailable), createRunShellTool(unavailable),
     createStartProcessTool(unavailable), ...gitTools];
   const tools = definitions.map((definition) => tool(async (args: Record<string, unknown>) => {

@@ -2,8 +2,11 @@
 name: general
 description: 处理不需要更具体 Capability 的通用任务；可以读取和修改工作区、执行受控命令并使用 Git。
 uses:
-  - bash
+  - files
+  - shell
+  - web
   - git
+  - github
 version: 1
 ---
 

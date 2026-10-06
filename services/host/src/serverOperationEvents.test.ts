@@ -12,7 +12,10 @@ import {
   isHumanReviewInterruptError,
 } from './serverOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './toolkits/local';
+import { createFilesToolkit } from './toolkits/files';
+import { createGitToolkit } from './toolkits/git';
+import { createShellToolkit } from './toolkits/shell';
+import { PosixShellRS } from './toolkits/shellRS';
 import { buildReviewSpec } from '@pinpawo/pet-agent';
 
 test('serialized review batches are interrupted and hide internal error JSON', () => {
@@ -34,7 +37,8 @@ test('serialized review batches are interrupted and hide internal error JSON', (
 
 const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
-  createBashToolkit({ shell: sharedShell }),
+  createFilesToolkit(),
+  createShellToolkit({ shell: sharedShell }),
   createGitToolkit({ shell: sharedShell }),
 ]);
 
@@ -57,7 +61,7 @@ test('emitLocalServerToolOperationEvent emits one operation for a normal tool ev
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0], event);
   assert.equal(emitted[0]?.phase, 'started');
-  assert.equal(emitted[0]?.operation.kind, 'bash.read_file');
+  assert.equal(emitted[0]?.operation.kind, 'files.read_file');
 });
 
 test('emitLocalServerToolOperationEvent maps human review tool errors to interrupted operations', () => {

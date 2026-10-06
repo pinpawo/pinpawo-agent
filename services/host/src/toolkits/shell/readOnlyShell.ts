@@ -1,5 +1,6 @@
 import { parse } from 'shell-quote';
-import { classifyGhArgs, classifyGitArgs } from '../git/vcsCommands';
+import { classifyGitArgs } from '../git/gitCommands';
+import { classifyGhArgs } from '../github/ghCommands';
 
 /**
  * Admission for `inspect_shell`: a blocklist, not an allowlist.
@@ -20,7 +21,7 @@ type Refusal = { reason: string; redirect: string };
 
 const RUN_SHELL = '需要执行时改用 run_shell，它会走工具审批。';
 const GIT_TOOLS = 'git 写操作改用 git_* 工具或 git_shell，它们按操作走审批；没有 git toolkit 时用 run_shell。';
-const GH_TOOLS = 'GitHub 写操作改用 gh_* 工具或 gh_shell，它们按操作走审批；没有 git toolkit 时用 run_shell。';
+const GH_TOOLS = 'GitHub 写操作改用 gh_* 工具或 gh_shell，它们按操作走审批；没有 github toolkit 时用 run_shell。';
 
 const DESTRUCTIVE_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
 const KILL_COMMANDS = new Set(['kill', 'pkill', 'killall']);

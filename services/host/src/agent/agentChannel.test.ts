@@ -28,7 +28,12 @@ import {
 } from '../capabilities/capabilityCreator';
 import { createExploreCapability } from '../capabilities/explore';
 import { loadGeneralCapability } from '../capabilities/general';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from '../toolkits/local';
+import { createFilesToolkit } from '../toolkits/files';
+import { createGitToolkit } from '../toolkits/git';
+import { createGithubToolkit } from '../toolkits/github';
+import { createShellToolkit } from '../toolkits/shell';
+import { PosixShellRS } from '../toolkits/shellRS';
+import { createWebToolkit } from '../toolkits/web';
 import { createTestModelProfiles } from '../testing/modelProfiles';
 
 function createContext(): AgentContext {
@@ -177,7 +182,7 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['bash', 'git'],
+    ['files', 'shell', 'web', 'git', 'github'],
   );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
@@ -191,7 +196,7 @@ test('buildLocalChatAgentInput keeps the General Capability permission boundary 
 
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['bash', 'git'],
+    ['files', 'shell', 'web', 'git', 'github'],
   );
   assert.equal(
     setup.input.capabilities
@@ -372,7 +377,7 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
     userMessage: 'hello',
     threadId: 'thread/with space',
     capabilityArtifactStore: store,
-    toolkits: [createBashToolkit({ shell }), createGitToolkit({ shell })],
+    toolkits: [createFilesToolkit(), createShellToolkit({ shell }), createWebToolkit(), createGitToolkit({ shell }), createGithubToolkit({ shell })],
     capabilities: [createExploreCapability()],
   });
   const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');
@@ -384,7 +389,7 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['bash', 'git'],
+    ['files', 'shell', 'web', 'git', 'github'],
   );
   assert.deepEqual(
     setup.registry.capabilities

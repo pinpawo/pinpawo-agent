@@ -17,7 +17,8 @@
  */
 import { buildReviewSpec } from '../../../packages/pet-agent/src/types/reviewSpec.ts';
 import { assessAutoReviewRisk } from '../../../packages/pet-agent/src/autoReview/autoReviewer.ts';
-import { createBashToolkit, PosixShellRS } from '../../../services/host/src/toolkits/local/index.ts';
+import { createShellToolkit } from '../../../services/host/src/toolkits/shell/index.ts';
+import { PosixShellRS } from '../../../services/host/src/toolkits/shellRS/index.ts';
 import { shellOperationMetadata } from '../../../services/host/src/toolkits/shell/shellTools.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 
@@ -297,7 +298,7 @@ async function main() {
     profileId,
     role: 'subject',
   });
-  const bashToolkit = createBashToolkit({ shell: new PosixShellRS() });
+  const shellToolkit = createShellToolkit({ shell: new PosixShellRS() });
 
   console.log(`Model: ${modelConfig.label}`);
   const failures: Array<{ kind: string; name: string; riskScore: number }> = [];
@@ -310,11 +311,11 @@ async function main() {
       task: testCase.task,
       workdir,
       reviews: [{
-        toolkitName: 'bash',
+        toolkitName: 'file' in testCase ? 'files' : 'shell',
         toolName: 'file' in testCase ? 'write_file' : 'run_shell',
         input: 'file' in testCase ? testCase.file : { command: testCase.command, cwd: workdir },
         ...('file' in testCase ? {} : { operation: shellOperationMetadata.run_shell }),
-        autoReviewContext: bashToolkit.reviewGuidance,
+        autoReviewContext: shellToolkit.reviewGuidance,
         review: buildReviewSpec({
           id: `auto-review-risk-${testCase.id}`,
           view: {

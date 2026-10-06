@@ -117,7 +117,7 @@ export function createLocalServerHandlers(
       sendLocalServerPeerEvent(peer, event);
     });
   const inflightRequests = new InflightRequestController<ServerPeer>({
-    // Local TUI / companion / spawned stdio peer: trusted local transports.
+    // Local TUI / spawned stdio peer: trusted local transports.
     emitOperation: publishRuntimeEvent,
     sendControl: (peer, message) => peer.send(message),
   });

@@ -11,6 +11,18 @@ participant addressing, default Reply, fixed sessions, trusted input and limitat
 observation and keyboard behavior. Configuration and migration steps live in
 [Studio configuration](../../docs/studio/configuration.md).
 
+## Full-screen Channel messages
+
+Each Timeline message offers **View full screen**, including while disconnected.
+The read-only viewer uses the same safe Markdown renderer as the Timeline. Long
+messages scroll vertically; wide code blocks and tables scroll within their blocks.
+Tab stays in the viewer. Escape or **Close** restores the opening button and the
+Timeline/document reading position; clicking blank space keeps the viewer open.
+
+The viewer holds the body and participant names observed when opened, so incoming
+updates do not change the text being read. Close and reopen to read the latest
+stored message. Reading never sends a message or starts a dispatch.
+
 ## Validation
 
 From the repository root:
@@ -22,6 +34,7 @@ npm run build -w @pinpawo/studio-console
 npm exec -w @pinpawo/studio-console -- playwright install chromium
 npm run test:browser -w @pinpawo/studio-console
 npm run test:browser:layout -w @pinpawo/studio-console
+npm run test:browser:message -w @pinpawo/studio-console
 ```
 
 Both browser suites start temporary production Resident Host / HTTP / Channel
@@ -40,3 +53,11 @@ These fixtures do not certify live provider behavior or user acceptance.
 Screenshots stay local in `/tmp/channel-console-screenshots` (functional) and
 `/tmp/channel-console-layout-screenshots` (layout); override with `CHANNEL_SCREENSHOTS`.
 `PLAYWRIGHT_BROWSERS_PATH` selects a writable browser cache when needed.
+
+The message viewer suite starts only an isolated frontend (port 5208, configurable
+with `CHANNEL_MESSAGE_TEST_PORT`) and a synthetic HTTP/SSE fixture, without a
+Studio Host or Pets. It checks desktop and 390×300/320×200 windows, keyboard focus,
+independent scrolling, repeated opening, updates while reading and zero writes.
+Screenshots default to `/tmp/channel-message-fullscreen-screenshots`.
+`CHANNEL_BROWSER_EXECUTABLE` optionally selects an existing Chromium executable
+with an isolated temporary profile.

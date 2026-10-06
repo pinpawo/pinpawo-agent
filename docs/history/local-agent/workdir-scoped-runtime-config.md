@@ -135,7 +135,7 @@ CLI --workdir
 - `~` 展开到 `homedir()`。
 - 相对路径以当前启动进程的 `process.cwd()` 为基准解析成绝对路径。
 - 服务启动后 effective workdir 不再改变。
-- `/runtime` HTTP endpoint 返回 effective workdir，供 TUI 和 companion 显示。
+- `/runtime` HTTP endpoint 返回 effective workdir，供 TUI 和当时的 companion（现已移除）显示。
 
 ## Runtime Config 对象
 

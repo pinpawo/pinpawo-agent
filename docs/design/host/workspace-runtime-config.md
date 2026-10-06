@@ -61,7 +61,7 @@ Global config should not contain per-workspace Studio topology or chat checkpoin
 
 ### Workspace Registry
 
-The registry maps stable workspace ids to local roots. It is global because users need to reopen projects from the App or desktop companion.
+The registry maps stable workspace ids to local roots. It is global because users need to reopen projects from local clients.
 
 ```text
 ~/.pinpawo/workspaces.json

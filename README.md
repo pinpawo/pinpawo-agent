@@ -63,7 +63,7 @@ See [Architecture](docs/concepts/architecture.md) for package, runtime, and stat
 Runtime packages live in `packages/`; local Host and TUI live in `services/`.
 Studio Plugins live in `plugins/`, and Toolkits live in `toolkits/`.
 See the [package map](docs/concepts/architecture.md) and [workspace scripts](package.json).
-The macOS companion under `tools/agent-macos/` is suspended; see [AGENTS.md](AGENTS.md).
+The legacy native macOS companion has been removed. Studio, Console, and TUI retain their macOS support.
 
 ## Requirements
 

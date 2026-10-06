@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false && tsc --noEmit -p tsconfig.browser.json",
     "test:browser": "node tests/channel.browser.mjs",
-    "test:browser:layout": "node tests/channelLayout.browser.mjs"
+    "test:browser:layout": "node tests/channelLayout.browser.mjs",
+    "test:browser:message": "node tests/channelMessage.browser.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

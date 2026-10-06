@@ -93,3 +93,43 @@ Wiki maintenance requires an explicit request; dispatch completion is not goal a
 Existing workdirs are never rewritten by startup or `init`. Follow the single
 [configuration migration guide](../../docs/studio/configuration.md#retired-kanban-workdirs),
 preserving local instructions and historical databases, snapshots and Wiki files.
+
+## Operate a running Host
+
+The same Node.js CLI provides HTTP operator commands. These commands do not
+start a Host, open Console, or connect an exclusive TUI client:
+
+```sh
+pinpawo-studio channels list
+pinpawo-studio channels participants
+pinpawo-studio channels read CHANNEL_ID --after 0 --limit 50
+pinpawo-studio channels send CHANNEL_ID --file message.md --mention PARTICIPANT_ID
+pinpawo-studio channels executions CHANNEL_ID
+pinpawo-studio channels interrupts CHANNEL_ID
+pinpawo-studio queues
+pinpawo-studio pets
+pinpawo-studio snapshot executor --full
+pinpawo-studio events executor --seconds 30
+pinpawo-studio dispatch planner --file task.txt
+pinpawo-studio send executor --file command.json
+```
+
+`--studio-url`, `--agent-url`, and `--token-file` select the already-running
+Host and existing Bearer authority. Defaults are `http://127.0.0.1:3211`,
+`http://127.0.0.1:3212`, and `~/.pinpawo/local-server-token`. Connection flags
+may precede or follow operator commands; `--file -` reads stdin. Repeat
+`--mention` for registered participant IDs; `--reply-to` supplies a message
+reference. `channels --help` lists the operator command contract.
+
+Output is JSON, with bounded live SSE observations emitted as JSON lines.
+Reads return one page and preserve `nextAfter`/`hasMore`; execution pages are
+mutable snapshots, so cursor advancement alone cannot track existing executions.
+Commands do not retry. Dispatch accepts an optional `--idempotency-key`, scoped
+by the Host's process-local admission contract; Channel sends create a new
+message each time. Saved/accepted/completed does not establish goal acceptance.
+
+The [Studio skill](../../skills/studio/SKILL.md) explains operator workflows,
+identity resolution and review boundaries. Its former Python helper has been
+replaced by these CLI commands; no Python runtime is required. Pet Capability
+and Channel Toolkit ownership is unchanged. HTTP protocols remain defined in
+[Studio API](../../docs/reference/api/studio.md).

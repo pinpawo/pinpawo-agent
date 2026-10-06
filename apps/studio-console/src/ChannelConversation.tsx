@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useChannelDialogFocus } from './channelFocus';
 import {
   channelDateKey, channelExecutionOutputs, channelMessageExecutions, channelMessageIdentity, channelMentionLabel,
   channelMessagesGroup, channelMessageSummary, channelPetIdentity, channelToolCallDetail, channelToolCallTitle, executionLabel,
@@ -48,17 +49,62 @@ export function ChannelTechnicalDetails({ message, execution }: { message?: Chan
   </dl></details>;
 }
 
+type MessageMarkdownProps = { body: string; participants: ChannelParticipant[]; pets: ChannelPet[]; viewerParticipantId?: string };
+
+export function ChannelMessageMarkdown({ body, participants, pets, viewerParticipantId }: MessageMarkdownProps) {
+  return <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
+    urlTransform={url => url.startsWith('participant:') ? url : defaultUrlTransform(url)}
+    components={{ a: ({ href, children }) => href?.startsWith('participant:')
+      ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, participants, pets, viewerParticipantId)}</span>
+      : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{body}</ReactMarkdown></div>;
+}
+
+function ChannelMessageViewer({ body, author, occurredAt, participants, pets, viewerParticipantId, onClose }: MessageMarkdownProps & {
+  author: string; occurredAt: string; onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useChannelDialogFocus(true, dialog, onClose);
+  useLayoutEffect(() => {
+    const element = dialog.current!;
+    const previous = document.activeElement;
+    const root = document.documentElement;
+    const overflow = root.style.overflow;
+    const position = { x: window.scrollX, y: window.scrollY };
+    root.style.overflow = 'hidden';
+    element.showModal();
+    return () => {
+      element.close();
+      root.style.overflow = overflow;
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
+      window.scrollTo(position.x, position.y);
+    };
+  }, []);
+  return <dialog ref={dialog} className="channel-message-viewer" aria-labelledby="channel-message-viewer-title"
+    aria-describedby="channel-message-viewer-description" onCancel={event => { event.preventDefault(); onClose(); }}>
+    <header className="channel-message-viewer-head">
+      <div><h2 id="channel-message-viewer-title">Message from {author}</h2>
+        <p id="channel-message-viewer-description">Snapshot when opened · <time dateTime={occurredAt}>{new Date(occurredAt).toLocaleString()}</time></p></div>
+      <button type="button" autoFocus onClick={onClose} aria-label="Close full-screen message">Close <span aria-hidden="true">×</span></button>
+    </header>
+    <div className="channel-message-viewer-scroll" tabIndex={0} aria-label="Full message content">
+      <ChannelMessageMarkdown body={body} participants={participants} pets={pets} viewerParticipantId={viewerParticipantId} />
+    </div>
+  </dialog>;
+}
+
 type TimelineProps = {
   entries: ChannelEntry[]; pending: boolean; onReply: (item: ChannelMessage) => void;
   pets?: ChannelPet[]; petsReady?: boolean; executions?: ChannelExecution[]; connected?: boolean; highlighted?: string;
   onLocateMessage?: (messageId: string) => void; onLocateExecution?: (executionId: string) => void;
-  participants?: ChannelParticipant[]; viewerParticipantId?: string;
+  participants?: ChannelParticipant[]; viewerParticipantId?: string; onViewerChange?: (open: boolean) => void;
 };
 
 export function ChannelTimeline({ entries, pending, onReply, pets = [], petsReady = true, executions = [], connected = true,
-  highlighted, onLocateMessage, onLocateExecution, participants = [], viewerParticipantId }: TimelineProps) {
+  highlighted, onLocateMessage, onLocateExecution, participants = [], viewerParticipantId, onViewerChange }: TimelineProps) {
+  const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
+  const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const messages = new Map(entries.filter((item): item is ChannelMessage => item.kind === 'message').map(item => [item.messageId, item]));
-  return <div className="channel-timeline">{entries.map((item, index) => {
+  return <><div className="channel-timeline">{entries.map((item, index) => {
     const previous = entries[index - 1];
     const showDate = !previous || channelDateKey(previous.occurredAt) !== channelDateKey(item.occurredAt);
     const date = new Date(item.occurredAt);
@@ -81,16 +127,17 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
           {messageExecutions.map(execution => <span key={execution.executionId} className={'channel-inline-state ' + execution.state}>
             {channelPetIdentity(execution.petId, pets, petsReady).name} · {executionLabel(execution, connected)}</span>)}
         </div>
+        {item.body.trim() && <button type="button" className="channel-message-expand" aria-haspopup="dialog" onClick={() => {
+          onViewerChange?.(true);
+          setViewer({ body: item.body, author: identity.name, occurredAt: item.occurredAt,
+            participants: participants.map(participant => ({ ...participant })), pets: pets.map(pet => ({ ...pet })), viewerParticipantId });
+        }}>View full screen</button>}
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, participants, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
         {item.mentions.length > 0 && <div className="channel-mentions" aria-label="Addressed participants">{item.mentions.map((mention, index) =>
           <span className="channel-mention" key={index}>@{channelMentionLabel(mention, participants, pets, viewerParticipantId)}</span>)}</div>}
-        {item.body.trim() && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
-          urlTransform={url => url.startsWith('participant:') ? url : defaultUrlTransform(url)}
-          components={{ a: ({ href, children }) => href?.startsWith('participant:')
-            ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, participants, pets, viewerParticipantId)}</span>
-            : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{item.body}</ReactMarkdown></div>}
+        {item.body.trim() && <ChannelMessageMarkdown body={item.body} participants={participants} pets={pets} viewerParticipantId={viewerParticipantId} />}
         {item.toolCalls?.length ? <ChannelToolCalls calls={item.toolCalls} /> : null}
         {messageExecutions.filter(execution => execution.error || execution.deliveryError).map(execution =>
           <p className="channel-record-error" role="alert" key={execution.executionId}>
@@ -106,7 +153,7 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
         </div>
       </div>
     </article></React.Fragment>;
-  })}</div>;
+  })}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
 }
 
 export function ChannelExecutionHistory({ executions, connected, pets = [], petsReady = true, entries = [], highlighted, onLocateMessage }: {

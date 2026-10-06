@@ -251,6 +251,7 @@ function helpLines() {
       `  ${command.usage} — ${command.description}`
     )),
     '  Ctrl+R — Resume a session',
+    '  Ctrl+O — Select a timeline message, Enter to read fullscreen',
     '  Enter — Send the composer',
     '  Shift+Enter / Ctrl+J — Insert a newline',
     '  @path — Complete workspace files in chat',

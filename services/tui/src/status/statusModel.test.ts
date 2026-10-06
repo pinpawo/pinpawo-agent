@@ -68,7 +68,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
 
   assert.equal(
     formatComposerPlaceholder(session),
-    'Message · Enter to send · Shift+Enter newline · PageUp 详情',
+    'Message · Enter to send · Shift+Enter newline · PageUp 详情 · Ctrl+O 消息',
   );
   assert.equal(
     formatComposerPlaceholder({
@@ -79,7 +79,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
         activity: 'thinking',
       },
     }),
-    '输入下一条消息… · Esc 中断 · PageUp 详情',
+    '输入下一条消息… · Esc 中断 · PageUp 详情 · Ctrl+O 消息',
   );
   assert.equal(
     formatComposerPlaceholder({
@@ -94,7 +94,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
         activity: 'using_tool',
       },
     }),
-    '输入下一条消息… · Esc 中断 · PageUp 详情',
+    '输入下一条消息… · Esc 中断 · PageUp 详情 · Ctrl+O 消息',
   );
   assert.equal(
     formatComposerPlaceholder({
@@ -109,7 +109,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
         activity: 'streaming',
       },
     }),
-    '输入下一条消息… · Esc 中断 · PageUp 详情',
+    '输入下一条消息… · Esc 中断 · PageUp 详情 · Ctrl+O 消息',
   );
   assert.equal(
     formatComposerPlaceholder({

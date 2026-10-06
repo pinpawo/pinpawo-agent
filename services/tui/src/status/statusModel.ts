@@ -113,9 +113,9 @@ export function formatComposerPlaceholder(
     return 'Stopping response…';
   }
   if (run) {
-    return '输入下一条消息… · Esc 中断 · PageUp 详情';
+    return '输入下一条消息… · Esc 中断 · PageUp 详情 · Ctrl+O 消息';
   }
-  return `${COMPOSER_PLACEHOLDER} · PageUp 详情`;
+  return `${COMPOSER_PLACEHOLDER} · PageUp 详情 · Ctrl+O 消息`;
 }
 
 export function formatUsage(session: AgentSession) {

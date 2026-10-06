@@ -158,6 +158,7 @@ import {
 import {
   LiveActivityController,
 } from './timeline/liveActivityController';
+import { browseTimelineMessages, pageTimelineMessages } from './timeline/messageViewer';
 import { TimelineScrollback } from './timeline/timelineScrollback';
 import { truncateTerminalLine } from './text/terminalText';
 import { withRendererSuspended } from './terminal/rendererLifecycle';
@@ -167,6 +168,12 @@ import { TUI_VERSION } from './version';
 import { LoadingCellController } from './visuals/loadingCellController';
 import { buildLoadingCellLine } from './visuals/loadingCells';
 import { buildWelcomeLines } from './welcome/welcomeModel';
+
+// Internal child entry runs before connecting to a Host or creating the composer.
+if (process.argv[2] === '--message-viewer' && process.argv[3]) {
+  await browseTimelineMessages(await Bun.file(process.argv[3]).json());
+  process.exit(0);
+}
 
 const launchOptions = parseTuiLaunchOptions(process.argv.slice(2));
 /** Shared with the welcome block: grey ground replaces the drawn borders. */
@@ -482,7 +489,7 @@ const unsubscribe = controller.subscribe((state) => {
   syncComposerModeUi();
   syncComposerLayout();
   refreshLive();
-  if (state.session.sessionId !== 'pending') {
+  if (!terminalHandoffOpen && state.session.sessionId !== 'pending') {
     timeline.renderWelcome(buildWelcomeLines({
       session: state.session,
       width: renderer.width,
@@ -630,6 +637,14 @@ renderer.keyInput.on('keypress', (key) => {
       }
       break;
     }
+  }
+
+  if (owner.type === 'composer' && key.ctrl && key.name === 'o'
+    && !key.shift && !key.meta && !key.option) {
+    key.preventDefault();
+    key.stopPropagation();
+    openMessageViewer();
+    return;
   }
 
   const historyDirection = resolveComposerHistoryDirection(
@@ -1894,6 +1909,23 @@ function openExternalEditor(initialText: string) {
       setTimeout(() => renderer.destroy(), 50);
     }
   });
+}
+
+function openMessageViewer() {
+  if (terminalHandoffOpen) return;
+  terminalHandoffOpen = true;
+  composer.blur();
+  const session = controller.getState().session;
+  void withRendererSuspended(renderer, () => pageTimelineMessages(session))
+    .catch((error: unknown) => {
+      localNotice = `message viewer failed: ${errorMessage(error)}`;
+    }).finally(() => {
+      terminalHandoffOpen = false;
+      reconcileTimelineAfterHandoff();
+      syncComposerLayout();
+      refreshStatus();
+      restoreInteractionInputFocus(currentInteractionOwner(approvalController.getState()));
+    });
 }
 
 function openTranscriptPager() {

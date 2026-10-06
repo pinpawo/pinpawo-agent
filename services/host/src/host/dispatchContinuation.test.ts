@@ -22,6 +22,9 @@ function harness(pendingAfterStop: string | null = null) {
   };
   const events: PetDispatchLifecycleEvent[] = [];
   const contexts: unknown[] = [];
+  const graph = {
+    settle: async (): Promise<unknown> => pendingAfterStop ? { interruptId: pendingAfterStop, payload: { reviews: [] } } : null,
+  };
   const sessions = {
     findSessionByThread: (_petId: string, threadId: string | undefined) => threadId === session.threadId ? session : null,
     setPendingDispatch: (_id: string, value: TuiSessionPendingDispatch | null) => {
@@ -32,7 +35,7 @@ function harness(pendingAfterStop: string | null = null) {
     request: { kind: 'resume', requestId: 'req-2', resume: { interruptId, value: {} } },
     setup: { input: { threadId: session.threadId } },
     graphService: {
-      settleAbortedRun: async () => pendingAfterStop ? { interruptId: pendingAfterStop, payload: { reviews: [] } } : null,
+      settleAbortedRun: () => graph.settle(),
       readThreadState: async () => ({ pendingInterrupt: null }),
     },
     emitEvent: () => {},
@@ -45,7 +48,7 @@ function harness(pendingAfterStop: string | null = null) {
       return result();
     },
   });
-  return { session, events, contexts, turn, continueWith };
+  return { session, events, contexts, graph, turn, continueWith };
 }
 
 test('a resume for another interrupt is an ordinary conversation turn', async () => {
@@ -94,5 +97,28 @@ test('a failed continuation reports the original dispatch failed and rethrows', 
   const h = harness();
   await assert.rejects(h.continueWith(async () => { throw new Error('model down'); })(h.turn('review-1')), /model down/);
   assert.deepEqual(h.events.map((event) => [event.state, event.error]), [['running', undefined], ['failed', 'model down']]);
+  assert.equal(h.session.pendingDispatch, undefined);
+});
+
+test('a stop thrown as AbortError with nothing pending interrupts the dispatch', async () => {
+  const h = harness();
+  const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+  await assert.rejects(h.continueWith(async () => { throw abort; })(h.turn('review-1')), /aborted/);
+  assert.deepEqual(h.events.map((event) => event.state), ['running', 'interrupted']);
+  assert.equal(h.session.pendingDispatch, undefined);
+});
+
+test('an unreadable outcome keeps the suspension so a retry still continues the dispatch', async () => {
+  const h = harness();
+  h.graph.settle = async () => { throw new Error('checkpoint unavailable'); };
+  await assert.rejects(h.continueWith(async () => { throw new Error('state read failed'); })(h.turn('review-1')), /checkpoint unavailable/);
+  await assert.rejects(h.continueWith(async () => ({ status: 'interrupted' }))(h.turn('review-1')), /checkpoint unavailable/);
+  assert.deepEqual(h.events.map((event) => event.state), ['running', 'running']);
+  assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
+
+  h.graph.settle = async () => null;
+  await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-1'));
+  assert.deepEqual(h.contexts.at(-1), { petId: 'pet', dispatchId: 'dispatch-1', sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } });
+  assert.deepEqual([h.events.at(-1)?.state, h.events.at(-1)?.dispatchId, h.events.at(-1)?.scope?.id], ['completed', 'dispatch-1', 'ch-1']);
   assert.equal(h.session.pendingDispatch, undefined);
 });

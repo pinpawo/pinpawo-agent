@@ -7,6 +7,10 @@ import { withPetInvocationContext } from './petInvocationContext';
 
 type RunAgentTurn = (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
 /**
  * A dispatch that stopped on a review is resumed through the conversation
  * surface, not the dispatch queue. When a resume answers the interrupt the
@@ -62,8 +66,11 @@ export function continueSuspendedDispatch(options: {
         }),
       );
     } catch (error) {
-      const pending = await readPending().catch(() => null);
+      // An unreadable outcome is not "nothing pending": keep the suspension so
+      // a retry of the same review still continues this dispatch.
+      const pending = await readPending();
       if (pending) suspend(pending);
+      else if (turn.setup.input.signal?.aborted || isAbortError(error)) settle({ state: 'interrupted' });
       else settle({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
       throw error;
     }

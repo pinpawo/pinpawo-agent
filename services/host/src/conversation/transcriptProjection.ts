@@ -4,13 +4,12 @@ import {
   readCapabilityExecutions,
   readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
-  readMainToolCallMessages,
   readMessagesTokenUsage,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
 import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
-import { readFinalMessageText } from '../agent/agentStreamEvents';
+import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 
 /**
  * Transcript projection for the interface.
@@ -36,14 +35,13 @@ export type TuiCheckpointTokenUsage = (TokenUsageSnapshot & { scope: 'session' }
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   // Tool results remain execution evidence; never replay deliveries as chat messages.
-  const toolCallsByMessage = new Map(readMainToolCallMessages(messages)
-    .map(({ messageId, toolCalls }) => [messageId, toolCalls]));
+  const results = readToolResultStatuses(messages);
   return messages.flatMap<TuiCheckpointMessage>((message) => {
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);
-    const toolCalls = source.role === 'assistant' && message.id ? toolCallsByMessage.get(message.id) : undefined;
-    if (!text && !toolCalls) {
+    const toolCalls = readMessageToolCalls(message).map(call => ({ ...call, status: results.get(call.id) ?? 'running' as const }));
+    if (!text && !toolCalls.length) {
       return [];
     }
     const createdAt = readAgentMessageCreatedAt(message);
@@ -53,7 +51,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
-      ...(toolCalls ? { toolCalls } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
       ...(createdAt ? { createdAt } : {}),
     }];
   });

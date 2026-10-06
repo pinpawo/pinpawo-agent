@@ -157,7 +157,7 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
 });
 
 test('buildHostSessionSnapshot keeps only the live run\'s unanswered tool call open', () => {
-  const call = (id: string) => ({ id, name: 'delegate_capability', title: id, status: 'running' as const });
+  const call = (id: string) => ({ id, name: 'delegate_capability', args: { briefing: id }, status: 'running' as const });
   const messages = [
     { role: 'assistant' as const, text: '', toolCalls: [call('earlier')] },
     { role: 'assistant' as const, text: 'Starting.', toolCalls: [call('latest')] },

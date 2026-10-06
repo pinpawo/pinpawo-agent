@@ -6,7 +6,7 @@ import type {
 import stringWidth from 'string-width';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { LOADING_CELL_WIDTH } from '../visuals/loadingCells';
-import { buildMessageDisplayLines } from './messageDisplay';
+import { buildMessageDisplayLines, toolCallTitle } from './messageDisplay';
 import {
   buildOperationDisplayLines,
   operationActivityText,
@@ -144,7 +144,7 @@ export function formatLiveSession(
   }
   // Between the tools it starts, a call the agent made names what is running.
   const openCall = run ? findLastOpenToolCall(session.timeline) : undefined;
-  if (openCall) return truncateTerminalLine(singleLine(openCall.title), maxCodePoints);
+  if (openCall) return truncateTerminalLine(singleLine(toolCallTitle(openCall)), maxCodePoints);
   if (!run) {
     if (session.pendingInterrupt?.payload.kind === 'human_review') {
       return 'waiting for review';

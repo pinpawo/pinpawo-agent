@@ -513,10 +513,10 @@ test('main tool calls reach the conversation as messages and settle, including c
   const events: RootStreamChatEvent[] = [];
   for await (const event of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) events.push(event);
   assert.deepEqual(events.filter(e => e.type === 'tool_calls.message' || e.type === 'tool_call.settled'), [
-    { type: 'tool_call.settled', messageId: 'open', callId: 'call:open', status: 'returned' },
     { type: 'tool_calls.message', messageId: 'new', text: 'Looking it up.',
-      toolCalls: [{ id: 'call:new', name: 'lookup', title: 'lookup', input: '{"q":"new"}' }] },
-    { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'returned' },
+      toolCalls: [{ id: 'call:new', name: 'lookup', args: { q: 'new' } }] },
+    { type: 'tool_call.settled', messageId: 'open', callId: 'call:open', status: 'completed' },
+    { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'completed' },
   ]);
   // Root's own tool node is that message, not a separate operation.
   assert.equal(readRootStreamChatEvent({ type: 'event', seq: 1, method: 'tools', params: {

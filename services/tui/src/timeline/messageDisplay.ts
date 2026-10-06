@@ -71,22 +71,31 @@ export function hasOpenToolCalls(entry: { toolCalls?: readonly AgentMessageToolC
 }
 
 /**
- * One line per call: its title, plus the outcome when it did not simply
- * return. A running or returned call shows the title alone, so the line the
- * transcript commits while it runs never has to be rewritten.
+ * One line per call: its title, plus the outcome when it did not complete. A
+ * running or completed call shows the title alone, so the line the transcript
+ * commits while it runs never has to be rewritten.
  */
 export function buildToolCallDisplayLines(entry: AgentMessageEntry): MessageDisplayLine[] {
   return (entry.toolCalls ?? []).map(call => ({
-    text: `▸ ${call.title.replace(/\s+/g, ' ').trim()}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
+    text: `▸ ${toolCallTitle(call)}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
     tone: 'assistant' as const,
   }));
 }
 
+/** A call as one line: what it was asked to do, else the tool's name. */
+export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>) {
+  const subject = TOOL_CALL_SUBJECT[call.name]?.(call.args);
+  return (typeof subject === 'string' && subject.replace(/\s+/g, ' ').trim()) || call.name;
+}
+
+const TOOL_CALL_SUBJECT: Record<string, (args: Record<string, unknown>) => unknown> = {
+  delegate_capability: args => typeof args.briefing === 'string' ? args.briefing.split('\n').find(line => line.trim()) : null,
+  plan_request: args => args.goal,
+};
+
 const TOOL_CALL_OUTCOME: Record<AgentMessageToolCall['status'], string> = {
   running: '',
-  returned: '',
-  missing: '未交付',
-  declined: '未通过',
+  completed: '',
   failed: '失败',
   interrupted: '已中断',
 };

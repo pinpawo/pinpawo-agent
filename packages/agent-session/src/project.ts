@@ -768,7 +768,7 @@ function upsertTimelineEntry(
 function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   if (entry.type === 'message') return { ...entry,
     ...(entry.resultReferences ? { resultReferences: entry.resultReferences.map(ref => ({ ...ref })) } : {}),
-    ...(entry.toolCalls ? { toolCalls: entry.toolCalls.map(call => ({ ...call })) } : {}),
+    ...(entry.toolCalls ? { toolCalls: entry.toolCalls.map(call => ({ ...call, args: { ...call.args } })) } : {}),
   };
   return {
     ...entry,

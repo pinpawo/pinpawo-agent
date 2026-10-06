@@ -755,12 +755,12 @@ test('a tool-call message keeps the run going and settles in place, even after a
   let session = replay(createDomainSession(), [
     { input: { type: 'user.accepted', requestId: 'r1', kind: 'chat', text: 'inspect' }, observedAt: 1 },
     { input: event({ type: 'message.tool_calls', requestId: 'r1', messageId: 'm1', text: 'Starting.',
-      toolCalls: [{ id: 'c1', name: 'delegate_capability', title: 'Inspect A.', input: 'Look at A.' }] }), observedAt: 2 },
+      toolCalls: [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Look at A.' } }] }), observedAt: 2 },
   ]);
   const entry = () => session.timeline.find((item): item is Extract<AgentTimelineEntry, { type: 'message' }> =>
     item.type === 'message' && Boolean(item.toolCalls))!;
   assert.equal(session.activeRun?.state === 'running' && session.activeRun.activity, 'using_tool');
-  assert.deepEqual(entry().toolCalls, [{ id: 'c1', name: 'delegate_capability', title: 'Inspect A.', input: 'Look at A.', status: 'running' }]);
+  assert.deepEqual(entry().toolCalls, [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Look at A.' }, status: 'running' }]);
   assert.equal(entry().text, 'Starting.');
   // A review pauses the call; the run answering it settles the same entry.
   session = replay(session, [
@@ -769,9 +769,9 @@ test('a tool-call message keeps the run going and settles in place, even after a
   assert.equal(entry().toolCalls![0]!.status, 'running');
   session = { ...session, pendingInterrupt: null, activeRun: { requestId: 'r2', state: 'running', activity: 'thinking' } };
   session = replay(session, [
-    { input: event({ type: 'tool_call.settled', requestId: 'r2', messageId: 'm1', callId: 'c1', status: 'returned' }), observedAt: 4 },
+    { input: event({ type: 'tool_call.settled', requestId: 'r2', messageId: 'm1', callId: 'c1', status: 'completed' }), observedAt: 4 },
   ]);
-  assert.equal(entry().toolCalls![0]!.status, 'returned');
+  assert.equal(entry().toolCalls![0]!.status, 'completed');
   assert.equal(session.activeRun?.requestId, 'r2');
 });
 
@@ -780,7 +780,7 @@ test('a run that stops leaves its open tool calls interrupted', () => {
   const session = replay(createDomainSession(), [
     { input: { type: 'user.accepted', requestId: 'r1', kind: 'chat', text: 'inspect' }, observedAt: 1 },
     { input: event({ type: 'message.tool_calls', requestId: 'r1', messageId: 'm1', text: '',
-      toolCalls: [{ id: 'c1', name: 'delegate_capability', title: 'Inspect A.' }] }), observedAt: 2 },
+      toolCalls: [{ id: 'c1', name: 'delegate_capability', args: {} }] }), observedAt: 2 },
     { input: event({ type: 'run.interrupted', requestId: 'r1' }), observedAt: 3 },
   ]);
   const call = session.timeline.flatMap(item => item.type === 'message' ? item.toolCalls ?? [] : [])[0];

@@ -36,7 +36,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { hasOpenToolCalls, isToolCallMessageEntry } from './messageDisplay';
+import { hasOpenToolCalls, isToolCallMessageEntry, toolCallTitle } from './messageDisplay';
 
 const USER_MESSAGE_BACKGROUND = '#272c33';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
@@ -484,7 +484,7 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       normalizeText(entry.text),
       entry.status,
       // Titles only: a call's outcome does not rewrite the committed line.
-      ...(entry.toolCalls ?? []).map(call => normalizeText(call.title)),
+      ...(entry.toolCalls ?? []).map(call => normalizeText(toolCallTitle(call))),
     ]);
   }
   return JSON.stringify([

@@ -18,22 +18,13 @@ export type AgentResultReference = {
   text: string;
 };
 
-export type AgentToolCallStatus =
-  | 'running'
-  | 'returned'
-  | 'missing'
-  | 'declined'
-  | 'failed'
-  | 'interrupted';
+export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'interrupted';
 
-/** A tool the main agent called in this message, shown as part of what it said. */
+/** A tool the main agent called in this message, as the model wrote the call. */
 export type AgentMessageToolCall = {
   id: string;
   name: string;
-  /** One display line, such as the plan item a delegation carries out. */
-  title: string;
-  /** Display detail, such as a delegation's briefing. */
-  input?: string;
+  args: Record<string, unknown>;
   status: AgentToolCallStatus;
 };
 

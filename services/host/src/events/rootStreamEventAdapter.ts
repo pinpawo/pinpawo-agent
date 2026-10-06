@@ -1,11 +1,9 @@
-import { readFinalMessageText } from '../agent/agentStreamEvents';
-import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
   GUARD_DECISION_EVENT,
   isOrchestratorInternalAiStreamNode,
-  readMainToolCallMessages,
-  type MainToolCall,
-  type RunSupervisorState,
   SUBAGENT_GUARD_DECISION_EVENT,
   type GuardDecisionRecord,
 } from '@pinpawo/pet-agent';
@@ -66,9 +64,9 @@ export type RootStreamChatEvent =
   /** Raw custom-channel event; known names are projected downstream and unknown names are ignored. */
   | { type: 'runtime.custom'; streamSequence: number; name: string; data: unknown }
   /** Root committed a main message that calls tools; the run continues. */
-  | { type: 'tool_calls.message'; messageId: string; text: string; toolCalls: Array<Omit<MainToolCall, 'status'>> }
+  | { type: 'tool_calls.message'; messageId: string; text: string; toolCalls: Array<Omit<AgentMessageToolCall, 'status'>> }
   /** A main tool call announced in this stream, or open when it began, reached its outcome. */
-  | { type: 'tool_call.settled'; messageId: string; callId: string; status: Exclude<MainToolCall['status'], 'running'> }
+  | { type: 'tool_call.settled'; messageId: string; callId: string; status: 'completed' | 'failed' }
   /** Root state snapshot (drives final-messages tracking). */
   | { type: 'values'; values: Record<string, unknown> }
   /** The run paused on an interrupt (human review etc.). */
@@ -396,21 +394,23 @@ function* projectMainToolCalls(
   openToolCalls: Map<string, string>,
   announce: boolean,
 ): Generator<RootStreamChatEvent> {
-  const committed = messages.filter((message): message is BaseMessage => AIMessage.isInstance(message) || ToolMessage.isInstance(message));
-  const runSupervisorState = readRecord(values.runSupervisorState) as RunSupervisorState | null;
-  for (const message of readMainToolCallMessages(committed, { runSupervisorState })) {
-    const current = message.runId !== null && message.runId === values.runId;
-    if (announce && current && !seenMessages.has(message.messageId)) {
-      yield { type: 'tool_calls.message', messageId: message.messageId, text: message.text,
-        toolCalls: message.toolCalls.map(({ status: _status, ...call }) => call) };
-      for (const call of message.toolCalls) openToolCalls.set(call.id, message.messageId);
-    } else if (!announce && current) {
-      for (const call of message.toolCalls) if (call.status === 'running') openToolCalls.set(call.id, message.messageId);
+  const results = readToolResultStatuses(messages);
+  for (const message of messages as BaseMessage[]) {
+    const toolCalls = readMessageToolCalls(message);
+    const pinpawo = readRecord(message.additional_kwargs?.pinpawo);
+    // Main messages of this run: private lanes and synthetic bookkeeping are not conversation.
+    if (!message.id || !toolCalls.length || pinpawo?.lane || pinpawo?.synthetic || pinpawo?.runId !== values.runId) continue;
+    if (announce && !seenMessages.has(message.id)) {
+      yield { type: 'tool_calls.message', messageId: message.id, text: readFinalMessageText(message), toolCalls };
+      for (const call of toolCalls) openToolCalls.set(call.id, message.id);
+    } else if (!announce) {
+      for (const call of toolCalls) if (!results.has(call.id)) openToolCalls.set(call.id, message.id);
     }
-    for (const call of message.toolCalls) {
-      if (call.status === 'running' || openToolCalls.get(call.id) !== message.messageId) continue;
-      openToolCalls.delete(call.id);
-      yield { type: 'tool_call.settled', messageId: message.messageId, callId: call.id, status: call.status };
-    }
+  }
+  for (const [callId, messageId] of openToolCalls) {
+    const status = results.get(callId);
+    if (!status) continue;
+    openToolCalls.delete(callId);
+    yield { type: 'tool_call.settled', messageId, callId, status };
   }
 }

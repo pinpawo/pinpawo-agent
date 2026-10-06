@@ -50,7 +50,7 @@ test('a running tool call the agent made names the live activity until the run e
     sessionId: 'session', kind: 'chat', pendingInterrupt: null,
     activeRun: { requestId: 'request', state: 'running', activity: 'using_tool' },
     timeline: [{ ...assistant, text: '', toolCalls: [{ id: 'call', name: 'delegate_capability',
-      title: 'Verify contract extraction', input: 'Long private execution instructions', status: 'running' }] }],
+      args: { briefing: 'Verify contract extraction\nLong private execution instructions' }, status: 'running' }] }],
   };
   assert.equal(formatLiveSession(session), 'Verify contract extraction');
   assert.equal(formatLiveSession({ ...session, activeRun: null }), 'idle');
@@ -62,13 +62,15 @@ test('a running tool call the agent made names the live activity until the run e
 });
 
 test('a message\'s tool calls head their work and commit before they return', () => {
-  const call = { id: 'call', name: 'delegate_capability', title: '读取 issue #826\n并定位相关代码', input: 'briefing', status: 'running' as const };
+  const call = { id: 'call', name: 'delegate_capability', args: { briefing: '\n读取 issue #826  并定位相关代码\n先看评论' }, status: 'running' as const };
   const message: AgentTimelineEntry = { ...assistant, id: 'dispatch', text: '先看 issue。', toolCalls: [call] };
   const lines = formatTimelineEntry(message, { width: 80 }).split('\n');
   assert.deepEqual(lines, ['| 先看 issue。', '▸ 读取 issue #826 并定位相关代码']);
-  assert.doesNotMatch(lines.join('\n'), /delegate_capability|briefing/);
+  assert.doesNotMatch(lines.join('\n'), /delegate_capability|先看评论/);
   assert.equal(formatTimelineEntry({ ...message, text: '' }), '▸ 读取 issue #826 并定位相关代码');
-  assert.match(formatTimelineEntry({ ...message, toolCalls: [{ ...call, status: 'declined' }] }), /（未通过）/);
+  assert.match(formatTimelineEntry({ ...message, toolCalls: [{ ...call, status: 'failed' }] }), /（失败）/);
+  // Other tools need no knowledge here: they show by name.
+  assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, name: 'lookup', args: { q: 'x' } }] }), '▸ lookup');
 
   // Its calls still run, but their committed form — the titles alone — is
   // final, so the transcript commits it and the finished tools behind it.
@@ -84,7 +86,7 @@ test('a message\'s tool calls head their work and commit before they return', ()
   // A call settling must not rewrite what was committed.
   assert.equal(
     timelineFingerprint(message),
-    timelineFingerprint({ ...message, toolCalls: [{ ...call, status: 'returned' }] }),
+    timelineFingerprint({ ...message, toolCalls: [{ ...call, status: 'completed' }] }),
   );
 });
 

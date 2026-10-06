@@ -21,7 +21,7 @@ export function isAgentTokenUsageSnapshot(
   return parseTokenUsageSnapshot(value) !== null;
 }
 
-const TOOL_CALL_STATUSES: readonly AgentToolCallStatus[] = ['running', 'returned', 'missing', 'declined', 'failed', 'interrupted'];
+const TOOL_CALL_STATUSES: readonly AgentToolCallStatus[] = ['running', 'completed', 'failed', 'interrupted'];
 
 export function isAgentToolCallStatus(value: unknown): value is AgentToolCallStatus {
   return TOOL_CALL_STATUSES.includes(value as AgentToolCallStatus);
@@ -35,16 +35,14 @@ export function parseAgentMessageToolCalls(value: unknown, withStatus: boolean) 
   const calls = value.flatMap((call) => {
     if (
       !isRecord(call)
-      || Object.keys(call).some(key => !['id', 'name', 'title', 'input', 'status'].includes(key))
+      || Object.keys(call).some(key => !['id', 'name', 'args', 'status'].includes(key))
       || typeof call.id !== 'string'
       || typeof call.name !== 'string'
-      || typeof call.title !== 'string'
-      || (call.input !== undefined && typeof call.input !== 'string')
+      || !isRecord(call.args)
       || (withStatus ? !isAgentToolCallStatus(call.status) : call.status !== undefined)
     ) return [];
     return [{
-      id: call.id, name: call.name, title: call.title,
-      ...(typeof call.input === 'string' ? { input: call.input } : {}),
+      id: call.id, name: call.name, args: call.args,
       ...(withStatus ? { status: call.status as AgentToolCallStatus } : {}),
     }];
   });

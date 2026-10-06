@@ -1,20 +1,15 @@
 import {
   closeSync,
   existsSync,
-  mkdirSync,
   openSync,
   readFileSync,
   readSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
-  basename,
-  dirname,
   isAbsolute,
   join,
   relative,
@@ -28,6 +23,7 @@ import type {
   CapabilityArtifactStore,
   CapabilityArtifactWriteInput,
 } from '@pinpawo/pet-agent';
+import { atomicWriteFile } from './atomicFile';
 
 export function defaultCapabilityArtifactRoot(workdir = process.cwd()) {
   return resolve(workdir, '.pinpawo', 'capability-artifacts');
@@ -74,13 +70,6 @@ export function resolveCapabilityArtifactThreadRoot(rootDir: string, threadId: s
     resolve(rootDir, 'threads'),
     encodePathSegment(threadId),
   );
-}
-
-function atomicWriteFile(path: string, data: string | Uint8Array) {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
-  writeFileSync(tmp, data);
-  renameSync(tmp, path);
 }
 
 function sha256(data: string | Uint8Array) {

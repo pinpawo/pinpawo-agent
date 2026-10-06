@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { atomicWriteFile } from './atomicFile';
 import type { StoredModelProfilesV1 } from './config/modelProfiles';
 
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
@@ -48,8 +49,7 @@ export function loadStoredConfig(): StoredConfig {
 }
 
 export function saveStoredConfig(config: StoredConfig) {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  atomicWriteFile(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
 export function configPath() {

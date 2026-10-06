@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
+import { atomicWriteFile } from '../atomicFile';
 import { buildTuiChatThreadId } from '../chatInterface';
 
 export const DEFAULT_TUI_SESSION_STATE_PATH = resolve(homedir(), '.pinpawo', 'tui-sessions.json');
@@ -57,8 +58,7 @@ export function saveTuiSessionState(
   state: TuiSessionState,
   filePath = DEFAULT_TUI_SESSION_STATE_PATH,
 ) {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
+  atomicWriteFile(filePath, JSON.stringify(state, null, 2));
 }
 
 export function ensureActiveTuiSession(

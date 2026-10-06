@@ -30,7 +30,8 @@ export function createMemoryHostPersistence(options: {
       const result = fn(draft);
       if (!isDeepStrictEqual(draft, state)) {
         await options.commit?.(draft);
-        state = draft;
+        // Domain inputs and a commit hook may retain references to this draft.
+        state = structuredClone(draft);
       }
       return structuredClone(result);
     });

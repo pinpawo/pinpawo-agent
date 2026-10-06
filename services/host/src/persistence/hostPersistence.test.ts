@@ -140,7 +140,9 @@ test('legacy registry migrates in place; service and invocation adapter share on
 });
 
 test('session identity conflicts and removal of unresolved invocation fail closed', async () => {
-  const { p, session } = (await admitted());
+  const { p, session, input } = (await admitted());
+  input.scope.id = 'tampered-after-commit';
+  assert.equal((await p.invocations.read(input.dispatchId))?.scope?.id, 'a');
   await assert.rejects(async () => (await p.sessions.register('other', session.id, true)), /another Pet/);
   await assert.rejects(async () => (await p.sessions.remove(session.id)), /unresolved/);
   const detached = (await p.sessions.read(session.id))!;

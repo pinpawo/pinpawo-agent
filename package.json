@@ -2,7 +2,7 @@
   "name": "pinpawo-agent",
   "version": "0.2.1",
   "private": true,
-  "description": "Open-source PinPawo agent runtime, local agent, and desktop companion.",
+  "description": "Open-source PinPawo agent runtime, Studio, Console, and TUI.",
   "license": "MIT",
   "type": "module",
   "workspaces": [

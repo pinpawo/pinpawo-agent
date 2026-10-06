@@ -226,7 +226,7 @@ buildChatSetup → graph
 答案且无人调用的方法。
 
 `/health` 的 `actor_id` / `actor_name` 一并改为 `pet_id` / `pet_name`：唯一的
-消费方是已废弃的 `tools/agent-macos`，没有活的外部契约需要保留旧名——留着只会
+消费方是已移除的原生 macOS companion，没有活的外部契约需要保留旧名——留着只会
 让遗留命名从存储层一路脏到 HTTP 出口。
 
 **Step 4 — PET.md 路径收敛**

@@ -25,7 +25,7 @@
 host 的定位是：
 
 - 运行在用户电脑上的本地 agent host。
-- 连接 app / TUI / macOS companion 等客户端。
+- 连接 app / TUI 等客户端。
 - 装配 local-machine Toolkits、Capabilities、LLM config 和用户本地状态。
 - 对外输出稳定的 host 事件，而不是泄漏 agent 框架内部事件。
 
@@ -184,7 +184,6 @@ host 在每个 run 上建立由当前 `toolkits` 生成的 registry，作为 hos
 
 - TUI：渲染成紧凑文本、active operation line、system message。
 - App：渲染成结构化 run state、pet gif、compact activity strip。
-- macOS companion：通过 `/health` 读取 agent run 和 active operation 摘要，pet 动画按 `operation.kind/title/target/summary` 映射。
 - Logs/debug：保留 JSON。
 
 adapter 可以有自己的 i18n / copy，但不能重新解析内部 tool input/output。
@@ -318,7 +317,7 @@ host 对外只发送 `HostRuntimeEvent` envelope。`pinpawo-app` app/API 旧路�
 原则：
 
 - LangGraph stream 是 runtime internal API。
-- `HostRuntimeEvent` 是 host 对 app/TUI/macOS companion 的 public event API。
+- `HostRuntimeEvent` 是 host 对 app/TUI 的 public event API。
 - `sendHostMessage` 和 `sendHostEvent` 不接受 legacy 输出开关。
 - `parseHostServerMessage` 只解析新协议 event/control message；host 不再提供通用 legacy server message parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
 - `raw.input/output/error` 仅保留为 host 内部调试数据，`sendHostEvent` 发送 public event 前会剥离 raw。

@@ -11,6 +11,8 @@ import {
 } from '@pinpawo/agent-session';
 import {
   buildReviewSpec,
+  prepareRuntimeExecution,
+  type RuntimeExecutionIdentity,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 
@@ -259,7 +261,13 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     messages: AIMessage[];
     pendingInterrupt: ReturnType<typeof buildReviewSpec> | null;
   }>();
+  const identities = new Map<string, RuntimeExecutionIdentity>();
   const graphService = {
+    readExecutionDescriptor: async (setup: { input: { threadId?: string } }) => {
+      const pending = states.get(setup.input.threadId ?? '')?.pendingInterrupt;
+      return { identity: identities.get(setup.input.threadId ?? '') ?? null, state: pending ? 'waiting' : 'completed',
+        pendingInterrupt: pending ? { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [pending] } } : null };
+    },
     readThreadState: async (setup: { input: { threadId?: string } }) => {
       const state = states.get(setup.input.threadId ?? '') ?? {
         messages: [],
@@ -292,10 +300,13 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
     graphService: graphService as never,
-    runAgentTurn: async ({ request, setup }) => {
+    runAgentTurn: async ({ request, setup, onExecutionIdentity }) => {
       const threadId = setup.input.threadId ?? '';
       const state = states.get(threadId) ?? { messages: [], pendingInterrupt: null };
       if (request.kind === 'user_message') {
+        const identity = prepareRuntimeExecution([], threadId).identity;
+        identities.set(threadId, identity);
+        onExecutionIdentity?.(identity);
         const review = buildReviewSpec({
           id: 'review-1',
           view: { kind: 'plain', body: 'Approve this dispatch?' },
@@ -547,9 +558,7 @@ test('dispatch and conversation publish the same Agent Session event stream', as
       type: 'run.interrupt',
       requestId: startedEnvelope.requestId,
     });
-    assert.ok(sourceMessages.some((message) => (
-      (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
-    )));
+    await waitFor(() => sourceMessages.some(message => (message as { event?: { type?: string } }).event?.type === 'run.interrupted'), 'interruption did not settle');
     await waitFor(() => host.interaction.getQueueSnapshot().state === 'open', 'dispatch did not settle');
     // Stop commands cross the transport boundary in either direction.
     for (const owner of ['http', 'tui']) {
@@ -977,7 +986,7 @@ test('a failed settled-state read during a target scan keeps legacy work queued'
   } finally { await coordinator.close(); }
 });
 
-test('targeted dispatch survives a transient checkpoint read and fails visibly once its session is gone', async () => {
+test('targeted dispatch survives transient reads and protects its unresolved session from deletion', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-target-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   const petId = 'pet-target';
@@ -1035,11 +1044,12 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
     await resident.dispatch.dispatch({ request: 'orphaned', session: { id: sessionId } });
     await waitFor(() => resident.dispatch.getQueueSnapshot().state === 'waiting', 'a reviewed target did not wait');
     await context.sessions.resumeSession(context.runtimeDeps.get(), sessionId);
-    await context.sessions.resetSession(petId, { deletePrevious: true });
+    await assert.rejects(context.sessions.resetSession(petId, { deletePrevious: true }), /unresolved Host invocation/);
+    reviewing = false;
     await context.coordinator.refreshState();
-    await waitFor(() => lifecycle.includes('orphaned:failed'), 'work for a deleted session stayed parked');
+    await waitFor(() => lifecycle.includes('orphaned:completed'), 'retained work did not finish');
     assert.equal(resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
-    assert.deepEqual(turns, ['transient']);
+    assert.deepEqual(turns, ['transient', 'orphaned']);
   } finally {
     await context.close();
   }

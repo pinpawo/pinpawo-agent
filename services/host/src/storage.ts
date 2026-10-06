@@ -1,9 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { hostConfiguration, HOST_CONFIGURATION_PATH } from './persistence/configuration';
 import type { StoredModelProfilesV1 } from './config/modelProfiles';
-
-const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 
 export type StoredConfig = {
   llm_api_key?: string;
@@ -38,20 +34,7 @@ export type StoredConfig = {
   capability_dirs?: string[];
 };
 
-export function loadStoredConfig(): StoredConfig {
-  try {
-    const raw = readFileSync(CONFIG_PATH, 'utf-8');
-    return JSON.parse(raw) as StoredConfig;
-  } catch {
-    return {};
-  }
-}
-
-export function saveStoredConfig(config: StoredConfig) {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
-}
-
-export function configPath() {
-  return CONFIG_PATH;
-}
+/** Compatibility facade: Host configuration has one adapter and one path. */
+export function loadStoredConfig(): StoredConfig { return hostConfiguration.readConfiguration(); }
+export function saveStoredConfig(config: StoredConfig) { hostConfiguration.replaceConfiguration(config); }
+export function configPath() { return HOST_CONFIGURATION_PATH; }

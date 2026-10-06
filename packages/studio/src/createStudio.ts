@@ -55,7 +55,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   }
 
   const eventBus = new StudioEventBus();
-  const idempotencyRecords = new Map<string, Promise<StudioDispatchReceipt>>();
+  const idempotencyRecords = new Map<string, { fingerprint: string; admission: Promise<StudioDispatchReceipt> }>();
   const stopDispatchLifecycleObservers: Array<() => void> = [];
   const pluginHooks = new StudioPluginHookRegistry();
   const startedPlugins: StudioPlugin[] = [];
@@ -89,6 +89,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           invocationId: event.dispatchId,
           petId: pet.registration.petId,
           request: event.request,
+          ...(event.revision !== undefined ? { revision: event.revision } : {}),
+          ...(event.settlementId ? { settlementId: event.settlementId } : {}),
           ...(event.requestId ? { requestId: event.requestId } : {}),
           ...(event.sessionId ? { sessionId: event.sessionId } : {}),
           ...(event.scope ? { scope: { ...event.scope } } : {}),
@@ -118,24 +120,31 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     const existing = idempotencyRecordKey
       ? idempotencyRecords.get(idempotencyRecordKey)
       : undefined;
-    if (existing) return existing;
+    const fingerprint = JSON.stringify([request.petId, request.request, request.session?.id ?? null, request.scope ?? null, request.metadata ?? null]);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw new Error('Studio dispatch idempotency identity conflict.');
+      return existing.admission;
+    }
 
     // Reserve before awaiting the port: simultaneous deliveries share one
     // admission. Failed admissions release the reservation, in this domain.
     const admission = Promise.resolve().then(async () => {
-      const invocationId = randomUUID();
+      let invocationId: string = randomUUID();
       const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
 
       console.log(
         `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
       );
-      await pet.dispatch.dispatch({
+      const accepted = await pet.dispatch.dispatch({
         request: request.request,
         dispatchId: invocationId,
+        fingerprint,
+        ...(idempotencyRecordKey ? { idempotencyKey: idempotencyRecordKey } : {}),
         ...(request.session ? { session: { ...request.session } } : {}),
         ...(request.scope ? { scope: { ...request.scope } } : {}),
       });
 
+      if (accepted) invocationId = accepted.dispatchId;
       const receipt: StudioDispatchReceipt = Object.freeze({
         petId: request.petId,
         invocationId,
@@ -154,11 +163,13 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       });
       return receipt;
     });
-    if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, admission);
+    if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, { fingerprint, admission });
     try { return await admission; }
     catch (error) {
-      if (idempotencyRecordKey && idempotencyRecords.get(idempotencyRecordKey) === admission) idempotencyRecords.delete(idempotencyRecordKey);
+      if (idempotencyRecordKey && idempotencyRecords.get(idempotencyRecordKey)?.admission === admission) idempotencyRecords.delete(idempotencyRecordKey);
       throw error;
+    } finally {
+      if (pet.dispatch.persistentAdmissions && idempotencyRecordKey && idempotencyRecords.get(idempotencyRecordKey)?.admission === admission) idempotencyRecords.delete(idempotencyRecordKey);
     }
   }
 
@@ -214,6 +225,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           startedPlugins.push(plugin);
           await plugin.start(buildPluginContext(plugin));
         }
+        for (const pet of petsById.values()) pet.dispatch.replayDispatchLifecycle?.();
       } catch (error) {
         stopped = true;
         await stopStartedPlugins();

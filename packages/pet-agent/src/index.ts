@@ -361,3 +361,6 @@ export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export { createAutoReviewer } from './autoReview';
 export type { AutoReviewer, AutoReviewInput, AutoReviewAction, AutoReviewResult, ReviewAssessment } from './autoReview';
+
+export { prepareRuntimeExecution, readRuntimeRecoveryDescriptor, readRuntimeExecutionRecovery } from './agent/executionRecovery';
+export type { RuntimeExecutionIdentity, RuntimeRecoveryDescriptor } from './agent/executionRecovery';

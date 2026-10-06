@@ -107,6 +107,7 @@ export function createLocalServerHandlers(
   const chatGraphService = options.chatGraphService ?? new HostGraphService();
   const tuiSessions = options.tuiSessions ?? new ServerTuiSessionService({
     graphService: chatGraphService,
+    artifacts: initialDeps.capabilityArtifactStore,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
     ...(initialDeps.chatCheckpointer ? { checkpointer: initialDeps.chatCheckpointer } : {}),

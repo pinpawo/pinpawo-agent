@@ -73,6 +73,7 @@ test('local server forwards structured local attachments to the chat session', a
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
         graphConfig: {},
@@ -140,6 +141,7 @@ test('replacement request waits for the previous thread invocation to settle', a
     // plain interruption.
     graphService: { settleAbortedRun: async () => null } as never,
     tuiSessions: {
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
         graphConfig: {},
@@ -221,6 +223,7 @@ test('run interrupt during a review resume neither supersedes nor resolves it', 
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       refreshActiveSessionSummary: async () => {},
       readActivePendingInterrupt: async () => ({
@@ -274,6 +277,7 @@ test('run interrupt re-announces a review that became pending before the client 
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       refreshActiveSessionSummary: async () => {},
       readActivePendingInterrupt: async () => ({
@@ -329,6 +333,7 @@ test('a review decision resume rejects a stale canonical interactionId before fo
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
+    getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
     getChatThreadId: () => 'thread-x',
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
@@ -388,6 +393,7 @@ test('a review decision resume consumes matching canonical review route once', a
   };
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
+    getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
     getChatThreadId: () => 'thread-x',
     readActivePendingInterrupt: async () => pendingInterrupt,
   } as never;
@@ -465,6 +471,7 @@ test('a review decision resume keeps single-review review as batch resume shape'
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -520,6 +527,7 @@ test('a review decision resume recovers missing route from active checkpoint rev
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -578,6 +586,7 @@ test('a review decision resume releases a recovered review when its peer disconn
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -620,6 +629,7 @@ test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', (
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -658,6 +668,7 @@ test('a review cancel resume resumes pending review with run interruption contro
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => (reviewResumed ? null : {
         sessionId: 'sess-active',
@@ -741,6 +752,7 @@ test('a review cancel resume recovers missing route from active checkpoint revie
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -815,6 +827,7 @@ test('a review cancel resume interrupts an approve-only pending review', async (
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => pendingInterrupt,
     } as never,
@@ -865,6 +878,7 @@ test('a review decision resume forwards canonical selected option without resolv
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
+    getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
     getChatThreadId: () => 'thread-x',
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
@@ -936,6 +950,7 @@ test('a review decision resume rejects canonical review response from a differen
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => activeSessionId,
+    getActiveSession: () => ({ id: activeSessionId, threadId: 'thread-x' }),
     getChatThreadId: () => 'thread-x',
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-origin',
@@ -991,6 +1006,7 @@ test('a review decision resume forwards effect-bearing options without local aut
     } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -1078,6 +1094,7 @@ test('a review decision resume does not validate authorization effect context in
     } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
@@ -1137,6 +1154,7 @@ test('an aborted run preserves a native review that was already pending', async 
     } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       refreshActiveSessionSummary: async () => {},
       buildChatSetup: () => ({ graphKey: 'test', graphConfig: {}, input: { messages: [] } }),
@@ -1175,6 +1193,7 @@ test('an aborted run with nothing to continue still reports an interruption', as
     } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       refreshActiveSessionSummary: async () => {},
       buildChatSetup: () => ({ graphKey: 'test', graphConfig: {}, input: { messages: [] } }),
@@ -1209,6 +1228,7 @@ test('a review resolution that settles into a task pause finalizes as waiting, n
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
       getChatThreadId: () => 'thread-x',
       refreshActiveSessionSummary: async () => {},
       readActivePendingInterrupt: async () => ({

@@ -69,8 +69,8 @@ test('ServerTuiSessionService creates and resets active sessions', async () => {
   });
 
   assert.equal(service.getChatThreadId('pet-a'), third.threadId);
-  assert.equal(state.sessions[first.id] !== undefined, true);
-  assert.equal(state.sessions[second.id], undefined);
+  assert.equal(service.getSession('pet-a', first.id) !== null, true);
+  assert.equal(service.getSession('pet-a', second.id), null);
   assert.deepEqual(deletedThreads, [second.threadId]);
   assert.equal(saved.length >= 4, true);
 });
@@ -95,14 +95,14 @@ test('ServerTuiSessionService rolls back a model selection when persistence fail
     () => service.selectModelProfile('pet-a', session.id, 'secondary'),
     /session store unavailable/,
   );
-  assert.equal(state.sessions[session.id], session);
+  assert.deepEqual(service.getSession('pet-a', session.id), session);
   assert.equal(
-    state.sessions[session.id]?.modelProfileId,
+    service.getSession('pet-a', session.id)?.modelProfileId,
     TEST_MODEL_PROFILE_ID,
   );
 });
 
-test('ServerTuiSessionService rolls back image requirements when persistence fails', async () => {
+test('attachment admission reads the session without an incidental registry write', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-image-ledger-save-'));
   const imagePath = join(root, 'image.png');
   await fs.writeFile(imagePath, Buffer.concat([
@@ -125,8 +125,7 @@ test('ServerTuiSessionService rolls back image requirements when persistence fai
   failSave = true;
 
   try {
-    await assert.rejects(
-      () => service.createUserMessage({
+    await service.createUserMessage({
         petId: 'pet-a',
         ...createTestModelServerDeps({
           inputModalities: ['text', 'image'],
@@ -137,12 +136,10 @@ test('ServerTuiSessionService rolls back image requirements when persistence fai
         kind: 'file',
         path: imagePath,
         name: 'image.png',
-      }]),
-      /session store unavailable/,
-    );
-    assert.equal(state.sessions[session.id], session);
+      }]);
+    assert.deepEqual(service.getSession('pet-a', session.id), session);
     assert.deepEqual(
-      state.sessions[session.id]?.requiredInputModalities,
+      service.getSession('pet-a', session.id)?.requiredInputModalities,
       ['text'],
     );
   } finally {
@@ -300,12 +297,12 @@ test('reserved dispatch sessions retry failed persistence without changing the a
   const id = 'pet-a:12345678';
   fail = true;
   assert.throws(() => service.ensureDispatchSession('pet-a', id, true), /disk/);
-  assert.equal(state.sessions[id], undefined);
+  assert.equal(service.getSession('pet-a', id), null);
   fail = false;
   const reserved = service.ensureDispatchSession('pet-a', id, true);
-  assert.equal(service.ensureDispatchSession('pet-a', id, true), reserved);
+  assert.deepEqual(service.ensureDispatchSession('pet-a', id, true), reserved);
   assert.equal(service.getActiveSessionId('pet-a'), active.id);
   assert.throws(() => service.ensureDispatchSession('pet-b', id), /another Pet/);
-  delete state.sessions[id];
+  service.persistence.sessions.remove(id);
   assert.throws(() => service.ensureDispatchSession('pet-a', id), /no longer exists/);
 });

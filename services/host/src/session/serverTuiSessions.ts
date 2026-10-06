@@ -32,20 +32,10 @@ import {
 } from '../agent/chatMessageInput';
 import { ImageAttachmentAdmission } from '../agent/attachmentAdmission';
 import type { HostRuntimeConfig } from '../config/runtimeConfig';
-import {
-  createTuiSession,
-  ensureDispatchSession,
-  createTuiSessionForThread,
-  ensureActiveTuiSession,
-  listTuiSessions,
-  loadTuiSessionState,
-  resumeTuiSession,
-  saveTuiSessionState,
-  updateTuiSessionModelProfile,
-  updateTuiSessionSummary,
-  type TuiSessionRecord,
-  type TuiSessionState,
-} from './tuiSessionRegistry';
+import { type TuiSessionRecord, type TuiSessionState } from './tuiSessionRegistry';
+import type { HostPersistence, SessionRegistryPort } from '../persistence/contracts';
+import { createHostPersistence } from '../persistence/hostPersistence';
+import { createFileHostPersistence } from '../persistence/fileHostPersistence';
 
 
 import {
@@ -85,8 +75,8 @@ type TuiSessionGraphService = Pick<HostGraphService, 'readThreadState'>;
 
 
 export class ServerTuiSessionService {
-  private readonly state: TuiSessionState;
-  private readonly saveState: (state: TuiSessionState) => void;
+  readonly persistence: HostPersistence;
+  private readonly registry: SessionRegistryPort;
   private readonly checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
@@ -95,6 +85,8 @@ export class ServerTuiSessionService {
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
+    artifacts?: import('@pinpawo/pet-agent').CapabilityArtifactStore;
+    persistence?: HostPersistence;
     state?: TuiSessionState;
     saveState?: (state: TuiSessionState) => void;
     checkpointer?: TuiSessionCheckpointer;
@@ -108,11 +100,12 @@ export class ServerTuiSessionService {
     const runtimeConfig = options.runtimeConfig;
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.defaultModelProfileId = options.defaultModelProfileId;
-    this.state = options.state ?? loadTuiSessionState(
-      this.defaultModelProfileId,
-      sessionStatePath,
-    );
-    this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));
+    this.persistence = options.persistence ?? (options.state || options.saveState
+      ? createHostPersistence({ defaultModelProfileId: this.defaultModelProfileId, artifacts: options.artifacts,
+          initial: options.state ? { sessions: options.state, invocations: {} } : undefined,
+          commit: options.saveState ? state => options.saveState!(state.sessions) : undefined })
+      : createFileHostPersistence(sessionStatePath, this.defaultModelProfileId, options.artifacts));
+    this.registry = this.persistence.sessions;
     this.checkpointer = options.checkpointer ?? new FileSaver(
       options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,
     );
@@ -120,57 +113,19 @@ export class ServerTuiSessionService {
     this.loadContext = options.loadContext ?? loadAgentContext;
   }
 
-  getActiveSession(petId: string) {
-    const session = ensureActiveTuiSession(
-      this.state,
-      petId,
-      this.defaultModelProfileId,
-    );
-    this.save();
-    return session;
-  }
-
-  hasActiveSession(petId: string): boolean {
-    const activeId = this.state.activeSessionIds[petId];
-    return Boolean(activeId && this.state.sessions[activeId]?.petId === petId);
-  }
-
+  getActiveSession(petId: string) { return this.registry.ensureActive(petId); }
+  hasActiveSession(petId: string): boolean { return !!this.registry.active(petId); }
   adoptInitialThread(petId: string, threadId: string) {
-    if (this.hasActiveSession(petId)) {
-      return this.getActiveSession(petId);
-    }
-    const session = createTuiSessionForThread(
-      this.state,
-      petId,
-      this.defaultModelProfileId,
-      threadId,
-    );
-    this.save();
-    return session;
+    return this.registry.active(petId) ?? this.registry.create(petId, threadId);
   }
-
-  getChatThreadId(petId: string) {
-    return this.getActiveSession(petId).threadId;
-  }
-
-  getActiveSessionId(petId: string) {
-    return this.getActiveSession(petId).id;
-  }
-
+  getChatThreadId(petId: string) { return this.getActiveSession(petId).threadId; }
+  getActiveSessionId(petId: string) { return this.getActiveSession(petId).id; }
   getSession(petId: string, sessionId: string) {
-    const session = this.state.sessions[sessionId];
+    const session = this.registry.read(sessionId);
     return session?.petId === petId ? session : null;
   }
-
   ensureDispatchSession(petId: string, sessionId: string, create = false) {
-    const previous = this.state.sessions[sessionId];
-    const record = ensureDispatchSession(this.state, petId, sessionId, this.defaultModelProfileId, create);
-    try { this.save(); }
-    catch (error) {
-      if (!previous) delete this.state.sessions[sessionId];
-      throw error;
-    }
-    return record;
+    return this.registry.register(petId, sessionId, create);
   }
 
   buildSessionSetup(deps: ServerDeps, ctx: Awaited<ReturnType<typeof loadAgentContext>>, sessionId: string) {
@@ -179,30 +134,16 @@ export class ServerTuiSessionService {
     return this.buildChatSetup(deps, ctx, session.threadId);
   }
 
-  createNewSession(petId: string) {
-    this.getActiveSession(petId);
-    const next = createTuiSession(
-      this.state,
-      petId,
-      this.defaultModelProfileId,
-    );
-    this.save();
-    return next;
-  }
-
+  createNewSession(petId: string) { return this.registry.create(petId); }
   async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
     const previous = this.getActiveSession(petId);
-    const next = createTuiSession(
-      this.state,
-      petId,
-      this.defaultModelProfileId,
-    );
     if (options.deletePrevious) {
+      // Remove registration first; unresolved invocations fail closed before
+      // runtime deletion can erase their thread.
+      this.registry.remove(previous.id);
       await this.checkpointer.deleteThread(previous.threadId);
-      delete this.state.sessions[previous.id];
     }
-    this.save();
-    return next;
+    return this.registry.create(petId);
   }
 
   /**
@@ -218,7 +159,7 @@ export class ServerTuiSessionService {
     threadId = this.getChatThreadId(deps.petId),
     modelProfileIdOverride?: string,
   ) {
-    const session = Object.values(this.state.sessions)
+    const session = this.registry.list(deps.petId)
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.petId);
     return buildChatSetup({
@@ -257,28 +198,10 @@ export class ServerTuiSessionService {
     sessionId: string,
     modelProfileId: string,
   ) {
-    const session = this.state.sessions[sessionId];
-    if (!session || session.petId !== petId) {
-      throw new Error('session not found');
-    }
-    if (this.state.activeSessionIds[petId] !== sessionId) {
-      throw new Error('model selection requires the active session');
-    }
-    const updated = updateTuiSessionModelProfile(
-      this.state,
-      sessionId,
-      modelProfileId,
-    );
-    if (!updated) {
-      throw new Error('session not found');
-    }
-    try {
-      this.save();
-    } catch (error) {
-      this.state.sessions[sessionId] = session;
-      throw error;
-    }
-    return updated;
+    const session = this.getSession(petId, sessionId);
+    if (!session) throw new Error('session not found');
+    if (this.registry.active(petId)?.id !== sessionId) throw new Error('model selection requires the active session');
+    return this.registry.updateProfile(sessionId, modelProfileId);
   }
 
   async readSessionCheckpointPoint(
@@ -327,8 +250,7 @@ export class ServerTuiSessionService {
     session: TuiSessionRecord,
     messages: TuiCheckpointMessage[],
   ) {
-    updateTuiSessionSummary(this.state, session.id, summarizeTuiCheckpointMessages(messages));
-    this.save();
+    this.registry.updateSummary(session.id, summarizeTuiCheckpointMessages(messages));
   }
 
   async refreshActiveSessionSummary(deps: ServerDeps) {
@@ -349,22 +271,20 @@ export class ServerTuiSessionService {
   async readActiveCheckpointPoint(deps: ServerDeps) {
     const session = this.getActiveSession(deps.petId);
     const checkpoint = await this.readSessionCheckpointPoint(deps, session);
-    updateTuiSessionSummary(
-      this.state,
+    this.registry.updateSummary(
       session.id,
       summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
     );
-    this.save();
     return checkpoint;
   }
 
   async listSessions(deps: ServerDeps) {
     this.getActiveSession(deps.petId);
-    const sessions = listTuiSessions(this.state, deps.petId);
+    const sessions = this.registry.list(deps.petId).map(s => ({ ...s, active: s.id === this.registry.active(deps.petId)?.id }));
     const enriched = await Promise.all(sessions.map(async (session) => {
       const messages = await this.readSessionCheckpointMessages(deps, session);
       const summary = summarizeTuiCheckpointMessages(messages, session.updatedAt);
-      const updated = updateTuiSessionSummary(this.state, session.id, summary) ?? session;
+      const updated = this.registry.updateSummary(session.id, summary) ?? session;
       return {
         ...updated,
         active: session.active,
@@ -373,30 +293,26 @@ export class ServerTuiSessionService {
         updatedAt: summary.updatedAt,
       };
     }));
-    this.save();
     return enriched.sort((a, b) => Number(b.active) - Number(a.active) || b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async resumeSession(deps: ServerDeps, sessionId: string) {
-    const candidate = this.state.sessions[sessionId];
+    const candidate = this.registry.read(sessionId);
     if (!candidate || candidate.petId !== deps.petId) {
       throw new Error('session not found');
     }
     const checkpoint = await this.readSessionCheckpointPoint(deps, candidate);
-    const session = resumeTuiSession(this.state, deps.petId, sessionId);
+    const session = this.registry.select(deps.petId, sessionId);
     if (!session) {
       throw new Error('session not found');
     }
-    this.save();
-    updateTuiSessionSummary(
-      this.state,
+    this.registry.updateSummary(
       session.id,
       summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
     );
-    this.save();
     return {
       session: {
-        ...(this.state.sessions[session.id] ?? session),
+        ...(this.registry.read(session.id) ?? session),
         // Report what the restored transcript actually holds, not the value
         // the record was persisted with.
         requiredInputModalities: checkpoint.requiredInputModalities,
@@ -409,7 +325,4 @@ export class ServerTuiSessionService {
     };
   }
 
-  private save() {
-    this.saveState(this.state);
-  }
 }

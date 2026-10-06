@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { loadSessionRegistryCompatibility, saveSessionRegistryCompatibility } from '../persistence/fileHostPersistence';
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
 import { buildTuiChatThreadId } from '../chatInterface';
@@ -44,21 +44,11 @@ export function loadTuiSessionState(
   defaultModelProfileId: string,
   filePath = DEFAULT_TUI_SESSION_STATE_PATH,
 ): TuiSessionState {
-  try {
-    if (!existsSync(filePath)) return createEmptyTuiSessionState();
-    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
-    return parseTuiSessionState(parsed, defaultModelProfileId);
-  } catch {
-    return createEmptyTuiSessionState();
-  }
+  return loadSessionRegistryCompatibility(defaultModelProfileId, filePath);
 }
 
-export function saveTuiSessionState(
-  state: TuiSessionState,
-  filePath = DEFAULT_TUI_SESSION_STATE_PATH,
-) {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
+export function saveTuiSessionState(state: TuiSessionState, filePath = DEFAULT_TUI_SESSION_STATE_PATH) {
+  saveSessionRegistryCompatibility(state, filePath);
 }
 
 export function ensureActiveTuiSession(
@@ -221,7 +211,7 @@ export function updateTuiSessionModelProfile(
 }
 
 
-function parseTuiSessionState(
+export function parseTuiSessionState(
   value: unknown,
   defaultModelProfileId: string,
 ): TuiSessionState {

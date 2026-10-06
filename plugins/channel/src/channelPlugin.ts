@@ -139,7 +139,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           const source = { petId, sessionId, invocationId };
           const state = event.type.slice('dispatch.'.length) as 'queued' | 'running' | 'completed' | 'waiting' | 'failed' | 'interrupted';
           const error = z.object({ error: z.string().optional() }).parse(event.payload).error;
-          service.recordExecution(channelId, source, state, event.occurredAt, error);
+          const { revision } = z.object({ revision: z.number().int().nonnegative().optional() }).parse(event.payload);
+          const execution = service.recordExecution(channelId, source, state, event.occurredAt, error, revision);
+          if (revision !== undefined && execution.revision !== revision) return;
           if (event.type === 'dispatch.completed') {
             const { reply } = z.object({ reply: z.string() }).parse(event.payload);
             if (reply.trim()) {
@@ -156,6 +158,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
             const { pendingInterrupt } = z.object({ pendingInterrupt: z.unknown() }).parse(event.payload);
             service.recordInterrupt(channelId, source, pendingInterrupt);
           }
+          service.recordDeliverySuccess(invocationId);
         } catch (error) {
           // Event delivery is asynchronous. Expose persistence failure to observers;
           // a completed run is not a receipt for successful Channel storage.

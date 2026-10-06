@@ -275,7 +275,8 @@ export class ServerChatHandler {
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
-    const threadId = this.tuiSessions.getChatThreadId(deps.petId);
+    const session = this.tuiSessions.getActiveSession(deps.petId);
+    const threadId = session.threadId;
     const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
     const invocation = this.threadInvocations.enqueue({
@@ -400,6 +401,7 @@ export class ServerChatHandler {
       setup.input.signal = controller.signal;
       const result = await this.runAgentTurn({
         request,
+        sessionId: session.id,
         setup,
         graphService: this.graphService,
         isCurrent,

@@ -60,7 +60,7 @@ export type ChannelExecutionState = 'admitting' | 'queued' | 'running' | 'waitin
 export type ChannelExecution = {
   executionId: string; channelId: string; petId: string; sessionId: string;
   messageId?: string; invocationId?: string; state: ChannelExecutionState;
-  occurredAt: string; error?: string; deliveryError?: string; observerId: string;
+  occurredAt: string; revision?: number; error?: string; deliveryError?: string; observerId: string;
 };
 
 /** One append-only journal is the source of truth, including goal revisions.
@@ -359,21 +359,31 @@ export class ChannelService {
     if (!value) throw new Error('Unknown Channel execution request.');
     this.saveExecution({ ...value, state: 'failed', error, occurredAt: new Date().toISOString() });
   }
-  recordExecution(channelId: string, source: ChannelMessageSource, state: Exclude<ChannelExecutionState, 'admitting'>, occurredAt: string, error?: string): ChannelExecution {
+  recordExecution(channelId: string, source: ChannelMessageSource, state: Exclude<ChannelExecutionState, 'admitting'>, occurredAt: string, error?: string, revision?: number): ChannelExecution {
     const binding = this.requireOutputBinding(channelId, source);
     const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(source.invocationId) as { data: string } | undefined;
     const existing = row ? JSON.parse(row.data) as ChannelExecution : null;
     if (existing && (existing.channelId !== binding.channelId || existing.petId !== source.petId || existing.sessionId !== source.sessionId)) {
       throw new Error('Channel execution identity does not match its original observation.');
     }
-    if (existing && ['waiting', 'completed', 'interrupted', 'failed'].includes(existing.state)) return existing;
+    if (existing?.revision !== undefined && (revision === undefined || revision < existing.revision)) return existing;
+    if (existing && ['completed', 'interrupted', 'failed'].includes(existing.state)) return existing;
     return this.saveExecution({ ...(existing ?? {}), ...source, channelId: binding.channelId,
       executionId: existing?.executionId ?? `dispatch:${source.invocationId}`, state, occurredAt,
+      ...(revision !== undefined ? { revision } : {}),
       ...(error ? { error } : {}), observerId: this.observerId });
   }
   recordDeliveryFailure(invocationId: string, error: string): void {
     const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(invocationId) as { data: string } | undefined;
     if (row) this.saveExecution({ ...JSON.parse(row.data), deliveryError: error });
+  }
+  recordDeliverySuccess(invocationId: string): void {
+    const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(invocationId) as { data: string } | undefined;
+    if (!row) return;
+    const record = JSON.parse(row.data) as ChannelExecution;
+    if (!record.deliveryError) return;
+    delete record.deliveryError;
+    this.saveExecution(record);
   }
   readExecutions(channelId: string, page: unknown = {}) {
     const { after, limit } = channelPageSchema.parse(page);

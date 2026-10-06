@@ -11,6 +11,7 @@ import {
   readPendingInterrupt,
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
+  type RuntimeExecutionIdentity,
   type SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
@@ -61,6 +62,8 @@ export type AgentSessionTurnRequest =
 
 export type AgentSessionTurnOptions = {
   request: AgentSessionTurnRequest;
+  /** Host session identity, never injected into runtime state or model input. */
+  sessionId?: string;
   setup: AgentChannelSetup;
   graphService: HostGraphService;
   isCurrent: () => boolean;
@@ -77,6 +80,8 @@ export type AgentSessionTurnOptions = {
    * pending-review checks and before graph invocation.
    */
   prepareUserMessage?: () => Promise<BaseMessage>;
+  /** Commit the runtime-provided identity before any graph execution. */
+  onExecutionIdentity?: (identity: RuntimeExecutionIdentity) => void;
 };
 
 async function waitForGraphRunSettlement(run: HostGraphEventStream | null) {
@@ -354,7 +359,7 @@ export async function runAgentSessionTurn(
   emitCurrentPlan(initialThreadState.currentPlan ?? null);
   let run: HostGraphEventStream | null = null;
   try {
-    run = await graphService.streamEvents(setup, resume);
+    run = await graphService.streamEvents(setup, resume, options.onExecutionIdentity);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {

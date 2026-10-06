@@ -41,6 +41,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     runAgentTurn,
     loadContext,
     sessions,
+    invocations,
     publishRuntimeEvent: publishActiveSessionEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
@@ -49,27 +50,39 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
   } = context;
 
   const dispatch: PetDispatchPort = {
+    persistentAdmissions: true,
+    replayDispatchLifecycle: () => invocations.replay(runtime.petId),
     getQueueSnapshot: () => coordinator.getQueueSnapshot(),
     onQueueChange: (listener) => coordinator.onQueueChange(listener),
     onDispatchLifecycle: (listener) => {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession }) => {
-      const dispatchId = suppliedDispatchId?.trim() || randomUUID();
+    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, idempotencyKey, fingerprint: suppliedFingerprint }) => {
+      if (context.isClosing()) throw new Error('Resident Pet Host is closing.');
+      let dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
       const petId = runtime.petId;
       // Resolve and persist before admission; neither queue time nor a TUI switch
       // may change the target. Legacy callers retain active-session behavior.
-      const target = suppliedSession
+      // A retry keeps its first admitted target even if the active TUI changed.
+      const prior = sessions.persistence.invocations.read(dispatchId) ?? (idempotencyKey ? sessions.persistence.invocations.findAdmission(idempotencyKey) : null);
+      const explicitTarget = !!suppliedSession || !!scope;
+      let target = suppliedSession
         ? sessions.ensureDispatchSession(petId, suppliedSession.id, suppliedSession.create === true)
-        : undefined;
+        : prior ? sessions.getSession(petId, prior.sessionId) : sessions.getActiveSession(petId);
+      if (!target) throw new Error('Admitted dispatch session no longer exists.');
+      const fingerprint = suppliedFingerprint ?? JSON.stringify([petId, request, suppliedSession?.id ?? null, scope ?? null]);
+      const admission = sessions.persistence.invocations.admit({ dispatchId, petId, sessionId: target.id,
+        threadId: target.threadId, request, fingerprint, ...(scope ? { scope } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
+      dispatchId = admission.record.dispatchId;
+      if (!admission.created) return { dispatchId };
       let pendingInterrupt: PendingInterruptProjection | undefined;
       const publishRuntimeEvent: typeof publishActiveSessionEvent = (event) => {
         if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
         if (!target || sessions.getActiveSessionId(petId) === target.id) publishActiveSessionEvent(event);
       };
-      const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
+      const publishLifecycle: typeof publishDispatchLifecycle = (event) => invocations.observe({
         ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
         ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
         ...(target ? { sessionId: target.id } : {}),
@@ -121,6 +134,14 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             publishLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
           };
           try {
+            if (!explicitTarget) {
+              const active = sessions.getActiveSession(petId);
+              if (active.id !== target!.id) {
+                const record = sessions.persistence.invocations.read(dispatchId)!;
+                sessions.persistence.invocations.bindLegacyQueuedSession(dispatchId, record.revision, active.id);
+                target = active;
+              }
+            }
             const context = await loadContext(runtimeDeps.get().petId);
             const setup = target ? sessions.buildSessionSetup(runtimeDeps.get(), context, target.id)
               : sessions.buildChatSetup(runtimeDeps.get(), context);
@@ -141,6 +162,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             });
             const result = await withPetInvocationContext({ petId, dispatchId, scope, sessionId: target?.id }, () => runAgentTurn({
               request: { kind: 'user_message', requestId, message: request },
+              sessionId: target!.id,
               setup,
               graphService,
               isCurrent: () => !run.controller.signal.aborted,
@@ -157,6 +179,10 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               },
             }));
             if (result.status === 'waiting') {
+              if (!pendingInterrupt) {
+                const pending = (await graphService.readThreadState(setup)).pendingInterrupt;
+                if (pending) pendingInterrupt = projectPendingInterrupt(pending);
+              }
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
               publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
@@ -211,10 +237,10 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           }
         },
         true,
-      ), target ? async () => {
+      ), explicitTarget ? async () => {
         // A vanished target is not held by a review. Admit it so the run fails
         // through its own failed lifecycle instead of parking forever.
-        if (!sessions.getSession(petId, target.id)) return true;
+        if (!sessions.getSession(petId, target!.id)) return true;
         // Read failures propagate: the Coordinator keeps this work queued.
         return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
       } : undefined, {
@@ -223,6 +249,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
       });
       publishLifecycle({ dispatchId, request, state: 'queued' });
+      return { dispatchId };
     },
   };
 

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Annotation, Command, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
-import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
+import { buildReviewSpec, readPendingInterrupt, prepareRuntimeExecution, readRuntimeRecoveryDescriptor } from '@pinpawo/pet-agent';
 import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
 import { createStudio } from '@pinpawo/studio';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
@@ -30,14 +30,24 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
   for (const petId of pets) {
     const runtimeConfig = buildHostRuntimeConfig(join(root, petId));
     const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
-    const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
+    const State = Annotation.Root({
+      runId: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+      taskId: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+      messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
     const graph = new StateGraph(State).addNode('reply', async (state) => {
       const raw = state.messages.at(-1)!.text;
       const input = /^`{3,}json\n/.test(raw) ? readChannelTestInput(raw) : undefined;
       const last = input?.body ?? raw;
-      if (last === 'approval') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'approval',
-        view: { kind: 'plain', body: 'Authorize?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' }, effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
+      if (last === 'approval' || last === 'approval-failure' || last === 'approval-cancel') {
+        const resolution = interrupt({ kind: 'review', review: buildReviewSpec({ id: 'approval',
+        view: { kind: 'plain', body: 'Authorize?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' }, effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }, { id: 'reject', label: 'Reject', decision: { type: 'reject' } }],
       }) });
+        if (resolution?.action === 'interrupt_run' || resolution?.decisions?.[0]?.selectedOptionId === 'reject') return { messages: [new AIMessage('Action withdrawn.')] };
+        const read = channel.toolkits[0]!.tools.find(t => t.tool.name === 'channel_read_context')!;
+        const context = JSON.parse(await read.tool.invoke({}));
+        assert.equal(context.channel.channelId, readPetInvocationContext()?.scope?.id);
+      }
+      if (last === 'approval-failure') throw new Error('deterministic resume failure');
       active++; maxActive = Math.max(maxActive, active);
       try {
         await barrier.wait;
@@ -55,8 +65,14 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
         return { messages: snapshot.values.messages ?? [], pendingInterrupt: readPendingInterrupt(snapshot),
           acceptsResume: snapshot.next.length > 0 || snapshot.tasks.length > 0, currentPlan: null };
       },
-      async streamEvents(setup: AgentChannelSetup, resume?: InterruptResume) {
-        return graph.streamEvents(resume ? new Command({ resume: { [resume.interruptId]: resume.value } }) : { messages: setup.input.messages },
+      async readExecutionDescriptor(setup: AgentChannelSetup) {
+        return readRuntimeRecoveryDescriptor(await graph.getState(config(setup)), setup.input.threadId!);
+      },
+      async streamEvents(setup: AgentChannelSetup, resume?: InterruptResume, onIdentity?: (identity: import('@pinpawo/pet-agent').RuntimeExecutionIdentity) => void) {
+        const prepared = resume ? undefined : prepareRuntimeExecution(setup.input.messages, setup.input.threadId!);
+        const identity = prepared?.identity ?? (await this.readExecutionDescriptor(setup)).identity;
+        if (identity) onIdentity?.(identity);
+        return graph.streamEvents(resume ? new Command({ resume: { [resume.interruptId]: resume.value } }) : prepared!.input,
           { ...config(setup), version: 'v3' });
       },
     };
@@ -182,8 +198,9 @@ test('waiting target is skipped; background execution does not pollute active TU
     assert.equal(stillWaiting.snapshot.session.pendingInterrupt?.interruptId, pending.interruptId);
     await host.interaction.request({ type: 'interrupt.resume', requestId: 'approve-a', interruptId: pending.interruptId,
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
-    await waitFor(() => outputs(f, a).length === 1);
-    assert.equal(outputs(f, a)[0]?.body, 'Answer 2: after approval');
+    await waitFor(() => outputs(f, a).length === 2);
+    assert.deepEqual(outputs(f, a).map(m => m.body), ['Answer 1: approval', 'Answer 2: after approval']);
+    assert.equal(f.channel.service.readExecutions(a).executions[0]!.state, 'completed');
     stop();
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
@@ -268,5 +285,173 @@ test('a bound session alone does not publish; scope mismatch reports failure; na
     assert.equal(f.channel.service.readInterruptNotifications(b).notifications[0]?.pendingInterrupt.payload.kind, 'human_review');
     assert.equal(outputs(f, b).length, 0);
     assert.ok(!JSON.stringify(f.channel.service.readContext(b)).includes('interruptId'));
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+async function selectPending(f: Awaited<ReturnType<typeof fixture>>, channelId: string) {
+  const binding = f.channel.service.getBinding(channelId, 'one')!;
+  await f.hosts[0]!.interaction.request({ type: 'session.resume', requestId: 'select-pending', sessionId: binding.sessionId });
+  const snapshot = await f.hosts[0]!.interaction.snapshot();
+  if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
+  const pending = snapshot.snapshot.session.pendingInterrupt;
+  assert.ok(pending);
+  return pending;
+}
+const approve = (interruptId: string, requestId = 'approve') => ({ type: 'interrupt.resume' as const, requestId, interruptId,
+  value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
+
+test('Host restart restores waiting invocation; duplicate approval and result replay publish only the original output', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-resume-restart-'));
+  let f = await fixture(root);
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    const { receipt } = await f.channel.execute(id, { petId: 'one', body: 'approval' });
+    await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'waiting');
+    await f.close();
+    f = await fixture(root);
+    const pending = await selectPending(f, id);
+    await Promise.all([f.hosts[0]!.interaction.request(approve(pending.interruptId, 'resume-1')),
+      f.hosts[0]!.interaction.request(approve(pending.interruptId, 'resume-duplicate'))]);
+    await waitFor(() => outputs(f, id).length === 1);
+    assert.equal(outputs(f, id)[0]!.source?.invocationId, receipt.invocationId);
+    assert.equal(f.channel.service.readExecutions(id).executions[0]!.state, 'completed');
+    assert.equal(f.calls.length, 1);
+    f.hosts[0]!.resident.dispatch.replayDispatchLifecycle!();
+    await f.close();
+    f = await fixture(root);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(outputs(f, id).length, 1);
+    assert.equal(f.calls.length, 0, 'recovery republishes settlement, never repeats execution');
+    const record = JSON.parse(await readFile(buildHostRuntimeConfig(join(root, 'one')).tuiSessionPath, 'utf8')).invocations[receipt.invocationId];
+    assert.equal(record.scope.id, id);
+    assert.equal(record.pendingInterrupt, undefined);
+    assert.equal(record.settlementId, `${receipt.invocationId}:settled`);
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('approval runtime failure settles original Channel timeline while another Channel remains runnable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-resume-failure-'));
+  const f = await fixture(root);
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    await f.channel.execute(id, { petId: 'one', body: 'approval-failure' });
+    await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'waiting');
+    const pending = await selectPending(f, id);
+    await f.hosts[0]!.interaction.request(approve(pending.interruptId));
+    await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'failed');
+    assert.match(f.channel.service.readExecutions(id).executions[0]!.error!, /deterministic resume failure/);
+    assert.equal(outputs(f, id).length, 0);
+    const other = f.channel.service.createChannel(goal, human).channelId;
+    await f.channel.execute(other, { petId: 'one', body: 'next' });
+    await waitFor(() => outputs(f, other).length === 1);
+    assert.equal(f.channel.service.readExecutions(other).executions[0]!.state, 'completed');
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+for (const decision of ['cancel', 'reject'] as const) {
+  test(`${decision} resolves original invocation without stale pending state or cross-Channel delivery`, async () => {
+    const root = await mkdtemp(join(tmpdir(), `channel-resume-${decision}-`));
+    const f = await fixture(root);
+    try {
+      const id = f.channel.service.createChannel(goal, human).channelId;
+      const other = f.channel.service.createChannel(goal, human).channelId;
+      await f.channel.execute(id, { petId: 'one', body: 'approval-cancel' });
+      await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'waiting');
+      const pending = await selectPending(f, id);
+      await f.hosts[0]!.interaction.request({ type: 'interrupt.resume', requestId: decision, interruptId: pending.interruptId,
+        value: decision === 'cancel' ? { action: 'cancel' } : { decisions: [{ interactionId: 'approval', selectedOptionId: 'reject' }] } });
+      await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'completed');
+      assert.equal(outputs(f, id)[0]!.body, 'Action withdrawn.');
+      assert.equal(outputs(f, other).length, 0);
+      await f.channel.execute(id, { petId: 'one', body: 'next' });
+      await waitFor(() => outputs(f, id).length === 2);
+      const snapshot = await f.hosts[0]!.interaction.snapshot();
+      if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
+      assert.equal(snapshot.snapshot.session.pendingInterrupt, null);
+      assert.equal(f.maxActive(), 1);
+    } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+  });
+}
+
+test('mismatched durable runtime identity blocks recovery and cannot inherit a Channel scope', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-resume-mismatch-'));
+  let f = await fixture(root);
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    const { receipt } = await f.channel.execute(id, { petId: 'one', body: 'approval' });
+    await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'waiting');
+    await f.close();
+    const file = buildHostRuntimeConfig(join(root, 'one')).tuiSessionPath;
+    const data = JSON.parse(await readFile(file, 'utf8'));
+    data.invocations[receipt.invocationId].runtime.runId = 'different-run';
+    await writeFile(file, JSON.stringify(data));
+    f = await fixture(root);
+    await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'failed');
+    const pending = await selectPending(f, id);
+    await f.hosts[0]!.interaction.request(approve(pending.interruptId));
+    assert.equal(f.calls.length, 0);
+    assert.equal(outputs(f, id).length, 0);
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).invocations[receipt.invocationId].state, 'blocked');
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('ordinary interactive messages in a bound session never become Channel output', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-interactive-isolation-'));
+  const f = await fixture(root);
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    const { binding } = await f.channel.execute(id, { petId: 'one', body: 'ask' });
+    await waitFor(() => outputs(f, id).length === 1);
+    await f.hosts[0]!.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });
+    await f.hosts[0]!.interaction.request({ type: 'chat_request', requestId: 'private', message: 'ordinary conversation' });
+    assert.equal(outputs(f, id).length, 1);
+    assert.equal(f.calls.at(-1)!.thread, 'tui');
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('restart reconciles a completed runtime after Host settlement loss without executing again', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-settlement-reconcile-'));
+  let f = await fixture(root);
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    const { receipt } = await f.channel.execute(id, { petId: 'one', body: 'approval' });
+    await waitFor(() => f.channel.service.readExecutions(id).executions[0]?.state === 'waiting');
+    const file = buildHostRuntimeConfig(join(root, 'one')).tuiSessionPath;
+    const before = JSON.parse(await readFile(file, 'utf8'));
+    const pending = await selectPending(f, id);
+    await f.hosts[0]!.interaction.request(approve(pending.interruptId));
+    await waitFor(() => outputs(f, id).length === 1);
+    await f.close();
+    // Fault injection only in Host state: runtime checkpoints are untouched.
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    saved.invocations[receipt.invocationId] = before.invocations[receipt.invocationId];
+    await writeFile(file, JSON.stringify(saved));
+    f = await fixture(root);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(f.calls.length, 0);
+    assert.equal(outputs(f, id).length, 1);
+    const recovered = JSON.parse(await readFile(file, 'utf8')).invocations[receipt.invocationId];
+    assert.equal(recovered.state, 'completed');
+    assert.equal(recovered.reply, 'Answer 1: approval');
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('durable Studio idempotency returns the first invocation after restart and rejects a changed request', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-durable-idempotency-'));
+  let f = await fixture(root);
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    const { binding } = await f.channel.execute(id, { petId: 'one', body: 'ask' });
+    await waitFor(() => outputs(f, id).length === 1);
+    const request = { petId: 'one', request: 'idempotent task', session: { id: binding.sessionId },
+      scope: { namespace: 'channel', id }, idempotencyKey: 'stable-request' };
+    const receipt = await f.studio.dispatch(request);
+    await waitFor(() => outputs(f, id).length === 2);
+    await f.close();
+    f = await fixture(root);
+    assert.equal((await f.studio.dispatch(request)).invocationId, receipt.invocationId);
+    await assert.rejects(f.studio.dispatch({ ...request, request: 'changed task' }), /identity conflict/);
+    assert.equal(f.calls.length, 0);
+    assert.equal(outputs(f, id).length, 2);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });

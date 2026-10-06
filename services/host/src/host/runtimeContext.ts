@@ -16,6 +16,8 @@ import type { createLocalServerHandlers, ServerHandlerOptions } from '../serverH
 import type { LocalServerPeerHandlers } from '../wire/messageDispatcher';
 import type { ServerTuiSessionService, TuiSessionCheckpointer } from '../session/serverTuiSessions';
 import type { ServerRuntimeDepsStore } from '../serverTypes';
+import type { HostInvocationService } from '../persistence/hostInvocationService';
+import type { HostPersistence } from '../persistence/contracts';
 import type { HostExecutionConfig } from '../config/hostExecutionConfig';
 import type { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from '../config/llmConfig';
@@ -51,6 +53,7 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   checkpointer: TuiSessionCheckpointer;
   /** Pet-scoped Agent Session registry path owned by the composing Host. */
   sessionStatePath: string;
+  persistence?: HostPersistence;
   loadContext?: typeof loadAgentContext;
   graphService?: HostGraphService;
   /** Shared Agent Session turn runner used by conversation and headless input. */
@@ -78,6 +81,7 @@ export type ResidentPetRuntimeContext = {
   runAgentTurn: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   loadContext: typeof loadAgentContext;
   sessions: ServerTuiSessionService;
+  invocations: HostInvocationService;
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;

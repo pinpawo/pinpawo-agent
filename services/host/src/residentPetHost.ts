@@ -1,3 +1,4 @@
+import { HostInvocationService } from './persistence/hostInvocationService';
 import { withoutPetInvocationContext } from './host/petInvocationContext';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
@@ -168,9 +169,13 @@ export async function createResidentPetRuntime(
     loadContext,
     runtimeConfig: deps.runtimeConfig,
     sessionStatePath: options.sessionStatePath,
+    persistence: options.persistence,
+    artifacts: options.capabilityArtifactStore,
     checkpointer: options.checkpointer,
     defaultModelProfileId: deps.modelProfiles.defaultProfileId,
   });
+
+  if (sessions.persistence.artifacts) deps.capabilityArtifactStore = sessions.persistence.artifacts;
 
   if (!sessions.hasActiveSession(deps.petId) && options.adoptThreadId) {
     const legacy = await options.checkpointer.getTuple({
@@ -223,13 +228,15 @@ export async function createResidentPetRuntime(
       }
     }
   };
-  const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
+  const invocations = new HostInvocationService(sessions.persistence.invocations, publishDispatchLifecycle);
+  const runner = options.runAgentTurn ?? runAgentSessionTurn;
+  const runAgentTurn: typeof runner = input => invocations.runTurn(input, deps.petId, runner);
   const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    runAgentTurn: (input) => withoutPetInvocationContext(() => runAgentTurn(input)),
+    runAgentTurn: input => withoutPetInvocationContext(() => runAgentTurn(input)),
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
     activeRuns,
     interruptHostRun: (requestId) => {
@@ -267,6 +274,7 @@ export async function createResidentPetRuntime(
     runAgentTurn,
     loadContext,
     sessions,
+    invocations,
     coordinator,
     localHandlers,
     peerHandlers,
@@ -282,6 +290,8 @@ export async function createResidentPetRuntime(
     isClosing: () => closing !== null,
   };
   registerResidentPetRuntimeContext(runtime, context);
+  await invocations.reconcile(deps.petId, sessions, graphService,
+    async id => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(deps.petId), id));
   await coordinator.refreshState();
   return runtime;
 }

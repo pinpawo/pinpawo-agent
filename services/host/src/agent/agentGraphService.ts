@@ -1,5 +1,7 @@
 import {
   buildOrchestratorRunInput,
+  prepareRuntimeExecution, readRuntimeExecutionRecovery,
+  type RuntimeExecutionIdentity, type RuntimeRecoveryDescriptor,
   createOrchestratorGraph,
   buildAgentRunnableConfig,
   readPendingInterrupt,
@@ -127,6 +129,7 @@ export class HostGraphService {
   async streamEvents(
     setup: AgentChannelSetup,
     resume?: InterruptResume,
+    onIdentity?: (identity: RuntimeExecutionIdentity) => void,
   ): Promise<HostGraphEventStream> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
@@ -136,10 +139,17 @@ export class HostGraphService {
         interface: setup.interfaceContext?.kind ?? 'headless',
       },
     });
+    const threadId = setup.input.threadId;
+    const prepared = resume === undefined ? (threadId
+      ? prepareRuntimeExecution(setup.input.messages, threadId, setup.input)
+      : { input: buildOrchestratorRunInput(setup.input.messages, setup.input), identity: null }) : undefined;
+    const identity = prepared?.identity ?? (resume && threadId ? (await this.readExecutionDescriptor(setup)).identity : null);
+    if (onIdentity) {
+      if (!identity) throw new Error('Durable runtime execution requires an execution identity.');
+      onIdentity(identity);
+    }
     return await graph.streamEvents(
-      (resume === undefined
-        ? buildOrchestratorRunInput(setup.input.messages, setup.input)
-        : buildResumeCommand(resume)) as Parameters<OrchestratorGraph['streamEvents']>[0],
+      (prepared ? prepared.input : buildResumeCommand(resume!)) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
         ...buildAgentGraphRunConfig(setup),
@@ -163,6 +173,12 @@ export class HostGraphService {
     return graph.getState({
       configurable: buildAgentGraphConfigurable(setup),
     });
+  }
+
+  async readExecutionDescriptor(setup: AgentChannelSetup): Promise<RuntimeRecoveryDescriptor> {
+    if (!setup.input.threadId) throw new Error('Runtime recovery requires a thread identity.');
+    return readRuntimeExecutionRecovery(createOrchestratorGraph(setup.graphConfig),
+      { configurable: buildAgentGraphConfigurable(setup) }, setup.input.threadId);
   }
 
   async readThreadState(setup: AgentChannelSetup): Promise<HostGraphThreadState> {

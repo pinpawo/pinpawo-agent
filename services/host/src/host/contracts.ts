@@ -44,6 +44,8 @@ export type PetDispatchQueueEntry = {
 export type PetDispatchRequest = {
   request: string;
   dispatchId?: string;
+  idempotencyKey?: string;
+  fingerprint?: string;
   /** Explicit durable session; create only when registering a reserved identity. */
   session?: { id: string; create?: boolean };
   /** Explicit Host-admitted domain scope, independent of the Agent Session. */
@@ -66,6 +68,8 @@ export type PetDispatchLifecycleEvent = {
   dispatchId: string;
   request: string;
   state: PetDispatchLifecycleState;
+  revision?: number;
+  settlementId?: string;
   requestId?: string;
   error?: string;
   sessionId?: string;
@@ -75,11 +79,14 @@ export type PetDispatchLifecycleEvent = {
 };
 
 export interface PetDispatchPort {
+  readonly persistentAdmissions?: boolean;
+  /** Re-publish durable observations after Plugin startup; never replay execution. */
+  replayDispatchLifecycle?(): void;
   getQueueSnapshot(): PetDispatchQueueSnapshot;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input into the resident queue. Execution is observed through Agent Session. */
-  dispatch(request: PetDispatchRequest): Promise<void>;
+  dispatch(request: PetDispatchRequest): Promise<void | { dispatchId: string }>;
 }
 
 export interface ResidentPet {

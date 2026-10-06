@@ -23,6 +23,7 @@ import {
   type CheckpointTuple,
   type PendingWrite,
 } from '@langchain/langgraph-checkpoint';
+import { atomicWriteFile } from './atomicFile';
 
 type CheckpointManifest = {
   version: 1;
@@ -102,13 +103,6 @@ function objectHash(bytes: Uint8Array) {
 
 function objectPath(rootDir: string, hash: string) {
   return join(rootDir, 'objects', hash.slice(0, 2), hash.slice(2));
-}
-
-function atomicWriteFile(path: string, data: string | Uint8Array) {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
-  writeFileSync(tmp, data);
-  renameSync(tmp, path);
 }
 
 function safeReadDir(path: string) {

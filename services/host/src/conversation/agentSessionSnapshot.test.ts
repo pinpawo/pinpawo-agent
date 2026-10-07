@@ -4,6 +4,7 @@ import { parseAgentSessionSnapshot } from '@pinpawo/agent-session';
 import { buildHostSessionSnapshot } from './agentSessionSnapshot';
 import type { ServerDeps } from '../serverTypes';
 import { createTestModelServerDeps } from '../testing/modelProfiles';
+import type { TuiCheckpointMessage } from './transcriptProjection';
 
 test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
   const snapshot = buildHostSessionSnapshot({
@@ -154,4 +155,26 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
   });
   assert.equal(snapshot.session.pendingInterrupt, null);
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
+});
+
+test('buildHostSessionSnapshot keeps only the live run\'s unanswered tool calls open', () => {
+  const call = (id: string) => ({ id, name: 'delegate_capability', args: { briefing: id }, status: 'running' as const });
+  const deps = { petId: 'pet-a', ...createTestModelServerDeps(), runtimeConfig: { workdir: '/tmp/work',
+    stateRoot: '/tmp/work/.pinpawo' } } as unknown as ServerDeps;
+  const statuses = (messages: TuiCheckpointMessage[], activeRun: Parameters<typeof buildHostSessionSnapshot>[0]['activeRun']) => {
+    const snapshot = buildHostSessionSnapshot({ sessionId: 'chat:pet-a', kind: 'chat', messages, deps, activeRun });
+    assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
+    return snapshot.session.timeline.flatMap(entry => entry.type === 'message' ? entry.toolCalls?.map(c => c.status) ?? [] : []);
+  };
+  const live = { requestId: 'r', state: 'running', activity: 'using_tool', startedAt: 1 } as const;
+  const current = [
+    { role: 'user' as const, text: 'Go.', runId: 'run-1' },
+    { role: 'assistant' as const, text: '', toolCalls: [call('first')], runId: 'run-1' },
+    { role: 'assistant' as const, text: 'Starting.', toolCalls: [call('second')], runId: 'run-1' },
+  ];
+  assert.deepEqual(statuses(current, null), ['interrupted', 'interrupted']);
+  assert.deepEqual(statuses(current, live), ['running', 'running']);
+  // An earlier run's call is not the live run's, however recent: the new run has called nothing yet.
+  const later = [...current, { role: 'user' as const, text: 'Next.', runId: 'run-2' }];
+  assert.deepEqual(statuses(later, live), ['interrupted', 'interrupted']);
 });

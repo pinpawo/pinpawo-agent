@@ -19,6 +19,7 @@ import {
   planSettledTimelineCommits,
   reconcileTimelinePrefix,
   timelineFingerprint,
+  withToolCallOutcomes,
 } from './timelineScrollback';
 
 const user: AgentTimelineEntry = {
@@ -45,68 +46,70 @@ const assistant: AgentTimelineEntry = {
   status: 'completed',
 };
 
-test('live delegation shows only its objective and disappears after the run ends', () => {
+test('a running tool call the agent made names the live activity until the run ends', () => {
   const session: AgentSession = {
     sessionId: 'session', kind: 'chat', pendingInterrupt: null,
     activeRun: { requestId: 'request', state: 'running', activity: 'using_tool' },
-    currentPlan: { items: [{ id: 'task', capability: 'general', task: 'Verify contract extraction', status: 'active' }] },
-    timeline: [{ ...operation, kind: 'runtime.delegate_capability', title: 'delegate_capability',
-      raw: { input: { briefing: 'Long private execution instructions' } } }],
+    timeline: [{ ...assistant, text: '', toolCalls: [{ id: 'call', name: 'delegate_capability',
+      args: { briefing: 'Verify contract extraction\nLong private execution instructions' }, status: 'running' }] }],
   };
   assert.equal(formatLiveSession(session), 'Verify contract extraction');
   assert.equal(formatLiveSession({ ...session, activeRun: null }), 'idle');
-  assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
   }] }), 'Read file');
+  // The call is work in progress, never the reply.
+  assert.equal(latestCompletedAssistantReply(session), null);
 });
 
-test('a delegation is headed by its task and keeps its failure reason', () => {
-  const delegation: AgentTimelineEntry = {
-    ...operation,
-    id: 'delegation',
-    operationKey: 'delegation',
-    kind: 'runtime.delegate_capability',
-    title: 'delegate_capability',
-    raw: { input: { briefing: '读取 issue #826\n并定位相关代码' } },
-  };
-  // The heading names the task, on one row, instead of the tool call.
-  const header = formatTimelineEntry(delegation, { width: 80 });
-  assert.match(header, /任务 读取 issue #826 并定位相关代码/);
-  assert.doesNotMatch(header, /delegate_capability/);
-  assert.equal(header.split('\n').length, 1);
+test('a message\'s tool calls head their work and commit before they return', () => {
+  const call = { id: 'call', name: 'delegate_capability', args: { briefing: '\n读取 issue #826  并定位相关代码\n先看评论' }, status: 'running' as const };
+  const message: AgentTimelineEntry = { ...assistant, id: 'dispatch', text: '先看 issue。', toolCalls: [call] };
+  const lines = formatTimelineEntry(message, { width: 80 }).split('\n');
+  assert.deepEqual(lines, ['| 先看 issue。', '▸ 读取 issue #826 并定位相关代码']);
+  assert.doesNotMatch(lines.join('\n'), /delegate_capability|先看评论/);
+  assert.equal(formatTimelineEntry({ ...message, text: '' }), '▸ 读取 issue #826 并定位相关代码');
+  assert.match(formatTimelineEntry({ ...message, toolCalls: [{ ...call, status: 'failed' }] }), /（失败）/);
+  // Other tools need no knowledge here: they show by name.
+  assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, name: 'lookup', args: { q: 'x' } }] }), '▸ lookup');
 
-  // A failed delegation still reports why: the briefing replaces the payload
-  // rows, never the output ones.
-  const failed = formatTimelineEntry({
-    ...delegation,
-    phase: 'failed',
-    raw: { input: { briefing: '读取 issue' }, error: 'capability crashed' },
-  }, { width: 80 });
-  assert.match(failed, /capability crashed/);
-
-  // A running delegation has not finished, but its committed heading — the
-  // task alone — is already final, so the transcript may commit it and the
-  // finished tools behind it while the capability keeps working.
-  assert.equal(isSettledTimelineEntry(delegation), false);
+  // Its calls still run, but their committed form — the titles alone — is
+  // final, so the transcript commits it and the finished tools behind it.
   assert.equal(
     countSettledTimelinePrefix([
       user,
-      delegation,
+      message,
       { ...operation, id: 'done', operationKey: 'done', phase: 'completed' },
       operation,
     ]),
     3,
   );
-  // Its heading carries no status or elapsed time while it runs, which is what
-  // makes those rows safe to commit.
-  assert.doesNotMatch(header, /进行中|完成|失败/);
-  // Settling must not rewrite what was committed, or the block is emitted a
-  // second time when the delegation returns.
+  // A call settling must not rewrite what was committed.
   assert.equal(
-    timelineFingerprint(delegation),
-    timelineFingerprint({ ...delegation, phase: 'completed' }),
+    timelineFingerprint(message),
+    timelineFingerprint({ ...message, toolCalls: [{ ...call, status: 'completed' }] }),
   );
+});
+
+test('a call that ends badly after its line was committed gets an outcome row, not a rewrite', () => {
+  const call = { id: 'call', name: 'plan_request', args: { goal: '定位问题' }, status: 'running' as const };
+  const message: AgentTimelineEntry = { ...assistant, id: 'dispatch', text: '', toolCalls: [call] };
+  const work: AgentTimelineEntry = { ...operation, id: 'work', operationKey: 'work', phase: 'completed' };
+  const live = withToolCallOutcomes([user, message, work]);
+  const committed = live.slice(0, countSettledTimelinePrefix(live)).map(timelineFingerprint);
+  assert.equal(committed.length, 3);
+  for (const [status, outcome] of [['failed', '▸ 定位问题（失败）'], ['interrupted', '▸ 定位问题（已中断）']] as const) {
+    // A fresh snapshot (the run's completion) carries the outcome on the call itself.
+    const settled = withToolCallOutcomes([{ ...user }, { ...message, id: 'message:1:assistant', toolCalls: [{ ...call, status }] },
+      { ...work }, { ...assistant, text: '结束了。' }]);
+    assert.equal(findFirstUncommittedEntry(settled, committed), 3, 'nothing committed is written again');
+    assert.equal(formatTimelineEntry(settled[1]!), '▸ 定位问题');
+    assert.deepEqual(settled.slice(3).map(entry => formatTimelineEntry(entry)), [outcome, '| 结束了。']);
+    assert.equal(countSettledTimelinePrefix(settled, 3), settled.length);
+  }
+  // A completed call needs no row of its own.
+  const completed = [user, { ...message, toolCalls: [{ ...call, status: 'completed' as const }] }, work];
+  assert.equal(withToolCallOutcomes(completed), completed);
 });
 
 test('timeline model commits only the settled ordered prefix', () => {

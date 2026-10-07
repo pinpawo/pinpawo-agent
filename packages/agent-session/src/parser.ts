@@ -23,6 +23,7 @@ import type {
 import { isJsonValue } from './snapshot';
 import {
   isAgentTokenUsageSnapshot,
+  parseAgentMessageToolCalls,
   parseAgentPlan,
 } from './validation';
 
@@ -300,11 +301,14 @@ function parseAgentTimelineEntry(
     ) {
       return null;
     }
+    const toolCalls = value.toolCalls === undefined ? undefined : parseAgentMessageToolCalls(value.toolCalls, true);
+    if (toolCalls === null || (toolCalls && value.role !== 'assistant')) return null;
     return {
       id: value.id,
       type: 'message',
       role: value.role,
       text: value.text,
+      ...(toolCalls ? { toolCalls } : {}),
       ...(value.resultReferences !== undefined ? { resultReferences: parseResultReferences(value.resultReferences) } : {}),
       status: value.status,
       ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),

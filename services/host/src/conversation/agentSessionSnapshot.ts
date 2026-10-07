@@ -30,8 +30,9 @@ export function buildHostSessionSnapshot(params: {
   activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
-  const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingInterrupt = params.pendingInterrupt?.pendingInterrupt ?? null;
+  // A call without a result is still open only while its run is live or paused.
+  const timeline = timelineFromCheckpointMessages(params.messages, Boolean(pendingInterrupt || params.activeRun));
   const runtime = buildHostRuntimeView(
     params.deps,
     params.modelProfileId,
@@ -111,18 +112,24 @@ export function buildHostRuntimeView(
   };
 }
 
-function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): AgentTimelineEntry[] {
+function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[], runOpen: boolean): AgentTimelineEntry[] {
+  // The open run is the one its latest user message started; a call from any
+  // earlier run that never got a result can no longer get one.
+  const currentRunId = runOpen ? [...messages].reverse().find(message => message.role === 'user' && message.runId)?.runId : undefined;
   return messages.flatMap((message, index) => {
     const text = message.text.trim();
-    if (!text) {
+    if (!text && !message.toolCalls?.length) {
       return [];
     }
+    const toolCalls = message.toolCalls?.map(call => call.status === 'running' && !(currentRunId && message.runId === currentRunId)
+      ? { ...call, status: 'interrupted' as const } : call);
     return [{
       id: `message:${index}:${message.role}`,
       type: 'message',
       role: message.role,
       text,
       ...(message.resultReferences?.length ? { resultReferences: message.resultReferences } : {}),
+      ...(toolCalls?.length ? { toolCalls } : {}),
       status: 'completed',
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies AgentTimelineEntry];

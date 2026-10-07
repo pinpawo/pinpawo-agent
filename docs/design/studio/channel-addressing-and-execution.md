@@ -76,6 +76,14 @@ Channel 给 dispatch 的 `scope:{namespace:'channel',id}` 由 Host 在接纳时�
 私有 Capability 交付、工具结果、旧 checkpoint 回复与无 scope 的通用 dispatch 不自动发布。
 没有 `channel_send_message` 第二条输出路径。
 
+执行中的对话同样到达 Channel：dispatch 的 run 里，Agent Session 的 `message.tool_calls` /
+`tool_call.settled` 原样作为非终态 `dispatch.message`（payload `message`，去掉 requestId）发布，
+续跑同样发布，不论该会话是否在 TUI 上打开。Channel 按 (Pet, 会话, 会话消息 id) 幂等记一条
+Pet 消息，正文为模型同轮写的文本（可为空），`toolCalls` 保留调用原形 `{id, name, args}`；
+每个调用的结果（`completed` / `failed`，dispatch 中断或失败时未结束的记为 `interrupted`）单独存放、
+读取时合入 `status`。如何显示由前端按结构决定。它不解析 @、不派发，不改变执行记录状态：
+交接仍只由 `dispatch.completed.reply` 触发。
+
 唯一 Channel Toolkit 入口 `channel_read_context` 只读本轮已接纳 Channel 的目标/范围、
 分页历史、绑定和参与者，不接受作者或 Channel 参数。执行/审批历史是独立观察 API，
 不进入模型上下文；该工具不派发或恢复工作。

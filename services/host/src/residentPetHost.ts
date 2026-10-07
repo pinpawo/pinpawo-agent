@@ -35,6 +35,7 @@ export {
   type AgentSessionPeer,
   type PetDispatchLifecycleEvent,
   type PetDispatchLifecycleState,
+  type PetDispatchMessage,
   type PetDispatchPort,
   type PetDispatchQueueSnapshot,
   type PetDispatchQueueEntry,

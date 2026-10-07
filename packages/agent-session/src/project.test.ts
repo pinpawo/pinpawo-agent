@@ -749,3 +749,56 @@ test('text resuming after a tool becomes its own assistant entry', () => {
   assert.equal(assistants[1]?.text, 'port is 3210');
   assert.equal(assistants[0]?.status, 'streaming');
 });
+
+test('a tool-call message keeps the run going and settles in place, even after a resumed review', () => {
+  const event = (body: Record<string, unknown>) => ({ type: 'runtime.event' as const, event: body as never });
+  let session = replay(createDomainSession(), [
+    { input: { type: 'user.accepted', requestId: 'r1', kind: 'chat', text: 'inspect' }, observedAt: 1 },
+    { input: event({ type: 'message.tool_calls', requestId: 'r1', messageId: 'm1', text: 'Starting.',
+      toolCalls: [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Look at A.' } }] }), observedAt: 2 },
+  ]);
+  const entry = () => session.timeline.find((item): item is Extract<AgentTimelineEntry, { type: 'message' }> =>
+    item.type === 'message' && Boolean(item.toolCalls))!;
+  assert.equal(session.activeRun?.state === 'running' && session.activeRun.activity, 'using_tool');
+  assert.deepEqual(entry().toolCalls, [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Look at A.' }, status: 'running' }]);
+  assert.equal(entry().text, 'Starting.');
+  // A review pauses the call; the run answering it settles the same entry.
+  session = replay(session, [
+    { input: event({ type: 'interrupt.requested', requestId: 'r1', pendingInterrupt: { interruptId: 'i', payload: { kind: 'unknown' } } }), observedAt: 3 },
+  ]);
+  assert.equal(entry().toolCalls![0]!.status, 'running');
+  session = { ...session, pendingInterrupt: null, activeRun: { requestId: 'r2', state: 'running', activity: 'thinking' } };
+  session = replay(session, [
+    { input: event({ type: 'tool_call.settled', requestId: 'r2', messageId: 'm1', callId: 'c1', status: 'completed' }), observedAt: 4 },
+  ]);
+  assert.equal(entry().toolCalls![0]!.status, 'completed');
+  assert.equal(session.activeRun?.requestId, 'r2');
+});
+
+test('a run that stops leaves its open tool calls interrupted', () => {
+  const event = (body: Record<string, unknown>) => ({ type: 'runtime.event' as const, event: body as never });
+  const session = replay(createDomainSession(), [
+    { input: { type: 'user.accepted', requestId: 'r1', kind: 'chat', text: 'inspect' }, observedAt: 1 },
+    { input: event({ type: 'message.tool_calls', requestId: 'r1', messageId: 'm1', text: '',
+      toolCalls: [{ id: 'c1', name: 'delegate_capability', args: {} }] }), observedAt: 2 },
+    { input: event({ type: 'run.interrupted', requestId: 'r1' }), observedAt: 3 },
+  ]);
+  const call = session.timeline.flatMap(item => item.type === 'message' ? item.toolCalls ?? [] : [])[0];
+  assert.equal(call?.status, 'interrupted');
+  assert.equal(session.activeRun, null);
+});
+
+test('a run that completes without a call\'s result leaves it interrupted', () => {
+  const event = (body: Record<string, unknown>) => ({ type: 'runtime.event' as const, event: body as never });
+  const session = replay(createDomainSession(), [
+    { input: { type: 'user.accepted', requestId: 'r1', kind: 'chat', text: 'inspect' }, observedAt: 1 },
+    { input: event({ type: 'message.tool_calls', requestId: 'r1', messageId: 'm1', text: '',
+      toolCalls: [{ id: 'c1', name: 'delegate_capability', args: {} }, { id: 'c2', name: 'lookup', args: {} }] }), observedAt: 2 },
+    { input: event({ type: 'tool_call.settled', requestId: 'r1', messageId: 'm1', callId: 'c2', status: 'failed' }), observedAt: 3 },
+    // For example a run stopped at its recursion limit reports a completed reply.
+    { input: event({ type: 'message.completed', requestId: 'r1', messageId: 'final', text: 'Stopped early.' }), observedAt: 4 },
+  ]);
+  const calls = session.timeline.flatMap(item => item.type === 'message' ? item.toolCalls ?? [] : []);
+  assert.deepEqual(calls.map(call => call.status), ['interrupted', 'failed']);
+  assert.equal(session.activeRun, null);
+});

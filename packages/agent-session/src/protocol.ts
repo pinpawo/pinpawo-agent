@@ -33,6 +33,8 @@ import {
 } from './parser';
 import {
   isAgentReviewSpecValue,
+  isAgentToolCallStatus,
+  parseAgentMessageToolCalls,
   parseAgentPlan,
   parseAgentTokenUsageSnapshot,
 } from './validation';
@@ -559,6 +561,24 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
     const messageId = readString(record, 'messageId');
     return role === 'assistant' && text != null && messageId
       ? { type, requestId, messageId, role, text }
+      : null;
+  }
+  if (type === 'message.tool_calls') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'messageId', 'text', 'toolCalls'])) return null;
+    const messageId = readString(record, 'messageId');
+    const text = readString(record, 'text');
+    const toolCalls = parseAgentMessageToolCalls(record.toolCalls, false);
+    return messageId && text != null && toolCalls?.length
+      ? { type, requestId, messageId, text, toolCalls }
+      : null;
+  }
+  if (type === 'tool_call.settled') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'messageId', 'callId', 'status'])) return null;
+    const messageId = readString(record, 'messageId');
+    const callId = readString(record, 'callId');
+    const status = record.status;
+    return messageId && callId && isAgentToolCallStatus(status) && status !== 'running'
+      ? { type, requestId, messageId, callId, status }
       : null;
   }
   if (type === 'subagent.message.completed') {

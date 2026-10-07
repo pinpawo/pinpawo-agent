@@ -305,3 +305,30 @@ test('legacy pause notification data is preserved and explicitly refused rather 
     assert.equal(service.readContext(id).history.entries.length, 1);
   } finally { database?.close(); service.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a Pet tool-call message keeps its calls as written, settles in place and addresses nobody', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-tool-calls-'));
+  const file = path.join(root, 'channels.sqlite');
+  let service = new ChannelService(file); service.init();
+  try {
+    const channelId = service.createChannel(goal, human).channelId;
+    const binding = service.reserveBinding(channelId, pet.id, () => 'executor:12345678');
+    const source = { petId: pet.id, sessionId: binding.sessionId, invocationId: 'turn' };
+    const calls = [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Inspect A.' } },
+      { id: 'c2', name: 'lookup', args: { q: 'x' } }];
+    const message = service.recordToolCallMessage(channelId, source, { messageId: 'm1', text: '', toolCalls: calls });
+    assert.equal(message.body, '');
+    assert.deepEqual(message.mentions, []);
+    assert.deepEqual(message.toolCalls, calls.map(call => ({ ...call, status: 'running' })));
+    // Replays of the same session message record nothing new.
+    assert.deepEqual(service.recordToolCallMessage(channelId, source, { messageId: 'm1', text: '', toolCalls: calls }), message);
+    service.settleToolCall(channelId, source, { messageId: 'm1', callId: 'c1', status: 'completed' });
+    service.settleToolCall(channelId, source, { messageId: 'unseen', callId: 'c9', status: 'failed' });
+    service.interruptToolCalls(source);
+    service.close(); service = new ChannelService(file); service.init();
+    assert.deepEqual(service.getMessage(channelId, message.messageId).toolCalls?.map(call => call.status), ['completed', 'interrupted']);
+    assert.equal(service.readHistory(channelId).entries.length, 2);
+    assert.throws(() => service.recordToolCallMessage(channelId, { ...source, sessionId: 'other' }, { messageId: 'm2', text: '', toolCalls: calls }), /binding/);
+    assert.throws(() => service.recordToolCallMessage(channelId, source, { messageId: 'm3', text: '', toolCalls: [] }));
+  } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
+});

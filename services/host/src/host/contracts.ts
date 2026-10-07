@@ -2,7 +2,10 @@ import type { PetInvocationScope } from './petInvocationContext';
 import type {
   PendingInterruptProjection,
   AgentClientMessage,
+  AgentRuntimeEvent,
   AgentServerMessage,
+  AgentToolCallMessageEvent,
+  AgentToolCallSettledEvent,
 } from '@pinpawo/agent-session';
 
 /**
@@ -56,7 +59,21 @@ export type PetDispatchLifecycleState =
   | 'waiting'
   | 'completed'
   | 'interrupted'
-  | 'failed';
+  | 'failed'
+  /** Non-terminal: the running dispatch's conversation gained or settled a tool call. */
+  | 'message';
+
+/** A conversation message event of the dispatch's run, as Agent Session carries it. */
+export type PetDispatchMessage =
+  | Omit<AgentToolCallMessageEvent, 'requestId'>
+  | Omit<AgentToolCallSettledEvent, 'requestId'>;
+
+/** Narrow a runtime event to what dispatch observers see of the conversation. */
+export function readPetDispatchMessage(event: AgentRuntimeEvent): PetDispatchMessage | null {
+  if (event.type !== 'message.tool_calls' && event.type !== 'tool_call.settled') return null;
+  const { requestId: _requestId, ...message } = event;
+  return message;
+}
 
 /**
  * Observation-only lifecycle for one admitted dispatch. This is not an Agent
@@ -70,6 +87,8 @@ export type PetDispatchLifecycleEvent = {
   error?: string;
   sessionId?: string;
   reply?: string;
+  /** Present only on `message`, which never changes the dispatch's state. */
+  message?: PetDispatchMessage;
   scope?: PetInvocationScope;
   pendingInterrupt?: PendingInterruptProjection;
 };

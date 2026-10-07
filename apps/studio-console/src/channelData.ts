@@ -9,7 +9,32 @@ export type ChannelMessage = {
   author: { kind: string; id: string }; occurredAt: string; revision: number; replyTo?: string;
   source?: { petId: string; sessionId: string; invocationId: string };
   artifacts: ArtifactReference[]; mentions: { participantId?: string; petId?: string; label?: string }[];
+  /** Tools the Pet called in this message, exactly as it called them. */
+  toolCalls?: ChannelToolCall[];
 };
+export type ChannelToolCall = {
+  id: string; name: string; args: Record<string, unknown>;
+  status: 'running' | 'completed' | 'failed' | 'interrupted';
+};
+
+/** A call as one line: what it was asked to do, else the tool's name. */
+export function channelToolCallTitle(call: Pick<ChannelToolCall, 'name' | 'args'>): string {
+  const subject = call.name === 'delegate_capability' ? call.args.briefing
+    : call.name === 'plan_request' ? call.args.goal : undefined;
+  const line = typeof subject === 'string' ? subject.split('\n').find(part => part.trim())?.trim() : undefined;
+  return line || call.name;
+}
+
+/** The detail a call carries: a delegation's briefing as written, otherwise its arguments. */
+export function channelToolCallDetail(call: Pick<ChannelToolCall, 'name' | 'args'>): { markdown?: string; json?: string } {
+  if (call.name === 'delegate_capability' && typeof call.args.briefing === 'string') return { markdown: call.args.briefing };
+  return Object.keys(call.args).length ? { json: JSON.stringify(call.args, null, 2) } : {};
+}
+
+/** What a message says in one line, for quotes: its text, else what it called. */
+export function channelMessageSummary(message: Pick<ChannelMessage, 'body' | 'toolCalls'>): string {
+  return message.body.trim() ? channelQuote(message.body) : channelQuote((message.toolCalls ?? []).map(channelToolCallTitle).join(' · '));
+}
 export type ChannelEntry = ChannelGoal | ChannelMessage;
 export type ChannelExecution = {
   sequence: number; executionId: string; channelId: string; petId: string; sessionId: string;

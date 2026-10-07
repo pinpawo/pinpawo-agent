@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readChannelPages, executionLabel, channelPetIdentity, channelMessageIdentity, channelMessageExecution,
-  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelReplyRecipientId, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
+  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageSummary, channelMessageInput, channelReplyRecipientId, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
 import { ChannelTimeline, ChannelExecutionHistory } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
@@ -157,6 +157,18 @@ test('unfinished observations become unknown after disconnection or restart; wai
   assert.ok(markup.includes('worker:same')); assert.ok(markup.includes('not the current approval state'));
 });
 
+test('a Pet tool-call message renders each call from its own structure', () => {
+  const calls = { ...message, messageId: 'calls', body: '', mentions: [], toolCalls: [
+    { id: 'c1', name: 'delegate_capability', args: { briefing: '\nInspect the CRM record\nThen report.' }, status: 'running' as const },
+    { id: 'c2', name: 'lookup', args: { q: 'x' }, status: 'failed' as const },
+  ] };
+  const markup = renderToStaticMarkup(<ChannelTimeline entries={[calls]} pending={false} onReply={() => undefined} />);
+  assert.ok(markup.includes('Inspect the CRM record')); assert.ok(markup.includes('Then report.'));
+  assert.ok(markup.includes('lookup')); assert.ok(markup.includes('&quot;q&quot;: &quot;x&quot;'));
+  assert.ok(markup.includes('Running')); assert.ok(markup.includes('Failed'));
+  assert.ok(!markup.includes('channel-message-body"></div>'));
+  assert.equal(channelMessageSummary(calls), 'Inspect the CRM record · lookup');
+});
 
 test('message reader shares safe Markdown and participant identity rendering with the Timeline', () => {
   const markup = renderToStaticMarkup(<ChannelMessageMarkdown body={'# Evidence\n\n[Analyst](participant:pet:worker)\n\n| Item | Value |\n| --- | --- |\n| test | passed |\n\n```ts\nconst n = 42;\n```\n\n[unsafe](javascript:alert(1))\n\n<script>bad()</script>'}

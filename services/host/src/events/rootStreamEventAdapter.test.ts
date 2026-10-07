@@ -1,7 +1,7 @@
 import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
@@ -496,4 +496,31 @@ test('committed Supervisor reply publishes once with its identity while private 
     { type: 'assistant.delta', node: null, messageId: 'final-reply', text: 'Ready to publish.' },
   ]);
   assert.equal(events.some(e => e.type === 'subagent.message'), false);
+});
+
+test('main tool calls reach the conversation as messages and settle, including calls open when a run resumes', async () => {
+  const call = (id: string) => setAgentMessageMetadata(new AIMessage({ id, content: id === 'new' ? 'Looking it up.' : '',
+    tool_calls: [{ name: 'lookup', id: `call:${id}`, type: 'tool_call', args: { q: id } }] }), { runId: 'current' });
+  const result = (id: string) => new ToolMessage({ tool_call_id: `call:${id}`, content: 'ok' });
+  const state = Annotation.Root({ ...MessagesAnnotation.spec, runId: Annotation<string>() });
+  const graph = new StateGraph(state)
+    .addNode('resume', () => ({ messages: [result('open'), call('new')] }))
+    .addNode('tools', () => ({ messages: [result('new')] }))
+    .addEdge(START, 'resume').addEdge('resume', 'tools').addEdge('tools', END).compile();
+  const run = await graph.streamEvents({ runId: 'current', messages: [
+    new HumanMessage('Proceed'), call('done'), result('done'), call('open'),
+  ] }, { version: 'v3' });
+  const events: RootStreamChatEvent[] = [];
+  for await (const event of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) events.push(event);
+  // A call ends before the message after it begins, even when one snapshot carries both.
+  assert.deepEqual(events.filter(e => e.type === 'tool_calls.message' || e.type === 'tool_call.settled'), [
+    { type: 'tool_call.settled', messageId: 'open', callId: 'call:open', status: 'completed' },
+    { type: 'tool_calls.message', messageId: 'new', text: 'Looking it up.',
+      toolCalls: [{ id: 'call:new', name: 'lookup', args: { q: 'new' } }] },
+    { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'completed' },
+  ]);
+  // Root's own tool node is that message, not a separate operation.
+  assert.equal(readRootStreamChatEvent({ type: 'event', seq: 1, method: 'tools', params: {
+    namespace: ['capability:1'], data: { event: 'tool-started', tool_call_id: 'call:new', tool_name: 'lookup' },
+  } }, new Map()), null);
 });

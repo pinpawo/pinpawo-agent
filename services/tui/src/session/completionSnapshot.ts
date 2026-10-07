@@ -118,11 +118,13 @@ function reconcileCheckpointMessages(
       index >= liveIndex
       && candidate.role === message.role
       && message.text === candidate.text
+      && toolCallIds(candidate) === toolCallIds(message)
     ));
     const matchingIndex = exactIndex >= 0
       ? exactIndex
       : live.findIndex((candidate, index) => (
         index >= liveIndex && candidate.role === message.role
+        && Boolean(candidate.toolCalls?.length) === Boolean(message.toolCalls?.length)
       ));
     if (matchingIndex < 0) {
       return { message, liveIndex: -1 };
@@ -136,6 +138,10 @@ function reconcileCheckpointMessages(
       liveIndex: matchingIndex,
     };
   });
+}
+
+function toolCallIds(message: AgentMessageEntry) {
+  return message.toolCalls?.map(call => call.id).join('\n') ?? '';
 }
 
 function isSettledSupplementaryEntry(entry: AgentTimelineEntry) {

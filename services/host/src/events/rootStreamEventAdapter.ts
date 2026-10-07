@@ -1,5 +1,6 @@
-import { readFinalMessageText } from '../agent/agentStreamEvents';
-import { AIMessage } from '@langchain/core/messages';
+import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
   GUARD_DECISION_EVENT,
   isOrchestratorInternalAiStreamNode,
@@ -62,6 +63,10 @@ export type RootStreamChatEvent =
   | { type: 'guard.decision'; record: GuardDecisionRecord }
   /** Raw custom-channel event; known names are projected downstream and unknown names are ignored. */
   | { type: 'runtime.custom'; streamSequence: number; name: string; data: unknown }
+  /** Root committed a main message that calls tools; the run continues. */
+  | { type: 'tool_calls.message'; messageId: string; text: string; toolCalls: Array<Omit<AgentMessageToolCall, 'status'>> }
+  /** A main tool call announced in this stream, or open when it began, reached its outcome. */
+  | { type: 'tool_call.settled'; messageId: string; callId: string; status: 'completed' | 'failed' }
   /** Root state snapshot (drives final-messages tracking). */
   | { type: 'values'; values: Record<string, unknown> }
   /** The run paused on an interrupt (human review etc.). */
@@ -259,6 +264,11 @@ export function readRootStreamChatEvent(
       if (!data) {
         return null;
       }
+      // Root's own tool node runs the calls of main messages, which reach the
+      // conversation as those messages rather than as operations.
+      if (namespace.length === 1) {
+        return null;
+      }
       // Supervisor file exploration tools are framework internals, not Capability
       // Toolkit activity exposed to the chat surface.
       if (isInternalOrchestratorNamespace(namespace)) {
@@ -330,6 +340,9 @@ export async function* adaptRootStream(
   const state: RootStreamAdapterState = new Map();
   let assistantReply = '';
   const seenMessages = new Set<string>();
+  // Main tool calls whose outcome this stream still owes: announced here, or
+  // already open in the first snapshot (a run resumed after a review).
+  const openToolCalls = new Map<string, string>();
   let receivedInitialValues = false;
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);
@@ -363,6 +376,7 @@ export async function* adaptRootStream(
           assistantReply += text;
         }
       }
+      yield* projectMainToolCalls(chatEvent.values, messages, seenMessages, openToolCalls, receivedInitialValues);
       for (const message of messages) {
         const id = readRecord(message)?.id;
         if (typeof id === 'string') seenMessages.add(id);
@@ -371,4 +385,37 @@ export async function* adaptRootStream(
     }
     yield chatEvent;
   }
+}
+
+function* projectMainToolCalls(
+  values: Record<string, unknown>,
+  messages: readonly unknown[],
+  seenMessages: ReadonlySet<string>,
+  openToolCalls: Map<string, string>,
+  announce: boolean,
+): Generator<RootStreamChatEvent> {
+  const results = readToolResultStatuses(messages);
+  function* settle(): Generator<RootStreamChatEvent> {
+    for (const [callId, messageId] of openToolCalls) {
+      const status = results.get(callId);
+      if (!status) continue;
+      openToolCalls.delete(callId);
+      yield { type: 'tool_call.settled', messageId, callId, status };
+    }
+  }
+  // Earlier calls end before the message after them begins.
+  yield* settle();
+  for (const message of messages as BaseMessage[]) {
+    const toolCalls = readMessageToolCalls(message);
+    const pinpawo = readRecord(message.additional_kwargs?.pinpawo);
+    // Main messages of this run: private lanes and synthetic bookkeeping are not conversation.
+    if (!message.id || !toolCalls.length || pinpawo?.lane || pinpawo?.synthetic || pinpawo?.runId !== values.runId) continue;
+    if (announce && !seenMessages.has(message.id)) {
+      yield { type: 'tool_calls.message', messageId: message.id, text: readFinalMessageText(message), toolCalls };
+      for (const call of toolCalls) openToolCalls.set(call.id, message.id);
+    } else if (!announce) {
+      for (const call of toolCalls) if (!results.has(call.id)) openToolCalls.set(call.id, message.id);
+    }
+  }
+  yield* settle();
 }

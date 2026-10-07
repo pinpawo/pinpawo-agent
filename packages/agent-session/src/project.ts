@@ -211,6 +211,10 @@ function reduceRuntimeEvent(
         { ...message, role: 'assistant', text: event.text, resultReferences: event.resultReferences },
         context,
       );
+    case 'message.tool_calls':
+      return appendToolCallMessage(session, event, context);
+    case 'tool_call.settled':
+      return settleToolCall(session, event);
     case 'operation':
       return applyOperationEvent(session, event, context);
     case 'plan.updated':
@@ -393,6 +397,74 @@ function applyOperationEvent(
   });
 }
 
+function appendToolCallMessage(
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'message.tool_calls' }>,
+  context: AgentSessionReductionContext,
+) {
+  if (!event.toolCalls.length || !ownsRun(session, event.requestId)) return session;
+  const id = assistantEntryId(event.requestId, event.messageId);
+  const previous = findMessageEntry(session.timeline, id);
+  const entry: AgentMessageEntry = {
+    id,
+    type: 'message',
+    role: 'assistant',
+    requestId: event.requestId,
+    text: event.text,
+    toolCalls: event.toolCalls.map(call => ({
+      ...call,
+      status: previous?.toolCalls?.find(known => known.id === call.id)?.status ?? 'running',
+    })),
+    status: 'completed',
+    ...(previous?.createdAt ? { createdAt: previous.createdAt } : createdAtField(undefined, context)),
+  };
+  return updateOwnedRun({
+    ...session,
+    timeline: upsertTimelineEntry(session.timeline, entry),
+    pendingInterrupt: null,
+  }, event.requestId, (run) => ({
+    ...runViewBase(run, event.requestId),
+    state: 'running',
+    activity: 'using_tool',
+    ...observedAtUpdate(context),
+  }));
+}
+
+/**
+ * Settle by the call's own identity: a call made before a review keeps its
+ * entry when the run that answers the review settles it.
+ */
+function settleToolCall(
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'tool_call.settled' }>,
+) {
+  const entry = session.timeline.find((candidate): candidate is AgentMessageEntry =>
+    candidate.type === 'message' && Boolean(candidate.toolCalls?.some(call => call.id === event.callId)));
+  if (!entry) return session;
+  return {
+    ...session,
+    timeline: upsertTimelineEntry(session.timeline, {
+      ...entry,
+      toolCalls: entry.toolCalls!.map(call => call.id === event.callId ? { ...call, status: event.status } : call),
+    }),
+  };
+}
+
+/**
+ * A run that stops without an outcome leaves open calls interrupted, including
+ * one made by the run it resumed after a review.
+ */
+function interruptOpenToolCalls(session: AgentSession, requestId: string): AgentSession {
+  if (!ownsRun(session, requestId)) return session;
+  return {
+    ...session,
+    timeline: session.timeline.map(entry => entry.type === 'message'
+      && entry.toolCalls?.some(call => call.status === 'running')
+      ? { ...entry, toolCalls: entry.toolCalls.map(call => call.status === 'running' ? { ...call, status: 'interrupted' as const } : call) }
+      : entry),
+  };
+}
+
 function hasOpenOperation(
   timeline: readonly AgentTimelineEntry[],
   requestId: string,
@@ -471,6 +543,9 @@ function finishOwnedRun(
   } = {},
 ) {
   if (!ownsRun(session, requestId)) return session;
+  // A run that ends without a call's result leaves it interrupted, however it
+  // ended; one paused on a review keeps its calls open for the run resuming it.
+  if (!session.pendingInterrupt) session = interruptOpenToolCalls(session, requestId);
   let nextSession: AgentSession = {
     ...session,
     timeline: options.settleStreamingMessages === false
@@ -696,6 +771,7 @@ function upsertTimelineEntry(
 function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   if (entry.type === 'message') return { ...entry,
     ...(entry.resultReferences ? { resultReferences: entry.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(entry.toolCalls ? { toolCalls: entry.toolCalls.map(call => ({ ...call, args: { ...call.args } })) } : {}),
   };
   return {
     ...entry,

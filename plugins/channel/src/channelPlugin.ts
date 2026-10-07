@@ -129,7 +129,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       service.init();
       context = host;
       host.subscribe(async (event) => {
-        if (event.source !== 'resident-pet' || !['dispatch.queued', 'dispatch.running', 'dispatch.completed', 'dispatch.waiting', 'dispatch.failed', 'dispatch.interrupted'].includes(event.type)) return;
+        if (event.source !== 'resident-pet' || !['dispatch.queued', 'dispatch.running', 'dispatch.message', 'dispatch.completed', 'dispatch.waiting', 'dispatch.failed', 'dispatch.interrupted'].includes(event.type)) return;
         // Scope is captured by Host for this invocation, never inferred from a bound session.
         const envelope = z.object({ scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }) }).safeParse(event.payload);
         if (!envelope.success) return;
@@ -137,9 +137,19 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         try {
           const { petId, sessionId, invocationId } = z.object({ petId: z.string().min(1), sessionId: z.string().min(1), invocationId: z.string().min(1) }).parse(event.payload);
           const source = { petId, sessionId, invocationId };
+          if (event.type === 'dispatch.message') {
+            // The Pet's conversation as it happens: no state change, nobody addressed.
+            const { message } = z.object({ message: z.object({ type: z.string() }).passthrough() }).parse(event.payload);
+            const { type, ...body } = message;
+            if (type === 'message.tool_calls') service.recordToolCallMessage(channelId, source, body);
+            else if (type === 'tool_call.settled') service.settleToolCall(channelId, source, body);
+            return;
+          }
           const state = event.type.slice('dispatch.'.length) as 'queued' | 'running' | 'completed' | 'waiting' | 'failed' | 'interrupted';
           const error = z.object({ error: z.string().optional() }).parse(event.payload).error;
           service.recordExecution(channelId, source, state, event.occurredAt, error);
+          // Any end leaves a call without a result interrupted; a later result still overrides it.
+          if (state === 'completed' || state === 'interrupted' || state === 'failed') service.interruptToolCalls(source);
           if (event.type === 'dispatch.completed') {
             const { reply } = z.object({ reply: z.string() }).parse(event.payload);
             if (reply.trim()) {

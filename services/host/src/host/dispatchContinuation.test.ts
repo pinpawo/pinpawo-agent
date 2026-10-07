@@ -122,3 +122,18 @@ test('an unreadable outcome keeps the suspension so a retry still continues the 
   assert.deepEqual([h.events.at(-1)?.state, h.events.at(-1)?.dispatchId, h.events.at(-1)?.scope?.id], ['completed', 'dispatch-1', 'ch-1']);
   assert.equal(h.session.pendingDispatch, undefined);
 });
+
+test('tool calls in the continued run report under the original dispatch', async () => {
+  const h = harness();
+  const settled = { type: 'tool_call.settled', requestId: 'req-2', messageId: 'm1', callId: 'c1', status: 'completed' } as const;
+  await continueSuspendedDispatch({
+    petId: 'pet', sessions: { findSessionByThread: () => h.session, setPendingDispatch: () => {} } as never,
+    publishLifecycle: (event) => h.events.push(event),
+    run: async (options) => { options.emitEvent(settled); return { status: 'completed', reply: 'done' }; },
+  })({ ...h.turn('review-1'), emitEvent: () => {} } as never);
+  assert.deepEqual(h.events.map((event) => [event.state, event.dispatchId, event.scope?.id, event.message?.type]), [
+    ['running', 'dispatch-1', 'ch-1', undefined],
+    ['message', 'dispatch-1', 'ch-1', 'tool_call.settled'],
+    ['completed', 'dispatch-1', 'ch-1', undefined],
+  ]);
+});

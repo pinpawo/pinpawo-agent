@@ -22,6 +22,7 @@ import {
   ResidentPetCoordinator,
   ResidentPetInteractionBusyError,
   type AgentSessionPeer,
+  type PetDispatchLifecycleEvent,
   type PetDispatchState,
 } from './residentPetHost';
 import { FileSaver } from './fileSaver';
@@ -1083,3 +1084,31 @@ for (const wakeup of ['enqueue', 'refresh'] as const) {
     } finally { release.resolve(); await coordinator.close(); }
   });
 }
+
+test('a dispatch reports its conversation tool calls as non-terminal messages, whichever session is on screen', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-dispatch-message-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const toolCalls = [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Inspect B.' } }];
+  const host = await createResidentPetHost({
+    petId: 'message-pet', petName: 'Message', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    runAgentTurn: async ({ request, emitEvent }) => {
+      emitEvent({ type: 'message.tool_calls', requestId: request.requestId, messageId: 'm1', text: '', toolCalls });
+      emitEvent({ type: 'tool_call.settled', requestId: request.requestId, messageId: 'm1', callId: 'c1', status: 'completed' });
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  const lifecycle: PetDispatchLifecycleEvent[] = [];
+  host.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
+  try {
+    await host.resident.dispatch.dispatch({ request: 'inspect', scope: { namespace: 'channel', id: 'ch-1' } });
+    await waitFor(() => lifecycle.some(event => event.state === 'completed'), 'the dispatch did not complete');
+    assert.deepEqual(lifecycle.map(event => event.state), ['queued', 'running', 'message', 'message', 'completed']);
+    assert.deepEqual(lifecycle[2].message, { type: 'message.tool_calls', messageId: 'm1', text: '', toolCalls });
+    assert.deepEqual(lifecycle[3].message, { type: 'tool_call.settled', messageId: 'm1', callId: 'c1', status: 'completed' });
+    assert.equal(lifecycle[2].scope?.id, 'ch-1');
+  } finally { await host.close(); }
+});

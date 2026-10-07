@@ -2,7 +2,8 @@ import {
   normalizeToolStreamEvent,
   type StreamToolsPayload,
 } from '../events/agentStreamNormalizer';
-import type { AgentOperationEvent } from '@pinpawo/agent-session';
+import type { AgentMessageToolCall, AgentOperationEvent } from '@pinpawo/agent-session';
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   emptyOperationRegistry,
   type OperationRegistry,
@@ -36,4 +37,22 @@ export function readFinalMessageText(message: { content?: unknown }) {
       .trim();
   }
   return '';
+}
+
+/** The tool calls a message makes, exactly as the model wrote them. */
+export function readMessageToolCalls(message: BaseMessage): Array<Omit<AgentMessageToolCall, 'status'>> {
+  if (!AIMessage.isInstance(message)) return [];
+  return (message.tool_calls ?? []).flatMap(call => call.id ? [{ id: call.id, name: call.name, args: call.args ?? {} }] : []);
+}
+
+/** Main-conversation tool results keyed by the call they answer; lane results are private work. */
+export function readToolResultStatuses(messages: readonly unknown[]) {
+  return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && !isLaneMessage(message)
+    ? [[message.tool_call_id, message.status === 'error' ? 'failed' as const : 'completed' as const]]
+    : []));
+}
+
+function isLaneMessage(message: BaseMessage) {
+  const pinpawo = message.additional_kwargs?.pinpawo;
+  return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
 }

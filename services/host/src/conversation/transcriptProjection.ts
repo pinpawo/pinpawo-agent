@@ -7,9 +7,9 @@ import {
   readMessagesTokenUsage,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
-import type { AgentInputModality, AgentResultReference } from '@pinpawo/agent-session';
+import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
-import { readFinalMessageText } from '../agent/agentStreamEvents';
+import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 
 /**
  * Transcript projection for the interface.
@@ -23,6 +23,10 @@ import { readFinalMessageText } from '../agent/agentStreamEvents';
 export type TuiCheckpointMessage = {
   role: 'user' | 'assistant';
   resultReferences?: AgentResultReference[];
+  /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
+  toolCalls?: AgentMessageToolCall[];
+  /** The orchestrator run that wrote this message, as stamped by the runtime. */
+  runId?: string;
   text: string;
   createdAt?: string;
 };
@@ -33,20 +37,27 @@ export type TuiCheckpointTokenUsage = (TokenUsageSnapshot & { scope: 'session' }
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   // Tool results remain execution evidence; never replay deliveries as chat messages.
+  const results = readToolResultStatuses(messages);
   return messages.flatMap<TuiCheckpointMessage>((message) => {
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);
-    if (!text) {
+    const toolCalls = readMessageToolCalls(message).map(call => ({ ...call, status: results.get(call.id) ?? 'running' as const }));
+    if (!text && !toolCalls.length) {
       return [];
     }
     const createdAt = readAgentMessageCreatedAt(message);
+    const metadata = message.additional_kwargs?.pinpawo;
+    const runId = metadata && typeof metadata === 'object' && 'runId' in metadata && typeof metadata.runId === 'string'
+      ? metadata.runId : undefined;
     const resultReferences = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
       ? readReplyResultReferences(messages, message) : [];
     return [{
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
+      ...(runId ? { runId } : {}),
       ...(createdAt ? { createdAt } : {}),
     }];
   });

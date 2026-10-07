@@ -19,41 +19,6 @@ const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'patch',
 ]);
 
-/**
- * A delegation heads a task instead of reporting a tool call: it stays
- * `started` for the whole capability run, and the tools it spawns arrive
- * behind it as siblings in the flat timeline. Callers use this to render those
- * tools as its content rather than as peers.
- */
-export function isDelegationEntry(entry: {
-  type: string;
-  kind?: string;
-  operationSource?: { toolName?: string };
-}) {
-  return entry.type === 'operation'
-    && (entry.kind === 'runtime.delegate_capability'
-      || entry.operationSource?.toolName === 'delegate_capability');
-}
-
-/**
- * The task a delegation was given, as a single line, or null.
- *
- * Tool input reaches the transcript either as the decoded arguments or as the
- * raw JSON the model emitted, depending on how far along the call was when the
- * event was built, so both shapes have to be read here.
- */
-export function readDelegationTask(entry: AgentOperationEntry) {
-  const briefing = readBriefing(entry.raw?.input);
-  if (typeof briefing !== 'string') return null;
-  const task = briefing.replace(/\s+/g, ' ').trim();
-  return task || null;
-}
-
-function readBriefing(input: unknown): unknown {
-  const record = asRecord(input) ?? asRecord(parseJson(input));
-  return record?.briefing;
-}
-
 function asRecord(value: unknown) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -77,23 +42,6 @@ export function buildOperationDisplayLines(
 ): OperationDisplayLine[] {
   const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
   if (authorizationLines) return authorizationLines;
-  const task = isDelegationEntry(entry) ? readDelegationTask(entry) : null;
-  if (task) {
-    // A delegation heads a task: the briefing is its title, not a payload row.
-    //
-    // While it runs the heading carries no status and no elapsed time. That is
-    // what lets the transcript commit it immediately, which in turn lets the
-    // tools behind it commit as they finish instead of appearing all at once
-    // when the delegation returns — the transcript only commits rows it will
-    // never have to rewrite. Once the delegation settles its outcome is fixed,
-    // so the terminal phase is safe to show.
-    const settled = entry.phase !== 'started' && entry.phase !== 'updated';
-    return [{
-      text: settled
-        ? buildOperationHeaderText(`任务 ${task}`, entry, now, headerWidth)
-        : sanitizeLine(`任务 ${task}`, headerWidth),
-    }, ...buildOperationOutputLines(entry, width)];
-  }
   return [{
     text: buildOperationHeader(entry, now, headerWidth),
   }, ...buildOperationPayloadLines(entry, width), ...buildOperationOutputLines(entry, width)];
@@ -267,8 +215,6 @@ function buildOperationOutputLines(
   entry: AgentOperationEntry,
   width: number,
 ): OperationDisplayLine[] {
-  // Delivery prose is linked from the final reply, never dumped under a task.
-  if (isDelegationEntry(entry) && entry.phase !== 'failed') return [];
   // Successful operations are one-line receipts. PageUp retains their full
   // output; patches keep their existing bounded diff above this section.
   const isError = entry.phase === 'failed' || hasReturnedError(entry);

@@ -13,7 +13,7 @@ import {
 } from './transcriptProjection';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
 
-test('readTuiCheckpointMessages keeps visible conversation without replaying Capability deliveries', () => {
+test('readTuiCheckpointMessages keeps visible conversation and delegations without replaying Capability deliveries', () => {
   const userMessage = stampAgentMessageCreatedAt(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -36,6 +36,8 @@ test('readTuiCheckpointMessages keeps visible conversation without replaying Cap
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
+    { role: 'assistant', text: '', createdAt: '2026-06-01T01:00:00.000Z', runId: 'run-1', toolCalls: [{ id: 'call:delivery-1',
+      name: 'delegate_capability', args: { briefing: 'Fixture plan' }, status: 'completed' }] },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
 });
@@ -50,14 +52,16 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
   const result = createCapabilityExecutionMessage({ callId: 'dispatch-1', execution, metadata,
     result: { status: 'returned', artifacts: [], delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } } });
-  assert.deepEqual(readTuiCheckpointMessages([call, result]), []);
+  // The delegation is the call itself; its delivery never replays as text.
+  const delegation = (status: 'running' | 'completed') => ({ role: 'assistant', text: '', runId: 'run-1', toolCalls: [{
+    id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' }, status }] });
+  assert.deepEqual(readTuiCheckpointMessages([call, result]), [delegation('completed')]);
   assert.deepEqual(readTuiCheckpointMessages([result]), []);
-  for (const overrides of [{ lane: 'capability:general' as const }, { runId: 'other-run' }]) {
-    const hidden = setAgentMessageMetadata(new ToolMessage({ ...result, tool_call_id: 'dispatch-1' }), overrides);
-    assert.deepEqual(readTuiCheckpointMessages([call, hidden]), []);
-  }
+  const privateResult = setAgentMessageMetadata(new ToolMessage({ ...result, tool_call_id: 'dispatch-1' }), { lane: 'capability:general' });
+  assert.deepEqual(readTuiCheckpointMessages([call, privateResult]), [delegation('running')]);
   const before = result.content;
   assert.deepEqual(readTuiCheckpointMessages([call, result, new AIMessage('Verified delivery')]), [
+    delegation('completed'),
     { role: 'assistant', text: 'Verified delivery' },
   ]);
   assert.equal(result.content, before);

@@ -18,11 +18,23 @@ export type AgentResultReference = {
   text: string;
 };
 
+export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'interrupted';
+
+/** A tool the main agent called in this message, as the model wrote the call. */
+export type AgentMessageToolCall = {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  status: AgentToolCallStatus;
+};
+
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
   role: 'user' | 'assistant' | 'system' | 'subagent';
   text: string;
+  /** Assistant only. A message that calls tools may have no text. */
+  toolCalls?: AgentMessageToolCall[];
   resultReferences?: AgentResultReference[];
   status: 'streaming' | 'completed';
   requestId?: string;

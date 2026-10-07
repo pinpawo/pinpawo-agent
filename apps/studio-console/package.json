@@ -12,9 +12,11 @@
     "typecheck": "tsc -b --pretty false && tsc --noEmit -p tsconfig.browser.json",
     "test:browser": "node tests/channel.browser.mjs",
     "test:browser:layout": "node tests/channelLayout.browser.mjs",
-    "test:browser:message": "node tests/channelMessage.browser.mjs"
+    "test:browser:message": "node tests/channelMessage.browser.mjs",
+    "test:browser:session": "node tests/petSession.browser.mjs"
   },
   "dependencies": {
+    "@pinpawo/agent-session": "^0.2.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

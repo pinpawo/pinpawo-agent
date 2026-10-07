@@ -159,6 +159,12 @@ export class ServerTuiSessionService {
     return this.getActiveSession(petId).id;
   }
 
+  /** The active session's id as recorded, without ensuring or saving one. */
+  peekActiveSessionId(petId: string): string | null {
+    const activeId = this.state.activeSessionIds[petId];
+    return activeId && this.state.sessions[activeId]?.petId === petId ? activeId : null;
+  }
+
   getSession(petId: string, sessionId: string) {
     const session = this.state.sessions[sessionId];
     return session?.petId === petId ? session : null;
@@ -360,8 +366,24 @@ export class ServerTuiSessionService {
     }
   }
 
+  async refreshSessionSummary(deps: ServerDeps, session: TuiSessionRecord) {
+    try {
+      const messages = await this.readSessionCheckpointMessages(deps, session);
+      this.updateSessionSummaryFromCheckpoint(session, messages);
+    } catch (err) {
+      console.warn('[local-server] failed to refresh session summary:', err instanceof Error ? err.message : err);
+    }
+  }
+
   async readActivePendingInterrupt(deps: ServerDeps): Promise<ActivePendingInterrupt | null> {
     const session = this.getActiveSession(deps.petId);
+    return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
+  }
+
+  async readSessionPendingInterrupt(
+    deps: ServerDeps,
+    session: TuiSessionRecord,
+  ): Promise<ActivePendingInterrupt | null> {
     return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
   }
 

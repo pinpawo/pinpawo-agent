@@ -156,9 +156,11 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
   })}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
 }
 
-export function ChannelExecutionHistory({ executions, connected, pets = [], petsReady = true, entries = [], highlighted, onLocateMessage }: {
+export function ChannelExecutionHistory({ executions, connected, pets = [], petsReady = true, entries = [], highlighted, onLocateMessage, onViewSession }: {
   executions: ChannelExecution[]; connected: boolean; pets?: ChannelPet[]; petsReady?: boolean; entries?: ChannelEntry[]; highlighted?: string;
   onLocateMessage?: (messageId: string) => void;
+  /** Opens the execution's own session; never the binding's or the TUI's current one. */
+  onViewSession?: (execution: ChannelExecution) => void;
 }) {
   return <div className="channel-executions">{!executions.length && <div className="compact-empty">No executions recorded.</div>}{[...executions].reverse().map(item => {
     const identity = channelPetIdentity(item.petId, pets, petsReady);
@@ -169,9 +171,10 @@ export function ChannelExecutionHistory({ executions, connected, pets = [], pets
         <em className={item.observationLost || (!connected && ['admitting', 'queued', 'running', 'waiting'].includes(item.state)) ? 'unknown' : item.state}>{executionLabel(item, connected)}</em></div>
       <time dateTime={item.occurredAt}>{new Date(item.occurredAt).toLocaleString()}</time>
       <div className="channel-execution-links">{item.messageId && <button type="button" onClick={() => onLocateMessage?.(item.messageId!)}>Locate request</button>}
-        {outputs.map((output, index) => <button type="button" key={output.messageId} onClick={() => onLocateMessage?.(output.messageId)}>{outputs.length > 1 ? 'Locate output ' + (index + 1) : 'Locate output'}</button>)}</div>
+        {outputs.map((output, index) => <button type="button" key={output.messageId} onClick={() => onLocateMessage?.(output.messageId)}>{outputs.length > 1 ? 'Locate output ' + (index + 1) : 'Locate output'}</button>)}
+        {onViewSession && <button type="button" disabled={!connected} onClick={() => onViewSession(item)}>View session</button>}</div>
       {(item.observationLost || (!connected && ['admitting', 'queued', 'running', 'waiting'].includes(item.state))) && <p>Observation was interrupted. Last recorded: {item.state}. Refresh and inspect the Pet session; tasks are not replayed automatically.</p>}
-      {item.state === 'waiting' && <p>Review was requested. Use the original Pet TUI and session to inspect its current state; this record is not the current approval state.</p>}
+      {item.state === 'waiting' && <p>Review was requested. This record is not the current approval state; open the session to see whether the review is still current.</p>}
       {item.error && <p className="channel-record-error" role="alert">{item.error}</p>}
       {item.deliveryError && <p className="channel-record-error" role="alert">Reply or notice storage failed: {item.deliveryError}</p>}
       <ChannelTechnicalDetails execution={item} />

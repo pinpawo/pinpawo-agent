@@ -95,8 +95,36 @@ export type StudioPluginContext = {
    * Studio neither stores them nor decides how a queue should progress.
    */
   listDispatchQueues: () => StudioDispatchQueue[];
+  /**
+   * Read, follow, and answer the current review of one exact Pet session.
+   * Borrowed from the Pet's Host: Studio adds Pet routing and nothing else.
+   */
+  petSessions: StudioPetSessions;
   hooks: StudioPluginHooks;
 };
+
+type PetSessionPort = import('pinpawo/host-runtime').PetSessionPort;
+
+/**
+ * Exact-session access to resident Pets. A Pet that is not registered, or
+ * whose Host offers no session port, rejects with `pet_unavailable`; an
+ * unknown session rejects with `session_not_found`. Neither ever falls back
+ * to another Pet or to an active session.
+ */
+export type StudioPetSessions = {
+  snapshot: (petId: string, ...args: Parameters<PetSessionPort['snapshot']>) => ReturnType<PetSessionPort['snapshot']>;
+  observe: (petId: string, ...args: Parameters<PetSessionPort['observe']>) => ReturnType<PetSessionPort['observe']>;
+  review: (petId: string, ...args: Parameters<PetSessionPort['review']>) => ReturnType<PetSessionPort['review']>;
+};
+
+export class StudioPetUnavailableError extends Error {
+  readonly code = 'pet_unavailable';
+
+  constructor(petId: string) {
+    super(`Pet "${petId}" is not available for session access.`);
+    this.name = 'StudioPetUnavailableError';
+  }
+}
 
 /** Read-only projection of one resident Pet's dispatch-admission queue. */
 export type StudioDispatchQueue = {

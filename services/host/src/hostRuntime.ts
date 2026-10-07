@@ -12,6 +12,8 @@ export {
   createResidentPetHost,
   createResidentPetInteraction,
   createResidentPetRuntime,
+  createResidentPetSessions,
+  PetSessionNotFoundError,
   ResidentPetCoordinator,
 } from './residentPetHost';
 export type {
@@ -27,6 +29,8 @@ export type {
   PetDispatchRequest,
   PetDispatchSettledState,
   PetDispatchState,
+  PetSessionPort,
+  PetSessionReviewRequest,
   ResidentPet,
   ResidentPetCoordinatorOptions,
   ResidentPetHost,

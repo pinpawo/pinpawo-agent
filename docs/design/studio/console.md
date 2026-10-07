@@ -42,8 +42,14 @@ Channel 完整读取分页，执行时补读观察。未结束的旧 Host 记录
 status unknown；已知终态保留。completed 不代表业务目标验收。
 直接 dispatch 的 receipt 只表示接纳，不是可恢复 execution handle。
 
-Console 不接管独占 TUI WebSocket，不读 checkpoint，也不提供审批、resume、cancel
-或其他 Agent Session 控制。Channel Review 仅为历史通知，当前审批在原 Pet TUI/session。
+Console 不接管独占 TUI WebSocket，也不提供 chat、dispatch、resume、cancel 或其他
+Agent Session 控制。每条 Channel execution、Pet session binding 与 Review 通知都有
+“View session” 入口（#923）：按记录自己的 `petId + sessionId` 打开只读阅读视图，首帧是
+Host 权威 snapshot，之后只收该 session 的事件；打开、关闭、重连都不切换 active session。
+唯一写操作是回答该 session **当前** review（服务端 view/options、`defer/immediate`
+批量语义），提交后等待同一 requestId 的 `run.started` 或 closed/stale 错误；结果不明时
+重读 snapshot，不自动重发。断线期间保留已读内容、禁用审批。Channel Review 通知本身仍只是
+历史记录。
 Agent Session HTTP 工具是独立操作入口，见 [API](../../reference/api/studio.md#host-agent-session-http)。
 
 ## 验证与迁移

@@ -227,6 +227,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           name: petConfig.name,
         },
         dispatch: resident.resident.dispatch,
+        sessions: resident.sessions,
       });
     }
   } catch (error) {

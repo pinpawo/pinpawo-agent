@@ -7,11 +7,13 @@ import { buildHostSessionSnapshot } from './conversation/agentSessionSnapshot';
 import type {
   AgentModelProfileSummary,
   AgentRuntimeEvent,
+  AgentSessionSnapshot,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import type {
   HostSessionServerMessage,
+  InterruptResumeMessage,
 } from './wire/protocol';
 import { handleLocalHttpRequest } from './httpHandlers';
 import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
@@ -38,6 +40,22 @@ import {
 export type ServerHandlers = {
   interruptRun: (requestId: string) => boolean;
   peerHandlers: LocalServerPeerHandlers;
+  /**
+   * Read one exact session without selecting it. Throws `session_not_found`
+   * for a session this Pet does not own; it never falls back to the active
+   * session and never creates one.
+   */
+  readSessionSnapshot: (sessionId: string) => Promise<AgentSessionSnapshot>;
+  /**
+   * Answer the current human review of one exact session, in that session's
+   * own thread. Admission, validation and dispatch continuation are the same
+   * as for the active session; the active selection does not change.
+   */
+  resumeSessionInterrupt: (
+    peer: ServerPeer,
+    sessionId: string,
+    message: InterruptResumeMessage,
+  ) => Promise<void>;
   handleHttpRequest: (
     req: IncomingMessage,
     res: ServerResponse,
@@ -169,6 +187,27 @@ export function createLocalServerHandlers(
     });
   };
   const activeRuns = options.activeRuns ?? new ActiveRunRegister();
+
+  const readSessionSnapshot = async (sessionId: string) => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.getSession(requestDeps.petId, sessionId);
+    if (!session) {
+      throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
+    }
+    const checkpoint = await tuiSessions.readSessionCheckpointPoint(requestDeps, session);
+    return buildHostSessionSnapshot({
+      sessionId: checkpoint.sessionId,
+      kind: 'chat',
+      messages: checkpoint.messages,
+      deps: requestDeps,
+      modelProfileId: checkpoint.modelProfileId,
+      requiredInputModalities: checkpoint.requiredInputModalities,
+      sessionTokenUsage: checkpoint.sessionTokenUsage,
+      pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
+      activeRun: activeRuns.read(checkpoint.sessionId),
+      currentPlan: checkpoint.currentPlan,
+    });
+  };
 
   const loadSnapshot = async (peer?: ServerPeer) => {
     const requestDeps = runtimeDeps.get();
@@ -550,6 +589,7 @@ export function createLocalServerHandlers(
     peer: ServerPeer,
     requestId: string,
     admit: () => Promise<void>,
+    sessionId?: string,
   ) => {
     // A human message is not a command: it waits for queued commands to
     // drain, then Session admits it.
@@ -561,7 +601,12 @@ export function createLocalServerHandlers(
       if (!peer.isConnected()) {
         return;
       }
-      const activeRun = activeRuns.begin(requestId);
+      // A turn without a target runs in the active session, which cannot
+      // change while it runs: session commands are refused mid-run.
+      const activeRun = activeRuns.begin(
+        requestId,
+        sessionId ?? tuiSessions.getActiveSessionId(runtimeDeps.get().petId),
+      );
       try {
         await admit();
       } finally {
@@ -760,6 +805,20 @@ export function createLocalServerHandlers(
 
   return {
     peerHandlers,
+    readSessionSnapshot,
+    resumeSessionInterrupt: async (peer, sessionId, message) => {
+      const requestDeps = runtimeDeps.get();
+      const session = tuiSessions.getSession(requestDeps.petId, sessionId);
+      if (!session) {
+        throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
+      }
+      await admitHumanMessage(
+        peer,
+        message.requestId,
+        () => chatHandler.handleInterruptResume(peer, message, runtimeDeps.get(), session),
+        session.id,
+      );
+    },
     interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
     close: () => {},
     handleHttpRequest: (req, res, authToken) => {

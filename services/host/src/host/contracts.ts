@@ -4,8 +4,10 @@ import type {
   AgentClientMessage,
   AgentRuntimeEvent,
   AgentServerMessage,
+  AgentSessionSnapshot,
   AgentToolCallMessageEvent,
   AgentToolCallSettledEvent,
+  HumanReviewResponse,
 } from '@pinpawo/agent-session';
 
 /**
@@ -122,9 +124,46 @@ export interface ResidentPetInteraction {
   close(): Promise<void>;
 }
 
+/** A human-review answer addressed to one session's current interrupt. */
+export type PetSessionReviewRequest = {
+  requestId: string;
+  interruptId: string;
+  value: { decisions: HumanReviewResponse[] };
+};
+
+/**
+ * Exact-session observation, plus the one write it allows: answering that
+ * session's current review.
+ *
+ * Nothing here selects, creates, or resumes a session, and observing claims
+ * no interactive connection. A session is addressed by id and never falls
+ * back to the active one.
+ */
+export interface PetSessionPort {
+  /** The session's authoritative snapshot. */
+  snapshot(sessionId: string): Promise<AgentSessionSnapshot>;
+  /**
+   * Follow one session. The first message is a `session.snapshot.result`;
+   * every later one is a message of that session only, in order. Messages
+   * published while the snapshot is read are delivered after it, not lost.
+   */
+  observe(
+    sessionId: string,
+    listener: (message: AgentServerMessage) => void,
+  ): Promise<() => void>;
+  /**
+   * Hand a review answer to the Host. Resolves once the Host owns it, not
+   * when the review takes effect: the outcome (a resumed run, or a
+   * closed/stale/wrong-session error) arrives on the session's observation
+   * under the same requestId.
+   */
+  review(sessionId: string, request: PetSessionReviewRequest): Promise<void>;
+}
+
 export interface ResidentPetHost {
   readonly resident: ResidentPet;
   readonly interaction: ResidentPetInteraction;
+  readonly sessions: PetSessionPort;
   close(): Promise<void>;
 }
 
@@ -155,6 +194,16 @@ export class ResidentPetInteractionBusyError extends Error {
   ) {
     super(message);
     this.name = 'ResidentPetInteractionBusyError';
+  }
+}
+
+/** The addressed session does not exist or belongs to another Pet. */
+export class PetSessionNotFoundError extends Error {
+  readonly code = 'session_not_found';
+
+  constructor(sessionId: string) {
+    super(`Session "${sessionId}" does not exist for this Pet.`);
+    this.name = 'PetSessionNotFoundError';
   }
 }
 

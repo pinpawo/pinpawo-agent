@@ -18,13 +18,22 @@ import {
   type StudioPluginContext,
 } from '@pinpawo/studio';
 import { readLocalServerAuthToken } from 'pinpawo/local-server-transport';
+import { parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
 
 const LOOPBACK_HOST = '127.0.0.1' as const;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
-const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/dispatch/queues', '/events', '/pets']);
+const RESERVED_ROUTE_PATHS = new Set([
+  '/dispatch',
+  '/dispatch/queues',
+  '/events',
+  '/pets',
+  '/pet-sessions/snapshot',
+  '/pet-sessions/events',
+  '/pet-sessions/review',
+]);
 
 type StudioHttpEnvironment = { Bindings: HttpBindings };
 type StudioHttpContext = Context<StudioHttpEnvironment>;
@@ -81,7 +90,7 @@ export type CreateStudioHttpPluginOptions = {
 export type StudioHttpPluginContext = Pick<
   StudioPluginContext,
   'dispatch' | 'listPets' | 'subscribe' | 'hooks'
-> & Partial<Pick<StudioPluginContext, 'listDispatchQueues'>>;
+> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions'>>;
 
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
@@ -160,6 +169,46 @@ function safeTokenEqual(provided: string, expected: string): boolean {
   const expectedBuffer = Buffer.from(expected);
   return providedBuffer.length === expectedBuffer.length
     && timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+function readSessionTarget(context: StudioHttpContext): { petId: string; sessionId: string } {
+  const petId = context.req.query('petId')?.trim();
+  const sessionId = context.req.query('sessionId')?.trim();
+  if (!petId || !sessionId) throw new HttpRequestError(400, 'petId and sessionId are required.');
+  return { petId, sessionId };
+}
+
+/** Only a review answer is accepted; any other Agent Session command is refused. */
+function parseSessionReviewBody(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  const allowed = ['petId', 'sessionId', 'requestId', 'interruptId', 'value'];
+  if (Object.keys(body).some((key) => !allowed.includes(key))) return null;
+  const fields = ['petId', 'sessionId', 'requestId', 'interruptId'] as const;
+  if (fields.some((field) => typeof body[field] !== 'string' || !(body[field] as string).trim())) return null;
+  const answer = body.value;
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return null;
+  const record = answer as Record<string, unknown>;
+  if (Object.keys(record).length !== 1 || !Array.isArray(record.decisions) || !record.decisions.length) return null;
+  const decisions = record.decisions.map(parseHumanReviewResponse);
+  if (decisions.some((decision) => decision === null)) return null;
+  return {
+    petId: (body.petId as string).trim(),
+    sessionId: (body.sessionId as string).trim(),
+    request: {
+      requestId: body.requestId as string,
+      interruptId: body.interruptId as string,
+      value: { decisions: decisions as HumanReviewResponse[] },
+    },
+  };
+}
+
+function readSessionAccessError(error: unknown): HttpRequestError {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'pet_unavailable') return new HttpRequestError(404, 'Pet is not available.');
+  if (code === 'session_not_found') return new HttpRequestError(404, 'Session does not exist for this Pet.');
+  console.error('[studio-http] session access failed:', error instanceof Error ? error.message : error);
+  return new HttpRequestError(500, 'Session access failed.');
 }
 
 function readRouteStatus(status: number | undefined): number {
@@ -327,6 +376,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   let started = false;
   let stopped = false;
   const eventClients = new Set<EventClient>();
+  const sessionStreams = new Set<EventClient>();
+  let sessionObservers = 0;
   const routes = new Map<string, StudioHttpRoute>();
 
   const routesHook: StudioHttpRoutesHook = {
@@ -469,6 +520,91 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     });
     app.all('/events', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
+    // Exact-session observation: the Host's snapshot and that session's own
+    // messages. Reading never selects, creates or resumes a session.
+    app.get('/pet-sessions/snapshot', async (requestContext) => {
+      const petSessions = context?.petSessions;
+      if (!petSessions) throw new HttpRequestError(503, 'Session observation is unavailable.');
+      const { petId, sessionId } = readSessionTarget(requestContext);
+      try {
+        return requestContext.json({ petId, snapshot: await petSessions.snapshot(petId, sessionId) });
+      } catch (error) {
+        throw readSessionAccessError(error);
+      }
+    });
+    app.all('/pet-sessions/snapshot', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+
+    app.get('/pet-sessions/events', async (requestContext) => {
+      const petSessions = context?.petSessions;
+      if (!petSessions) throw new HttpRequestError(503, 'Session observation is unavailable.');
+      const { petId, sessionId } = readSessionTarget(requestContext);
+      if (eventClients.size + sessionObservers >= maxEventClients) {
+        return requestContext.json({ error: 'Too many event clients.' }, 503);
+      }
+      // Attach before answering, so an unknown session is a 404 rather than
+      // an empty stream; the first message is always the session snapshot.
+      const pending: string[] = [];
+      let write: ((chunk: string) => void) | null = null;
+      let detach: () => void;
+      try {
+        detach = await petSessions.observe(petId, sessionId, (message) => {
+          const chunk = `event: agent.session\ndata: ${JSON.stringify(message)}\n\n`;
+          if (write) write(chunk);
+          else pending.push(chunk);
+        });
+      } catch (error) {
+        throw readSessionAccessError(error);
+      }
+      sessionObservers += 1;
+      const response = streamSSE(requestContext, async (stream) => {
+        let resolveClosed: (() => void) | undefined;
+        const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+        const close = () => resolveClosed?.();
+        let writing = Promise.resolve();
+        const enqueue = (chunk: string) => {
+          writing = writing.then(() => stream.write(chunk)).then(() => undefined, close);
+        };
+        const heartbeatTimer = setInterval(() => enqueue(': heartbeat\n\n'), heartbeatIntervalMs);
+        heartbeatTimer.unref();
+        const client: EventClient = { stream, close };
+        sessionStreams.add(client);
+        requestContext.req.raw.signal.addEventListener('abort', close, { once: true });
+        try {
+          enqueue('retry: 3000\n: connected\n\n');
+          for (const chunk of pending.splice(0)) enqueue(chunk);
+          write = enqueue;
+          await closed;
+        } finally {
+          clearInterval(heartbeatTimer);
+          requestContext.req.raw.signal.removeEventListener('abort', close);
+          sessionStreams.delete(client);
+          detach();
+          sessionObservers -= 1;
+        }
+      });
+      response.headers.set('Cache-Control', 'no-cache, no-transform');
+      response.headers.set('X-Accel-Buffering', 'no');
+      return response;
+    });
+    app.all('/pet-sessions/events', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+
+    // The one write: answer the session's current review. 202 means the Host
+    // took the answer, not that it applied; the outcome arrives on the
+    // session's events under the same requestId.
+    app.post('/pet-sessions/review', async (requestContext) => {
+      const petSessions = context?.petSessions;
+      if (!petSessions) throw new HttpRequestError(503, 'Session review is unavailable.');
+      const parsed = parseSessionReviewBody(await readJsonBody(requestContext));
+      if (!parsed) throw new HttpRequestError(400, 'Expected a review answer for one Pet session.');
+      try {
+        await petSessions.review(parsed.petId, parsed.sessionId, parsed.request);
+      } catch (error) {
+        throw readSessionAccessError(error);
+      }
+      return requestContext.json({ requestId: parsed.request.requestId }, 202);
+    });
+    app.all('/pet-sessions/review', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+
     app.all('*', async (requestContext) => {
       const route = routes.get(`${requestContext.req.method} ${requestContext.req.path}`);
       if (route) {
@@ -563,6 +699,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       heartbeat = undefined;
       for (const client of eventClients) client.close();
       eventClients.clear();
+      for (const client of sessionStreams) client.close();
+      sessionStreams.clear();
       const activeServer = server;
       server = undefined;
       currentAddress = null;

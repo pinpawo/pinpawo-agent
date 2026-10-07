@@ -85,7 +85,21 @@ export type ResidentPetRuntimeContext = {
   interactivePeer: { current: AgentSessionPeer | null };
   hostPeer: AgentSessionPeer;
   messageListeners: Set<(message: AgentServerMessage) => void>;
+  /** Publish one event of the active session. */
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
+  /**
+   * Publish one message of an exact session: to that session's observers,
+   * and to the active-session observers only when it is the active session.
+   */
+  publishSessionMessage: (sessionId: string, message: AgentServerMessage) => void;
+  publishSessionEvent: (sessionId: string, event: AgentRuntimeEvent) => void;
+  /** Follow one session's messages; returns the detach function. */
+  observeSession: (sessionId: string, listener: (message: AgentServerMessage) => void) => () => void;
+  /**
+   * A Host-owned peer bound to one session. Whatever a turn sends to it, or
+   * publishes with it as origin, reaches that session's observers.
+   */
+  openSessionPeer: (sessionId: string) => { peer: AgentSessionPeer; release: () => void };
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
   activeHostRuns: Map<string, AbortController>;

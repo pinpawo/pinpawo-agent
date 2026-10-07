@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PetDispatchPort } from 'pinpawo/host-runtime';
+import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 
 import { createStudio, prepareStudio } from './createStudio';
-import type { StudioPlugin } from './studioContract';
+import { StudioPetUnavailableError, type StudioPlugin, type StudioPluginContext } from './studioContract';
 import type { StudioPetBinding } from './types';
 
 function deferred<T = void>() {
@@ -274,6 +274,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'listDispatchQueues',
     'listPets',
     'notify',
+    'petSessions',
     'subscribe',
   ]);
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -281,6 +282,34 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     ['schedule.ready', 'scheduler'],
     ['dispatch.accepted', 'studio'],
   ]);
+  await studio.shutdown();
+});
+
+test('Plugin session access routes to the exact Pet and never to another', async () => {
+  const calls: unknown[] = [];
+  const sessions: PetSessionPort = {
+    snapshot: async (sessionId) => { calls.push(['snapshot', sessionId]); return { sessionId } as never; },
+    observe: async (sessionId) => { calls.push(['observe', sessionId]); return () => undefined; },
+    review: async (sessionId, request) => { calls.push(['review', sessionId, request.requestId]); },
+  };
+  let access: StudioPluginContext['petSessions'] | undefined;
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [{ ...binding('worker'), sessions }, binding('dispatch-only')],
+    plugins: [{ name: 'http', toolkits: [], start: (context) => { access = context.petSessions; } }],
+  });
+  assert.ok(access);
+  await access.snapshot('worker', 'worker:0000000a');
+  await access.observe('worker', 'worker:0000000a', () => undefined);
+  await access.review('worker', 'worker:0000000a', { requestId: 'r', interruptId: 'i', value: { decisions: [] } });
+  assert.deepEqual(calls, [
+    ['snapshot', 'worker:0000000a'],
+    ['observe', 'worker:0000000a'],
+    ['review', 'worker:0000000a', 'r'],
+  ]);
+  await assert.rejects(access.snapshot('dispatch-only', 's'), StudioPetUnavailableError);
+  await assert.rejects(access.snapshot('missing', 's'), StudioPetUnavailableError);
   await studio.shutdown();
 });
 

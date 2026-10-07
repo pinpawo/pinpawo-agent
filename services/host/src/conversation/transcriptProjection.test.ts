@@ -36,7 +36,7 @@ test('readTuiCheckpointMessages keeps visible conversation and delegations witho
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-    { role: 'assistant', text: '', createdAt: '2026-06-01T01:00:00.000Z', toolCalls: [{ id: 'call:delivery-1',
+    { role: 'assistant', text: '', createdAt: '2026-06-01T01:00:00.000Z', runId: 'run-1', toolCalls: [{ id: 'call:delivery-1',
       name: 'delegate_capability', args: { briefing: 'Fixture plan' }, status: 'completed' }] },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
@@ -53,7 +53,7 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
     result: { status: 'returned', artifacts: [], delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } } });
   // The delegation is the call itself; its delivery never replays as text.
-  const delegation = (status: 'running' | 'completed') => ({ role: 'assistant', text: '', toolCalls: [{
+  const delegation = (status: 'running' | 'completed') => ({ role: 'assistant', text: '', runId: 'run-1', toolCalls: [{
     id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' }, status }] });
   assert.deepEqual(readTuiCheckpointMessages([call, result]), [delegation('completed')]);
   assert.deepEqual(readTuiCheckpointMessages([result]), []);

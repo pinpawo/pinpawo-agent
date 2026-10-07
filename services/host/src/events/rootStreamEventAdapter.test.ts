@@ -512,10 +512,11 @@ test('main tool calls reach the conversation as messages and settle, including c
   ] }, { version: 'v3' });
   const events: RootStreamChatEvent[] = [];
   for await (const event of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) events.push(event);
+  // A call ends before the message after it begins, even when one snapshot carries both.
   assert.deepEqual(events.filter(e => e.type === 'tool_calls.message' || e.type === 'tool_call.settled'), [
+    { type: 'tool_call.settled', messageId: 'open', callId: 'call:open', status: 'completed' },
     { type: 'tool_calls.message', messageId: 'new', text: 'Looking it up.',
       toolCalls: [{ id: 'call:new', name: 'lookup', args: { q: 'new' } }] },
-    { type: 'tool_call.settled', messageId: 'open', callId: 'call:open', status: 'completed' },
     { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'completed' },
   ]);
   // Root's own tool node is that message, not a separate operation.

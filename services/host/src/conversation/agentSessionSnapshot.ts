@@ -113,13 +113,15 @@ export function buildHostRuntimeView(
 }
 
 function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[], runOpen: boolean): AgentTimelineEntry[] {
-  const lastToolCallMessage = messages.map(message => Boolean(message.toolCalls?.length)).lastIndexOf(true);
+  // The open run is the one its latest user message started; a call from any
+  // earlier run that never got a result can no longer get one.
+  const currentRunId = runOpen ? [...messages].reverse().find(message => message.role === 'user' && message.runId)?.runId : undefined;
   return messages.flatMap((message, index) => {
     const text = message.text.trim();
     if (!text && !message.toolCalls?.length) {
       return [];
     }
-    const toolCalls = message.toolCalls?.map(call => call.status === 'running' && !(runOpen && index === lastToolCallMessage)
+    const toolCalls = message.toolCalls?.map(call => call.status === 'running' && !(currentRunId && message.runId === currentRunId)
       ? { ...call, status: 'interrupted' as const } : call);
     return [{
       id: `message:${index}:${message.role}`,

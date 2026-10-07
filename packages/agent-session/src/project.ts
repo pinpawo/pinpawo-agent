@@ -194,7 +194,7 @@ function reduceRuntimeEvent(
     case 'run.started':
       return startObservedRun(session, event, context);
     case 'run.interrupted':
-      return finishOwnedRun(interruptOpenToolCalls(session, event.requestId), event.requestId, [{
+      return finishOwnedRun(session, event.requestId, [{
         role: 'system',
         requestId: event.requestId,
         text: event.message?.trim() || 'Run interrupted.',
@@ -226,7 +226,7 @@ function reduceRuntimeEvent(
     case 'system.notice':
       return appendRuntimeSystemMessage(session, event.requestId, event.message, message, context);
     case 'error':
-      return finishOwnedRun(interruptOpenToolCalls(session, event.requestId), event.requestId, [{
+      return finishOwnedRun(session, event.requestId, [{
         ...(message ?? {}),
         role: 'system',
         requestId: event.requestId,
@@ -543,6 +543,9 @@ function finishOwnedRun(
   } = {},
 ) {
   if (!ownsRun(session, requestId)) return session;
+  // A run that ends without a call's result leaves it interrupted, however it
+  // ended; one paused on a review keeps its calls open for the run resuming it.
+  if (!session.pendingInterrupt) session = interruptOpenToolCalls(session, requestId);
   let nextSession: AgentSession = {
     ...session,
     timeline: options.settleStreamingMessages === false

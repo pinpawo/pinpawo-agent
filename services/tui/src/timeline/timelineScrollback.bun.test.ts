@@ -519,6 +519,36 @@ test('a running operation gets a live surface without committing later rows out 
   }
 });
 
+test('a committed call that later fails gets its outcome as a new row', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  const committedText = () => setup.externalOutput.take().flatMap(commit => commit.rows).join('\n');
+  try {
+    const user = userMessage('inspect');
+    const call = { id: 'call-1', name: 'plan_request', args: { goal: '定位问题' }, status: 'running' as const };
+    const message: AgentTimelineEntry = { ...assistantMessage('', 'completed'), id: 'dispatch', toolCalls: [call] };
+    const work: AgentTimelineEntry = { id: 'work', type: 'operation', requestId: 'request-1', operationKey: 'work',
+      kind: 'tool', title: 'Read file', phase: 'completed' };
+    timeline.render(session([user, message, work], 'request-1'));
+    const first = committedText();
+    assert.match(first, /▸ 定位问题/);
+    assert.doesNotMatch(first, /失败/);
+
+    const failed = { ...message, toolCalls: [{ ...call, status: 'failed' as const }] };
+    timeline.render(session([user, failed, work], 'request-1'));
+    const outcome = committedText();
+    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 定位问题（失败）'],
+      'only the outcome is written; committed rows stay as they are');
+
+    // The completion snapshot carries the same outcome: nothing more to write.
+    timeline.render(session([{ ...user, id: 'message:0:user' }, { ...failed, id: 'message:1:assistant' }, { ...work }]));
+    assert.equal(committedText(), '');
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('long sessions use bounded native scrollback commits', async () => {
   const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);

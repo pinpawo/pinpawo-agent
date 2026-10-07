@@ -787,3 +787,18 @@ test('a run that stops leaves its open tool calls interrupted', () => {
   assert.equal(call?.status, 'interrupted');
   assert.equal(session.activeRun, null);
 });
+
+test('a run that completes without a call\'s result leaves it interrupted', () => {
+  const event = (body: Record<string, unknown>) => ({ type: 'runtime.event' as const, event: body as never });
+  const session = replay(createDomainSession(), [
+    { input: { type: 'user.accepted', requestId: 'r1', kind: 'chat', text: 'inspect' }, observedAt: 1 },
+    { input: event({ type: 'message.tool_calls', requestId: 'r1', messageId: 'm1', text: '',
+      toolCalls: [{ id: 'c1', name: 'delegate_capability', args: {} }, { id: 'c2', name: 'lookup', args: {} }] }), observedAt: 2 },
+    { input: event({ type: 'tool_call.settled', requestId: 'r1', messageId: 'm1', callId: 'c2', status: 'failed' }), observedAt: 3 },
+    // For example a run stopped at its recursion limit reports a completed reply.
+    { input: event({ type: 'message.completed', requestId: 'r1', messageId: 'final', text: 'Stopped early.' }), observedAt: 4 },
+  ]);
+  const calls = session.timeline.flatMap(item => item.type === 'message' ? item.toolCalls ?? [] : []);
+  assert.deepEqual(calls.map(call => call.status), ['interrupted', 'failed']);
+  assert.equal(session.activeRun, null);
+});

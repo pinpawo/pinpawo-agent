@@ -148,7 +148,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           const state = event.type.slice('dispatch.'.length) as 'queued' | 'running' | 'completed' | 'waiting' | 'failed' | 'interrupted';
           const error = z.object({ error: z.string().optional() }).parse(event.payload).error;
           service.recordExecution(channelId, source, state, event.occurredAt, error);
-          if (state === 'interrupted' || state === 'failed') service.interruptToolCalls(source);
+          // Any end leaves a call without a result interrupted; a later result still overrides it.
+          if (state === 'completed' || state === 'interrupted' || state === 'failed') service.interruptToolCalls(source);
           if (event.type === 'dispatch.completed') {
             const { reply } = z.object({ reply: z.string() }).parse(event.payload);
             if (reply.trim()) {

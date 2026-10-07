@@ -118,7 +118,8 @@ export class TimelineScrollback {
     };
   }
 
-  render(session: AgentSession) {
+  render(source: AgentSession) {
+    const session = { ...source, timeline: withToolCallOutcomes(source.timeline) };
     if (session.sessionId !== this.sessionId) {
       const previousSessionId = this.sessionId;
       this.destroyTimelineSurface();
@@ -476,6 +477,41 @@ export function planSettledTimelineCommits(
   return ranges;
 }
 
+const displayTimelines = new WeakMap<readonly AgentTimelineEntry[], readonly AgentTimelineEntry[]>();
+
+/**
+ * The timeline as the transcript writes it. A call's line is committed while
+ * it runs, so a call that then fails or is interrupted cannot change that line:
+ * its outcome becomes a row of its own where the call's work ends, and the
+ * call's own line keeps its title alone.
+ */
+export function withToolCallOutcomes(timeline: readonly AgentTimelineEntry[]): readonly AgentTimelineEntry[] {
+  const cached = displayTimelines.get(timeline);
+  if (cached) return cached;
+  const outcomes = new Map<number, AgentMessageEntry[]>();
+  const display = timeline.map((entry, index) => {
+    if (!isToolCallMessageEntry(entry)) return entry;
+    const unsuccessful = entry.toolCalls!.filter(call => call.status === 'failed' || call.status === 'interrupted');
+    if (!unsuccessful.length) return entry;
+    let end = index + 1;
+    while (end < timeline.length && isToolCallContent(timeline[end]!)) end += 1;
+    outcomes.set(end, [...outcomes.get(end) ?? [], {
+      type: 'message', id: `${entry.id}:outcome`, role: 'assistant', text: '', toolCalls: unsuccessful, status: 'completed',
+    }]);
+    return { ...entry, toolCalls: entry.toolCalls!.map(call => unsuccessful.includes(call) ? { ...call, status: 'completed' as const } : call) };
+  });
+  const result = outcomes.size
+    ? [...display.keys(), display.length].flatMap(index => [...outcomes.get(index) ?? [], ...display.slice(index, index + 1)])
+    : timeline;
+  displayTimelines.set(timeline, result);
+  return result;
+}
+
+/** What follows a message as the work its calls started. */
+function isToolCallContent(entry: AgentTimelineEntry) {
+  return isDelegationScopeChild(entry) || (entry.type === 'message' && entry.role === 'subagent');
+}
+
 export function timelineFingerprint(entry: AgentTimelineEntry) {
   if (entry.type === 'message') {
     return JSON.stringify([
@@ -483,8 +519,10 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       entry.role,
       normalizeText(entry.text),
       entry.status,
-      // Titles only: a call's outcome does not rewrite the committed line.
-      ...(entry.toolCalls ?? []).map(call => normalizeText(toolCallTitle(call))),
+      // A committed call line holds its title alone; only an outcome row,
+      // written once the call has ended, carries the outcome.
+      ...(entry.toolCalls ?? []).map(call => normalizeText(toolCallTitle(call))
+        + (call.status === 'failed' || call.status === 'interrupted' ? `:${call.status}` : '')),
     ]);
   }
   return JSON.stringify([

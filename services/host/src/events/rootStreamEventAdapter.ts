@@ -395,6 +395,16 @@ function* projectMainToolCalls(
   announce: boolean,
 ): Generator<RootStreamChatEvent> {
   const results = readToolResultStatuses(messages);
+  function* settle(): Generator<RootStreamChatEvent> {
+    for (const [callId, messageId] of openToolCalls) {
+      const status = results.get(callId);
+      if (!status) continue;
+      openToolCalls.delete(callId);
+      yield { type: 'tool_call.settled', messageId, callId, status };
+    }
+  }
+  // Earlier calls end before the message after them begins.
+  yield* settle();
   for (const message of messages as BaseMessage[]) {
     const toolCalls = readMessageToolCalls(message);
     const pinpawo = readRecord(message.additional_kwargs?.pinpawo);
@@ -407,10 +417,5 @@ function* projectMainToolCalls(
       for (const call of toolCalls) if (!results.has(call.id)) openToolCalls.set(call.id, message.id);
     }
   }
-  for (const [callId, messageId] of openToolCalls) {
-    const status = results.get(callId);
-    if (!status) continue;
-    openToolCalls.delete(callId);
-    yield { type: 'tool_call.settled', messageId, callId, status };
-  }
+  yield* settle();
 }

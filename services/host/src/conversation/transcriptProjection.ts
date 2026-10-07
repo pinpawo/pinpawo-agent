@@ -25,6 +25,8 @@ export type TuiCheckpointMessage = {
   resultReferences?: AgentResultReference[];
   /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
   toolCalls?: AgentMessageToolCall[];
+  /** The orchestrator run that wrote this message, as stamped by the runtime. */
+  runId?: string;
   text: string;
   createdAt?: string;
 };
@@ -45,6 +47,9 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       return [];
     }
     const createdAt = readAgentMessageCreatedAt(message);
+    const metadata = message.additional_kwargs?.pinpawo;
+    const runId = metadata && typeof metadata === 'object' && 'runId' in metadata && typeof metadata.runId === 'string'
+      ? metadata.runId : undefined;
     const resultReferences = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
       ? readReplyResultReferences(messages, message) : [];
     return [{
@@ -52,6 +57,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
+      ...(runId ? { runId } : {}),
       ...(createdAt ? { createdAt } : {}),
     }];
   });

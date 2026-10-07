@@ -19,6 +19,7 @@ import {
   planSettledTimelineCommits,
   reconcileTimelinePrefix,
   timelineFingerprint,
+  withToolCallOutcomes,
 } from './timelineScrollback';
 
 const user: AgentTimelineEntry = {
@@ -88,6 +89,27 @@ test('a message\'s tool calls head their work and commit before they return', ()
     timelineFingerprint(message),
     timelineFingerprint({ ...message, toolCalls: [{ ...call, status: 'completed' }] }),
   );
+});
+
+test('a call that ends badly after its line was committed gets an outcome row, not a rewrite', () => {
+  const call = { id: 'call', name: 'plan_request', args: { goal: '定位问题' }, status: 'running' as const };
+  const message: AgentTimelineEntry = { ...assistant, id: 'dispatch', text: '', toolCalls: [call] };
+  const work: AgentTimelineEntry = { ...operation, id: 'work', operationKey: 'work', phase: 'completed' };
+  const live = withToolCallOutcomes([user, message, work]);
+  const committed = live.slice(0, countSettledTimelinePrefix(live)).map(timelineFingerprint);
+  assert.equal(committed.length, 3);
+  for (const [status, outcome] of [['failed', '▸ 定位问题（失败）'], ['interrupted', '▸ 定位问题（已中断）']] as const) {
+    // A fresh snapshot (the run's completion) carries the outcome on the call itself.
+    const settled = withToolCallOutcomes([{ ...user }, { ...message, id: 'message:1:assistant', toolCalls: [{ ...call, status }] },
+      { ...work }, { ...assistant, text: '结束了。' }]);
+    assert.equal(findFirstUncommittedEntry(settled, committed), 3, 'nothing committed is written again');
+    assert.equal(formatTimelineEntry(settled[1]!), '▸ 定位问题');
+    assert.deepEqual(settled.slice(3).map(entry => formatTimelineEntry(entry)), [outcome, '| 结束了。']);
+    assert.equal(countSettledTimelinePrefix(settled, 3), settled.length);
+  }
+  // A completed call needs no row of its own.
+  const completed = [user, { ...message, toolCalls: [{ ...call, status: 'completed' as const }] }, work];
+  assert.equal(withToolCallOutcomes(completed), completed);
 });
 
 test('timeline model commits only the settled ordered prefix', () => {

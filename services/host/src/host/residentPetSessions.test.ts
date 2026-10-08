@@ -10,6 +10,7 @@ import { buildReviewSpec, type CapabilityArtifactStore } from '@pinpawo/pet-agen
 import {
   createResidentPetHost,
   PetSessionNotFoundError,
+  PetSessionReviewRefusedError,
   type AgentSessionPeer,
   type PetDispatchLifecycleEvent,
 } from '../residentPetHost';
@@ -53,6 +54,8 @@ async function createWaitingHost() {
   const runtimeConfig = buildHostRuntimeConfig(root);
   const threads = new Map<string, { messages: AIMessage[]; reviewing: boolean }>();
   const turns: string[] = [];
+  // Tests hold a resumed run, or one checkpoint read, open on these.
+  const gates: { resume?: Promise<void>; read?: Promise<void> } = {};
   const host = await createResidentPetHost({
     petId: 'pet',
     petName: 'Pet',
@@ -68,6 +71,9 @@ async function createWaitingHost() {
     graphService: {
       readThreadState: async (setup: { input: { threadId?: string } }) => {
         const thread = threads.get(setup.input.threadId ?? '');
+        const read = gates.read;
+        gates.read = undefined;
+        await read;
         return {
           messages: thread?.messages ?? [],
           pendingInterrupt: thread?.reviewing
@@ -94,6 +100,7 @@ async function createWaitingHost() {
         });
         return { status: 'waiting' };
       }
+      await gates.resume;
       threads.set(threadId, { messages: [new AIMessage('approved')], reviewing: false });
       emitEvent({
         type: 'message.completed', requestId: request.requestId, messageId: 'm-approved', role: 'assistant', text: 'approved',
@@ -103,7 +110,7 @@ async function createWaitingHost() {
   });
   const lifecycle: PetDispatchLifecycleEvent[] = [];
   host.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
-  return { host, threads, turns, lifecycle };
+  return { host, threads, turns, lifecycle, gates };
 }
 
 test('an exact session is read, followed and reviewed without changing the active session', async () => {
@@ -134,15 +141,10 @@ test('an exact session is read, followed and reviewed without changing the activ
     const detach = await host.sessions.observe(target, (message) => observed.push(message));
     assert.equal(observed[0]?.type, 'session.snapshot.result');
 
-    // An answer to an interrupt that is not current is refused on B's stream.
-    await host.sessions.review(target, {
+    // An answer to an interrupt that is not current is refused before the Host takes it.
+    await assert.rejects(host.sessions.review(target, {
       requestId: 'stale', interruptId: 'old-interrupt', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
-    });
-    await waitFor(() => events(observed).some((event) => event.requestId === 'stale'), 'stale answer was not reported');
-    assert.deepEqual(
-      events(observed).filter((event) => event.requestId === 'stale').map((event) => event.type === 'error' && event.code),
-      ['interrupt_closed'],
-    );
+    }), (error) => error instanceof PetSessionReviewRefusedError && error.code === 'review_closed');
 
     await host.sessions.review(target, {
       requestId: 'approve-b', interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
@@ -165,10 +167,9 @@ test('an exact session is read, followed and reviewed without changing the activ
 
     // A second answer to the same review finds it closed and runs nothing.
     const turnCount = turns.length;
-    await host.sessions.review(target, {
+    await assert.rejects(host.sessions.review(target, {
       requestId: 'again', interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
-    });
-    await waitFor(() => events(observed).some((event) => event.requestId === 'again'), 'duplicate answer was not reported');
+    }), (error) => error instanceof PetSessionReviewRefusedError && error.code === 'review_closed');
     assert.equal(turns.length, turnCount);
     detach();
   } finally {
@@ -205,6 +206,75 @@ test('observing the active session follows its conversation turns', async () => 
     assert.equal(snapshot.session.pendingInterrupt?.interruptId, 'interrupt-1');
     detach();
   } finally {
+    await host.close();
+  }
+});
+
+async function waitInReview(host: Awaited<ReturnType<typeof createWaitingHost>>) {
+  const target = 'pet:0000000b';
+  await host.host.resident.dispatch.dispatch({ request: 'work in B', dispatchId: 'd-1', session: { id: target, create: true } });
+  await waitFor(() => host.lifecycle.some((event) => event.state === 'waiting'), 'B did not wait for review');
+  return target;
+}
+
+const approve = (requestId: string) => ({
+  requestId, interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
+});
+
+test('a second answer while the first is resuming is refused as busy, and runs nothing', async () => {
+  const waiting = await createWaitingHost();
+  const { host, turns, lifecycle, gates } = waiting;
+  let open!: () => void;
+  gates.resume = new Promise((resolve) => { open = resolve; });
+  try {
+    const target = await waitInReview(waiting);
+    // Two windows answer the same review together.
+    const first = host.sessions.review(target, approve('first'));
+    await assert.rejects(
+      host.sessions.review(target, approve('second')),
+      (error) => error instanceof PetSessionReviewRefusedError && error.code === 'session_busy',
+    );
+    await first;
+    await waitFor(() => turns.some((turn) => turn.endsWith(':resume')), 'the first answer did not resume');
+    await assert.rejects(
+      host.sessions.review(target, approve('third')),
+      (error) => error instanceof PetSessionReviewRefusedError && error.code === 'session_busy',
+    );
+    open();
+    await waitFor(() => lifecycle.some((event) => event.state === 'completed'), 'the dispatch did not continue');
+    assert.equal(turns.filter((turn) => turn.endsWith(':resume')).length, 1);
+  } finally {
+    open();
+    await host.close();
+  }
+});
+
+test('a snapshot read across the end of a run is read again, so the final reply is not lost', async () => {
+  const waiting = await createWaitingHost();
+  const { host, turns, lifecycle, gates } = waiting;
+  let finishRun!: () => void;
+  gates.resume = new Promise((resolve) => { finishRun = resolve; });
+  try {
+    const target = await waitInReview(waiting);
+    await host.sessions.review(target, approve('approve-b'));
+    await waitFor(() => turns.some((turn) => turn.endsWith(':resume')), 'the answer did not resume');
+
+    // The checkpoint read starts while the run is live and returns the state
+    // from before it; the run settles in between.
+    let releaseRead!: () => void;
+    gates.read = new Promise((resolve) => { releaseRead = resolve; });
+    const reading = host.sessions.snapshot(target);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finishRun();
+    await waitFor(() => lifecycle.some((event) => event.state === 'completed'), 'the run did not settle');
+    releaseRead();
+
+    const snapshot = await reading;
+    assert.equal(snapshot.session.activeRun, null);
+    assert.equal(snapshot.session.pendingInterrupt, null);
+    assert.ok(JSON.stringify(snapshot.session.timeline).includes('approved'));
+  } finally {
+    finishRun();
     await host.close();
   }
 });

@@ -153,9 +153,11 @@ export interface PetSessionPort {
   ): Promise<() => void>;
   /**
    * Hand a review answer to the Host. Resolves once the Host owns it, not
-   * when the review takes effect: the outcome (a resumed run, or a
-   * closed/stale/wrong-session error) arrives on the session's observation
-   * under the same requestId.
+   * when the review takes effect: the outcome (a resumed run, or an error)
+   * arrives on the session's observation under the same requestId. An answer
+   * the Host can already tell it will not run (the review is no longer
+   * current, or the Pet is running another turn) is refused here instead,
+   * with a `PetSessionReviewRefusedError`.
    */
   review(sessionId: string, request: PetSessionReviewRequest): Promise<void>;
 }
@@ -204,6 +206,18 @@ export class PetSessionNotFoundError extends Error {
   constructor(sessionId: string) {
     super(`Session "${sessionId}" does not exist for this Pet.`);
     this.name = 'PetSessionNotFoundError';
+  }
+}
+
+/**
+ * A review answer refused before the Host took it: `review_closed` when the
+ * answered review is not the session's current one, `session_busy` when the
+ * Pet is running a turn or already resuming another answer.
+ */
+export class PetSessionReviewRefusedError extends Error {
+  constructor(readonly code: 'review_closed' | 'session_busy', message: string) {
+    super(message);
+    this.name = 'PetSessionReviewRefusedError';
   }
 }
 

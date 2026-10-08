@@ -46,8 +46,10 @@ session，也不创建 session。缺少端口时返回 `503`。
   共用连接上限，不占用 TUI 的交互连接。
 - `POST /pet-sessions/review`：只接受
   `{petId, sessionId, requestId, interruptId, value: {decisions}}`；其他命令（chat、
-  session.resume、cancel 等）一律 `400`。`202` 只表示 Host 接手，结果在该 session 的
-  事件流里按 requestId 返回。
+  session.resume、cancel 等）一律 `400`。`202` 只表示 Host 接手，结果（包括接手后的
+  失败）在该 session 的事件流里按 requestId 返回。Host 当场能判定的拒绝返回 `409`：
+  审批已不是该 session 当前的（`review_closed`），或该 Pet 正在运行（含另一个正在续跑
+  的应答，`session_busy`）。两个窗口同时应答时，第二个直接收到 `409`。
 
 ### `POST /dispatch`
 

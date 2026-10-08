@@ -207,6 +207,10 @@ function readSessionAccessError(error: unknown): HttpRequestError {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === 'pet_unavailable') return new HttpRequestError(404, 'Pet is not available.');
   if (code === 'session_not_found') return new HttpRequestError(404, 'Session does not exist for this Pet.');
+  // A refused review answer: the Host never took it, so the caller is told now.
+  if ((code === 'review_closed' || code === 'session_busy') && error instanceof Error) {
+    return new HttpRequestError(409, error.message);
+  }
   console.error('[studio-http] session access failed:', error instanceof Error ? error.message : error);
   return new HttpRequestError(500, 'Session access failed.');
 }

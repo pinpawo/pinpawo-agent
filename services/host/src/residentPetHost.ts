@@ -31,6 +31,7 @@ import type { LocalModelProfileRegistry } from './config/llmConfig';
  */
 export {
   PetSessionNotFoundError,
+  PetSessionReviewRefusedError,
   ResidentPetInteractionBusyError,
   ResidentPetOperationCancelledError,
   type AgentSessionPeer,

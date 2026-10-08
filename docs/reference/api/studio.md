@@ -82,7 +82,12 @@ admission, checkpoint validation and dispatch continuation as a TUI answer, in
 the addressed session's own thread. `202` means the Host took the answer, not
 that it applied: the resumed run's `run.started`, or an `interrupt_closed` /
 `interrupt_stale` / `interrupt_wrong_session` error, arrives on that session's
-event stream under the same `requestId`. Transient tool `raw` payloads are live
+event stream under the same `requestId`; a later Host failure is reported there
+as an `error` too. An answer the Host can already refuse gets `409 { error }`
+instead: the review is no longer the session's current one, or the Pet is
+running a turn (including another answer being resumed). Snapshots re-read the
+checkpoint when a run started or settled during the read, so a reconnect
+straddling a run's end shows its final state. Transient tool `raw` payloads are live
 only; a reconnect rebuilds from the checkpoint snapshot.
 
 ## Channel messages and addressing

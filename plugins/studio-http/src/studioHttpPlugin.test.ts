@@ -454,6 +454,11 @@ function sessionHarness() {
     },
     review: async (petId, sessionId, request) => {
       if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
+      if (request.requestId === 'busy' || request.requestId === 'closed') {
+        throw Object.assign(new Error(`refused: ${request.requestId}`), {
+          code: request.requestId === 'busy' ? 'session_busy' : 'review_closed',
+        });
+      }
       reviews.push({ petId, sessionId, request });
     },
   };
@@ -530,6 +535,12 @@ test('HTTP Plugin accepts only a review answer for an exact Pet session', async 
     assert.equal((await post(body)).status, 400, JSON.stringify(body));
   }
   assert.equal((await post({ ...answer, sessionId: 'pet:deadbeef' })).status, 404);
+  // A refused answer is told now, with the Host's reason, instead of a 202.
+  for (const requestId of ['busy', 'closed']) {
+    const refused = await post({ ...answer, requestId });
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { error: `refused: ${requestId}` });
+  }
   assert.equal(reviews.length, 1);
 });
 

@@ -188,13 +188,32 @@ export function createLocalServerHandlers(
   };
   const activeRuns = options.activeRuns ?? new ActiveRunRegister();
 
+  /**
+   * Read a checkpoint that agrees with the run register.
+   *
+   * The checkpoint read is asynchronous, so a run can start or settle while it
+   * is in flight. Pairing an older checkpoint (a review still pending) with a
+   * newer register (no run) yields a snapshot no event can repair: the run's
+   * completion names a run the snapshot never had, so it is ignored. When the
+   * register changed during the read, read again.
+   */
+  const readCheckpointAtRun = async <T>(read: () => Promise<T>): Promise<T> => {
+    for (let attempt = 1; ; attempt += 1) {
+      const before = activeRuns.read();
+      const checkpoint = await read();
+      if (activeRuns.read() === before || attempt >= 5) return checkpoint;
+    }
+  };
+
   const readSessionSnapshot = async (sessionId: string) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
       throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
     }
-    const checkpoint = await tuiSessions.readSessionCheckpointPoint(requestDeps, session);
+    const checkpoint = await readCheckpointAtRun(
+      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session),
+    );
     return buildHostSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',
@@ -211,7 +230,9 @@ export function createLocalServerHandlers(
 
   const loadSnapshot = async (peer?: ServerPeer) => {
     const requestDeps = runtimeDeps.get();
-    const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
+    const checkpoint = await readCheckpointAtRun(
+      () => tuiSessions.readActiveCheckpointPoint(requestDeps),
+    );
     const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
       requestDeps,
       checkpoint.pendingInterrupt,

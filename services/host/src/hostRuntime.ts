@@ -14,6 +14,7 @@ export {
   createResidentPetRuntime,
   createResidentPetSessions,
   PetSessionNotFoundError,
+  PetSessionReviewRefusedError,
   ResidentPetCoordinator,
 } from './residentPetHost';
 export type {

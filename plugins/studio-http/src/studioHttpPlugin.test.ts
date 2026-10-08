@@ -433,3 +433,126 @@ test('HTTP Plugin rejects invalid security and resource options eagerly', () => 
     /must be an HTTP\(S\) origin/,
   );
 });
+
+function sessionHarness() {
+  const harness = createContext();
+  const reviews: unknown[] = [];
+  const listeners = new Set<(message: unknown) => void>();
+  const snapshot = { version: 5, session: { sessionId: 'pet:0000000b', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null } };
+  const notFound = (sessionId: string) => Object.assign(new Error(`no ${sessionId}`), { code: 'session_not_found' });
+  harness.context.petSessions = {
+    snapshot: async (_petId, sessionId) => {
+      if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
+      return snapshot as never;
+    },
+    observe: async (_petId, sessionId, listener) => {
+      if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
+      listener({ type: 'session.snapshot.result', requestId: 'first', snapshot } as never);
+      const forward = (message: unknown) => listener(message as never);
+      listeners.add(forward);
+      return () => { listeners.delete(forward); };
+    },
+    review: async (petId, sessionId, request) => {
+      if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
+      if (request.requestId === 'busy' || request.requestId === 'closed') {
+        throw Object.assign(new Error(`refused: ${request.requestId}`), {
+          code: request.requestId === 'busy' ? 'session_busy' : 'review_closed',
+        });
+      }
+      reviews.push({ petId, sessionId, request });
+    },
+  };
+  return { harness, reviews, listeners, publish: (message: unknown) => { for (const listener of listeners) listener(message); } };
+}
+
+test('HTTP Plugin reads and follows one exact Pet session', async (t) => {
+  const { harness, listeners, publish } = sessionHarness();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+  const headers = { Authorization: `Bearer ${AUTH_TOKEN}` };
+
+  const snapshot = await fetch(pluginUrl(address.port, '/pet-sessions/snapshot?petId=pet&sessionId=pet%3A0000000b'), { headers });
+  assert.equal(snapshot.status, 200);
+  assert.equal((await snapshot.json()).snapshot.session.sessionId, 'pet:0000000b');
+
+  const missing = await fetch(pluginUrl(address.port, '/pet-sessions/snapshot?petId=pet&sessionId=pet%3Adeadbeef'), { headers });
+  assert.equal(missing.status, 404);
+  const incomplete = await fetch(pluginUrl(address.port, '/pet-sessions/snapshot?petId=pet'), { headers });
+  assert.equal(incomplete.status, 400);
+  const unknownStream = await fetch(pluginUrl(address.port, '/pet-sessions/events?petId=pet&sessionId=pet%3Adeadbeef'), { headers });
+  assert.equal(unknownStream.status, 404);
+
+  const abort = new AbortController();
+  const stream = await fetch(pluginUrl(address.port, '/pet-sessions/events?petId=pet&sessionId=pet%3A0000000b'), { headers, signal: abort.signal });
+  assert.equal(stream.status, 200);
+  const reader = stream.body!.getReader();
+  const first = await readStreamUntil(reader, (text) => text.includes('session.snapshot.result'));
+  assert.match(first, /event: agent\.session/);
+  publish({ type: 'event', requestId: 'r1', event: { type: 'run.started', requestId: 'r1', initiator: 'host' } });
+  const next = await readStreamUntil(reader, (text) => text.includes('run.started'));
+  assert.match(next, /"requestId":"r1"/);
+  abort.abort();
+  await reader.cancel().catch(() => undefined);
+  for (let attempt = 0; attempt < 100 && listeners.size; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(listeners.size, 0);
+});
+
+test('HTTP Plugin accepts only a review answer for an exact Pet session', async (t) => {
+  const { harness, reviews } = sessionHarness();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+  const post = (body: unknown) => fetch(pluginUrl(address.port, '/pet-sessions/review'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const answer = {
+    petId: 'pet', sessionId: 'pet:0000000b', requestId: 'review-1', interruptId: 'interrupt-1',
+    value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve', input: { message: 'ok' } }] },
+  };
+
+  const accepted = await post(answer);
+  assert.equal(accepted.status, 202);
+  assert.deepEqual(await accepted.json(), { requestId: 'review-1' });
+  assert.deepEqual(reviews, [{
+    petId: 'pet', sessionId: 'pet:0000000b',
+    request: { requestId: 'review-1', interruptId: 'interrupt-1', value: answer.value },
+  }]);
+
+  for (const body of [
+    { ...answer, type: 'chat_request', message: 'hi' },
+    { ...answer, value: { action: 'cancel' } },
+    { ...answer, value: { decisions: [] } },
+    { ...answer, value: { decisions: [{ interactionId: 'review-1' }] } },
+    { petId: 'pet', sessionId: 'pet:0000000b', type: 'session.resume', requestId: 'x' },
+  ]) {
+    assert.equal((await post(body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await post({ ...answer, sessionId: 'pet:deadbeef' })).status, 404);
+  // A refused answer is told now, with the Host's reason, instead of a 202.
+  for (const requestId of ['busy', 'closed']) {
+    const refused = await post({ ...answer, requestId });
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { error: `refused: ${requestId}` });
+  }
+  assert.equal(reviews.length, 1);
+});
+
+test('HTTP Plugin reports session access as unavailable without a session port', async (t) => {
+  const harness = createContext();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+  const response = await fetch(pluginUrl(address.port, '/pet-sessions/snapshot?petId=pet&sessionId=s'), {
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  assert.equal(response.status, 503);
+});

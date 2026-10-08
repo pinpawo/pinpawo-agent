@@ -63,6 +63,33 @@ source labels, never another session's ID or request body. Model context does no
 include this queue endpoint. Disconnected or failed reads show the last observed
 queue as unknown; a global waiting gate alone does not establish a human review.
 
+## Exact Pet session observation and review
+
+Under the same Studio Bearer authority, the HTTP Plugin forwards each resident
+Pet's `PetSessionPort` (Host `resident.sessions`, borrowed by Studio as
+`context.petSessions`). Every route addresses one `petId + sessionId`; an unknown
+Pet or session is `404` and never falls back to the active session or creates one.
+
+| Route | Result |
+| --- | --- |
+| `GET /pet-sessions/snapshot?petId&sessionId` | `{ petId, snapshot }`, the Host's `AgentSessionSnapshot` |
+| `GET /pet-sessions/events?petId&sessionId` | SSE `agent.session`: first `session.snapshot.result`, then only that session's `AgentServerMessage`s |
+| `POST /pet-sessions/review` | `{ petId, sessionId, requestId, interruptId, value: { decisions } }` → `202 { requestId }` |
+
+Observing holds no interactive connection and never changes the active session.
+The review route accepts only a human-review answer; it runs through the same
+admission, checkpoint validation and dispatch continuation as a TUI answer, in
+the addressed session's own thread. `202` means the Host took the answer, not
+that it applied: the resumed run's `run.started`, or an `interrupt_closed` /
+`interrupt_stale` / `interrupt_wrong_session` error, arrives on that session's
+event stream under the same `requestId`; a later Host failure is reported there
+as an `error` too. An answer the Host can already refuse gets `409 { error }`
+instead: the review is no longer the session's current one, or the Pet is
+running a turn (including another answer being resumed). Snapshots re-read the
+checkpoint when a run started or settled during the read, so a reconnect
+straddling a run's end shows its final state. Transient tool `raw` payloads are live
+only; a reconnect rebuilds from the checkpoint snapshot.
+
 ## Channel messages and addressing
 
 Channel contributes these routes to the HTTP Plugin under Studio Bearer:

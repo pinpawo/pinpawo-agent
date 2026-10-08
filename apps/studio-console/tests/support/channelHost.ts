@@ -71,7 +71,8 @@ for (const petId of ['alpha', 'beta']) {
   }));
 }
 const studio = await createStudio({ studioId: 'console-browser', entryPetId: 'alpha', plugins: [channel, http],
-  pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: petNames[index]! }, dispatch: host.resident.dispatch })),
+  pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: petNames[index]! },
+    dispatch: host.resident.dispatch, sessions: host.sessions })),
 });
 // Historical fixture data lives only in this temporary database. No model calls.
 if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 
 import { ChannelCopy, ChannelTimeline, ChannelExecutionHistory } from './ChannelConversation';
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
 import { ChannelDispatchQueues } from './ChannelDispatchQueues';
+import { PetSessionView } from './PetSessionView';
+import type { PetSessionTarget } from './petSession';
 import {
   channelMessageInput, channelMessageIdentity, channelPetIdentity, channelMessageSummary, channelReplyRecipientId, readChannelPages,
   type ChannelGoal, type ChannelContext, type ChannelEntry, type ChannelMessage, type ChannelExecution, type ChannelNotice, type DispatchQueue,
@@ -36,6 +38,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [queueError, setQueueError] = useState('');
   const [reply, setReply] = useState<ChannelMessage | undefined>();
   const [localVersion, setLocalVersion] = useState(0);
+  const [sessionView, setSessionView] = useState<PetSessionTarget | null>(null);
   const submitting = useRef(false);
   const composer = useRef<HTMLTextAreaElement>(null);
   const timeline = useRef<HTMLDivElement>(null);
@@ -319,16 +322,18 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
         <div className="channel-activity-section"><div className="channel-section-label"><h3>Execution history</h3><span>{executions.length}</span></div>
           <p className="channel-history-hint">Last recorded observations. An ended invocation does not mean the goal is complete.</p>
           <ChannelExecutionHistory executions={executions} pets={pets} petsReady={petsReady} entries={entries} connected={connected}
-            highlighted={highlightedExecution} onLocateMessage={locateMessage} />
+            highlighted={highlightedExecution} onLocateMessage={locateMessage}
+            onViewSession={item => setSessionView({ petId: item.petId, sessionId: item.sessionId, executionId: item.executionId })} />
           {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>Channel storage failed: {item.error}</p>)}
         </div>
         {notices.length > 0 && <details className="channel-notices"><summary>Review notification history ({notices.length})</summary>
-          <p>Historical notifications only. Inspect and decide in the original Pet TUI; approval output is not automatically returned here.</p>
+          <p>Historical notifications only. Open the session to see whether a review is still current and answer it there.</p>
           {notices.map(item => <div className="channel-review" key={item.sequence}>
             <strong>{channelPetIdentity(item.source.petId, pets, petsReady).name} · review requested</strong>
             {channelPetIdentity(item.source.petId, pets, petsReady).removed && <span className="channel-removed">Removed Pet</span>}
             <time>{new Date(item.occurredAt).toLocaleString()}</time>
-            {item.pendingInterrupt.payload.interactions.map((interaction, index) => <p key={index}>{interaction.view.title ?? interaction.view.body ?? 'Review details are available in the original TUI.'}</p>)}
+            {item.pendingInterrupt.payload.interactions.map((interaction, index) => <p key={index}>{interaction.view.title ?? interaction.view.body ?? 'Review details are available in the session.'}</p>)}
+            <button type="button" disabled={!connected} onClick={() => setSessionView({ petId: item.source.petId, sessionId: item.source.sessionId })}>View session</button>
             <details className="channel-technical"><summary>Technical details</summary>
               <dl><dt>Pet</dt><dd><code>{item.source.petId}</code></dd><dt>Session</dt><dd><ChannelCopy label="review session ID" value={item.source.sessionId} /></dd></dl>
               <pre>{JSON.stringify(item.pendingInterrupt, null, 2)}</pre>
@@ -341,11 +346,14 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
         {context && <details className="channel-session-details"><summary>Pet sessions ({context.sessions.length})</summary>
           {context.sessions.map(item => <div className="channel-session" key={item.petId}><strong>{channelPetIdentity(item.petId, pets, petsReady).name}</strong>
             {channelPetIdentity(item.petId, pets, petsReady).removed && <span className="channel-removed">Removed Pet</span>}
-            {!item.registered && <span>Registration pending</span>}<ChannelCopy label="Pet session ID" value={item.sessionId} /></div>)}
+            {!item.registered && <span>Registration pending</span>}<ChannelCopy label="Pet session ID" value={item.sessionId} />
+            <button type="button" disabled={!connected || !item.registered} onClick={() => setSessionView({ petId: item.petId, sessionId: item.sessionId })}>View session</button></div>)}
         </details>}
         <button className="channel-refresh" type="button" disabled={!connected || pending} onClick={refresh}>Refresh persisted history</button>
       </div>
     </aside>
+    {sessionView && <PetSessionView url={url} token={token} target={sessionView} pets={pets} petsReady={petsReady}
+      onClose={() => setSessionView(null)} />}
     {creating && <div className="modal-layer" role="presentation" onMouseDown={event => {
       if (event.target === event.currentTarget && !submitting.current) setCreating(false);
     }}><form ref={createDialog} aria-label="Create Channel" aria-modal="true" role="dialog" className="connection-modal" onSubmit={create}>

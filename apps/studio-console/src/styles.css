@@ -310,3 +310,48 @@ footer { display: flex; align-items: center; padding: 0 22px; color: #849496; bo
   .channel-message-viewer-head { padding: 8px 12px; }
   .channel-message-viewer-scroll { padding: 12px; }
 }
+.pet-session-viewer { position: fixed; inset: 0; width: 100%; max-width: none; height: 100%; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; color: #c2d0cc; background: #11191b; }
+.pet-session-viewer[open] { display: flex; flex-direction: column; }
+.pet-session-viewer::backdrop { background: rgba(3, 7, 8, .8); }
+.pet-session-head { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #334246; }
+.pet-session-head > div:first-child { min-width: 0; }
+.pet-session-head h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.pet-session-head p { margin: 4px 0; color: #819594; font-size: 11px; }
+.pet-session-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; margin: 0; font-size: 11px; }
+.pet-session-identity dt { color: #819594; }
+.pet-session-identity dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pet-session-head-actions { flex: none; display: flex; align-items: center; gap: 10px; }
+.pet-session-state { font: 10px/1 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: #87c9aa; }
+.pet-session-state.loading, .pet-session-state.reconnecting { color: #d7b36f; }
+.pet-session-state.unavailable { color: #e28a83; }
+.pet-session-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pet-session-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px 20px; }
+.pet-session-timeline { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.pet-session-entry { min-width: 0; padding: 8px 12px; border: 1px solid #263236; border-radius: 4px; background: #0f1618; overflow-wrap: anywhere; }
+.pet-session-entry.message.user { border-color: #2c4a4d; }
+.pet-session-entry.message.system { color: #9fb0ae; }
+.pet-session-entry.message.subagent { margin-left: 24px; }
+.pet-session-entry-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.pet-session-entry-head time { color: #718184; font-size: 10px; }
+.pet-session-streaming { color: #d7b36f; font-size: 10px; }
+.pet-session-entry.operation summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; font-size: 12px; }
+.pet-session-entry.operation em { color: #819594; font-style: normal; font-size: 10px; text-transform: uppercase; }
+.pet-session-entry pre, .pet-session-review pre { max-height: 360px; overflow: auto; padding: 8px; background: #0a1012; font-size: 11px; white-space: pre-wrap; }
+.pet-session-footnote { max-width: 1000px; margin: 16px auto 0; color: #718184; font-size: 11px; }
+.pet-session-review { flex: none; max-height: 50dvh; overflow: auto; padding: 12px 20px; border-top: 1px solid #3c4f53; background: #132023; }
+.pet-session-review-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+.pet-session-review-diff .added { color: #87c9aa; }
+.pet-session-review-diff .removed { color: #e28a83; }
+.pet-session-review-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pet-session-review-options button.primary { background: #1f4d3e; }
+.pet-session-review-options button.danger { background: #4d2422; color: #f2c3bf; }
+.pet-session-review-options button.selected { outline: 2px solid #66d3d7; }
+.pet-session-review-input { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.pet-session-review-input label { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.pet-session-review-input textarea { color: #cbd7d5; border: 1px solid #334246; border-radius: 3px; background: #0c1214; padding: 6px 9px; }
+.pet-session-review-note { color: #9fb0ae; font-size: 11px; }
+.pet-session-outcome { margin: 0; padding: 8px 20px; }
+@media (max-width: 700px), (max-height: 400px) {
+  .pet-session-head { padding: 8px 12px; flex-wrap: wrap; }
+  .pet-session-scroll, .pet-session-review { padding: 10px 12px; }
+}

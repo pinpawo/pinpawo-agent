@@ -30,6 +30,8 @@ import type { LocalModelProfileRegistry } from './config/llmConfig';
  * not have to know which file inside host/ declares what.
  */
 export {
+  PetSessionNotFoundError,
+  PetSessionReviewRefusedError,
   ResidentPetInteractionBusyError,
   ResidentPetOperationCancelledError,
   type AgentSessionPeer,
@@ -42,6 +44,8 @@ export {
   type PetDispatchRequest,
   type PetDispatchSettledState,
   type PetDispatchState,
+  type PetSessionPort,
+  type PetSessionReviewRequest,
   type ResidentPet,
   type ResidentPetCoordinatorOptions,
   type ResidentPetHost,
@@ -69,6 +73,7 @@ export {
 } from './host/runtimeContext';
 export { createResidentPet } from './host/residentPetDispatch';
 export { createResidentPetInteraction } from './host/residentPetInteraction';
+export { createResidentPetSessions } from './host/residentPetSessions';
 
 import {
   readResidentPetRuntimeContext,
@@ -80,6 +85,7 @@ import {
 } from './host/runtimeContext';
 import { createResidentPet } from './host/residentPetDispatch';
 import { createResidentPetInteraction } from './host/residentPetInteraction';
+import { createResidentPetSessions } from './host/residentPetSessions';
 
 function withDefaultModelProfile(
   registry: LocalModelProfileRegistry,
@@ -197,12 +203,21 @@ export async function createResidentPetRuntime(
   const activeHostRuns = new Map<string, AbortController>();
   const activeRuns = new ActiveRunRegister();
   const messageListeners = new Set<(message: AgentServerMessage) => void>();
-  const publishMessage = (message: AgentServerMessage) => {
-    for (const listener of messageListeners) {
+  const sessionListeners = new Map<string, Set<(message: AgentServerMessage) => void>>();
+  const sessionPeers = new WeakMap<AgentSessionPeer, string>();
+  const openSessionPeers = new Set<AgentSessionPeer>();
+  const notify = (
+    listeners: Iterable<(message: AgentServerMessage) => void>,
+    message: AgentServerMessage,
+  ) => {
+    for (const listener of listeners) {
       try { listener(message); } catch (error) {
         defaultLogError('[resident-pet] event observer failed:', error);
       }
     }
+  };
+  const publishMessage = (message: AgentServerMessage) => {
+    notify(messageListeners, message);
     const peer = interactivePeer.current;
     if (!peer || !peer.isConnected()) return;
     try {
@@ -211,7 +226,39 @@ export async function createResidentPetRuntime(
       defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
     }
   };
-  const publishRuntimeEvent = (event: AgentRuntimeEvent) => publishMessage(buildAgentEventEnvelope(event));
+  const publishSessionMessage = (sessionId: string, message: AgentServerMessage) => {
+    const observers = sessionListeners.get(sessionId);
+    if (observers) notify([...observers], message);
+    // The Pet-level stream and the interactive client follow the active session.
+    if (sessions.peekActiveSessionId(deps.petId) === sessionId) publishMessage(message);
+  };
+  const publishSessionEvent = (sessionId: string, event: AgentRuntimeEvent) => {
+    publishSessionMessage(sessionId, buildAgentEventEnvelope(event));
+  };
+  const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
+    const activeId = sessions.peekActiveSessionId(deps.petId);
+    if (activeId) publishSessionEvent(activeId, event);
+    else publishMessage(buildAgentEventEnvelope(event));
+  };
+  const observeSession = (sessionId: string, listener: (message: AgentServerMessage) => void) => {
+    let observers = sessionListeners.get(sessionId);
+    if (!observers) sessionListeners.set(sessionId, observers = new Set());
+    const entry = (message: AgentServerMessage) => listener(message);
+    observers.add(entry);
+    return () => {
+      observers.delete(entry);
+      if (!observers.size && sessionListeners.get(sessionId) === observers) sessionListeners.delete(sessionId);
+    };
+  };
+  const openSessionPeer = (sessionId: string) => {
+    const peer: AgentSessionPeer = {
+      isConnected: () => closing === null,
+      send: (message) => { publishSessionMessage(sessionId, message); return closing === null; },
+    };
+    sessionPeers.set(peer, sessionId);
+    openSessionPeers.add(peer);
+    return { peer, release: () => { openSessionPeers.delete(peer); } };
+  };
   const hostPeer: AgentSessionPeer = {
     isConnected: () => closing === null,
     send: (message) => { publishMessage(message); return closing === null; },
@@ -235,7 +282,13 @@ export async function createResidentPetRuntime(
     tuiSessions: sessions,
     loadContext,
     runAgentTurn: (input) => withoutPetInvocationContext(() => runConversationTurn(input)),
-    publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
+    // A session-bound origin publishes to its session; any other origin is a
+    // turn of the active session.
+    publishRuntimeEvent: (origin, event) => {
+      const sessionId = sessionPeers.get(origin);
+      if (sessionId) publishSessionEvent(sessionId, event);
+      else publishRuntimeEvent(event);
+    },
     activeRuns,
     interruptHostRun: (requestId) => {
       const controller = activeHostRuns.get(requestId);
@@ -258,8 +311,11 @@ export async function createResidentPetRuntime(
       interactivePeer.current = null;
       if (peer) await peerHandlers.onClose(peer);
       await peerHandlers.onClose(hostPeer);
+      for (const sessionPeer of openSessionPeers) await peerHandlers.onClose(sessionPeer);
+      openSessionPeers.clear();
       await coordinator.close();
       messageListeners.clear();
+      sessionListeners.clear();
       localHandlers.close();
     })();
     return closing;
@@ -279,6 +335,10 @@ export async function createResidentPetRuntime(
     hostPeer,
     messageListeners,
     publishRuntimeEvent,
+    publishSessionMessage,
+    publishSessionEvent,
+    observeSession,
+    openSessionPeer,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
     activeHostRuns,
@@ -299,10 +359,12 @@ export async function createResidentPetHost(
   const runtime = await createResidentPetRuntime(options);
   const resident = createResidentPet(runtime);
   const interaction = createResidentPetInteraction(runtime);
+  const sessions = createResidentPetSessions(runtime);
   const { close } = readResidentPetRuntimeContext(runtime);
   return {
     resident,
     interaction,
+    sessions,
     close,
   };
 }

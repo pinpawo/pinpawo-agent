@@ -29,6 +29,7 @@ import {
   ServerTuiSessionService,
   type ActivePendingInterrupt,
 } from '../session/serverTuiSessions';
+import type { TuiSessionRecord } from '../session/tuiSessionRegistry';
 import type { ServerDeps } from '../serverTypes';
 import { createOperationRegistryForAgentSetup } from '../runtimeOperationRegistry';
 import {
@@ -63,6 +64,13 @@ type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
   sessionId?: string;
 };
+
+/**
+ * The session a turn runs in when it is not the active one. Only a review
+ * resume addressed to an exact session carries it; every other turn runs in
+ * the active session, as before.
+ */
+export type ChatTurnTarget = TuiSessionRecord;
 
 export type PendingInterruptSnapshot = {
   sessionId?: string;
@@ -129,12 +137,19 @@ export class ServerChatHandler {
     };
   }
 
+  private readPendingInterrupt(deps: ServerDeps, target?: ChatTurnTarget) {
+    return target
+      ? this.tuiSessions.readSessionPendingInterrupt(deps, target)
+      : this.tuiSessions.readActivePendingInterrupt(deps);
+  }
+
   private async recoverPendingInterruptRoute(
     requestId: string,
     deps: ServerDeps,
+    target?: ChatTurnTarget,
   ) {
     try {
-      const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
+      const pending = await this.readPendingInterrupt(deps, target);
       // Recover only the pending native review and its original action identity.
       if (!pending || pending.payload.kind !== 'human_review') {
         return null;
@@ -195,19 +210,28 @@ export class ServerChatHandler {
    * the interrupt's kind. A review's value is validated against the
    * authoritative checkpoint first, because a malformed decision would leave a
    * tool call unanswered.
+   *
+   * With a target, the interrupt is read from and resumed in that session's
+   * own thread; the active session is neither read nor changed.
    */
   async handleInterruptResume(
     peer: ServerPeer,
     msg: InterruptResumeMessage,
     deps: ServerDeps,
+    target?: ChatTurnTarget,
   ) {
-    const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
+    const pending = await this.readPendingInterrupt(deps, target);
     if (!pending || pending.interruptId !== msg.interruptId) {
       this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
     if (pending.payload.kind === 'human_review') {
-      await this.resolvePendingReview(peer, msg, deps);
+      await this.resolvePendingReview(peer, msg, deps, target);
+      return;
+    }
+    if (target) {
+      // A targeted resume answers reviews only.
+      this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
     await this.runChatRequest(peer, {
@@ -257,6 +281,7 @@ export class ServerChatHandler {
     request: LocalServerRunRequest,
     deps: ServerDeps,
     source: LocalServerRunSource,
+    target?: ChatTurnTarget,
   ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
@@ -275,7 +300,10 @@ export class ServerChatHandler {
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
-    const threadId = this.tuiSessions.getChatThreadId(deps.petId);
+    const threadId = target?.threadId ?? this.tuiSessions.getChatThreadId(deps.petId);
+    const refreshSummary = () => target
+      ? this.tuiSessions.refreshSessionSummary(deps, target)
+      : this.tuiSessions.refreshActiveSessionSummary(deps);
     const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
     const invocation = this.threadInvocations.enqueue({
@@ -305,7 +333,7 @@ export class ServerChatHandler {
           pendingInterrupt: projectPendingInterrupt(settled),
         });
         this.inflightRequests.clear(peer, inflight);
-        await this.tuiSessions.refreshActiveSessionSummary(deps);
+        await refreshSummary();
         return 'waiting';
       }
       finalizeInterrupted();
@@ -340,7 +368,8 @@ export class ServerChatHandler {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
       console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
-      const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
+      // Resetting replaces the active session; a targeted turn never does that.
+      const recoveredFromToolProtocolError = !target && isToolProtocolHistoryError(err);
       if (recoveredFromToolProtocolError) {
         try {
           await this.tuiSessions.resetSession(deps.petId, {
@@ -430,7 +459,7 @@ export class ServerChatHandler {
         // interrupt.requested event already told the interface what it is
         // waiting on and under which id.
         this.inflightRequests.finish(peer, inflight, 'interrupted');
-        await this.tuiSessions.refreshActiveSessionSummary(deps);
+        await refreshSummary();
         console.log(`[local-server] interrupt.requested requestId=${requestId}`);
         this.inflightRequests.clear(peer, inflight);
         return 'waiting';
@@ -440,7 +469,7 @@ export class ServerChatHandler {
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
-      await this.tuiSessions.refreshActiveSessionSummary(deps);
+      await refreshSummary();
 
       console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
@@ -469,10 +498,11 @@ export class ServerChatHandler {
     peer: ServerPeer,
     msg: InterruptResumeMessage,
     deps: ServerDeps,
+    target?: ChatTurnTarget,
   ) {
     await resolvePendingHumanReviewInterrupt({
       message: msg,
-      recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps),
+      recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps, target),
       emitClosed: () => {
         console.warn(
           `[local-server] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
@@ -482,13 +512,13 @@ export class ServerChatHandler {
       emitEvent: (event) => {
         this.publishRuntimeEvent(peer, event);
       },
-      acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps),
+      acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps, target),
       isConnected: peer.isConnected,
       run: (route, resume, source) => this.runChatRequest(peer, {
         kind: 'resume',
         requestId: msg.requestId,
         resume: { interruptId: route.interruptId, value: resume },
-      }, deps, source),
+      }, deps, source, target),
     });
   }
 
@@ -497,12 +527,13 @@ export class ServerChatHandler {
     route: PendingInterruptRoute,
     message: InterruptResumeMessage,
     deps: ServerDeps,
+    target?: ChatTurnTarget,
   ) {
-    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.petId);
-    if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
+    const expectedSessionId = target?.id ?? this.tuiSessions.getActiveSessionId(deps.petId);
+    if (route.sessionId && expectedSessionId && route.sessionId !== expectedSessionId) {
       console.warn(
         `[local-server] interrupt.resume rejected: route sessionId=${route.sessionId} `
-        + `does not match active session=${activeSessionId}`,
+        + `does not match ${target ? 'target' : 'active'} session=${expectedSessionId}`,
       );
       sendLocalServerPeerEvent(peer, {
         type: 'error',

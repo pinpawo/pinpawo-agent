@@ -1,4 +1,4 @@
-import type { PetDispatchPort } from 'pinpawo/host-runtime';
+import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 
 /** Studio-owned metadata used to target a currently live resident Pet. */
 export type StudioPetRegistration = {
@@ -10,4 +10,6 @@ export type StudioPetRegistration = {
 export type StudioPetBinding = {
   registration: StudioPetRegistration;
   dispatch: PetDispatchPort;
+  /** Exact-session observation and review; absent for dispatch-only Pets. */
+  sessions?: PetSessionPort;
 };

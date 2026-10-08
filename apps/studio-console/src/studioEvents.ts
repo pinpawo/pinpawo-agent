@@ -1,7 +1,7 @@
 import type { LiveEvent } from './dispatchActivity';
 
-class EventStreamError extends Error {
-  constructor(message: string, readonly retryable = true) { super(message); }
+export class EventStreamError extends Error {
+  constructor(message: string, readonly retryable = true, readonly status?: number) { super(message); }
 }
 
 function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
@@ -13,17 +13,36 @@ function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** Observe live facts. Reconnection restores observation, not missed history. */
-export async function observeStudioEvents(options: {
+type EventStreamOptions<T> = {
   url: string;
   headers: Record<string, string>;
   signal: AbortSignal;
   onConnected: () => void;
   onDisconnected: (error: Error, retrying: boolean) => void;
-  onEvent: (event: LiveEvent) => void;
+  onEvent: (event: T) => void;
   fetch?: typeof fetch;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
-}): Promise<void> {
+};
+
+function readStudioEvent(event: unknown): LiveEvent {
+  if (!event || typeof event !== 'object' || !('type' in event) || typeof event.type !== 'string'
+    || !('source' in event) || typeof event.source !== 'string'
+    || !('occurredAt' in event) || typeof event.occurredAt !== 'string') {
+    throw new EventStreamError('Invalid Studio event.');
+  }
+  return event as LiveEvent;
+}
+
+/** Observe live facts. Reconnection restores observation, not missed history. */
+export function observeStudioEvents(options: EventStreamOptions<LiveEvent>): Promise<void> {
+  return observeEventStream(options, readStudioEvent);
+}
+
+/**
+ * Read one authenticated SSE stream, reconnecting with backoff. A 4xx other
+ * than a throttle is final: the server named something wrong with the request.
+ */
+export async function observeEventStream<T>(options: EventStreamOptions<T>, read: (data: unknown) => T): Promise<void> {
   const request = options.fetch ?? fetch;
   const wait = options.wait ?? waitForRetry;
   let retryMs = 3_000;
@@ -33,8 +52,9 @@ export async function observeStudioEvents(options: {
     try {
       const response = await request(options.url, { headers: options.headers, signal: options.signal });
       if (!response.ok || !response.body) {
-        await response.body?.cancel();
-        throw new EventStreamError(`SSE failed (${response.status}).`, ![400, 401, 403, 404].includes(response.status));
+        const detail = await response.json().catch(() => null) as { error?: unknown } | null;
+        const reason = typeof detail?.error === 'string' ? ` ${detail.error}` : '';
+        throw new EventStreamError(`SSE failed (${response.status}).${reason}`, ![400, 401, 403, 404].includes(response.status), response.status);
       }
       if (options.signal.aborted) { await response.body.cancel(); return; }
       reader = response.body.getReader();
@@ -55,13 +75,7 @@ export async function observeStudioEvents(options: {
           if (retry) retryMs = Math.min(30_000, Math.max(1_000, Number(retry.slice(6).trim())));
           const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
           if (data) {
-            const event: unknown = JSON.parse(data);
-            if (!event || typeof event !== 'object' || !('type' in event) || typeof event.type !== 'string'
-              || !('source' in event) || typeof event.source !== 'string'
-              || !('occurredAt' in event) || typeof event.occurredAt !== 'string') {
-              throw new EventStreamError('Invalid Studio event.');
-            }
-            options.onEvent(event as LiveEvent);
+            options.onEvent(read(JSON.parse(data)));
             failures = 0;
           }
           boundary = /\r?\n\r?\n/.exec(pending);

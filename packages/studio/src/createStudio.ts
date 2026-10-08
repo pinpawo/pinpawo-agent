@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import type {
-  Studio,
-  StudioEvent,
-  StudioEventInput,
-  StudioPlugin,
-  StudioPluginContext,
+import {
+  StudioPetUnavailableError,
+  type Studio,
+  type StudioEvent,
+  type StudioEventInput,
+  type StudioPetSessions,
+  type StudioPlugin,
+  type StudioPluginContext,
 } from './studioContract';
 import type {
   StudioDispatchReceipt,
@@ -74,6 +76,17 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       ...dispatch.getQueueSnapshot(),
     }));
   }
+
+  const petSessionPort = (petId: string) => {
+    const port = petsById.get(petId)?.sessions;
+    if (!port) throw new StudioPetUnavailableError(petId);
+    return port;
+  };
+  const petSessions: StudioPetSessions = {
+    snapshot: async (petId, sessionId) => petSessionPort(petId).snapshot(sessionId),
+    observe: async (petId, sessionId, listener) => petSessionPort(petId).observe(sessionId, listener),
+    review: async (petId, sessionId, request) => petSessionPort(petId).review(sessionId, request),
+  };
 
   function notify(event: StudioEvent): void {
     eventBus.publish(event);
@@ -174,6 +187,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
       listPets,
       listDispatchQueues,
+      petSessions,
       hooks: pluginHooks.contextFor(plugin.name),
     };
   }

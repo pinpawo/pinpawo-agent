@@ -1,4 +1,4 @@
-import type { PendingInterruptProjection } from '@pinpawo/agent-session';
+import type { AgentRuntimeEvent, PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
@@ -42,6 +42,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     loadContext,
     sessions,
     publishRuntimeEvent: publishActiveSessionEvent,
+    publishSessionEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
     activeHostRuns,
@@ -70,12 +71,14 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
         ...(target ? { sessionId: target.id } : {}),
       });
-      const publishRuntimeEvent: typeof publishActiveSessionEvent = (event) => {
+      const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
         if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
         // Dispatch observers follow the conversation whichever session is on screen.
         const message = readPetDispatchMessage(event);
         if (message) publishLifecycle({ dispatchId, request, requestId: event.requestId, state: 'message', message });
-        if (!target || sessions.getActiveSessionId(petId) === target.id) publishActiveSessionEvent(event);
+        // The run belongs to its target; a legacy dispatch runs in the active session.
+        if (target) publishSessionEvent(target.id, event);
+        else publishActiveSessionEvent(event);
       };
       const readTargetSetup = async () => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(petId), target!.id);
       // Whoever resumes this review continues the dispatch; see continueSuspendedDispatch.

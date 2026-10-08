@@ -34,6 +34,23 @@ route 背后的领域。
 入队时间与已有 session/scope 关联，不含请求正文或模型内容。缺少观察 port 时返回
 `503`，不制造空闲或空队列；不支持通过这个接口修改队列。
 
+### `/pet-sessions/*`（#923）
+
+使用现有 Studio Bearer，经 `context.petSessions` 转发 Host 的 `PetSessionPort`，
+按 `petId + sessionId` 精确寻址；未知 Pet/session 返回 `404`，绝不回落到 active
+session，也不创建 session。缺少端口时返回 `503`。
+
+- `GET /pet-sessions/snapshot?petId&sessionId`：该 session 的版本化 `AgentSessionSnapshot`。
+- `GET /pet-sessions/events?petId&sessionId`：SSE `agent.session`，首帧
+  `session.snapshot.result`，之后只有该 session 的 `AgentServerMessage`；与 `/events`
+  共用连接上限，不占用 TUI 的交互连接。
+- `POST /pet-sessions/review`：只接受
+  `{petId, sessionId, requestId, interruptId, value: {decisions}}`；其他命令（chat、
+  session.resume、cancel 等）一律 `400`。`202` 只表示 Host 接手，结果（包括接手后的
+  失败）在该 session 的事件流里按 requestId 返回。Host 当场能判定的拒绝返回 `409`：
+  审批已不是该 session 当前的（`review_closed`），或该 Pet 正在运行（含另一个正在续跑
+  的应答，`session_busy`）。两个窗口同时应答时，第二个直接收到 `409`。
+
 ### `POST /dispatch`
 
 请求体是 `StudioWireDispatchRequest` 的 JSON 形态：

@@ -58,6 +58,11 @@ test('Scheduler audits configured dispatch queues without changing their admissi
     listDispatchQueues: () => [{
       petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 2,
     }],
+    petSessions: {
+      snapshot: async () => { throw new Error('not used'); },
+      observe: async () => { throw new Error('not used'); },
+      review: async () => { throw new Error('not used'); },
+    },
     hooks: {
       expose: () => () => undefined,
       contribute: () => () => undefined,

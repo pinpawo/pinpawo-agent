@@ -14,11 +14,13 @@ export type {
   StudioEvent,
   StudioEventHandler,
   StudioEventInput,
+  StudioPetSessions,
   StudioPlugin,
   StudioPluginContext,
   StudioPluginHookInstaller,
   StudioPluginHooks,
 } from './studioContract';
+export { StudioPetUnavailableError } from './studioContract';
 export { parseStudioDispatchRequest } from './studioInvocation';
 export type { StudioWireDispatchRequest } from './studioInvocation';
 

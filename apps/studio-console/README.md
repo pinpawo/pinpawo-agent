@@ -35,6 +35,7 @@ npm exec -w @pinpawo/studio-console -- playwright install chromium
 npm run test:browser -w @pinpawo/studio-console
 npm run test:browser:layout -w @pinpawo/studio-console
 npm run test:browser:message -w @pinpawo/studio-console
+npm run test:browser:session -w @pinpawo/studio-console
 ```
 
 Both browser suites start temporary production Resident Host / HTTP / Channel

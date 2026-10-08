@@ -70,12 +70,13 @@ try {
     packWorkspacePackage(petAgentRoot, artifactDir),
     packWorkspacePackage(hostRoot, artifactDir),
   ]);
+  // Resolve against live registry metadata: with --prefer-offline, a restored
+  // CI npm cache served stale packuments and failed on newly published deps.
   await runNpm([
     'install',
     '--no-audit',
     '--no-fund',
     '--package-lock=false',
-    '--prefer-offline',
     '--save=false',
     agentContractsTarball,
     agentSessionTarball,

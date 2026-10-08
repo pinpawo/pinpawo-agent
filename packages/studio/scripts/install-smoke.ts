@@ -67,13 +67,14 @@ try {
   const tarballs = await Promise.all(
     packageRoots.map((packageRoot) => packPackage(packageRoot, artifactDir)),
   );
+  // Resolve against live registry metadata: with --prefer-offline, a restored
+  // CI npm cache served stale packuments and failed on newly published deps.
   await runNpm([
     'install',
     '--ignore-scripts',
     '--no-audit',
     '--no-fund',
     '--package-lock=false',
-    '--prefer-offline',
     '--loglevel=verbose',
     '--timing',
     '--save=false',

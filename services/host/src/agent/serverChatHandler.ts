@@ -62,7 +62,7 @@ type LocalServerRunSource =
   | HumanReviewResolutionSource;
 
 /** Per-turn hooks a Host-initiated turn adds to the shared pipeline. */
-type LocalServerRunHooks = {
+type ChatTurnHooks = {
   /** Decorates this turn's run, as a dispatch adds its own attribution. */
   runAgentTurn?: RunAgentSessionTurn;
   /** Receives the error behind a `failed` or `fatal_failed` outcome. */
@@ -319,7 +319,7 @@ export class ServerChatHandler {
     deps: ServerDeps,
     source: LocalServerRunSource,
     target?: ChatTurnTarget,
-    hooks: LocalServerRunHooks = {},
+    hooks: ChatTurnHooks = {},
   ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';

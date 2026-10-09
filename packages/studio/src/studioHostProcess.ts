@@ -2,7 +2,7 @@ import {
   buildHostRuntimeConfig,
   type HostRuntimeConfig,
 } from 'pinpawo/host-runtime';
-import { ensureLocalServerAuthToken } from 'pinpawo/local-server-transport';
+import { ensureWireAuthToken } from 'pinpawo/wire';
 import type { StudioPluginResolver } from './host/buildStudio';
 import { createInstalledStudioPluginResolver } from './installedPluginResolver';
 import {
@@ -42,7 +42,7 @@ export async function runStudioHostProcess(
   const runtimeConfig = (dependencies.buildRuntimeConfig ?? buildHostRuntimeConfig)(
     options.workdir,
   );
-  const authToken = (dependencies.ensureAuthToken ?? ensureLocalServerAuthToken)();
+  const authToken = (dependencies.ensureAuthToken ?? ensureWireAuthToken)();
   const resolvePlugin = options.resolvePlugin
     ?? (dependencies.createPluginResolver ?? createInstalledStudioPluginResolver)({
       workdir: runtimeConfig.workdir,

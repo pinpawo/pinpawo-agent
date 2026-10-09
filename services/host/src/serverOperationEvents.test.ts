@@ -8,7 +8,7 @@ import {
   createInflightOperationRun,
 } from './inflightOperationRun';
 import {
-  emitLocalServerToolOperationEvent,
+  emitToolOperationEvent,
   isHumanReviewInterruptError,
 } from './serverOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
@@ -23,7 +23,7 @@ test('serialized review batches are interrupted and hide internal error JSON', (
     kind: 'review', review: buildReviewSpec({ id: 'write', view: { kind: 'plain', body: 'Write?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] }),
   }] } }];
   for (const error of [batch, JSON.stringify(batch), { interrupts: batch }, { __interrupt__: batch }]) {
-    const event = emitLocalServerToolOperationEvent({
+    const event = emitToolOperationEvent({
       run: createInflightOperationRun('request'),
       payload: { event: 'on_tool_error', name: 'delegate_capability', error },
       emit: () => {}, log: () => {},
@@ -42,12 +42,12 @@ const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createGitToolkit({ shell: sharedShell }),
 ]);
 
-test('emitLocalServerToolOperationEvent emits one operation for a normal tool event', () => {
+test('emitToolOperationEvent emits one operation for a normal tool event', () => {
   const run = createInflightOperationRun('req-1');
   configureInflightOperationRegistry(run, localToolOperationRegistry);
   const emitted: AgentOperationEvent[] = [];
 
-  const event = emitLocalServerToolOperationEvent({
+  const event = emitToolOperationEvent({
     run,
     payload: {
       event: 'on_tool_start',
@@ -64,11 +64,11 @@ test('emitLocalServerToolOperationEvent emits one operation for a normal tool ev
   assert.equal(emitted[0]?.operation.kind, 'files.read_file');
 });
 
-test('emitLocalServerToolOperationEvent maps human review tool errors to interrupted operations', () => {
+test('emitToolOperationEvent maps human review tool errors to interrupted operations', () => {
   const run = createInflightOperationRun('req-1');
   const emitted: AgentOperationEvent[] = [];
 
-  emitLocalServerToolOperationEvent({
+  emitToolOperationEvent({
     run,
     payload: {
       event: 'on_tool_start',
@@ -78,7 +78,7 @@ test('emitLocalServerToolOperationEvent maps human review tool errors to interru
     emit: (item) => emitted.push(item),
     log: () => undefined,
   });
-  const interrupted = emitLocalServerToolOperationEvent({
+  const interrupted = emitToolOperationEvent({
     run,
     payload: {
       event: 'on_tool_error',

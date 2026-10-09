@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isAuthorizedLocalServerRequest } from './wire/auth';
+import { isAuthorizedWireRequest } from './wire/auth';
 import type { PetIdentityDeps, RuntimeProjectionDeps } from './serverTypes';
 import { buildLocalHttpRuntimeProjection } from './config/configProjection';
 
@@ -20,7 +20,7 @@ export function handleLocalHttpRequest(
 ) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
-  if (!isAuthorizedLocalServerRequest(req, options.authToken)) {
+  if (!isAuthorizedWireRequest(req, options.authToken)) {
     writeJson(res, 401, { error: 'unauthorized' });
     return true;
   }

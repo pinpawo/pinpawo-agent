@@ -15,14 +15,14 @@ import {
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
 } from './protocol';
-import { sendLocalServerPeerEvent, type ServerPeer } from './peer';
+import { sendAgentSessionPeerEvent, type ServerPeer } from './peer';
 import type { ServerWireHandlers } from './framing';
 
 type MaybePromise<T> = T | Promise<T>;
 export type ServerLogError = (message: string, error: unknown) => void;
 export type ServerLogWarn = (message: string) => void;
 
-export type LocalServerPeerHandlers = {
+export type AgentSessionPeerHandlers = {
   onChatRequest: (peer: ServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
   /** Continue any pending interrupt by id. */
   onInterruptResume: (
@@ -52,8 +52,8 @@ export type LocalServerPeerHandlers = {
   logWarn?: ServerLogWarn;
 };
 
-export type ServerTransportHandlers = Partial<LocalServerPeerHandlers> & Pick<
-  LocalServerPeerHandlers,
+export type ServerTransportHandlers = Partial<AgentSessionPeerHandlers> & Pick<
+  AgentSessionPeerHandlers,
   'log' | 'logError' | 'logWarn'
 >;
 
@@ -64,11 +64,11 @@ function rejectUnsupportedMessage(
 ) {
   if (!message.requestId) {
     logWarn(
-      `[local-server] ignored unsupported client message type=${message.type} because it has no requestId`,
+      `[wire] ignored unsupported client message type=${message.type} because it has no requestId`,
     );
     return Promise.resolve();
   }
-  sendLocalServerPeerEvent(peer, {
+  sendAgentSessionPeerEvent(peer, {
     type: 'error',
     requestId: message.requestId,
     message: `Message type "${message.type}" is not supported by this Host transport.`,
@@ -85,15 +85,15 @@ function dispatchOptional<TMessage extends { type: string; requestId?: string }>
   logWarn: ServerLogWarn,
 ) {
   return handler
-    ? runLocalServerPeerHandler(handlerName, () => handler(peer, message), logError)
+    ? runAgentSessionPeerHandler(handlerName, () => handler(peer, message), logError)
     : rejectUnsupportedMessage(peer, message, logWarn);
 }
 
-export function defaultLocalServerLogError(message: string, error: unknown) {
+export function defaultHostLogError(message: string, error: unknown) {
   console.error(message, error instanceof Error ? error.message : error);
 }
 
-export function defaultLocalServerLogWarn(message: string) {
+export function defaultHostLogWarn(message: string) {
   console.warn(message);
 }
 
@@ -136,14 +136,14 @@ function sendMalformedClientMessageError(peer: ServerPeer, data: Buffer | string
     });
     return;
   }
-  sendLocalServerPeerEvent(peer, {
+  sendAgentSessionPeerEvent(peer, {
     type: 'error',
     requestId: envelope.requestId,
     message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
   });
 }
 
-export function runLocalServerPeerHandler(
+export function runAgentSessionPeerHandler(
   name: string,
   handler: () => MaybePromise<void>,
   logError: ServerLogError,
@@ -151,21 +151,21 @@ export function runLocalServerPeerHandler(
   return Promise.resolve()
     .then(handler)
     .catch((err) => {
-      logError(`[local-server] ${name} error:`, err);
+      logError(`[wire] ${name} error:`, err);
     });
 }
 
-export function dispatchLocalServerMessage(
+export function dispatchAgentSessionMessage(
   peer: ServerPeer,
   data: Buffer | string,
   handlers: ServerTransportHandlers,
-  logError: ServerLogError = handlers.logError ?? defaultLocalServerLogError,
-  logWarn: ServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
+  logError: ServerLogError = handlers.logError ?? defaultHostLogError,
+  logWarn: ServerLogWarn = handlers.logWarn ?? defaultHostLogWarn,
 ) {
   try {
     const msg = parseHostClientMessage(data);
     if (!msg) {
-      logWarn(formatMalformedClientMessage('[local-server]', data));
+      logWarn(formatMalformedClientMessage('[wire]', data));
       sendMalformedClientMessageError(peer, data);
       return Promise.resolve();
     }
@@ -198,7 +198,7 @@ export function dispatchLocalServerMessage(
         });
         return Promise.resolve();
       }
-      return runLocalServerPeerHandler(
+      return runAgentSessionPeerHandler(
         'handleSessionCompact',
         () => handlers.onSessionCompact!(peer, msg),
         logError,
@@ -211,7 +211,7 @@ export function dispatchLocalServerMessage(
       peer.send({ type: 'pong' });
     }
   } catch (err) {
-    logError('[local-server] failed to dispatch client message:', err);
+    logError('[wire] failed to dispatch client message:', err);
   }
   return Promise.resolve();
 }
@@ -230,8 +230,8 @@ export function dispatchLocalServerMessage(
  */
 export function createHostWireHandlers(
   handlers: ServerTransportHandlers,
-  logError: ServerLogError = handlers.logError ?? defaultLocalServerLogError,
-  logWarn: ServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
+  logError: ServerLogError = handlers.logError ?? defaultHostLogError,
+  logWarn: ServerLogWarn = handlers.logWarn ?? defaultHostLogWarn,
 ): ServerWireHandlers<import('./protocol').HostServerMessage> {
   let interactive: ServerPeer | null = null;
   return {
@@ -243,11 +243,11 @@ export function createHostWireHandlers(
           message: 'This Agent already has an interactive client.',
           code: 'interaction_busy',
         }));
-        logWarn('[local-server] refused a second interactive client');
+        logWarn('[wire] refused a second interactive client');
         return Promise.resolve();
       }
       interactive = peer;
-      return dispatchLocalServerMessage(peer, data, handlers, logError, logWarn);
+      return dispatchAgentSessionMessage(peer, data, handlers, logError, logWarn);
     },
     onClose: (peer) => {
       if (interactive === peer) {

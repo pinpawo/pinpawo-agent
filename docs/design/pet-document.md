@@ -198,7 +198,7 @@ Chat and Studio forward this snapshot; Agent input construction consumes it
 without consulting global configuration or resolving directories again.
 `AgentLlmConfig` owns model settings only, not authorization policy.
 
-Each resident owns one `LocalServerRuntimeDepsStore`. Conversation, session
+Each resident owns one `ServerRuntimeDepsStore`. Conversation, session
 projection and background dispatch read this same store. A policy update replaces
 mode and safety level together; subsequent runs use the new snapshot while an
 already-started run keeps its admitted configuration. Persistence continues to
@@ -206,8 +206,8 @@ save startup defaults; it does not mutate other already-running Hosts.
 
 Migration: programmatic Hosts supply resolved settings through
 `resolveHostExecutionConfig(runtimeConfig, settings)` (the settings argument may
-be omitted only at a process composition boundary). `LocalServerDeps.workdir`
-is removed; consumers use `runtimeConfig.workdir`. `createLocalServerHandlers`
+be omitted only at a process composition boundary). `ServerDeps.workdir`
+is removed; consumers use `runtimeConfig.workdir`. `createChatHostHandlers`
 accepts the shared store. Session services require runtime paths explicitly;
 Host-specific session/checkpoint path overrides remain deliberate storage scopes.
 Chat explicitly owns the existing `tuiCheckpointPath` adapter; the default session

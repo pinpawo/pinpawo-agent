@@ -93,7 +93,7 @@ export function buildLocalRuntimeProjection(
 export function buildLocalHttpRuntimeProjection(deps: RuntimeProjectionDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
-    local_agent_version: readHostPackageVersion(),
+    host_version: readHostPackageVersion(),
     server_mode: runtime.serverMode,
     model_profile_id: runtime.modelProfileId,
     model_profile_label: runtime.modelProfileLabel,

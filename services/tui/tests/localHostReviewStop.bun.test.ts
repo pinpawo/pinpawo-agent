@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { buildAgentContext } from '../../host/src/contextLoader';
-import { createLocalServerHandlers } from '../../host/src/serverHandlers';
-import { createLocalServerRuntimeDepsStore } from '../../host/src/serverTypes';
-import { attachLocalServerWebSocketTransport } from '../../host/src/serverWsTransport';
+import { createChatHostHandlers } from '../../host/src/serverHandlers';
+import { createChatHostDepsStore } from '../../host/src/serverTypes';
+import { attachHostWebSocketTransport } from '../../host/src/serverWsTransport';
 import { buildHostRuntimeConfig } from '../../host/src/config/runtimeConfig';
 import { createTestModelServerDeps } from '../../host/src/testing/modelProfiles';
 import { createTestHostToolkitInventory } from '../../host/src/testing/toolkitInventory';
@@ -25,7 +25,7 @@ test('real Host transport completes cancelled review and accepts the next ordina
   const root = mkdtempSync(join(tmpdir(), 'tui-review-stop-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   const fixture = createHostGraphFixture();
-  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
+  const handlers = createChatHostHandlers(createChatHostDepsStore({
     serverMode: 'chat', petId: 'one', petName: 'One', runtimeConfig,
     ...createTestModelServerDeps({ apiKey: 'offline', baseUrl: 'http://127.0.0.1:1/v1', model: 'test', contextWindowTokens: 32_000 }),
     toolkitInventory: createTestHostToolkitInventory([]),
@@ -36,7 +36,7 @@ test('real Host transport completes cancelled review and accepts the next ordina
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   const authToken = 'offline-review-stop';
-  const ws = attachLocalServerWebSocketTransport(server, handlers.peerHandlers, { authToken, port: address.port });
+  const ws = attachHostWebSocketTransport(server, handlers.peerHandlers, { authToken, port: address.port });
   let requestCount = 0;
   const controller = new TuiSessionController({
     connectionFactory: connectionHandlers => new LocalHostConnection(connectionHandlers, {

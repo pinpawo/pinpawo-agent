@@ -140,7 +140,7 @@ export type Config = Readonly<{
   globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
-  localServerPort: number;
+  hostPort: number;
 }>;
 
 export type ConfigInput = Partial<Config>;
@@ -171,7 +171,7 @@ function readConfigDefaults(): Config {
     globalReviewPolicyMode: getGlobalReviewPolicyMode(),
     autoAuthorizationSafetyLevel: getAutoAuthorizationSafetyLevel(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
-    localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
+    hostPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });
 }
 

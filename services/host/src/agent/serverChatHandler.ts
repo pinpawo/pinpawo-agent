@@ -23,7 +23,7 @@ import {
   type InflightOperationRun,
 } from '../inflightOperationRun';
 import { InflightRequestController } from '../inflightRequestController';
-import { emitLocalServerToolOperationEvent } from '../serverOperationEvents';
+import { emitToolOperationEvent } from '../serverOperationEvents';
 import { HostGraphService } from './agentGraphService';
 import {
   ServerTuiSessionService,
@@ -42,12 +42,12 @@ import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { sendLocalServerPeerEvent, type ServerPeer } from '../wire/peer';
+import { sendAgentSessionPeerEvent, type ServerPeer } from '../wire/peer';
 import { ThreadInvocationCoordinator } from '../threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
 
-type LocalServerRunRequest = AgentSessionTurnRequest;
+type ChatTurnRequest = AgentSessionTurnRequest;
 type RunAgentSessionTurn = typeof runAgentSessionTurn;
 export type ChatRunOutcome =
   | 'completed'
@@ -56,7 +56,7 @@ export type ChatRunOutcome =
   | 'failed'
   | 'fatal_failed';
 
-type LocalServerRunSource =
+type ChatTurnSource =
   | { type: 'chat_request' }
   | { type: 'host_dispatch' }
   | HumanReviewResolutionSource;
@@ -136,7 +136,7 @@ export class ServerChatHandler {
     this.runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
     this.publishRuntimeEvent = options.publishRuntimeEvent
       ?? ((peer, event) => {
-        sendLocalServerPeerEvent(peer, event);
+        sendAgentSessionPeerEvent(peer, event);
       });
     this.interruptHostRun = options.interruptHostRun;
   }
@@ -181,7 +181,7 @@ export class ServerChatHandler {
       return route;
     } catch (err) {
       console.warn(
-        '[local-server] failed to recover pending human_review from checkpoint:',
+        '[chat-host] failed to recover pending human_review from checkpoint:',
         err instanceof Error ? err.message : err,
       );
       return null;
@@ -202,7 +202,7 @@ export class ServerChatHandler {
   }
 
   private sendClosedReviewError(peer: ServerPeer, requestId: string) {
-    sendLocalServerPeerEvent(peer, {
+    sendAgentSessionPeerEvent(peer, {
       type: 'error',
       requestId,
       message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
@@ -325,9 +325,9 @@ export class ServerChatHandler {
 
   private async runChatRequest(
     peer: ServerPeer,
-    request: LocalServerRunRequest,
+    request: ChatTurnRequest,
     deps: ServerDeps,
-    source: LocalServerRunSource,
+    source: ChatTurnSource,
     target?: ChatTurnTarget,
     hooks: ChatTurnHooks = {},
   ): Promise<ChatRunOutcome> {
@@ -336,16 +336,16 @@ export class ServerChatHandler {
     const runAgentTurn = hooks.runAgentTurn ?? this.runAgentTurn;
 
     if (source.type === 'chat_request' || source.type === 'host_dispatch') {
-      console.log(`[local-server] ${source.type} requestId=${requestId} message="${message.slice(0, 80)}"`);
+      console.log(`[chat-host] ${source.type} requestId=${requestId} message="${message.slice(0, 80)}"`);
     } else if (source.type === 'review_decision') {
       console.log(
-        `[local-server] review decision requestId=${requestId} `
+        `[chat-host] review decision requestId=${requestId} `
         + `interactionId=${source.interactionId} option=${source.selectedOptionId}`
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     } else {
       console.log(
-        `[local-server] review cancel requestId=${requestId} `
+        `[chat-host] review cancel requestId=${requestId} `
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
@@ -419,7 +419,7 @@ export class ServerChatHandler {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
       hooks.onFailure?.(err);
-      console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
+      console.error('[chat-host] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       // Resetting replaces the active session; a targeted turn never does that.
       const recoveredFromToolProtocolError = !target && isToolProtocolHistoryError(err);
       if (recoveredFromToolProtocolError) {
@@ -427,10 +427,10 @@ export class ServerChatHandler {
           await this.tuiSessions.resetSession(deps.petId, {
             deletePrevious: true,
           });
-          console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
+          console.warn(`[chat-host] reset TUI chat session after tool protocol error requestId=${requestId}`);
         } catch (resetError) {
           console.warn(
-            '[local-server] failed to reset TUI chat session after tool protocol error:',
+            '[chat-host] failed to reset TUI chat session after tool protocol error:',
             resetError instanceof Error ? resetError.message : resetError,
           );
         }
@@ -512,7 +512,7 @@ export class ServerChatHandler {
         // waiting on and under which id.
         this.inflightRequests.finish(peer, inflight, 'interrupted');
         await refreshSummary();
-        console.log(`[local-server] interrupt.requested requestId=${requestId}`);
+        console.log(`[chat-host] interrupt.requested requestId=${requestId}`);
         this.inflightRequests.clear(peer, inflight);
         return 'waiting';
       }
@@ -523,18 +523,18 @@ export class ServerChatHandler {
       this.inflightRequests.clear(peer, inflight);
       await refreshSummary();
 
-      console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
+      console.log(`[chat-host] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
     } catch (err) {
       const aborted = controller.signal.aborted
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
-        console.warn(`[local-server] chat interrupted requestId=${requestId}`);
+        console.warn(`[chat-host] chat interrupted requestId=${requestId}`);
         try {
           return await settleInterrupted();
         } catch (settleError) {
           console.error(
-            '[local-server] failed to settle an aborted run:',
+            '[chat-host] failed to settle an aborted run:',
             settleError instanceof Error ? (settleError.stack ?? settleError.message) : settleError,
           );
           // The run was aborted, so it is no longer current; yet a started
@@ -560,7 +560,7 @@ export class ServerChatHandler {
       recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps, target),
       emitClosed: () => {
         console.warn(
-          `[local-server] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
+          `[chat-host] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
         );
         this.sendClosedReviewError(peer, msg.requestId);
       },
@@ -587,10 +587,10 @@ export class ServerChatHandler {
     const expectedSessionId = target?.id ?? this.tuiSessions.getActiveSessionId(deps.petId);
     if (route.sessionId && expectedSessionId && route.sessionId !== expectedSessionId) {
       console.warn(
-        `[local-server] interrupt.resume rejected: route sessionId=${route.sessionId} `
+        `[chat-host] interrupt.resume rejected: route sessionId=${route.sessionId} `
         + `does not match ${target ? 'target' : 'active'} session=${expectedSessionId}`,
       );
-      sendLocalServerPeerEvent(peer, {
+      sendAgentSessionPeerEvent(peer, {
         type: 'error',
         requestId: message.requestId,
         message: '请回到发起该 review 的会话再操作。',
@@ -606,7 +606,7 @@ export class ServerChatHandler {
     inflight: InflightRequest,
     payload: StreamToolsPayload,
   ) {
-    emitLocalServerToolOperationEvent({
+    emitToolOperationEvent({
       run: inflight,
       payload,
       // Trusted local peer: include raw input/output so the UI can render diffs etc.

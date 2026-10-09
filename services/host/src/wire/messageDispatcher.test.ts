@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createHostWireHandlers,
-  dispatchLocalServerMessage,
-  type LocalServerPeerHandlers,
+  dispatchAgentSessionMessage,
+  type AgentSessionPeerHandlers,
   type ServerTransportHandlers,
 } from './messageDispatcher';
 import type { HostServerMessage } from './protocol';
@@ -24,7 +24,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
   const sent: HostServerMessage[] = [];
   const warnings: string[] = [];
   const peer = createFakePeer(sent);
-  const handlers: LocalServerPeerHandlers = {
+  const handlers: AgentSessionPeerHandlers = {
     onChatRequest: (_peer, message) => {
       seen.push(`chat:${message.requestId}:${message.message}`);
     },
@@ -71,13 +71,13 @@ test('local server dispatcher routes typed client messages and pong', async () =
     },
   };
 
-  dispatchLocalServerMessage(peer, JSON.stringify({ type: 'ping' }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({ type: 'ping' }), handlers);
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'chat_request',
     requestId: 'chat-1',
     message: 'hi',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'interrupt.resume',
     requestId: 'review-1',
     interruptId: 'action-1',
@@ -85,67 +85,67 @@ test('local server dispatcher routes typed client messages and pong', async () =
       decisions: [{ interactionId: 'review-spec-1', selectedOptionId: 'approve' }],
     },
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'run.interrupt',
     requestId: 'chat-1',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'interrupt.resume',
     requestId: 'review-cancel-1',
     interruptId: 'action-1',
     value: { action: 'cancel' },
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'new_session',
     userId: 'user-1',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     globalReviewPolicyMode: 'auto_authorization',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     requestId: 'policy-1',
     globalReviewPolicyMode: 'full_access',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.snapshot.get',
     requestId: 'snapshot-1',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.list',
     requestId: 'sessions-1',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.new',
     requestId: 'new-1',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.compact',
     requestId: 'compact-1',
     sessionId: 'chat:one',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.resume',
     requestId: 'resume-1',
     sessionId: 'chat:one',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'chat_request',
     requestId: 'chat-old',
     message: 'Approve',
     resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.resume',
     requestId: 'resume-invalid',
   }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     requestId: 'policy-invalid',
     globalReviewPolicyMode: 'custom',
   }), handlers);
-  dispatchLocalServerMessage(peer, '{bad json', handlers);
+  dispatchAgentSessionMessage(peer, '{bad json', handlers);
 
   await assertEventually(() => {
     assert.deepEqual(sent, [
@@ -186,10 +186,10 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'resume:resume-1:chat:one',
     ]);
     assert.deepEqual(warnings, [
-      '[local-server] ignored malformed client message type=chat_request requestId=chat-old',
-      '[local-server] ignored malformed client message type=session.resume requestId=resume-invalid',
-      '[local-server] ignored malformed client message type=runtime_config.update requestId=policy-invalid',
-      '[local-server] ignored malformed client message type=unknown requestId=unknown',
+      '[wire] ignored malformed client message type=chat_request requestId=chat-old',
+      '[wire] ignored malformed client message type=session.resume requestId=resume-invalid',
+      '[wire] ignored malformed client message type=runtime_config.update requestId=policy-invalid',
+      '[wire] ignored malformed client message type=unknown requestId=unknown',
     ]);
   });
 });
@@ -202,17 +202,17 @@ test('local server dispatcher reports unsupported messages without silently drop
     logWarn: (message) => warnings.push(message),
   };
 
-  await dispatchLocalServerMessage(peer, JSON.stringify({
+  await dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'new_session',
     userId: 'legacy-client',
   }), handlers);
-  await dispatchLocalServerMessage(peer, JSON.stringify({
+  await dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'run.interrupt',
     requestId: 'interrupt-1',
   }), handlers);
 
   assert.deepEqual(warnings, [
-    '[local-server] ignored unsupported client message type=new_session because it has no requestId',
+    '[wire] ignored unsupported client message type=new_session because it has no requestId',
   ]);
   assert.deepEqual(sent, [{
     type: 'event',

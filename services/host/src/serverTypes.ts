@@ -90,14 +90,14 @@ export type ServerRuntimeDepsStore = Readonly<{
   ) => Readonly<ServerDeps>;
 }>;
 
-export function getLocalServerToolkitInventory(
+export function getToolkitInventory(
   deps: Pick<ServerDeps, 'toolkitInventory'>,
 ): HostToolkitInventorySnapshot {
   return deps.toolkitInventory.getSnapshot();
 }
 
 /** One Host-owned current snapshot shared by conversation and dispatch surfaces. */
-export function createLocalServerRuntimeDepsStore(
+export function createChatHostDepsStore(
   deps: ServerDeps,
 ): ServerRuntimeDepsStore {
   let current = Object.freeze({ ...deps });

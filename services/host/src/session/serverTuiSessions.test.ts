@@ -20,7 +20,7 @@ import {
   type TuiSessionCheckpointer,
 } from './serverTuiSessions';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
-import { createLocalServerRuntimeDepsStore, type ServerDeps } from '../serverTypes';
+import { createChatHostDepsStore, type ServerDeps } from '../serverTypes';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
 import {
   createTestModelProfiles,
@@ -200,7 +200,7 @@ test('runtime config updates reach the next chat setup through the normalized de
     saveState: () => {},
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
-  const runtimeDeps = createLocalServerRuntimeDepsStore({
+  const runtimeDeps = createChatHostDepsStore({
     serverMode: 'chat',
     petId: 'pet-a',
     modelProfiles: createTestModelProfiles(),

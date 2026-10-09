@@ -121,7 +121,7 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
-    local_agent_version: readHostPackageVersion(),
+    host_version: readHostPackageVersion(),
     server_mode: 'chat',
     model_profile_id: 'test-profile',
     model_profile_label: 'Test profile',

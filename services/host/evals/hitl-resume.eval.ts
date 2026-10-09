@@ -17,7 +17,7 @@
  *
  * SUT seams:
  *   - services/host/src/agent/chatSessionAdapter.ts (runAgentSessionTurn)
- *   - services/host/src/localServerChatHandler.ts (review route guard)
+ *   - services/host/src/agent/serverChatHandler.ts (review route guard)
  *   - packages/pet-agent/src/autoReview/reviewAuthorizations.ts
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the

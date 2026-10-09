@@ -17,7 +17,7 @@ export type {
   AgentHostConnectionHandlers,
 } from './agentHostConnection';
 
-const DEFAULT_LOCAL_SERVER_PORT = 3210;
+const DEFAULT_HOST_PORT = 3210;
 const DEFAULT_TOKEN_PATH = resolve(homedir(), '.pinpawo', 'local-server-token');
 const SOCKET_OPEN = 1;
 
@@ -47,7 +47,7 @@ export type LocalHostConnectionOptions = {
   webSocketFactory?: WebSocketFactory;
 };
 
-export function readLocalServerToken(path = DEFAULT_TOKEN_PATH) {
+export function readWireToken(path = DEFAULT_TOKEN_PATH) {
   try {
     return readFileSync(path, 'utf8').trim() || null;
   } catch {
@@ -55,9 +55,9 @@ export function readLocalServerToken(path = DEFAULT_TOKEN_PATH) {
   }
 }
 
-export function readLocalServerPort(value = process.env.LOCAL_SERVER_PORT) {
+export function readWirePort(value = process.env.LOCAL_SERVER_PORT) {
   if (value === undefined || value.trim() === '') {
-    return DEFAULT_LOCAL_SERVER_PORT;
+    return DEFAULT_HOST_PORT;
   }
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -76,7 +76,7 @@ export class LocalHostConnection implements AgentHostConnection {
     private readonly handlers: AgentHostConnectionHandlers,
     private readonly options: LocalHostConnectionOptions = {},
   ) {
-    this.tokenProvider = options.tokenProvider ?? (() => readLocalServerToken());
+    this.tokenProvider = options.tokenProvider ?? (() => readWireToken());
     this.webSocketFactory = options.webSocketFactory ?? createBunWebSocket;
   }
 
@@ -94,7 +94,7 @@ export class LocalHostConnection implements AgentHostConnection {
     let socket: WebSocketLike;
     try {
       socket = this.webSocketFactory(
-        `ws://127.0.0.1:${this.options.port ?? DEFAULT_LOCAL_SERVER_PORT}${this.options.path ?? ''}`,
+        `ws://127.0.0.1:${this.options.port ?? DEFAULT_HOST_PORT}${this.options.path ?? ''}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
     } catch (error) {

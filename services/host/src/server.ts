@@ -1,14 +1,14 @@
 /**
  * Local HTTP/WebSocket server for TUI ↔ run process communication.
  */
-import { ensureLocalServerAuthToken } from './wire/auth';
+import { ensureWireAuthToken } from './wire/auth';
 import {
-  createLocalServerHandlers,
+  createChatHostHandlers,
   type ServerHandlerOptions,
 } from './serverHandlers';
-import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
+import { createChatHostDepsStore, type ServerDeps } from './serverTypes';
 import {
-  startLocalServerTransport,
+  startHostTransport,
   type ServerTransport,
 } from './wire/transport';
 
@@ -19,20 +19,20 @@ export type ServerOptions = {
   handlerOptions?: ServerHandlerOptions;
 };
 
-export { startLocalServerTransport } from './wire/transport';
+export { startHostTransport } from './wire/transport';
 export type {
   ServerTransport,
   ServerTransportOptions,
 } from './wire/transport';
 
-export async function startLocalServer(
+export async function startHostServer(
   port: number,
   deps: ServerDeps,
   options: ServerOptions = {},
 ): Promise<ServerTransport> {
-  const authToken = options.authToken ?? ensureLocalServerAuthToken();
-  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps), options.handlerOptions ?? {});
-  return startLocalServerTransport(port, handlers.peerHandlers, {
+  const authToken = options.authToken ?? ensureWireAuthToken();
+  const handlers = createChatHostHandlers(createChatHostDepsStore(deps), options.handlerOptions ?? {});
+  return startHostTransport(port, handlers.peerHandlers, {
     authToken,
     handleHttpRequest: (req, res) => {
       if (handlers.handleHttpRequest(req, res, authToken)) return;

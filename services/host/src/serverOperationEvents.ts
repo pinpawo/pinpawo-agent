@@ -67,7 +67,7 @@ export function isHumanReviewInterruptError(value: unknown): boolean {
   });
 }
 
-export function emitLocalServerToolOperationEvent(options: {
+export function emitToolOperationEvent(options: {
   run: InflightOperationRun;
   payload: StreamToolsPayload;
   emit: EmitEvent;
@@ -85,7 +85,7 @@ export function emitLocalServerToolOperationEvent(options: {
       },
     };
     emitInflightOperationEvent(interruptedEvent, emit);
-    log(`[local-server] operation_interrupted requestId=${run.requestId} kind=${interruptedEvent.operation.kind}`);
+    log(`[chat-host] operation_interrupted requestId=${run.requestId} kind=${interruptedEvent.operation.kind}`);
     return interruptedEvent;
   }
 
@@ -94,7 +94,7 @@ export function emitLocalServerToolOperationEvent(options: {
   emitInflightOperationEvent(event, emit);
 
   log(
-    `[local-server] operation_${event.phase} requestId=${run.requestId} kind=${event.operation.kind}`
+    `[chat-host] operation_${event.phase} requestId=${run.requestId} kind=${event.operation.kind}`
       + (input ? ` input=${maybeTrimForLog(input, 200)}` : '')
       + (error ? ` error=${maybeTrimForLog(error)}` : ''),
   );

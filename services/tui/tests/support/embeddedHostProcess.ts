@@ -14,13 +14,13 @@ import {
   buildAgentContext,
 } from '../../../host/src/contextLoader';
 import {
-  createLocalServerHandlers,
+  createChatHostHandlers,
 } from '../../../host/src/serverHandlers';
 import {
-  createLocalServerRuntimeDepsStore,
+  createChatHostDepsStore,
 } from '../../../host/src/serverTypes';
 import {
-  attachLocalServerStdioTransport,
+  attachHostStdioTransport,
   redirectConsoleToStdioDiagnostics,
 } from '../../../host/src/wire/stdioTransport';
 import {
@@ -52,8 +52,8 @@ redirectConsoleToStdioDiagnostics();
 
 const runtimeConfig = buildHostRuntimeConfig(workdir);
 const graphFixture = createHostGraphFixture();
-const handlers = createLocalServerHandlers(
-  createLocalServerRuntimeDepsStore({
+const handlers = createChatHostHandlers(
+  createChatHostDepsStore({
     serverMode: 'chat',
     petId: 'pet-embedded-host',
     petName: 'PinPawo',
@@ -77,7 +77,7 @@ const handlers = createLocalServerHandlers(
   },
 );
 
-const transport = attachLocalServerStdioTransport(handlers.peerHandlers);
+const transport = attachHostStdioTransport(handlers.peerHandlers);
 
 try {
   await transport.closed;

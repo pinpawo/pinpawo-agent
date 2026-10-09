@@ -8,15 +8,15 @@ import {
   type AgentRuntimeEvent,
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
-import { createLocalServerHandlers } from './serverHandlers';
-import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
+import { createChatHostHandlers } from './serverHandlers';
+import type { AgentSessionPeerHandlers } from './wire/messageDispatcher';
 import {
   ServerTuiSessionService,
   type TuiSessionCheckpointer,
 } from './session/serverTuiSessions';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
-  createLocalServerRuntimeDepsStore,
+  createChatHostDepsStore,
   type ServerDeps,
 } from './serverTypes';
 import type { LocalModelProfileRegistry } from './config/llmConfig';
@@ -97,9 +97,9 @@ function withDefaultModelProfile(
 }
 
 function admitConversationHandlers(
-  handlers: LocalServerPeerHandlers,
+  handlers: AgentSessionPeerHandlers,
   coordinator: ResidentPetCoordinator,
-): LocalServerPeerHandlers {
+): AgentSessionPeerHandlers {
   // Conversation no longer enters the dispatch queue; it holds the gate for
   // its duration so a dispatch cannot start mid-conversation. Its own
   // admission and ordering live in the local layer (SessionAdmission,
@@ -164,7 +164,7 @@ export async function createResidentPetRuntime(
     ...(options.petDocument ? { petDocument: options.petDocument } : {}),
     capabilityArtifactStore: options.capabilityArtifactStore,
   };
-  const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
+  const runtimeDeps = createChatHostDepsStore(deps);
   const graphService = options.graphService ?? new HostGraphService();
   const loadContext = options.loadContext
     ?? (async () => ({
@@ -275,7 +275,7 @@ export async function createResidentPetRuntime(
   const runConversationTurn = continueSuspendedDispatch({
     petId: deps.petId, sessions, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
   });
-  const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
+  const localHandlers: ReturnType<typeof createChatHostHandlers> = createChatHostHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,

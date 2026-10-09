@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parseAgentClientMessage } from '@pinpawo/agent-session';
 import type { ResidentPetInteraction } from '../residentPetHost';
-import { isAllowedLocalServerOrigin, isAuthorizedLocalServerRequest } from './auth';
+import { isAllowedWireOrigin, isAuthorizedWireRequest } from './auth';
 
 /** HTTP transport only: session semantics remain in the shared interaction. */
 export async function handleAgentSessionHttp(
@@ -14,10 +14,10 @@ export async function handleAgentSessionHttp(
     response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     response.end(JSON.stringify(body));
   };
-  if (!isAllowedLocalServerOrigin(request, request.socket.localPort ?? 0)) {
+  if (!isAllowedWireOrigin(request, request.socket.localPort ?? 0)) {
     json(403, { error: 'Forbidden origin' }); return;
   }
-  if (!isAuthorizedLocalServerRequest(request, authToken)) {
+  if (!isAuthorizedWireRequest(request, authToken)) {
     json(401, { error: 'Unauthorized' }); return;
   }
   const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;

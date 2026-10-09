@@ -24,15 +24,15 @@ export type ServerWireHandlers<TMessage extends object> = {
   logWarn?: ServerWireLogWarn;
 };
 
-export function defaultLocalServerWireLogError(message: string, error: unknown) {
+export function defaultWireLogError(message: string, error: unknown) {
   console.error(message, error instanceof Error ? error.message : error);
 }
 
-export function defaultLocalServerWireLogWarn(message: string) {
+export function defaultWireLogWarn(message: string) {
   console.warn(message);
 }
 
-export function runLocalServerWireHandler(
+export function runWireHandler(
   name: string,
   handler: () => MaybePromise<void>,
   logError: ServerWireLogError,
@@ -40,6 +40,6 @@ export function runLocalServerWireHandler(
   return Promise.resolve()
     .then(handler)
     .catch((error) => {
-      logError(`[local-server] ${name} error:`, error);
+      logError(`[wire] ${name} error:`, error);
     });
 }

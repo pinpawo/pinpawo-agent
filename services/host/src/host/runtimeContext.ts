@@ -12,8 +12,8 @@ import type {
   AgentSessionTurnResult,
 } from '../agent/chatSessionAdapter';
 import type { loadAgentContext } from '../contextLoader';
-import type { createLocalServerHandlers, ServerHandlerOptions } from '../serverHandlers';
-import type { LocalServerPeerHandlers } from '../wire/messageDispatcher';
+import type { createChatHostHandlers, ServerHandlerOptions } from '../serverHandlers';
+import type { AgentSessionPeerHandlers } from '../wire/messageDispatcher';
 import type { ServerTuiSessionService, TuiSessionCheckpointer } from '../session/serverTuiSessions';
 import type { ServerRuntimeDepsStore } from '../serverTypes';
 import type { HostExecutionConfig } from '../config/hostExecutionConfig';
@@ -79,8 +79,8 @@ export type ResidentPetRuntimeContext = {
   loadContext: typeof loadAgentContext;
   sessions: ServerTuiSessionService;
   coordinator: ResidentPetCoordinator;
-  localHandlers: ReturnType<typeof createLocalServerHandlers>;
-  peerHandlers: LocalServerPeerHandlers;
+  localHandlers: ReturnType<typeof createChatHostHandlers>;
+  peerHandlers: AgentSessionPeerHandlers;
   /** One WebSocket client; passive readers and Host-owned HTTP commands do not claim it. */
   interactivePeer: { current: AgentSessionPeer | null };
   hostPeer: AgentSessionPeer;

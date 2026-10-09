@@ -9,7 +9,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
-import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { isConversationMessage, readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 
 /**
  * Transcript projection for the interface.
@@ -100,14 +100,8 @@ function readTuiCheckpointMessageSource(
 ): TuiCheckpointMessageSource | null {
   const type = message._getType();
   if (type !== 'human' && type !== 'ai') return null;
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  // Lane-tagged messages are internal Capability transcripts, never root
-  // conversation. Filter them before the human/ai split.
-  if (pinpawo && typeof pinpawo === 'object') {
-    if ('lane' in pinpawo || (pinpawo as Record<string, unknown>).synthetic === true) {
-      return null;
-    }
-  }
+  // Capability transcripts and synthetic bookkeeping are never root conversation.
+  if (!isConversationMessage(message)) return null;
   if (type === 'human') return { role: 'user' };
   return { role: 'assistant' };
 }

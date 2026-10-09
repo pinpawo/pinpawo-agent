@@ -168,6 +168,12 @@ test('a Pet tool-call message renders each call from its own structure', () => {
   assert.ok(markup.includes('Running')); assert.ok(markup.includes('Failed'));
   assert.ok(!markup.includes('channel-message-body"></div>'));
   assert.equal(channelMessageSummary(calls), 'Inspect the CRM record · lookup');
+  // The Supervisor's planning and review read by what they decided.
+  const work = { ...calls, toolCalls: [
+    { id: 'p', name: 'submit_plan', args: { tasks: [{ capability: 'general', objective: '读取记录' }, { capability: 'general', objective: '写报告' }] }, status: 'completed' as const },
+    { id: 'r', name: 'review_current', args: { completed: false, reason: '缺少来源' }, status: 'completed' as const },
+  ] };
+  assert.equal(channelMessageSummary(work), '计划：读取记录；写报告 · 未通过验收：缺少来源');
 });
 
 test('message reader shares safe Markdown and participant identity rendering with the Timeline', () => {

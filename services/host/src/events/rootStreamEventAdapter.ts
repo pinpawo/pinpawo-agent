@@ -1,4 +1,4 @@
-import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { isConversationMessage, readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
@@ -403,14 +403,13 @@ function* projectMainToolCalls(
       yield { type: 'tool_call.settled', messageId, callId, status };
     }
   }
-  // Earlier calls end before the message after them begins.
-  yield* settle();
   for (const message of messages as BaseMessage[]) {
     const toolCalls = readMessageToolCalls(message);
-    const pinpawo = readRecord(message.additional_kwargs?.pinpawo);
-    // Main messages of this run: private lanes and synthetic bookkeeping are not conversation.
-    if (!message.id || !toolCalls.length || pinpawo?.lane || pinpawo?.synthetic || pinpawo?.runId !== values.runId) continue;
+    if (!message.id || !toolCalls.length || !isConversationMessage(message)
+      || readRecord(message.additional_kwargs?.pinpawo)?.runId !== values.runId) continue;
     if (announce && !seenMessages.has(message.id)) {
+      // Earlier calls end before the message after them begins.
+      yield* settle();
       yield { type: 'tool_calls.message', messageId: message.id, text: readFinalMessageText(message), toolCalls };
       for (const call of toolCalls) openToolCalls.set(call.id, message.id);
     } else if (!announce) {

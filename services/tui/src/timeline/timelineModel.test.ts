@@ -72,6 +72,11 @@ test('a message\'s tool calls head their work and commit before they return', ()
   assert.match(formatTimelineEntry({ ...message, toolCalls: [{ ...call, status: 'failed' }] }), /（失败）/);
   // Other tools need no knowledge here: they show by name.
   assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, name: 'lookup', args: { q: 'x' } }] }), '▸ lookup');
+  // The Supervisor's planning and review read by what they decided.
+  assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [
+    { ...call, name: 'submit_plan', args: { tasks: [{ capability: 'general', objective: '读取 issue' }, { capability: 'general', objective: '修复' }] } },
+    { ...call, name: 'review_current', args: { completed: true, reason: '测试通过' } },
+  ] }), '▸ 计划：读取 issue；修复\n▸ 验收通过：测试通过');
 
   // Its calls still run, but their committed form — the titles alone — is
   // final, so the transcript commits it and the finished tools behind it.

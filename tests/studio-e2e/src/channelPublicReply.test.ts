@@ -140,14 +140,19 @@ test('capability handoff reaches Channel only through the selected final root re
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
     assert.equal(outputs().length, 0, 'internal delivery and Supervisor work are not published');
-    // The Pet's own tool calls are its conversation: they reach the Channel while it runs, in their own shape.
+    // The Pet's own tool calls are its conversation: they reach the Channel while it runs, in their own shape,
+    // the Supervisor's planning included. Its review lands with the turn that ends on the final reply.
     assert.deepEqual(published().map(message => [message.body, message.mentions, message.toolCalls?.map(call => [call.name, call.args, call.status])]), [
       ['', [], [['plan_request', { goal: 'Publish the plan.' }, 'completed']]],
+      ['', [], [['submit_plan', { tasks: [{ capability: 'studio_planning', objective: 'Produce a plan.' }] }, 'completed']]],
       ['', [], [['delegate_capability', { briefing: 'Produce a plan with the chosen handoff.' }, 'completed']]],
     ]);
     assert.equal(betaCalls, 0, 'internal @ is not a dispatch');
     release();
     await waitFor(() => outputs().length === 2 && betaCalls === 1);
+    const firstReply = published().findIndex(message => !message.toolCalls);
+    assert.deepEqual(published().slice(0, firstReply).flatMap(message => message.toolCalls!.map(call => call.name)),
+      ['plan_request', 'submit_plan', 'delegate_capability', 'review_current'], 'the review precedes the reply it led to');
     assert.equal(alphaOutputs()[0]!.body, handoff);
     assert.deepEqual(alphaOutputs()[0]!.mentions.map(mention => mention.participantId), ['pet:acceptance-b']);
     for (let index = 1; index < replies.length; index++) {

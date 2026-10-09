@@ -79,6 +79,24 @@ test('readTuiCheckpointMessages hides internal Capability transcript messages', 
   assert.deepEqual(messages, [{ role: 'user', text: 'real user turn' }]);
 });
 
+test('readTuiCheckpointMessages keeps the Supervisor\'s own work as the main agent\'s messages', () => {
+  const supervisor = { lane: 'supervisor', runId: 'run-1' };
+  const messages = readTuiCheckpointMessages([
+    setAgentMessageMetadata(new HumanMessage('Plan it.'), { runId: 'run-1' }),
+    setAgentMessageMetadata(new AIMessage({ content: 'Listing the work.', tool_calls: [{ id: 'plan-1', name: 'submit_plan',
+      args: { tasks: [{ capability: 'general', objective: 'Inspect.' }] } }] }), supervisor),
+    setAgentMessageMetadata(new ToolMessage({ tool_call_id: 'plan-1', content: '{}' }), supervisor),
+    setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{ id: 'review-1', name: 'review_current',
+      args: { completed: false, reason: 'Missing tests.' } }] }), supervisor),
+    setAgentMessageMetadata(new AIMessage({ content: 'capability transcript' }), { lane: 'capability:general', runId: 'run-1' }),
+  ]);
+  assert.deepEqual(messages.map(message => [message.role, message.text, message.toolCalls?.map(call => [call.name, call.status])]), [
+    ['user', 'Plan it.', undefined],
+    ['assistant', 'Listing the work.', [['submit_plan', 'completed']]],
+    ['assistant', '', [['review_current', 'running']]],
+  ]);
+});
+
 test('readTuiCheckpointMessages uses attachment display metadata instead of local paths', () => {
   const messages = readTuiCheckpointMessages([
     createLocalChatHumanMessage('review this', [{

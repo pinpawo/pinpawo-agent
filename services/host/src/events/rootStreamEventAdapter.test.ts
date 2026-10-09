@@ -519,6 +519,33 @@ test('main tool calls reach the conversation as messages and settle, including c
       toolCalls: [{ id: 'call:new', name: 'lookup', args: { q: 'new' } }] },
     { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'completed' },
   ]);
+
+  // The Supervisor's own work is the main agent at work: it lands in Root, in
+  // its lane, right before the delegation that ends its turn.
+  const supervisor = (message: BaseMessage) => setAgentMessageMetadata(message, { lane: 'supervisor', runId: 'current' });
+  const delegation = setAgentMessageMetadata(new AIMessage({ id: 'delegate', content: 'Starting.',
+    tool_calls: [{ name: 'delegate_capability', id: 'call:delegate', type: 'tool_call', args: { briefing: 'Inspect.' } }] }),
+  { runId: 'current', source: 'supervisor' });
+  const handoff = new StateGraph(state)
+    .addNode('runSupervisor', () => ({ messages: [
+      supervisor(new AIMessage({ id: 'plan', content: 'Listing the work.',
+        tool_calls: [{ name: 'submit_plan', id: 'call:plan', type: 'tool_call', args: { tasks: [] } }] })),
+      supervisor(new ToolMessage({ id: 'plan-result', tool_call_id: 'call:plan', content: '{}' })),
+      setAgentMessageMetadata(new AIMessage({ id: 'private', content: '',
+        tool_calls: [{ name: 'lookup', id: 'call:private', type: 'tool_call', args: {} }] }), { lane: 'capability:general', runId: 'current' }),
+      delegation,
+    ] }))
+    .addEdge(START, 'runSupervisor').addEdge('runSupervisor', END).compile();
+  const handoffEvents: RootStreamChatEvent[] = [];
+  for await (const event of adaptRootStream(await handoff.streamEvents({ runId: 'current', messages: [new HumanMessage('Go')] },
+    { version: 'v3' }) as AsyncIterable<RootProtocolEvent>)) handoffEvents.push(event);
+  assert.deepEqual(handoffEvents.flatMap(e => e.type === 'tool_calls.message' ? [[e.messageId, e.text, e.toolCalls.map(call => call.name)]]
+    : e.type === 'tool_call.settled' ? [[e.callId, e.status]] : []), [
+    ['plan', 'Listing the work.', ['submit_plan']],
+    ['call:plan', 'completed'],
+    ['delegate', 'Starting.', ['delegate_capability']],
+  ]);
+
   // Root's own tool node is that message, not a separate operation.
   assert.equal(readRootStreamChatEvent({ type: 'event', seq: 1, method: 'tools', params: {
     namespace: ['capability:1'], data: { event: 'tool-started', tool_call_id: 'call:new', tool_name: 'lookup' },

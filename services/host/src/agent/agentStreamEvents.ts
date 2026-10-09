@@ -47,12 +47,19 @@ export function readMessageToolCalls(message: BaseMessage): Array<Omit<AgentMess
 
 /** Main-conversation tool results keyed by the call they answer; lane results are private work. */
 export function readToolResultStatuses(messages: readonly unknown[]) {
-  return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && !isLaneMessage(message)
+  return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && isConversationMessage(message)
     ? [[message.tool_call_id, message.status === 'error' ? 'failed' as const : 'completed' as const]]
     : []));
 }
 
-function isLaneMessage(message: BaseMessage) {
+/**
+ * Root's conversation: its unlaned messages and the Supervisor's own work
+ * (planning, review, delegation), which is the main agent at work. Other
+ * lanes, such as a Capability's transcript, and synthetic bookkeeping are not.
+ */
+export function isConversationMessage(message: BaseMessage) {
   const pinpawo = message.additional_kwargs?.pinpawo;
-  return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
+  if (!pinpawo || typeof pinpawo !== 'object') return true;
+  const { lane, synthetic } = pinpawo as Record<string, unknown>;
+  return synthetic !== true && (lane === undefined || lane === 'supervisor');
 }

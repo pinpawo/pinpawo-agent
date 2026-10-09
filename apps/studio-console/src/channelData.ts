@@ -19,10 +19,22 @@ export type ChannelToolCall = {
 
 /** A call as one line: what it was asked to do, else the tool's name. */
 export function channelToolCallTitle(call: Pick<ChannelToolCall, 'name' | 'args'>): string {
-  const subject = call.name === 'delegate_capability' ? call.args.briefing
-    : call.name === 'plan_request' ? call.args.goal : undefined;
+  const { args } = call;
+  const subject = call.name === 'delegate_capability' ? args.briefing
+    : call.name === 'plan_request' ? args.goal
+    : call.name === 'submit_plan' ? planSubject('计划', args.tasks)
+    : call.name === 'adjust_plan' ? planSubject('调整计划', args.tasks)
+    : call.name === 'review_current' && typeof args.reason === 'string'
+      ? `${args.completed === true ? '验收通过' : '未通过验收'}：${args.reason}` : undefined;
   const line = typeof subject === 'string' ? subject.split('\n').find(part => part.trim())?.trim() : undefined;
   return line || call.name;
+}
+
+function planSubject(label: string, tasks: unknown) {
+  const objectives = Array.isArray(tasks) ? tasks.flatMap(task =>
+    task && typeof task === 'object' && typeof (task as { objective?: unknown }).objective === 'string'
+      ? [(task as { objective: string }).objective] : []) : [];
+  return objectives.length ? `${label}：${objectives.join('；')}` : undefined;
 }
 
 /** The detail a call carries: a delegation's briefing as written, otherwise its arguments. */

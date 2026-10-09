@@ -91,7 +91,17 @@ export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>)
 const TOOL_CALL_SUBJECT: Record<string, (args: Record<string, unknown>) => unknown> = {
   delegate_capability: args => typeof args.briefing === 'string' ? args.briefing.split('\n').find(line => line.trim()) : null,
   plan_request: args => args.goal,
+  submit_plan: args => planSubject('计划', args.tasks),
+  adjust_plan: args => planSubject('调整计划', args.tasks),
+  review_current: args => typeof args.reason === 'string' ? `${args.completed === true ? '验收通过' : '未通过验收'}：${args.reason}` : null,
 };
+
+function planSubject(label: string, tasks: unknown) {
+  const objectives = Array.isArray(tasks) ? tasks.flatMap(task =>
+    task && typeof task === 'object' && typeof (task as { objective?: unknown }).objective === 'string'
+      ? [(task as { objective: string }).objective] : []) : [];
+  return objectives.length ? `${label}：${objectives.join('；')}` : null;
+}
 
 const TOOL_CALL_OUTCOME: Record<AgentMessageToolCall['status'], string> = {
   running: '',

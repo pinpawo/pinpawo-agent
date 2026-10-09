@@ -14,7 +14,7 @@ lint passes, and documentation migrations.
 
 ## [2026-07-20] migration | Documentation wiki foundation
 
-- Added the documentation schema in `docs/AGENTS.md`.
+- Added the documentation schema (now referenced in `docs/contributing.md`).
 - Added the master catalog in `docs/index.md`.
 - Added a staged plan for managing all existing documents through ingest, query,
   lint, and migration workflows without bulk-moving current files.

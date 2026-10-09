@@ -1,8 +1,8 @@
 # Writing and Maintaining Documentation
 
 Use this guide when editing repository documentation. Follow
-[repository rules](../AGENTS.md) and [documentation evidence rules](AGENTS.md)
-for authority, draft promotion, and the explicit Wiki ingest gate.
+[repository rules](../AGENTS.md) for authority, draft promotion, evidence,
+and the explicit Wiki ingest gate.
 
 ## Choose the reader and purpose
 
@@ -74,3 +74,26 @@ term with a familiar synonym that changes its domain meaning.
 
 Do not start services solely to verify a prose-only navigation change. When a
 command or behavior changes, choose verification appropriate to that change.
+
+## Wiki schema reference
+
+The removed `docs/wiki/` used the following page metadata. This reference preserves
+its format for an explicitly requested rebuild; it does not initiate an ingest.
+
+```yaml
+---
+title: Human-readable title
+page_type: concept
+status: draft
+updated: YYYY-MM-DD
+sources:
+  - ../../path/to/source.md
+related:
+  - ../path/to/related-page.md
+---
+```
+
+Page types: `overview`, `concept`, `system`, `decision`, `investigation`, `source`,
+`question`, `migration`. Status values: `seed`, `draft`, `validated`, `contested`,
+`deprecated`, `historical`; deprecated pages link to their successor.
+Frontmatter relationships supplement repository-relative body links.

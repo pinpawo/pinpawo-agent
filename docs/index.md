@@ -75,5 +75,5 @@ For ordinary edits, follow [Writing and maintenance](contributing.md).
 
 `docs/` is the source-document layer. The synthesized wiki under `docs/wiki/` was
 removed as unmaintained; the append-only [maintenance log](log.md) is kept for the
-next ingest. See [Documentation Wiki Guidelines](AGENTS.md) before rebuilding the
+next ingest. See [repository ingest rules](../AGENTS.md) before rebuilding the
 wiki or modifying `log.md`.

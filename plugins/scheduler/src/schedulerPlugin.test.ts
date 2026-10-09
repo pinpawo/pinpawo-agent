@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { createStudio, type StudioDispatchRequest } from '@pinpawo/studio';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createSchedulerPlugin } from './schedulerPlugin';
+import { SchedulerService } from './schedulerService';
 
 function recordingPet(petId: string, dispatched: StudioDispatchRequest[]) {
   return {
@@ -156,3 +160,39 @@ test('a channel-bound schedule fails when no Channel Plugin runs', async (t) => 
   assert.equal(stored?.status, 'failed');
   assert.match(stored?.note ?? '', /Channel Plugin/);
 });
+
+for (const order of ['scheduler first', 'channel first'] as const) {
+  test(`a channel-bound schedule that fell due while stopped is delivered on restart (${order})`, async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-scheduler-restart-'));
+    const databasePath = path.join(root, 'scheduler.sqlite');
+    const channel = createChannelPlugin({ databasePath: path.join(root, 'channels.sqlite'), httpRoute: false });
+    channel.service.init();
+    const { channelId } = channel.service.createChannel(
+      { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },
+      { kind: 'human', id: 'studio-operator' },
+    );
+    // Stored before the restart and already due when the Studio comes back.
+    const offline = new SchedulerService(databasePath);
+    await offline.init();
+    const schedule = await offline.create({
+      petId: 'reporter', channelId, request: 'Write the nightly report',
+      runAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    await offline.close();
+
+    const dispatched: StudioDispatchRequest[] = [];
+    const scheduler = createSchedulerPlugin({ databasePath, pollIntervalMs: 10, httpRoute: false });
+    const studio = await createStudio({
+      studioId: 'scheduler-restart',
+      entryPetId: 'reporter',
+      pets: [recordingPet('reporter', dispatched)],
+      plugins: order === 'scheduler first' ? [scheduler, channel] : [channel, scheduler],
+    });
+    t.after(() => studio.shutdown());
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    assert.equal(dispatched.length, 1);
+    assert.deepEqual(dispatched[0]?.scope, { namespace: 'channel', id: channelId });
+    assert.equal((await scheduler.service.get(schedule.scheduleId))?.status, 'dispatched');
+  });
+}

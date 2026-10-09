@@ -63,7 +63,8 @@ schedule 可以带可选的 `channelId`。带了它的 schedule 到期后不直�
 Trigger 一样通过 Channel 的 `inputs` hook，以 `bot:scheduler` 身份往该 Channel 发一条 @`petId`
 的消息，Pet 的执行和回复都落在 Channel 里。Channel Plugin 没有运行时，这条 schedule 标记
 `failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变；已有数据库启动时自动补上
-`channel_id` 列，旧记录视为没有 Channel。
+`channel_id` 列，旧记录视为没有 Channel。Scheduler 等 Studio core 发布 `plugins.activated`（所有 Plugin 启动完成）后才开始处理到期
+schedule，所以停机期间到期的 channel-bound schedule 不会因为 Channel Plugin 启动得比它晚而失败。
 
 管理 API：
 

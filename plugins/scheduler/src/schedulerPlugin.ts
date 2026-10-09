@@ -62,6 +62,10 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   let dispatchQueueAuditTimer: NodeJS.Timeout | undefined;
   let initialDispatchQueueAuditTimer: NodeJS.Timeout | undefined;
   let unsubscribeMutations: (() => void) | undefined;
+  let unsubscribeActivation: (() => void) | undefined;
+  // Due schedules wait until every Plugin has started: a channel-bound one
+  // must not fail just because the Channel Plugin starts after this one.
+  let activated = false;
   let unregisterRoutes: (() => void) | undefined;
   let removeChannelInputs: (() => void) | undefined;
   let channelInputs: ChannelInputsHook | undefined;
@@ -89,7 +93,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   };
 
   const poll = async () => {
-    if (polling || !context) return;
+    if (polling || !context || !activated) return;
     polling = (async () => {
       while (context) {
         const schedule = await service.claimDue();
@@ -159,6 +163,11 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
           if (event.eventType === 'created') requestPoll();
         });
         await service.init();
+        unsubscribeActivation = pluginContext.subscribe((event) => {
+          if (event.source !== 'studio' || event.type !== 'plugins.activated') return;
+          activated = true;
+          requestPoll();
+        });
         removeChannelInputs = pluginContext.hooks.contribute<ChannelInputsHook>(
           options.channel?.pluginName ?? 'channel',
           'inputs',
@@ -258,7 +267,6 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
           initialDispatchQueueAuditTimer = setTimeout(auditDispatchQueues, 0);
           initialDispatchQueueAuditTimer.unref();
         }
-        await poll();
       } catch (error) {
         if (timer) clearInterval(timer);
         timer = undefined;
@@ -267,8 +275,11 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         if (initialDispatchQueueAuditTimer) clearTimeout(initialDispatchQueueAuditTimer);
         initialDispatchQueueAuditTimer = undefined;
         context = undefined;
+        activated = false;
         unsubscribeMutations?.();
         unsubscribeMutations = undefined;
+        unsubscribeActivation?.();
+        unsubscribeActivation = undefined;
         unregisterRoutes?.();
         unregisterRoutes = undefined;
         removeChannelInputs?.();
@@ -286,8 +297,11 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
       initialDispatchQueueAuditTimer = undefined;
       await polling;
       context = undefined;
+      activated = false;
       unsubscribeMutations?.();
       unsubscribeMutations = undefined;
+      unsubscribeActivation?.();
+      unsubscribeActivation = undefined;
       unregisterRoutes?.();
       unregisterRoutes = undefined;
       removeChannelInputs?.();

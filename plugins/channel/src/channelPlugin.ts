@@ -35,6 +35,21 @@ export type ChannelDelivery = {
   participantId: string; state: 'delivered' | 'accepted' | 'failed';
   receipt?: StudioDispatchReceipt; binding?: ChannelSessionBinding; error?: string;
 };
+/** Name of the hook through which another Plugin posts into a Channel. */
+export const CHANNEL_INPUTS_HOOK_NAME = 'inputs';
+/**
+ * Another Plugin's way into a Channel. It posts as its own bot author and the
+ * message is delivered exactly as an operator message is: the addressed Pets
+ * run in their Channel sessions and their replies land back in the Channel.
+ */
+export type ChannelInputsHook = {
+  post: (channelId: string, input: {
+    author: { kind: 'bot'; id: string };
+    body: string;
+    /** Exactly who the message addresses; the body may not address anyone else. */
+    mentions: ChannelMention[];
+  }) => Promise<{ message: ChannelMessage; deliveries: ChannelDelivery[] }>;
+};
 export type ChannelPlugin = StudioPlugin & {
   service: ChannelService;
   sendMessage: (channelId: string, input: unknown) => Promise<{ message: ChannelMessage; deliveries: ChannelDelivery[] }>;
@@ -47,6 +62,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let removeHttp: (() => void) | undefined;
+  let unexposeInputs: (() => void) | undefined;
   function participants(): ChannelParticipant[] {
     if (!context) throw new Error('Channel Plugin is not started.');
     return [
@@ -85,12 +101,25 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       }
     }));
   }
-  async function sendMessage(channelId: string, value: unknown) {
+  async function post(channelId: string, value: unknown, author: ChannelAuthor) {
     const input = channelMessageSchema.parse(value);
     input.mentions = parseChannelMentions(input.body, input.mentions, participants());
-    const message = service.sendMessage(channelId, input, operator);
+    const message = service.sendMessage(channelId, input, author);
     return { message, deliveries: await deliver(message) };
   }
+  const sendMessage = (channelId: string, value: unknown) => post(channelId, value, operator);
+  const inputs: ChannelInputsHook = {
+    post: async (channelId, { author, body, mentions }) => {
+      // The poster decides who is addressed. Mentions are still parsed the one
+      // Channel way, but a body that adds anyone beyond them is rejected, so
+      // data carried in the body never addresses another participant.
+      const addressed = new Set(mentions.map(channelMentionId));
+      const extra = parseChannelMentions(body, mentions, participants())
+        .find((mention) => !addressed.has(channelMentionId(mention)));
+      if (extra) throw new Error(`Message addresses "${channelMentionId(extra)}", which its poster did not address.`);
+      return post(channelId, { body, mentions }, { kind: 'bot', id: z.string().trim().min(1).max(256).parse(author.id) });
+    },
+  };
   async function execute(channelId: string, input: ChannelExecutionInput) {
     const value = channelMessageSchema.extend({ petId: z.string().min(1).optional() }).strict().parse(input);
     // Preserve the explicit legacy reply action. The unified message protocol
@@ -179,6 +208,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           throw error;
         }
       });
+      unexposeInputs = host.hooks.expose(CHANNEL_INPUTS_HOOK_NAME, inputs);
       unsubscribe = service.subscribe((entry) => {
         host.notify({
           type: entry.kind === 'message' ? 'channel.message.created' : 'channel.revised',
@@ -228,6 +258,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     },
     stop: () => {
       removeHttp?.(); removeHttp = undefined;
+      unexposeInputs?.(); unexposeInputs = undefined;
       unsubscribe?.(); unsubscribe = undefined;
       context = undefined;
       if (!options.service) service.close();

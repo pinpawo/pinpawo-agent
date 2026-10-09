@@ -29,11 +29,21 @@ event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自�
 ```text
 Scheduler SQLite -> due claim -> context.dispatch()
 event source -> Trigger binding condition -> context.dispatch()
+event source -> Trigger binding condition (channelId) -> Channel `inputs` hook -> Channel delivery
 
 Scheduler/Trigger -X-> Agent / thread / checkpoint / Agent Session
-Scheduler/Trigger -X-> another Plugin database or service
+Scheduler/Trigger -X-> another Plugin database or service（Channel 的 `inputs` hook 除外）
 Studio core       -X-> Scheduler/Trigger concrete package
 ```
+
+Channel 是对话和结果的汇集处。规则配置了 `channelId` 时，Trigger 不再自己 dispatch，而是通过
+Channel Plugin 暴露的 `inputs` hook，以自己的 bot 身份（`bot:<triggerId>`）往该 Channel 发一条
+@目标 Pet 的消息。之后的投递与操作员发言完全相同：Channel 为 `(channel, pet)` 绑定 session、
+带上 `channel` scope 派发，Pet 的回复和工具调用都记回 Channel。Channel 是软依赖：没有安装或
+没有启动 Channel Plugin 时，这类 delivery 记为 failed，并不会退回到无 session 的 dispatch。
+消息只 @ 规则解析出的目标 Pet；如果模板渲染出的正文里还 @ 了其他参与者，Channel 会拒收，这次 delivery
+记为 failed，事件数据不能借正文增加收件人。没有 `channelId` 的规则保持原来的直接 dispatch。每次 retry/redeliver 都会在 Channel 里发一条
+新消息。
 
 两个 Plugin 都可向 HTTP Plugin 的 `routes` hook 贡献 API，但不依赖 HTTP 才能启动。
 HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 由贡献 route 的 Plugin
@@ -88,7 +98,8 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 自身需要 durability/replay 时，应由其 owning Plugin 提供；Trigger 不复制其他领域、GitHub
 或其他领域的事实源。
 
-Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”。
+Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”，
+`channelId` 负责“结果落在哪个 Channel”。
 宽泛的 `typePrefix` 会为每个匹配 mutation 产生一次独立 dispatch；需要昂贵 Agent 工作时，
 配置应优先选择明确的领域终态事件，而不是依赖 Trigger 隐式 debounce 或合并队列。
 

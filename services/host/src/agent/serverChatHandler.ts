@@ -49,7 +49,7 @@ type InflightRequest = InflightOperationRun;
 
 type LocalServerRunRequest = AgentSessionTurnRequest;
 type RunAgentSessionTurn = typeof runAgentSessionTurn;
-type ChatRunOutcome =
+export type ChatRunOutcome =
   | 'completed'
   | 'waiting'
   | 'interrupted'
@@ -58,7 +58,21 @@ type ChatRunOutcome =
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
+  | { type: 'host_dispatch' }
   | HumanReviewResolutionSource;
+
+/** Per-turn hooks a Host-initiated turn adds to the shared pipeline. */
+type LocalServerRunHooks = {
+  /** Decorates this turn's run, as a dispatch adds its own attribution. */
+  runAgentTurn?: RunAgentSessionTurn;
+  /** Receives the error behind a `failed` or `fatal_failed` outcome. */
+  onFailure?: (error: unknown) => void;
+};
+
+export type HostTurnOutcome = {
+  outcome: ChatRunOutcome;
+  error?: unknown;
+};
 
 type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
@@ -66,9 +80,9 @@ type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
 };
 
 /**
- * The session a turn runs in when it is not the active one. Only a review
- * resume addressed to an exact session carries it; every other turn runs in
- * the active session, as before.
+ * The session a turn runs in when it is not the active one. A review resume
+ * addressed to an exact session and a dispatch bound to one carry it; every
+ * other turn runs in the active session.
  */
 export type ChatTurnTarget = TuiSessionRecord;
 
@@ -241,6 +255,29 @@ export class ServerChatHandler {
     }, deps, { type: 'chat_request' });
   }
 
+  /**
+   * A Host-initiated turn, such as a resident Pet's dispatch. It runs through
+   * the same pipeline as a chat request; it only has no client to answer, so
+   * the outcome is returned instead of being reported to a requester.
+   */
+  async runHostTurn(
+    peer: ServerPeer,
+    turn: { requestId: string; message: string; runAgentTurn?: RunAgentSessionTurn },
+    deps: ServerDeps,
+    target?: ChatTurnTarget,
+  ): Promise<HostTurnOutcome> {
+    let error: unknown;
+    const outcome = await this.runChatRequest(peer, {
+      kind: 'user_message',
+      requestId: turn.requestId,
+      message: turn.message,
+    }, deps, { type: 'host_dispatch' }, target, {
+      ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
+      onFailure: (failure) => { error = failure; },
+    });
+    return error === undefined ? { outcome } : { outcome, error };
+  }
+
   async handleRunInterrupt(
     peer: ServerPeer,
     msg: RunInterruptMessage,
@@ -282,12 +319,14 @@ export class ServerChatHandler {
     deps: ServerDeps,
     source: LocalServerRunSource,
     target?: ChatTurnTarget,
+    hooks: LocalServerRunHooks = {},
   ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
+    const runAgentTurn = hooks.runAgentTurn ?? this.runAgentTurn;
 
-    if (source.type === 'chat_request') {
-      console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
+    if (source.type === 'chat_request' || source.type === 'host_dispatch') {
+      console.log(`[local-server] ${source.type} requestId=${requestId} message="${message.slice(0, 80)}"`);
     } else if (source.type === 'review_decision') {
       console.log(
         `[local-server] review decision requestId=${requestId} `
@@ -367,6 +406,7 @@ export class ServerChatHandler {
     ): Promise<ChatRunOutcome> => {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
+      hooks.onFailure?.(err);
       console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       // Resetting replaces the active session; a targeted turn never does that.
       const recoveredFromToolProtocolError = !target && isToolProtocolHistoryError(err);
@@ -409,7 +449,7 @@ export class ServerChatHandler {
       this.publishRuntimeEvent(peer, {
         type: 'run.started',
         requestId,
-        initiator: 'client',
+        initiator: source.type === 'host_dispatch' ? 'host' : 'client',
         ...(request.kind === 'user_message'
           ? { input: { role: 'user', text: request.message } as const }
           : {}),
@@ -427,7 +467,7 @@ export class ServerChatHandler {
         createOperationRegistryForAgentSetup(setup),
       );
       setup.input.signal = controller.signal;
-      const result = await this.runAgentTurn({
+      const result = await runAgentTurn({
         request,
         setup,
         graphService: this.graphService,

@@ -548,9 +548,10 @@ test('dispatch and conversation publish the same Agent Session event stream', as
       type: 'run.interrupt',
       requestId: startedEnvelope.requestId,
     });
-    assert.ok(sourceMessages.some((message) => (
+    // The stop is a signal; the run reports its interruption once it settles.
+    await waitFor(() => sourceMessages.some((message) => (
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
-    )));
+    )), 'interrupted dispatch did not report run.interrupted');
     await waitFor(() => host.interaction.getQueueSnapshot().state === 'open', 'dispatch did not settle');
     // Stop commands cross the transport boundary in either direction.
     for (const owner of ['http', 'tui']) {
@@ -1111,4 +1112,30 @@ test('a dispatch reports its conversation tool calls as non-terminal messages, w
     assert.deepEqual(lifecycle[3].message, { type: 'tool_call.settled', messageId: 'm1', callId: 'c1', status: 'completed' });
     assert.equal(lifecycle[2].scope?.id, 'ch-1');
   } finally { await host.close(); }
+});
+
+test('a dispatch fails through the conversation pipeline: a broken tool history resets the active session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-dispatch-failure-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const runtime = await createResidentPetRuntime({
+    petId: 'failure-pet', petName: 'Failure', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    runAgentTurn: async () => {
+      throw new Error("An assistant message with 'tool_calls' must be followed by tool messages");
+    },
+  });
+  const { sessions, close } = readResidentPetRuntimeContext(runtime);
+  const resident = createResidentPet(runtime);
+  const before = sessions.getActiveSessionId('failure-pet');
+  const lifecycle: PetDispatchLifecycleEvent[] = [];
+  resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
+  try {
+    await resident.dispatch.dispatch({ request: 'continue' });
+    await waitFor(() => lifecycle.some(event => event.state === 'failed'), 'the dispatch did not fail');
+    assert.match(lifecycle.at(-1)?.error ?? '', /must be followed by tool messages/);
+    assert.notEqual(sessions.getActiveSessionId('failure-pet'), before);
+  } finally { await close(); }
 });

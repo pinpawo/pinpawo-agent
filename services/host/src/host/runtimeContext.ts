@@ -102,7 +102,6 @@ export type ResidentPetRuntimeContext = {
   openSessionPeer: (sessionId: string) => { peer: AgentSessionPeer; release: () => void };
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
-  activeHostRuns: Map<string, AbortController>;
   /** Shared with the local handlers: conversation and dispatch claim one register. */
   activeRuns: ActiveRunRegister;
   close: () => Promise<void>;

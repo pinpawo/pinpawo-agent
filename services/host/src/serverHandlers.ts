@@ -20,7 +20,7 @@ import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
 import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
 import { SessionAdmission } from './session/sessionAdmission';
 import { SessionCommandQueue } from './session/sessionCommandQueue';
-import { ServerChatHandler } from './agent/serverChatHandler';
+import { ServerChatHandler, type HostTurnOutcome } from './agent/serverChatHandler';
 import type {
   AgentSessionTurnOptions,
   AgentSessionTurnResult,
@@ -56,6 +56,18 @@ export type ServerHandlers = {
     sessionId: string,
     message: InterruptResumeMessage,
   ) => Promise<void>;
+  /**
+   * Run one Host-initiated turn (a resident dispatch) through the chat
+   * pipeline. With a session id it runs in that session's own thread and
+   * throws `session_not_found` once that session is gone; without one it runs
+   * in the active session. The caller admits it: no conversation runs
+   * meanwhile.
+   */
+  runHostTurn: (
+    peer: ServerPeer,
+    turn: Parameters<ServerChatHandler['runHostTurn']>[1],
+    sessionId?: string,
+  ) => Promise<HostTurnOutcome>;
   handleHttpRequest: (
     req: IncomingMessage,
     res: ServerResponse,
@@ -839,6 +851,22 @@ export function createLocalServerHandlers(
         () => chatHandler.handleInterruptResume(peer, message, runtimeDeps.get(), session),
         session.id,
       );
+    },
+    runHostTurn: async (peer, turn, sessionId) => {
+      const requestDeps = runtimeDeps.get();
+      const session = sessionId ? tuiSessions.getSession(requestDeps.petId, sessionId) ?? undefined : undefined;
+      if (sessionId && !session) {
+        throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
+      }
+      const activeRun = activeRuns.begin(
+        turn.requestId,
+        session?.id ?? tuiSessions.getActiveSessionId(requestDeps.petId),
+      );
+      try {
+        return await chatHandler.runHostTurn(peer, turn, requestDeps, session);
+      } finally {
+        activeRuns.finish(activeRun);
+      }
     },
     interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
     close: () => {},

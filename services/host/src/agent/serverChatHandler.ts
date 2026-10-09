@@ -49,7 +49,7 @@ type InflightRequest = InflightOperationRun;
 
 type LocalServerRunRequest = AgentSessionTurnRequest;
 type RunAgentSessionTurn = typeof runAgentSessionTurn;
-type ChatRunOutcome =
+export type ChatRunOutcome =
   | 'completed'
   | 'waiting'
   | 'interrupted'
@@ -58,7 +58,25 @@ type ChatRunOutcome =
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
+  | { type: 'host_dispatch' }
   | HumanReviewResolutionSource;
+
+/** Per-turn hooks a Host-initiated turn adds to the shared pipeline. */
+type ChatTurnHooks = {
+  /** Decorates this turn's run, as a dispatch adds its own attribution. */
+  runAgentTurn?: RunAgentSessionTurn;
+  /** Receives the error behind a `failed` or `fatal_failed` outcome. */
+  onFailure?: (error: unknown) => void;
+  /** Receives the native review a cancelled run settled into. */
+  onSettledInterrupt?: (pending: PendingInterruptProjection) => void;
+};
+
+export type HostTurnOutcome = {
+  outcome: ChatRunOutcome;
+  error?: unknown;
+  /** The review a cancellation settled into, when the outcome is `waiting`. */
+  pendingInterrupt?: PendingInterruptProjection;
+};
 
 type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
@@ -66,9 +84,9 @@ type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
 };
 
 /**
- * The session a turn runs in when it is not the active one. Only a review
- * resume addressed to an exact session carries it; every other turn runs in
- * the active session, as before.
+ * The session a turn runs in when it is not the active one. A review resume
+ * addressed to an exact session and a dispatch bound to one carry it; every
+ * other turn runs in the active session.
  */
 export type ChatTurnTarget = TuiSessionRecord;
 
@@ -241,6 +259,35 @@ export class ServerChatHandler {
     }, deps, { type: 'chat_request' });
   }
 
+  /**
+   * A Host-initiated turn, such as a resident Pet's dispatch. It runs through
+   * the same pipeline as a chat request; it only has no client to answer, so
+   * the outcome is returned instead of being reported to a requester.
+   */
+  async runHostTurn(
+    peer: ServerPeer,
+    turn: { requestId: string; message: string; runAgentTurn?: RunAgentSessionTurn },
+    deps: ServerDeps,
+    target?: ChatTurnTarget,
+  ): Promise<HostTurnOutcome> {
+    let error: unknown;
+    let pendingInterrupt: PendingInterruptProjection | undefined;
+    const outcome = await this.runChatRequest(peer, {
+      kind: 'user_message',
+      requestId: turn.requestId,
+      message: turn.message,
+    }, deps, { type: 'host_dispatch' }, target, {
+      ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
+      onFailure: (failure) => { error = failure; },
+      onSettledInterrupt: (pending) => { pendingInterrupt = pending; },
+    });
+    return {
+      outcome,
+      ...(error === undefined ? {} : { error }),
+      ...(pendingInterrupt ? { pendingInterrupt } : {}),
+    };
+  }
+
   async handleRunInterrupt(
     peer: ServerPeer,
     msg: RunInterruptMessage,
@@ -282,12 +329,14 @@ export class ServerChatHandler {
     deps: ServerDeps,
     source: LocalServerRunSource,
     target?: ChatTurnTarget,
+    hooks: ChatTurnHooks = {},
   ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
+    const runAgentTurn = hooks.runAgentTurn ?? this.runAgentTurn;
 
-    if (source.type === 'chat_request') {
-      console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
+    if (source.type === 'chat_request' || source.type === 'host_dispatch') {
+      console.log(`[local-server] ${source.type} requestId=${requestId} message="${message.slice(0, 80)}"`);
     } else if (source.type === 'review_decision') {
       console.log(
         `[local-server] review decision requestId=${requestId} `
@@ -326,11 +375,13 @@ export class ServerChatHandler {
       const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
       const settled = await this.graphService.settleAbortedRun(setup);
       if (settled) {
+        const pendingInterrupt = projectPendingInterrupt(settled);
         this.inflightRequests.finish(peer, inflight, 'interrupted');
+        hooks.onSettledInterrupt?.(pendingInterrupt);
         this.publishRuntimeEvent(peer, {
           type: 'interrupt.requested',
           requestId,
-          pendingInterrupt: projectPendingInterrupt(settled),
+          pendingInterrupt,
         });
         this.inflightRequests.clear(peer, inflight);
         await refreshSummary();
@@ -367,6 +418,7 @@ export class ServerChatHandler {
     ): Promise<ChatRunOutcome> => {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
+      hooks.onFailure?.(err);
       console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       // Resetting replaces the active session; a targeted turn never does that.
       const recoveredFromToolProtocolError = !target && isToolProtocolHistoryError(err);
@@ -409,7 +461,7 @@ export class ServerChatHandler {
       this.publishRuntimeEvent(peer, {
         type: 'run.started',
         requestId,
-        initiator: 'client',
+        initiator: source.type === 'host_dispatch' ? 'host' : 'client',
         ...(request.kind === 'user_message'
           ? { input: { role: 'user', text: request.message } as const }
           : {}),
@@ -427,7 +479,7 @@ export class ServerChatHandler {
         createOperationRegistryForAgentSetup(setup),
       );
       setup.input.signal = controller.signal;
-      const result = await this.runAgentTurn({
+      const result = await runAgentTurn({
         request,
         setup,
         graphService: this.graphService,
@@ -485,7 +537,10 @@ export class ServerChatHandler {
             '[local-server] failed to settle an aborted run:',
             settleError instanceof Error ? (settleError.stack ?? settleError.message) : settleError,
           );
-          return await reportFailure(settleError, isCurrent());
+          // The run was aborted, so it is no longer current; yet a started
+          // run that nothing replaced still owes its observers one terminal
+          // event. Only a superseded run leaves that to its successor.
+          return await reportFailure(settleError, runStarted && !invocation.isSuperseded());
         }
       }
       return await reportFailure(err, isCurrent());

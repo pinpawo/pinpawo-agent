@@ -200,7 +200,6 @@ export async function createResidentPetRuntime(
   const coordinator = new ResidentPetCoordinator({ readSettledState });
   const interactivePeer: { current: AgentSessionPeer | null } = { current: null };
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
-  const activeHostRuns = new Map<string, AbortController>();
   const activeRuns = new ActiveRunRegister();
   const messageListeners = new Set<(message: AgentServerMessage) => void>();
   const sessionListeners = new Map<string, Set<(message: AgentServerMessage) => void>>();
@@ -290,12 +289,9 @@ export async function createResidentPetRuntime(
       else publishRuntimeEvent(event);
     },
     activeRuns,
-    interruptHostRun: (requestId) => {
-      const controller = activeHostRuns.get(requestId);
-      if (!controller) return localHandlers.interruptRun(requestId);
-      controller.abort();
-      return true;
-    },
+    // A dispatch or a Host-owned request runs on a peer other than the one
+    // asking to stop it.
+    interruptHostRun: (requestId) => localHandlers.interruptRun(requestId),
   });
   const peerHandlers = admitConversationHandlers(localHandlers.peerHandlers, coordinator);
   let closing: Promise<void> | null = null;
@@ -306,7 +302,6 @@ export async function createResidentPetRuntime(
 
   const close = () => {
     closing ??= (async () => {
-      for (const controller of activeHostRuns.values()) controller.abort();
       const peer = interactivePeer.current;
       interactivePeer.current = null;
       if (peer) await peerHandlers.onClose(peer);
@@ -341,7 +336,6 @@ export async function createResidentPetRuntime(
     openSessionPeer,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
-    activeHostRuns,
     activeRuns,
     close,
     isClosing: () => closing !== null,

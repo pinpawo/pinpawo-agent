@@ -28,6 +28,7 @@ event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自�
 
 ```text
 Scheduler SQLite -> due claim -> context.dispatch()
+Scheduler SQLite -> due claim (channelId) -> Channel `inputs` hook -> Channel delivery
 event source -> Trigger binding condition -> context.dispatch()
 event source -> Trigger binding condition (channelId) -> Channel `inputs` hook -> Channel delivery
 
@@ -57,6 +58,12 @@ SQLite transaction 先把记录原子地转成 `dispatching`，再调用 `contex
 标记 `dispatched`，表示 resident queue 已接纳而不是 Agent 执行完成；admission 失败标记
 `failed`。崩溃遗留的 `dispatching` 标记为
 `failed`，避免无法证明安全时重复派发。
+
+schedule 可以带可选的 `channelId`。带了它的 schedule 到期后不直接 dispatch，而是和
+Trigger 一样通过 Channel 的 `inputs` hook，以 `bot:scheduler` 身份往该 Channel 发一条 @`petId`
+的消息，Pet 的执行和回复都落在 Channel 里。Channel Plugin 没有运行时，这条 schedule 标记
+`failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变；已有数据库启动时自动补上
+`channel_id` 列，旧记录视为没有 Channel。
 
 管理 API：
 

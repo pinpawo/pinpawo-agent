@@ -8,6 +8,8 @@ export type ScheduleStatus = 'scheduled' | 'dispatching' | 'dispatched' | 'faile
 export type Schedule = {
   scheduleId: string;
   petId: string;
+  /** Deliver through this Channel instead of a bare dispatch. */
+  channelId?: string;
   request: string;
   runAt: string;
   status: ScheduleStatus;
@@ -33,6 +35,7 @@ export type ScheduleMutation = {
 type ScheduleRow = {
   schedule_id: string;
   pet_id: string;
+  channel_id: string | null;
   request: string;
   run_at: string;
   status: string;
@@ -73,6 +76,7 @@ function scheduleFromRow(row: ScheduleRow): Schedule {
   return {
     scheduleId: row.schedule_id,
     petId: row.pet_id,
+    ...(row.channel_id === null ? {} : { channelId: row.channel_id }),
     request: row.request,
     runAt: row.run_at,
     status: row.status as ScheduleStatus,
@@ -119,6 +123,7 @@ export class SchedulerService {
       CREATE TABLE IF NOT EXISTS schedules (
         schedule_id TEXT PRIMARY KEY,
         pet_id TEXT NOT NULL,
+        channel_id TEXT,
         request TEXT NOT NULL,
         run_at TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','dispatched','failed','cancelled')),
@@ -138,6 +143,11 @@ export class SchedulerService {
       CREATE INDEX IF NOT EXISTS schedules_due ON schedules(status, run_at);
       COMMIT;
     `);
+    // Schedules stored before Channel delivery existed have no channel.
+    const columns = this.database.prepare('PRAGMA table_info(schedules)').all() as { name: string }[];
+    if (!columns.some(({ name }) => name === 'channel_id')) {
+      this.database.exec('ALTER TABLE schedules ADD COLUMN channel_id TEXT;');
+    }
     this.initialized = true;
     for (const mutation of this.recoverInterrupted()) this.publish(mutation);
   }
@@ -154,20 +164,21 @@ export class SchedulerService {
     return () => this.listeners.delete(listener);
   }
 
-  async create(input: { petId: string; request: string; runAt: string }): Promise<Schedule> {
+  async create(input: { petId: string; channelId?: string; request: string; runAt: string }): Promise<Schedule> {
     this.assertReady();
     const now = new Date().toISOString();
     const scheduleId = randomUUID();
     const petId = nonEmpty(input.petId, 'petId');
+    const channelId = input.channelId === undefined ? null : nonEmpty(input.channelId, 'channelId');
     const request = nonEmpty(input.request, 'request');
     const runAt = parseDate(input.runAt, 'runAt');
     let event: ScheduleEvent;
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       this.database.prepare(`
-        INSERT INTO schedules(schedule_id, pet_id, request, run_at, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'scheduled', ?, ?)
-      `).run(scheduleId, petId, request, runAt, now, now);
+        INSERT INTO schedules(schedule_id, pet_id, channel_id, request, run_at, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?)
+      `).run(scheduleId, petId, channelId, request, runAt, now, now);
       event = this.insertEvent(scheduleId, 'created', 'scheduled', undefined, now);
       this.database.exec('COMMIT;');
     } catch (error) {

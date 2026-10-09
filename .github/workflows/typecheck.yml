@@ -32,7 +32,7 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
       # Studio and the Plugins reach host source, which imports
-      # @pinpawo-toolkit/browser and pinpawo/local-server-transport by package
+      # @pinpawo-toolkit/browser and pinpawo/wire by package
       # name with no tsconfig path mapping, so those declarations must exist.
       - name: Build typecheck prerequisites
         run: |

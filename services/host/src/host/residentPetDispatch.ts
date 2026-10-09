@@ -85,7 +85,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           let reply = '';
           publishLifecycle({ dispatchId, request, requestId, state: 'running' });
           try {
-            const { outcome, error } = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
+            const { outcome, error, pendingInterrupt: settledInterrupt } = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
               requestId,
               message: request,
               runAgentTurn: (turn) => withPetInvocationContext(
@@ -112,6 +112,9 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               return;
             }
             if (outcome === 'waiting') {
+              // A cancellation that settled into a review hands that review back,
+              // so ownership is saved from what the settlement already knew.
+              if (settledInterrupt) pendingInterrupt = settledInterrupt;
               const setup = turnSetup ?? await readSetup();
               if (!pendingInterrupt) {
                 const pending = (await graphService.readThreadState(setup)).pendingInterrupt;

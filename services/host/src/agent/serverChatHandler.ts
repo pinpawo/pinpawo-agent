@@ -67,11 +67,15 @@ type ChatTurnHooks = {
   runAgentTurn?: RunAgentSessionTurn;
   /** Receives the error behind a `failed` or `fatal_failed` outcome. */
   onFailure?: (error: unknown) => void;
+  /** Receives the native review a cancelled run settled into. */
+  onSettledInterrupt?: (pending: PendingInterruptProjection) => void;
 };
 
 export type HostTurnOutcome = {
   outcome: ChatRunOutcome;
   error?: unknown;
+  /** The review a cancellation settled into, when the outcome is `waiting`. */
+  pendingInterrupt?: PendingInterruptProjection;
 };
 
 type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
@@ -267,6 +271,7 @@ export class ServerChatHandler {
     target?: ChatTurnTarget,
   ): Promise<HostTurnOutcome> {
     let error: unknown;
+    let pendingInterrupt: PendingInterruptProjection | undefined;
     const outcome = await this.runChatRequest(peer, {
       kind: 'user_message',
       requestId: turn.requestId,
@@ -274,8 +279,13 @@ export class ServerChatHandler {
     }, deps, { type: 'host_dispatch' }, target, {
       ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
       onFailure: (failure) => { error = failure; },
+      onSettledInterrupt: (pending) => { pendingInterrupt = pending; },
     });
-    return error === undefined ? { outcome } : { outcome, error };
+    return {
+      outcome,
+      ...(error === undefined ? {} : { error }),
+      ...(pendingInterrupt ? { pendingInterrupt } : {}),
+    };
   }
 
   async handleRunInterrupt(
@@ -365,11 +375,13 @@ export class ServerChatHandler {
       const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
       const settled = await this.graphService.settleAbortedRun(setup);
       if (settled) {
+        const pendingInterrupt = projectPendingInterrupt(settled);
         this.inflightRequests.finish(peer, inflight, 'interrupted');
+        hooks.onSettledInterrupt?.(pendingInterrupt);
         this.publishRuntimeEvent(peer, {
           type: 'interrupt.requested',
           requestId,
-          pendingInterrupt: projectPendingInterrupt(settled),
+          pendingInterrupt,
         });
         this.inflightRequests.clear(peer, inflight);
         await refreshSummary();
@@ -525,7 +537,10 @@ export class ServerChatHandler {
             '[local-server] failed to settle an aborted run:',
             settleError instanceof Error ? (settleError.stack ?? settleError.message) : settleError,
           );
-          return await reportFailure(settleError, isCurrent());
+          // The run was aborted, so it is no longer current; yet a started
+          // run that nothing replaced still owes its observers one terminal
+          // event. Only a superseded run leaves that to its successor.
+          return await reportFailure(settleError, runStarted && !invocation.isSuperseded());
         }
       }
       return await reportFailure(err, isCurrent());

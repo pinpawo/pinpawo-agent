@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  startLocalServer,
+  startHostServer,
   type ServerDeps,
 } from './server';
 import { buildHostRuntimeConfig } from './config/runtimeConfig';
@@ -16,7 +16,7 @@ import { createTestModelServerDeps } from './testing/modelProfiles';
 test('local server close is idempotent and releases its listening port', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-local-server-'));
   const deps = createDeps(workdir);
-  const first = await startLocalServer(0, deps, {
+  const first = await startHostServer(0, deps, {
     authToken: 'local-server-lifecycle-token',
   });
 
@@ -26,7 +26,7 @@ test('local server close is idempotent and releases its listening port', async (
     first.close();
     await first.closed;
 
-    const restarted = await startLocalServer(first.port, deps, {
+    const restarted = await startHostServer(first.port, deps, {
       authToken: 'local-server-lifecycle-token',
     });
     try {

@@ -16,8 +16,8 @@ import type {
   InterruptResumeMessage,
 } from './wire/protocol';
 import { handleLocalHttpRequest } from './httpHandlers';
-import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
-import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
+import { sendAgentSessionPeerEvent, type ServerPeer } from './wire/peer';
+import type { AgentSessionPeerHandlers } from './wire/messageDispatcher';
 import { SessionAdmission } from './session/sessionAdmission';
 import { SessionCommandQueue } from './session/sessionCommandQueue';
 import { ServerChatHandler, type HostTurnOutcome } from './agent/serverChatHandler';
@@ -39,7 +39,7 @@ import {
 
 export type ServerHandlers = {
   interruptRun: (requestId: string) => boolean;
-  peerHandlers: LocalServerPeerHandlers;
+  peerHandlers: AgentSessionPeerHandlers;
   /**
    * Read one exact session without selecting it. Throws `session_not_found`
    * for a session this Pet does not own; it never falls back to the active
@@ -128,7 +128,7 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * the outer boundary. HTTP endpoints and stdio session commands call the same
  * checkpoint-backed operations below.
  */
-export function createLocalServerHandlers(
+export function createChatHostHandlers(
   runtimeDeps: ServerRuntimeDepsStore,
   options: ServerHandlerOptions = {},
 ): ServerHandlers {
@@ -144,7 +144,7 @@ export function createLocalServerHandlers(
   });
   const publishRuntimeEvent = options.publishRuntimeEvent
     ?? ((peer: ServerPeer, event: AgentRuntimeEvent) => {
-      sendLocalServerPeerEvent(peer, event);
+      sendAgentSessionPeerEvent(peer, event);
     });
   const inflightRequests = new InflightRequestController<ServerPeer>({
     // Local TUI / spawned stdio peer: trusted local transports.
@@ -480,7 +480,7 @@ export function createLocalServerHandlers(
     } catch (error) {
       if (selectionCommitted) {
         console.warn(
-          '[local-server] model selection was committed but acknowledgement failed:',
+          '[chat-host] model selection was committed but acknowledgement failed:',
           error instanceof Error ? error.message : error,
         );
         return;
@@ -648,7 +648,7 @@ export function createLocalServerHandlers(
     });
   };
 
-  const peerHandlers: LocalServerPeerHandlers = {
+  const peerHandlers: AgentSessionPeerHandlers = {
     onChatRequest: (client, message) => {
       return admitHumanMessage(
         client,
@@ -676,13 +676,13 @@ export function createLocalServerHandlers(
         runtimeDeps.get(),
       );
       if (inflight) {
-        console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
+        console.log(`[chat-host] interrupt requestId=${inflight.requestId}`);
       }
     },
     onNewSession: () => {
       const petId = runtimeDeps.get().petId;
       tuiSessions.createNewSession(petId);
-      console.log(`[local-server] new session created for pet ${petId}`);
+      console.log(`[chat-host] new session created for pet ${petId}`);
     },
     onRuntimeConfigUpdate: (client, message) => runSessionCommand(
       async () => {
@@ -703,7 +703,7 @@ export function createLocalServerHandlers(
             });
           }
           console.log(
-            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`
+            `[chat-host] global review policy set to ${message.globalReviewPolicyMode}`
               + ` (${autoAuthorizationSafetyLevel})`,
           );
         } catch (error) {

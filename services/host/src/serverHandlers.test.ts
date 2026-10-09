@@ -1,4 +1,4 @@
-import { createLocalServerRuntimeDepsStore } from './serverTypes';
+import { createChatHostDepsStore } from './serverTypes';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync,
@@ -13,7 +13,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { HostGraphService } from './agent/agentGraphService';
 import { ActiveRunRegister } from './agent/activeRunRegister';
-import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
+import { createChatHostHandlers as createProductionChatHostHandlers } from './serverHandlers';
 import type { HostServerMessage } from './wire/protocol';
 import type { ServerPeer } from './wire/peer';
 import { buildHostRuntimeConfig } from './config/runtimeConfig';
@@ -24,14 +24,14 @@ import {
 import type { ServerDeps } from './serverTypes';
 import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 
-function createLocalServerHandlers(
+function createChatHostHandlers(
   deps: Omit<ServerDeps, 'toolkitInventory' | 'capabilityCatalog'> & Partial<Pick<
     ServerDeps,
     'toolkitInventory' | 'capabilityCatalog'
   >>,
-  options?: Parameters<typeof createProductionLocalServerHandlers>[1],
+  options?: Parameters<typeof createProductionChatHostHandlers>[1],
 ) {
-  return createProductionLocalServerHandlers(createLocalServerRuntimeDepsStore({
+  return createProductionChatHostHandlers(createChatHostDepsStore({
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityCatalog: createTestModelServerDeps().capabilityCatalog,
     ...deps,
@@ -87,7 +87,7 @@ test('session.new returns an authoritative empty snapshot for a unique session',
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -140,7 +140,7 @@ test('session.compact is a v2 session command and returns the authoritative snap
       throw new Error('empty context must not be written');
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -220,7 +220,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
       inputModalities: ['text', 'image'],
     },
   ], 'primary');
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -335,7 +335,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
       throw new Error('checkpoint unavailable');
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -398,7 +398,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   ], 'primary');
   const initialSent: HostServerMessage[] = [];
   const initialPeer = createPeer(initialSent);
-  const initialHandlers = createLocalServerHandlers({
+  const initialHandlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -432,7 +432,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
 
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -515,7 +515,7 @@ test('model selection is rejected while the active session is running', async ()
   const peer = createPeer(sent);
   const started = deferred<void>();
   const release = deferred<void>();
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -615,7 +615,7 @@ test('a run claims the register for the whole admitted turn', async () => {
   const graphService = {
     readThreadState: async () => ({ messages: [], pendingInterrupt: null }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -691,7 +691,7 @@ test('completion snapshot does not reintroduce a settled active run', async () =
       };
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -758,7 +758,7 @@ test('model selection blocks a chat admitted by another peer until the selection
       };
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -846,7 +846,7 @@ test('model selection is rejected while checkpoint state has pending review', as
       pendingInterrupt: { review },
     }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -910,7 +910,7 @@ test('admitted images gate model selection through the transcript', async () => 
       pendingInterrupt: null,
     }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -1056,7 +1056,7 @@ test('text-only selected profile rejects image admission before graph invocation
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
   let graphInvocations = 0;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
@@ -1133,7 +1133,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1200,7 +1200,7 @@ test('runtime config update preserves the configured safety level when the messa
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1260,7 +1260,7 @@ test('runtime config update reports persistence failures without changing runtim
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -1309,7 +1309,7 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
   const { FileSaver } = await import('./fileSaver');
   const checkpointer = new FileSaver(join(workdir, 'host-owned.json'));
   let actual: unknown;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     ...createTestModelServerDeps(),
     serverMode: 'chat', petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),

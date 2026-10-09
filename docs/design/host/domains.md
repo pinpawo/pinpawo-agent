@@ -457,7 +457,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 | 断连清理 | wire（连接自身） | wire |
 
 **没有 `process` 层。** `activeChatOperations` 与 `sessionTransition` 是
-`createLocalServerHandlers` 的闭包局部变量，而 Studio 对每个 Pet 各调一次
+`createChatHostHandlers` 的闭包局部变量，而 Studio 对每个 Pet 各调一次
 `createResidentPetHost` —— 它们是 **Host 级**的，多 Pet 时进程内没有共享准入状态。
 
 ### 现状核对（实施前的事实基线）

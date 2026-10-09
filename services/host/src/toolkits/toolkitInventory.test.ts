@@ -11,7 +11,7 @@ import {
 import { createGitToolkit } from './git';
 import { createShellToolkit } from './shell';
 import { PosixShellRS } from './shellRS';
-import { createOperationRegistryForLocalServerDeps } from '../runtimeOperationRegistry';
+import { createOperationRegistryForDeps } from '../runtimeOperationRegistry';
 
 function toolkit(name: string, available = true): AgentToolkit {
   return defineToolkit({
@@ -213,7 +213,7 @@ test('operation registry derives only from the effective Host inventory', async 
       ? { available: true }
       : { available: false, reason: 'git unavailable' },
   });
-  const registry = createOperationRegistryForLocalServerDeps({
+  const registry = createOperationRegistryForDeps({
     toolkitInventory: new HostToolkitInventoryStore(inventory),
   });
 

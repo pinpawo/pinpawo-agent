@@ -12,7 +12,7 @@ export type StartupConfigSnapshot = {
   workdir: string;
   petId?: string;
   petName?: string;
-  localServerPort: number;
+  hostPort: number;
   modelProfileId: string;
   modelProfileFingerprint: string;
   llmModel: string;
@@ -56,7 +56,7 @@ export function buildStartupConfigSnapshot(params: {
     workdir: params.workdir,
     ...(params.petId ? { petId: params.petId } : {}),
     ...(params.petName ? { petName: params.petName } : {}),
-    localServerPort: config.localServerPort,
+    hostPort: config.hostPort,
     modelProfileId: profile.id,
     modelProfileFingerprint: config.modelProfileFingerprint,
     llmModel: profile.model,
@@ -78,7 +78,7 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
     `  workdir=${snapshot.workdir}`,
     snapshot.petId ? `  petId=${snapshot.petId}` : null,
     snapshot.petName ? `  petName=${snapshot.petName}` : null,
-    `  localServerPort=${snapshot.localServerPort}`,
+    `  hostPort=${snapshot.hostPort}`,
     `  modelProfileId=${snapshot.modelProfileId}`,
     `  modelProfileFingerprint=${snapshot.modelProfileFingerprint}`,
     `  llmModel=${snapshot.llmModel}`,

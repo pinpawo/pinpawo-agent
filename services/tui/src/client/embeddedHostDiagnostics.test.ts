@@ -15,7 +15,7 @@ test('embedded host diagnostics append timestamped lines to the log file', () =>
   const path = join(directory, 'nested', 'embedded-host.log');
   try {
     const sink = createEmbeddedHostDiagnosticsSink(path);
-    sink('[local-server] stdio JSONL transport ready');
+    sink('[wire] stdio JSONL transport ready');
     sink('[host] stopping');
 
     const lines = readFileSync(path, 'utf8').trim().split('\n');
@@ -23,11 +23,11 @@ test('embedded host diagnostics append timestamped lines to the log file', () =>
     for (const line of lines) {
       assert.match(
         line,
-        /^\d{4}-\d{2}-\d{2}T[\d:.]+Z \[(local-server|host)\]/,
+        /^\d{4}-\d{2}-\d{2}T[\d:.]+Z \[(wire|host)\]/,
       );
     }
     assert.equal(
-      lines[0]?.endsWith('[local-server] stdio JSONL transport ready'),
+      lines[0]?.endsWith('[wire] stdio JSONL transport ready'),
       true,
     );
   } finally {

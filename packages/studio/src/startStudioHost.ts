@@ -5,7 +5,7 @@ import {
 import {
   startResidentPetAgentSessionTransport,
   type ResidentPetAgentSessionTransportOptions,
-} from 'pinpawo/local-server-transport';
+} from 'pinpawo/wire';
 import { StudioHost, type StudioHostOptions } from './host/StudioHost';
 
 export type StartStudioHostOptions = Omit<StudioHostOptions, 'runtimeConfig'> & {

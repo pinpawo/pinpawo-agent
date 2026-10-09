@@ -17,7 +17,7 @@ test('local host metadata reads the host version', async () => {
         authorization: new Headers(init?.headers).get('authorization'),
       });
       return Response.json({
-        local_agent_version: '0.2.0',
+        host_version: '0.2.0',
       });
     },
   });

@@ -1,5 +1,5 @@
 import { AgentHost } from '../runtime';
-import { startLocalServer } from '../server';
+import { startHostServer } from '../server';
 import { getConfig } from '../config/config';
 import { applyRuntimeWorkdir } from '../config/runtimeWorkdir';
 import { logStartupConfig } from '../config/startupConfigLog';
@@ -67,7 +67,7 @@ export async function runAgent(options: RunAgentOptions) {
       petId: runtime.getPetConfig().petId,
       petName: runtime.getPetConfig().name,
     });
-    const deps = runtime.buildLocalServerDeps();
+    const deps = runtime.buildChatHostDeps();
 
     if (stopping) {
       runtime.requestStop();
@@ -77,11 +77,11 @@ export async function runAgent(options: RunAgentOptions) {
     if (options.stdio) {
       const transport = startLocalStdioServer(deps);
       closeLocalTransport = transport.close;
-      console.log('[local-server] stdio JSONL transport ready');
+      console.log('[chat-host] stdio JSONL transport ready');
       await transport.closed;
       runtime.requestStop();
     } else {
-      const transport = await startLocalServer(getConfig().localServerPort, deps);
+      const transport = await startHostServer(getConfig().hostPort, deps);
       closeLocalTransport = transport.close;
       try {
         await runtime.runForever({ skipInit: true });

@@ -28,14 +28,14 @@ import {
   readLocalChatDisplayText,
 } from '../../host/src/agent/chatMessageInput';
 import {
-  createLocalServerHandlers,
+  createChatHostHandlers,
 } from '../../host/src/serverHandlers';
-import { createLocalServerRuntimeDepsStore } from '../../host/src/serverTypes';
+import { createChatHostDepsStore } from '../../host/src/serverTypes';
 import type {
-  LocalServerPeerHandlers,
+  AgentSessionPeerHandlers,
 } from '../../host/src/wire/messageDispatcher';
 import {
-  attachLocalServerWebSocketTransport,
+  attachHostWebSocketTransport,
 } from '../../host/src/serverWsTransport';
 import {
   buildHostRuntimeConfig,
@@ -87,7 +87,7 @@ test('production host handlers drive the v2 host vertical slice', async () => {
   writeFileSync(attachmentPath, ATTACHMENT_CONTENT);
   const runtimeConfig = buildHostRuntimeConfig(workdir);
   const graphFixture = createHostGraphFixture();
-  const localServerHandlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
+  const chatHostHandlers = createChatHostHandlers(createChatHostDepsStore({
     serverMode: 'chat',
     petId: 'pet-host-integration',
     petName: 'PinPawo',
@@ -119,8 +119,8 @@ test('production host handlers drive the v2 host vertical slice', async () => {
   let chatRequestCount = 0;
   const transportErrors: unknown[] = [];
   const transportLogs: string[] = [];
-  const productionHandlers = localServerHandlers.peerHandlers;
-  const peerHandlers: LocalServerPeerHandlers = {
+  const productionHandlers = chatHostHandlers.peerHandlers;
+  const peerHandlers: AgentSessionPeerHandlers = {
     ...productionHandlers,
     onChatRequest: (peer, message) => {
       chatRequestCount += 1;
@@ -138,7 +138,7 @@ test('production host handlers drive the v2 host vertical slice', async () => {
     },
     logWarn: () => undefined,
   };
-  const webSocketServer = attachLocalServerWebSocketTransport(
+  const webSocketServer = attachHostWebSocketTransport(
     server,
     peerHandlers,
     {
@@ -361,7 +361,7 @@ test('production host handlers drive the v2 host vertical slice', async () => {
     );
     assert.ok(
       transportLogs.filter((message) => (
-        message === '[local-server] local client connected'
+        message === '[wire] local client connected'
       )).length >= 2,
     );
 
@@ -610,7 +610,7 @@ test('production host handlers drive the v2 host vertical slice', async () => {
     await Bun.sleep(10);
     await closeWebSocketServer(webSocketServer);
     await closeServer(server);
-    localServerHandlers.close();
+    chatHostHandlers.close();
     rmSync(workdir, { recursive: true, force: true });
   }
 });
@@ -705,7 +705,7 @@ async function listen(server: ReturnType<typeof createServer>) {
 }
 
 async function closeWebSocketServer(
-  server: ReturnType<typeof attachLocalServerWebSocketTransport>,
+  server: ReturnType<typeof attachHostWebSocketTransport>,
 ) {
   await withCleanupTimeout(
     new Promise<void>((resolve, reject) => {

@@ -60,7 +60,7 @@ export function redirectConsoleToStdioDiagnostics(diagnostics: Writable = stderr
   };
 }
 
-export function attachLocalServerWireStdioTransport<TMessage extends object>(
+export function attachWireStdioTransport<TMessage extends object>(
   handlers: ServerWireHandlers<TMessage>,
   options: ServerStdioTransportOptions = {},
 ): ServerWireStdioTransport<TMessage> {
@@ -103,7 +103,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
     Promise.resolve()
       .then(() => handlers.onClose?.(peer))
       .catch((error) => {
-        logError('[local-server] handleClose error:', error);
+        logError('[wire] handleClose error:', error);
       })
       .then(() => Promise.allSettled(Array.from(pendingDispatches)))
       .finally(resolveClosed);
@@ -114,7 +114,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
       backpressured = !output.write(line);
       return true;
     } catch (error) {
-      logError('[local-server] stdio write failed:', error);
+      logError('[wire] stdio write failed:', error);
       finish();
       return false;
     }
@@ -135,12 +135,12 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
   }
 
   function handleInputError(error: Error) {
-    logError('[local-server] stdio input failed:', error);
+    logError('[wire] stdio input failed:', error);
     finish();
   }
 
   function handleOutputError(error: Error) {
-    logError('[local-server] stdio output failed:', error);
+    logError('[wire] stdio output failed:', error);
     finish();
   }
 
@@ -154,7 +154,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
       try {
         line = `${JSON.stringify(message)}\n`;
       } catch (error) {
-        logError('[local-server] failed to serialize stdio message:', error);
+        logError('[wire] failed to serialize stdio message:', error);
         return false;
       }
       if (!backpressured) {
@@ -163,7 +163,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
       const bytes = Buffer.byteLength(line);
       if (pendingBytes + bytes > maxPendingBytes) {
         logError(
-          '[local-server] stdio output backpressure limit exceeded:',
+          '[wire] stdio output backpressure limit exceeded:',
           new Error(`pending bytes exceed ${maxPendingBytes}`),
         );
         finish();
@@ -197,7 +197,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
     const dispatched = Promise.resolve()
       .then(() => handlers.onMessage(peer, lineBuffer.toString('utf8')))
       .catch((error) => {
-        logError('[local-server] handleMessage error:', error);
+        logError('[wire] handleMessage error:', error);
       });
     pendingDispatches.add(dispatched);
     void dispatched.finally(() => {
@@ -207,7 +207,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
 
   function failInputLineLimit() {
     logError(
-      '[local-server] stdio input line limit exceeded:',
+      '[wire] stdio input line limit exceeded:',
       new Error(`line bytes exceed ${maxInputLineBytes}`),
     );
     finish();
@@ -282,7 +282,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
 }
 
 /** Chat/Agent Session adapter retained for the Host. */
-export function attachLocalServerStdioTransport(
+export function attachHostStdioTransport(
   handlers: ServerTransportHandlers,
   options: ServerStdioTransportOptions = {},
 ): ServerStdioTransport {
@@ -291,7 +291,7 @@ export function attachLocalServerStdioTransport(
     ?? ((message, error) => writeDiagnostic(diagnostics, `${message} ${formatError(error)}`));
   const logWarn: ServerLogWarn = handlers.logWarn
     ?? ((message) => writeDiagnostic(diagnostics, message));
-  return attachLocalServerWireStdioTransport(
+  return attachWireStdioTransport(
     createHostWireHandlers(handlers, logError, logWarn),
     options,
   );

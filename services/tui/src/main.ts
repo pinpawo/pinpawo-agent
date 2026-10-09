@@ -16,7 +16,7 @@ import { createEmbeddedHostConnectionFactory } from './client/embeddedHostConnec
 import { createEmbeddedHostDiagnosticsSink } from './client/embeddedHostDiagnostics';
 import {
   createLocalHostConnectionFactory,
-  readLocalServerPort,
+  readWirePort,
 } from './client/localHostConnection';
 import {
   loadLocalHostMetadata,
@@ -185,7 +185,7 @@ const embeddedHost = launchOptions.embeddedHost;
 const embeddedHostDiagnostics = createEmbeddedHostDiagnosticsSink();
 // `--server-port` selects a running Host directly; `LOCAL_SERVER_PORT` only
 // supplies the default for the connect paths that do not name a port.
-const port = agentSession?.port ?? launchOptions.serverPort ?? readLocalServerPort();
+const port = agentSession?.port ?? launchOptions.serverPort ?? readWirePort();
 const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
   ? {
       hostVersion: 'demo',

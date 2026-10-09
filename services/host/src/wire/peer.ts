@@ -17,7 +17,7 @@ export type ServerPeer = ServerWirePeer<HostServerMessage>;
  * The local server transport is a trusted loopback peer, so it retains native
  * operation payloads and streaming message deltas.
  */
-export function sendLocalServerPeerEvent(
+export function sendAgentSessionPeerEvent(
   peer: ServerPeer,
   event: AgentRuntimeEvent,
 ) {

@@ -36,7 +36,7 @@ One physical egress point exists:
 
 | Egress | File |
 | --- | --- |
-| Local HTTP/WS server | `localServer.ts`, `localServerChatHandler.ts`, `localServerStudioHandler.ts` |
+| Local HTTP/WS server | `server.ts`, `serverWsTransport.ts`, `agent/serverChatHandler.ts` |
 
 It calls `sendHostEvent(ws, event)`, which delivers every event
 unchanged — deltas, completed text, operation payloads and snapshots alike.
@@ -93,7 +93,7 @@ that didn't naturally complete; they go through the same egress.
 
 ## Where `raw` is consumed locally
 
-- `localServerOperationEvents.ts` — pretty-prints `raw.input/error` into the
+- `serverOperationEvents.ts` — pretty-prints `raw.input/error` into the
   host log (truncated). Lives inside the agent process; doesn't cross
   any wire.
 - TUI clients receive `event.operation.raw` through the local WS

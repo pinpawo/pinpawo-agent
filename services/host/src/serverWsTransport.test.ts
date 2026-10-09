@@ -4,11 +4,11 @@ import { createServer } from 'node:http';
 import test from 'node:test';
 import { WebSocket, type ClientOptions } from 'ws';
 import {
-  attachLocalServerWebSocketTransport,
-  createLocalServerWebSocketPeer,
+  attachHostWebSocketTransport,
+  createHostWebSocketPeer,
 } from './serverWsTransport';
 import {
-  type LocalServerPeerHandlers,
+  type AgentSessionPeerHandlers,
 } from './wire/messageDispatcher';
 import type { ServerPeer } from './wire/peer';
 
@@ -21,7 +21,7 @@ test('local websocket peer owns socket readiness, serialization, and send failur
       sent.push(JSON.parse(data) as unknown);
     },
   };
-  const peer = createLocalServerWebSocketPeer(
+  const peer = createHostWebSocketPeer(
     socket as unknown as WebSocket,
     (message, error) => {
       errors.push(`${message}${error instanceof Error ? error.message : String(error)}`);
@@ -41,13 +41,13 @@ test('local websocket peer owns socket readiness, serialization, and send failur
     throw new Error('write failed');
   };
   assert.equal(peer.send({ type: 'pong' }), false);
-  assert.deepEqual(errors, ['[local-server] failed to send websocket message:write failed']);
+  assert.deepEqual(errors, ['[wire] failed to send websocket message:write failed']);
 });
 
 test('local websocket transport enforces token and Origin during upgrade', async () => {
   const server = createServer();
   const handlers = createHandlers();
-  attachLocalServerWebSocketTransport(server, handlers, {
+  attachHostWebSocketTransport(server, handlers, {
     authToken: 'secret',
     port: 0,
   });
@@ -87,7 +87,7 @@ test('local websocket transport keeps one peer identity through message and clos
   const closed = new Promise<void>((resolve) => {
     resolveClosed = resolve;
   });
-  const handlers: LocalServerPeerHandlers = {
+  const handlers: AgentSessionPeerHandlers = {
     ...createHandlers(),
     onChatRequest: (peer) => {
       peers.push(peer);
@@ -98,7 +98,7 @@ test('local websocket transport keeps one peer identity through message and clos
       resolveClosed();
     },
   };
-  attachLocalServerWebSocketTransport(server, handlers, {
+  attachHostWebSocketTransport(server, handlers, {
     authToken: 'secret',
     port: 0,
   });
@@ -153,7 +153,7 @@ test('local websocket transport keeps one peer identity through message and clos
   }
 });
 
-function createHandlers(): LocalServerPeerHandlers {
+function createHandlers(): AgentSessionPeerHandlers {
   return {
     onChatRequest: () => undefined,
     onInterruptResume: () => undefined,

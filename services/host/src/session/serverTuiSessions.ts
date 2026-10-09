@@ -362,7 +362,7 @@ export class ServerTuiSessionService {
       const messages = await this.readSessionCheckpointMessages(deps, session);
       this.updateSessionSummaryFromCheckpoint(session, messages);
     } catch (err) {
-      console.warn('[local-server] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
+      console.warn('[chat-host] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
     }
   }
 
@@ -371,7 +371,7 @@ export class ServerTuiSessionService {
       const messages = await this.readSessionCheckpointMessages(deps, session);
       this.updateSessionSummaryFromCheckpoint(session, messages);
     } catch (err) {
-      console.warn('[local-server] failed to refresh session summary:', err instanceof Error ? err.message : err);
+      console.warn('[chat-host] failed to refresh session summary:', err instanceof Error ? err.message : err);
     }
   }
 

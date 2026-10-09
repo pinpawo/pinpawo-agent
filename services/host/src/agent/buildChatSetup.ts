@@ -3,7 +3,7 @@ import { buildLocalChatAgentInput } from './agentChannel';
 import type { loadAgentContext } from '../contextLoader';
 import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import {
-  getLocalServerToolkitInventory,
+  getToolkitInventory,
   type ChatSetupDeps,
 } from '../serverTypes';
 
@@ -41,7 +41,7 @@ export function buildChatSetup(options: BuildChatSetupOptions) {
   // selection checks the checkpoint, and image attachments are refused at
   // admission. Building the graph is synchronous, so it does not re-check
   // against a stored copy that could disagree with the transcript.
-  const toolkitInventory = getLocalServerToolkitInventory(deps);
+  const toolkitInventory = getToolkitInventory(deps);
   return buildLocalChatAgentInput({
     context: options.context,
     userMessage: '',

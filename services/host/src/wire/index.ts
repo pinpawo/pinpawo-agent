@@ -6,16 +6,16 @@
  * transport-independent Studio contract.
  */
 export {
-  startLocalServerTransport,
-  startLocalServerWireTransport,
+  startHostTransport,
+  startWireTransport,
 } from './transport';
 export type {
   ServerTransport,
   ServerTransportOptions,
 } from './transport';
 export {
-  attachLocalServerStdioTransport,
-  attachLocalServerWireStdioTransport,
+  attachHostStdioTransport,
+  attachWireStdioTransport,
   redirectConsoleToStdioDiagnostics,
 } from './stdioTransport';
 export type {
@@ -32,15 +32,15 @@ export type {
 export type {
   ServerLogError,
   ServerLogWarn,
-  LocalServerPeerHandlers,
+  AgentSessionPeerHandlers,
   ServerTransportHandlers,
 } from './messageDispatcher';
 export type { ServerPeer } from './peer';
-export { sendLocalServerPeerEvent } from './peer';
+export { sendAgentSessionPeerEvent } from './peer';
 export type { HostServerMessage } from './protocol';
 export {
-  ensureLocalServerAuthToken,
-  readLocalServerAuthToken,
+  ensureWireAuthToken,
+  readWireAuthToken,
 } from './auth';
 export {
   readResidentPetIdFromAgentSessionPath,

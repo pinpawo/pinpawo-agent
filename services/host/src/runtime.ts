@@ -139,7 +139,7 @@ export class AgentHost {
 
   // ---- Chat/ws-relay concerns (host-specific) ----
 
-  buildLocalServerDeps(): ServerDeps {
+  buildChatHostDeps(): ServerDeps {
     return {
       serverMode: this.serverMode,
       petId: this.petConfig.petId,

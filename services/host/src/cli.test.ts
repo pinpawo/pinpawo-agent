@@ -375,3 +375,24 @@ test('local agent CLI passes Chrome extension registration options to the handle
     options: { extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
   });
 });
+
+test('CLI explicitly routes toolkit install/status without starting a Host', async () => {
+  const calls: unknown[] = [];
+  const program = createHostCli({
+    runToolkit: (action, toolkit, options) => { calls.push({ action, toolkit, options }); },
+    runAgent: () => { throw new Error('Toolkit management must not start a Host'); },
+  });
+  await program.parseAsync(['node', 'pinpawo', 'toolkit', 'install', 'office', '--dir', '/tmp/dependencies with spaces']);
+  await createHostCli({
+    runToolkit: (action, toolkit, options) => { calls.push({ action, toolkit, options }); },
+  }).parseAsync(['node', 'pinpawo', 'toolkit', 'status', 'office']);
+  assert.deepEqual(calls, [
+    { action: 'install', toolkit: 'office', options: { dir: '/tmp/dependencies with spaces' } },
+    { action: 'status', toolkit: 'office', options: {} },
+  ]);
+});
+
+test('CLI toolkit installation failures propagate to the CLI error handler', async () => {
+  const program = createHostCli({ runToolkit: async () => { throw new Error('checksum mismatch'); } });
+  await assert.rejects(program.parseAsync(['node', 'pinpawo', 'toolkit', 'install', 'office']), /checksum mismatch/);
+});

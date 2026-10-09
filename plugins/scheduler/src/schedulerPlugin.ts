@@ -1,7 +1,8 @@
 import path from 'node:path';
 import type { StudioDispatchQueue, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { SchedulerService } from './schedulerService';
+import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
+import { SchedulerService, type Schedule } from './schedulerService';
 
 export type CreateSchedulerPluginOptions = {
   service?: SchedulerService;
@@ -13,6 +14,8 @@ export type CreateSchedulerPluginOptions = {
     attentionStates?: readonly StudioDispatchQueue['state'][];
   };
   httpRoute?: false | { pluginName?: string };
+  /** The Channel Plugin that channel-bound schedules post through. */
+  channel?: { pluginName?: string };
 };
 
 export type SchedulerPlugin = StudioPlugin & { service: SchedulerService };
@@ -59,21 +62,44 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   let dispatchQueueAuditTimer: NodeJS.Timeout | undefined;
   let initialDispatchQueueAuditTimer: NodeJS.Timeout | undefined;
   let unsubscribeMutations: (() => void) | undefined;
+  let unsubscribeActivation: (() => void) | undefined;
+  // Due schedules wait until every Plugin has started: a channel-bound one
+  // must not fail just because the Channel Plugin starts after this one.
+  let activated = false;
   let unregisterRoutes: (() => void) | undefined;
+  let removeChannelInputs: (() => void) | undefined;
+  let channelInputs: ChannelInputsHook | undefined;
   let polling: Promise<void> | undefined;
 
+  // A channel-bound schedule hands its request to the Channel, which runs the
+  // Pet in its Channel session and keeps the reply; any other schedule dispatches.
+  const send = async (host: StudioPluginContext, schedule: Schedule) => {
+    if (schedule.channelId === undefined) {
+      await host.dispatch({
+        petId: schedule.petId,
+        request: schedule.request,
+        idempotencyKey: `schedule:${schedule.scheduleId}`,
+      });
+      return;
+    }
+    if (!channelInputs) throw new Error('This schedule needs the Channel Plugin, which is not running.');
+    const { deliveries } = await channelInputs.post(schedule.channelId, {
+      author: { kind: 'bot', id: 'scheduler' },
+      body: schedule.request,
+      mentions: [{ petId: schedule.petId }],
+    });
+    const failed = deliveries.find((delivery) => delivery.state === 'failed');
+    if (failed) throw new Error(failed.error ?? `Channel did not deliver to Pet "${schedule.petId}".`);
+  };
+
   const poll = async () => {
-    if (polling || !context) return;
+    if (polling || !context || !activated) return;
     polling = (async () => {
       while (context) {
         const schedule = await service.claimDue();
         if (!schedule) break;
         try {
-          await context.dispatch({
-            petId: schedule.petId,
-            request: schedule.request,
-            idempotencyKey: `schedule:${schedule.scheduleId}`,
-          });
+          await send(context, schedule);
           await service.markDispatched(schedule.scheduleId);
         } catch (error) {
           await service.fail(schedule.scheduleId, asError(error).message);
@@ -128,6 +154,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
             payload: {
               scheduleId: schedule.scheduleId,
               petId: schedule.petId,
+              ...(schedule.channelId === undefined ? {} : { channelId: schedule.channelId }),
               status: schedule.status,
               sequence: event.sequence,
               ...(event.note === undefined ? {} : { note: event.note }),
@@ -136,6 +163,19 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
           if (event.eventType === 'created') requestPoll();
         });
         await service.init();
+        unsubscribeActivation = pluginContext.subscribe((event) => {
+          if (event.source !== 'studio' || event.type !== 'plugins.activated') return;
+          activated = true;
+          requestPoll();
+        });
+        removeChannelInputs = pluginContext.hooks.contribute<ChannelInputsHook>(
+          options.channel?.pluginName ?? 'channel',
+          'inputs',
+          (hook) => {
+            channelInputs = hook;
+            return () => { if (channelInputs === hook) channelInputs = undefined; };
+          },
+        );
         const route = options.httpRoute;
         if (route !== false) {
           unregisterRoutes = pluginContext.hooks.contribute<StudioHttpRoutesHook>(
@@ -157,14 +197,16 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
                       if (!value || typeof value !== 'object'
                         || typeof value.petId !== 'string'
                         || typeof value.request !== 'string'
-                        || typeof value.runAt !== 'string') {
-                        throw new Error('Scheduler request requires petId, request, and runAt.');
+                        || typeof value.runAt !== 'string'
+                        || (value.channelId !== undefined && typeof value.channelId !== 'string')) {
+                        throw new Error('Scheduler request requires petId, request, and runAt, and a string channelId when set.');
                       }
                       if (!pluginContext.listPets().some(({ petId }) => petId === value.petId)) {
                         throw new Error(`Unknown Studio petId "${value.petId}".`);
                       }
                       const schedule = await service.create({
                         petId: value.petId,
+                        ...(typeof value.channelId === 'string' ? { channelId: value.channelId } : {}),
                         request: value.request,
                         runAt: value.runAt,
                       });
@@ -225,7 +267,6 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
           initialDispatchQueueAuditTimer = setTimeout(auditDispatchQueues, 0);
           initialDispatchQueueAuditTimer.unref();
         }
-        await poll();
       } catch (error) {
         if (timer) clearInterval(timer);
         timer = undefined;
@@ -234,10 +275,15 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         if (initialDispatchQueueAuditTimer) clearTimeout(initialDispatchQueueAuditTimer);
         initialDispatchQueueAuditTimer = undefined;
         context = undefined;
+        activated = false;
         unsubscribeMutations?.();
         unsubscribeMutations = undefined;
+        unsubscribeActivation?.();
+        unsubscribeActivation = undefined;
         unregisterRoutes?.();
         unregisterRoutes = undefined;
+        removeChannelInputs?.();
+        removeChannelInputs = undefined;
         if (ownsService) await service.close().catch(() => undefined);
         throw error;
       }
@@ -251,10 +297,15 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
       initialDispatchQueueAuditTimer = undefined;
       await polling;
       context = undefined;
+      activated = false;
       unsubscribeMutations?.();
       unsubscribeMutations = undefined;
+      unsubscribeActivation?.();
+      unsubscribeActivation = undefined;
       unregisterRoutes?.();
       unregisterRoutes = undefined;
+      removeChannelInputs?.();
+      removeChannelInputs = undefined;
       if (ownsService) await service.close();
     },
   };
@@ -265,7 +316,7 @@ export function createStudioPlugin(
   environment: { workdir: string },
 ): SchedulerPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'pollIntervalMs', 'dispatchQueueAudit', 'httpRoute']);
+  const allowed = new Set(['databasePath', 'pollIntervalMs', 'dispatchQueueAudit', 'httpRoute', 'channel']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Scheduler Plugin option "${unknown}" is not supported.`);
   if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
@@ -296,6 +347,13 @@ export function createStudioPlugin(
       || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string'))) {
     throw new Error('Scheduler Plugin option "httpRoute" must be false or a route object.');
   }
+  const channel = options.channel;
+  if (channel !== undefined
+    && (!channel || typeof channel !== 'object' || Array.isArray(channel)
+      || Object.keys(channel).some((key) => key !== 'pluginName')
+      || ('pluginName' in channel && typeof channel.pluginName !== 'string'))) {
+    throw new Error('Scheduler Plugin option "channel" must be an object with an optional pluginName.');
+  }
   const databasePath = typeof options.databasePath === 'string'
     ? (path.isAbsolute(options.databasePath)
       ? options.databasePath
@@ -319,5 +377,6 @@ export function createStudioPlugin(
     ...(httpRoute !== undefined
       ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),
+    ...(channel !== undefined ? { channel: channel as { pluginName?: string } } : {}),
   });
 }

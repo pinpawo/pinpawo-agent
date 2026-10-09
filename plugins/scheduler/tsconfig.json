@@ -5,9 +5,14 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@pinpawo-plugin/channel": ["../../plugins/channel/src/index.ts"],
       "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
+      "@pinpawo/agent-contracts": ["../../packages/agent-contracts/src/index.ts"],
+      "@pinpawo/agent-session": ["../../packages/agent-session/src/index.ts"],
+      "@pinpawo/pet-agent": ["../../packages/pet-agent/src/index.ts"],
       "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
-      "pinpawo/host-runtime": ["../../services/host/src/hostRuntime.ts"]
+      "pinpawo/host-runtime": ["../../services/host/src/hostRuntime.ts"],
+      "pinpawo/wire": ["../../services/host/src/wire/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

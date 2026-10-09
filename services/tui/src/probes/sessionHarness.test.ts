@@ -56,7 +56,7 @@ test('spike session applies high-frequency deltas in place', () => {
 
   assert.equal(session.timeline.length, 2);
   assert.deepEqual(session.timeline[1], {
-    id: 'delta-1:assistant:message-delta-1',
+    id: 'message-delta-1',
     type: 'message',
     role: 'assistant',
     requestId: 'delta-1',

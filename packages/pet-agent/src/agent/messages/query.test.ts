@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { setAgentMessageDelegationScope, setAgentMessageMetadata } from './metadata';
-import { queryAgentMessages } from './query';
+import { isMainConversationMessage, isPublicConversationMessage, queryAgentMessages } from './query';
+import { createContextCompactionMessage } from '../orchestrator/contextCompaction';
 
 const scope = {
   lane: 'capability:general' as const,
@@ -133,4 +134,16 @@ test('Supervisor working history is run-scoped without changing main or Capabili
 test('Supervisor messages cannot fall back to main when their run identity is missing', () => {
   const message = setAgentMessageMetadata(new AIMessage({ content: 'private' }), { lane: 'supervisor' });
   assert.throws(() => queryAgentMessages([message]).main().select(), /missing its run id/);
+});
+
+test('conversation predicates: lanes are private, compaction stays main but is not public', () => {
+  const user = new HumanMessage({ id: 'user', content: 'goal' });
+  const delegation = setAgentMessageDelegationScope(new AIMessage({ id: 'delegation', content: 'work' }), scope);
+  const supervisor = setAgentMessageMetadata(new AIMessage({ id: 'supervisor', content: 'check' }), { lane: 'supervisor', runId: 'run-1' });
+  const compaction = createContextCompactionMessage('earlier context', 4);
+
+  assert.deepEqual([user, delegation, supervisor, compaction].map(isMainConversationMessage), [true, false, false, true]);
+  assert.deepEqual([user, delegation, supervisor, compaction].map(isPublicConversationMessage), [true, false, false, false]);
+  // The model still reads the compaction summary as main history.
+  assert.deepEqual(queryAgentMessages([user, delegation, compaction]).main().select().messages, [user, compaction]);
 });

@@ -124,7 +124,7 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[], runOpe
     const toolCalls = message.toolCalls?.map(call => call.status === 'running' && !(currentRunId && message.runId === currentRunId)
       ? { ...call, status: 'interrupted' as const } : call);
     return [{
-      id: `message:${index}:${message.role}`,
+      id: message.id ?? `message:${index}:${message.role}`,
       type: 'message',
       role: message.role,
       text,

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { stampAgentMessageCreatedAt } from '@pinpawo/pet-agent';
+import { createContextCompactionMessage } from '../../../../packages/pet-agent/src/agent/orchestrator/contextCompaction';
 import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import {
   readTuiCheckpointInputModalities,
@@ -36,7 +37,7 @@ test('readTuiCheckpointMessages keeps visible conversation and delegations witho
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-    { role: 'assistant', text: '', createdAt: '2026-06-01T01:00:00.000Z', runId: 'run-1', toolCalls: [{ id: 'call:delivery-1',
+    { id: 'request:call:delivery-1', role: 'assistant', text: '', createdAt: '2026-06-01T01:00:00.000Z', runId: 'run-1', toolCalls: [{ id: 'call:delivery-1',
       name: 'delegate_capability', args: { briefing: 'Fixture plan' }, status: 'completed' }] },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
@@ -77,6 +78,19 @@ test('readTuiCheckpointMessages hides internal Capability transcript messages', 
   ]);
 
   assert.deepEqual(messages, [{ role: 'user', text: 'real user turn' }]);
+});
+
+test('readTuiCheckpointMessages names messages by checkpoint id and hides compaction summaries', () => {
+  const messages = readTuiCheckpointMessages([
+    new HumanMessage({ id: 'human-1', content: 'real user turn' }),
+    createContextCompactionMessage('earlier context', 2),
+    new AIMessage({ id: 'ai-1', content: 'reply' }),
+  ]);
+
+  assert.deepEqual(messages, [
+    { id: 'human-1', role: 'user', text: 'real user turn' },
+    { id: 'ai-1', role: 'assistant', text: 'reply' },
+  ]);
 });
 
 test('readTuiCheckpointMessages uses attachment display metadata instead of local paths', () => {

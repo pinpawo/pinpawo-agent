@@ -11,7 +11,7 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
     sessionId: 'chat:pet-a',
     kind: 'chat',
     messages: [
-      { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
+      { id: 'human-1', role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
       { role: 'assistant', text: 'hi' },
     ],
     deps: {
@@ -71,7 +71,8 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
   assert.equal(snapshot.version, 5);
   assert.equal(snapshot.session.sessionId, 'chat:pet-a');
   assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
-    ['message:0:user', 'message', 'user'],
+    // The checkpoint message id is the entry id live events also use.
+    ['human-1', 'message', 'user'],
     ['message:1:assistant', 'message', 'assistant'],
   ]);
   assert.equal(

@@ -1,4 +1,4 @@
-import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { isPublicRunMessage, readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
@@ -370,8 +370,7 @@ export async function* adaptRootStream(
       if (receivedInitialValues && AIMessage.isInstance(last) && last.id && !seenMessages.has(last.id)
         && !last.tool_calls?.length) {
         const text = readFinalMessageText(last);
-        const metadata = readRecord(last.additional_kwargs.pinpawo) ?? {};
-        if (text && !metadata.lane && !metadata.synthetic && metadata.runId === chatEvent.values.runId && metadata.runId) {
+        if (text && isPublicRunMessage(last, chatEvent.values.runId)) {
           yield { type: 'assistant.delta', messageId: last.id, node: null, text };
           assistantReply += text;
         }
@@ -407,9 +406,7 @@ function* projectMainToolCalls(
   yield* settle();
   for (const message of messages as BaseMessage[]) {
     const toolCalls = readMessageToolCalls(message);
-    const pinpawo = readRecord(message.additional_kwargs?.pinpawo);
-    // Main messages of this run: private lanes and synthetic bookkeeping are not conversation.
-    if (!message.id || !toolCalls.length || pinpawo?.lane || pinpawo?.synthetic || pinpawo?.runId !== values.runId) continue;
+    if (!message.id || !toolCalls.length || !isPublicRunMessage(message, values.runId)) continue;
     if (announce && !seenMessages.has(message.id)) {
       yield { type: 'tool_calls.message', messageId: message.id, text: readFinalMessageText(message), toolCalls };
       for (const call of toolCalls) openToolCalls.set(call.id, message.id);

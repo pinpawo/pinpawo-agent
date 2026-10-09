@@ -5,6 +5,7 @@ import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
+  isPublicConversationMessage,
   NamespacedProtocolToolEventReader,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
@@ -511,11 +512,10 @@ export async function runAgentSessionTurn(
   // Only new public AI text can become a conversation reply. Tool results,
   // private lanes and an old checkpoint reply are not publishable fallbacks.
   const finalMessage = finalMessages.at(-1) ?? finalThreadState.messages.at(-1);
-  const metadata = finalMessage?.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
   const isOldMessage = finalMessage && initialThreadState.messages.some(message =>
     message === finalMessage || (!!message.id && message.id === finalMessage.id));
   const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
-    && !finalMessage.tool_calls?.length && !metadata?.lane && !metadata?.synthetic && !isOldMessage
+    && !finalMessage.tool_calls?.length && isPublicConversationMessage(finalMessage) && !isOldMessage
     ? readFinalMessageText(finalMessage) : '';
   // FileSaver reloads different objects. Resolve the same reply by stable ID
   // inside the checkpoint collection before projecting its preceding deliveries.

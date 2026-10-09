@@ -33,6 +33,14 @@ export function getAgentMessageLane(message: BaseMessage): string | null {
   return typeof lane === 'string' ? lane : null;
 }
 
+/**
+ * Runtime bookkeeping, such as a context compaction summary: it stays in the
+ * main history the model reads but is never part of the visible conversation.
+ */
+export function isSyntheticAgentMessage(message: BaseMessage): boolean {
+  return getAgentMessageMetadata(message).synthetic === true;
+}
+
 export function isCapabilityMessageLane(
   lane: string | null,
 ): lane is CapabilityMessageLane {

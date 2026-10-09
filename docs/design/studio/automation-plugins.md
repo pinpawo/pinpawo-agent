@@ -41,7 +41,8 @@ Channel Plugin 暴露的 `inputs` hook，以自己的 bot 身份（`bot:<trigger
 @目标 Pet 的消息。之后的投递与操作员发言完全相同：Channel 为 `(channel, pet)` 绑定 session、
 带上 `channel` scope 派发，Pet 的回复和工具调用都记回 Channel。Channel 是软依赖：没有安装或
 没有启动 Channel Plugin 时，这类 delivery 记为 failed，并不会退回到无 session 的 dispatch。
-没有 `channelId` 的规则保持原来的直接 dispatch。每次 retry/redeliver 都会在 Channel 里发一条
+消息只 @ 规则解析出的目标 Pet；如果模板渲染出的正文里还 @ 了其他参与者，Channel 会拒收，这次 delivery
+记为 failed，事件数据不能借正文增加收件人。没有 `channelId` 的规则保持原来的直接 dispatch。每次 retry/redeliver 都会在 Channel 里发一条
 新消息。
 
 两个 Plugin 都可向 HTTP Plugin 的 `routes` hook 贡献 API，但不依赖 HTTP 才能启动。

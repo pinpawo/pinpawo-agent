@@ -39,14 +39,15 @@ export type ChannelDelivery = {
 export const CHANNEL_INPUTS_HOOK_NAME = 'inputs';
 /**
  * Another Plugin's way into a Channel. It posts as its own bot author and the
- * message is delivered exactly as an operator message is: the addressed Pet
- * runs in its Channel session and its reply lands back in the Channel.
+ * message is delivered exactly as an operator message is: the addressed Pets
+ * run in their Channel sessions and their replies land back in the Channel.
  */
 export type ChannelInputsHook = {
   post: (channelId: string, input: {
     author: { kind: 'bot'; id: string };
     body: string;
-    mentions?: ChannelMention[];
+    /** Exactly who the message addresses; the body may not address anyone else. */
+    mentions: ChannelMention[];
   }) => Promise<{ message: ChannelMessage; deliveries: ChannelDelivery[] }>;
 };
 export type ChannelPlugin = StudioPlugin & {
@@ -108,11 +109,16 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   }
   const sendMessage = (channelId: string, value: unknown) => post(channelId, value, operator);
   const inputs: ChannelInputsHook = {
-    post: (channelId, { author, body, mentions }) => post(
-      channelId,
-      { body, ...(mentions ? { mentions } : {}) },
-      { kind: 'bot', id: z.string().trim().min(1).max(256).parse(author.id) },
-    ),
+    post: async (channelId, { author, body, mentions }) => {
+      // The poster decides who is addressed. Mentions are still parsed the one
+      // Channel way, but a body that adds anyone beyond them is rejected, so
+      // data carried in the body never addresses another participant.
+      const addressed = new Set(mentions.map(channelMentionId));
+      const extra = parseChannelMentions(body, mentions, participants())
+        .find((mention) => !addressed.has(channelMentionId(mention)));
+      if (extra) throw new Error(`Message addresses "${channelMentionId(extra)}", which its poster did not address.`);
+      return post(channelId, { body, mentions }, { kind: 'bot', id: z.string().trim().min(1).max(256).parse(author.id) });
+    },
   };
   async function execute(channelId: string, input: ChannelExecutionInput) {
     const value = channelMessageSchema.extend({ petId: z.string().min(1).optional() }).strict().parse(input);

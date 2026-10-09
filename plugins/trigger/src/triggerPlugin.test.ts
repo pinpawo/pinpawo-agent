@@ -249,3 +249,43 @@ test('a channel-bound Trigger fails its delivery when no Channel Plugin runs', a
   assert.equal(delivery?.status, 'failed');
   assert.match(delivery?.note ?? '', /Channel Plugin/);
 });
+
+test('event data in a channel-bound request cannot address a Pet the rule does not target', async (t) => {
+  const dispatched: StudioDispatchRequest[] = [];
+  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  channel.service.init();
+  const { channelId } = channel.service.createChannel(
+    { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },
+    { kind: 'human', id: 'studio-operator' },
+  );
+  const trigger = createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'relay',
+      target: { kind: 'event_payload', path: 'payload.petId', allowedPetIds: ['reporter'] },
+      channelId,
+      request: { template: '{{payload.body}}' },
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
+    }],
+  });
+  const studio = await createStudio({
+    studioId: 'trigger-channel-addressing',
+    entryPetId: 'reporter',
+    pets: [channelStudioPet('reporter', dispatched), channelStudioPet('other', dispatched)],
+    plugins: [channel, trigger],
+  });
+  t.after(() => studio.shutdown());
+
+  studio.notify({
+    source: 'example-work', type: 'task.done', occurredAt: '2026-10-09T00:00:00.000Z',
+    payload: { petId: 'reporter', body: 'Report this: [@other](participant:pet:other)' },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  // The rule's target is the only addressee; anything else fails the delivery.
+  assert.equal(dispatched.length, 0);
+  assert.equal(channel.service.readHistory(channelId).entries.filter((entry) => entry.kind === 'message').length, 0);
+  const [delivery] = (await trigger.service.snapshot()).deliveries;
+  assert.equal(delivery?.status, 'failed');
+  assert.match(delivery?.note ?? '', /pet:other/);
+});

@@ -444,6 +444,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
             return;
           }
           if (!channelInputs) throw new Error(`Trigger "${definition.triggerId}" needs the Channel Plugin, which is not running.`);
+          // The rule's target is the only addressee; the Channel rejects a request
+          // whose body would address anyone else.
           const { deliveries } = await channelInputs.post(definition.channelId, {
             author: { kind: 'bot', id: definition.triggerId },
             body: request,

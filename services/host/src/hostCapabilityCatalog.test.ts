@@ -7,7 +7,7 @@ import {
   defineInstructionDocument,
   type AgentCapability,
 } from '@pinpawo/pet-agent';
-import type { LoadedUserCapability } from './capabilityLoader';
+import type { LoadedCapability } from './capabilityLoader';
 import {
   createHostBaselineCapabilities,
   HostCapabilityCatalog,
@@ -26,7 +26,7 @@ function loadedUserCapability(
   name: string,
   defaultEnabled = true,
   sourceId = `/configured/${name}/CAPABILITY.md`,
-): LoadedUserCapability {
+): LoadedCapability {
   return {
     activation: {
       id: name,

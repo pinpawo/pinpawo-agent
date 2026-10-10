@@ -7,7 +7,6 @@ import type { ToolAuthorizationSafetyLevel, ToolAuthorizationMode } from '@pinpa
 import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import type { LocalModelProfileRegistry } from './config/llmConfig';
 import type { HostExecutionConfig } from './config/hostExecutionConfig';
-import type { ServerMode } from './config/serverMode';
 import {
   type HostToolkitInventorySnapshot,
   HostToolkitInventoryStore,
@@ -20,7 +19,6 @@ export type CapabilityCatalogReader = Pick<
 
 export type ServerDeps = HostExecutionConfig & {
   /** Host interaction mode; resident Pet adapters reuse the Chat semantics. */
-  serverMode: ServerMode;
   petId: string;
   petName?: string;
   modelProfiles: LocalModelProfileRegistry;
@@ -64,7 +62,7 @@ export type PetIdentityDeps = Pick<ServerDeps, 'petId' | 'petName'>;
 
 /** What a runtime-config projection reads. Owned by Config (domains §一.5). */
 export type RuntimeProjectionDeps =
-  & Pick<ServerDeps, 'serverMode' | 'modelProfiles'>
+  & Pick<ServerDeps, 'modelProfiles'>
   & HostExecutionConfig;
 
 /**

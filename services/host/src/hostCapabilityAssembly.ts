@@ -275,11 +275,6 @@ export class HostCapabilityAssembly {
     return this.checkpointer;
   }
 
-  /** Chat compatibility name; shared consumers should use getCheckpointer(). */
-  getChatCheckpointer(): FileSaver {
-    return this.getCheckpointer();
-  }
-
   /** Availability of each RS instance this Host created. */
   getRSStatus(): Promise<readonly HostRSStatus[]> {
     return this.rsInstances.status();

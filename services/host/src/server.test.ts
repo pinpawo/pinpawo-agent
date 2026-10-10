@@ -44,7 +44,6 @@ test('local server close is idempotent and releases its listening port', async (
 
 function createDeps(workdir: string): ServerDeps {
   return {
-    serverMode: 'chat',
     petId: 'pet-local-server-lifecycle',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({

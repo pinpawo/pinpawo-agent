@@ -14,7 +14,6 @@ import { createTestModelServerDeps } from '../testing/modelProfiles';
 
 function createDeps(workdir: string): ServerDeps {
   return {
-    serverMode: 'chat',
     petId: 'pet-test',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     runtimeConfig: buildHostRuntimeConfig(workdir),
@@ -42,7 +41,6 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
 
 test('runtime projection excludes output and thinking reserves before context compaction', () => {
   const deps: ServerDeps = {
-    serverMode: 'chat',
     petId: 'pet-test',
     ...createTestModelServerDeps({
       model: 'qwen3.8-max',
@@ -74,13 +72,6 @@ test('session projection surfaces an unavailable selected profile without fallba
   assert.equal(runtime.modelProfileAvailable, false);
   assert.equal(runtime.model, undefined);
   assert.match(runtime.modelProfileIssues[0] ?? '', /Unknown model profile/);
-});
-
-test('runtime projection surfaces the startup-decided chat mode', () => {
-  const deps = createDeps('/tmp/pinpawo-mode-chat-projection');
-
-  assert.equal(buildLocalRuntimeProjection(deps).serverMode, 'chat');
-  assert.equal(buildLocalHttpRuntimeProjection(deps).server_mode, 'chat');
 });
 
 test('chat projection omits Studio-specific fields', () => {

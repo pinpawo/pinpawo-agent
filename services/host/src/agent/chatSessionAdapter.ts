@@ -70,7 +70,7 @@ export type AgentSessionTurnOptions = {
   /**
    * Receives a delegation's `subagent_operations` announcement so the
    * caller's operation registry can join display metadata for
-   * delegation-scoped toolkit tools (#322 Phase 4).
+   * delegation-scoped toolkit tools.
    */
   acceptDelegationOperations?: (operations: Record<string, SubagentToolOperationMetadata>) => void;
   /**
@@ -431,8 +431,7 @@ export async function runAgentSessionTurn(
             callId: chatEvent.callId, status: chatEvent.status });
           break;
         case 'guard.decision':
-          // Decision records are observability, not chat surface — parity
-          // with the legacy path, which did not consume the custom mode.
+          // Decision records are observability, not chat surface.
           break;
         case 'values': {
           const messages = (chatEvent.values as { messages?: BaseMessage[] }).messages;

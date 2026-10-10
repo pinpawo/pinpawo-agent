@@ -146,7 +146,6 @@ export async function createResidentPetRuntime(
     chatCheckpointer: TuiSessionCheckpointer;
     capabilityArtifactStore: CapabilityArtifactStore;
   } = {
-    serverMode: 'chat',
     petId: options.petId,
     petName: options.petName,
     modelProfiles,

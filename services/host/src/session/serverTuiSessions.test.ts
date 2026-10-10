@@ -181,7 +181,6 @@ test('chat setup requires an artifact store at the type boundary', () => {
   // compile — the check moved from a thrown Error to the contract, which
   // catches it earlier and cannot be reached in production anyway.
   const deps = {
-    serverMode: 'chat' as const,
     petId: 'pet-a',
     ...createTestModelServerDeps(),
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-artifact-store'),
@@ -201,7 +200,6 @@ test('runtime config updates reach the next chat setup through the normalized de
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const runtimeDeps = createChatHostDepsStore({
-    serverMode: 'chat',
     petId: 'pet-a',
     modelProfiles: createTestModelProfiles(),
     toolAuthorizationMode: 'require_authorization',

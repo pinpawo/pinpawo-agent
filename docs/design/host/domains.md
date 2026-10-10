@@ -410,7 +410,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 
 | 字段 | 实际是什么 | 归属 |
 |---|---|---|
-| `petId`、`petName`、`serverMode` | Pet 的身份 | Host |
+| `petId`、`petName` | Pet 的身份 | Host |
 | `modelProfiles` | 配置来源 | Config |
 | `capabilityCatalog`、`toolkitInventory`、`toolkitRuntimeManager`、`petDocument`、`capabilityArtifactStore` | Host 长期持有的服务 | Host |
 | `chatCheckpointer` | 存储适配器 | Host |

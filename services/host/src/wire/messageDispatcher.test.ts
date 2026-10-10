@@ -101,12 +101,15 @@ test('local server dispatcher routes typed client messages and pong', async () =
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
+    requestId: 'policy-0',
     toolAuthorizationMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     requestId: 'policy-1',
     toolAuthorizationMode: 'full_access',
+    autoAuthorizationSafetyLevel: 'strict',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.snapshot.get',

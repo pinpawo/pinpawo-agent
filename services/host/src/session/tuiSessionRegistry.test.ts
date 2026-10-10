@@ -16,7 +16,7 @@ import {
 } from './tuiSessionRegistry';
 
 test('tui session registry creates, lists, and resumes sessions without deleting old records', () => {
-  const state = loadTuiSessionState('test-profile', '/path/that/does/not/exist.json');
+  const state = loadTuiSessionState('/path/that/does/not/exist.json');
   const first = ensureActiveTuiSession(
     state,
     'pet-a',
@@ -54,12 +54,13 @@ test('tui session registry rejects unversioned and unsupported persisted state',
   const unsupportedStates = [
     { 'pet-a': 'abc12345' },
     { version: 1, activeSessionIds: {}, sessions: {} },
+    { version: 3, activeSessionIds: {}, sessions: {} },
     { version: 5, activeSessionIds: {}, sessions: {} },
   ];
 
   for (const persisted of unsupportedStates) {
     await writeFile(filePath, JSON.stringify(persisted), 'utf8');
-    assert.deepEqual(loadTuiSessionState('test-profile', filePath), {
+    assert.deepEqual(loadTuiSessionState(filePath), {
       version: 4,
       activeSessionIds: {},
       sessions: {},
@@ -102,7 +103,7 @@ test('tui session registry drops malformed current records', async () => {
       activeSessionIds: { 'pet-a': sessionId },
       sessions: { [sessionId]: record },
     }), 'utf8');
-    assert.deepEqual(loadTuiSessionState('test-profile', filePath), {
+    assert.deepEqual(loadTuiSessionState(filePath), {
       version: 4,
       activeSessionIds: {},
       sessions: {},
@@ -113,7 +114,7 @@ test('tui session registry drops malformed current records', async () => {
 test('tui session registry persists an adopted opaque checkpoint thread', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
-  const state = loadTuiSessionState('test-profile', '/missing.json');
+  const state = loadTuiSessionState('/missing.json');
   const adopted = createTuiSessionForThread(
     state,
     'planner',
@@ -123,7 +124,7 @@ test('tui session registry persists an adopted opaque checkpoint thread', async 
   );
 
   saveTuiSessionState(state, filePath);
-  const restored = loadTuiSessionState('test-profile', filePath);
+  const restored = loadTuiSessionState(filePath);
 
   assert.equal(restored.activeSessionIds.planner, adopted.id);
   assert.equal(restored.sessions[adopted.id]?.threadId, 'studio:legacy:pet:planner');
@@ -132,7 +133,7 @@ test('tui session registry persists an adopted opaque checkpoint thread', async 
 test('tui session registry persists versioned state', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
-  const state = loadTuiSessionState('test-profile', '/missing.json');
+  const state = loadTuiSessionState('/missing.json');
   const session = ensureActiveTuiSession(
     state,
     'pet-a',
@@ -146,7 +147,7 @@ test('tui session registry persists versioned state', async () => {
 
   saveTuiSessionState(state, filePath);
   const raw = JSON.parse(await readFile(filePath, 'utf8')) as { version?: number };
-  const restored = loadTuiSessionState('test-profile', filePath);
+  const restored = loadTuiSessionState(filePath);
 
   assert.equal(raw.version, 4);
   assert.equal(restored.sessions[session.id]?.title, 'persisted');
@@ -158,87 +159,25 @@ test('tui session registry persists versioned state', async () => {
   );
 });
 
-test('tui session registry migrates v2 sessions to the current default profile', async () => {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
-  const filePath = path.join(tmp, 'tui-sessions.json');
-  const sessionId = 'pet-a:abc12345';
-  await writeFile(filePath, JSON.stringify({
-    version: 2,
-    activeSessionIds: { 'pet-a': sessionId },
-    sessions: {
-      [sessionId]: {
-        id: sessionId,
-        petId: 'pet-a',
-        suffix: 'abc12345',
-        threadId: 'petbot:tui:pet:pet-a:abc12345',
-        title: 'Legacy session',
-        messageCount: 1,
-        createdAt: '2026-06-01T01:00:00.000Z',
-        updatedAt: '2026-06-01T01:01:00.000Z',
-      },
-    },
-  }), 'utf8');
-
-  const restored = loadTuiSessionState('new-default', filePath);
-
-  assert.equal(restored.version, 4);
-  assert.equal(restored.sessions[sessionId]?.modelProfileId, 'new-default');
-  assert.deepEqual(
-    restored.sessions[sessionId]?.requiredInputModalities,
-    ['text'],
-  );
-});
-
-test('tui session registry migrates v3 sessions to a text-only requirement', async () => {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
-  const filePath = path.join(tmp, 'tui-sessions.json');
-  const sessionId = 'pet-a:abc12345';
-  await writeFile(filePath, JSON.stringify({
-    version: 3,
-    activeSessionIds: { 'pet-a': sessionId },
-    sessions: {
-      [sessionId]: {
-        id: sessionId,
-        petId: 'pet-a',
-        suffix: 'abc12345',
-        threadId: 'petbot:tui:pet:pet-a:abc12345',
-        modelProfileId: 'saved-profile',
-        title: 'V3 session',
-        messageCount: 1,
-        createdAt: '2026-06-01T01:00:00.000Z',
-        updatedAt: '2026-06-01T01:01:00.000Z',
-      },
-    },
-  }), 'utf8');
-
-  const restored = loadTuiSessionState('new-default', filePath);
-
-  assert.equal(restored.sessions[sessionId]?.modelProfileId, 'saved-profile');
-  assert.deepEqual(
-    restored.sessions[sessionId]?.requiredInputModalities,
-    ['text'],
-  );
-});
-
 test('tui session registry persists a suspended dispatch across restart and summary updates', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tui-pending-dispatch-'));
   const filePath = path.join(dir, 'sessions.json');
-  const state = loadTuiSessionState('test-profile', filePath);
+  const state = loadTuiSessionState(filePath);
   const session = ensureActiveTuiSession(state, 'pet', 'test-profile');
   const pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it', scope: { namespace: 'channel', id: 'ch-1' } };
   setTuiSessionPendingDispatch(state, session.id, pendingDispatch);
   updateTuiSessionSummary(state, session.id, { title: 'renamed' });
   saveTuiSessionState(state, filePath);
-  assert.deepEqual(loadTuiSessionState('test-profile', filePath).sessions[session.id]?.pendingDispatch, pendingDispatch);
+  assert.deepEqual(loadTuiSessionState(filePath).sessions[session.id]?.pendingDispatch, pendingDispatch);
 
   setTuiSessionPendingDispatch(state, session.id, null);
   saveTuiSessionState(state, filePath);
-  assert.equal('pendingDispatch' in loadTuiSessionState('test-profile', filePath).sessions[session.id]!, false);
+  assert.equal('pendingDispatch' in loadTuiSessionState(filePath).sessions[session.id]!, false);
 
   const raw = JSON.parse(await readFile(filePath, 'utf-8'));
   raw.sessions[session.id].pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'x', scope: { namespace: '' } };
   await writeFile(filePath, JSON.stringify(raw));
-  const reloaded = loadTuiSessionState('test-profile', filePath).sessions[session.id];
+  const reloaded = loadTuiSessionState(filePath).sessions[session.id];
   assert.ok(reloaded, 'a malformed suspension does not drop the session');
   assert.equal(reloaded.pendingDispatch, undefined);
 });

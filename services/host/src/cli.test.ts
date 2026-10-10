@@ -11,7 +11,7 @@ test('tui launches the v2 client by default', async () => {
     embedHost: boolean;
   } | null = null;
   const program = createHostCli({
-    runTuiV2: (options) => { received = options; },
+    runTui: (options) => { received = options; },
   });
 
   await program.parseAsync([
@@ -32,7 +32,7 @@ test('the removed legacy flags are no longer declared', () => {
   //
   // 这里断言"选项没被声明"而不是"解析会失败":Commander 未配 exitOverride,
   // 未知选项会直接 process.exit,断言捕获不到。
-  const tui = createHostCli({ runTuiV2: () => undefined })
+  const tui = createHostCli({ runTui: () => undefined })
     .commands.find((command) => command.name() === 'tui');
   assert.ok(tui, 'the tui command must exist');
 
@@ -51,7 +51,7 @@ test('the removed legacy flags are no longer declared', () => {
 test('tui forwards one complete Pet-scoped Agent Session target', async () => {
   let received: unknown;
   const program = createHostCli({
-    runTuiV2: (options) => { received = options; },
+    runTui: (options) => { received = options; },
   });
 
   await program.parseAsync([
@@ -77,7 +77,7 @@ test('tui forwards one complete Pet-scoped Agent Session target', async () => {
 test('tui forwards embedded Host mode to the launcher', async () => {
   let received: { embedHost: boolean } | null = null;
   const program = createHostCli({
-    runTuiV2: (options) => { received = options; },
+    runTui: (options) => { received = options; },
   });
 
   await program.parseAsync(['node', 'pinpawo', 'tui', '--embed-host']);
@@ -88,7 +88,7 @@ test('tui forwards embedded Host mode to the launcher', async () => {
 test('tui forwards an explicit server port to the launcher', async () => {
   let received: unknown;
   const program = createHostCli({
-    runTuiV2: (options) => { received = options; },
+    runTui: (options) => { received = options; },
   });
 
   await program.parseAsync(['node', 'pinpawo', 'tui', '--server-port', '4321']);
@@ -105,7 +105,7 @@ test('tui forwards an explicit server port to the launcher', async () => {
 test('tui rejects a server port the loopback dial cannot use', async () => {
   for (const port of ['0', '65536', 'nope']) {
     await assert.rejects(
-      createHostCli({ runTuiV2: () => undefined }).parseAsync([
+      createHostCli({ runTui: () => undefined }).parseAsync([
         'node',
         'pinpawo',
         'tui',
@@ -119,7 +119,7 @@ test('tui rejects a server port the loopback dial cannot use', async () => {
 
 test('an explicit server port and embedded mode are mutually exclusive', async () => {
   await assert.rejects(
-    createHostCli({ runTuiV2: () => undefined }).parseAsync([
+    createHostCli({ runTui: () => undefined }).parseAsync([
       'node',
       'pinpawo',
       'tui',
@@ -133,7 +133,7 @@ test('an explicit server port and embedded mode are mutually exclusive', async (
 
 test('a server port cannot be combined with a resident Pet target', async () => {
   await assert.rejects(
-    createHostCli({ runTuiV2: () => undefined }).parseAsync([
+    createHostCli({ runTui: () => undefined }).parseAsync([
       'node',
       'pinpawo',
       'tui',
@@ -151,7 +151,7 @@ test('a server port cannot be combined with a resident Pet target', async () => 
 test('a server port does not apply to the modes that never connect', async () => {
   for (const mode of ['--check', '--qa']) {
     await assert.rejects(
-      createHostCli({ runTuiV2: () => undefined }).parseAsync([
+      createHostCli({ runTui: () => undefined }).parseAsync([
         'node',
         'pinpawo',
         'tui',
@@ -166,7 +166,7 @@ test('a server port does not apply to the modes that never connect', async () =>
 
 test('embedded Host mode rejects a resident Pet target', async () => {
   await assert.rejects(
-    createHostCli({ runTuiV2: () => undefined }).parseAsync([
+    createHostCli({ runTui: () => undefined }).parseAsync([
       'node',
       'pinpawo',
       'tui',
@@ -183,7 +183,7 @@ test('embedded Host mode rejects a resident Pet target', async () => {
 test('embedded Host mode rejects the modes that never start a local agent', async () => {
   for (const mode of ['--check', '--qa']) {
     await assert.rejects(
-      createHostCli({ runTuiV2: () => undefined }).parseAsync([
+      createHostCli({ runTui: () => undefined }).parseAsync([
         'node',
         'pinpawo',
         'tui',
@@ -197,7 +197,7 @@ test('embedded Host mode rejects the modes that never start a local agent', asyn
 
 test('Pet connection mode does not accept a second workdir', async () => {
   await assert.rejects(
-    createHostCli({ runTuiV2: () => undefined }).parseAsync([
+    createHostCli({ runTui: () => undefined }).parseAsync([
       'node',
       'pinpawo',
       'tui',
@@ -219,7 +219,7 @@ test('the deferred Browser detect command is not part of this CLI contract', () 
 
 test('tui still rejects --check together with --qa', async () => {
   await assert.rejects(
-    createHostCli({ runTuiV2: () => undefined })
+    createHostCli({ runTui: () => undefined })
       .parseAsync(['node', 'pinpawo', 'tui', '--check', '--qa']),
     /Choose either --check or --qa/,
   );
@@ -266,7 +266,7 @@ test('local agent CLI runs setup guide handler', async () => {
 });
 
 test('local agent CLI applies server workdir option before handler', async () => {
-  let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
+  let received: { workdir?: string; stdio: boolean } | null = null;
   const program = createHostCli({
     runAgent: (options) => {
       received = options;
@@ -277,12 +277,11 @@ test('local agent CLI applies server workdir option before handler', async () =>
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-workdir',
     stdio: false,
-    mode: 'chat',
   });
 });
 
 test('local agent CLI enables the single-peer JSONL stdio transport', async () => {
-  let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
+  let received: { workdir?: string; stdio: boolean } | null = null;
   const program = createHostCli({
     runAgent: (options) => {
       received = options;
@@ -293,20 +292,7 @@ test('local agent CLI enables the single-peer JSONL stdio transport', async () =
   assert.deepEqual(received, {
     workdir: undefined,
     stdio: true,
-    mode: 'chat',
   });
-});
-
-test('local agent CLI defaults the server command to chat mode', async () => {
-  let received: { mode?: string } | null = null;
-  const program = createHostCli({
-    runAgent: (options) => {
-      received = options;
-    },
-  });
-
-  await program.parseAsync(['node', 'pinpawo', 'server']);
-  assert.equal(received!.mode, 'chat');
 });
 
 test('local agent CLI does not expose Studio as a server mode', () => {
@@ -316,10 +302,10 @@ test('local agent CLI does not expose Studio as a server mode', () => {
   assert.equal(server.options.some((option) => option.long === '--mode'), false);
 });
 
-test('local agent CLI keeps run as a chat-mode alias of server', async () => {
+test('local agent CLI keeps run as an alias of server', async () => {
   // `run` predates server mode and starts chat, so existing scripts and
   // service units must keep working unchanged (#561).
-  let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
+  let received: { workdir?: string; stdio: boolean } | null = null;
   const program = createHostCli({
     runAgent: (options) => {
       received = options;
@@ -330,7 +316,6 @@ test('local agent CLI keeps run as a chat-mode alias of server', async () => {
   assert.deepEqual(received, {
     workdir: undefined,
     stdio: false,
-    mode: 'chat',
   });
 });
 

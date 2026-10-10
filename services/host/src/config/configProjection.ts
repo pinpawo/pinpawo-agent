@@ -7,13 +7,11 @@ import {
 } from '@pinpawo/agent-contracts';
 import { readHostPackageVersion } from '../packageVersion';
 import type { RuntimeProjectionDeps } from '../serverTypes';
-import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 import { resolveLlmGenerationReserveTokens } from './llmModelPresets';
 
 export type RuntimeProjection = {
   /** The Host projection is always the Chat Host. */
-  serverMode: ServerMode;
   modelProfileId: string;
   modelProfileLabel: string;
   modelProfileAvailable: boolean;
@@ -39,7 +37,6 @@ export function buildLocalRuntimeProjection(
   const profile = deps.modelProfiles.snapshot.profiles[modelProfileId];
   if (!profile) {
     return {
-      serverMode: deps.serverMode,
       modelProfileId,
       modelProfileLabel: modelProfileId,
       modelProfileAvailable: false,
@@ -65,7 +62,6 @@ export function buildLocalRuntimeProjection(
   );
 
   return {
-    serverMode: deps.serverMode,
     modelProfileId,
     modelProfileLabel: profile.label,
     modelProfileAvailable: true,
@@ -94,7 +90,6 @@ export function buildLocalHttpRuntimeProjection(deps: RuntimeProjectionDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
     host_version: readHostPackageVersion(),
-    server_mode: runtime.serverMode,
     model_profile_id: runtime.modelProfileId,
     model_profile_label: runtime.modelProfileLabel,
     model_profile_available: runtime.modelProfileAvailable,

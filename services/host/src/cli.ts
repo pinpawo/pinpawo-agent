@@ -5,11 +5,10 @@ import { registerCapabilityCommand } from './commands/capability';
 import type { ExecCommandOptions } from './commands/exec';
 import type { InitCommandOptions } from './commands/init';
 import { readHostPackageVersion } from './packageVersion';
-import type { ServerMode } from './config/serverMode';
 
 type HostCliHandlers = {
-  runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
-  runTuiV2?: (opts: {
+  runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
+  runTui?: (opts: {
     workdir?: string;
     check: boolean;
     qa: boolean;
@@ -98,7 +97,6 @@ export function createHostCli(handlers: HostCliHandlers = {}): Command {
         await runAgent({
           workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
           stdio: options.stdio ?? false,
-          mode: 'chat',
         });
       });
   }
@@ -217,9 +215,9 @@ export function createHostCli(handlers: HostCliHandlers = {}): Command {
       if (options.petId !== undefined && !agentSessionPetId) {
         throw new Error('--pet-id must not be empty.');
       }
-      const runTuiV2 = handlers.runTuiV2
-        ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
-      await runTuiV2({
+      const runTui = handlers.runTui
+        ?? (await import('./commands/tuiLauncher')).runTui;
+      await runTui({
         workdir,
         check: options.check ?? false,
         qa: options.qa ?? false,

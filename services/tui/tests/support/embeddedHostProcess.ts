@@ -54,7 +54,6 @@ const runtimeConfig = buildHostRuntimeConfig(workdir);
 const graphFixture = createHostGraphFixture();
 const handlers = createChatHostHandlers(
   createChatHostDepsStore({
-    serverMode: 'chat',
     petId: 'pet-embedded-host',
     petName: 'PinPawo',
     runtimeConfig,

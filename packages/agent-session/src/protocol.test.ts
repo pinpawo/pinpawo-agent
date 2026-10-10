@@ -68,14 +68,21 @@ test('chat request parser rejects relative, duplicate, and excessive attachments
   }), null);
 });
 
-test('runtime config protocol supports legacy updates and correlated acknowledgements', () => {
-  assert.deepEqual(parseAgentClientMessage({
+test('runtime config protocol requires a request id and safety level', () => {
+  assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     toolAuthorizationMode: 'require_authorization',
-  }), {
+  }), null);
+  assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
+    requestId: 'policy-0',
     toolAuthorizationMode: 'require_authorization',
-  });
+  }), null);
+  assert.equal(parseAgentServerMessage({
+    type: 'runtime_config.result',
+    requestId: 'policy-0',
+    toolAuthorizationMode: 'require_authorization',
+  }), null);
   assert.deepEqual(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 'policy-1',
@@ -97,11 +104,13 @@ test('runtime config protocol supports legacy updates and correlated acknowledge
     type: 'runtime_config.update',
     requestId: 42,
     toolAuthorizationMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
   }), null);
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: '',
     toolAuthorizationMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
   }), null);
   assert.deepEqual(parseAgentServerMessage({
     type: 'runtime_config.result',

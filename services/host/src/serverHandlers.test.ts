@@ -88,7 +88,6 @@ test('session.new returns an authoritative empty snapshot for a unique session',
     },
   };
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -141,7 +140,6 @@ test('session.compact is a v2 session command and returns the authoritative snap
     },
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -221,7 +219,6 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     },
   ], 'primary');
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles,
@@ -336,7 +333,6 @@ test('model selection keeps the previous profile when checkpoint preparation fai
     },
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
@@ -399,7 +395,6 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   const initialSent: HostServerMessage[] = [];
   const initialPeer = createPeer(initialSent);
   const initialHandlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: initialProfiles,
@@ -433,7 +428,6 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
@@ -516,7 +510,6 @@ test('model selection is rejected while the active session is running', async ()
   const started = deferred<void>();
   const release = deferred<void>();
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
@@ -616,7 +609,6 @@ test('a run claims the register for the whole admitted turn', async () => {
     readThreadState: async () => ({ messages: [], pendingInterrupt: null }),
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -692,7 +684,6 @@ test('completion snapshot does not reintroduce a settled active run', async () =
     },
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -759,7 +750,6 @@ test('model selection blocks a chat admitted by another peer until the selection
     },
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
@@ -847,7 +837,6 @@ test('model selection is rejected while checkpoint state has pending review', as
     }),
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
@@ -911,7 +900,6 @@ test('admitted images gate model selection through the transcript', async () => 
     }),
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
@@ -1057,7 +1045,6 @@ test('text-only selected profile rejects image admission before graph invocation
   const peer = createPeer(sent);
   let graphInvocations = 0;
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
@@ -1134,7 +1121,6 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     },
   };
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
@@ -1189,67 +1175,6 @@ test('runtime config update persists the safety level, acknowledges, and reaches
   }
 });
 
-test('runtime config update preserves the configured safety level when the message omits it', async () => {
-  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-preserve-'));
-  const sent: HostServerMessage[] = [];
-  const persisted: Array<{ mode: string; safetyLevel: string }> = [];
-  const peer: ServerPeer = {
-    isConnected: () => true,
-    send: (message) => {
-      sent.push(message);
-      return true;
-    },
-  };
-  const handlers = createChatHostHandlers({
-    serverMode: 'chat',
-    petId: 'pet-a',
-    runtimeConfig: buildHostRuntimeConfig(workdir),
-    ...createTestModelServerDeps({
-      toolAuthorizationMode: 'auto_authorization',
-      autoAuthorizationSafetyLevel: 'relaxed',
-    }),
-  }, {
-    persistToolAuthorizationMode: (mode, safetyLevel) => {
-      persisted.push({ mode, safetyLevel });
-    },
-  });
-
-  try {
-    await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
-      type: 'runtime_config.update',
-      requestId: 'policy-preserve-1',
-      toolAuthorizationMode: 'full_access',
-    });
-    await handlers.peerHandlers.onSessionNew(peer, {
-      type: 'session.new',
-      requestId: 'new-preserve-1',
-    });
-
-    assert.deepEqual(persisted, [{
-      mode: 'full_access',
-      safetyLevel: 'relaxed',
-    }]);
-    assert.deepEqual(sent[0], {
-      type: 'runtime_config.result',
-      requestId: 'policy-preserve-1',
-      toolAuthorizationMode: 'full_access',
-      autoAuthorizationSafetyLevel: 'relaxed',
-    });
-    const snapshot = sent.find((message) => (
-      message.type === 'session.new.result'
-    ));
-    assert.equal(
-      snapshot?.type === 'session.new.result'
-        ? snapshot.snapshot.session.runtime?.autoAuthorizationSafetyLevel
-        : null,
-      'relaxed',
-    );
-  } finally {
-    handlers.close();
-    rmSync(workdir, { recursive: true, force: true });
-  }
-});
-
 test('runtime config update reports persistence failures without changing runtime state', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-failure-'));
   const sent: HostServerMessage[] = [];
@@ -1261,7 +1186,6 @@ test('runtime config update reports persistence failures without changing runtim
     },
   };
   const handlers = createChatHostHandlers({
-    serverMode: 'chat',
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
@@ -1278,6 +1202,7 @@ test('runtime config update reports persistence failures without changing runtim
       type: 'runtime_config.update',
       requestId: 'policy-1',
       toolAuthorizationMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'strict',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
       type: 'session.new',
@@ -1311,7 +1236,7 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
   let actual: unknown;
   const handlers = createChatHostHandlers({
     ...createTestModelServerDeps(),
-    serverMode: 'chat', petId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     chatCheckpointer: checkpointer,
     capabilityArtifactStore: testArtifactStore,

@@ -1,13 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
 import { atomicWriteFile } from '../atomicFile';
 import { buildTuiChatThreadId } from '../chatInterface';
 import type { PetInvocationScope } from '../host/petInvocationContext';
-
-export const DEFAULT_TUI_SESSION_STATE_PATH = resolve(homedir(), '.pinpawo', 'tui-sessions.json');
 
 export type TuiSessionRecord = {
   id: string;
@@ -57,13 +53,12 @@ export function createEmptyTuiSessionState(): TuiSessionState {
 }
 
 export function loadTuiSessionState(
-  defaultModelProfileId: string,
-  filePath = DEFAULT_TUI_SESSION_STATE_PATH,
+  filePath: string,
 ): TuiSessionState {
   try {
     if (!existsSync(filePath)) return createEmptyTuiSessionState();
     const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
-    return parseTuiSessionState(parsed, defaultModelProfileId);
+    return parseTuiSessionState(parsed);
   } catch {
     return createEmptyTuiSessionState();
   }
@@ -71,7 +66,7 @@ export function loadTuiSessionState(
 
 export function saveTuiSessionState(
   state: TuiSessionState,
-  filePath = DEFAULT_TUI_SESSION_STATE_PATH,
+  filePath: string,
 ) {
   atomicWriteFile(filePath, JSON.stringify(state, null, 2));
 }
@@ -248,25 +243,13 @@ export function setTuiSessionPendingDispatch(
   return next;
 }
 
-function parseTuiSessionState(
-  value: unknown,
-  defaultModelProfileId: string,
-): TuiSessionState {
+function parseTuiSessionState(value: unknown): TuiSessionState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return createEmptyTuiSessionState();
   }
   const record = value as Record<string, unknown>;
-  if (record.version !== 2 && record.version !== 3 && record.version !== 4) {
-    return createEmptyTuiSessionState();
-  }
-  return parseCurrentState(record, defaultModelProfileId, record.version);
-}
+  if (record.version !== 4) return createEmptyTuiSessionState();
 
-function parseCurrentState(
-  record: Record<string, unknown>,
-  defaultModelProfileId: string,
-  version: 2 | 3 | 4,
-): TuiSessionState {
   const state = createEmptyTuiSessionState();
   const activeSessionIds = readRecord(record.activeSessionIds);
   const sessions = readRecord(record.sessions);
@@ -276,12 +259,7 @@ function parseCurrentState(
     }
   }
   for (const [sessionId, rawSession] of Object.entries(sessions ?? {})) {
-    const parsed = parseSessionRecord(
-      sessionId,
-      rawSession,
-      version < 3 ? defaultModelProfileId : undefined,
-      version < 4 ? ['text'] : undefined,
-    );
+    const parsed = parseSessionRecord(sessionId, rawSession);
     if (parsed) {
       state.sessions[parsed.id] = parsed;
     }
@@ -294,24 +272,15 @@ function parseCurrentState(
   return state;
 }
 
-function parseSessionRecord(
-  id: string,
-  value: unknown,
-  migratedModelProfileId?: string,
-  migratedInputModalities?: AgentInputModality[],
-): TuiSessionRecord | null {
+function parseSessionRecord(id: string, value: unknown): TuiSessionRecord | null {
   const record = readRecord(value);
   if (!record) return null;
   const recordId = readString(record.id);
   const petId = readString(record.petId);
   const suffix = readString(record.suffix);
   const threadId = readString(record.threadId);
-  const modelProfileId = readString(record.modelProfileId)
-    ?? migratedModelProfileId
-    ?? null;
-  const requiredInputModalities = readInputModalities(
-    record.requiredInputModalities,
-  ) ?? migratedInputModalities ?? null;
+  const modelProfileId = readString(record.modelProfileId);
+  const requiredInputModalities = readInputModalities(record.requiredInputModalities);
   const title = readString(record.title);
   const messageCount = readNonNegativeInteger(record.messageCount);
   const createdAt = readString(record.createdAt);

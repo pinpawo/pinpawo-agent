@@ -1,5 +1,4 @@
 import { getConfig } from './config';
-import type { ServerMode } from './serverMode';
 import {
   resolveModelProfile,
   summarizeModelProfile,
@@ -8,7 +7,6 @@ import {
 export type StartupConfigSnapshot = {
   mode: 'server' | 'tui';
   /** #561 server primary mode; absent for launch surfaces that have no mode. */
-  serverMode?: ServerMode;
   workdir: string;
   petId?: string;
   petName?: string;
@@ -40,7 +38,6 @@ function readLangSmithTracingEnabled() {
 
 export function buildStartupConfigSnapshot(params: {
   mode: 'server' | 'tui';
-  serverMode?: ServerMode;
   workdir: string;
   petId?: string;
   petName?: string | null;
@@ -52,7 +49,6 @@ export function buildStartupConfigSnapshot(params: {
   );
   return {
     mode: params.mode,
-    ...(params.serverMode ? { serverMode: params.serverMode } : {}),
     workdir: params.workdir,
     ...(params.petId ? { petId: params.petId } : {}),
     ...(params.petName ? { petName: params.petName } : {}),
@@ -74,7 +70,6 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
   return [
     '[host] startup config',
     `  mode=${snapshot.mode}`,
-    snapshot.serverMode ? `  serverMode=${snapshot.serverMode}` : null,
     `  workdir=${snapshot.workdir}`,
     snapshot.petId ? `  petId=${snapshot.petId}` : null,
     snapshot.petName ? `  petName=${snapshot.petName}` : null,
@@ -94,7 +89,6 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
 
 export function logStartupConfig(params: {
   mode: 'server' | 'tui';
-  serverMode?: ServerMode;
   workdir: string;
   petId?: string;
   petName?: string | null;

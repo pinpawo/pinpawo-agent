@@ -9,7 +9,6 @@ import type { ServerDeps } from './serverTypes';
 import { DEFAULT_CHAT_PET } from './defaultPet';
 import { loadPetConfigs, type PetConfig } from './config/petConfig';
 import { loadPetDocumentFile, resolveChatPetDocumentPath } from './config/petDocument';
-import { DEFAULT_SERVER_MODE, type ServerMode } from './config/serverMode';
 
 /**
  * Chat Host — assembles capability supply via {@link HostCapabilityAssembly}
@@ -65,22 +64,17 @@ export async function loadChatPetConfig(
 
 export class AgentHost {
   private readonly caps: HostCapabilityAssembly;
-  private readonly serverMode: ServerMode;
   private petDocument: PetDocument | null = null;
   private petConfig: PetConfig = DEFAULT_CHAT_PET;
   private stopRequested = false;
   private readonly stopController = new AbortController();
-  constructor(
-    runtimeConfig: HostRuntimeConfig = buildHostRuntimeConfig(),
-    serverMode: ServerMode = DEFAULT_SERVER_MODE,
-  ) {
+  constructor(runtimeConfig: HostRuntimeConfig = buildHostRuntimeConfig()) {
     this.caps = new HostCapabilityAssembly({
       runtimeConfig,
       sourceId: 'host',
       // Preserve the existing Chat session namespace while sharing its writer.
       checkpointPath: runtimeConfig.tuiCheckpointPath,
     });
-    this.serverMode = serverMode;
   }
 
   async init() {
@@ -109,8 +103,8 @@ export class AgentHost {
   }
 
   /** This Chat Host's conversation checkpointer. */
-  getChatCheckpointer(): FileSaver {
-    return this.caps.getChatCheckpointer();
+  getCheckpointer(): FileSaver {
+    return this.caps.getCheckpointer();
   }
 
   getModelProfiles() {
@@ -141,10 +135,9 @@ export class AgentHost {
 
   buildChatHostDeps(): ServerDeps {
     return {
-      serverMode: this.serverMode,
       petId: this.petConfig.petId,
       petName: this.petConfig.name,
-      chatCheckpointer: this.getChatCheckpointer(),
+      chatCheckpointer: this.getCheckpointer(),
       modelProfiles: this.getModelProfiles(),
       ...this.caps.getExecutionConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),

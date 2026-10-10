@@ -30,7 +30,10 @@ export type BenchTask = {
 export type AgentOutcome = {
   /** `completed` for the oracle; otherwise the agent's own terminal status. */
   status: string;
-  toolCalls?: number;
+  /** Main-agent tool calls: planning, routing, delegation. */
+  mainToolCalls?: number;
+  /** Tools that actually ran, mostly inside Capability subagents. */
+  executedToolCalls?: number;
   error?: string;
 };
 
@@ -51,7 +54,8 @@ export type BenchRunResult = {
   attempt: number;
   passed: boolean;
   agentStatus: string;
-  toolCalls?: number;
+  mainToolCalls?: number;
+  executedToolCalls?: number;
   agentError?: string;
   verifierExitCode: number | null;
   agentDurationMs: number;
@@ -212,13 +216,15 @@ export function createPinpawoAgent(options: PinpawoAgentOptions): BenchAgent {
       }
       const exec = JSON.parse(readFileSync(outputPath, 'utf8')) as {
         status: string;
-        toolCalls?: number;
+        mainToolCalls?: number;
+        executedToolCalls?: number;
         error?: string;
         pendingInterruptKind?: string;
       };
       return {
         status: exec.status,
-        toolCalls: exec.toolCalls,
+        mainToolCalls: exec.mainToolCalls,
+        executedToolCalls: exec.executedToolCalls,
         error: exec.error ?? (exec.pendingInterruptKind ? `stopped on ${exec.pendingInterruptKind}` : undefined),
       };
     },
@@ -275,7 +281,8 @@ export async function runBench(options: RunBenchOptions): Promise<BenchSummary> 
         attempt,
         passed: verifier.exitCode === 0 && !verifier.timedOut,
         agentStatus: outcome.status,
-        ...(outcome.toolCalls !== undefined ? { toolCalls: outcome.toolCalls } : {}),
+        ...(outcome.mainToolCalls !== undefined ? { mainToolCalls: outcome.mainToolCalls } : {}),
+        ...(outcome.executedToolCalls !== undefined ? { executedToolCalls: outcome.executedToolCalls } : {}),
         ...(outcome.error ? { agentError: outcome.error } : {}),
         verifierExitCode: verifier.exitCode,
         agentDurationMs,
@@ -308,14 +315,15 @@ export function formatSummary(summary: BenchSummary): string {
     '',
     `Passed ${summary.passed}/${summary.runs} runs (${(summary.passRate * 100).toFixed(1)}%) across ${summary.tasks} tasks, started ${summary.startedAt}.`,
     '',
-    '| task | attempt | passed | agent status | tool calls | agent time (s) | note |',
-    '|---|---|---|---|---|---|---|',
+    '| task | attempt | passed | agent status | main-agent calls | executed tools | agent time (s) | note |',
+    '|---|---|---|---|---|---|---|---|',
     ...summary.results.map((result) => [
       result.task,
       result.attempt,
       result.passed ? 'yes' : 'no',
       result.agentStatus,
-      result.toolCalls ?? '',
+      result.mainToolCalls ?? '',
+      result.executedToolCalls ?? '',
       (result.agentDurationMs / 1000).toFixed(1),
       (result.agentError ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ').slice(0, 120),
     ].join(' | ')).map((row) => `| ${row} |`),

@@ -8,7 +8,7 @@
  * terminal UI does. Every server message is kept as the run's trajectory.
  */
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs';
+import { closeSync, createWriteStream, mkdirSync, openSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import {
@@ -43,7 +43,18 @@ export type ExecResult = {
   error?: string;
   /** Kind of the pending interrupt when the run stopped waiting on one. */
   pendingInterruptKind?: string;
-  toolCalls: number;
+  /**
+   * Tool calls the main agent made (Entry and Supervisor: planning, routing,
+   * delegation), from its committed messages.
+   */
+  mainToolCalls: number;
+  /**
+   * Tools that ran outside those calls, mostly inside Capability subagents,
+   * counted once per call id from the run's operation events.
+   */
+  executedToolCalls: number;
+  /** `executedToolCalls` broken down by tool name. */
+  executedToolCallsByName: Record<string, number>;
   durationMs: number;
   usage?: unknown;
 };
@@ -89,30 +100,56 @@ export function runExecSession(
 ): Promise<ExecResult> {
   const now = options.now ?? Date.now;
   const startedAt = now();
-  let toolCalls = 0;
+  const mainCallIds = new Set<string>();
+  let mainToolCalls = 0;
+  const executed = new Map<string, string>();
   let buffer = '';
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
 
   return new Promise<ExecResult>((resolve) => {
     let settled = false;
-    const finish = (result: Omit<ExecResult, 'toolCalls' | 'durationMs'>) => {
+    type Outcome = Omit<ExecResult, 'mainToolCalls' | 'executedToolCalls' | 'executedToolCallsByName' | 'durationMs'>;
+    const finish = (result: Outcome) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       host.stdout.off('data', onData);
-      resolve({ ...result, toolCalls, durationMs: now() - startedAt });
+      const executedToolCallsByName: Record<string, number> = {};
+      for (const [callId, name] of executed) {
+        // A main-agent call can also surface as an operation; count it once.
+        if (mainCallIds.has(callId)) continue;
+        executedToolCallsByName[name] = (executedToolCallsByName[name] ?? 0) + 1;
+      }
+      resolve({
+        ...result,
+        mainToolCalls,
+        executedToolCalls: Object.values(executedToolCallsByName).reduce((sum, count) => sum + count, 0),
+        executedToolCallsByName,
+        durationMs: now() - startedAt,
+      });
     };
 
     const onRunEvent = (event: AgentRuntimeEvent) => {
       switch (event.type) {
         case 'message.tool_calls':
-          toolCalls += event.toolCalls.length;
+          for (const call of event.toolCalls ?? []) {
+            mainToolCalls += 1;
+            if (call.id) mainCallIds.add(call.id);
+          }
           return;
+        case 'operation': {
+          const source = event.operation?.source;
+          const callId = source?.callId ?? event.operation?.id;
+          if (callId && !executed.has(callId)) {
+            executed.set(callId, source?.toolName ?? event.operation.title ?? 'unknown');
+          }
+          return;
+        }
         case 'message.completed':
           finish({
             status: timedOut ? 'timeout' : 'completed',
-            reply: event.text,
+            reply: typeof event.text === 'string' ? event.text : '',
             ...(event.usage ? { usage: event.usage } : {}),
           });
           return;
@@ -239,37 +276,59 @@ function spawnHost(options: ExecCommandOptions): ExecHostProcess {
   };
 }
 
-export async function runExec(options: ExecCommandOptions): Promise<ExecResult> {
+export async function runExec(
+  options: ExecCommandOptions,
+  /** Replaces the child Host in tests. */
+  spawnHostProcess?: (options: ExecCommandOptions) => ExecHostProcess,
+): Promise<ExecResult> {
   if (options.approval !== undefined) {
     const { resolveGlobalReviewPolicyMode } = await import('../config/config');
     if (!resolveGlobalReviewPolicyMode(options.approval)) {
       throw new Error(`Unknown --approval policy "${options.approval}". Use full-access, auto, or require.`);
     }
   }
-  const host = spawnHost(options);
+  // Every output path is prepared before the Host starts, so a bad path
+  // fails fast instead of leaving a Host behind.
+  if (options.outputPath) {
+    ensureParent(options.outputPath);
+    closeSync(openSync(options.outputPath, 'w'));
+  }
   let trajectory: ReturnType<typeof createWriteStream> | undefined;
   if (options.trajectoryPath) {
     ensureParent(options.trajectoryPath);
-    trajectory = createWriteStream(options.trajectoryPath);
+    trajectory = createWriteStream(options.trajectoryPath, { fd: openSync(options.trajectoryPath, 'w') });
+    trajectory.on('error', (error) => {
+      process.stderr.write(`[exec] trajectory write failed: ${error.message}\n`);
+    });
   }
-  const result = await runExecSession(host, {
-    instruction: options.instruction,
-    timeoutMs: options.timeoutMs,
-    onMessage: (message) => { trajectory?.write(`${JSON.stringify(message)}\n`); },
-  });
 
-  // Closing stdin is the Host's shutdown signal; kill only if it lingers.
-  host.stdin.end();
-  const lingering = setTimeout(() => host.kill(), 10_000);
-  await host.exited;
-  clearTimeout(lingering);
-  await new Promise<void>((resolve) => {
-    if (trajectory) trajectory.end(resolve);
-    else resolve();
-  });
+  let host: ExecHostProcess;
+  try {
+    host = (spawnHostProcess ?? spawnHost)(options);
+  } catch (error) {
+    trajectory?.destroy();
+    throw error;
+  }
+  let result: ExecResult;
+  try {
+    result = await runExecSession(host, {
+      instruction: options.instruction,
+      timeoutMs: options.timeoutMs,
+      onMessage: (message) => { trajectory?.write(`${JSON.stringify(message)}\n`); },
+    });
+  } finally {
+    // Closing stdin is the Host's shutdown signal; kill only if it lingers.
+    host.stdin.end();
+    const lingering = setTimeout(() => host.kill(), 10_000);
+    await host.exited;
+    clearTimeout(lingering);
+    await new Promise<void>((resolve) => {
+      if (trajectory) trajectory.end(resolve);
+      else resolve();
+    });
+  }
 
   if (options.outputPath) {
-    ensureParent(options.outputPath);
     writeFileSync(options.outputPath, `${JSON.stringify(result, null, 2)}\n`);
   }
   if (options.json) {

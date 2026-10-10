@@ -55,7 +55,7 @@ test('the pinpawo agent calls exec with the task and reads its result', async ()
     'const args = process.argv.slice(2);',
     "const output = args[args.indexOf('--output') + 1];",
     "writeFileSync('argv.json', JSON.stringify(args));",
-    "writeFileSync(output, JSON.stringify({ status: 'waiting', pendingInterruptKind: 'human_review', toolCalls: 3 }));",
+    "writeFileSync(output, JSON.stringify({ status: 'waiting', pendingInterruptKind: 'human_review', mainToolCalls: 2, executedToolCalls: 3 }));",
   ].join('\n'));
   const tasks = loadBenchTasks(tasksDir, ['systemd-unit']);
   const outDir = scratch('pinpawo');
@@ -70,7 +70,8 @@ test('the pinpawo agent calls exec with the task and reads its result', async ()
   const [result] = summary.results;
   assert.equal(result.passed, false);
   assert.equal(result.agentStatus, 'waiting');
-  assert.equal(result.toolCalls, 3);
+  assert.equal(result.mainToolCalls, 2);
+  assert.equal(result.executedToolCalls, 3);
   assert.equal(result.agentError, 'stopped on human_review');
   const argv = JSON.parse(readFileSync(join(result.workdir, 'argv.json'), 'utf8')) as string[];
   assert.equal(argv[0], 'exec');

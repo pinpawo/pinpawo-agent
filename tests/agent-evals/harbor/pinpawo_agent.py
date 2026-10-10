@@ -144,7 +144,9 @@ class PinpawoAgent(BaseInstalledAgent):
         context.metadata = {
             **(context.metadata or {}),
             "pinpawo_status": result.get("status"),
-            "pinpawo_tool_calls": result.get("toolCalls"),
+            "pinpawo_main_tool_calls": result.get("mainToolCalls"),
+            "pinpawo_executed_tool_calls": result.get("executedToolCalls"),
+            "pinpawo_executed_tool_calls_by_name": result.get("executedToolCallsByName"),
             "pinpawo_pending_interrupt": result.get("pendingInterruptKind"),
             "pinpawo_error": result.get("error"),
         }

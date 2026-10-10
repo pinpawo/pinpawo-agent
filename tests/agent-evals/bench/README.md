@@ -17,7 +17,7 @@ npm run bench -w @pinpawo-tests/agent-evals -- --agent oracle       # reference 
 ```
 
 Results go to `tests/agent-evals/.eval-results/bench/<time>-<agent>/`:
-`summary.md`, `summary.json`, and per run `exec.json` (status, reply, tool calls,
+`summary.md`, `summary.json`, and per run `exec.json` (status, reply, main-agent and executed tool calls,
 token usage), `trajectory.jsonl` (every Host message), `agent.log` and
 `verifier.log`. The scratch directory of each run is kept and listed in the
 result so a failure can be inspected.

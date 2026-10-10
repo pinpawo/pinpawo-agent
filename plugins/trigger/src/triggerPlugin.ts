@@ -53,6 +53,9 @@ export type TriggerDefinition = {
   request: TriggerRequest;
 };
 
+/** A definition after parseDefinitions: the petId shorthand is folded into target. */
+type ParsedTriggerDefinition = Omit<TriggerDefinition, 'petId' | 'target'> & { target: TriggerTarget };
+
 export type CreateTriggerPluginOptions = {
   triggers: readonly TriggerDefinition[];
   service?: TriggerService;
@@ -169,7 +172,7 @@ function renderTriggerRequest(
 }
 
 function buildTriggerRequestEnvelope(
-  definition: TriggerDefinition,
+  definition: ParsedTriggerDefinition,
   context:
     | { kind: 'http'; payload: unknown }
     | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
@@ -208,7 +211,7 @@ function buildTriggerRequestEnvelope(
 }
 
 function buildTriggerRequest(
-  definition: TriggerDefinition,
+  definition: ParsedTriggerDefinition,
   context:
     | { kind: 'http'; payload: unknown }
     | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
@@ -240,14 +243,8 @@ function buildTriggerRequest(
   return `${definition.request}\n\nTrigger context:\n${stringifyTriggerContext(detail)}`;
 }
 
-function triggerTarget(definition: TriggerDefinition): TriggerTarget {
-  if (definition.target) return definition.target;
-  if (definition.petId) return { kind: 'pet', petId: definition.petId };
-  throw new Error(`Trigger "${definition.triggerId}" has no target.`);
-}
-
-function resolveTargetPetId(definition: TriggerDefinition, envelope: TriggerRequestEnvelope): string {
-  const target = triggerTarget(definition);
+function resolveTargetPetId(definition: ParsedTriggerDefinition, envelope: TriggerRequestEnvelope): string {
+  const target = definition.target;
   if (target.kind === 'pet') return target.petId;
   const value = readEnvelopePath(envelope, target.path);
   if (typeof value !== 'string' || !value.trim()) {
@@ -260,8 +257,8 @@ function resolveTargetPetId(definition: TriggerDefinition, envelope: TriggerRequ
   return petId;
 }
 
-function permitsTargetPetId(definition: TriggerDefinition, petId: string): boolean {
-  const target = triggerTarget(definition);
+function permitsTargetPetId(definition: ParsedTriggerDefinition, petId: string): boolean {
+  const target = definition.target;
   return target.kind === 'pet'
     ? target.petId === petId
     : target.allowedPetIds === undefined || target.allowedPetIds.includes(petId);
@@ -273,7 +270,7 @@ function matchesStudioEvent(source: StudioEventTriggerSource, event: StudioEvent
   return source.typePrefix === undefined || event.type.startsWith(source.typePrefix);
 }
 
-function publicDefinition(definition: TriggerDefinition): Record<string, unknown> {
+function publicDefinition(definition: ParsedTriggerDefinition): Record<string, unknown> {
   return {
     triggerId: definition.triggerId,
     source: definition.source.kind === 'studio_event'
@@ -285,15 +282,15 @@ function publicDefinition(definition: TriggerDefinition): Record<string, unknown
           ...(definition.source.action === undefined ? {} : { action: definition.source.action }),
         }
         : { kind: 'http' },
-    target: triggerTarget(definition),
+    target: definition.target,
     ...(definition.channelId === undefined ? {} : { channelId: definition.channelId }),
     request: definition.request,
   };
 }
 
-function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, TriggerDefinition> {
-  const definitions = new Map<string, TriggerDefinition>();
-  for (const definition of input) {
+function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, ParsedTriggerDefinition> {
+  const definitions = new Map<string, ParsedTriggerDefinition>();
+  for (const { petId, ...definition } of input) {
     const triggerId = definition.triggerId.trim();
     const target = definition.target
       ? definition.target.kind === 'pet'
@@ -303,7 +300,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
           path: validateTemplatePath(definition.target.path, `Trigger "${definition.triggerId}" target path`),
           ...(definition.target.allowedPetIds === undefined ? {} : { allowedPetIds: definition.target.allowedPetIds.map((petId) => petId.trim()) }),
         }
-      : definition.petId === undefined ? undefined : { kind: 'pet' as const, petId: definition.petId.trim() };
+      : petId === undefined ? undefined : { kind: 'pet' as const, petId: petId.trim() };
     const channelId = definition.channelId?.trim();
     if (channelId !== undefined && !channelId) {
       throw new Error(`Trigger "${triggerId}" channelId must not be empty.`);
@@ -414,7 +411,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       if (context) throw new Error('Trigger Plugin is already started.');
       const petIds = new Set(pluginContext.listPets().map(({ petId }) => petId));
       for (const definition of definitions.values()) {
-        const target = triggerTarget(definition);
+        const target = definition.target;
         if (target.kind === 'pet' && !petIds.has(target.petId)) {
           throw new Error(`Trigger "${definition.triggerId}" targets unknown pet "${target.petId}".`);
         }
@@ -438,7 +435,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
         }
         // A channel-bound rule hands its request to the Channel, which runs the
         // Pet in its Channel session and keeps the reply; any other rule dispatches.
-        const send = async (definition: TriggerDefinition, petId: string, request: string, deliveryId: string) => {
+        const send = async (definition: ParsedTriggerDefinition, petId: string, request: string, deliveryId: string) => {
           if (definition.channelId === undefined) {
             await pluginContext.dispatch({ petId, request, idempotencyKey: `trigger:${deliveryId}` });
             return;
@@ -455,7 +452,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
           if (failed) throw new Error(failed.error ?? `Channel did not deliver to Pet "${petId}".`);
         };
         const dispatchDelivery = async (
-          definition: TriggerDefinition,
+          definition: ParsedTriggerDefinition,
           idempotencyKey: string,
           input:
             | { kind: 'http'; payload: unknown }
@@ -580,7 +577,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       return { kind: 'json', status: 400, body: { error: 'GitHub webhook requires X-GitHub-Event and X-GitHub-Delivery.' } };
                     }
                     const githubDefinitions = [...definitions.values()].filter((definition): definition is (
-                      TriggerDefinition & { source: GitHubTriggerSource }
+                      ParsedTriggerDefinition & { source: GitHubTriggerSource }
                     ) => definition.source.kind === 'github');
                     const signedDefinitions = githubDefinitions.filter((definition) => (
                       verifyGitHubSignature(body, headers['x-hub-signature-256'], definition.source.secret)
@@ -777,9 +774,10 @@ export function createStudioPlugin(
         `Trigger Plugin triggers[${index.toString()}] option "${definitionUnknown}" is not supported.`,
       );
     }
-    const target = parseInstalledTarget(definition.target, definition.petId, index);
+    const target = parseInstalledTarget(definition.target, index);
+    const petId = typeof definition.petId === 'string' ? definition.petId : undefined;
     if (typeof definition.triggerId !== 'string'
-      || !target
+      || target === null || (target === undefined && petId === undefined)
       || !isInstalledTriggerRequest(definition.request, index)
       || (definition.channelId !== undefined && typeof definition.channelId !== 'string')) {
       throw new Error(
@@ -788,7 +786,7 @@ export function createStudioPlugin(
     }
     return {
       triggerId: definition.triggerId,
-      target,
+      ...(target ? { target } : { petId }),
       ...(typeof definition.channelId === 'string' ? { channelId: definition.channelId } : {}),
       request: definition.request,
       source: parseSource(definition.source, index),
@@ -823,8 +821,8 @@ export function createStudioPlugin(
   });
 }
 
-function parseInstalledTarget(value: unknown, legacyPetId: unknown, index: number): TriggerTarget | null {
-  if (value === undefined) return typeof legacyPetId === 'string' ? { kind: 'pet', petId: legacyPetId } : null;
+function parseInstalledTarget(value: unknown, index: number): TriggerTarget | null | undefined {
+  if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const target = value as Record<string, unknown>;
   if (target.kind === 'pet' && typeof target.petId === 'string' && Object.keys(target).every((key) => key === 'kind' || key === 'petId')) {

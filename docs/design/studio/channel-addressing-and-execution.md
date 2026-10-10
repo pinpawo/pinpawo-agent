@@ -41,7 +41,7 @@ HTTP 作者由 `operatorId` 确定（默认 `studio-operator`），共享 Bearer
 Console 点击 Reply 按原作者的 kind / 原始 id 预选已登记 participantId，可改选或清除；
 已移除作者不猜目标。人作者默认选择人，不派发 Pet。清除且正文无有效寻址时仅保存；
 正文主动寻址仍生效，UI 明确说明该条件。这个人的 UI 默认不替 Pet 输出补目标。
-旧 `/channels/execute` 保留显式 petId 与 replyTo-only 原 Pet/session 动作，后者仍校验绑定。
+旧 `/channels/execute` 只保留显式 petId（或 mentions）；与普通消息一样，`replyTo` 不推断目标。
 
 ## 持久事实与 session
 

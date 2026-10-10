@@ -102,7 +102,7 @@ Channel contributes these routes to the HTTP Plugin under Studio Bearer:
 | `GET /channels/participants` | Registry plus viewerParticipantId. |
 | `GET /channels/context?channelId=...` | Current revision, bindings, paginated history and participants. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
-| `POST /channels/execute` | Legacy explicit `petId` or replyTo-only original-session action; admission receipt and binding. |
+| `POST /channels/execute` | Legacy action with an explicit `petId` or `mentions` (`replyTo` only quotes); admission receipt and binding. |
 | `GET /channels/executions?channelId=...` | Per-target lifecycle / failure observations, not queue state. |
 | `GET /channels/interrupts?channelId=...` | Read-only historical PendingInterruptProjection notifications. |
 

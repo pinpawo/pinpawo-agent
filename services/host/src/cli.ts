@@ -23,6 +23,7 @@ type HostCliHandlers = {
     action: string,
     opts: { extensionId?: string },
   ) => Promise<void> | void;
+  runToolkit?: (action: string, toolkit: string, opts: { dir?: string }) => Promise<void> | void;
   runRS?: (
     action: string,
     argument: string | undefined,
@@ -216,6 +217,15 @@ export function createHostCli(handlers: HostCliHandlers = {}): Command {
     .action(async (action: string, argument: string | undefined, options: { session?: string }) => {
       const runRS = handlers.runRS ?? (await import('./commands/rs')).runRSCommand;
       await runRS(action, argument, options);
+    });
+
+  program
+    .command('toolkit <action> <name>')
+    .description('Explicit Toolkit dependency management: install office, status office')
+    .option('--dir <directory>', 'dependency root; defaults to ~/.pinpawo/toolkits')
+    .action(async (action: string, name: string, options: { dir?: string }) => {
+      const runToolkit = handlers.runToolkit ?? (await import('./commands/toolkit')).runToolkitCommand;
+      await runToolkit(action, name, options);
     });
 
   registerCapabilityCommand(program);

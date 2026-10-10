@@ -186,3 +186,41 @@ test('Chat Host preserves the existing session checkpoint namespace', async () =
     existingWriter.releaseHostWriterLease();
   }
 });
+
+test('Office Host assembly omits tools and capability when explicitly disabled', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-office-disabled-'));
+  const caps = new HostCapabilityAssembly({
+    runtimeConfig: buildTestConfig(root), sourceId: 'office-test',
+    includeOffice: false, includeBrowser: false, loadUserCapabilities: false,
+  });
+  const builtIns = (caps as unknown as {
+    hostBuiltInToolkits: readonly { name: string; tools: readonly { tool: { name: string } }[] }[];
+  }).hostBuiltInToolkits;
+  assert.equal(builtIns.some(({ name }) => name === 'office'), false);
+  assert.equal(builtIns.flatMap(({ tools }) => tools).some(({ tool }) => tool.name === 'office_cli'), false);
+  await caps.getCapabilityCatalog().load();
+  assert.equal(caps.getCapabilityCatalog().getSnapshot({ capabilities: { office: true } })
+    .capabilities.some(({ name }) => name === 'office'), false);
+});
+
+test('Office Host opt-in assembles the real Toolkit and matching capability', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-office-enabled-'));
+  const caps = new HostCapabilityAssembly({
+    runtimeConfig: buildTestConfig(root), sourceId: 'office-test',
+    includeOffice: true, includeBrowser: false, loadUserCapabilities: false,
+  });
+  const builtIns = (caps as unknown as {
+    hostBuiltInToolkits: readonly import('@pinpawo/pet-agent').AgentToolkit[];
+  }).hostBuiltInToolkits;
+  const office = builtIns.find(({ name }) => name === 'office');
+  assert.ok(office);
+  assert.deepEqual(office.tools.map(({ tool }) => tool.name), ['office_cli']);
+  assert.equal(office.requires?.shell.contract, 'pinpawo.shell-rs');
+  assert.ok(office.tools[0]?.review);
+  await caps.getCapabilityCatalog().load();
+  const capability = caps.getCapabilityCatalog().getSnapshot({ capabilities: { office: true } })
+    .capabilities.find(({ name }) => name === 'office');
+  assert.deepEqual(capability?.uses, ['office']);
+  assert.equal(caps.getCapabilityCatalog().getSnapshot({ capabilities: { office: false } })
+    .capabilities.some(({ name }) => name === 'office'), false);
+});

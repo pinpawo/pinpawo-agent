@@ -205,6 +205,33 @@ test('adapted Entry Answer text is emitted only when root state accepts it as th
   }]);
   assert.equal(planned.some((event) => event.type === 'assistant.delta'), false);
   assert.equal(planned.some((event) => event.type === 'tool'), false);
+
+  // A handoff's one-line user note streams like a reply but publishes once, as
+  // the text of the committed routing message.
+  const handoff = await collect([...entryMessageEvents, {
+    type: 'event',
+    seq: 3,
+    method: 'values',
+    params: {
+      namespace: [],
+      data: {
+        runId: 'entry-run',
+        messages: [new HumanMessage('问题'), new AIMessage({
+          id: 'entry-message',
+          content: '只在直答时展示',
+          tool_calls: [{ id: 'call:plan', name: 'plan_request', args: { goal: '问题' }, type: 'tool_call' }],
+          additional_kwargs: { pinpawo: { runId: 'entry-run' } },
+        })],
+      },
+    },
+  }]);
+  assert.equal(handoff.some((event) => event.type === 'assistant.delta'), false);
+  assert.deepEqual(handoff.filter((event) => event.type === 'tool_calls.message'), [{
+    type: 'tool_calls.message',
+    messageId: 'entry-message',
+    text: '只在直答时展示',
+    toolCalls: [{ id: 'call:plan', name: 'plan_request', args: { goal: '问题' } }],
+  }]);
 });
 
 test('adapter drops synthetic assistant messages written by prepare', () => {

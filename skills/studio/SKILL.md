@@ -60,7 +60,7 @@ review merely to unblock a queue.
 pinpawo-studio pets
 pinpawo-studio snapshot executor
 pinpawo-studio events executor --seconds 30
-pinpawo-studio dispatch planner --file /tmp/task.txt
+pinpawo-studio dispatch executor --file /tmp/task.txt
 ```
 
 Snapshot prints a compact projection including the full pending interrupt; use `--full` for delivered

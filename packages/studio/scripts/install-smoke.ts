@@ -158,7 +158,7 @@ try {
   assert.equal(initialized.stderr, '');
   await Promise.all([
     access(join(initializedWorkdir, '.pinpawo', 'studio.json')),
-    access(join(initializedWorkdir, '.pinpawo', 'pets', 'planner.json')),
+    access(join(initializedWorkdir, '.pinpawo', 'pets', 'executor.json')),
     access(join(initializedWorkdir, 'wiki', 'PROJECT.md')),
   ]);
 

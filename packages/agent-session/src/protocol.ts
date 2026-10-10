@@ -72,11 +72,9 @@ export type NewSessionMessage = {
 
 export type RuntimeConfigUpdateMessage = {
   type: 'runtime_config.update';
-  /** Optional for compatibility with pre-acknowledgement local clients. */
-  requestId?: string;
+  requestId: string;
   toolAuthorizationMode: ToolAuthorizationMode;
-  /** Omitted by older clients; the host retains the configured level. */
-  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 };
 
 export type SessionSnapshotGetMessage = {
@@ -147,7 +145,7 @@ export type AgentControlServerMessage =
       type: 'runtime_config.result';
       requestId: string;
       toolAuthorizationMode: ToolAuthorizationMode;
-      autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
+      autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
     }
   | {
       type: 'runtime_config.error';
@@ -798,20 +796,11 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       'toolAuthorizationMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
-    const requestId = readOptionalString(record, 'requestId');
-    if ('requestId' in record && !requestId) return null;
+    const requestId = readString(record, 'requestId');
     const toolAuthorizationMode = readToolAuthorizationMode(record, 'toolAuthorizationMode');
-    const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
-      ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
-      : undefined;
-    if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
-    return toolAuthorizationMode
-      ? {
-          type,
-          ...(requestId ? { requestId } : {}),
-          toolAuthorizationMode,
-          ...(autoAuthorizationSafetyLevel ? { autoAuthorizationSafetyLevel } : {}),
-        }
+    const autoAuthorizationSafetyLevel = readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel');
+    return requestId && toolAuthorizationMode && autoAuthorizationSafetyLevel
+      ? { type, requestId, toolAuthorizationMode, autoAuthorizationSafetyLevel }
       : null;
   }
   return null;
@@ -978,17 +967,9 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       record,
       'toolAuthorizationMode',
     );
-    const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
-      ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
-      : undefined;
-    if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
-    return toolAuthorizationMode
-      ? {
-          type,
-          requestId,
-          toolAuthorizationMode,
-          ...(autoAuthorizationSafetyLevel ? { autoAuthorizationSafetyLevel } : {}),
-        }
+    const autoAuthorizationSafetyLevel = readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel');
+    return toolAuthorizationMode && autoAuthorizationSafetyLevel
+      ? { type, requestId, toolAuthorizationMode, autoAuthorizationSafetyLevel }
       : null;
   }
   if (type === 'runtime_config.error') {

@@ -687,27 +687,23 @@ export function createChatHostHandlers(
     onRuntimeConfigUpdate: (client, message) => runSessionCommand(
       async () => {
         try {
-          const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
-            ?? runtimeDeps.get().autoAuthorizationSafetyLevel;
+          const { autoAuthorizationSafetyLevel } = message;
           (options.persistToolAuthorizationMode ?? persistToolAuthorizationMode)(
             message.toolAuthorizationMode,
             autoAuthorizationSafetyLevel,
           );
           runtimeDeps.updateToolAuthorizationMode(message.toolAuthorizationMode, autoAuthorizationSafetyLevel);
-          if (message.requestId) {
-            client.send({
-              type: 'runtime_config.result',
-              requestId: message.requestId,
-              toolAuthorizationMode: message.toolAuthorizationMode,
-              autoAuthorizationSafetyLevel,
-            });
-          }
+          client.send({
+            type: 'runtime_config.result',
+            requestId: message.requestId,
+            toolAuthorizationMode: message.toolAuthorizationMode,
+            autoAuthorizationSafetyLevel,
+          });
           console.log(
             `[chat-host] tool authorization mode set to ${message.toolAuthorizationMode}`
               + ` (${autoAuthorizationSafetyLevel})`,
           );
         } catch (error) {
-          if (!message.requestId) throw error;
           client.send({
             type: 'runtime_config.error',
             requestId: message.requestId,

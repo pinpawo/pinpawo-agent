@@ -166,7 +166,7 @@ test('AgentHost deleteThread callback calls both checkpointer.deleteThread and c
   assert.equal((await store.listArtifacts({ threadId: 'thread-1' })).length, 1);
 
   // Simulate the deleteThread callback: checkpoint delete + artifact delete.
-  await caps.getChatCheckpointer().deleteThread('thread-1');
+  await caps.getCheckpointer().deleteThread('thread-1');
   await caps.deleteThreadArtifacts('thread-1');
 
   // Artifact should be gone (checkpoint deletion is covered by fileSaver.test.ts).
@@ -181,7 +181,7 @@ test('Chat Host preserves the existing session checkpoint namespace', async () =
   const host = new AgentHost(runtimeConfig);
   existingWriter.acquireHostWriterLease('existing-chat');
   try {
-    assert.throws(() => host.getChatCheckpointer().acquireHostWriterLease('new-chat'), /already owned by existing-chat/);
+    assert.throws(() => host.getCheckpointer().acquireHostWriterLease('new-chat'), /already owned by existing-chat/);
   } finally {
     existingWriter.releaseHostWriterLease();
   }

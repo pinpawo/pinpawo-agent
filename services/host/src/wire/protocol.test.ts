@@ -113,11 +113,15 @@ test('parseHostClientMessage accepts runtime config updates for built-in review 
   assert.deepEqual(
     parseHostClientMessage(JSON.stringify({
       type: 'runtime_config.update',
+      requestId: 'policy-1',
       toolAuthorizationMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'strict',
     })),
     {
       type: 'runtime_config.update',
+      requestId: 'policy-1',
       toolAuthorizationMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'strict',
     },
   );
   assert.equal(

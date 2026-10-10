@@ -13,20 +13,20 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type TuiV2LaunchSource =
+export type TuiLaunchSource =
   | 'override'
   | 'packaged-binary'
   | 'packaged-bundle'
   | 'workspace-binary'
   | 'workspace-source';
 
-export type TuiV2LaunchPlan = {
-  source: TuiV2LaunchSource;
+export type TuiLaunchPlan = {
+  source: TuiLaunchSource;
   command: string;
   args: string[];
 };
 
-export type ResolveTuiV2LaunchPlanOptions = {
+export type ResolveTuiLaunchPlanOptions = {
   hostRoot: string;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
@@ -36,7 +36,7 @@ export type ResolveTuiV2LaunchPlanOptions = {
   readBinaryFile?: (path: string) => Uint8Array;
 };
 
-export type RunTuiV2Options = {
+export type RunTuiOptions = {
   workdir?: string;
   check?: boolean;
   qa?: boolean;
@@ -48,7 +48,7 @@ export type RunTuiV2Options = {
   agentSessionPetId?: string;
 };
 
-export type TuiV2DistributionManifest = {
+export type TuiDistributionManifest = {
   schemaVersion: 1;
   format: 'bun-bundle';
   entry: 'main.js';
@@ -59,9 +59,9 @@ export type TuiV2DistributionManifest = {
   sha256: string;
 };
 
-export function parseTuiV2DistributionManifest(
+export function parseTuiDistributionManifest(
   value: string,
-): TuiV2DistributionManifest | null {
+): TuiDistributionManifest | null {
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
     if (
@@ -78,15 +78,15 @@ export function parseTuiV2DistributionManifest(
     ) {
       return null;
     }
-    return parsed as TuiV2DistributionManifest;
+    return parsed as TuiDistributionManifest;
   } catch {
     return null;
   }
 }
 
-export function resolveTuiV2LaunchPlan(
-  options: ResolveTuiV2LaunchPlanOptions,
-): TuiV2LaunchPlan {
+export function resolveTuiLaunchPlan(
+  options: ResolveTuiLaunchPlanOptions,
+): TuiLaunchPlan {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
@@ -168,26 +168,26 @@ export function resolveTuiV2LaunchPlan(
   const distributionRoot = join(options.hostRoot, 'dist', 'tui');
   const distributionManifestPath = join(distributionRoot, 'manifest.json');
   if (pathExists(distributionManifestPath)) {
-    const manifest = parseTuiV2DistributionManifest(
+    const manifest = parseTuiDistributionManifest(
       readTextFile(distributionManifestPath),
     );
     if (!manifest) {
       throw new Error(
-        `OpenTUI v2 distribution manifest is invalid: ${distributionManifestPath}`,
+        `OpenTUI distribution manifest is invalid: ${distributionManifestPath}`,
       );
     }
     const entryPath = join(distributionRoot, manifest.entry);
     if (!pathExists(entryPath)) {
       throw new Error(
-        `OpenTUI v2 distribution entry is missing: ${entryPath}`,
+        `OpenTUI distribution entry is missing: ${entryPath}`,
       );
     }
-    if (!verifyTuiV2DistributionEntry(
+    if (!verifyTuiDistributionEntry(
       manifest,
       readBinaryFile(entryPath),
     )) {
       throw new Error(
-        `OpenTUI v2 distribution entry failed integrity verification: ${entryPath}`,
+        `OpenTUI distribution entry failed integrity verification: ${entryPath}`,
       );
     }
     const packageParent = resolve(options.hostRoot, '..');
@@ -229,8 +229,8 @@ function isExactVersion(value: unknown): value is string {
   return typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value);
 }
 
-export function verifyTuiV2DistributionEntry(
-  manifest: TuiV2DistributionManifest,
+export function verifyTuiDistributionEntry(
+  manifest: TuiDistributionManifest,
   entry: Uint8Array,
 ) {
   return entry.byteLength === manifest.bytes
@@ -250,11 +250,11 @@ function bunExecutableCandidates(
 }
 
 function createBunLaunchPlan(
-  source: Extract<TuiV2LaunchSource, 'workspace-source' | 'packaged-bundle'>,
+  source: Extract<TuiLaunchSource, 'workspace-source' | 'packaged-bundle'>,
   command: string,
   entryPath: string,
   platform: NodeJS.Platform,
-): TuiV2LaunchPlan {
+): TuiLaunchPlan {
   return {
     source,
     command,
@@ -289,8 +289,8 @@ function hasTuiWorkspace(
   }
 }
 
-export async function runTuiV2(
-  options: RunTuiV2Options = {},
+export async function runTui(
+  options: RunTuiOptions = {},
 ): Promise<void> {
   if (options.workdir) {
     let isDirectory = false;
@@ -306,8 +306,8 @@ export async function runTuiV2(
   const hostRoot = findHostPackageRoot(
     fileURLToPath(import.meta.url),
   );
-  const plan = resolveTuiV2LaunchPlan({ hostRoot });
-  await spawnTuiV2(plan, options, hostRoot);
+  const plan = resolveTuiLaunchPlan({ hostRoot });
+  await spawnTui(plan, options, hostRoot);
 }
 
 export function findHostPackageRoot(
@@ -334,14 +334,14 @@ export function findHostPackageRoot(
   throw new Error('Could not locate the PinPawo host package root.');
 }
 
-async function spawnTuiV2(
-  plan: TuiV2LaunchPlan,
-  options: RunTuiV2Options,
+async function spawnTui(
+  plan: TuiLaunchPlan,
+  options: RunTuiOptions,
   hostRoot: string,
 ) {
   const cwd = options.workdir ?? process.cwd();
-  const args = buildTuiV2LaunchArgs(plan, options);
-  const env = buildTuiV2LaunchEnv(options, hostRoot);
+  const args = buildTuiLaunchArgs(plan, options);
+  const env = buildTuiLaunchEnv(options, hostRoot);
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(plan.command, args, {
       cwd,
@@ -359,7 +359,7 @@ async function spawnTuiV2(
             'Bun is required to run the terminal client.',
             'Install optional dependencies, or set PINPAWO_BUN_BIN.',
           ].join(' ')
-        : `Could not start OpenTUI v2: ${error.message}`));
+        : `Could not start OpenTUI: ${error.message}`));
     });
     child.once('exit', (code, signal) => {
       if (code === 0) {
@@ -370,8 +370,8 @@ async function spawnTuiV2(
       reject(Object.assign(
         new Error(
           signal
-            ? `OpenTUI v2 exited after ${signal}`
-            : `OpenTUI v2 exited with code ${exitCode}`,
+            ? `OpenTUI exited after ${signal}`
+            : `OpenTUI exited with code ${exitCode}`,
         ),
         { exitCode },
       ));
@@ -379,10 +379,10 @@ async function spawnTuiV2(
   });
 }
 
-export function buildTuiV2LaunchArgs(
-  plan: TuiV2LaunchPlan,
+export function buildTuiLaunchArgs(
+  plan: TuiLaunchPlan,
   options: Pick<
-    RunTuiV2Options,
+    RunTuiOptions,
     | 'check'
     | 'qa'
     | 'embedHost'
@@ -392,16 +392,16 @@ export function buildTuiV2LaunchArgs(
   > = {},
 ) {
   if (options.check && options.qa) {
-    throw new Error('OpenTUI v2 check and QA modes are mutually exclusive.');
+    throw new Error('OpenTUI check and QA modes are mutually exclusive.');
   }
   if (options.embedHost && (options.check || options.qa)) {
     throw new Error(
-      'OpenTUI v2 embedded host mode does not apply to check or QA mode.',
+      'OpenTUI embedded host mode does not apply to check or QA mode.',
     );
   }
   if (options.embedHost && options.serverPort !== undefined) {
     throw new Error(
-      'OpenTUI v2 embedded host mode cannot connect to a running server.',
+      'OpenTUI embedded host mode cannot connect to a running server.',
     );
   }
   return [
@@ -455,8 +455,8 @@ export function resolveEmbeddedHostEnv(
   };
 }
 
-export function buildTuiV2LaunchEnv(
-  options: RunTuiV2Options,
+export function buildTuiLaunchEnv(
+  options: RunTuiOptions,
   hostRoot: string,
 ) {
   // Embedded stdio is the terminal UI default, so the launcher forwards the Host
@@ -486,7 +486,7 @@ export function buildTuiV2LaunchEnv(
  */
 export function usesEmbeddedHostTransport(
   options: Pick<
-    RunTuiV2Options,
+    RunTuiOptions,
     'check' | 'qa' | 'embedHost' | 'agentSessionPort' | 'serverPort'
   >,
 ) {

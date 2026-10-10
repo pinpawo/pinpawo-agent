@@ -3,16 +3,16 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  buildTuiV2LaunchArgs,
-  buildTuiV2LaunchEnv,
+  buildTuiLaunchArgs,
+  buildTuiLaunchEnv,
   findHostPackageRoot,
-  parseTuiV2DistributionManifest,
+  parseTuiDistributionManifest,
   resolveEmbeddedHostEnv,
-  resolveTuiV2LaunchPlan,
-  runTuiV2,
+  resolveTuiLaunchPlan,
+  runTui,
   usesEmbeddedHostTransport,
-  verifyTuiV2DistributionEntry,
-} from './tuiV2Launcher';
+  verifyTuiDistributionEntry,
+} from './tuiLauncher';
 
 const HOST_ROOT = '/workspace/services/host';
 const WORKSPACE_ROOT = '/workspace';
@@ -41,7 +41,7 @@ const VALID_DISTRIBUTION_MANIFEST = JSON.stringify(
 );
 
 test('v2 launcher prefers an explicit executable override', () => {
-  assert.deepEqual(resolveTuiV2LaunchPlan({
+  assert.deepEqual(resolveTuiLaunchPlan({
     hostRoot: HOST_ROOT,
     env: {
       PINPAWO_TUI_V2_BIN: '/opt/pinpawo/custom-tui',
@@ -61,7 +61,7 @@ test('v2 launcher selects a packaged binary before workspace assets', () => {
     'tui',
     'pinpawo-tui-darwin-arm64',
   );
-  assert.deepEqual(resolveTuiV2LaunchPlan({
+  assert.deepEqual(resolveTuiLaunchPlan({
     hostRoot: HOST_ROOT,
     env: {},
     platform: 'darwin',
@@ -77,7 +77,7 @@ test('v2 launcher selects a packaged binary before workspace assets', () => {
 
 test('v2 launcher uses a workspace binary when no local Bun is installed', () => {
   const workspace = join(TUI_ROOT, 'dist', 'pinpawo-tui');
-  assert.deepEqual(resolveTuiV2LaunchPlan({
+  assert.deepEqual(resolveTuiLaunchPlan({
     hostRoot: HOST_ROOT,
     env: {},
     platform: 'darwin',
@@ -96,30 +96,30 @@ test('v2 launcher uses a workspace binary when no local Bun is installed', () =>
 
 test('v2 launcher parses only the supported distribution manifest', () => {
   assert.deepEqual(
-    parseTuiV2DistributionManifest(VALID_DISTRIBUTION_MANIFEST),
+    parseTuiDistributionManifest(VALID_DISTRIBUTION_MANIFEST),
     JSON.parse(VALID_DISTRIBUTION_MANIFEST),
   );
-  assert.equal(parseTuiV2DistributionManifest('{'), null);
-  assert.equal(parseTuiV2DistributionManifest(JSON.stringify({
+  assert.equal(parseTuiDistributionManifest('{'), null);
+  assert.equal(parseTuiDistributionManifest(JSON.stringify({
     ...JSON.parse(VALID_DISTRIBUTION_MANIFEST),
     entry: '../main.js',
   })), null);
-  assert.equal(parseTuiV2DistributionManifest(JSON.stringify({
+  assert.equal(parseTuiDistributionManifest(JSON.stringify({
     ...JSON.parse(VALID_DISTRIBUTION_MANIFEST),
     bytes: 0,
   })), null);
 });
 
 test('v2 launcher verifies distribution bytes and digest', () => {
-  assert.equal(verifyTuiV2DistributionEntry(
+  assert.equal(verifyTuiDistributionEntry(
     VALID_DISTRIBUTION_MANIFEST_VALUE,
     DISTRIBUTION_ENTRY,
   ), true);
-  assert.equal(verifyTuiV2DistributionEntry(
+  assert.equal(verifyTuiDistributionEntry(
     VALID_DISTRIBUTION_MANIFEST_VALUE,
     Buffer.from('truncated'),
   ), false);
-  assert.equal(verifyTuiV2DistributionEntry(
+  assert.equal(verifyTuiDistributionEntry(
     {
       ...VALID_DISTRIBUTION_MANIFEST_VALUE,
       sha256: 'a'.repeat(64),
@@ -130,7 +130,7 @@ test('v2 launcher verifies distribution bytes and digest', () => {
 
 test('v2 launcher runs workspace source with a configured or local Bun', () => {
   const source = join(TUI_ROOT, 'src', 'main.ts');
-  assert.deepEqual(resolveTuiV2LaunchPlan({
+  assert.deepEqual(resolveTuiLaunchPlan({
     hostRoot: HOST_ROOT,
     env: {
       PINPAWO_BUN_BIN: '/opt/bun/bin/bun',
@@ -148,7 +148,7 @@ test('v2 launcher runs workspace source with a configured or local Bun', () => {
 
   const workspaceBun = join(WORKSPACE_ROOT, 'node_modules', '.bin', 'bun');
   const workspaceBinary = join(TUI_ROOT, 'dist', 'pinpawo-tui');
-  assert.deepEqual(resolveTuiV2LaunchPlan({
+  assert.deepEqual(resolveTuiLaunchPlan({
     hostRoot: HOST_ROOT,
     env: {},
     pathExists: (path) => (
@@ -184,7 +184,7 @@ test('v2 launcher runs an installed distribution with its local Bun', () => {
     hostPackage,
     hostTuiSource,
   ]);
-  assert.deepEqual(resolveTuiV2LaunchPlan({
+  assert.deepEqual(resolveTuiLaunchPlan({
     hostRoot: installedRoot,
     env: {},
     platform: 'darwin',
@@ -208,16 +208,16 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
     args: ['run', '/app/node_modules/pinpawo/dist/tui/main.js'],
   };
 
-  assert.deepEqual(buildTuiV2LaunchArgs(plan), plan.args);
-  assert.deepEqual(buildTuiV2LaunchArgs(plan, { check: true }), [
+  assert.deepEqual(buildTuiLaunchArgs(plan), plan.args);
+  assert.deepEqual(buildTuiLaunchArgs(plan, { check: true }), [
     ...plan.args,
     '--version',
   ]);
-  assert.deepEqual(buildTuiV2LaunchArgs(plan, { qa: true }), [
+  assert.deepEqual(buildTuiLaunchArgs(plan, { qa: true }), [
     ...plan.args,
     '--demo-qa',
   ]);
-  assert.deepEqual(buildTuiV2LaunchArgs(plan, {
+  assert.deepEqual(buildTuiLaunchArgs(plan, {
     agentSessionPort: 4322,
     agentSessionPetId: 'planner',
   }), [
@@ -227,25 +227,25 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
     '--pet-id',
     'planner',
   ]);
-  assert.deepEqual(buildTuiV2LaunchArgs(plan, { embedHost: true }), [
+  assert.deepEqual(buildTuiLaunchArgs(plan, { embedHost: true }), [
     ...plan.args,
     '--embed-host',
   ]);
-  assert.deepEqual(buildTuiV2LaunchArgs(plan, { serverPort: 4321 }), [
+  assert.deepEqual(buildTuiLaunchArgs(plan, { serverPort: 4321 }), [
     ...plan.args,
     '--server-port',
     '4321',
   ]);
   assert.throws(
-    () => buildTuiV2LaunchArgs(plan, { check: true, qa: true }),
+    () => buildTuiLaunchArgs(plan, { check: true, qa: true }),
     /mutually exclusive/,
   );
   assert.throws(
-    () => buildTuiV2LaunchArgs(plan, { check: true, embedHost: true }),
+    () => buildTuiLaunchArgs(plan, { check: true, embedHost: true }),
     /does not apply to check or QA mode/,
   );
   assert.throws(
-    () => buildTuiV2LaunchArgs(plan, { embedHost: true, serverPort: 4321 }),
+    () => buildTuiLaunchArgs(plan, { embedHost: true, serverPort: 4321 }),
     /cannot connect to a running server/,
   );
 });
@@ -273,7 +273,7 @@ test('v2 launcher resolves the installed Bun runtime across supported platforms'
       '..',
       ...item.bunPath,
     );
-    assert.deepEqual(resolveTuiV2LaunchPlan({
+    assert.deepEqual(resolveTuiLaunchPlan({
       hostRoot: installedRoot,
       env: {},
       platform: item.platform,
@@ -296,7 +296,7 @@ test('v2 launcher resolves the installed Bun runtime across supported platforms'
 test('v2 launcher rejects an invalid or incomplete distribution', () => {
   const manifest = join(HOST_ROOT, 'dist', 'tui', 'manifest.json');
   assert.throws(
-    () => resolveTuiV2LaunchPlan({
+    () => resolveTuiLaunchPlan({
       hostRoot: HOST_ROOT,
       env: {},
       pathExists: (path) => path === manifest,
@@ -305,7 +305,7 @@ test('v2 launcher rejects an invalid or incomplete distribution', () => {
     /distribution manifest is invalid/,
   );
   assert.throws(
-    () => resolveTuiV2LaunchPlan({
+    () => resolveTuiLaunchPlan({
       hostRoot: HOST_ROOT,
       env: {},
       pathExists: (path) => path === manifest,
@@ -314,7 +314,7 @@ test('v2 launcher rejects an invalid or incomplete distribution', () => {
     /distribution entry is missing/,
   );
   assert.throws(
-    () => resolveTuiV2LaunchPlan({
+    () => resolveTuiLaunchPlan({
       hostRoot: HOST_ROOT,
       env: {},
       pathExists: (path) => (
@@ -330,7 +330,7 @@ test('v2 launcher rejects an invalid or incomplete distribution', () => {
 
 test('v2 launcher explains when an installed package has no v2 payload', () => {
   assert.throws(
-    () => resolveTuiV2LaunchPlan({
+    () => resolveTuiLaunchPlan({
       hostRoot: HOST_ROOT,
       env: {},
       pathExists: () => false,
@@ -346,7 +346,7 @@ test('package root discovery accepts source and bundled module locations', () =>
   const read = () => JSON.stringify({ name: 'pinpawo' });
 
   assert.equal(findHostPackageRoot(
-    join(HOST_ROOT, 'src', 'commands', 'tuiV2Launcher.ts'),
+    join(HOST_ROOT, 'src', 'commands', 'tuiLauncher.ts'),
     exists,
     read,
   ), HOST_ROOT);
@@ -445,19 +445,19 @@ test('the embedded Host contract is the default but never for another endpoint',
 
 test('the launcher leaves the environment untouched for non-embedded modes', () => {
   assert.equal(
-    buildTuiV2LaunchEnv({ serverPort: 4321 }, HOST_ROOT),
+    buildTuiLaunchEnv({ serverPort: 4321 }, HOST_ROOT),
     process.env,
   );
   assert.equal(
-    buildTuiV2LaunchEnv({ check: true }, HOST_ROOT),
+    buildTuiLaunchEnv({ check: true }, HOST_ROOT),
     process.env,
   );
   assert.equal(
-    buildTuiV2LaunchEnv({ qa: true }, HOST_ROOT),
+    buildTuiLaunchEnv({ qa: true }, HOST_ROOT),
     process.env,
   );
   assert.equal(
-    buildTuiV2LaunchEnv(
+    buildTuiLaunchEnv(
       { agentSessionPort: 4322, agentSessionPetId: 'planner' },
       HOST_ROOT,
     ),
@@ -467,7 +467,7 @@ test('the launcher leaves the environment untouched for non-embedded modes', () 
 
 test('v2 launcher rejects an invalid child working directory before spawning', async () => {
   await assert.rejects(
-    runTuiV2({
+    runTui({
       workdir: '/definitely/missing/pinpawo-tui-v2-workdir',
     }),
     /TUI workdir is not a directory/,

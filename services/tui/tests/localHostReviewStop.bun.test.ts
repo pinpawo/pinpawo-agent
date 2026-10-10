@@ -26,7 +26,7 @@ test('real Host transport completes cancelled review and accepts the next ordina
   const runtimeConfig = buildHostRuntimeConfig(root);
   const fixture = createHostGraphFixture();
   const handlers = createChatHostHandlers(createChatHostDepsStore({
-    serverMode: 'chat', petId: 'one', petName: 'One', runtimeConfig,
+    petId: 'one', petName: 'One', runtimeConfig,
     ...createTestModelServerDeps({ apiKey: 'offline', baseUrl: 'http://127.0.0.1:1/v1', model: 'test', contextWindowTokens: 32_000 }),
     toolkitInventory: createTestHostToolkitInventory([]),
     capabilityArtifactStore: new FileCapabilityArtifactStore(runtimeConfig.capabilityArtifactRoot),

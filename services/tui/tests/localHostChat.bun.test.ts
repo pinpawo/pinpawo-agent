@@ -88,7 +88,6 @@ test('production host handlers drive the v2 host vertical slice', async () => {
   const runtimeConfig = buildHostRuntimeConfig(workdir);
   const graphFixture = createHostGraphFixture();
   const chatHostHandlers = createChatHostHandlers(createChatHostDepsStore({
-    serverMode: 'chat',
     petId: 'pet-host-integration',
     petName: 'PinPawo',
     runtimeConfig,

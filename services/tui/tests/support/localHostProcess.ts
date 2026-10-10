@@ -54,7 +54,6 @@ const toolkits = [createFilesToolkit(), createShellToolkit({ shell: shell }), cr
 const transport = await startHostServer(requestedPort, {
   petId: 'pet-process-restart',
   petName: 'PinPawo',
-  serverMode: 'chat',
   runtimeConfig,
   ...createTestModelServerDeps({
     apiKey: 'offline-process-key',

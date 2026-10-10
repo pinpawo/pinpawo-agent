@@ -103,12 +103,8 @@ export class RuntimeConfigCoordinator {
       ));
       return;
     }
-    const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
-      ?? pending.autoAuthorizationSafetyLevel;
-    if (
-      message.autoAuthorizationSafetyLevel !== undefined
-      && message.autoAuthorizationSafetyLevel !== pending.autoAuthorizationSafetyLevel
-    ) {
+    const { autoAuthorizationSafetyLevel } = message;
+    if (autoAuthorizationSafetyLevel !== pending.autoAuthorizationSafetyLevel) {
       pending.reject(new Error(
         'runtime config response did not match the requested safety level',
       ));

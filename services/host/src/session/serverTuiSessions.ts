@@ -110,10 +110,7 @@ export class ServerTuiSessionService {
     const runtimeConfig = options.runtimeConfig;
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.defaultModelProfileId = options.defaultModelProfileId;
-    this.state = options.state ?? loadTuiSessionState(
-      this.defaultModelProfileId,
-      sessionStatePath,
-    );
+    this.state = options.state ?? loadTuiSessionState(sessionStatePath);
     this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));
     this.checkpointer = options.checkpointer ?? new FileSaver(
       options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,

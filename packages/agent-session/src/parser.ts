@@ -2,7 +2,6 @@ import { parseResultReferences } from './resultReferences';
 import {
   isToolAuthorizationMode,
   isToolAuthorizationSafetyLevel,
-  HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
   parseHumanReviewRequest,
   type HumanReviewRequest,
 } from '@pinpawo/agent-contracts';
@@ -31,15 +30,8 @@ export function parseAgentSessionSnapshot(
   value: unknown,
 ): AgentSessionSnapshot | null {
   if (!isRecord(value)) return null;
-  if (
-    value.version !== 3
-    && value.version !== 4
-    && value.version !== AGENT_SESSION_SNAPSHOT_VERSION
-  ) return null;
-  const readReviews = value.version === 3
-    ? readLegacyReviewSpecs
-    : readReviewSpecs;
-  const session = parseAgentSession(value.session, readReviews, value.version);
+  if (value.version !== AGENT_SESSION_SNAPSHOT_VERSION) return null;
+  const session = parseAgentSession(value.session);
   return session
     ? { version: AGENT_SESSION_SNAPSHOT_VERSION, session }
     : null;
@@ -73,13 +65,7 @@ export function parseAgentSessionSummary(
   };
 }
 
-type ReviewSpecsReader = (value: unknown) => HumanReviewRequest[] | null;
-
-function parseAgentSession(
-  value: unknown,
-  readReviews: ReviewSpecsReader,
-  version: 3 | 4 | typeof AGENT_SESSION_SNAPSHOT_VERSION,
-): AgentSession | null {
+function parseAgentSession(value: unknown): AgentSession | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.sessionId !== 'string'
@@ -94,22 +80,12 @@ function parseAgentSession(
     return parsed ? [parsed] : [];
   });
   if (timeline.length !== value.timeline.length) return null;
-  const parsedRun = value.activeRun === null
-    ? { activeRun: null, pendingInterrupt: null }
-    : parseAgentRun(value.activeRun, readReviews, version < 5);
-  if (!parsedRun) return null;
-  const canonicalPendingInterrupt = version === 5
-    ? value.pendingInterrupt === null
-      ? null
-      : parsePendingInterrupt(value.pendingInterrupt, readReviews)
-    : parsedRun.pendingInterrupt;
-  if (
-    version === 5
-    && (
-      value.pendingInterrupt === undefined
-      || (value.pendingInterrupt !== null && !canonicalPendingInterrupt)
-    )
-  ) return null;
+  const activeRun = value.activeRun === null ? null : parseAgentRun(value.activeRun);
+  if (value.activeRun !== null && !activeRun) return null;
+  const pendingInterrupt = value.pendingInterrupt === null
+    ? null
+    : parsePendingInterrupt(value.pendingInterrupt);
+  if (value.pendingInterrupt === undefined || (value.pendingInterrupt !== null && !pendingInterrupt)) return null;
   const actor = isRecord(value.actor)
     && typeof value.actor.label === 'string'
     && typeof value.actor.summary === 'string'
@@ -136,8 +112,8 @@ function parseAgentSession(
     sessionId: value.sessionId,
     kind: value.kind,
     timeline,
-    activeRun: parsedRun.activeRun,
-    pendingInterrupt: canonicalPendingInterrupt,
+    activeRun,
+    pendingInterrupt,
     ...(currentPlan !== undefined ? { currentPlan } : {}),
     ...(actor ? { actor } : {}),
     ...(runtime ? { runtime } : {}),
@@ -412,14 +388,7 @@ function parseOperationSource(
   };
 }
 
-function parseAgentRun(
-  value: unknown,
-  readReviews: ReviewSpecsReader,
-  allowLegacyPending: boolean,
-): {
-    activeRun: AgentRunView | null;
-    pendingInterrupt: PendingInterruptProjection | null;
-  } | null {
+function parseAgentRun(value: unknown): AgentRunView | null {
   if (
     !isRecord(value)
     || !isOptionalFiniteNumber(value.startedAt)
@@ -437,79 +406,40 @@ function parseAgentRun(
       typeof value.requestId !== 'string'
       || !isRunActivity(value.activity)
       || value.pendingInterrupt !== undefined
-      || value.reviewAction !== undefined
     ) return null;
     return {
-      activeRun: {
-        ...base,
-        requestId: value.requestId,
-        state: 'running',
-        activity: value.activity,
-      },
-      pendingInterrupt: null,
+      ...base,
+      requestId: value.requestId,
+      state: 'running',
+      activity: value.activity,
     };
-  }
-  if (allowLegacyPending && value.state === 'pending_interrupt') {
-    const pendingInterrupt = parsePendingInterrupt(value.pendingInterrupt, readReviews);
-    if (!pendingInterrupt || value.activity !== undefined) return null;
-    return { activeRun: null, pendingInterrupt };
-  }
-  // Snapshot compatibility: pre-PendingInterrupt projections used
-  // waiting_review + ReviewAction. Normalize them at the parser boundary.
-  if (allowLegacyPending && value.state === 'waiting_review') {
-    const pendingInterrupt = parseLegacyReviewAction(value.reviewAction, readReviews);
-    if (!pendingInterrupt || value.activity !== undefined) return null;
-    return { activeRun: null, pendingInterrupt };
   }
   if (value.state === 'interrupting') {
     if (
       typeof value.requestId !== 'string'
       || value.activity !== undefined
       || value.pendingInterrupt !== undefined
-      || value.reviewAction !== undefined
     ) return null;
     return {
-      activeRun: {
-        ...base,
-        requestId: value.requestId,
-        state: 'interrupting',
-      },
-      pendingInterrupt: null,
+      ...base,
+      requestId: value.requestId,
+      state: 'interrupting',
     };
   }
   return null;
 }
 
-function parsePendingInterrupt(
-  value: unknown,
-  readReviews: ReviewSpecsReader,
-): PendingInterruptProjection | null {
+function parsePendingInterrupt(value: unknown): PendingInterruptProjection | null {
   if (!isRecord(value)) return null;
   const payload = value.payload;
   if (!isRecord(payload)) return null;
   if (payload.kind !== 'human_review') return null;
-  const interactions = readReviews(payload.interactions);
+  const interactions = readReviewSpecs(payload.interactions);
   if (typeof value.interruptId !== 'string' || !interactions) {
     return null;
   }
   return {
     interruptId: value.interruptId,
-    payload: {
-      kind: 'human_review',
-      interactions,
-    },
-  };
-}
-
-function parseLegacyReviewAction(
-  value: unknown,
-  readReviews: ReviewSpecsReader,
-): PendingInterruptProjection | null {
-  if (!isRecord(value)) return null;
-  const interactions = readReviews(value.reviews);
-  if (typeof value.actionId !== 'string' || !interactions) return null;
-  return {
-    interruptId: value.actionId,
     payload: {
       kind: 'human_review',
       interactions,
@@ -524,55 +454,6 @@ function readReviewSpecs(value: unknown): HumanReviewRequest[] | null {
     return review ? [review] : [];
   });
   return reviews.length === value.length && reviews.length > 0 ? reviews : null;
-}
-
-function readLegacyReviewSpecs(value: unknown): HumanReviewRequest[] | null {
-  if (!Array.isArray(value)) return null;
-  const reviews = value.flatMap((item) => {
-    const review = parseHumanReviewRequest(item) ?? projectLegacyReviewSpec(item);
-    return review ? [review] : [];
-  });
-  return reviews.length === value.length && reviews.length > 0 ? reviews : null;
-}
-
-function projectLegacyReviewSpec(value: unknown): HumanReviewRequest | null {
-  if (
-    !isRecord(value)
-    || typeof value.id !== 'string'
-    || typeof value.schemaVersion !== 'number'
-    || !Number.isFinite(value.schemaVersion)
-    || !Array.isArray(value.options)
-    || !isJsonValue(value)
-  ) {
-    return null;
-  }
-  const options = value.options.map(projectLegacyReviewOption);
-  if (options.some((option) => option === null)) return null;
-  return parseHumanReviewRequest({
-    interactionId: value.id,
-    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
-    view: value.view,
-    options,
-  });
-}
-
-function projectLegacyReviewOption(value: unknown) {
-  if (!isRecord(value) || !isRecord(value.decision)) return null;
-  if (
-    value.decision.type !== 'approve'
-    && value.decision.type !== 'reject'
-    && value.decision.type !== 'respond'
-  ) {
-    return null;
-  }
-  return {
-    id: value.id,
-    label: value.label,
-    ...(value.description !== undefined ? { description: value.description } : {}),
-    ...(value.variant !== undefined ? { variant: value.variant } : {}),
-    ...(value.input !== undefined ? { input: value.input } : {}),
-    batchSubmission: value.decision.type === 'approve' ? 'defer' : 'immediate',
-  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

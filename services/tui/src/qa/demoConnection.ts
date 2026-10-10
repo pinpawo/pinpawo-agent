@@ -287,8 +287,7 @@ export function createDemoConnectionFactory(
         }
         if (message.type === 'runtime_config.update' && message.requestId) {
           toolAuthorizationMode = message.toolAuthorizationMode;
-          autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
-            ?? autoAuthorizationSafetyLevel;
+          autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel;
           session = {
             ...session,
             runtime: {

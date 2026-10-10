@@ -7,13 +7,10 @@ import {
   redirectConsoleToStdioDiagnostics,
 } from '../wire/stdioTransport';
 import { startLocalStdioServer } from '../chatStdioServer';
-import type { ServerMode } from '../config/serverMode';
 
 export type RunAgentOptions = {
   workdir?: string;
   stdio?: boolean;
-  /** This package is the Chat Host; retained in runtime projections as a literal. */
-  mode: ServerMode;
 };
 
 export function buildRunAgentRuntimeConfig(options: Pick<RunAgentOptions, 'workdir'>) {
@@ -51,18 +48,16 @@ export async function runAgent(options: RunAgentOptions) {
 
   try {
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
-    const mode = options.mode;
 
     // AgentHost shares capability supply via HostCapabilityAssembly and
     // adds Chat/ws-relay concerns on top.
-    runtime = new AgentHost(runtimeConfig, mode);
+    runtime = new AgentHost(runtimeConfig);
 
     // Init loads Toolkit definitions and starts their optional runtimes before
     // any local transport begins accepting execution requests.
     await runtime.init();
     logStartupConfig({
       mode: 'server',
-      serverMode: mode,
       workdir: runtimeConfig.workdir,
       petId: runtime.getPetConfig().petId,
       petName: runtime.getPetConfig().name,

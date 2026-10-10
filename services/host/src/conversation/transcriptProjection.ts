@@ -1,5 +1,6 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
+  isPublicConversationMessage,
   mainConversationMessages,
   readCapabilityExecutions,
   readAgentMessageCreatedAt,
@@ -21,6 +22,8 @@ import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } fr
  */
 
 export type TuiCheckpointMessage = {
+  /** The checkpoint message id; live events name the same message by it. */
+  id?: string;
   role: 'user' | 'assistant';
   resultReferences?: AgentResultReference[];
   /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
@@ -53,6 +56,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
     const resultReferences = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
       ? readReplyResultReferences(messages, message) : [];
     return [{
+      ...(message.id ? { id: message.id } : {}),
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
@@ -100,14 +104,7 @@ function readTuiCheckpointMessageSource(
 ): TuiCheckpointMessageSource | null {
   const type = message._getType();
   if (type !== 'human' && type !== 'ai') return null;
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  // Lane-tagged messages are internal Capability transcripts, never root
-  // conversation. Filter them before the human/ai split.
-  if (pinpawo && typeof pinpawo === 'object') {
-    if ('lane' in pinpawo || (pinpawo as Record<string, unknown>).synthetic === true) {
-      return null;
-    }
-  }
+  if (!isPublicConversationMessage(message)) return null;
   if (type === 'human') return { role: 'user' };
   return { role: 'assistant' };
 }

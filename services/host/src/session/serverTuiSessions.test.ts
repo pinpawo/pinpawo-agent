@@ -204,7 +204,7 @@ test('runtime config updates reach the next chat setup through the normalized de
     serverMode: 'chat',
     petId: 'pet-a',
     modelProfiles: createTestModelProfiles(),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-policy-update'),
     toolkitInventory: new HostToolkitInventoryStore(),
@@ -220,7 +220,7 @@ test('runtime config updates reach the next chat setup through the normalized de
 
   const beforeDeps = runtimeDeps.get();
   const before = service.buildChatSetup(beforeDeps, context);
-  runtimeDeps.updateReviewPolicy('auto_authorization', 'strict');
+  runtimeDeps.updateToolAuthorizationMode('auto_authorization', 'strict');
   const afterDeps = runtimeDeps.get();
   const after = service.buildChatSetup(afterDeps, context);
 

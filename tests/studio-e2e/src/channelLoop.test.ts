@@ -62,7 +62,7 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
     const graphConfig = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
     hosts.push(await createResidentPetHost({ petId, petName: 'Same name', runtimeConfig: config,
-      modelProfiles: createTestModelProfiles(), globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+      modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: config.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
         listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },

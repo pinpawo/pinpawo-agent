@@ -151,7 +151,7 @@ export async function createResidentPetRuntime(
     petName: options.petName,
     modelProfiles,
     runtimeConfig: options.runtimeConfig,
-    globalReviewPolicyMode: options.globalReviewPolicyMode,
+    toolAuthorizationMode: options.toolAuthorizationMode,
     autoAuthorizationSafetyLevel: options.autoAuthorizationSafetyLevel,
     chatCheckpointer: options.checkpointer,
     toolkitInventory: options.toolkitInventory,
@@ -276,7 +276,7 @@ export async function createResidentPetRuntime(
     petId: deps.petId, sessions, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
   });
   const localHandlers: ReturnType<typeof createChatHostHandlers> = createChatHostHandlers(runtimeDeps, {
-    persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
+    persistToolAuthorizationMode: options.persistToolAuthorizationMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,

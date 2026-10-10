@@ -26,7 +26,7 @@ import type {
   AgentSessionTurnResult,
 } from './agent/chatSessionAdapter';
 import { ServerTuiSessionService } from './session/serverTuiSessions';
-import { persistGlobalReviewPolicyMode } from './config/globalReviewPolicyConfig';
+import { persistToolAuthorizationMode } from './config/toolAuthorizationConfig';
 import { loadAgentContext } from './contextLoader';
 import {
   missingInputModalities,
@@ -77,7 +77,7 @@ export type ServerHandlers = {
 };
 
 export type ServerHandlerOptions = {
-  persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
+  persistToolAuthorizationMode?: typeof persistToolAuthorizationMode;
   /** Composition hook for embedded hosts and deterministic integration tests. */
   chatGraphService?: HostGraphService;
   /** Host-owned session service shared with another surface of the same resident Pet. */
@@ -689,21 +689,21 @@ export function createChatHostHandlers(
         try {
           const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
             ?? runtimeDeps.get().autoAuthorizationSafetyLevel;
-          (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
-            message.globalReviewPolicyMode,
+          (options.persistToolAuthorizationMode ?? persistToolAuthorizationMode)(
+            message.toolAuthorizationMode,
             autoAuthorizationSafetyLevel,
           );
-          runtimeDeps.updateReviewPolicy(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
+          runtimeDeps.updateToolAuthorizationMode(message.toolAuthorizationMode, autoAuthorizationSafetyLevel);
           if (message.requestId) {
             client.send({
               type: 'runtime_config.result',
               requestId: message.requestId,
-              globalReviewPolicyMode: message.globalReviewPolicyMode,
+              toolAuthorizationMode: message.toolAuthorizationMode,
               autoAuthorizationSafetyLevel,
             });
           }
           console.log(
-            `[chat-host] global review policy set to ${message.globalReviewPolicyMode}`
+            `[chat-host] tool authorization mode set to ${message.toolAuthorizationMode}`
               + ` (${autoAuthorizationSafetyLevel})`,
           );
         } catch (error) {

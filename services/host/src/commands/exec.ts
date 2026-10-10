@@ -282,8 +282,8 @@ export async function runExec(
   spawnHostProcess?: (options: ExecCommandOptions) => ExecHostProcess,
 ): Promise<ExecResult> {
   if (options.approval !== undefined) {
-    const { resolveGlobalReviewPolicyMode } = await import('../config/config');
-    if (!resolveGlobalReviewPolicyMode(options.approval)) {
+    const { resolveToolAuthorizationMode } = await import('../config/config');
+    if (!resolveToolAuthorizationMode(options.approval)) {
       throw new Error(`Unknown --approval policy "${options.approval}". Use full-access, auto, or require.`);
     }
   }

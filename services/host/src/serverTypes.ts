@@ -84,7 +84,7 @@ export type ChatSetupDeps =
 
 export type ServerRuntimeDepsStore = Readonly<{
   get: () => Readonly<ServerDeps>;
-  updateReviewPolicy: (
+  updateToolAuthorizationMode: (
     mode: ToolAuthorizationMode,
     safetyLevel: ToolAuthorizationSafetyLevel,
   ) => Readonly<ServerDeps>;
@@ -103,8 +103,8 @@ export function createChatHostDepsStore(
   let current = Object.freeze({ ...deps });
   return Object.freeze({
     get: () => current,
-    updateReviewPolicy: (globalReviewPolicyMode, autoAuthorizationSafetyLevel) => {
-      current = Object.freeze({ ...current, globalReviewPolicyMode, autoAuthorizationSafetyLevel });
+    updateToolAuthorizationMode: (toolAuthorizationMode, autoAuthorizationSafetyLevel) => {
+      current = Object.freeze({ ...current, toolAuthorizationMode, autoAuthorizationSafetyLevel });
       return current;
     },
   });

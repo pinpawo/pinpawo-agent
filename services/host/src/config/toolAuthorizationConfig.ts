@@ -10,7 +10,7 @@ import {
  * clients request the change through the shared protocol and never reach into
  * host storage directly.
  */
-export function persistGlobalReviewPolicyMode(
+export function persistToolAuthorizationMode(
   mode: ToolAuthorizationMode,
   safetyLevel: ToolAuthorizationSafetyLevel,
 ) {
@@ -20,7 +20,7 @@ export function persistGlobalReviewPolicyMode(
     auto_authorization_safety_level: safetyLevel,
   });
   setConfig({
-    globalReviewPolicyMode: mode,
+    toolAuthorizationMode: mode,
     autoAuthorizationSafetyLevel: safetyLevel,
   });
 }

@@ -98,7 +98,7 @@ export function buildHostRuntimeView(
       )),
     } : {}),
     requiredInputModalities: [...requiredInputModalities],
-    globalReviewPolicyMode: runtime.globalReviewPolicyMode,
+    toolAuthorizationMode: runtime.toolAuthorizationMode,
     autoAuthorizationSafetyLevel: runtime.autoAuthorizationSafetyLevel,
     ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
     ...(runtime.contextCompactionWatermarkTokens !== undefined

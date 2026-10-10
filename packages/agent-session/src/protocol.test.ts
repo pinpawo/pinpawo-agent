@@ -71,47 +71,47 @@ test('chat request parser rejects relative, duplicate, and excessive attachments
 test('runtime config protocol supports legacy updates and correlated acknowledgements', () => {
   assert.deepEqual(parseAgentClientMessage({
     type: 'runtime_config.update',
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
   }), {
     type: 'runtime_config.update',
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
   });
   assert.deepEqual(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   }), {
     type: 'runtime_config.update',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 'policy-invalid-level',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'balanced',
   }), null);
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 42,
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
   }), null);
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: '',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
   }), null);
   assert.deepEqual(parseAgentServerMessage({
     type: 'runtime_config.result',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   }), {
     type: 'runtime_config.result',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.deepEqual(parseAgentServerMessage({

@@ -37,12 +37,12 @@ export function createDemoConnectionFactory(
     let connected = false;
     let newSessionIndex = 0;
     let observedAt = 1_000;
-    let globalReviewPolicyMode: ToolAuthorizationMode =
+    let toolAuthorizationMode: ToolAuthorizationMode =
       'require_authorization';
     let autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict';
     let session = createDemoSession(
       options,
-      globalReviewPolicyMode,
+      toolAuthorizationMode,
       autoAuthorizationSafetyLevel,
     );
     const schedule = options.schedule ?? ((callback, delayMs) => (
@@ -166,7 +166,7 @@ export function createDemoConnectionFactory(
             pendingInterrupt: null,
             runtime: {
               ...DEMO_RUNTIME,
-              globalReviewPolicyMode,
+              toolAuthorizationMode,
               autoAuthorizationSafetyLevel,
             },
           };
@@ -201,7 +201,7 @@ export function createDemoConnectionFactory(
             pendingInterrupt: null,
             runtime: {
               ...DEMO_RUNTIME,
-              globalReviewPolicyMode,
+              toolAuthorizationMode,
               autoAuthorizationSafetyLevel,
             },
           };
@@ -286,14 +286,14 @@ export function createDemoConnectionFactory(
           });
         }
         if (message.type === 'runtime_config.update' && message.requestId) {
-          globalReviewPolicyMode = message.globalReviewPolicyMode;
+          toolAuthorizationMode = message.toolAuthorizationMode;
           autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
             ?? autoAuthorizationSafetyLevel;
           session = {
             ...session,
             runtime: {
               ...(session.runtime ?? {}),
-              globalReviewPolicyMode,
+              toolAuthorizationMode,
               autoAuthorizationSafetyLevel,
             },
           };
@@ -302,7 +302,7 @@ export function createDemoConnectionFactory(
             handlers.onMessage({
               type: 'runtime_config.result',
               requestId: message.requestId!,
-              globalReviewPolicyMode,
+              toolAuthorizationMode,
               autoAuthorizationSafetyLevel,
             });
           });
@@ -315,7 +315,7 @@ export function createDemoConnectionFactory(
 
 function createDemoSession(
   options: DemoConnectionOptions,
-  globalReviewPolicyMode: ToolAuthorizationMode,
+  toolAuthorizationMode: ToolAuthorizationMode,
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
 ): AgentSession {
   return {
@@ -379,7 +379,7 @@ function createDemoSession(
       : null,
     runtime: {
       ...DEMO_RUNTIME,
-      globalReviewPolicyMode,
+      toolAuthorizationMode,
       autoAuthorizationSafetyLevel,
     },
   };

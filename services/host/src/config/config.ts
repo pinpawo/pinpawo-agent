@@ -73,7 +73,7 @@ function getBoolean(envKey: string, storedKey: keyof typeof stored): boolean | u
   return resolveBooleanConfigValue(process.env[envKey], stored[storedKey]);
 }
 
-export function resolveGlobalReviewPolicyMode(raw: string | undefined): ToolAuthorizationMode | undefined {
+export function resolveToolAuthorizationMode(raw: string | undefined): ToolAuthorizationMode | undefined {
   const normalized = raw?.trim().toLowerCase().replace(/_/g, '-');
   if (!normalized) return undefined;
   if ([
@@ -111,9 +111,9 @@ export function resolveGlobalReviewPolicyMode(raw: string | undefined): ToolAuth
   return undefined;
 }
 
-function getGlobalReviewPolicyMode(): ToolAuthorizationMode {
-  return resolveGlobalReviewPolicyMode(process.env.PINPAWO_GLOBAL_REVIEW_POLICY)
-    ?? resolveGlobalReviewPolicyMode(typeof stored.global_review_policy === 'string'
+function getToolAuthorizationMode(): ToolAuthorizationMode {
+  return resolveToolAuthorizationMode(process.env.PINPAWO_GLOBAL_REVIEW_POLICY)
+    ?? resolveToolAuthorizationMode(typeof stored.global_review_policy === 'string'
       ? stored.global_review_policy
       : undefined)
     ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
@@ -137,7 +137,7 @@ export type Config = Readonly<{
   modelProfileFingerprint: string;
   structuredOutputAutoRepair?: boolean;
   structuredOutputRepairMaxRetries?: number;
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   hostPort: number;
@@ -168,7 +168,7 @@ function readConfigDefaults(): Config {
       'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
       'structured_output_repair_max_retries',
     ),
-    globalReviewPolicyMode: getGlobalReviewPolicyMode(),
+    toolAuthorizationMode: getToolAuthorizationMode(),
     autoAuthorizationSafetyLevel: getAutoAuthorizationSafetyLevel(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
     hostPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),

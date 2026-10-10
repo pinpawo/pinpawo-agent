@@ -14,7 +14,7 @@ import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
 import { prepareReviewDecision } from './reviewDecision';
 import {
   RuntimeConfigCoordinator,
-  type UpdateGlobalReviewPolicyResult,
+  type UpdateToolAuthorizationModeResult,
 } from './runtimeConfigCoordinator';
 import {
   SessionCommandCoordinator,
@@ -50,7 +50,7 @@ export type {
   StartNewSessionResult,
 } from './sessionCommandCoordinator';
 export type {
-  UpdateGlobalReviewPolicyResult,
+  UpdateToolAuthorizationModeResult,
 } from './runtimeConfigCoordinator';
 export {
   ModelProfileCommandError,
@@ -180,12 +180,12 @@ export class TuiSessionController {
       requestIdFactory: this.requestIdFactory,
       send: (message) => this.transport.send(message),
       getUnavailableReason: () => this.runtimeConfigUpdateUnavailable(),
-      onUpdated: (globalReviewPolicyMode, autoAuthorizationSafetyLevel) => {
+      onUpdated: (toolAuthorizationMode, autoAuthorizationSafetyLevel) => {
         this.updateSession({
           ...this.state.session,
           runtime: {
             ...this.state.session.runtime,
-            globalReviewPolicyMode,
+            toolAuthorizationMode,
             autoAuthorizationSafetyLevel,
           },
         });
@@ -368,12 +368,12 @@ export class TuiSessionController {
     });
   }
 
-  updateGlobalReviewPolicy(
-    globalReviewPolicyMode: ToolAuthorizationMode,
+  updateToolAuthorizationMode(
+    toolAuthorizationMode: ToolAuthorizationMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
-  ): Promise<UpdateGlobalReviewPolicyResult> {
-    return this.runtimeConfig.updateGlobalReviewPolicy(
-      globalReviewPolicyMode,
+  ): Promise<UpdateToolAuthorizationModeResult> {
+    return this.runtimeConfig.updateToolAuthorizationMode(
+      toolAuthorizationMode,
       autoAuthorizationSafetyLevel,
     );
   }

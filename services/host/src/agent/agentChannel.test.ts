@@ -336,7 +336,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    hostConfig: resolveHostExecutionConfig(buildHostRuntimeConfig('/tmp'), {globalReviewPolicyMode: 'auto_authorization', autoAuthorizationSafetyLevel: 'relaxed'}),
+    hostConfig: resolveHostExecutionConfig(buildHostRuntimeConfig('/tmp'), {toolAuthorizationMode: 'auto_authorization', autoAuthorizationSafetyLevel: 'relaxed'}),
     llmConfig: {
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
@@ -520,11 +520,11 @@ test('Host resolves workdir once and keeps tracing attribution out of Agent inpu
 test('explicit Host snapshots override changing process defaults at the Agent boundary', () => {
   const previous = getConfig();
   const host = resolveHostExecutionConfig(buildHostRuntimeConfig(`/tmp/${randomUUID()}`), {
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
   });
   try {
-    setConfig({ workdir: '/unrelated-process-dir', globalReviewPolicyMode: 'full_access',
+    setConfig({ workdir: '/unrelated-process-dir', toolAuthorizationMode: 'full_access',
       autoAuthorizationSafetyLevel: 'relaxed' });
     const setup = buildTestLocalChatAgentInput({
       context: createContext(), userMessage: 'inspect', hostConfig: host,

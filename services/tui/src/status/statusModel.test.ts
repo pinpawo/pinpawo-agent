@@ -19,7 +19,7 @@ test('status model renders connection, model, token usage, context, and compact 
       runtime: {
         model: 'gpt-test',
         modelProfileLabel: 'Primary coding',
-        globalReviewPolicyMode: 'require_authorization',
+        toolAuthorizationMode: 'require_authorization',
         cwd: '/Users/me/project',
         contextWindow: 128_000,
         contextCompactionWatermarkTokens: 72_000,

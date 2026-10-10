@@ -5,7 +5,7 @@ import type { HostRuntimeConfig } from './runtimeConfig';
 /** Resolved Host settings. Consumers never consult process defaults. */
 export type HostExecutionConfig = Readonly<{
   runtimeConfig: HostRuntimeConfig;
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 }>;
 
@@ -16,7 +16,7 @@ export function resolveHostExecutionConfig(
 ): HostExecutionConfig {
   return Object.freeze({
     runtimeConfig,
-    globalReviewPolicyMode: settings.globalReviewPolicyMode,
+    toolAuthorizationMode: settings.toolAuthorizationMode,
     autoAuthorizationSafetyLevel: settings.autoAuthorizationSafetyLevel,
   });
 }

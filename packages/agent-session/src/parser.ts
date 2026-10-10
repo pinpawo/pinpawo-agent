@@ -228,8 +228,8 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     return null;
   }
   if (
-    value.globalReviewPolicyMode !== undefined
-    && !isToolAuthorizationMode(value.globalReviewPolicyMode)
+    value.toolAuthorizationMode !== undefined
+    && !isToolAuthorizationMode(value.toolAuthorizationMode)
   ) {
     return null;
   }
@@ -265,8 +265,8 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
             value.requiredInputModalities as AgentRuntimeView['requiredInputModalities'],
         }
       : {}),
-    ...(isToolAuthorizationMode(value.globalReviewPolicyMode)
-      ? { globalReviewPolicyMode: value.globalReviewPolicyMode }
+    ...(isToolAuthorizationMode(value.toolAuthorizationMode)
+      ? { toolAuthorizationMode: value.toolAuthorizationMode }
       : {}),
     ...(isToolAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
       ? { autoAuthorizationSafetyLevel: value.autoAuthorizationSafetyLevel }

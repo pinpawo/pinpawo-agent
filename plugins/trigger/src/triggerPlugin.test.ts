@@ -177,7 +177,7 @@ test('Trigger request templates reject invalid expressions and duplicate context
 
 test('a channel-bound Trigger posts into its Channel and the Pet runs there', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  const channel = createChannelPlugin({ inputUsers: { 'nightly-report': 'studio-operator', relay: 'studio-operator' }, databasePath: ':memory:', httpRoute: false });
   channel.service.init();
   const { channelId } = channel.service.createChannel(
     { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },
@@ -213,11 +213,11 @@ test('a channel-bound Trigger posts into its Channel and the Pet runs there', as
   // The run is the Channel's: its session and scope, with the Trigger as author.
   assert.deepEqual(input?.scope, { namespace: 'channel', id: channelId });
   assert.ok(input?.session?.id);
-  assert.match(input!.request, /"participantId": "bot:nightly-report"/);
+  assert.match(input!.request, /"participantId": "human:studio-operator"/);
   assert.match(input!.request, /Report on task-7/);
   const messages = channel.service.readHistory(channelId).entries.filter((entry) => entry.kind === 'message');
   assert.equal(messages.length, 1);
-  assert.deepEqual(messages[0]?.author, { kind: 'bot', id: 'nightly-report' });
+  assert.deepEqual(messages[0]?.author, { kind: 'human', id: 'studio-operator', actorId: 'nightly-report' });
   assert.equal((await trigger.service.snapshot()).deliveries[0]?.status, 'accepted');
 });
 
@@ -252,7 +252,7 @@ test('a channel-bound Trigger fails its delivery when no Channel Plugin runs', a
 
 test('event data in a channel-bound request cannot address a Pet the rule does not target', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  const channel = createChannelPlugin({ inputUsers: { 'nightly-report': 'studio-operator', relay: 'studio-operator' }, databasePath: ':memory:', httpRoute: false });
   channel.service.init();
   const { channelId } = channel.service.createChannel(
     { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },

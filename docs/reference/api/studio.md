@@ -92,15 +92,18 @@ only; a reconnect rebuilds from the checkpoint snapshot.
 
 ## Channel messages and addressing
 
-Channel contributes these routes to the HTTP Plugin under Studio Bearer:
+Channel contributes these routes to the HTTP Plugin under authenticated Studio or Channel Bearer:
 
 | Route | Input / result |
 |---|---|
-| `GET /channels` | Paginated current goals. |
+| `GET /channels/viewer` | Authenticated viewerParticipantId and channelOnly. |
+| `GET /channels` | Paginated current goals for the authenticated user’s memberships. |
 | `POST /channels` | `title`, `goal`, `scope`, optional references. |
 | `POST /channels/revisions` | `channelId`, goal fields, `expectedRevision`, `reason`, optional `sourceMessageId`. |
-| `GET /channels/participants` | Registry plus viewerParticipantId. |
-| `GET /channels/context?channelId=...` | Current revision, bindings, paginated history and participants. |
+| `GET /channels/participants?channelId=...` | Active members plus viewerParticipantId; unscoped directory is operator-only. |
+| `GET /channels/members?channelId=...` | Persistent membership states; operator also receives available participants. |
+| `POST /channels/members` | Operator-only `{channelId, kind: "human" \| "pet", id, active}`; default operator cannot be removed. |
+| `GET /channels/context?channelId=...` | Current revision, bindings, paginated history, active participants and historicalParticipants. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
 | `POST /channels/execute` | Legacy action with an explicit `petId` or `mentions` (`replyTo` only quotes); admission receipt and binding. |
 | `GET /channels/executions?channelId=...` | Per-target lifecycle / failure observations, not queue state. |
@@ -152,3 +155,10 @@ usage guidance for the project Node.js CLI. `pinpawo-studio channels`,
 HTTP endpoints; they do not start a Host. The former Python helper has been
 replaced. See the [CLI commands](../../../packages/studio/README.md#operate-a-running-host)
 for connection flags and pagination.
+
+Channel-only bearer credentials are bound to a user by the Channel Plugin’s configuration.
+They do not authorize global Studio events, Pet sessions, or dispatch APIs. Reads and
+writes require current Channel membership; authors and optional actorId are assigned
+from authentication, never accepted in message bodies. `human` is the user identity’s
+serialization name; it is independent of a model’s HumanMessage role. A user mention
+records a recipient without automatically executing an external agent.

@@ -3,7 +3,7 @@ import type { Nodes } from 'mdast';
 import { z } from 'zod';
 
 export type ChannelParticipant = {
-  participantId: string; kind: 'human' | 'pet' | 'bot'; id: string; label: string;
+  participantId: string; kind: 'human' | 'pet'; id: string; label: string; active?: boolean;
 };
 export const channelMentionSchema = z.object({
   participantId: z.string().trim().min(1).max(1024).optional(),
@@ -13,7 +13,7 @@ export const channelMentionSchema = z.object({
 }).strict().refine(value => Boolean(value.participantId) !== Boolean(value.petId), 'A mention needs one unique identity.');
 export type ChannelMention = z.infer<typeof channelMentionSchema>;
 
-export function channelParticipantId(kind: ChannelParticipant['kind'], id: string): string {
+export function channelParticipantId(kind: ChannelParticipant['kind'] | 'bot', id: string): string {
   // encodeURIComponent leaves Markdown delimiters such as parentheses intact.
   // Encode them too so every registered identity is safe in a direct link.
   const encoded = encodeURIComponent(id).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);

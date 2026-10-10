@@ -5,6 +5,7 @@ import type { ChannelMessage } from './channelService';
 export function channelDispatchInput(message: ChannelMessage, original?: ChannelMessage): string {
   const author = (entry: ChannelMessage) => ({
     participantId: channelParticipantId(entry.author.kind, entry.author.id), kind: entry.author.kind,
+    ...('actorId' in entry.author && entry.author.actorId ? { actorId: entry.author.actorId } : {}),
   });
   const input = JSON.stringify({
     type: 'channel_message', version: 1,

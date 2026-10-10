@@ -170,3 +170,11 @@ test('Studio and Agent Session origins remain separate and network mutations are
   });
   assert.equal(attempts, 1);
 });
+
+test('Channel member commands scope the registry and restrict mutation arguments', () => {
+  assert.equal(parseStudioOperatorArgs(['channels', 'participants', 'c'])?.id, 'c');
+  assert.equal(parseStudioOperatorArgs(['channels', 'members', 'c'])?.action, 'members');
+  assert.equal(parseStudioOperatorArgs(['channels', 'member', 'c', '--file', '-'])?.file, '-');
+  assert.throws(() => parseStudioOperatorArgs(['channels', 'member', 'c']), /--file/);
+  assert.throws(() => parseStudioOperatorArgs(['channels', 'member', 'c', '--file', '-', '--mention', 'pet:p']), /Unknown option/);
+});

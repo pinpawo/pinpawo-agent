@@ -8,7 +8,8 @@ import { channelMentionSchema, channelMentionId, type ChannelMention } from './c
 
 const identifier = z.string().trim().min(1).max(256);
 export const channelAuthorSchema = z.object({
-  kind: z.enum(['human', 'bot', 'pet']),
+  kind: z.enum(['human', 'pet']),
+  actorId: identifier.optional(),
   id: identifier,
 }).strict();
 export const artifactReferenceSchema = z.object({
@@ -38,8 +39,12 @@ export const channelPageSchema = z.object({
   limit: z.number().int().min(1).max(200).default(50),
 }).strict();
 export type ChannelAuthor = z.infer<typeof channelAuthorSchema>;
+/** Old journal sources remain readable, never new addressable members. */
+export type ChannelStoredAuthor = ChannelAuthor | { kind: 'bot'; id: string };
+export type ChannelMember = { kind: 'human' | 'pet'; id: string; active: boolean };
+export type ChannelUser = { id: string; label: string };
 export type ChannelRevision = z.infer<typeof channelGoalSchema> & {
-  kind: 'revision'; channelId: string; sequence: number; author: ChannelAuthor;
+  kind: 'revision'; channelId: string; sequence: number; author: ChannelStoredAuthor;
   occurredAt: string; reason: string; sourceMessageId?: string;
 };
 export type ChannelSessionBinding = { channelId: string; petId: string; sessionId: string; registered: boolean };
@@ -63,7 +68,7 @@ export type ChannelMessage = z.infer<typeof channelMessageSchema> & {
   /** Tools the Pet called in this message, in their own shape; the body may then be empty. */
   toolCalls?: ChannelToolCall[];
   kind: 'message'; channelId: string; sequence: number; messageId: string;
-  author: ChannelAuthor; occurredAt: string; revision: number;
+  author: ChannelStoredAuthor; occurredAt: string; revision: number;
 };
 /** Historical observation only, never an authoritative approval state. */
 export type ChannelInterruptNotification = {
@@ -84,6 +89,8 @@ export type ChannelExecution = {
  */
 export class ChannelService {
   private db: DatabaseSync | undefined;
+  private defaultMembers: ChannelMember[] = [];
+  private inputUsers: Record<string, string> = {};
   private observerId = randomUUID();
   private readonly listeners = new Set<(entry: ChannelEntry) => void>();
 
@@ -97,7 +104,7 @@ export class ChannelService {
       if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
       db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
       const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (![0, 1, 2, 3, 4, 5].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
+      if (![0, 1, 2, 3, 4, 5, 6].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS channel_entries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,7 +146,13 @@ export class ChannelService {
           message_id TEXT NOT NULL, call_id TEXT NOT NULL, status TEXT NOT NULL,
           PRIMARY KEY(message_id, call_id)
         );
-        PRAGMA user_version=5;
+        CREATE TABLE IF NOT EXISTS channel_users (id TEXT PRIMARY KEY, label TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS channel_members (
+          channel_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('human', 'pet')),
+          id TEXT NOT NULL, active INTEGER NOT NULL, PRIMARY KEY(channel_id, kind, id)
+        );
+        CREATE TABLE IF NOT EXISTS channel_members_initialized (channel_id TEXT PRIMARY KEY);
+        PRAGMA user_version=6;
       `);
       this.observerId = randomUUID();
       this.db = db;
@@ -155,6 +168,9 @@ export class ChannelService {
     if (!row) return null;
     const value = row as { sequence: number; data: string };
     const entry = { ...JSON.parse(value.data), sequence: value.sequence } as ChannelEntry;
+    if (entry.author.kind === 'bot' && Object.hasOwn(this.inputUsers, entry.author.id)) {
+      entry.author = { kind: 'human', id: this.inputUsers[entry.author.id]!, actorId: entry.author.id };
+    }
     if (entry.kind !== 'message' || !entry.toolCalls) return entry;
     // The message is the journal's; each call's outcome is observed afterwards.
     const statuses = new Map((this.database().prepare('SELECT call_id, status FROM channel_tool_calls WHERE message_id=?')
@@ -184,6 +200,60 @@ export class ChannelService {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
+  configureMembers(operator: ChannelUser, pets: { petId: string }[], users: ChannelUser[] = [], inputUsers: Record<string, string> = {}): void {
+    this.inputUsers = inputUsers;
+    for (const user of [operator, ...users]) this.upsertUser(user);
+    this.defaultMembers = [{ kind: 'human', id: operator.id, active: true },
+      ...pets.map(pet => ({ kind: 'pet' as const, id: pet.petId, active: true }))];
+  }
+  upsertUser(user: ChannelUser): void {
+    this.database().prepare('INSERT INTO channel_users(id,label) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET label=excluded.label')
+      .run(identifier.parse(user.id), z.string().trim().min(1).max(500).parse(user.label));
+  }
+  listUsers(): ChannelUser[] {
+    return this.database().prepare('SELECT id,label FROM channel_users ORDER BY id').all() as ChannelUser[];
+  }
+  private initializeMembers(channelId: string, inTransaction = false): void {
+    channelId = this.getChannel(channelId).channelId;
+    if (this.database().prepare('SELECT 1 FROM channel_members_initialized WHERE channel_id=?').get(channelId)) return;
+    const initialize = () => {
+      if (this.database().prepare('SELECT 1 FROM channel_members_initialized WHERE channel_id=?').get(channelId)) return;
+      const members = [...this.defaultMembers];
+      const rows = this.database().prepare('SELECT data FROM channel_entries WHERE channel_id=?').all(channelId) as { data: string }[];
+      for (const row of rows) {
+        const author = JSON.parse(row.data).author as ChannelStoredAuthor;
+        if (author.kind === 'pet') members.push({ kind: 'pet', id: author.id, active: true });
+        if (author.kind === 'bot' && Object.hasOwn(this.inputUsers, author.id)) members.push({ kind: 'human', id: this.inputUsers[author.id]!, active: true });
+        if (author.kind === 'human') {
+          members.push({ kind: 'human', id: author.id, active: true });
+          this.database().prepare('INSERT OR IGNORE INTO channel_users(id,label) VALUES (?,?)').run(author.id, author.id);
+        }
+      }
+      for (const row of this.database().prepare('SELECT pet_id FROM channel_sessions WHERE channel_id=?').all(channelId) as { pet_id: string }[]) members.push({ kind: 'pet', id: row.pet_id, active: true });
+      for (const member of members) this.database().prepare('INSERT OR IGNORE INTO channel_members VALUES (?,?,?,?)')
+        .run(channelId, member.kind, member.id, 1);
+      this.database().prepare('INSERT INTO channel_members_initialized VALUES (?)').run(channelId);
+    };
+    if (inTransaction) initialize(); else this.transaction(initialize);
+  }
+  listMembers(channelId: string): ChannelMember[] {
+    channelId = this.getChannel(channelId).channelId;
+    this.initializeMembers(channelId);
+    return (this.database().prepare('SELECT kind,id,active FROM channel_members WHERE channel_id=? ORDER BY kind,id')
+      .all(channelId) as { kind: ChannelMember['kind']; id: string; active: number }[]).map(member => ({ ...member, active: !!member.active }));
+  }
+  requireMember(channelId: string, author: ChannelAuthor): void {
+    if (!this.listMembers(channelId).some(member => member.active && member.kind === author.kind && member.id === author.id)) {
+      throw new Error('Channel membership required.');
+    }
+  }
+  setMember(channelId: string, member: ChannelMember): void {
+    channelId = this.getChannel(channelId).channelId;
+    this.initializeMembers(channelId);
+    if (member.kind === 'human' && !this.listUsers().some(user => user.id === member.id)) throw new Error('Unknown Channel user.');
+    this.database().prepare('INSERT INTO channel_members VALUES (?,?,?,?) ON CONFLICT(channel_id,kind,id) DO UPDATE SET active=excluded.active')
+      .run(channelId, z.enum(['human', 'pet']).parse(member.kind), identifier.parse(member.id), member.active ? 1 : 0);
+  }
   getChannel(channelId: string): ChannelRevision {
     const id = identifier.parse(channelId);
     const entry = this.decode(this.database().prepare(
@@ -192,21 +262,25 @@ export class ChannelService {
     if (!entry) throw new Error(`Unknown Channel "${id}".`);
     return entry as ChannelRevision;
   }
-  listChannels(page: unknown = {}): { channels: ChannelRevision[]; nextAfter: number; hasMore: boolean } {
+  listChannels(page: unknown = {}, userId?: string): { channels: ChannelRevision[]; nextAfter: number; hasMore: boolean } {
     const { after, limit } = channelPageSchema.parse(page);
+    if (userId) for (const row of this.database().prepare('SELECT DISTINCT e.channel_id FROM channel_entries e WHERE NOT EXISTS (SELECT 1 FROM channel_members_initialized m WHERE m.channel_id=e.channel_id)').all() as { channel_id: string }[]) this.initializeMembers(row.channel_id);
     // Page by immutable creation sequence; revisions cannot move a Channel across pages.
     const rows = this.database().prepare(`SELECT MIN(sequence) AS created, channel_id FROM channel_entries
-      WHERE kind='revision' GROUP BY channel_id HAVING MIN(sequence)>? ORDER BY created LIMIT ?`).all(after, limit + 1) as { created: number; channel_id: string }[];
+      WHERE kind='revision' AND (? IS NULL OR EXISTS (SELECT 1 FROM channel_members m WHERE m.channel_id=channel_entries.channel_id AND m.kind='human' AND m.id=? AND m.active=1)) GROUP BY channel_id HAVING MIN(sequence)>? ORDER BY created LIMIT ?`).all(userId ?? null, userId ?? null, after, limit + 1) as { created: number; channel_id: string }[];
     const selected = rows.slice(0, limit);
     return { channels: selected.map((row) => this.getChannel(row.channel_id)), nextAfter: selected.at(-1)?.created ?? after, hasMore: rows.length > limit };
   }
   createChannel(input: unknown, author: ChannelAuthor): ChannelRevision {
     const goal = channelGoalSchema.parse(input);
     const trustedAuthor = channelAuthorSchema.parse(author);
-    const entry = this.transaction(() => this.append({
-      ...goal, kind: 'revision', channelId: randomUUID(), author: trustedAuthor,
-      occurredAt: new Date().toISOString(), reason: 'created',
-    })) as ChannelRevision;
+    const entry = this.transaction(() => {
+      const created = this.append({ ...goal, kind: 'revision', channelId: randomUUID(), author: trustedAuthor,
+        occurredAt: new Date().toISOString(), reason: 'created' }) as ChannelRevision;
+      if (trustedAuthor.kind === 'human') this.database().prepare('INSERT OR IGNORE INTO channel_users(id,label) VALUES (?,?)').run(trustedAuthor.id, trustedAuthor.id);
+      if (this.defaultMembers.length) this.initializeMembers(created.channelId, true);
+      return created;
+    });
     return this.publish(entry);
   }
   reviseChannel(channelId: string, input: unknown, author: ChannelAuthor): ChannelRevision {

@@ -107,7 +107,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
 
 test('a channel-bound schedule posts into its Channel and the Pet runs there', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  const channel = createChannelPlugin({ inputUsers: { scheduler: 'studio-operator' }, databasePath: ':memory:', httpRoute: false });
   channel.service.init();
   const { channelId } = channel.service.createChannel(
     { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },
@@ -131,9 +131,9 @@ test('a channel-bound schedule posts into its Channel and the Pet runs there', a
   assert.equal(dispatched.length, 1);
   assert.deepEqual(dispatched[0]?.scope, { namespace: 'channel', id: channelId });
   assert.ok(dispatched[0]?.session?.id);
-  assert.match(dispatched[0]!.request, /"participantId": "bot:scheduler"/);
+  assert.match(dispatched[0]!.request, /"participantId": "human:studio-operator"/);
   const messages = channel.service.readHistory(channelId).entries.filter((entry) => entry.kind === 'message');
-  assert.deepEqual(messages.map((message) => message.author), [{ kind: 'bot', id: 'scheduler' }]);
+  assert.deepEqual(messages.map((message) => message.author), [{ kind: 'human', id: 'studio-operator', actorId: 'scheduler' }]);
   assert.equal((await scheduler.service.get(schedule.scheduleId))?.status, 'dispatched');
 });
 
@@ -165,7 +165,7 @@ for (const order of ['scheduler first', 'channel first'] as const) {
   test(`a channel-bound schedule that fell due while stopped is delivered on restart (${order})`, async (t) => {
     const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-scheduler-restart-'));
     const databasePath = path.join(root, 'scheduler.sqlite');
-    const channel = createChannelPlugin({ databasePath: path.join(root, 'channels.sqlite'), httpRoute: false });
+    const channel = createChannelPlugin({ inputUsers: { scheduler: 'studio-operator' }, databasePath: path.join(root, 'channels.sqlite'), httpRoute: false });
     channel.service.init();
     const { channelId } = channel.service.createChannel(
       { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },

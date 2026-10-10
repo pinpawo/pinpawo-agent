@@ -204,3 +204,44 @@ After a Studio Host has built a Studio for a workdir, it keeps that resident ins
 restart the host to pick up configuration changes.
 
 For dispatch, gate, and event behavior, read the [Studio API](../reference/api/studio.md).
+
+## Channel users and members
+
+Channel Plugin options support `users: [{id, label}]`,
+`credentials: [{userId, tokenHash, actorId?}]`, and `inputUsers: {sourceId: userId}`.
+`tokenHash` is the 64-character hex SHA-256 digest of a separately provisioned,
+random Channel bearer token; do not use the Host operator token or commit raw tokens.
+A credential’s user must exist in `users` or be the local `operatorId` (default
+`studio-operator`). Multiple client credentials can bind the same user; actorId
+records the client source and never adds an addressable member. Remove a credential
+and restart the Host to revoke it; no credential creation API is introduced.
+These options require a deliberate operator configuration change; upgrades do not
+create user credentials or change running Host settings automatically.
+
+The local operator adds or removes members in Console’s Members section or with:
+
+```sh
+pinpawo-studio channels members CHANNEL_ID
+pinpawo-studio channels member CHANNEL_ID --file member.json
+pinpawo-studio channels participants CHANNEL_ID --token-file /path/to/user-token
+```
+
+`member.json` contains `{"kind":"human","id":"second-user","active":true}`
+(or kind `pet`). The user must be configured first. IDs remain stable when labels
+change. Membership revocation blocks Channel reads and new writes; historical
+messages and accepted output are retained. User credentials connect to the same
+Console, which displays only their Channels and refreshes stored history every two
+seconds. It does not subscribe to the global event stream or offer Pet session reviews.
+
+Schema v6 adds users and memberships without rewriting journal entries. Existing
+Channels initialize once with the local operator, historical human authors, historical
+and bound Pets, and currently configured Pets; future configured Pets are added
+explicitly. New Channels include the operator, creator, and current Pets. Removed
+members stay removed on restart. Old human identity links and petId mentions remain
+valid. Unmapped bot history stays readable as legacy source data without new access.
+For existing Channel-bound Plugin inputs, explicitly map each source ID to its
+representing user in `inputUsers` and add that user to the Channel. The mapping also
+projects historical bot authors to that user while preserving original journal bytes;
+changing it deliberately changes that source’s historical ownership projection.
+Unmapped new Plugin inputs fail rather than guessing an owner. This changes ownership
+only, with no new scheduler or trigger behavior.

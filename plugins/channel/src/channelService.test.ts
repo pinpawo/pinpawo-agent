@@ -332,3 +332,38 @@ test('a Pet tool-call message keeps its calls as written, settles in place and a
     assert.throws(() => service.recordToolCallMessage(channelId, source, { messageId: 'm3', text: '', toolCalls: [] }));
   } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('membership persists across restart and v5 migration preserves raw legacy bot journal with explicit user projection', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-members-migrate-'));
+  const file = path.join(root, 'channel.sqlite');
+  let service = new ChannelService(file); service.init();
+  try {
+    const c = service.createChannel(goal, human);
+    const message = service.sendMessage(c.channelId, { body: '[@Owner](participant:human:owner)' }, human);
+    const binding = service.reserveBinding(c.channelId, 'executor', () => 'executor:12345678');
+    service.close();
+    const db = new DatabaseSync(file);
+    const legacy = { ...message, author: { kind: 'bot', id: 'legacy-client' } };
+    const raw = JSON.stringify(legacy);
+    db.prepare('UPDATE channel_entries SET data=? WHERE message_id=?').run(raw, message.messageId);
+    db.exec('DROP TABLE channel_users; DROP TABLE channel_members; DROP TABLE channel_members_initialized; PRAGMA user_version=5;'); db.close();
+    service = new ChannelService(file); service.init();
+    service.configureMembers({ id: 'owner', label: 'Owner' }, [{ petId: 'executor' }], [{ id: 'other', label: 'Owner' }]);
+    assert.deepEqual(service.getMessage(c.channelId, message.messageId).author, { kind: 'bot', id: 'legacy-client' });
+    assert.deepEqual(service.listMembers(c.channelId).map(m => m.kind), ['human', 'pet']);
+    service.setMember(c.channelId, { kind: 'human', id: 'other', active: true });
+    service.setMember(c.channelId, { kind: 'pet', id: 'executor', active: false });
+    service.close(); service = new ChannelService(file); service.init();
+    service.configureMembers({ id: 'owner', label: 'Renamed' }, [{ petId: 'executor' }], [], { 'legacy-client': 'owner' });
+    assert.deepEqual(service.getMessage(c.channelId, message.messageId).author, { kind: 'human', id: 'owner', actorId: 'legacy-client' });
+    assert.equal(service.getMessage(c.channelId, message.messageId).sequence, message.sequence);
+    assert.equal(service.getBinding(c.channelId, 'executor')?.sessionId, binding.sessionId);
+    assert.equal(service.listMembers(c.channelId).find(m => m.id === 'executor')?.active, false);
+    assert.equal(service.listMembers(c.channelId).find(m => m.id === 'other')?.active, true);
+    assert.equal(service.listUsers().find(u => u.id === 'owner')?.label, 'Renamed');
+    service.close();
+    const verify = new DatabaseSync(file);
+    assert.equal((verify.prepare('SELECT data FROM channel_entries WHERE message_id=?').get(message.messageId) as { data: string }).data, raw);
+    verify.close();
+  } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
+});

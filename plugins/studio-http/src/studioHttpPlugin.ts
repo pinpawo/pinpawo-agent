@@ -41,6 +41,8 @@ type StudioHttpContext = Context<StudioHttpEnvironment>;
 export type StudioHttpRouteRequest = {
   readonly url: URL;
   readonly headers: Readonly<IncomingHttpHeaders>;
+  /** Computed by HTTP from the Host token, never from a caller header. */
+  readonly studioAuthorized?: boolean;
   /** Exact request text for route-owned signature verification. */
   readText: () => Promise<string>;
   readJson: () => Promise<unknown>;
@@ -617,6 +619,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         const result = await route.handle({
           url: new URL(requestContext.req.url),
           headers: requestContext.env.incoming.headers,
+          studioAuthorized: safeTokenEqual(readBearerToken(requestContext.req.header('authorization')) ?? '', options.authToken),
           readText: () => {
             text ??= requestContext.req.text();
             return text;

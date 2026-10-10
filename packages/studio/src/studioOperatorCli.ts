@@ -5,7 +5,9 @@ import { join } from 'node:path';
 
 export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host is started):
   pinpawo-studio channels list [--after N] [--limit N]
-  pinpawo-studio channels participants
+  pinpawo-studio channels participants [channelId]
+  pinpawo-studio channels members <channelId>
+  pinpawo-studio channels member <channelId> --file <member.json>
   pinpawo-studio channels read <channelId> [--after N] [--limit N]
   pinpawo-studio channels send <channelId> --file <markdown|-> [--mention <participantId>] [--reply-to <messageId>]
   pinpawo-studio channels executions <channelId> [--after N] [--limit N]
@@ -73,12 +75,13 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   const allowed = new Set(CONNECTION_OPTIONS);
   const action = command === 'channels' ? args[start + 1] : undefined;
   if (command === 'channels') {
-    if (!['list', 'participants', 'read', 'send', 'executions', 'interrupts'].includes(action ?? '')) {
-      throw new Error('Expected channels list, participants, read, send, executions, or interrupts.');
+    if (!['list', 'participants', 'members', 'member', 'read', 'send', 'executions', 'interrupts'].includes(action ?? '')) {
+      throw new Error('Expected channels list, participants, members, member, read, send, executions, or interrupts.');
     }
     if (['list', 'read', 'executions', 'interrupts'].includes(action!)) {
       allowed.add('--after'); allowed.add('--limit');
     }
+    if (action === 'member') allowed.add('--file');
     if (action === 'send') {
       allowed.add('--file'); allowed.add('--mention'); allowed.add('--reply-to');
     }
@@ -106,10 +109,11 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   }
   const needsId = !['pets', 'queues'].includes(command)
     && !(command === 'channels' && ['list', 'participants'].includes(action!));
-  if (positional.length !== (needsId ? 1 : 0) || positional.some(value => !value.trim())) {
+  const optionalChannelId = command === 'channels' && action === 'participants';
+  if ((needsId ? positional.length !== 1 : optionalChannelId ? positional.length > 1 : positional.length !== 0) || positional.some(value => !value.trim())) {
     throw new Error(needsId ? `Expected one ${command === 'channels' ? 'Channel' : 'Pet'} id.` : 'Unexpected positional argument.');
   }
-  if ((command === 'dispatch' || command === 'send' || (command === 'channels' && action === 'send')) && !values.has('--file')) {
+  if ((command === 'dispatch' || command === 'send' || (command === 'channels' && ['send', 'member'].includes(action!))) && !values.has('--file')) {
     throw new Error('--file is required (use - for stdin).');
   }
   function integer(option: string, min: number, max: number, fallback?: number) {
@@ -155,7 +159,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   let route: string;
   let base = options.studioUrl;
   if (command === 'channels') {
-    route = action === 'list' ? '/channels' : `/channels/${action === 'read' ? 'context' : action === 'send' ? 'messages' : action}`;
+    route = action === 'list' ? '/channels' : `/channels/${action === 'read' ? 'context' : action === 'send' ? 'messages' : action === 'member' ? 'members' : action}`;
   } else if (['snapshot', 'events', 'send'].includes(command)) {
     base = options.agentUrl;
     route = `/agent-session/pets/${encodeURIComponent(id!)}/${command === 'send' ? 'messages' : command}`;
@@ -166,7 +170,9 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (command === 'channels' && id && action !== 'send') url.searchParams.set('channelId', id);
   if (options.file) {
     const text = options.file === '-' ? await (dependencies.readStdin ?? stdinText)() : await read(options.file);
-    if (command === 'channels') {
+    if (command === 'channels' && action === 'member') {
+      body = { ...JSON.parse(text), channelId: id };
+    } else if (command === 'channels') {
       body = { channelId: id, body: text, mentions: options.mentions.map(participantId => ({ participantId })),
         ...(options.replyTo ? { replyTo: options.replyTo } : {}) };
     } else if (command === 'dispatch') {

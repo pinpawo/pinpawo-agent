@@ -22,7 +22,7 @@ pinpawo-studio --studio-url http://127.0.0.1:3291 --agent-url http://127.0.0.1:3
 ```sh
 pinpawo-studio channels list --limit 50
 pinpawo-studio channels read CHANNEL_ID --after 0 --limit 50
-pinpawo-studio channels participants
+pinpawo-studio channels participants CHANNEL_ID
 pinpawo-studio channels send CHANNEL_ID --file /tmp/message.md --mention PARTICIPANT_ID
 pinpawo-studio channels executions CHANNEL_ID
 pinpawo-studio channels interrupts CHANNEL_ID
@@ -118,3 +118,9 @@ only, with no replay; after disconnect read snapshot again. Do not blindly retry
 accepted commands or uncertain mutations. A 404 on these Agent Session routes
 can mean the Host predates HTTP support; report that and arrange a controlled
 upgrade, rather than taking over the TUI WebSocket connection.
+
+Channel user credentials can use the existing --token-file option. Their Channel
+registry and history are membership-scoped; they cannot observe global Studio events,
+Pet sessions or queues. Only the local Studio operator manages members with
+`channels members CHANNEL_ID` and `channels member CHANNEL_ID --file member.json`.
+External agents use their bound user identity; request text must not claim an author.

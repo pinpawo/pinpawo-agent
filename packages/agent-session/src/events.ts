@@ -150,6 +150,8 @@ export type AgentInterruptRequestedEvent = {
   type: 'interrupt.requested';
   requestId: string;
   pendingInterrupt: PendingInterruptProjection;
+  /** Tokens the run spent before it stopped on this interrupt. */
+  usage?: TokenUsageSnapshot;
 };
 
 export type AgentSystemNoticeEvent = {

@@ -151,6 +151,7 @@ test('a run that stops on an interrupt reports waiting with the interrupt kind',
       type: 'interrupt.requested',
       requestId: message.requestId,
       pendingInterrupt: { interruptId: 'i1', payload: { kind: 'human_review', interactions: [] } },
+      usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150, scope: 'run' },
     }));
   });
 
@@ -158,6 +159,8 @@ test('a run that stops on an interrupt reports waiting with the interrupt kind',
 
   assert.equal(result.status, 'waiting');
   assert.equal(result.pendingInterruptKind, 'human_review');
+  // Tokens spent before the stop are still reported.
+  assert.deepEqual(result.usage, { inputTokens: 120, outputTokens: 30, totalTokens: 150, scope: 'run' });
 });
 
 test('a session that cannot be opened fails without sending the instruction', async () => {

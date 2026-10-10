@@ -158,6 +158,7 @@ export function runExecSession(
             status: timedOut ? 'timeout' : 'waiting',
             reply: '',
             pendingInterruptKind: event.pendingInterrupt?.payload?.kind,
+            ...(event.usage ? { usage: event.usage } : {}),
           });
           return;
         case 'run.interrupted':

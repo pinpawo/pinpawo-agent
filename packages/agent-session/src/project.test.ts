@@ -332,6 +332,28 @@ test('reduceSession accumulates usage across runs and clears only run usage on s
   assert.equal(session.sessionTokenUsage, undefined);
 });
 
+test('reduceSession counts the tokens a run spent before it stopped on an interrupt', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted',
+    requestId: 'req-1',
+    kind: 'chat',
+    text: 'clean the build',
+  }, { observedAt: 1_000 });
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'interrupt.requested',
+      requestId: 'req-1',
+      pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', interactions: [] } },
+      usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14, scope: 'run' },
+    },
+  }, { observedAt: 1_100 });
+
+  assert.equal(session.activeRun, null);
+  assert.equal(session.tokenUsage?.totalTokens, 14);
+  assert.equal(session.sessionTokenUsage?.totalTokens, 14);
+});
+
 test('reduceSession keeps review and terminal control scoped to the owning run', () => {
   let session = reduceSession(createDomainSession(), {
     type: 'user.accepted',

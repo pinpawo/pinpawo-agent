@@ -520,11 +520,12 @@ function applyInterruptRequest(
   event: Extract<AgentRuntimeEvent, { type: 'interrupt.requested' }>,
 ) {
   if (!ownsRun(session, event.requestId)) return session;
-  return {
+  const waiting = {
     ...session,
     activeRun: null,
     pendingInterrupt: event.pendingInterrupt,
   };
+  return event.usage ? applyTokenUsage(waiting, event.usage) : waiting;
 }
 
 function runViewBase(run: AgentRunView, requestId: string) {

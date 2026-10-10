@@ -13,6 +13,7 @@ import {
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
   type SubagentToolOperationMetadata,
+  type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type {
@@ -99,12 +100,14 @@ async function waitForGraphRunSettlement(run: HostGraphEventStream | null) {
 function emitInterruptRequested(params: {
   pendingInterrupt: PendingInterrupt;
   requestId: string;
+  usage?: TokenUsageSnapshot | null;
   emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
   params.emitEvent({
     type: 'interrupt.requested',
     requestId: params.requestId,
     pendingInterrupt: projectPendingInterrupt(params.pendingInterrupt),
+    ...(params.usage ? { usage: params.usage } : {}),
   });
 }
 
@@ -335,6 +338,7 @@ export async function runAgentSessionTurn(
     ];
   }
 
+  const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
   // Identifies the assistant entry the streamed reply is building, so the
@@ -447,7 +451,16 @@ export async function runAgentSessionTurn(
             tasks: [{ interrupts: chatEvent.interrupts }],
           });
           if (pendingInterrupt) {
-            emitInterruptRequested({ pendingInterrupt, requestId, emitEvent });
+            emitInterruptRequested({
+              pendingInterrupt,
+              requestId,
+              usage: readRunTokenUsage({
+                initialMessages: initialThreadState.messages,
+                finalMessages,
+                contextWindow,
+              }),
+              emitEvent,
+            });
             return { status: 'waiting' };
           }
           break;
@@ -498,11 +511,17 @@ export async function runAgentSessionTurn(
     return { status: 'interrupted' };
   }
 
+  const finalUsage = readRunTokenUsage({
+    initialMessages: initialThreadState.messages,
+    finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
+    contextWindow,
+  });
   if (finalThreadState.pendingInterrupt) {
     // A native review remains pending until its explicit approval response.
     emitInterruptRequested({
       pendingInterrupt: finalThreadState.pendingInterrupt,
       requestId,
+      usage: finalUsage,
       emitEvent,
     });
     return { status: 'waiting' };
@@ -520,12 +539,6 @@ export async function runAgentSessionTurn(
   // inside the checkpoint collection before projecting its preceding deliveries.
   const checkpointReply = finalThreadState.messages.find(message =>
     message === finalMessage || (!!finalMessage?.id && message.id === finalMessage.id));
-  const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const finalUsage = readRunTokenUsage({
-    initialMessages: initialThreadState.messages,
-    finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
-    contextWindow,
-  });
   emitEvent({
     type: 'message.completed',
     requestId,

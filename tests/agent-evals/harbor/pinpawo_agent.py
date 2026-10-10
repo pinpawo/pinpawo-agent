@@ -41,8 +41,8 @@ class PinpawoOptions(InstalledAgentOptions):
         description="Directory of tarballs built by pack.sh. Defaults to ./dist next to this file.",
     )
     approval: str = Field(
-        default="full-access",
-        description="Tool authorization for the run: full-access, auto, or require.",
+        default="auto",
+        description="Tool authorization for the run: auto (default), full-access, or require.",
     )
 
 
@@ -116,7 +116,7 @@ class PinpawoAgent(BaseInstalledAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        approval = self.options.approval if self.options else "full-access"
+        approval = self.options.approval if self.options else "auto"
         # No --workdir: the Host works in the container's working directory,
         # which is where the task expects changes.
         command = (

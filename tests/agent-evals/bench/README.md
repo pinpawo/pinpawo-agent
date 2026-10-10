@@ -7,12 +7,15 @@ public benchmark harness uses.
 
 ## Run the local tasks
 
-Uses the model profile in `~/.pinpawo/config.json`.
+Uses the model profile in `~/.pinpawo/config.json`. Runs default to
+`--approval auto`, the mode users run in: the auto reviewer decides each
+reviewed action, and anything it escalates to a human stops the run as
+`waiting`, because nobody answers in `exec`.
 
 ```sh
-npm run bench -w @pinpawo-tests/agent-evals                         # all tasks, once
+npm run bench -w @pinpawo-tests/agent-evals                         # all tasks, once, under auto-review
 npm run bench -w @pinpawo-tests/agent-evals -- --task git-release --attempts 3
-npm run bench -w @pinpawo-tests/agent-evals -- --approval auto      # with auto-review instead of full access
+npm run bench -w @pinpawo-tests/agent-evals -- --approval full-access  # skip review entirely
 npm run bench -w @pinpawo-tests/agent-evals -- --agent oracle       # reference solutions; must be 100%
 ```
 
@@ -61,6 +64,6 @@ harbor view jobs
 ```
 
 `--ak config=` is required: the config's model profile, API key included, is
-copied into the container. Add `--ak approval=auto` to run under auto-review,
-and `--ae LANGFUSE_...=...` to trace runs. Compare against a reference agent on
+copied into the container. Runs use auto-review by default; add
+`--ak approval=full-access` to skip review, and `--ae LANGFUSE_...=...` to trace runs. Compare against a reference agent on
 the same model with, for example, `-a terminus-2 -m <provider/model>`.

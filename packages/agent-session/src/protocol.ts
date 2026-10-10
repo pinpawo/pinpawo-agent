@@ -659,9 +659,10 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       : { type, requestId, plan };
   }
   if (type === 'interrupt.requested') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'pendingInterrupt'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'pendingInterrupt', 'usage'])) return null;
     const pendingInterrupt = parsePendingInterruptProjection(record.pendingInterrupt);
-    return pendingInterrupt ? { type, requestId, pendingInterrupt } : null;
+    const usage = parseAgentTokenUsageSnapshot(record.usage);
+    return pendingInterrupt ? { type, requestId, pendingInterrupt, ...(usage ? { usage } : {}) } : null;
   }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');

@@ -9,16 +9,16 @@ import { initStudioWorkdir } from './studioTemplate';
 async function createTemplate(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-template-'));
   await Promise.all([
-    mkdir(path.join(root, 'pets', 'planner', 'capabilities', 'planning'), { recursive: true }),
+    mkdir(path.join(root, 'pets', 'executor', 'capabilities', 'execution'), { recursive: true }),
     mkdir(path.join(root, 'wiki'), { recursive: true }),
   ]);
   await Promise.all([
     writeFile(path.join(root, 'studio.json'), '{"studioId":"demo"}\n'),
-    writeFile(path.join(root, 'pets', 'planner.json'), '{"petId":"planner"}\n'),
-    writeFile(path.join(root, 'pets', 'planner', 'PET.md'), '# Planner\n'),
+    writeFile(path.join(root, 'pets', 'executor.json'), '{"petId":"executor"}\n'),
+    writeFile(path.join(root, 'pets', 'executor', 'PET.md'), '# Executor\n'),
     writeFile(
-      path.join(root, 'pets', 'planner', 'capabilities', 'planning', 'CAPABILITY.md'),
-      '# Planning\n',
+      path.join(root, 'pets', 'executor', 'capabilities', 'execution', 'CAPABILITY.md'),
+      '# Execution\n',
     ),
     writeFile(path.join(root, 'wiki', 'PROJECT.md'), '# Project\n'),
     writeFile(path.join(root, 'README.md'), 'must not be copied\n'),
@@ -32,9 +32,9 @@ test('Studio init copies configuration, Pet documents and Capabilities, and Wiki
   const result = await initStudioWorkdir({ workdir, templateRoot });
 
   assert.deepEqual(result.files.sort(), [
-    '.pinpawo/pets/planner.json',
-    '.pinpawo/pets/planner/PET.md',
-    '.pinpawo/pets/planner/capabilities/planning/CAPABILITY.md',
+    '.pinpawo/pets/executor.json',
+    '.pinpawo/pets/executor/PET.md',
+    '.pinpawo/pets/executor/capabilities/execution/CAPABILITY.md',
     '.pinpawo/studio.json',
     'wiki/PROJECT.md',
   ].sort());
@@ -59,32 +59,16 @@ test('Studio init preflights conflicts before copying any file', async () => {
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
 });
 
-test('shipped Pet Capabilities support explicit planning, execution, review, and Wiki requests', async () => {
+test('shipped Pet Capabilities support explicit execution, review, and Wiki requests', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
   await initStudioWorkdir({ workdir });
-
-  const capabilities = await loadCapabilityDirectory(path.join(
-    workdir,
-    '.pinpawo',
-    'pets',
-    'planner',
-    'capabilities',
-  ));
-  assert.deepEqual(
-    capabilities.map(({ capability }) => ({
-      name: capability.name,
-      uses: capability.uses,
-    })),
-    [
-      { name: 'studio_exploration', uses: ['studio-context', 'project-inspection', 'channel'] },
-      { name: 'studio_planning', uses: ['studio-context', 'channel'] },
-    ],
-  );
 
   const studioConfig = JSON.parse(await readFile(
     path.join(workdir, '.pinpawo', 'studio.json'),
     'utf8',
-  )) as { plugins: Array<{ id: string; options?: Record<string, unknown> }> };
+  )) as { entryPetId: string; pets: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
+  assert.equal(studioConfig.entryPetId, 'executor');
+  assert.deepEqual(studioConfig.pets, ['executor', 'reviewer', 'wiki']);
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
     '@pinpawo-plugin/scheduler', '@pinpawo-plugin/project-files', '@pinpawo-plugin/trigger',

@@ -10,8 +10,8 @@
 ```json
 {
   "studioId": "content-studio",
-  "entryPetId": "planner",
-  "pets": ["planner", "writer"],
+  "entryPetId": "writer",
+  "pets": ["writer", "reviewer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
     { "id": "@pinpawo-plugin/channel" }
@@ -58,7 +58,7 @@ Host 实际加载的运行时指令，编辑后重启生效。
 ## 旧 Kanban 工作区迁移
 
 Kanban Plugin、API、工具和默认任务分配／任务完成后 Wiki 自动更新规则已退役。
-新模板启用现有 Channel；Planner 返回计划，Executor/Reviewer 返回结果与证据，
+新模板启用现有 Channel，不再包含 Planner；Executor/Reviewer 返回结果与证据，
 Wiki 由明确请求更新。通用 Trigger、Knowledge 和直接 Pet 请求继续可用。
 
 启动和 `init` 不自动改写既有文件。完整步骤只维护在

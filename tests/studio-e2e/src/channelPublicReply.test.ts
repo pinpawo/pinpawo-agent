@@ -13,7 +13,6 @@ import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, loadCapabilit
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
-import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 
 class ScriptedModel extends BaseChatModel {
@@ -64,18 +63,19 @@ test('capability handoff reaches Channel only through the selected final root re
   let studio: Awaited<ReturnType<typeof createStudio>> | undefined;
   try {
     const capabilitiesRoot = join(root, 'capabilities');
-    await mkdir(join(capabilitiesRoot, 'studio-planning'), { recursive: true });
-    const capabilitySource = await readFile(new URL('../../../packages/studio/templates/default/pets/planner/capabilities/studio-planning/CAPABILITY.md', import.meta.url), 'utf8');
-    await writeFile(join(capabilitiesRoot, 'studio-planning', 'CAPABILITY.md'), `${capabilitySource}\n${capabilityMarker}\n`);
+    await mkdir(join(capabilitiesRoot, 'studio-execution'), { recursive: true });
+    const capabilitySource = await readFile(new URL('../../../packages/studio/templates/default/pets/executor/capabilities/studio-execution/CAPABILITY.md', import.meta.url), 'utf8');
+    // Only the Channel Toolkit is wired here; keep the shipped instructions but narrow `uses` to it.
+    const channelOnlySource = capabilitySource.replace(/^uses:\n(?:  - .+\n)+/m, 'uses:\n  - channel\n');
+    await writeFile(join(capabilitiesRoot, 'studio-execution', 'CAPABILITY.md'), `${channelOnlySource}\n${capabilityMarker}\n`);
     const capabilities = (await loadCapabilityDirectory(capabilitiesRoot)).map(loaded => loaded.capability);
     const inventory = await buildHostToolkitInventory({ sources: [
       { id: 'channel', kind: 'plugin', definitions: channel.toolkits },
-      { id: 'studio-context', kind: 'host_builtin', definitions: [createStudioContextToolkit(() => studio?.listPets() ?? [])] },
     ] });
     for (const petId of ['acceptance-a', 'acceptance-b']) {
       const runtimeConfig = buildHostRuntimeConfig(join(root, petId));
       const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
-      const template = petId === 'acceptance-a' ? 'planner' : 'reviewer';
+      const template = petId === 'acceptance-a' ? 'executor' : 'reviewer';
       const petSource = await readFile(new URL(`../../../packages/studio/templates/default/pets/${template}/PET.md`, import.meta.url), 'utf8');
       await mkdir(runtimeConfig.workdir, { recursive: true });
       const petPath = join(runtimeConfig.workdir, 'PET.md');
@@ -93,7 +93,7 @@ test('capability handoff reaches Channel only through the selected final root re
       const supervisor = new ScriptedModel(async (messages, index) => {
         observeContext(messages, petId, 'supervisor');
         const run = Math.floor(index / 4), turn = index % 4;
-        if (turn === 0) return call('submit_plan', { tasks: [{ capability: 'studio_planning', objective: 'Produce a plan.' }] }, `plan-${run}`);
+        if (turn === 0) return call('submit_plan', { tasks: [{ capability: 'studio_execution', objective: 'Produce a plan.' }] }, `plan-${run}`);
         if (turn === 1) return call('delegate_capability', { briefing: 'Produce a plan with the chosen handoff.' }, `delegate-${run}`);
         const result = [...messages].reverse().find(message => ToolMessage.isInstance(message) && message.name === 'delegate_capability');
         assert.ok(result, 'the final responder receives the real Capability delivery');

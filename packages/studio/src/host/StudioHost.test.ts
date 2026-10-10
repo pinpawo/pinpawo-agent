@@ -251,12 +251,7 @@ test('StudioHost supplies Plugin Toolkits to the Host inventory before building 
   });
 
   await host.init();
-  assert.equal(sources?.[0]?.id, 'studio-host:context');
-  assert.equal(sources?.[0]?.kind, 'host_builtin');
-  const directory = sources?.[0]?.definitions[0];
-  assert.equal(directory?.name, 'studio-context');
-  assert.deepEqual(JSON.parse(await directory!.tools[0]!.tool.invoke({}) as string), { pets: [] });
-  assert.deepEqual(sources?.slice(1), [{
+  assert.deepEqual(sources, [{
     id: 'studio-plugin:layout',
     kind: 'plugin',
     definitions: [toolkit],
@@ -273,25 +268,25 @@ test('StudioHost loads each Pet Capability collection from its conventional dire
   const petsDir = path.join(root, '.pinpawo', 'pets');
   const capabilityDir = path.join(
     petsDir,
-    'planner',
+    'executor',
     'capabilities',
-    'studio-planning',
+    'studio-execution',
   );
   await mkdir(capabilityDir, { recursive: true });
   await writeFile(path.join(capabilityDir, 'CAPABILITY.md'), `---
-name: studio_planning
-description: "Plan work through the Studio board."
+name: studio_execution
+description: "Carry out the work handed to this Pet."
 uses: []
 version: 1
 ---
 
-# Studio planning
+# Studio execution
 
-Plan the work assigned to this Pet.
+Complete the work assigned to this Pet.
 `);
-  await writeFile(path.join(petsDir, 'planner', 'PET.md'), '# Planner\n\nCoordinate work.\n');
+  await writeFile(path.join(petsDir, 'executor', 'PET.md'), '# Executor\n\nComplete work.\n');
   const configured = {
-    ...configuration([], ['planner']),
+    ...configuration([], ['executor']),
     workdir: root,
     studioConfigPath: path.join(root, '.pinpawo', 'studio.json'),
     petsDir,
@@ -302,10 +297,10 @@ Plan the work assigned to this Pet.
     buildStudio: async (input) => {
       assert.deepEqual(input.hostCapabilities, [general]);
       assert.deepEqual(
-        input.petCapabilities.get('planner')?.map(({ name }) => name),
-        ['studio_planning'],
+        input.petCapabilities.get('executor')?.map(({ name }) => name),
+        ['studio_execution'],
       );
-      assert.equal(input.petDocuments?.get('planner')?.content, '# Planner\n\nCoordinate work.');
+      assert.equal(input.petDocuments?.get('executor')?.content, '# Executor\n\nComplete work.');
       return result(fakeStudio(() => undefined));
     },
   });

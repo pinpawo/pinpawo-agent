@@ -21,8 +21,8 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
   "studioId": "content-studio",
   "name": "Content Studio",
   "description": "A drafting and review workflow",
-  "entryPetId": "planner",
-  "pets": ["planner", "writer", "reviewer"],
+  "entryPetId": "writer",
+  "pets": ["writer", "reviewer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
     { "id": "@pinpawo-plugin/channel" },
@@ -60,7 +60,7 @@ is its lifecycle and event-source identity inside Studio.
   "petId": "writer",
   "name": "Writer",
   "modelProfileId": "qwen-max",
-  "defaultCapabilityName": "studio_planning"
+  "defaultCapabilityName": "drafting"
 }
 ```
 
@@ -110,7 +110,7 @@ configuration or name allowlist is required:
 <workdir>/.pinpawo/pets/writer/capabilities/
 ├── explore/
 │   └── CAPABILITY.md
-└── studio-planning/
+└── drafting/
     └── CAPABILITY.md
 ```
 
@@ -181,8 +181,12 @@ For an existing workdir, manually compare its files with the shipped template:
    Remove `kanban`, `kanban-planning`, `kanban-execution`, `kanban-reporting`, and
    `kanban-observation` bindings and calls. The old `studio_reporting` Capability
    can be removed: confirmed results now return through the ordinary public reply.
-4. Keep the four roles and their valid defaults: `studio_planning`,
-   `studio_execution`, `studio_review`, and `wiki_maintenance`. Explicitly request
+4. Keep the three roles and their valid defaults: `studio_execution`,
+   `studio_review`, and `wiki_maintenance`. The template no longer ships a
+   `planner` Pet, and the Host no longer provides the `studio-context` Toolkit
+   (`studio_pet_list`). Remove the `planner` Pet (and point `entryPetId` and any
+   Trigger `petId` at another Pet), or drop `studio-context` from its Capabilities'
+   `uses`; a Capability that still names it is unavailable. Explicitly request
    work through a Pet session, generic dispatch, or Channel execution. Request
    Wiki maintenance with the changes and evidence that should be reconciled.
 5. Preserve `.pinpawo/kanban/`, any `kanban.json`, existing Wiki, and other user data.

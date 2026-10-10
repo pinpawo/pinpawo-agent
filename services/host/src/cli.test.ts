@@ -375,3 +375,29 @@ test('local agent CLI passes Chrome extension registration options to the handle
     options: { extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
   });
 });
+
+test('exec forwards the instruction and run options', async () => {
+  let received: unknown = null;
+  const program = createHostCli({
+    runExec: (options) => { received = options; },
+  });
+
+  await program.parseAsync([
+    'node', 'pinpawo', 'exec', 'fix the build',
+    '--workdir', '/tmp/pinpawo-exec-workdir',
+    '--approval', 'full-access',
+    '--timeout', '90',
+    '--trajectory', '/tmp/out/trajectory.jsonl',
+    '--output', '/tmp/out/result.json',
+  ]);
+
+  assert.deepEqual(received, {
+    instruction: 'fix the build',
+    workdir: '/tmp/pinpawo-exec-workdir',
+    approval: 'full-access',
+    timeoutMs: 90_000,
+    trajectoryPath: '/tmp/out/trajectory.jsonl',
+    outputPath: '/tmp/out/result.json',
+    json: false,
+  });
+});

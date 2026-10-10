@@ -123,6 +123,6 @@ Plugin 在 `start()` 时通过 `listPets()` 验证目标 Pet。运行中所有 d
 
 ## Kanban 退役后的默认装配
 
-默认仅保留外部请求 → Planner 的显式 HTTP 规则；Wiki 更新需要明确请求，
+默认仅保留外部请求 → Executor 的显式 HTTP 规则；Wiki 更新需要明确请求，
 不以 dispatch.completed 替代交付验收。旧规则迁移见[配置](../../studio/configuration.md#retired-kanban-workdirs)，
 可选周期队列巡检见[Queue Notices](../studio-dispatch-queue-notices.md)。

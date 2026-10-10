@@ -1,7 +1,7 @@
 {
   "studioId": "studio",
-  "entryPetId": "planner",
-  "pets": ["planner", "executor", "reviewer", "wiki"],
+  "entryPetId": "executor",
+  "pets": ["executor", "reviewer", "wiki"],
   "plugins": [
     {
       "id": "@pinpawo-plugin/studio-http",
@@ -48,8 +48,8 @@
         "triggers": [
           {
             "triggerId": "external-request",
-            "petId": "planner",
-            "request": "Plan the following external request. Return a concrete proposal with scope, evidence, and completion criteria.",
+            "petId": "executor",
+            "request": "Handle the following external request. Return the result with evidence.",
             "source": {
               "kind": "http",
               "secretEnv": "PINPAWO_STUDIO_TRIGGER_SECRET"

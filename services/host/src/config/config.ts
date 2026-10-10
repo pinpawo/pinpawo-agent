@@ -73,7 +73,7 @@ function getBoolean(envKey: string, storedKey: keyof typeof stored): boolean | u
   return resolveBooleanConfigValue(process.env[envKey], stored[storedKey]);
 }
 
-function resolveGlobalReviewPolicyMode(raw: string | undefined): ToolAuthorizationMode | undefined {
+export function resolveGlobalReviewPolicyMode(raw: string | undefined): ToolAuthorizationMode | undefined {
   const normalized = raw?.trim().toLowerCase().replace(/_/g, '-');
   if (!normalized) return undefined;
   if ([

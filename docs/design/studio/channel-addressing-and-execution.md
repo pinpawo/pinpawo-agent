@@ -5,6 +5,22 @@
 本文是 Channel 当前设计入口；合并不表示已更新任何用户 workdir 或部署。
 早期方案与验收沿革见[历史记录](../../history/studio/channel-evolution.md)。
 
+## #943 多成员方案
+
+领域参与者只有用户和 Pet；用户暂保留 `human` 序列化名称，避免改写既有身份链接。
+SQLite 增加用户目录与 Channel 成员关系，名称仅为 label；Pet 元数据继续由 Host 提供。
+新 Channel 默认加入本地 operator、创建者及当前配置 Pets；旧 Channel 在首次加载时加入默认 operator、
+历史 human 作者、历史/绑定 Pets 和当前配置 Pets（一次性初始化，后续不自动重新加入被移除成员）。
+本地 Studio operator 维护成员；普通用户仅能读写自己加入的 Channel，不拥有全局 Studio API。
+HTTP 传递可信的 Studio 认证标志，Channel 单独校验配置的凭据 SHA-256 摘要并绑定用户。
+外部 agent 的凭据绑定同一用户，可选 actorId 仅作来源元信息，不成为第三类成员。
+请求正文不能指定作者。Console 对 Channel 用户使用历史轮询，不订阅全局 SSE。
+
+旧 journal 不改写，bot 历史保留原来源；明确的 inputUsers 映射将对应历史投影及新插件输入
+归属于指定用户。未映射旧 bot 只读，不能成为成员；未映射新插件输入拒绝。
+成员退出后保留历史身份及已接纳 Pet 输出，但不接纳新发送或向退出成员的新交接。
+不增加组织/RBAC、管理 Pet、通知/外部 agent 自动执行或 schedule/trigger 能力。
+
 ## 职责
 
 围绕一个长期目标，人和 Pet 在同一 Channel 发言、寻址、交接和查看结果。
@@ -22,11 +38,11 @@ Studio core、HTTP 与 Plugin 装配边界见 [Host 设计](independent-host-run
 
 ## 参与者与寻址
 
-登记对象是配置中的 Pet 和一个本地 operator。`participantId` 为
+登记对象是当前 Channel 的用户和 Pet 成员。`participantId` 为
 `kind:<RFC3986 百分号编码的原始 id>`，包括编码 `!'()*`；例如 `pet:reviewer`。
 名称只作 label，不按同名、改名或正文自称猜测身份。“Me”只是查看者显示称呼。
-HTTP 作者由 `operatorId` 确定（默认 `studio-operator`），共享 Bearer 的浏览器共享此身份。
-没有新增账号、多租户或 per-Channel ACL，也不隔离恶意进程内 Node Plugin。
+本地 Studio Bearer 对应 `operatorId`（默认 `studio-operator`）；Channel 专用凭据绑定具体用户。
+成员访问校验不隔离恶意进程内 Node Plugin。
 
 统一入口 `POST /channels/messages` 保存正文、可选 `replyTo`、artifacts 和
 `mentions: [{participantId}]`。正文直接链接 `[@Reviewer](participant:pet:reviewer)`
@@ -49,6 +65,8 @@ Channel 默认使用 `.pinpawo/channel/channels.sqlite`，SQLite WAL 与事务�
 
 | 记录 | 用途 |
 |---|---|
+| `channel_users` / `channel_members` | 用户名称与持久化成员/退出状态；Pet 名称来自 Host。 |
+| `channel_members_initialized` | 一次性初始化标记，重启不重新加入已退出成员。 |
 | `channel_entries` | 追加的目标修订与消息；全局 sequence 分页，最新修订为当前目标。 |
 | `channel_sessions` | 唯一 `(channelId, petId)` → sessionId 映射与注册标记。 |
 | `channel_outputs` | 同 Pet/session/invocation 的公开输出去重。 |

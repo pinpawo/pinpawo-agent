@@ -11,16 +11,19 @@ import {
 
 type Props = {
   url: string; token: string; connected: boolean; refreshVersion: number;
-  active?: boolean;
+  active?: boolean; channelOnly?: boolean;
   pets: { petId: string; name: string }[];
   petsReady?: boolean;
   failures: { channelId: string; invocationId?: string; error: string }[];
 };
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, failures }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, channelOnly = false, pets: hostPets, petsReady = true, failures }: Props) {
   const [channels, setChannels] = useState<ChannelGoal[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<ChannelContext | null>(null);
+  const pets = channelOnly
+    ? (context?.participants ?? []).filter(item => item.kind === 'pet').map(item => ({ petId: item.id, name: item.label }))
+    : hostPets;
   const [entries, setEntries] = useState<ChannelEntry[]>([]);
   const [executions, setExecutions] = useState<ChannelExecution[]>([]);
   const [notices, setNotices] = useState<ChannelNotice[]>([]);
@@ -34,6 +37,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [scope, setScope] = useState('');
   const [body, setBody] = useState('');
   const [recipientId, setRecipientId] = useState('');
+  const [memberId, setMemberId] = useState('');
   const [queues, setQueues] = useState<DispatchQueue[]>([]);
   const [queueError, setQueueError] = useState('');
   const [reply, setReply] = useState<ChannelMessage | undefined>();
@@ -77,7 +81,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const refresh = () => setLocalVersion(value => value + 1);
 
   useEffect(() => {
-    if (!connected || !active) return;
+    if (!connected || !active || channelOnly) return;
     const abort = new AbortController();
     const load = async () => {
       try {
@@ -89,7 +93,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     void load();
     const timer = setInterval(() => { void load(); }, 1500);
     return () => { abort.abort(); clearInterval(timer); };
-  }, [connected, active, refreshVersion, localVersion, read]);
+  }, [connected, active, channelOnly, refreshVersion, localVersion, read]);
 
   useEffect(() => {
     if (!connected) return;
@@ -107,7 +111,10 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   }, [connected, refreshVersion, localVersion, read]);
 
   useEffect(() => {
-    if (!connected || !selected) return;
+    if (!connected || !selected) {
+      if (!selected) { setContext(null); setEntries([]); setExecutions([]); setNotices([]); }
+      return;
+    }
     const abort = new AbortController();
     setLoading(true);
     const id = encodeURIComponent(selected);
@@ -126,7 +133,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       }
       if (abort.signal.aborted) return;
       setContext(nextContext); setEntries(history); setExecutions(nextExecutions); setNotices(nextNotices);
-    }).catch(reason => { if (!abort.signal.aborted) setError(String(reason)); })
+    }).catch(reason => { if (!abort.signal.aborted) { setContext(null); setEntries([]); setExecutions([]); setNotices([]); setError(String(reason)); } })
       .finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
   }, [selected, connected, refreshVersion, localVersion, read]);
@@ -181,6 +188,12 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       setBody(''); setReply(undefined); setRecipientId('');
     });
   };
+
+  useEffect(() => {
+    if (!connected || !active || !channelOnly) return;
+    const timer = setInterval(refresh, 2000);
+    return () => clearInterval(timer);
+  }, [connected, active, channelOnly]);
 
   const lastSequence = entries.at(-1)?.sequence;
   useEffect(() => {
@@ -243,6 +256,22 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       {!connected && <div className="channel-connection-note" role="status">Connection interrupted. Stored history remains visible; unfinished execution state is unknown.</div>}
       {unavailable ? <div className="empty-state"><strong>Channel Plugin unavailable</strong><span>Enable the Channel Plugin on this Studio Host to use this page.</span></div>
         : context ? <>
+          <details className="channel-members">
+            <summary>Members ({context.participants?.length ?? 0})</summary>
+            <ul>{context.participants?.map(participant => <li key={participant.participantId}>
+              {participant.participantId === context.viewerParticipantId ? 'Me' : participant.label} · {participant.participantId}
+              {context.canManageMembers && participant.participantId !== context.viewerParticipantId && <button type="button" disabled={pending}
+                onClick={() => void submit(async () => { await post('/channels/members', { channelId: selected, kind: participant.kind, id: participant.id, active: false }); })}>Remove</button>}
+            </li>)}</ul>
+            {context.canManageMembers && <form onSubmit={event => { event.preventDefault(); const participant = context.availableParticipants?.find(item => item.participantId === memberId);
+              if (participant) void submit(async () => { await post('/channels/members', { channelId: selected, kind: participant.kind, id: participant.id, active: true }); setMemberId(''); }); }}>
+              <select aria-label="Add Channel member" value={memberId} onChange={event => setMemberId(event.target.value)}>
+                <option value="">Choose member</option>
+                {context.availableParticipants?.filter(item => !context.participants?.some(member => member.participantId === item.participantId)).map(item =>
+                  <option key={item.participantId} value={item.participantId}>{item.label} · {item.participantId}</option>)}
+              </select><button type="submit" disabled={pending || !memberId}>Add member</button>
+            </form>}
+          </details>
           <div className="channel-timeline-region">
             <div ref={timeline} className="channel-timeline-scroll" role="log" aria-label="Channel messages" aria-live="polite" aria-relevant="additions"
               onScroll={() => {
@@ -251,7 +280,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 if (!viewerPosition.current) { followLatest.current = latest; setAtLatest(latest); }
               }}>
               <ChannelTimeline entries={entries} pets={pets} petsReady={petsReady} executions={executions} connected={connected} highlighted={highlightedMessage}
-                participants={context.participants} viewerParticipantId={context.viewerParticipantId}
+                participants={context.historicalParticipants ?? context.participants} viewerParticipantId={context.viewerParticipantId}
                 onViewerChange={open => {
                   if (open) {
                     viewerPosition.current = { top: timeline.current?.scrollTop ?? 0, follow: followLatest.current };
@@ -318,12 +347,12 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       className={'channel-activity' + (activityModal ? ' channel-drawer right' : '')}>
       <div className="channel-sidebar-head"><h2>Activity & details</h2><button type="button" aria-label="Close execution details" onClick={() => setActivityOpen(false)}>×</button></div>
       <div className="channel-activity-scroll">
-        {entries.some(entry => entry.kind === 'message') && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
+        {!channelOnly && entries.some(entry => entry.kind === 'message') && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
         <div className="channel-activity-section"><div className="channel-section-label"><h3>Execution history</h3><span>{executions.length}</span></div>
           <p className="channel-history-hint">Last recorded observations. An ended invocation does not mean the goal is complete.</p>
           <ChannelExecutionHistory executions={executions} pets={pets} petsReady={petsReady} entries={entries} connected={connected}
             highlighted={highlightedExecution} onLocateMessage={locateMessage}
-            onViewSession={item => setSessionView({ petId: item.petId, sessionId: item.sessionId, executionId: item.executionId })} />
+            onViewSession={channelOnly ? undefined : item => setSessionView({ petId: item.petId, sessionId: item.sessionId, executionId: item.executionId })} />
           {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>Channel storage failed: {item.error}</p>)}
         </div>
         {notices.length > 0 && <details className="channel-notices"><summary>Review notification history ({notices.length})</summary>
@@ -333,7 +362,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
             {channelPetIdentity(item.source.petId, pets, petsReady).removed && <span className="channel-removed">Removed Pet</span>}
             <time>{new Date(item.occurredAt).toLocaleString()}</time>
             {item.pendingInterrupt.payload.interactions.map((interaction, index) => <p key={index}>{interaction.view.title ?? interaction.view.body ?? 'Review details are available in the session.'}</p>)}
-            <button type="button" disabled={!connected} onClick={() => setSessionView({ petId: item.source.petId, sessionId: item.source.sessionId })}>View session</button>
+            <button type="button" hidden={channelOnly} disabled={!connected} onClick={() => setSessionView({ petId: item.source.petId, sessionId: item.source.sessionId })}>View session</button>
             <details className="channel-technical"><summary>Technical details</summary>
               <dl><dt>Pet</dt><dd><code>{item.source.petId}</code></dd><dt>Session</dt><dd><ChannelCopy label="review session ID" value={item.source.sessionId} /></dd></dl>
               <pre>{JSON.stringify(item.pendingInterrupt, null, 2)}</pre>
@@ -347,7 +376,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           {context.sessions.map(item => <div className="channel-session" key={item.petId}><strong>{channelPetIdentity(item.petId, pets, petsReady).name}</strong>
             {channelPetIdentity(item.petId, pets, petsReady).removed && <span className="channel-removed">Removed Pet</span>}
             {!item.registered && <span>Registration pending</span>}<ChannelCopy label="Pet session ID" value={item.sessionId} />
-            <button type="button" disabled={!connected || !item.registered} onClick={() => setSessionView({ petId: item.petId, sessionId: item.sessionId })}>View session</button></div>)}
+            <button type="button" hidden={channelOnly} disabled={!connected || !item.registered} onClick={() => setSessionView({ petId: item.petId, sessionId: item.sessionId })}>View session</button></div>)}
         </details>}
         <button className="channel-refresh" type="button" disabled={!connected || pending} onClick={refresh}>Refresh persisted history</button>
       </div>

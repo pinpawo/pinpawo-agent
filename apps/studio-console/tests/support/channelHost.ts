@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readChannelTestInput } from '../../../../tests/support/channelDispatchInput';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,7 +19,13 @@ import type { InterruptResume } from '../../../../services/host/src/agent/agentG
 const root = process.env.CHANNEL_HOST_TEST_ROOT ?? await mkdtemp(join(tmpdir(), 'channel-console-browser-'));
 const token = 'console-browser-test-only';
 const http = createStudioHttpPlugin({ port: Number(process.env.CHANNEL_HOST_TEST_PORT ?? 0), authToken: token, allowedOrigins: ['http://127.0.0.1:5199'] });
-const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite') });
+const multiUser = Boolean(process.env.CHANNEL_HOST_TEST_MEMBERS);
+const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite'), ...(multiUser ? {
+  users: [{ id: 'studio-operator', label: 'Owner' }, { id: 'colleague', label: 'Owner' }],
+  credentials: [{ userId: 'studio-operator', tokenHash: createHash('sha256').update('owner-test-only').digest('hex') },
+    { userId: 'colleague', tokenHash: createHash('sha256').update('colleague-test-only').digest('hex') },
+    { userId: 'studio-operator', actorId: 'fixture-agent', tokenHash: createHash('sha256').update('agent-test-only').digest('hex') }],
+} : {}) });
 const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
 const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
 const petNames = process.env.CHANNEL_HOST_TEST_DUPLICATE_NAMES ? ['Analyst', 'Analyst'] : ['Alpha', 'Beta'];

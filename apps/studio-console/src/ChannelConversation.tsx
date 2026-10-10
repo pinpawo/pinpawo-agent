@@ -41,7 +41,7 @@ export function ChannelCopy({ label, value }: { label: string; value: string }) 
 
 export function ChannelTechnicalDetails({ message, execution }: { message?: ChannelMessage; execution?: ChannelExecution }) {
   return <details className="channel-technical"><summary>Technical details</summary><dl>
-    {message && <><dt>Message</dt><dd><ChannelCopy label="message ID" value={message.messageId} /></dd><dt>Author</dt><dd>{message.author.kind} · <code>{message.author.id}</code></dd></>}
+    {message && <><dt>Message</dt><dd><ChannelCopy label="message ID" value={message.messageId} /></dd><dt>Author</dt><dd>{message.author.kind} · <code>{message.author.id}</code>{message.author.actorId && <> · via {message.author.actorId}</>}</dd></>}
     {execution && <><dt>Execution</dt><dd><ChannelCopy label="execution ID" value={execution.executionId} /></dd></>}
     {(message?.source || execution) && <><dt>Pet</dt><dd><code>{message?.source?.petId ?? execution!.petId}</code></dd>
       <dt>Session</dt><dd><ChannelCopy label="session ID" value={message?.source?.sessionId ?? execution!.sessionId} /></dd>
@@ -122,7 +122,8 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
       data-message-id={item.messageId} aria-label={identity.name + ' at ' + date.toLocaleTimeString()}>
       <div className={'channel-avatar ' + item.author.kind} aria-hidden="true">{grouped ? '' : avatar}</div>
       <div className="channel-message-content">
-        <div className="channel-message-head">{!grouped && <><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">Removed Pet</span>}</>}
+        <div className="channel-message-head">{!grouped && <><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">{item.author.kind === 'pet' ? 'Removed Pet' : 'Former member'}</span>}</>}
+          {item.author.actorId && <span className="channel-actor">via {item.author.actorId}</span>}
           <time dateTime={item.occurredAt} title={date.toLocaleString()}>{date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
           {messageExecutions.map(execution => <span key={execution.executionId} className={'channel-inline-state ' + execution.state}>
             {channelPetIdentity(execution.petId, pets, petsReady).name} · {executionLabel(execution, connected)}</span>)}

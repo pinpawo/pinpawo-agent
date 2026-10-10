@@ -105,6 +105,7 @@ export function App() {
   const storedToken = sessionStorage.getItem('studio.token') ?? '';
   const storedUrl = sessionStorage.getItem('studio.url') ?? 'http://127.0.0.1:3211';
   const [page, setPage] = useState<Page>('channel');
+  const [channelOnly, setChannelOnly] = useState(false);
   const [baseUrl, setBaseUrl] = useState(storedUrl);
   const [token, setToken] = useState(storedToken);
   const [connectionUrlDraft, setConnectionUrlDraft] = useState(storedUrl);
@@ -199,35 +200,50 @@ export function App() {
         if (!abort.signal.aborted) setNotice(connectionErrorMessage(error));
       });
     };
-    void observeStudioEvents({
-      url: `${normalizedUrl}/events`, headers, signal: abort.signal,
-      onConnected: () => {
-        setConnectionState('connected');
-        setConnectionError('');
-        setConnectionModalOpen(false);
-        setNotice('Connected. Activity missed while disconnected remains unknown.');
-        refreshInBackground();
-      },
-      onDisconnected: (error, retrying) => {
-        observationEpoch.current++;
-        setDispatches(markObservationLost);
-        setConnectionState(retrying ? 'reconnecting' : 'error');
-        setConnectionError(connectionErrorMessage(error));
-        if (!retrying) setConnectionModalOpen(true);
-      },
-      onEvent: (event) => {
-        const record = dispatchRecordFromEvent(event);
-        if (record) setDispatches((current) => appendDispatchRecord(current, record));
-        if (['scheduler', 'notice', 'trigger'].includes(event.source)) refreshInBackground();
-        const payload = event.payload as { channelId?: string; invocationId?: string; error?: string; scope?: { namespace?: string } } | undefined;
-        if (event.source === 'channel' || (event.source === 'resident-pet' && payload?.scope?.namespace === 'channel')) {
-          setChannelVersion(value => value + 1);
-        }
-        if (event.source === 'channel' && event.type === 'channel.delivery_failed' && payload?.channelId && payload.error) {
-          const failure = { channelId: payload.channelId, invocationId: payload.invocationId, error: payload.error };
-          setChannelFailures(current => [...current.slice(-19), failure]);
-        }
-      },
+    const connectObservation = async () => {
+      const viewer = await read<{ channelOnly: boolean }>('/channels/viewer');
+      if (abort.signal.aborted) return;
+      const scoped = viewer.value?.channelOnly ?? false;
+      setChannelOnly(scoped);
+      if (scoped) {
+        setPage('channel'); setPets([]); setPetsReady(true);
+        setConnectionState('connected'); setConnectionError(''); setConnectionModalOpen(false);
+        setNotice('Connected to your Channels. History refreshes every two seconds.');
+        return;
+      }
+      await observeStudioEvents({
+        url: `${normalizedUrl}/events`, headers, signal: abort.signal,
+        onConnected: () => {
+          setConnectionState('connected');
+          setConnectionError('');
+          setConnectionModalOpen(false);
+          setNotice('Connected. Activity missed while disconnected remains unknown.');
+          refreshInBackground();
+        },
+        onDisconnected: (error, retrying) => {
+          observationEpoch.current++;
+          setDispatches(markObservationLost);
+          setConnectionState(retrying ? 'reconnecting' : 'error');
+          setConnectionError(connectionErrorMessage(error));
+          if (!retrying) setConnectionModalOpen(true);
+        },
+        onEvent: (event) => {
+          const record = dispatchRecordFromEvent(event);
+          if (record) setDispatches((current) => appendDispatchRecord(current, record));
+          if (['scheduler', 'notice', 'trigger'].includes(event.source)) refreshInBackground();
+          const payload = event.payload as { channelId?: string; invocationId?: string; error?: string; scope?: { namespace?: string } } | undefined;
+          if (event.source === 'channel' || (event.source === 'resident-pet' && payload?.scope?.namespace === 'channel')) {
+            setChannelVersion(value => value + 1);
+          }
+          if (event.source === 'channel' && event.type === 'channel.delivery_failed' && payload?.channelId && payload.error) {
+            const failure = { channelId: payload.channelId, invocationId: payload.invocationId, error: payload.error };
+            setChannelFailures(current => [...current.slice(-19), failure]);
+          }
+        },
+      });
+    };
+    void connectObservation().catch(error => {
+      if (!abort.signal.aborted) { setConnectionState('error'); setConnectionError(connectionErrorMessage(error)); setConnectionModalOpen(true); }
     });
     return () => {
       abort.abort();
@@ -471,14 +487,14 @@ export function App() {
         </div>
       </header>
       <nav aria-label="Studio pages">
-        {(['channel', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
+        {(['channel', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).filter(item => !channelOnly || item === 'channel').map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
       <section className={'content' + (page === 'channel' ? ' channel-content' : '')}>
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
-            active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady} failures={channelFailures} />
+            active={page === 'channel'} channelOnly={channelOnly} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady} failures={channelFailures} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>CONNECTION FAILED</strong>

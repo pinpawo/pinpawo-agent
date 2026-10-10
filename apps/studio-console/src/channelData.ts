@@ -1,12 +1,12 @@
 export type ChannelGoal = {
   kind: 'revision'; channelId: string; sequence: number; title: string;
   goal: string; scope: string; reason: string; occurredAt: string;
-  author: { kind: string; id: string }; references: ArtifactReference[];
+  author: { kind: string; id: string; actorId?: string }; references: ArtifactReference[];
 };
 type ArtifactReference = { uri: string; label?: string; version?: string };
 export type ChannelMessage = {
   kind: 'message'; channelId: string; sequence: number; messageId: string; body: string;
-  author: { kind: string; id: string }; occurredAt: string; revision: number; replyTo?: string;
+  author: { kind: string; id: string; actorId?: string }; occurredAt: string; revision: number; replyTo?: string;
   source?: { petId: string; sessionId: string; invocationId: string };
   artifacts: ArtifactReference[]; mentions: { participantId?: string; petId?: string; label?: string }[];
   /** Tools the Pet called in this message, exactly as it called them. */
@@ -47,9 +47,13 @@ export type ChannelContext = {
   sessions: { petId: string; sessionId: string; registered: boolean }[];
   history: { entries: ChannelEntry[]; nextAfter: number; hasMore: boolean };
   participants?: ChannelParticipant[];
+  historicalParticipants?: ChannelParticipant[];
   viewerParticipantId?: string;
+  members?: { kind: 'human' | 'pet'; id: string; active: boolean }[];
+  availableParticipants?: ChannelParticipant[];
+  canManageMembers?: boolean;
 };
-export type ChannelParticipant = { participantId: string; kind: string; id: string; label: string };
+export type ChannelParticipant = { participantId: string; kind: string; id: string; label: string; active?: boolean };
 export type DispatchQueueEntry = { dispatchId: string; enqueuedAt: string; sessionId?: string; scope?: { namespace: string; id: string } };
 export type DispatchQueue = {
   petId: string; state: 'open' | 'busy' | 'waiting' | 'blocked'; activeOperation: 'conversation' | 'dispatch' | null;
@@ -105,7 +109,7 @@ export function channelMessageIdentity(message: ChannelMessage, pets: ChannelPet
   const participantId = channelAuthorParticipantId(message.author, participants);
   if (participantId === viewerParticipantId) return { name: 'Me', removed: false };
   const participant = participants.find(item => item.participantId === participantId);
-  if (participant) return { name: participant.label, removed: false };
+  if (participant) return { name: participant.label, removed: participant.active === false };
   return message.author.kind === 'pet'
     ? channelPetIdentity(message.author.id, pets, registryKnown)
     : { name: message.author.id === 'studio-operator' ? 'Studio operator' : message.author.id, removed: false };
@@ -138,7 +142,7 @@ export function channelMessagesGroup(previous: ChannelEntry | undefined, current
     || channelMessageExecution(previous, executions) || channelMessageExecution(current, executions)) return false;
   const gap = Date.parse(current.occurredAt) - Date.parse(previous.occurredAt);
   return previous.channelId === current.channelId && previous.author.kind === current.author.kind
-    && previous.author.id === current.author.id && channelDateKey(previous.occurredAt) === channelDateKey(current.occurredAt)
+    && previous.author.id === current.author.id && previous.author.actorId === current.author.actorId && channelDateKey(previous.occurredAt) === channelDateKey(current.occurredAt)
     && gap >= 0 && gap < 5 * 60_000;
 }
 

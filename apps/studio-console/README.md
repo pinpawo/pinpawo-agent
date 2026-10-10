@@ -62,3 +62,9 @@ independent scrolling, repeated opening, updates while reading and zero writes.
 Screenshots default to `/tmp/channel-message-fullscreen-screenshots`.
 `CHANNEL_BROWSER_EXECUTABLE` optionally selects an existing Chromium executable
 with an isolated temporary profile.
+
+Multi-member acceptance: `npm run test:browser:members`. It starts a temporary Host
+with two synthetic users, two deterministic Pets, and isolated credentials; tests
+Console member management, user/agent authorship, shared history, access revocation,
+and mobile layout. Set CHANNEL_BROWSER_EXECUTABLE to an installed Chromium binary
+when the Playwright browser is unavailable; a fresh temporary profile is used.

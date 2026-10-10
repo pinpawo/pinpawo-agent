@@ -43,10 +43,6 @@ import {
   type AgentLocalAttachment,
 } from './localAttachments';
 
-/**
- * Deprecated wire compatibility only. Runtime delegation transitions are not
- * part of agent-contracts and new callers must not emit this field.
- */
 export type ChatRequestMessage = {
   type: 'chat_request';
   requestId: string;
@@ -78,7 +74,7 @@ export type RuntimeConfigUpdateMessage = {
   type: 'runtime_config.update';
   /** Optional for compatibility with pre-acknowledgement local clients. */
   requestId?: string;
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   /** Omitted by older clients; the host retains the configured level. */
   autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
 };
@@ -150,7 +146,7 @@ export type AgentControlServerMessage =
   | {
       type: 'runtime_config.result';
       requestId: string;
-      globalReviewPolicyMode: ToolAuthorizationMode;
+      toolAuthorizationMode: ToolAuthorizationMode;
       autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
     }
   | {
@@ -799,21 +795,21 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     if (!hasOnlyKeys(record, [
       'type',
       'requestId',
-      'globalReviewPolicyMode',
+      'toolAuthorizationMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
     const requestId = readOptionalString(record, 'requestId');
     if ('requestId' in record && !requestId) return null;
-    const globalReviewPolicyMode = readToolAuthorizationMode(record, 'globalReviewPolicyMode');
+    const toolAuthorizationMode = readToolAuthorizationMode(record, 'toolAuthorizationMode');
     const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
       ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
       : undefined;
     if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
-    return globalReviewPolicyMode
+    return toolAuthorizationMode
       ? {
           type,
           ...(requestId ? { requestId } : {}),
-          globalReviewPolicyMode,
+          toolAuthorizationMode,
           ...(autoAuthorizationSafetyLevel ? { autoAuthorizationSafetyLevel } : {}),
         }
       : null;
@@ -975,22 +971,22 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     if (!hasOnlyKeys(record, [
       'type',
       'requestId',
-      'globalReviewPolicyMode',
+      'toolAuthorizationMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
-    const globalReviewPolicyMode = readToolAuthorizationMode(
+    const toolAuthorizationMode = readToolAuthorizationMode(
       record,
-      'globalReviewPolicyMode',
+      'toolAuthorizationMode',
     );
     const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
       ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
       : undefined;
     if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
-    return globalReviewPolicyMode
+    return toolAuthorizationMode
       ? {
           type,
           requestId,
-          globalReviewPolicyMode,
+          toolAuthorizationMode,
           ...(autoAuthorizationSafetyLevel ? { autoAuthorizationSafetyLevel } : {}),
         }
       : null;

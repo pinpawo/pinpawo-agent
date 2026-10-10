@@ -318,7 +318,7 @@ Studio
  ├─ residentPets: Map<petId, ResidentPetHost>   ← 多 Pet 在这一层
  ├─ 共享注入：modelProfiles、toolkitInventory、toolkitRuntimeManager、
  │            capabilityArtifactStore、checkpointer(同一个 FileSaver)、
- │            runtimeConfig、globalReviewPolicyMode
+ │            runtimeConfig、toolAuthorizationMode
  └─ 每 Pet 独有：petId、petName、modelProfileId、defaultCapabilityName、
                  petDocument、capabilities、sessionStatePath、adoptThreadId
 ```

@@ -19,7 +19,7 @@ export type StartupConfigSnapshot = {
   llmEndpointHost: string;
   llmModelPreset: string;
   llmContextWindowTokens: number;
-  globalReviewPolicyMode: string;
+  toolAuthorizationMode: string;
   langsmithTracing: boolean;
   langsmithProject: string;
   langsmithEndpoint: string;
@@ -63,7 +63,7 @@ export function buildStartupConfigSnapshot(params: {
     llmEndpointHost: summarizeModelProfile(profile).endpointHost,
     llmModelPreset: profile.sourcePreset ?? 'custom',
     llmContextWindowTokens: profile.contextWindowTokens,
-    globalReviewPolicyMode: config.globalReviewPolicyMode,
+    toolAuthorizationMode: config.toolAuthorizationMode,
     langsmithTracing: readLangSmithTracingEnabled(),
     langsmithProject: process.env.LANGSMITH_PROJECT?.trim() || '',
     langsmithEndpoint: process.env.LANGSMITH_ENDPOINT?.trim() || '',
@@ -85,7 +85,7 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
     `  llmEndpointHost=${snapshot.llmEndpointHost}`,
     `  llmModelPreset=${snapshot.llmModelPreset}`,
     `  llmContextWindowTokens=${snapshot.llmContextWindowTokens}`,
-    `  globalReviewPolicyMode=${snapshot.globalReviewPolicyMode}`,
+    `  toolAuthorizationMode=${snapshot.toolAuthorizationMode}`,
     `  langsmithTracing=${snapshot.langsmithTracing}`,
     `  langsmithProject=${snapshot.langsmithProject || 'not configured'}`,
     `  langsmithEndpoint=${snapshot.langsmithEndpoint || 'not configured'}`,

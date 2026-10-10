@@ -7,17 +7,17 @@ import type {
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
-export type UpdateGlobalReviewPolicyResult = {
-  globalReviewPolicyMode: ToolAuthorizationMode;
+export type UpdateToolAuthorizationModeResult = {
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 };
 
 type PendingRuntimeConfigUpdate = {
   requestId: string;
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   timer: TimerHandle | null;
-  resolve: (result: UpdateGlobalReviewPolicyResult) => void;
+  resolve: (result: UpdateToolAuthorizationModeResult) => void;
   reject: (error: Error) => void;
 };
 
@@ -31,7 +31,7 @@ export type RuntimeConfigCoordinatorOptions = {
   send: (message: AgentClientMessage) => boolean;
   getUnavailableReason: () => string | null;
   onUpdated: (
-    globalReviewPolicyMode: ToolAuthorizationMode,
+    toolAuthorizationMode: ToolAuthorizationMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
   ) => void;
   timeoutMs: number;
@@ -48,10 +48,10 @@ export class RuntimeConfigCoordinator {
     return this.pending !== null;
   }
 
-  updateGlobalReviewPolicy(
-    globalReviewPolicyMode: ToolAuthorizationMode,
+  updateToolAuthorizationMode(
+    toolAuthorizationMode: ToolAuthorizationMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
-  ): Promise<UpdateGlobalReviewPolicyResult> {
+  ): Promise<UpdateToolAuthorizationModeResult> {
     const unavailable = this.options.getUnavailableReason();
     if (unavailable) return Promise.reject(new Error(unavailable));
     if (this.pending) {
@@ -64,7 +64,7 @@ export class RuntimeConfigCoordinator {
     return new Promise((resolve, reject) => {
       const pending: PendingRuntimeConfigUpdate = {
         requestId,
-        globalReviewPolicyMode,
+        toolAuthorizationMode,
         autoAuthorizationSafetyLevel,
         timer: null,
         resolve,
@@ -80,7 +80,7 @@ export class RuntimeConfigCoordinator {
       if (!this.options.send({
         type: 'runtime_config.update',
         requestId,
-        globalReviewPolicyMode,
+        toolAuthorizationMode,
         autoAuthorizationSafetyLevel,
       })) {
         this.clear(pending);
@@ -97,7 +97,7 @@ export class RuntimeConfigCoordinator {
       pending.reject(new Error(message.message));
       return;
     }
-    if (message.globalReviewPolicyMode !== pending.globalReviewPolicyMode) {
+    if (message.toolAuthorizationMode !== pending.toolAuthorizationMode) {
       pending.reject(new Error(
         'runtime config response did not match the requested policy',
       ));
@@ -114,9 +114,9 @@ export class RuntimeConfigCoordinator {
       ));
       return;
     }
-    this.options.onUpdated(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
+    this.options.onUpdated(message.toolAuthorizationMode, autoAuthorizationSafetyLevel);
     pending.resolve({
-      globalReviewPolicyMode: message.globalReviewPolicyMode,
+      toolAuthorizationMode: message.toolAuthorizationMode,
       autoAuthorizationSafetyLevel,
     });
   }

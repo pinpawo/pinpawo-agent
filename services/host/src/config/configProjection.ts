@@ -20,7 +20,7 @@ export type RuntimeProjection = {
   modelProfileIssues: readonly string[];
   model?: string;
   inputModalities?: readonly ModelInputModality[];
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   contextWindow?: number;
   contextCompactionWatermarkTokens?: number;
@@ -47,7 +47,7 @@ export function buildLocalRuntimeProjection(
         deps.modelProfiles.snapshot.unavailableProfiles[modelProfileId]
           ?.map((issue) => issue.message)
         ?? [`Unknown model profile "${modelProfileId}"`],
-      globalReviewPolicyMode: deps.globalReviewPolicyMode,
+      toolAuthorizationMode: deps.toolAuthorizationMode,
       autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
       workdir: runtimeConfig.workdir,
       ...(runtimeConfig.workspace ? {
@@ -72,7 +72,7 @@ export function buildLocalRuntimeProjection(
     modelProfileIssues: [],
     model: llmConfig.model,
     inputModalities: llmConfig.inputModalities ?? ['text'],
-    globalReviewPolicyMode: deps.globalReviewPolicyMode,
+    toolAuthorizationMode: deps.toolAuthorizationMode,
     autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
     ...(llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: llmConfig.contextWindowTokens }

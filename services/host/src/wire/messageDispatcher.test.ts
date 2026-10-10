@@ -38,7 +38,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
       seen.push('new');
     },
     onRuntimeConfigUpdate: (_peer, message) => {
-      seen.push(`policy:${message.globalReviewPolicyMode}`);
+      seen.push(`policy:${message.toolAuthorizationMode}`);
     },
     onSessionSnapshotGet: (_peer, message) => {
       seen.push(`snapshot:${message.requestId}`);
@@ -101,12 +101,12 @@ test('local server dispatcher routes typed client messages and pong', async () =
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'full_access',
+    toolAuthorizationMode: 'full_access',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.snapshot.get',
@@ -143,7 +143,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
   dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     requestId: 'policy-invalid',
-    globalReviewPolicyMode: 'custom',
+    toolAuthorizationMode: 'custom',
   }), handlers);
   dispatchAgentSessionMessage(peer, '{bad json', handlers);
 

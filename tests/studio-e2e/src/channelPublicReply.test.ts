@@ -116,7 +116,7 @@ test('capability handoff reaches Channel only through the selected final root re
         graphConfig: { ...setup.graphConfig, models: { act: supervisor, answer: entry, subagent } },
       });
       hosts.push(await createResidentPetHost({ petId, petName: petId === 'acceptance-a' ? 'A' : 'B · Reviewer', runtimeConfig,
-        modelProfiles: createTestModelProfiles(), globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+        modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
         capabilities, petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
         capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
           listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },

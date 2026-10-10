@@ -69,7 +69,7 @@ export class QaLifecycleDriver {
       smoke.policy
       && this.policyStarted
       && !this.policyFinished
-      && state.session.runtime?.globalReviewPolicyMode === 'auto_authorization'
+      && state.session.runtime?.toolAuthorizationMode === 'auto_authorization'
     ) {
       this.policyFinished = true;
       this.actions.destroySoon();

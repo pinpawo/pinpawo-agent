@@ -225,7 +225,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -343,7 +343,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -403,7 +403,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: initialProfiles,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
@@ -439,7 +439,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
@@ -523,7 +523,7 @@ test('model selection is rejected while the active session is running', async ()
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -766,7 +766,7 @@ test('model selection blocks a chat admitted by another peer until the selection
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -854,7 +854,7 @@ test('model selection is rejected while checkpoint state has pending review', as
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -928,7 +928,7 @@ test('admitted images gate model selection through the transcript', async () => 
         inputModalities: ['text', 'image'],
       },
     ], 'vision-a'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -1066,7 +1066,7 @@ test('text-only selected profile rejects image admission before graph invocation
         inputModalities: ['text'],
       },
     ]),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -1138,10 +1138,10 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
-      globalReviewPolicyMode: 'require_authorization',
+      toolAuthorizationMode: 'require_authorization',
     }),
   }, {
-    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
+    persistToolAuthorizationMode: (mode, safetyLevel) => {
       persisted.push({ mode, safetyLevel });
     },
   });
@@ -1150,7 +1150,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
       type: 'runtime_config.update',
       requestId: 'policy-1',
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
       autoAuthorizationSafetyLevel: 'relaxed',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -1165,7 +1165,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     assert.deepEqual(sent[0], {
       type: 'runtime_config.result',
       requestId: 'policy-1',
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
       autoAuthorizationSafetyLevel: 'relaxed',
     });
     const snapshot = sent.find((message) => (
@@ -1173,7 +1173,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     ));
     assert.equal(
       snapshot?.type === 'session.new.result'
-        ? snapshot.snapshot.session.runtime?.globalReviewPolicyMode
+        ? snapshot.snapshot.session.runtime?.toolAuthorizationMode
         : null,
       'auto_authorization',
     );
@@ -1205,11 +1205,11 @@ test('runtime config update preserves the configured safety level when the messa
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
       autoAuthorizationSafetyLevel: 'relaxed',
     }),
   }, {
-    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
+    persistToolAuthorizationMode: (mode, safetyLevel) => {
       persisted.push({ mode, safetyLevel });
     },
   });
@@ -1218,7 +1218,7 @@ test('runtime config update preserves the configured safety level when the messa
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
       type: 'runtime_config.update',
       requestId: 'policy-preserve-1',
-      globalReviewPolicyMode: 'full_access',
+      toolAuthorizationMode: 'full_access',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
       type: 'session.new',
@@ -1232,7 +1232,7 @@ test('runtime config update preserves the configured safety level when the messa
     assert.deepEqual(sent[0], {
       type: 'runtime_config.result',
       requestId: 'policy-preserve-1',
-      globalReviewPolicyMode: 'full_access',
+      toolAuthorizationMode: 'full_access',
       autoAuthorizationSafetyLevel: 'relaxed',
     });
     const snapshot = sent.find((message) => (
@@ -1265,10 +1265,10 @@ test('runtime config update reports persistence failures without changing runtim
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
-      globalReviewPolicyMode: 'require_authorization',
+      toolAuthorizationMode: 'require_authorization',
     }),
   }, {
-    persistGlobalReviewPolicyMode: () => {
+    persistToolAuthorizationMode: () => {
       throw new Error('config is read-only');
     },
   });
@@ -1277,7 +1277,7 @@ test('runtime config update reports persistence failures without changing runtim
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
       type: 'runtime_config.update',
       requestId: 'policy-1',
-      globalReviewPolicyMode: 'full_access',
+      toolAuthorizationMode: 'full_access',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
       type: 'session.new',
@@ -1294,7 +1294,7 @@ test('runtime config update reports persistence failures without changing runtim
     ));
     assert.equal(
       snapshot?.type === 'session.new.result'
-        ? snapshot.snapshot.session.runtime?.globalReviewPolicyMode
+        ? snapshot.snapshot.session.runtime?.toolAuthorizationMode
         : null,
       'require_authorization',
     );

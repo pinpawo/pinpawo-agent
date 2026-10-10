@@ -1332,7 +1332,7 @@ function refreshSessionPicker() {
 function openPolicyPickerUi() {
   if (terminalHandoffOpen || policyPicker.phase !== 'closed') return;
   const state = controller.getState();
-  const currentMode = state.session.runtime?.globalReviewPolicyMode;
+  const currentMode = state.session.runtime?.toolAuthorizationMode;
   if (state.connection !== 'ready') {
     showErrorNotice('host is not connected');
     return;
@@ -1392,7 +1392,7 @@ function saveSelectedPolicy() {
   refreshPolicyPicker();
   const autoAuthorizationSafetyLevel = option.autoAuthorizationSafetyLevel
     ?? policyPicker.currentAutoAuthorizationSafetyLevel;
-  void controller.updateGlobalReviewPolicy(
+  void controller.updateToolAuthorizationMode(
     option.mode,
     autoAuthorizationSafetyLevel,
   ).then((result) => {
@@ -1404,7 +1404,7 @@ function saveSelectedPolicy() {
     }
     policyPicker = closePolicyPicker({
       ...policyPicker,
-      currentMode: result.globalReviewPolicyMode,
+      currentMode: result.toolAuthorizationMode,
       currentAutoAuthorizationSafetyLevel: result.autoAuthorizationSafetyLevel,
     });
     localNotice = `review policy: ${option.label}`;

@@ -56,7 +56,7 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   /** Shared Agent Session turn runner used by conversation and headless input. */
   runAgentTurn?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   /** Host persistence port for updated startup defaults. */
-  persistGlobalReviewPolicyMode?: ServerHandlerOptions['persistGlobalReviewPolicyMode'];
+  persistToolAuthorizationMode?: ServerHandlerOptions['persistToolAuthorizationMode'];
   /** Existing opaque checkpoint thread, adopted only when no Agent Session exists. */
   adoptThreadId?: string;
 };

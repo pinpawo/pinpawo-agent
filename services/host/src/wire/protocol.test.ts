@@ -113,24 +113,24 @@ test('parseHostClientMessage accepts runtime config updates for built-in review 
   assert.deepEqual(
     parseHostClientMessage(JSON.stringify({
       type: 'runtime_config.update',
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
     })),
     {
       type: 'runtime_config.update',
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
     },
   );
   assert.equal(
     parseHostClientMessage(JSON.stringify({
       type: 'runtime_config.update',
-      globalReviewPolicyMode: 'custom',
+      toolAuthorizationMode: 'custom',
     })),
     null,
   );
   assert.equal(
     parseHostClientMessage(JSON.stringify({
       type: 'runtime_config.update',
-      globalReviewPolicyMode: 'full_access',
+      toolAuthorizationMode: 'full_access',
       extra: true,
     })),
     null,

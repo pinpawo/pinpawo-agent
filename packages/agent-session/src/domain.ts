@@ -141,10 +141,8 @@ export type AgentRuntimeView = {
   model?: string;
   inputModalities?: AgentInputModality[];
   requiredInputModalities?: AgentInputModality[];
-  /** @deprecated Use toolAuthorizationMode for new consumers. */
-  globalReviewPolicyMode?: ToolAuthorizationMode;
-  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
   toolAuthorizationMode?: ToolAuthorizationMode;
+  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
   cwd?: string;
   workspaceId?: string;
   workspaceName?: string;

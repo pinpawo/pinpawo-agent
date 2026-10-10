@@ -9,7 +9,9 @@ const AUTO_REVIEW_RESULT_SCHEMA = z.object({
   riskScore: z.number().int().min(0).max(10).describe(
     'Risk from 0 to 10. Scores 0-2 pass strict review, 3-9 require relaxed review, and 10 always requires human review.',
   ),
-  reason: z.string().optional().default('').describe(
+  // Strict Structured Outputs reject ZodDefault and bare optional fields;
+  // nullish stays representable (required + nullable) and tolerates omission.
+  reason: z.string().nullish().describe(
     'A concise explanation grounded in the concrete action facts and authorization policy.',
   ),
 });
@@ -46,7 +48,7 @@ export async function assessAutoReviewRisk(options: AutoReviewInput & {
     runnableConfig: { callbacks: [] },
   });
 
-  return { complete: true, assessment };
+  return { complete: true, assessment: { riskScore: assessment.riskScore, reason: assessment.reason ?? '' } };
 }
 
 /** Bind execution dependencies once; no session state is kept by the evaluator. */

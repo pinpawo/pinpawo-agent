@@ -1,6 +1,6 @@
 /**
  * npm run bench -w @pinpawo-tests/agent-evals -- [--agent pinpawo|oracle|nop]
- *   [--task <id>]... [--attempts N] [--approval full-access|auto|require]
+ *   [--task <id>]... [--attempts N] [--approval auto|full-access|require]  (default auto)
  *   [--tasks-dir <dir>] [--out <dir>]
  *
  * The pinpawo agent uses the model profile in ~/.pinpawo/config.json. Set
@@ -48,7 +48,7 @@ const { values } = parseArgs({
     agent: { type: 'string', default: 'pinpawo' },
     task: { type: 'string', multiple: true, default: [] },
     attempts: { type: 'string', default: '1' },
-    approval: { type: 'string', default: 'full-access' },
+    approval: { type: 'string', default: 'auto' },
     'tasks-dir': { type: 'string', default: join(evalsRoot, 'bench', 'tasks') },
     out: { type: 'string' },
   },

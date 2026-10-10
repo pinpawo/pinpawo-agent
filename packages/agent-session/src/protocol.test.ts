@@ -159,6 +159,31 @@ test('runtime run boundaries round-trip for observing clients', () => {
   assert.deepEqual(parseAgentServerMessage(interrupted), interrupted);
 });
 
+test('an interrupt request carries the tokens its run spent before stopping', () => {
+  const waiting = {
+    type: 'event' as const,
+    requestId: 'r1',
+    event: {
+      type: 'interrupt.requested' as const,
+      requestId: 'r1',
+      pendingInterrupt: {
+        interruptId: 'i1',
+        payload: {
+          kind: 'human_review' as const,
+          interactions: [{
+            interactionId: 'review-1',
+            schemaVersion: 2 as const,
+            view: { kind: 'plain' as const, body: 'Approve?' },
+            options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' as const }],
+          }],
+        },
+      },
+      usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150, scope: 'run' as const },
+    },
+  };
+  assert.deepEqual(parseAgentServerMessage(waiting), waiting);
+});
+
 test('session compaction protocol is correlated and snapshot-backed', () => {
   assert.deepEqual(parseAgentClientMessage({
     type: 'session.compact',

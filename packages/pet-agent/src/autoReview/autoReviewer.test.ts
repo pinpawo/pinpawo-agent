@@ -38,3 +38,13 @@ test('AutoReviewer preserves budget failure and leaves model failure handling to
   await assert.rejects(reviewer.assess({ reviews: [action({ path: '/project/a' })] }), error => error === failure);
   assert.equal(invocations, 1);
 });
+
+test('AutoReviewer reads a null or missing reason as empty', async () => {
+  const replies: unknown[] = [{ riskScore: 1, reason: null }, { riskScore: 2 }];
+  const model = { withStructuredOutput: () => ({ invoke: async () => replies.shift() }) } as unknown as BaseChatModel;
+  const reviewer = createAutoReviewer({ model, structuredOutput: { autoRepair: false } });
+  for (const riskScore of [1, 2]) {
+    assert.deepEqual(await reviewer.assess({ reviews: [action({ path: '/project/a' })] }),
+      { complete: true, assessment: { riskScore, reason: '' } });
+  }
+});

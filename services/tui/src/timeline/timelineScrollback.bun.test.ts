@@ -531,13 +531,13 @@ test('a committed call that later fails gets its outcome as a new row', async ()
       kind: 'tool', title: 'Read file', phase: 'completed' };
     timeline.render(session([user, message, work], 'request-1'));
     const first = committedText();
-    assert.match(first, /▸ 定位问题/);
+    assert.match(first, /▸ 制定计划/);
     assert.doesNotMatch(first, /失败/);
 
     const failed = { ...message, toolCalls: [{ ...call, status: 'failed' as const }] };
     timeline.render(session([user, failed, work], 'request-1'));
     const outcome = committedText();
-    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 定位问题（失败）'],
+    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 制定计划（失败）'],
       'only the outcome is written; committed rows stay as they are');
 
     // The completion snapshot carries the same outcome: nothing more to write.

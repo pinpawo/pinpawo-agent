@@ -82,15 +82,20 @@ export function buildToolCallDisplayLines(entry: AgentMessageEntry): MessageDisp
   }));
 }
 
-/** A call as one line: what it was asked to do, else the tool's name. */
-export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>) {
-  const subject = TOOL_CALL_SUBJECT[call.name]?.(call.args);
-  return (typeof subject === 'string' && subject.replace(/\s+/g, ' ').trim()) || call.name;
+/**
+ * A call as one line: a fixed label for the handoff tools, else the tool's
+ * name. Handoff arguments (Entry's restated goal, Supervisor's briefing) are
+ * instructions for the next agent, not words for the user: the one sentence
+ * meant for the user is the message's own text, and the current plan item
+ * names the work.
+ */
+export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name'>) {
+  return TOOL_CALL_LABEL[call.name] ?? call.name;
 }
 
-const TOOL_CALL_SUBJECT: Record<string, (args: Record<string, unknown>) => unknown> = {
-  delegate_capability: args => typeof args.briefing === 'string' ? args.briefing.split('\n').find(line => line.trim()) : null,
-  plan_request: args => args.goal,
+const TOOL_CALL_LABEL: Record<string, string> = {
+  delegate_capability: '交给能力执行',
+  plan_request: '制定计划',
 };
 
 const TOOL_CALL_OUTCOME: Record<AgentMessageToolCall['status'], string> = {

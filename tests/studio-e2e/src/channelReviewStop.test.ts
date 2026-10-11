@@ -102,7 +102,7 @@ for (const decision of ['reject', 'cancel'] as const) {
       const { binding } = await channel.execute(id, { petId: 'one', body: 'Inspect and report.' });
       await waitFor(() => channel.service.readInterruptNotifications(id).notifications.length === 1);
       await channel.execute(id, { petId: 'one', body: 'Continue with different constraints.' });
-      await channel.execute(id, { replyTo: question.messageId, body: 'Use staging.' });
+      await channel.execute(id, { petId: 'one', replyTo: question.messageId, body: 'Use staging.' });
       await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedDispatches === 2);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 1, 0, 0]);
       await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });

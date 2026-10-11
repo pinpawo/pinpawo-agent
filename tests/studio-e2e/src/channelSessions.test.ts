@@ -104,14 +104,15 @@ test('Channel pair sessions survive new tasks, replies and restart; four Pets ke
     assert.equal(new Set(bindings.map(b => b.sessionId)).size, 4);
     assert.ok(f.maxActive() > 1, 'different Pets retain parallel execution');
     const question = outputs(f, a).find(m => m.author.id === 'one')!;
-    await f.channel.execute(` ${a} `, { replyTo: question.messageId, body: 'staging' });
+    await f.channel.execute(` ${a} `, { petId: 'one', replyTo: question.messageId, body: 'staging' });
     await waitFor(() => outputs(f, a).length === 5);
     assert.equal(outputs(f, a).at(-1)!.body, 'Answer 2: staging');
     assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
       messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet' }, body: question.body,
     });
     assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:studio-operator', kind: 'human' });
-    await assert.rejects(f.channel.execute(b, { replyTo: question.messageId, body: 'wrong Channel' }), /reference/);
+    await assert.rejects(f.channel.execute(a, { replyTo: question.messageId, body: 'no recipient' }), /Select an existing Pet/);
+    await assert.rejects(f.channel.execute(b, { petId: 'one', replyTo: question.messageId, body: 'wrong Channel' }), /reference/);
     await assert.rejects(f.channel.execute(a, { petId: 'missing', replyTo: question.messageId, body: 'unknown target' }), /Unknown/);
     await f.channel.execute(b, { petId: 'one', body: 'new Channel' });
     await waitFor(() => outputs(f, b).length === 1);

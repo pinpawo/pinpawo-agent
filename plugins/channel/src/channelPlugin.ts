@@ -122,15 +122,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   };
   async function execute(channelId: string, input: ChannelExecutionInput) {
     const value = channelMessageSchema.extend({ petId: z.string().min(1).optional() }).strict().parse(input);
-    // Preserve the explicit legacy reply action. The unified message protocol
-    // never infers a recipient from replyTo or automatically addresses a Pet reply.
-    const original = value.replyTo ? service.getMessage(channelId, value.replyTo) : undefined;
-    if (!value.petId && !value.mentions.length && original?.source) {
-      const binding = service.getBinding(channelId, original.source.petId);
-      if (!binding || binding.sessionId !== original.source.sessionId) throw new Error('Reply session binding does not match.');
-    }
-    const petId = value.petId ?? (value.mentions.length ? undefined : original?.source?.petId);
-    const mentions = [...value.mentions, ...(petId ? [{ participantId: channelParticipantId('pet', petId) }] : [])];
+    // Like every Channel message, the caller names the recipients; replyTo only
+    // quotes and never selects a Pet.
+    const mentions = [...value.mentions, ...(value.petId ? [{ participantId: channelParticipantId('pet', value.petId) }] : [])];
     if (!mentions.length && !parseChannelMentions(value.body, [], participants()).length) throw new Error('Select an existing Pet explicitly.');
     const result = await sendMessage(channelId, { body: value.body, mentions, ...(value.replyTo ? { replyTo: value.replyTo } : {}) });
     const accepted = result.deliveries.find(delivery => delivery.receipt && delivery.binding);

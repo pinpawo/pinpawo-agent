@@ -3,6 +3,7 @@ import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import { atomicWriteFile } from '../../atomicFile';
 import { tryStat } from './fileSystemUtils';
 import {
   applyChunksToContentPartially,
@@ -428,17 +429,6 @@ function worstFuzz(chunks: Array<{ fuzz: ResolvedPatchWrite['fuzz'] }>): Resolve
   if (chunks.some((chunk) => chunk.fuzz === 'ignore-whitespace')) return 'ignore-whitespace';
   if (chunks.some((chunk) => chunk.fuzz === 'ignore-trailing-whitespace')) return 'ignore-trailing-whitespace';
   return 'exact';
-}
-
-function atomicWriteFile(filePath: string, content: string) {
-  const tempPath = `${filePath}.pinpawo-patch-${process.pid}-${Date.now()}.tmp`;
-  writeFileSync(tempPath, content, 'utf-8');
-  try {
-    renameSync(tempPath, filePath);
-  } catch (err) {
-    rmSync(tempPath, { force: true });
-    throw err;
-  }
 }
 
 const APPLY_PATCH_DESCRIPTION = [

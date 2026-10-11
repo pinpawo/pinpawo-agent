@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -329,6 +329,30 @@ test('apply_patch updates a file with context-anchored chunks', async (t) => {
   assert.deepEqual(result.appliedHunks, [1]);
   assert.equal('failedHunks' in result, false);
   assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\ndelta\n');
+});
+
+test('apply_patch keeps the file mode of the patched file', { skip: process.platform === 'win32' }, async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'run.sh');
+  writeFileSync(filePath, '#!/bin/sh\necho old\n', 'utf-8');
+  chmodSync(filePath, 0o755);
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@',
+      ' #!/bin/sh',
+      '-echo old',
+      '+echo new',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(readFileSync(filePath, 'utf-8'), '#!/bin/sh\necho new\n');
+  assert.equal(statSync(filePath).mode & 0o7777, 0o755);
+  assert.deepEqual(readdirSync(root), ['run.sh']);
 });
 
 test('apply_patch rejects Unified Diff without modifying the file', async (t) => {

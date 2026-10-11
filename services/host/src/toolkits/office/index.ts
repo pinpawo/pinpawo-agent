@@ -37,11 +37,44 @@ export function resolveOfficeExecutable(binary: string = 'officecli', path = pro
   return null;
 }
 
+function officeExitStatus(code: number | null) {
+  if (code === 0) return 'ok';
+  return code === 2 ? 'warning' : 'failed';
+}
+
 export function officeEnabled(config: { capabilities?: Record<string, boolean> }, override?: boolean) {
   return override ?? config.capabilities?.office === true;
 }
 
+// OfficeCLI rewrites the whole package on each edit, so concurrent calls on
+// one document each succeed and the last writer silently drops the others.
+// Calls naming the same document run one at a time.
+function createDocumentQueue() {
+  const tails = new Map<string, Promise<void>>();
+  return async <T>(key: string | null, signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> => {
+    if (!key) return await run();
+    const previous = tails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => current);
+    tails.set(key, tail);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) { reject(createAbortError()); return; }
+        const onAbort = () => reject(createAbortError());
+        signal?.addEventListener('abort', onAbort, { once: true });
+        void previous.then(() => { signal?.removeEventListener('abort', onAbort); resolve(); });
+      });
+      return await run();
+    } finally {
+      release();
+      if (tails.get(key) === tail) tails.delete(key);
+    }
+  };
+}
+
 export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string }): AgentToolkit {
+  const serializeDocument = createDocumentQueue();
   const binary = deps.executable ?? process.env.PINPAWO_OFFICECLI_PATH;
   const executablePath = () => {
     if (binary) return resolveOfficeExecutable(binary);
@@ -53,18 +86,22 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     if (!executable) throw new Error('Office Toolkit requires iOfficeAI/OfficeCLI on PATH or an absolute PINPAWO_OFFICECLI_PATH. Run pinpawo toolkit install office explicitly; the Toolkit never installs dependencies.');
     const context = readToolExecutionContext(runtime);
     const cwd = resolve(context.workdir ?? process.cwd(), input.cwd ?? '.');
-    const result = await createCliRunner(deps.shell, runtime)([executable, input.command, ...input.args], {
+    const document = input.command !== 'help' && input.args[0] ? resolve(cwd, input.args[0]) : null;
+    const result = await serializeDocument(document, runtime.signal, () => createCliRunner(deps.shell, runtime)([executable, input.command, ...input.args], {
       cwd, timeoutMs: input.timeoutSeconds * 1000,
       maxOutputChars: 4 * 1024 * 1024,
       // Upstream opt-outs: do not let a bounded document call bootstrap or
       // update software, or spawn a detached resident beyond ShellRS ownership.
       env: { OFFICECLI_NO_AUTO_INSTALL: '1', OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' },
-    });
+    }));
     if (result.status === 'aborted') throw createAbortError();
     if (result.status === 'spawn_failed') throw result.error;
     if (result.status === 'yielded') return JSON.stringify({ status: 'result_unknown', processId: result.process.processId, message: 'Inspect existing effects before retrying.' });
     return JSON.stringify({
-      status: result.status === 'exited' ? (result.code === 0 ? 'ok' : 'failed') : 'timeout',
+      // OfficeCLI exit 2 means the operation was applied with warnings;
+      // reporting it as failed invites a retry that duplicates the edit.
+      status: result.status === 'exited' ? officeExitStatus(result.code) : 'timeout',
+      ...(result.status === 'exited' && result.code === 2 ? { message: 'Applied with warnings; read the document back before retrying.' } : {}),
       ...(result.status === 'exited' ? { exitCode: result.code } : { termination: result.termination ?? 'unconfirmed' }),
       stdout: truncateCliOutput(result.stdout), stderr: truncateCliOutput(result.stderr),
     });
@@ -73,7 +110,8 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     description: 'Use iOfficeAI/OfficeCLI to read, create and edit DOCX/XLSX/PPTX. Pass each CLI argument separately; help discovers syntax. No shell interpolation or automatic installation.',
     schema: z.object({
       command: z.enum(commands),
-      args: z.array(z.string().refine((value) => !value.includes('\0'), 'NUL is not allowed')).max(256).default([]),
+      args: z.array(z.string().refine((value) => !value.includes('\0'), 'NUL is not allowed')).max(256).default([])
+        .describe('Arguments after the command, starting with the document path; do not repeat the command.'),
       cwd: z.string().optional(),
       timeoutSeconds: z.number().int().min(1).max(600).default(60),
     }),
@@ -102,7 +140,7 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
         reason: 'Office is enabled but iOfficeAI/OfficeCLI is missing. Run pinpawo toolkit install office explicitly, or set absolute PINPAWO_OFFICECLI_PATH; then restart the Host.',
       };
     },
-    instructions: 'Use office_cli help to discover installed command syntax. Read document structure before editing; choose your own operations. Use separate argv entries (including paths or text with spaces). Prefer copies for edits; validate and read back results, close any opened OfficeCLI document session before delivery. Relative output paths resolve from the workdir; report their actual paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
+    instructions: 'Use office_cli help to discover installed command syntax. Read document structure before editing; choose your own operations. Pass the command once in command and the remaining arguments in args, starting with the document path. Use separate argv entries (including paths or text with spaces). Calls on the same document run one at a time; issue edits to one document sequentially. Exit status warning means the edit was applied, so read back instead of retrying. Prefer copies for edits; validate and read back results, close any opened OfficeCLI document session before delivery. Relative output paths resolve from the workdir; report their actual paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
   });
 }
 

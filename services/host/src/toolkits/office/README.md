@@ -40,6 +40,12 @@ Enabled but missing dependencies produce an unavailable Toolkit diagnostic.
 {"command":"create","args":["My Report.docx"]}
 ```
 
+`args` starts with the document path and never repeats the command. OfficeCLI
+rewrites the whole package on each edit, so concurrent calls on one document
+silently drop all but the last write; the Toolkit runs calls that name the same
+document (resolved against `cwd`) one at a time. Exit code 2 means the edit was
+applied with warnings and is reported as status `warning`, not `failed`.
+
 Use `help` to discover the installed version's syntax. Supported commands are
 help, create, view, get, query, add, set, remove, validate and close.
 Every call uses existing command-execution review and ShellRS with a bounded

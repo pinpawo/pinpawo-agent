@@ -144,3 +144,57 @@ test('actual Office tool timeout and cancellation reap the started process', asy
     assert.throws(() => process.kill(pid, 0));
   } finally { await shell.dispose(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('calls on the same document run one at a time; other documents and help do not wait', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office queue '));
+  const executable = join(directory, 'officecli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  const running = new Map<string, number>();
+  let overlap = 0;
+  const releases: Array<() => void> = [];
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async (_id, input) => {
+      const argv = (input.command as { argv: readonly string[] }).argv;
+      const key = argv[1] === 'help' ? 'help' : argv[2]!;
+      running.set(key, (running.get(key) ?? 0) + 1);
+      if (key !== 'help' && running.get(key)! > 1) overlap += 1;
+      await new Promise<void>((resolve) => releases.push(resolve));
+      running.set(key, running.get(key)! - 1);
+      return { status: 'exited', code: argv.includes('warn') ? 2 : 0, stdout: '', stderr: '' };
+    },
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const tool = createOfficeToolkit({ shell, executable }).tools[0]!.tool;
+    const call = (args: string[], command = 'add') => tool.invoke({ command, args, cwd: directory }, scope);
+    const first = call(['r.docx', '/body', 'p1']);
+    const second = call([join(directory, 'r.docx'), '/body', 'warn']);
+    const other = call(['other.docx', '/body', 'p1']);
+    const help = call([], 'help');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 3, 'second call on r.docx waits for the first');
+    while (releases.length) { releases.shift()!(); await new Promise((resolve) => setTimeout(resolve, 20)); }
+    const results = await Promise.all([first, second, other, help]).then((values) => values.map((value) => JSON.parse(String(value))));
+    assert.equal(overlap, 0);
+    assert.equal(results[0].status, 'ok');
+    assert.equal(results[1].status, 'warning');
+    assert.match(results[1].message, /Applied with warnings/);
+
+    const blocker = call(['r.docx', '/body', 'p2']);
+    const controller = new AbortController();
+    const queued = tool.invoke({ command: 'add', args: ['r.docx', '/body', 'p3'], cwd: directory }, { ...scope, signal: controller.signal });
+    const rejected = assert.rejects(queued, (error: Error) => error.name === 'AbortError');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort();
+    await rejected;
+    releases.shift()!();
+    assert.equal(JSON.parse(String(await blocker)).status, 'ok');
+    const after = call(['r.docx', '/body', 'p4']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 1, 'an aborted waiter does not hold the document');
+    releases.shift()!();
+    await after;
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

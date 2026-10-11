@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, realpathSync, readFileSync, existsSync, mkdtempSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createOfficeToolkit, officeEnabled, resolveOfficeExecutable } from './index';
+import { createOfficeToolkit, officeEnabled, resolveOfficeExecutable, OFFICE_TOOLKIT_INSTRUCTIONS } from './index';
 import { PosixShellRS } from '../shellRS/posixShellRS';
 import type { ShellRS, ShellExecRequest } from '../shellRS/shellRS';
 
@@ -200,5 +200,40 @@ test('document calls run one at a time whatever the argument order; help does no
     assert.equal(releases.length, 1, 'an aborted waiter does not hold the document');
     releases.shift()!();
     await after;
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('batch must be atomic and inline; dump is allowed; usage guide stays brief', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office batch '));
+  const executable = join(directory, 'officecli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  const argvs: string[][] = [];
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async (_id, input) => {
+      argvs.push([...(input.command as { argv: readonly string[] }).argv]);
+      return { status: 'exited', code: 0, stdout: '', stderr: '' };
+    },
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const toolkit = createOfficeToolkit({ shell, executable });
+    const tool = toolkit.tools[0]!.tool;
+    const call = async (command: string, args: string[]) => JSON.parse(String(await tool.invoke({ command, args, cwd: directory }, scope)));
+    const commands = JSON.stringify([{ command: 'add', parent: '/body', type: 'paragraph', props: { text: '标题 一' } }]);
+    assert.equal((await call('batch', ['r.docx', '--commands', commands])).status, 'ok');
+    assert.deepEqual(argvs.at(-1)!.slice(1), ['batch', 'r.docx', '--commands', commands]);
+    assert.equal((await call('batch', ['r.docx', '--input', 'edits.json'])).status, 'ok');
+    assert.equal((await call('dump', ['r.docx', '/body', '--json'])).status, 'ok');
+    assert.equal((await call('batch', ['r.docx'])).status, 'invalid_arguments');
+    const partial = await call('batch', ['r.docx', '--best-effort', '--commands', commands]);
+    assert.equal(partial.status, 'invalid_arguments'); assert.match(partial.message, /best-effort/);
+    assert.equal(argvs.length, 3, 'rejected batches never run');
+    await assert.rejects(tool.invoke({ command: 'raw-set', args: ['r.docx'] }, scope));
+    assert.equal(toolkit.instructions, OFFICE_TOOLKIT_INSTRUCTIONS);
+    assert.match(OFFICE_TOOLKIT_INSTRUCTIONS, /Apache-2\.0/);
+    // Injected into every capability that uses the Toolkit: keep it ~1k tokens.
+    assert.ok(OFFICE_TOOLKIT_INSTRUCTIONS.length < 4000);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

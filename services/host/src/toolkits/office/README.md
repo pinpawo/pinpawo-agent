@@ -45,11 +45,23 @@ rewrites the whole package on each edit, so concurrent calls on one document
 silently drop all but the last write; the Toolkit runs all calls except `help`
 one at a time (the document cannot be identified reliably from argv, since
 OfficeCLI accepts options before the path). Queued time does not count toward
-`timeoutSeconds`. Args that repeat the command are rejected without running. Exit code 2 means the edit was
-applied with warnings and is reported as status `warning`, not `failed`.
+`timeoutSeconds`. Args that repeat the command are rejected without running.
+Exit code 2 means the edit was applied with warnings and is reported as status
+`warning`, not `failed`.
 
-Use `help` to discover the installed version's syntax. Supported commands are
-help, create, view, get, query, add, set, remove, validate and close.
+Supported commands are help, create, view, get, query, add, set, remove,
+validate, close, batch and dump. `batch` must pass `--commands` or `--input`
+(stdin is not connected) and may not use `--best-effort`: the default batch is
+atomic, so a failed batch leaves the file byte-identical, while best-effort
+keeps partial writes yet still exits 1. Inside a batch an unsupported prop is
+only a warning (exit 0). `dump` is read-only and prints replayable batch JSON.
+
+The Toolkit instructions (`OFFICE_TOOLKIT_INSTRUCTIONS`) are a short usage
+guide adapted from upstream's Apache-2.0 `SKILL.md` for this Toolkit's argv
+form, allowlist and no-resident mode; each claim was checked against 1.0.156.
+They are injected into every capability using the Toolkit, so keep them brief.
+Upstream's per-format skills are not included.
+
 Every call uses existing command-execution review and ShellRS with a bounded
 wait and process-group termination on timeout. There is no shell interpolation.
 The model chooses its operations; no fixed workflow or roles are introduced.
@@ -62,8 +74,9 @@ remain owned by OfficeCLI; use independent files and close before delivery.
 The Toolkit has no independent state or job store.
 
 Tests cover opt-in, missing executable, argv/paths with spaces, execution
-failure, timeout and cancellation. Actual format roundtrips require the approved
-OfficeCLI binary; mock execution tests do not establish document fidelity.
+failure, batch restrictions, timeout and cancellation. Actual format roundtrips
+require the approved OfficeCLI binary; mock execution tests do not establish
+document fidelity.
 
 Source review: npm registry `@officecli/officecli@1.0.156` points to
 `iOfficeAI/OfficeCLI`; its release source is

@@ -11,7 +11,24 @@ import { readRecord, readString } from '../operationMetadata';
 import { managedOfficeExecutable } from './dependency';
 import { createCliRunner, truncateCliOutput } from '../cli/cliRunner';
 
-const commands = ['help', 'create', 'view', 'get', 'query', 'add', 'set', 'remove', 'validate', 'close'] as const;
+const commands = ['help', 'create', 'view', 'get', 'query', 'add', 'set', 'remove', 'validate', 'close', 'batch', 'dump'] as const;
+
+// Adapted from the Apache-2.0 iOfficeAI/OfficeCLI v1.0.156 SKILL.md for this
+// Toolkit's constraints (argv form, no resident, command allowlist). Every
+// claim here was checked against the 1.0.156 binary; keep it short, it is
+// injected into every capability that uses the Toolkit.
+export const OFFICE_TOOLKIT_INSTRUCTIONS = [
+  'office_cli runs iOfficeAI/OfficeCLI 1.0.156 (guidance adapted from its Apache-2.0 SKILL.md).',
+  'Call shape: command is the verb; args are the remaining argv in this order: document path, element path, then options. Never repeat the verb in args. Keep positionals before options: --prop takes several values and swallows a path placed after it. One --prop entry per key=value; text with spaces stays one entry. No shell, so no quoting.',
+  'Commands: help, create, view, get, query, add, set, remove, validate, close, batch, dump. Nothing else is available (no raw, raw-set, move, swap, open, save). There is no resident: every call opens and saves the file itself and close is a no-op. Calls run one at a time; issue edits to one document in order.',
+  'Paths: docx /body, /body/p[N], /body/tbl[N]/tr[R]/tc[C]; xlsx /Sheet1/A1; pptx / for slides, /slide[N]/shape[M]. add returns stable paths such as /body/p[@paraId=00100000] or /slide[1]/shape[@id=100000]; prefer them, positional indices shift after inserts.',
+  'Known-good forms: create report.docx (type from extension; fails if the file exists, use a new name or --force, and if the directory is missing). add report.docx /body --type paragraph --prop text=Summary --prop style=Heading1. add report.docx /body --type table --prop data=H1,H2;a,b (rows split by ;, cells by ,). set data.xlsx /Sheet1/A1 --prop value=City; set data.xlsx /Sheet1/B3 --prop formula=B2*2. add deck.pptx / --type slide --prop title=Q3; add deck.pptx /slide[1] --type shape --prop text=Point --prop x=2cm --prop y=5cm.',
+  'Use help only for what you do not know: help docx lists elements, help docx paragraph shows props with examples, help docx add table filters by verb (formats docx, xlsx, pptx). Do not guess prop names; there is no help --version.',
+  'Prefer one batch for several edits to one document: one save and atomic, so if any item fails nothing is written (status failed, the result names the item). args: [file, "--commands", "<JSON array>"] or [file, "--input", "<json file>"]. Items are objects, e.g. {"command":"add","parent":"/body","type":"paragraph","props":{"text":"Hi","style":"Heading1"}}, {"command":"set","path":"/Sheet1/A1","props":{"value":"City"}}. --best-effort is not allowed.',
+  'Read back in few calls: view <file> text (tables appear only as [Table: N rows]; modes are text, annotated, outline, stats, issues); get <file> <one path> --depth 2 shows a subtree including table cells; dump <file> /body (docx), /Sheet1 (xlsx) or /slide[N] (pptx) prints content as replayable batch JSON, add --json to keep CJK unescaped. get takes one path per call. Then validate <file>.',
+  'Results: ok; warning (exit 2) means applied with caveats such as an unsupported prop, so read back instead of retrying; failed means a single command or batch was not applied: read stderr/stdout, which usually lists the valid props or paths; invalid_arguments means the call never ran.',
+  'Prefer copies when editing existing documents. Relative paths resolve from the workdir; report actual output paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
+].join('\n');
 
 export function resolveOfficeExecutable(binary: string = 'officecli', path = process.env.PATH ?? ''): string | null {
   const candidates = isAbsolute(binary) ? [binary] : binary.includes('/')
@@ -90,6 +107,16 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     if (input.command !== 'help' && input.args[0] === input.command) {
       return JSON.stringify({ status: 'invalid_arguments', message: `args must not repeat the command "${input.command}"; pass only the arguments after it.` });
     }
+    if (input.command === 'batch') {
+      // stdin is not connected, and --best-effort keeps partial writes while
+      // still exiting 1, which would read as "not applied".
+      if (!input.args.some((arg) => arg === '--commands' || arg === '--input')) {
+        return JSON.stringify({ status: 'invalid_arguments', message: 'batch needs --commands <JSON array> or --input <json file>; stdin is not available.' });
+      }
+      if (input.args.includes('--best-effort')) {
+        return JSON.stringify({ status: 'invalid_arguments', message: 'batch --best-effort is not allowed; a failed batch must leave the document unchanged.' });
+      }
+    }
     const result = await serializeDocument(input.command === 'help' ? null : 'documents', runtime.signal, () => createCliRunner(deps.shell, runtime)([executable, input.command, ...input.args], {
       cwd, timeoutMs: input.timeoutSeconds * 1000,
       maxOutputChars: 4 * 1024 * 1024,
@@ -110,7 +137,7 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     });
   }, {
     name: 'office_cli',
-    description: 'Use iOfficeAI/OfficeCLI to read, create and edit DOCX/XLSX/PPTX. Pass each CLI argument separately; help discovers syntax. No shell interpolation or automatic installation.',
+    description: 'Use iOfficeAI/OfficeCLI to read, create and edit DOCX/XLSX/PPTX. Pass each CLI argument separately, document path first; batch applies several edits atomically. No shell interpolation or automatic installation.',
     schema: z.object({
       command: z.enum(commands),
       args: z.array(z.string().refine((value) => !value.includes('\0'), 'NUL is not allowed')).max(256).default([])
@@ -143,7 +170,7 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
         reason: 'Office is enabled but iOfficeAI/OfficeCLI is missing. Run pinpawo toolkit install office explicitly, or set absolute PINPAWO_OFFICECLI_PATH; then restart the Host.',
       };
     },
-    instructions: 'Use office_cli help to discover installed command syntax. Read document structure before editing; choose your own operations. Pass the command once in command and the remaining arguments in args, starting with the document path. Use separate argv entries (including paths or text with spaces). Document calls run one at a time; issue edits to one document sequentially. Exit status warning means the edit was applied, so read back instead of retrying. Prefer copies for edits; validate and read back results, close any opened OfficeCLI document session before delivery. Relative output paths resolve from the workdir; report their actual paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
+    instructions: OFFICE_TOOLKIT_INSTRUCTIONS,
   });
 }
 

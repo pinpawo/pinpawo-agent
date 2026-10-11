@@ -24,26 +24,6 @@ export function buildToolOperationEvent(
   return normalizeToolStreamEvent(requestId, payload, registry);
 }
 
-export function readFinalMessageText(message: { content?: unknown }) {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-          return part.text;
-        }
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
-}
-
 /** The tool calls a message makes, exactly as the model wrote them. */
 export function readMessageToolCalls(message: BaseMessage): Array<Omit<AgentMessageToolCall, 'status'>> {
   if (!AIMessage.isInstance(message)) return [];

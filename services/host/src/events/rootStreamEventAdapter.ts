@@ -1,10 +1,11 @@
-import { isPublicRunMessage, readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { isPublicRunMessage, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
   GUARD_DECISION_EVENT,
   isOrchestratorInternalAiStreamNode,
   SUBAGENT_GUARD_DECISION_EVENT,
+  readMessageText,
   type GuardDecisionRecord,
 } from '@pinpawo/pet-agent';
 
@@ -365,7 +366,7 @@ export async function* adaptRootStream(
       // Only a newly committed final AI in the current run is a public reply.
       if (receivedInitialValues && AIMessage.isInstance(last) && last.id && !seenMessages.has(last.id)
         && !last.tool_calls?.length) {
-        const text = readFinalMessageText(last);
+        const text = readMessageText(last);
         if (text && isPublicRunMessage(last, chatEvent.values.runId)) {
           yield { type: 'assistant.delta', messageId: last.id, node: null, text };
           assistantReply += text;
@@ -404,7 +405,7 @@ function* projectMainToolCalls(
     const toolCalls = readMessageToolCalls(message);
     if (!message.id || !toolCalls.length || !isPublicRunMessage(message, values.runId)) continue;
     if (announce && !seenMessages.has(message.id)) {
-      yield { type: 'tool_calls.message', messageId: message.id, text: readFinalMessageText(message), toolCalls };
+      yield { type: 'tool_calls.message', messageId: message.id, text: readMessageText(message), toolCalls };
       for (const call of toolCalls) openToolCalls.set(call.id, message.id);
     } else if (!announce) {
       for (const call of toolCalls) if (!results.has(call.id)) openToolCalls.set(call.id, message.id);

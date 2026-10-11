@@ -181,7 +181,7 @@ test('document calls run one at a time whatever the argument order; help does no
     assert.equal(overlap, 0);
     assert.equal(results[0].status, 'ok');
     assert.equal(results[1].status, 'warning');
-    assert.match(results[1].message, /Applied with warnings/);
+    assert.match(results[1].message, /may be fully, partly or not applied/);
     const repeated = JSON.parse(String(await call(['create', 'x.docx'], 'create')));
     assert.equal(repeated.status, 'invalid_arguments');
     assert.equal(releases.length, 0, 'a repeated command never runs');
@@ -200,6 +200,25 @@ test('document calls run one at a time whatever the argument order; help does no
     assert.equal(releases.length, 1, 'an aborted waiter does not hold the document');
     releases.shift()!();
     await after;
+
+    // A runs, B waits and is cancelled, C arrives before A finishes. C must still wait for A even though B (the old tail) is gone.
+    const runningA = call(['r.docx', '/body', 'A']);
+    const cancelB = new AbortController();
+    const waitingB = tool.invoke({ command: 'add', args: ['r.docx', '/body', 'B'], cwd: directory }, { ...scope, signal: cancelB.signal });
+    const rejectedB = assert.rejects(waitingB, (error: Error) => error.name === 'AbortError');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cancelB.abort();
+    await rejectedB;
+    const waitingC = call(['r.docx', '/body', 'C']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 1, 'C waits for A after B is cancelled');
+    releases.shift()!();
+    await runningA;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 1, 'C runs once A finishes');
+    releases.shift()!();
+    await waitingC;
+    assert.equal(overlap, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -229,7 +248,11 @@ test('batch must be atomic and inline; dump is allowed; usage guide stays brief'
     assert.equal((await call('batch', ['r.docx'])).status, 'invalid_arguments');
     const partial = await call('batch', ['r.docx', '--best-effort', '--commands', commands]);
     assert.equal(partial.status, 'invalid_arguments'); assert.match(partial.message, /best-effort/);
-    assert.equal(argvs.length, 3, 'rejected batches never run');
+    for (const smuggled of ['--best-effort=true', '--best-effort:true', '@args.rsp']) {
+      assert.equal((await call('batch', ['r.docx', smuggled, '--commands', commands])).status, 'invalid_arguments', smuggled);
+    }
+    assert.equal((await call('batch', ['r.docx', `--commands=${commands}`])).status, 'ok', '--commands=value form is accepted');
+    assert.equal(argvs.length, 4, 'rejected batches never run');
     await assert.rejects(tool.invoke({ command: 'raw-set', args: ['r.docx'] }, scope));
     assert.equal(toolkit.instructions, OFFICE_TOOLKIT_INSTRUCTIONS);
     assert.match(OFFICE_TOOLKIT_INSTRUCTIONS, /Apache-2\.0/);

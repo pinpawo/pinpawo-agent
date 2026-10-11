@@ -24,9 +24,9 @@ export const OFFICE_TOOLKIT_INSTRUCTIONS = [
   'Paths: docx /body, /body/p[N], /body/tbl[N]/tr[R]/tc[C]; xlsx /Sheet1/A1; pptx / for slides, /slide[N]/shape[M]. add returns stable paths such as /body/p[@paraId=00100000] or /slide[1]/shape[@id=100000]; prefer them, positional indices shift after inserts.',
   'Known-good forms: create report.docx (type from extension; fails if the file exists, use a new name or --force, and if the directory is missing). add report.docx /body --type paragraph --prop text=Summary --prop style=Heading1. add report.docx /body --type table --prop data=H1,H2;a,b (rows split by ;, cells by ,). set data.xlsx /Sheet1/A1 --prop value=City; set data.xlsx /Sheet1/B3 --prop formula=B2*2. add deck.pptx / --type slide --prop title=Q3; add deck.pptx /slide[1] --type shape --prop text=Point --prop x=2cm --prop y=5cm.',
   'Use help only for what you do not know: help docx lists elements, help docx paragraph shows props with examples, help docx add table filters by verb (formats docx, xlsx, pptx). Do not guess prop names; there is no help --version.',
-  'Prefer one batch for several edits to one document: one save and atomic, so if any item fails nothing is written (status failed, the result names the item). args: [file, "--commands", "<JSON array>"] or [file, "--input", "<json file>"]. Items are objects, e.g. {"command":"add","parent":"/body","type":"paragraph","props":{"text":"Hi","style":"Heading1"}}, {"command":"set","path":"/Sheet1/A1","props":{"value":"City"}}. --best-effort is not allowed.',
+  'Prefer one batch for several edits to one document: one save and atomic, so if any item fails nothing is written (status failed, the result names the item). args: [file, "--commands", "<JSON array>"] or [file, "--input", "<json file>"]. Items are objects, e.g. {"command":"add","parent":"/body","type":"paragraph","props":{"text":"Hi","style":"Heading1"}}, {"command":"set","path":"/Sheet1/A1","props":{"value":"City"}}. --best-effort (any form) and @response files are not allowed.',
   'Read back in few calls: view <file> text (tables appear only as [Table: N rows]; modes are text, annotated, outline, stats, issues); get <file> <one path> --depth 2 shows a subtree including table cells; dump <file> /body (docx), /Sheet1 (xlsx) or /slide[N] (pptx) prints content as replayable batch JSON, add --json to keep CJK unescaped. get takes one path per call. Then validate <file>.',
-  'Results: ok; warning (exit 2) means applied with caveats such as an unsupported prop, so read back instead of retrying; failed means a single command or batch was not applied: read stderr/stdout, which usually lists the valid props or paths; invalid_arguments means the call never ran.',
+  'Results: ok; warning (exit 2) may mean applied with caveats (e.g. an unsupported prop) or not applied at all (e.g. set without --prop), so read back before deciding whether to retry; failed means a single command or batch was not applied: read stderr/stdout, which usually lists the valid props or paths; invalid_arguments means the call never ran.',
   'Prefer copies when editing existing documents. Relative paths resolve from the workdir; report actual output paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
 ].join('\n');
 
@@ -52,6 +52,10 @@ export function resolveOfficeExecutable(binary: string = 'officecli', path = pro
     } catch { /* Try the next PATH entry without executing any installer. */ }
   }
   return null;
+}
+
+function optionMatches(arg: string, name: string) {
+  return arg === name || arg.startsWith(`${name}=`) || arg.startsWith(`${name}:`);
 }
 
 function officeExitStatus(code: number | null) {
@@ -86,7 +90,9 @@ function createDocumentQueue() {
       return await run();
     } finally {
       release();
-      if (tails.get(key) === tail) tails.delete(key);
+      // An aborted waiter finishes before its predecessor; drop the entry only
+      // once the whole chain has settled so later calls still wait for it.
+      void tail.then(() => { if (tails.get(key) === tail) tails.delete(key); });
     }
   };
 }
@@ -110,11 +116,13 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     if (input.command === 'batch') {
       // stdin is not connected, and --best-effort keeps partial writes while
       // still exiting 1, which would read as "not applied".
-      if (!input.args.some((arg) => arg === '--commands' || arg === '--input')) {
+      if (!input.args.some((arg) => optionMatches(arg, '--commands') || optionMatches(arg, '--input'))) {
         return JSON.stringify({ status: 'invalid_arguments', message: 'batch needs --commands <JSON array> or --input <json file>; stdin is not available.' });
       }
-      if (input.args.includes('--best-effort')) {
-        return JSON.stringify({ status: 'invalid_arguments', message: 'batch --best-effort is not allowed; a failed batch must leave the document unchanged.' });
+      // System.CommandLine also accepts --opt=value / --opt:value and expands
+      // @response files, either of which could smuggle in --best-effort.
+      if (input.args.some((arg) => optionMatches(arg, '--best-effort') || arg.startsWith('@'))) {
+        return JSON.stringify({ status: 'invalid_arguments', message: 'batch --best-effort (in any form) and @response files are not allowed; a failed batch must leave the document unchanged.' });
       }
     }
     const result = await serializeDocument(input.command === 'help' ? null : 'documents', runtime.signal, () => createCliRunner(deps.shell, runtime)([executable, input.command, ...input.args], {
@@ -128,10 +136,11 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     if (result.status === 'spawn_failed') throw result.error;
     if (result.status === 'yielded') return JSON.stringify({ status: 'result_unknown', processId: result.process.processId, message: 'Inspect existing effects before retrying.' });
     return JSON.stringify({
-      // OfficeCLI exit 2 means the operation was applied with warnings;
-      // reporting it as failed invites a retry that duplicates the edit.
+      // OfficeCLI exit 2 covers both "applied with warnings" and some usage
+      // errors that wrote nothing (e.g. set without --prop), so neither
+      // failed nor ok is safe: report warning and require a read-back.
       status: result.status === 'exited' ? officeExitStatus(result.code) : 'timeout',
-      ...(result.status === 'exited' && result.code === 2 ? { message: 'Applied with warnings; read the document back before retrying.' } : {}),
+      ...(result.status === 'exited' && result.code === 2 ? { message: 'Exit 2: the edit may be fully, partly or not applied. Read the document back to check before retrying.' } : {}),
       ...(result.status === 'exited' ? { exitCode: result.code } : { termination: result.termination ?? 'unconfirmed' }),
       stdout: truncateCliOutput(result.stdout), stderr: truncateCliOutput(result.stderr),
     });

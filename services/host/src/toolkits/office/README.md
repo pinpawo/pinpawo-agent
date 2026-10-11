@@ -46,12 +46,13 @@ silently drop all but the last write; the Toolkit runs all calls except `help`
 one at a time (the document cannot be identified reliably from argv, since
 OfficeCLI accepts options before the path). Queued time does not count toward
 `timeoutSeconds`. Args that repeat the command are rejected without running.
-Exit code 2 means the edit was applied with warnings and is reported as status
-`warning`, not `failed`.
+Exit code 2 is reported as status `warning`: it can mean applied with warnings
+or, for some usage errors such as `set` without `--prop`, nothing written, so
+the model must read back before retrying.
 
 Supported commands are help, create, view, get, query, add, set, remove,
 validate, close, batch and dump. `batch` must pass `--commands` or `--input`
-(stdin is not connected) and may not use `--best-effort`: the default batch is
+(stdin is not connected) and may not use `--best-effort` (including `=`/`:` value forms) or `@` response files: the default batch is
 atomic, so a failed batch leaves the file byte-identical, while best-effort
 keeps partial writes yet still exits 1. Inside a batch an unsupported prop is
 only a warning (exit 0). `dump` is read-only and prints replayable batch JSON.

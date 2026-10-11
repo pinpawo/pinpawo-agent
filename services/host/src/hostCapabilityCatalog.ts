@@ -6,7 +6,6 @@ import {
   loadCapabilityDirectory,
   loadUserCapabilities,
   type LoadedCapability,
-  type LoadedUserCapability,
 } from './capabilityLoader';
 import { loadStoredConfig, type StoredConfig } from './storage';
 import { createExploreCapability } from './capabilities/explore';
@@ -32,7 +31,7 @@ export type CapabilityCatalogSnapshot = Readonly<{
 }>;
 
 export type HostCapabilityCatalogDeps = {
-  loadConfiguredCapabilities: () => Promise<LoadedUserCapability[]>;
+  loadConfiguredCapabilities: () => Promise<LoadedCapability[]>;
   createHostCapabilities: () => AgentCapability[];
 };
 
@@ -130,7 +129,7 @@ function createSnapshot(
 export class HostCapabilityCatalog {
   private readonly deps: HostCapabilityCatalogDeps;
   private hostCapabilities: readonly AgentCapability[] = [];
-  private configuredCapabilities: readonly LoadedUserCapability[] = [];
+  private configuredCapabilities: readonly LoadedCapability[] = [];
 
   constructor(options: HostCapabilityCatalogOptions = {}) {
     this.deps = { ...defaultDeps, ...options };
@@ -183,7 +182,7 @@ export class HostCapabilityCatalog {
 
   private assertConfiguredCapabilities(
     hostCapabilities: readonly AgentCapability[],
-    configuredCapabilities: readonly LoadedUserCapability[],
+    configuredCapabilities: readonly LoadedCapability[],
   ): void {
     assertDistinctCapabilityNames([
       ...hostCapabilities.map(hostEntry),

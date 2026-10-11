@@ -17,7 +17,7 @@ import {
   type StudioPlugin,
   type StudioPluginContext,
 } from '@pinpawo/studio';
-import { readLocalServerAuthToken } from 'pinpawo/local-server-transport';
+import { readWireAuthToken } from 'pinpawo/wire';
 import { parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
 
 const LOOPBACK_HOST = '127.0.0.1' as const;
@@ -765,7 +765,7 @@ export function createStudioPlugin(
   options: Record<string, unknown> | undefined,
   _environment: InstalledStudioHttpPluginEnvironment,
 ): StudioHttpPlugin {
-  const authToken = readLocalServerAuthToken();
+  const authToken = readWireAuthToken();
   if (!authToken) {
     throw new Error('Studio HTTP Plugin requires the Host local auth token.');
   }

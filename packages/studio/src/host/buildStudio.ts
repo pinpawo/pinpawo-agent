@@ -211,7 +211,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         capabilityArtifactStore: input.capabilityArtifactStore,
         checkpointer: input.checkpoint,
         runtimeConfig: input.runtimeConfig,
-        globalReviewPolicyMode: input.globalReviewPolicyMode,
+        toolAuthorizationMode: input.toolAuthorizationMode,
         autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
         sessionStatePath: path.join(
           input.runtimeConfig.stateRoot,

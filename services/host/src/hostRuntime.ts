@@ -51,7 +51,7 @@ export type {
   HostCapabilityAssemblyInitOptions,
   HostCapabilityAssemblyOptions,
 } from './hostCapabilityAssembly';
-export type { LoadedCapability, LoadedUserCapability } from './capabilityLoader';
+export type { LoadedCapability } from './capabilityLoader';
 export type { LocalModelProfileRegistry } from './config/llmConfig';
 export {
   buildHostRuntimeConfig,

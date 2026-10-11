@@ -1,4 +1,4 @@
-import { readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { isPublicRunMessage, readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
@@ -9,16 +9,13 @@ import {
 } from '@pinpawo/pet-agent';
 
 /**
- * Root event-stream adapter (#322 Phase 2).
+ * Root event-stream adapter.
  *
  * Translates the RAW protocol events of a root `graph.streamEvents(version:
- * 'v3')` run into the host chat event vocabulary. Since #322 Phase 4
- * this is the production consumption path (the legacy
- * `graph.stream(['messages','values','custom'])` + `onToolEvent` bridge is
- * gone); the correspondence with the legacy semantics is pinned by tests and
- * documented in docs/history/agent-runtime/subagent-stream-bridge.md.
+ * 'v3')` run into the host chat event vocabulary. This is the only stream
+ * consumption path; its semantics are pinned by tests.
  *
- * Attribution model (established by the Phase 1 spike):
+ * Attribution model:
  * - namespace depth 0/1 = the root graph / a root node's own activity;
  * - namespace depth >= 2 normally = a delegated child scope (subagent model
  *   calls, tool executions run inside a child agent); the `entryAnswer`
@@ -32,12 +29,11 @@ import {
  *   run; it is emitted as one completed `subagent.message` per model message
  *   lifecycle. Token-level dedup across messages is unsound there (a legit
  *   new message can extend or repeat earlier text), and depth-1 lane echoes
- *   of child messages are dropped entirely — matching the legacy
- *   `isLaneTaggedAiMessage` skip.
+ *   of child messages are dropped entirely.
  *
  * The adapter deliberately consumes the protocol stream, not the ergonomic
- * projections (`run.messages` etc.), which showed subscription-timing
- * sensitivity in the spike.
+ * projections (`run.messages` etc.), which are sensitive to subscription
+ * timing.
  */
 
 /** Structural subset of LangGraph's v3 ProtocolEvent that the adapter reads. */
@@ -57,9 +53,9 @@ export type RootStreamChatEvent =
   | { type: 'assistant.delta'; messageId: string; node: string | null; text: string }
   /** One completed subagent model message (ambient progress, block-level). */
   | { type: 'subagent.message'; namespace: string[]; messageId: string; text: string }
-  /** Tool lifecycle from any scope; Phase 3 joins operation metadata. */
+  /** Tool lifecycle from any scope, joined with operation metadata. */
   | { type: 'tool'; namespace: string[]; data: Record<string, unknown> }
-  /** A guard decision record (orchestrator via stream writer; subagent after Phase 4). */
+  /** A guard decision record (orchestrator via stream writer, or subagent). */
   | { type: 'guard.decision'; record: GuardDecisionRecord }
   /** Raw custom-channel event; known names are projected downstream and unknown names are ignored. */
   | { type: 'runtime.custom'; streamSequence: number; name: string; data: unknown }
@@ -192,7 +188,7 @@ export function readRootStreamChatEvent(
         return null;
       }
       const current = currentLifecycle(state, key);
-      // Mirrors the legacy `_getType() === 'ai'` filter. Model streams omit
+      // Only assistant lifecycles become chat output. Model streams omit
       // the role on message-start (they are AI-authored by construction), so
       // only a KNOWN non-assistant role excludes a lifecycle.
       if (current.role && current.role !== 'ai' && current.role !== 'assistant') {
@@ -254,7 +250,7 @@ export function readRootStreamChatEvent(
       const isMain = options.isMainAssistantNode ?? defaultIsMainAssistantNode;
       if (!isMain(node)) {
         // Internal decision/discovery output and depth-1 lane echoes are
-        // dropped (legacy: internal-node skip + lane-tag skip).
+        // dropped.
         return null;
       }
       return { type: 'assistant.delta', messageId: current.messageId, node, text };
@@ -327,7 +323,7 @@ export function readRootStreamChatEvent(
  * Adapt a root v3 protocol stream into chat events. Adapter state is scoped
  * per run; the caller just iterates.
  *
- * The main assistant reply keeps the legacy prefix dedup: a node that streams
+ * The main assistant reply is prefix-deduplicated: a node that streams
  * a model and then writes the resulting message back to state produces a
  * second full-content lifecycle (the state echo); a chunk whose text is a
  * prefix-replay of the accumulated reply contributes nothing new. Subagent
@@ -370,8 +366,7 @@ export async function* adaptRootStream(
       if (receivedInitialValues && AIMessage.isInstance(last) && last.id && !seenMessages.has(last.id)
         && !last.tool_calls?.length) {
         const text = readFinalMessageText(last);
-        const metadata = readRecord(last.additional_kwargs.pinpawo) ?? {};
-        if (text && !metadata.lane && !metadata.synthetic && metadata.runId === chatEvent.values.runId && metadata.runId) {
+        if (text && isPublicRunMessage(last, chatEvent.values.runId)) {
           yield { type: 'assistant.delta', messageId: last.id, node: null, text };
           assistantReply += text;
         }
@@ -407,9 +402,7 @@ function* projectMainToolCalls(
   yield* settle();
   for (const message of messages as BaseMessage[]) {
     const toolCalls = readMessageToolCalls(message);
-    const pinpawo = readRecord(message.additional_kwargs?.pinpawo);
-    // Main messages of this run: private lanes and synthetic bookkeeping are not conversation.
-    if (!message.id || !toolCalls.length || pinpawo?.lane || pinpawo?.synthetic || pinpawo?.runId !== values.runId) continue;
+    if (!message.id || !toolCalls.length || !isPublicRunMessage(message, values.runId)) continue;
     if (announce && !seenMessages.has(message.id)) {
       yield { type: 'tool_calls.message', messageId: message.id, text: readFinalMessageText(message), toolCalls };
       for (const call of toolCalls) openToolCalls.set(call.id, message.id);

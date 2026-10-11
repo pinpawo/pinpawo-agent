@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  buildLocalServerAuthHeaders,
-  createLocalServerAuthToken,
-  ensureLocalServerAuthToken,
-  isAllowedLocalServerOrigin,
-  isAuthorizedLocalServerRequest,
-  readLocalServerAuthToken,
+  buildWireAuthHeaders,
+  createWireAuthToken,
+  ensureWireAuthToken,
+  isAllowedWireOrigin,
+  isAuthorizedWireRequest,
+  readWireAuthToken,
 } from './auth';
 
 function withTokenFile<T>(run: (path: string) => T): T {
@@ -41,53 +41,53 @@ function makeReq(options: {
 
 test('local server auth accepts only bearer tokens', () => {
   assert.equal(
-    isAuthorizedLocalServerRequest(makeReq({ authorization: 'Bearer secret' }), 'secret'),
+    isAuthorizedWireRequest(makeReq({ authorization: 'Bearer secret' }), 'secret'),
     true,
   );
   assert.equal(
-    isAuthorizedLocalServerRequest(makeReq({ url: '/?token=secret' }), 'secret'),
+    isAuthorizedWireRequest(makeReq({ url: '/?token=secret' }), 'secret'),
     false,
   );
   assert.equal(
-    isAuthorizedLocalServerRequest(makeReq({ protocol: 'chat, pinpawo-token.secret' }), 'secret'),
+    isAuthorizedWireRequest(makeReq({ protocol: 'chat, pinpawo-token.secret' }), 'secret'),
     false,
   );
   assert.equal(
-    isAuthorizedLocalServerRequest(makeReq({ authorization: 'Bearer wrong' }), 'secret'),
+    isAuthorizedWireRequest(makeReq({ authorization: 'Bearer wrong' }), 'secret'),
     false,
   );
-  assert.equal(isAuthorizedLocalServerRequest(makeReq(), 'secret'), false);
+  assert.equal(isAuthorizedWireRequest(makeReq(), 'secret'), false);
 });
 
 test('local server origin check permits only same-port loopback origins', () => {
-  assert.equal(isAllowedLocalServerOrigin(makeReq(), 3210), true);
+  assert.equal(isAllowedWireOrigin(makeReq(), 3210), true);
   assert.equal(
-    isAllowedLocalServerOrigin(makeReq({ origin: 'http://127.0.0.1:3210' }), 3210),
+    isAllowedWireOrigin(makeReq({ origin: 'http://127.0.0.1:3210' }), 3210),
     true,
   );
   assert.equal(
-    isAllowedLocalServerOrigin(makeReq({ origin: 'http://localhost:3210' }), 3210),
+    isAllowedWireOrigin(makeReq({ origin: 'http://localhost:3210' }), 3210),
     true,
   );
   assert.equal(
-    isAllowedLocalServerOrigin(makeReq({ origin: 'https://evil.example' }), 3210),
+    isAllowedWireOrigin(makeReq({ origin: 'https://evil.example' }), 3210),
     false,
   );
   assert.equal(
-    isAllowedLocalServerOrigin(makeReq({ origin: 'http://127.0.0.1:9999' }), 3210),
+    isAllowedWireOrigin(makeReq({ origin: 'http://127.0.0.1:9999' }), 3210),
     false,
   );
   assert.equal(
-    isAllowedLocalServerOrigin(makeReq({ origin: 'null' }), 3210),
+    isAllowedWireOrigin(makeReq({ origin: 'null' }), 3210),
     false,
   );
 });
 
 test('local server client auth helper formats bearer headers', () => {
-  assert.deepEqual(buildLocalServerAuthHeaders('secret'), {
+  assert.deepEqual(buildWireAuthHeaders('secret'), {
     Authorization: 'Bearer secret',
   });
-  assert.deepEqual(buildLocalServerAuthHeaders(null), {});
+  assert.deepEqual(buildWireAuthHeaders(null), {});
 });
 
 test('a second Host serves the token the first one published', () => {
@@ -95,13 +95,13 @@ test('a second Host serves the token the first one published', () => {
     // Hosts share this file by default, and it is how a Host tells the user
     // which credential to present. Minting per start left the earlier Host
     // serving a token nobody could look up.
-    const first = ensureLocalServerAuthToken(path);
-    const second = ensureLocalServerAuthToken(path);
+    const first = ensureWireAuthToken(path);
+    const second = ensureWireAuthToken(path);
 
     assert.equal(second, first);
-    assert.equal(readLocalServerAuthToken(path), first);
+    assert.equal(readWireAuthToken(path), first);
     assert.equal(
-      isAuthorizedLocalServerRequest(makeReq({ authorization: `Bearer ${first}` }), second),
+      isAuthorizedWireRequest(makeReq({ authorization: `Bearer ${first}` }), second),
       true,
     );
   });
@@ -109,17 +109,17 @@ test('a second Host serves the token the first one published', () => {
 
 test('a restart keeps the credential the user already has', () => {
   withTokenFile((path) => {
-    const before = ensureLocalServerAuthToken(path);
-    const after = ensureLocalServerAuthToken(path);
+    const before = ensureWireAuthToken(path);
+    const after = ensureWireAuthToken(path);
     assert.equal(after, before);
   });
 });
 
 test('a token file with surrounding whitespace is reused, not rotated', () => {
   withTokenFile((path) => {
-    const token = createLocalServerAuthToken();
+    const token = createWireAuthToken();
     writeFileSync(path, `  ${token}\n\n`, 'utf-8');
-    assert.equal(ensureLocalServerAuthToken(path), token);
+    assert.equal(ensureWireAuthToken(path), token);
     assert.equal(readFileSync(path, 'utf-8').trim(), token);
   });
 });

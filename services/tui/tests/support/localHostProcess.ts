@@ -5,7 +5,7 @@ import {
   buildAgentContext,
 } from '../../../host/src/contextLoader';
 import {
-  startLocalServer,
+  startHostServer,
 } from '../../../host/src/server';
 import {
   buildHostRuntimeConfig,
@@ -51,10 +51,9 @@ const graphService = fixture === 'toolkit'
   : createPersistentHostGraphService();
 const shell = new PosixShellRS();
 const toolkits = [createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell })];
-const transport = await startLocalServer(requestedPort, {
+const transport = await startHostServer(requestedPort, {
   petId: 'pet-process-restart',
   petName: 'PinPawo',
-  serverMode: 'chat',
   runtimeConfig,
   ...createTestModelServerDeps({
     apiKey: 'offline-process-key',

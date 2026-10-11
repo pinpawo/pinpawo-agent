@@ -91,127 +91,31 @@ test('snapshot parser refuses legacy pause projections and never turns them into
   }
 });
 
-test('snapshot parser migrates legacy V3 reviews to the V5 interrupt boundary', () => {
-  const parsed = parseAgentSessionSnapshot({
-    version: 3,
-    session: {
-      sessionId: 'chat:legacy',
-      kind: 'chat',
-      timeline: [],
-      activeRun: {
-        requestId: 'req-review',
-        state: 'waiting_review',
-        reviewAction: {
-          actionId: 'action-review',
-          reviews: [{
-            id: 'review-1',
-            schemaVersion: 1,
-            view: { kind: 'plain', body: 'Allow this operation?' },
-            options: [{
-              id: 'approve',
-              label: 'Approve',
-              decision: { type: 'approve' },
-              effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }],
-            }, {
-              id: 'reject',
-              label: 'Reject',
-              decision: { type: 'reject', message: 'Rejected' },
-            }],
-          }],
-        },
-      },
-    },
-  });
-
-  assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
-  assert.deepEqual(
-    parsed?.session.pendingInterrupt?.payload.kind === 'human_review'
-      ? parsed.session.pendingInterrupt.payload.interactions
-      : null,
-    [{
-      interactionId: 'review-1',
-      schemaVersion: 2,
-      view: { kind: 'plain', body: 'Allow this operation?' },
-      options: [{
-        id: 'approve',
-        label: 'Approve',
-        batchSubmission: 'defer',
-      }, {
-        id: 'reject',
-        label: 'Reject',
-        batchSubmission: 'immediate',
-      }],
-    }],
-  );
-  assert.equal(parseAgentSessionSnapshot({
-    version: 3,
-    session: {
-      sessionId: 'chat:legacy',
-      kind: 'chat',
-      timeline: [],
-      activeRun: {
-        requestId: 'req-review',
-        state: 'waiting_review',
-        reviewAction: {
-          actionId: 'action-review',
-          reviews: [{
-            id: 'review-empty',
-            schemaVersion: 1,
-            view: { kind: 'plain', body: 'No choices' },
-            options: [],
-          }],
-        },
-      },
-    },
-  }), null);
-});
-
-test('snapshot parser separates a V4 pending run and rejects it in V5', () => {
-  const legacySession = {
-    sessionId: 'chat:legacy-v4',
-    kind: 'chat',
-    timeline: [],
-    activeRun: {
-      state: 'pending_interrupt',
-      pendingInterrupt: {
-        interruptId: 'interrupt-v4',
-        payload: {
-          kind: 'human_review',
-          interactions: [{
-            interactionId: 'review-v4',
-            schemaVersion: 2,
-            view: { kind: 'plain', body: 'Approve?' },
-            options: [{
-              id: 'approve',
-              label: 'Approve',
-              batchSubmission: 'immediate',
-            }],
-          }],
-        },
+test('snapshot parser accepts only the current version and run states', () => {
+  const pendingRun = {
+    state: 'pending_interrupt',
+    pendingInterrupt: {
+      interruptId: 'interrupt-v4',
+      payload: {
+        kind: 'human_review',
+        interactions: [{
+          interactionId: 'review-v4',
+          schemaVersion: 2,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', batchSubmission: 'immediate' }],
+        }],
       },
     },
   };
-
-  const parsed = parseAgentSessionSnapshot({
-    version: 4,
-    session: legacySession,
-  });
-
-  assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
-  assert.equal(parsed?.session.activeRun, null);
-  assert.equal(
-    readHumanReviewPendingInterrupt(
-      parsed?.session.pendingInterrupt ?? null,
-    )?.interruptId,
-    'interrupt-v4',
-  );
+  const session = { sessionId: 'chat:old', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null };
+  // Snapshots are projected live by a Host released with its clients.
+  assert.equal(parseAgentSessionSnapshot({ version: 3, session }), null);
+  assert.equal(parseAgentSessionSnapshot({ version: 4, session }), null);
   assert.equal(parseAgentSessionSnapshot({
     version: AGENT_SESSION_SNAPSHOT_VERSION,
-    session: {
-      ...legacySession,
-      pendingInterrupt: null,
-    },
+    session: { ...session, activeRun: pendingRun },
   }), null);
+  assert.ok(parseAgentSessionSnapshot({ version: AGENT_SESSION_SNAPSHOT_VERSION, session }));
 });
 
 test('snapshot parser rejects removed operation owner providers', () => {

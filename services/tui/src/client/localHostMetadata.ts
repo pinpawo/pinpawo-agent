@@ -1,6 +1,6 @@
-import { readLocalServerToken } from './localHostConnection';
+import { readWireToken } from './localHostConnection';
 
-const DEFAULT_LOCAL_SERVER_PORT = 3210;
+const DEFAULT_HOST_PORT = 3210;
 const DEFAULT_TIMEOUT_MS = 1_500;
 
 export type LocalHostMetadata = {
@@ -22,14 +22,14 @@ export type LoadLocalHostMetadataOptions = {
 export async function loadLocalHostMetadata(
   options: LoadLocalHostMetadataOptions = {},
 ): Promise<LocalHostMetadata> {
-  const token = (options.tokenProvider ?? readLocalServerToken)();
+  const token = (options.tokenProvider ?? readWireToken)();
   if (!token) {
     return {
       hostVersion: null,
     };
   }
 
-  const port = options.port ?? DEFAULT_LOCAL_SERVER_PORT;
+  const port = options.port ?? DEFAULT_HOST_PORT;
   const fetcher = options.fetcher ?? fetch;
   const abortController = new AbortController();
   const timeout = setTimeout(
@@ -49,7 +49,7 @@ export async function loadLocalHostMetadata(
     ]);
     return {
       hostVersion: runtime.status === 'fulfilled'
-        ? readOptionalString(runtime.value, 'local_agent_version')
+        ? readOptionalString(runtime.value, 'host_version')
         : null,
     };
   } finally {

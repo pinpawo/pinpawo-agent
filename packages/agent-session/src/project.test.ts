@@ -144,7 +144,7 @@ test('reduceSession deterministically replays canonical run inputs', () => {
     completedAt: 1_200,
     raw: { input: { command: 'npm test' }, output: 'passed' },
   });
-  assert.equal(first.timeline[2]?.id, 'req-1:assistant:m-req-1');
+  assert.equal(first.timeline[2]?.id, 'm-req-1');
   assert.equal(first.timeline[2]?.type === 'message' ? first.timeline[2].status : undefined, 'completed');
   assert.equal(first.timeline[3]?.id, 'req-1:subagent:general:t1|model_request:t2:child-1');
   assert.equal(first.timeline[3]?.type === 'message' ? first.timeline[3].status : undefined, 'completed');
@@ -672,7 +672,7 @@ test('a reply settled mid-run by a tool is finalized in place, not duplicated', 
   const assistants = session.timeline.filter((entry) =>
     entry.type === 'message' && entry.role === 'assistant');
   assert.equal(assistants.length, 1);
-  assert.equal(assistants[0]?.id, 'req-1:assistant:ai-1');
+  assert.equal(assistants[0]?.id, 'ai-1');
   assert.equal(assistants[0]?.type === 'message' ? assistants[0].status : undefined, 'completed');
   // The subagent progress entry stays visible alongside the reply.
   assert.equal(
@@ -801,4 +801,43 @@ test('a run that completes without a call\'s result leaves it interrupted', () =
   const calls = session.timeline.flatMap(item => item.type === 'message' ? item.toolCalls ?? [] : []);
   assert.deepEqual(calls.map(call => call.status), ['interrupted', 'failed']);
   assert.equal(session.activeRun, null);
+});
+
+test('live events land on the snapshot entry that holds the same checkpoint message', () => {
+  const snapshot = {
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
+    session: {
+      sessionId: 'chat:pet',
+      kind: 'chat' as const,
+      timeline: [
+        { id: 'human-1', type: 'message' as const, role: 'user' as const, text: 'go', status: 'completed' as const },
+        { id: 'ai-1', type: 'message' as const, role: 'assistant' as const, text: 'checking',
+          toolCalls: [{ id: 'call-1', name: 'read_file', args: {}, status: 'running' as const }], status: 'completed' as const },
+        { id: 'ai-2', type: 'message' as const, role: 'assistant' as const, text: 'done', status: 'completed' as const },
+      ],
+      activeRun: { requestId: 'req-1', state: 'running' as const, activity: 'thinking' as const },
+      pendingInterrupt: null,
+    },
+  };
+  const session = replay(applySessionSnapshot(createDomainSession(), snapshot, { observedAt: 1_000 }), [
+    {
+      input: { type: 'runtime.event', event: { type: 'message.tool_calls', requestId: 'req-1', messageId: 'ai-1',
+        text: 'checking', toolCalls: [{ id: 'call-1', name: 'read_file', args: {} }] } },
+      observedAt: 1_100,
+    },
+    {
+      input: { type: 'runtime.event', event: { type: 'tool_call.settled', requestId: 'req-1', messageId: 'ai-1',
+        callId: 'call-1', status: 'completed' } },
+      observedAt: 1_200,
+    },
+    {
+      input: { type: 'runtime.event', event: { type: 'message.delta', requestId: 'req-1', messageId: 'ai-2', role: 'assistant', text: 'done' } },
+      observedAt: 1_300,
+    },
+  ]);
+
+  assert.deepEqual(session.timeline.map((entry) => entry.id), ['human-1', 'ai-1', 'ai-2']);
+  const [, toolCalls, reply] = session.timeline;
+  assert.equal(toolCalls?.type === 'message' ? toolCalls.toolCalls?.[0]?.status : undefined, 'completed');
+  assert.equal(reply?.type === 'message' ? reply.text : undefined, 'done');
 });

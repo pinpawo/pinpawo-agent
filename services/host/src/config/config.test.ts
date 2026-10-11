@@ -30,7 +30,7 @@ function storedModelConfig(): Record<string, unknown> {
   };
 }
 
-function readGlobalReviewPolicyMode(
+function readToolAuthorizationMode(
   home: string,
   env: Record<string, string> = {},
 ) {
@@ -41,7 +41,7 @@ function readGlobalReviewPolicyMode(
     '-e',
     [
       `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
-      'process.stdout.write(getConfig().globalReviewPolicyMode);',
+      'process.stdout.write(getConfig().toolAuthorizationMode);',
     ].join('\n'),
   ], {
     cwd: process.cwd(),
@@ -159,7 +159,7 @@ test('config workdir defaults to process cwd when no workdir is configured', () 
 test('config ignores the removed PINPAWO_REVIEW_POLICY_STRATEGY environment alias', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   assert.equal(
-    readGlobalReviewPolicyMode(home, { PINPAWO_REVIEW_POLICY_STRATEGY: 'full_access' }),
+    readToolAuthorizationMode(home, { PINPAWO_REVIEW_POLICY_STRATEGY: 'full_access' }),
     'require_authorization',
   );
 });
@@ -171,13 +171,13 @@ test('config ignores the removed review_policy_strategy stored key', () => {
     review_policy_strategy: 'full_access',
   });
 
-  assert.equal(readGlobalReviewPolicyMode(home), 'require_authorization');
+  assert.equal(readToolAuthorizationMode(home), 'require_authorization');
 });
 
 test('config still accepts the canonical global review policy setting', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   assert.equal(
-    readGlobalReviewPolicyMode(home, { PINPAWO_GLOBAL_REVIEW_POLICY: 'auto_authorization' }),
+    readToolAuthorizationMode(home, { PINPAWO_GLOBAL_REVIEW_POLICY: 'auto_authorization' }),
     'auto_authorization',
   );
 });
@@ -189,7 +189,7 @@ test('config still accepts the canonical global_review_policy stored key', () =>
     global_review_policy: 'full_access',
   });
 
-  assert.equal(readGlobalReviewPolicyMode(home), 'full_access');
+  assert.equal(readToolAuthorizationMode(home), 'full_access');
 });
 
 test('auto authorization safety level defaults to strict and reads the stored relaxed value', () => {

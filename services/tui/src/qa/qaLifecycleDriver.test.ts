@@ -23,7 +23,7 @@ test('QA lifecycle drives policy smoke once and exits after acknowledgement', ()
   ]);
 
   driver.handleState(state('ready', {
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
   }));
   assert.deepEqual(calls, [
     'submit:/policy',

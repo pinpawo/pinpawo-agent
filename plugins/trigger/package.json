@@ -24,11 +24,16 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": { "@pinpawo/studio": "^0.1.0" },
-  "peerDependencies": { "@pinpawo-plugin/studio-http": "^0.1.0" },
+  "peerDependencies": {
+    "@pinpawo-plugin/channel": "^0.1.0",
+    "@pinpawo-plugin/studio-http": "^0.1.0"
+  },
   "peerDependenciesMeta": {
+    "@pinpawo-plugin/channel": { "optional": true },
     "@pinpawo-plugin/studio-http": { "optional": true }
   },
   "devDependencies": {
+    "@pinpawo-plugin/channel": "^0.1.0",
     "@pinpawo-plugin/studio-http": "^0.1.0",
     "@types/node": "^24.0.0",
     "tsup": "^8.5.1",

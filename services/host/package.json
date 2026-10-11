@@ -20,9 +20,9 @@
       "types": "./dist/hostRuntime.d.ts",
       "import": "./dist/hostRuntime.js"
     },
-    "./local-server-transport": {
-      "types": "./dist/localServerTransportApi.d.ts",
-      "import": "./dist/localServerTransportApi.js"
+    "./wire": {
+      "types": "./dist/wireApi.d.ts",
+      "import": "./dist/wireApi.js"
     }
   },
   "bin": {

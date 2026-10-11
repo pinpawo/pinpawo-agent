@@ -8,12 +8,12 @@ import {
   type ServerResponse,
 } from 'node:http';
 import type { WebSocketServer } from 'ws';
-import { ensureLocalServerAuthToken } from './auth';
+import { ensureWireAuthToken } from './auth';
 import {
   createHostWireHandlers,
   type ServerTransportHandlers,
 } from './messageDispatcher';
-import { attachLocalServerWireWebSocketTransport } from '../serverWsTransport';
+import { attachWireWebSocketTransport } from '../serverWsTransport';
 import type { ServerWireHandlers } from './framing';
 
 export type ServerTransport = {
@@ -28,12 +28,12 @@ export type ServerTransportOptions = {
   closeHandlers?: () => void;
 };
 
-export async function startLocalServerWireTransport<TMessage extends object>(
+export async function startWireTransport<TMessage extends object>(
   port: number,
   peerHandlers: ServerWireHandlers<TMessage>,
   options: ServerTransportOptions = {},
 ): Promise<ServerTransport> {
-  const authToken = options.authToken ?? ensureLocalServerAuthToken();
+  const authToken = options.authToken ?? ensureWireAuthToken();
   const server = createServer(options.handleHttpRequest ?? ((_req, res) => {
     res.writeHead(404);
     res.end();
@@ -46,12 +46,12 @@ export async function startLocalServerWireTransport<TMessage extends object>(
     if (!address || typeof address === 'string') {
       throw new Error('local server did not expose a TCP address');
     }
-    webSocketServer = attachLocalServerWireWebSocketTransport(server, peerHandlers, {
+    webSocketServer = attachWireWebSocketTransport(server, peerHandlers, {
       authToken,
       port: address.port,
     });
-    console.log(`[local-server] listening on ws://127.0.0.1:${address.port}`);
-    console.log('[local-server] local HTTP/WS auth enabled');
+    console.log(`[wire] listening on ws://127.0.0.1:${address.port}`);
+    console.log('[wire] local HTTP/WS auth enabled');
 
     let requestClose!: () => void;
     let closeRequested = false;
@@ -93,12 +93,12 @@ export async function startLocalServerWireTransport<TMessage extends object>(
 }
 
 /** Chat/Agent Session adapter retained for the Host. */
-export function startLocalServerTransport(
+export function startHostTransport(
   port: number,
   peerHandlers: ServerTransportHandlers,
   options: ServerTransportOptions = {},
 ): Promise<ServerTransport> {
-  return startLocalServerWireTransport(
+  return startWireTransport(
     port,
     createHostWireHandlers(peerHandlers),
     options,

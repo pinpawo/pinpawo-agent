@@ -5,6 +5,7 @@ import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
+  isPublicConversationMessage,
   NamespacedProtocolToolEventReader,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
@@ -12,6 +13,7 @@ import {
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
   type SubagentToolOperationMetadata,
+  type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type {
@@ -69,7 +71,7 @@ export type AgentSessionTurnOptions = {
   /**
    * Receives a delegation's `subagent_operations` announcement so the
    * caller's operation registry can join display metadata for
-   * delegation-scoped toolkit tools (#322 Phase 4).
+   * delegation-scoped toolkit tools.
    */
   acceptDelegationOperations?: (operations: Record<string, SubagentToolOperationMetadata>) => void;
   /**
@@ -98,12 +100,14 @@ async function waitForGraphRunSettlement(run: HostGraphEventStream | null) {
 function emitInterruptRequested(params: {
   pendingInterrupt: PendingInterrupt;
   requestId: string;
+  usage?: TokenUsageSnapshot | null;
   emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
   params.emitEvent({
     type: 'interrupt.requested',
     requestId: params.requestId,
     pendingInterrupt: projectPendingInterrupt(params.pendingInterrupt),
+    ...(params.usage ? { usage: params.usage } : {}),
   });
 }
 
@@ -334,6 +338,7 @@ export async function runAgentSessionTurn(
     ];
   }
 
+  const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
   // Identifies the assistant entry the streamed reply is building, so the
@@ -430,8 +435,7 @@ export async function runAgentSessionTurn(
             callId: chatEvent.callId, status: chatEvent.status });
           break;
         case 'guard.decision':
-          // Decision records are observability, not chat surface — parity
-          // with the legacy path, which did not consume the custom mode.
+          // Decision records are observability, not chat surface.
           break;
         case 'values': {
           const messages = (chatEvent.values as { messages?: BaseMessage[] }).messages;
@@ -447,7 +451,16 @@ export async function runAgentSessionTurn(
             tasks: [{ interrupts: chatEvent.interrupts }],
           });
           if (pendingInterrupt) {
-            emitInterruptRequested({ pendingInterrupt, requestId, emitEvent });
+            emitInterruptRequested({
+              pendingInterrupt,
+              requestId,
+              usage: readRunTokenUsage({
+                initialMessages: initialThreadState.messages,
+                finalMessages,
+                contextWindow,
+              }),
+              emitEvent,
+            });
             return { status: 'waiting' };
           }
           break;
@@ -498,11 +511,17 @@ export async function runAgentSessionTurn(
     return { status: 'interrupted' };
   }
 
+  const finalUsage = readRunTokenUsage({
+    initialMessages: initialThreadState.messages,
+    finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
+    contextWindow,
+  });
   if (finalThreadState.pendingInterrupt) {
     // A native review remains pending until its explicit approval response.
     emitInterruptRequested({
       pendingInterrupt: finalThreadState.pendingInterrupt,
       requestId,
+      usage: finalUsage,
       emitEvent,
     });
     return { status: 'waiting' };
@@ -511,22 +530,15 @@ export async function runAgentSessionTurn(
   // Only new public AI text can become a conversation reply. Tool results,
   // private lanes and an old checkpoint reply are not publishable fallbacks.
   const finalMessage = finalMessages.at(-1) ?? finalThreadState.messages.at(-1);
-  const metadata = finalMessage?.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
   const isOldMessage = finalMessage && initialThreadState.messages.some(message =>
     message === finalMessage || (!!message.id && message.id === finalMessage.id));
   const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
-    && !finalMessage.tool_calls?.length && !metadata?.lane && !metadata?.synthetic && !isOldMessage
+    && !finalMessage.tool_calls?.length && isPublicConversationMessage(finalMessage) && !isOldMessage
     ? readFinalMessageText(finalMessage) : '';
   // FileSaver reloads different objects. Resolve the same reply by stable ID
   // inside the checkpoint collection before projecting its preceding deliveries.
   const checkpointReply = finalThreadState.messages.find(message =>
     message === finalMessage || (!!finalMessage?.id && message.id === finalMessage.id));
-  const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const finalUsage = readRunTokenUsage({
-    initialMessages: initialThreadState.messages,
-    finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
-    contextWindow,
-  });
   emitEvent({
     type: 'message.completed',
     requestId,

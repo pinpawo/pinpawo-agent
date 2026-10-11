@@ -20,7 +20,7 @@ import {
   type TuiSessionCheckpointer,
 } from './serverTuiSessions';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
-import { createLocalServerRuntimeDepsStore, type ServerDeps } from '../serverTypes';
+import { createChatHostDepsStore, type ServerDeps } from '../serverTypes';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
 import {
   createTestModelProfiles,
@@ -181,7 +181,6 @@ test('chat setup requires an artifact store at the type boundary', () => {
   // compile — the check moved from a thrown Error to the contract, which
   // catches it earlier and cannot be reached in production anyway.
   const deps = {
-    serverMode: 'chat' as const,
     petId: 'pet-a',
     ...createTestModelServerDeps(),
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-artifact-store'),
@@ -200,11 +199,10 @@ test('runtime config updates reach the next chat setup through the normalized de
     saveState: () => {},
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
-  const runtimeDeps = createLocalServerRuntimeDepsStore({
-    serverMode: 'chat',
+  const runtimeDeps = createChatHostDepsStore({
     petId: 'pet-a',
     modelProfiles: createTestModelProfiles(),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-policy-update'),
     toolkitInventory: new HostToolkitInventoryStore(),
@@ -220,7 +218,7 @@ test('runtime config updates reach the next chat setup through the normalized de
 
   const beforeDeps = runtimeDeps.get();
   const before = service.buildChatSetup(beforeDeps, context);
-  runtimeDeps.updateReviewPolicy('auto_authorization', 'strict');
+  runtimeDeps.updateToolAuthorizationMode('auto_authorization', 'strict');
   const afterDeps = runtimeDeps.get();
   const after = service.buildChatSetup(afterDeps, context);
 

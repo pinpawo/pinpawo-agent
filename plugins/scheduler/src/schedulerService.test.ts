@@ -63,8 +63,14 @@ test('Scheduler migrates the unreleased completed admission status to dispatched
   t.after(() => service.close());
 
   assert.equal((await service.get('schedule-1'))?.status, 'dispatched');
+  // A schedule stored before Channel delivery has no channel; new ones can.
+  assert.equal((await service.get('schedule-1'))?.channelId, undefined);
+  const bound = await service.create({
+    petId: 'worker', channelId: 'ops', request: 'report', runAt: '2026-01-02T00:00:00.000Z',
+  });
+  assert.equal((await service.get(bound.scheduleId))?.channelId, 'ops');
   assert.deepEqual(
     (await service.events()).map(({ eventType, status }) => [eventType, status]),
-    [['dispatched', 'dispatched']],
+    [['dispatched', 'dispatched'], ['created', 'scheduled']],
   );
 });

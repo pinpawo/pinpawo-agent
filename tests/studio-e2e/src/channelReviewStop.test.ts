@@ -82,7 +82,7 @@ for (const decision of ['reject', 'cancel'] as const) {
       },
     };
     const host = await createResidentPetHost({ petId: 'one', petName: 'One', runtimeConfig,
-      modelProfiles: createTestModelProfiles(), globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
+      modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
         listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
@@ -102,7 +102,7 @@ for (const decision of ['reject', 'cancel'] as const) {
       const { binding } = await channel.execute(id, { petId: 'one', body: 'Inspect and report.' });
       await waitFor(() => channel.service.readInterruptNotifications(id).notifications.length === 1);
       await channel.execute(id, { petId: 'one', body: 'Continue with different constraints.' });
-      await channel.execute(id, { replyTo: question.messageId, body: 'Use staging.' });
+      await channel.execute(id, { petId: 'one', replyTo: question.messageId, body: 'Use staging.' });
       await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedDispatches === 2);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 1, 0, 0]);
       await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });

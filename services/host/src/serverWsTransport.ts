@@ -1,19 +1,19 @@
 import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
-  isAllowedLocalServerOrigin,
-  isAuthorizedLocalServerRequest,
+  isAllowedWireOrigin,
+  isAuthorizedWireRequest,
 } from './wire/auth';
 import {
   createHostWireHandlers,
-  defaultLocalServerLogError,
+  defaultHostLogError,
   type ServerLogError,
   type ServerTransportHandlers,
 } from './wire/messageDispatcher';
 import type { ServerPeer } from './wire/peer';
 import {
-  defaultLocalServerWireLogError,
-  runLocalServerWireHandler,
+  defaultWireLogError,
+  runWireHandler,
   type ServerWireHandlers,
   type ServerWirePeer,
 } from './wire/framing';
@@ -23,9 +23,9 @@ export type ServerWsTransportOptions = {
   port: number;
 };
 
-export function createLocalServerWireWebSocketPeer<TMessage extends object>(
+export function createWireWebSocketPeer<TMessage extends object>(
   ws: WebSocket,
-  logError: ServerLogError = defaultLocalServerWireLogError,
+  logError: ServerLogError = defaultWireLogError,
 ): ServerWirePeer<TMessage> {
   return {
     isConnected: () => ws.readyState === WebSocket.OPEN,
@@ -35,41 +35,41 @@ export function createLocalServerWireWebSocketPeer<TMessage extends object>(
         ws.send(JSON.stringify(message));
         return true;
       } catch (err) {
-        logError('[local-server] failed to send websocket message:', err);
+        logError('[wire] failed to send websocket message:', err);
         return false;
       }
     },
   };
 }
 
-export function createLocalServerWebSocketPeer(
+export function createHostWebSocketPeer(
   ws: WebSocket,
-  logError: ServerLogError = defaultLocalServerLogError,
+  logError: ServerLogError = defaultHostLogError,
 ): ServerPeer {
-  return createLocalServerWireWebSocketPeer(ws, logError);
+  return createWireWebSocketPeer(ws, logError);
 }
 
-export function attachLocalServerWireWebSocketTransport<TMessage extends object>(
+export function attachWireWebSocketTransport<TMessage extends object>(
   server: Server,
   handlers: ServerWireHandlers<TMessage>,
   options: ServerWsTransportOptions,
 ) {
   const log = handlers.log ?? console.log;
-  const logError = handlers.logError ?? defaultLocalServerWireLogError;
+  const logError = handlers.logError ?? defaultWireLogError;
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
-    if (!isAllowedLocalServerOrigin(req, options.port)) {
+    if (!isAllowedWireOrigin(req, options.port)) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
-      log('[local-server] rejected WS upgrade from invalid Origin');
+      log('[wire] rejected WS upgrade from invalid Origin');
       return;
     }
 
-    if (!isAuthorizedLocalServerRequest(req, options.authToken)) {
+    if (!isAuthorizedWireRequest(req, options.authToken)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
-      log('[local-server] rejected WS upgrade without valid token');
+      log('[wire] rejected WS upgrade without valid token');
       return;
     }
 
@@ -79,11 +79,11 @@ export function attachLocalServerWireWebSocketTransport<TMessage extends object>
   });
 
   wss.on('connection', (ws) => {
-    const peer = createLocalServerWireWebSocketPeer<TMessage>(ws, logError);
-    log('[local-server] local client connected');
+    const peer = createWireWebSocketPeer<TMessage>(ws, logError);
+    log('[wire] local client connected');
 
     ws.on('message', (data: Buffer | string) => {
-      void runLocalServerWireHandler(
+      void runWireHandler(
         'handleMessage',
         () => handlers.onMessage(peer, data),
         logError,
@@ -92,13 +92,13 @@ export function attachLocalServerWireWebSocketTransport<TMessage extends object>
 
     ws.on('close', () => {
       if (handlers.onClose) {
-        void runLocalServerWireHandler('handleClose', () => handlers.onClose!(peer), logError);
+        void runWireHandler('handleClose', () => handlers.onClose!(peer), logError);
       }
-      log('[local-server] local client disconnected');
+      log('[wire] local client disconnected');
     });
 
     ws.on('error', (err) => {
-      console.warn('[local-server] WS error:', err.message);
+      console.warn('[wire] WS error:', err.message);
     });
   });
 
@@ -106,12 +106,12 @@ export function attachLocalServerWireWebSocketTransport<TMessage extends object>
 }
 
 /** Chat/Agent Session adapter retained for the Host. */
-export function attachLocalServerWebSocketTransport(
+export function attachHostWebSocketTransport(
   server: Server,
   handlers: ServerTransportHandlers,
   options: ServerWsTransportOptions,
 ) {
-  return attachLocalServerWireWebSocketTransport(
+  return attachWireWebSocketTransport(
     server,
     createHostWireHandlers(handlers),
     options,

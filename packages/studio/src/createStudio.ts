@@ -229,6 +229,9 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           startedPlugins.push(plugin);
           await plugin.start(buildPluginContext(plugin));
         }
+        // Every hook a Plugin can contribute to is exposed by now, so work that
+        // depends on another Plugin can start without guessing at start order.
+        notify({ type: 'plugins.activated', source: 'studio', occurredAt: new Date().toISOString() });
       } catch (error) {
         stopped = true;
         await stopStartedPlugins();

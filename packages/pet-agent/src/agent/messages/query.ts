@@ -5,6 +5,7 @@ import {
   getAgentMessageLane,
   getAgentMessageRunId,
   isCapabilityMessageLane,
+  isSyntheticAgentMessage,
   type DelegationMessageScope,
 } from './metadata';
 
@@ -170,4 +171,18 @@ export function queryAgentMessages(
 
 export function mainConversationMessages(messages: readonly BaseMessage[]) {
   return queryAgentMessages(messages).main().select().messages;
+}
+
+/** The untagged main conversation, exactly what `main()` selects. */
+export function isMainConversationMessage(message: BaseMessage): boolean {
+  return getAgentMessageLane(message) === null;
+}
+
+/**
+ * A main-conversation message people see: private lanes and synthetic
+ * bookkeeping are excluded. Every projection of the conversation, live or
+ * from a checkpoint, uses this one rule.
+ */
+export function isPublicConversationMessage(message: BaseMessage): boolean {
+  return isMainConversationMessage(message) && !isSyntheticAgentMessage(message);
 }

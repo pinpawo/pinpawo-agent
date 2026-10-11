@@ -94,7 +94,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const host = await createResidentPetHost({
     petId: 'executor', petName: 'Not the author ID', modelProfiles: createTestModelProfiles(),
-    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: {
       writeArtifact: async () => { throw new Error('unused'); }, readArtifact: async () => { throw new Error('unused'); },

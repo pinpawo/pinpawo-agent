@@ -43,10 +43,6 @@ import {
   type AgentLocalAttachment,
 } from './localAttachments';
 
-/**
- * Deprecated wire compatibility only. Runtime delegation transitions are not
- * part of agent-contracts and new callers must not emit this field.
- */
 export type ChatRequestMessage = {
   type: 'chat_request';
   requestId: string;
@@ -76,11 +72,9 @@ export type NewSessionMessage = {
 
 export type RuntimeConfigUpdateMessage = {
   type: 'runtime_config.update';
-  /** Optional for compatibility with pre-acknowledgement local clients. */
-  requestId?: string;
-  globalReviewPolicyMode: ToolAuthorizationMode;
-  /** Omitted by older clients; the host retains the configured level. */
-  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
+  requestId: string;
+  toolAuthorizationMode: ToolAuthorizationMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 };
 
 export type SessionSnapshotGetMessage = {
@@ -150,8 +144,8 @@ export type AgentControlServerMessage =
   | {
       type: 'runtime_config.result';
       requestId: string;
-      globalReviewPolicyMode: ToolAuthorizationMode;
-      autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
+      toolAuthorizationMode: ToolAuthorizationMode;
+      autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
     }
   | {
       type: 'runtime_config.error';
@@ -665,9 +659,10 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       : { type, requestId, plan };
   }
   if (type === 'interrupt.requested') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'pendingInterrupt'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'pendingInterrupt', 'usage'])) return null;
     const pendingInterrupt = parsePendingInterruptProjection(record.pendingInterrupt);
-    return pendingInterrupt ? { type, requestId, pendingInterrupt } : null;
+    const usage = parseAgentTokenUsageSnapshot(record.usage);
+    return pendingInterrupt ? { type, requestId, pendingInterrupt, ...(usage ? { usage } : {}) } : null;
   }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');
@@ -799,23 +794,14 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     if (!hasOnlyKeys(record, [
       'type',
       'requestId',
-      'globalReviewPolicyMode',
+      'toolAuthorizationMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
-    const requestId = readOptionalString(record, 'requestId');
-    if ('requestId' in record && !requestId) return null;
-    const globalReviewPolicyMode = readToolAuthorizationMode(record, 'globalReviewPolicyMode');
-    const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
-      ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
-      : undefined;
-    if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
-    return globalReviewPolicyMode
-      ? {
-          type,
-          ...(requestId ? { requestId } : {}),
-          globalReviewPolicyMode,
-          ...(autoAuthorizationSafetyLevel ? { autoAuthorizationSafetyLevel } : {}),
-        }
+    const requestId = readString(record, 'requestId');
+    const toolAuthorizationMode = readToolAuthorizationMode(record, 'toolAuthorizationMode');
+    const autoAuthorizationSafetyLevel = readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel');
+    return requestId && toolAuthorizationMode && autoAuthorizationSafetyLevel
+      ? { type, requestId, toolAuthorizationMode, autoAuthorizationSafetyLevel }
       : null;
   }
   return null;
@@ -975,24 +961,16 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     if (!hasOnlyKeys(record, [
       'type',
       'requestId',
-      'globalReviewPolicyMode',
+      'toolAuthorizationMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
-    const globalReviewPolicyMode = readToolAuthorizationMode(
+    const toolAuthorizationMode = readToolAuthorizationMode(
       record,
-      'globalReviewPolicyMode',
+      'toolAuthorizationMode',
     );
-    const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
-      ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
-      : undefined;
-    if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
-    return globalReviewPolicyMode
-      ? {
-          type,
-          requestId,
-          globalReviewPolicyMode,
-          ...(autoAuthorizationSafetyLevel ? { autoAuthorizationSafetyLevel } : {}),
-        }
+    const autoAuthorizationSafetyLevel = readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel');
+    return toolAuthorizationMode && autoAuthorizationSafetyLevel
+      ? { type, requestId, toolAuthorizationMode, autoAuthorizationSafetyLevel }
       : null;
   }
   if (type === 'runtime_config.error') {

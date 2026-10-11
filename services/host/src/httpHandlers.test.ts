@@ -99,7 +99,6 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
 
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer secret'), res, {
-    serverMode: 'chat',
     petId: 'pet-a',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     runtimeConfig: {
@@ -121,8 +120,7 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
-    local_agent_version: readHostPackageVersion(),
-    server_mode: 'chat',
+    host_version: readHostPackageVersion(),
     model_profile_id: 'test-profile',
     model_profile_label: 'Test profile',
     model_profile_available: true,

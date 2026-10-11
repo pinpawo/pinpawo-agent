@@ -68,50 +68,59 @@ test('chat request parser rejects relative, duplicate, and excessive attachments
   }), null);
 });
 
-test('runtime config protocol supports legacy updates and correlated acknowledgements', () => {
-  assert.deepEqual(parseAgentClientMessage({
+test('runtime config protocol requires a request id and safety level', () => {
+  assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
-    globalReviewPolicyMode: 'require_authorization',
-  }), {
+    toolAuthorizationMode: 'require_authorization',
+  }), null);
+  assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
-    globalReviewPolicyMode: 'require_authorization',
-  });
+    requestId: 'policy-0',
+    toolAuthorizationMode: 'require_authorization',
+  }), null);
+  assert.equal(parseAgentServerMessage({
+    type: 'runtime_config.result',
+    requestId: 'policy-0',
+    toolAuthorizationMode: 'require_authorization',
+  }), null);
   assert.deepEqual(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   }), {
     type: 'runtime_config.update',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 'policy-invalid-level',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'balanced',
   }), null);
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: 42,
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
   }), null);
   assert.equal(parseAgentClientMessage({
     type: 'runtime_config.update',
     requestId: '',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
   }), null);
   assert.deepEqual(parseAgentServerMessage({
     type: 'runtime_config.result',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   }), {
     type: 'runtime_config.result',
     requestId: 'policy-1',
-    globalReviewPolicyMode: 'auto_authorization',
+    toolAuthorizationMode: 'auto_authorization',
     autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.deepEqual(parseAgentServerMessage({
@@ -148,6 +157,31 @@ test('runtime run boundaries round-trip for observing clients', () => {
     },
   };
   assert.deepEqual(parseAgentServerMessage(interrupted), interrupted);
+});
+
+test('an interrupt request carries the tokens its run spent before stopping', () => {
+  const waiting = {
+    type: 'event' as const,
+    requestId: 'r1',
+    event: {
+      type: 'interrupt.requested' as const,
+      requestId: 'r1',
+      pendingInterrupt: {
+        interruptId: 'i1',
+        payload: {
+          kind: 'human_review' as const,
+          interactions: [{
+            interactionId: 'review-1',
+            schemaVersion: 2 as const,
+            view: { kind: 'plain' as const, body: 'Approve?' },
+            options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' as const }],
+          }],
+        },
+      },
+      usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150, scope: 'run' as const },
+    },
+  };
+  assert.deepEqual(parseAgentServerMessage(waiting), waiting);
 });
 
 test('session compaction protocol is correlated and snapshot-backed', () => {

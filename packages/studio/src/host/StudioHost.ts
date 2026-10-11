@@ -29,7 +29,6 @@ import {
   type StudioPluginResolver,
 } from './buildStudio';
 import type { Studio } from '../studioContract';
-import { createStudioContextToolkit } from './studioContextToolkit';
 import type { ResidentPetInteraction } from 'pinpawo/host-runtime';
 import {
   loadPetDocument,
@@ -123,11 +122,7 @@ export class StudioHost {
       // Load the shared Host catalog before resolving Pet directories so every
       // Pet snapshot is built against the same initialized baseline.
       await this.caps.init({
-        toolkitSources: [{
-          id: 'studio-host:context',
-          kind: 'host_builtin',
-          definitions: [createStudioContextToolkit(() => this.getStudio().listPets())],
-        }, ...pluginToolkitSources],
+        toolkitSources: pluginToolkitSources,
       });
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();

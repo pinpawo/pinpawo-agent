@@ -318,7 +318,7 @@ Studio
  ├─ residentPets: Map<petId, ResidentPetHost>   ← 多 Pet 在这一层
  ├─ 共享注入：modelProfiles、toolkitInventory、toolkitRuntimeManager、
  │            capabilityArtifactStore、checkpointer(同一个 FileSaver)、
- │            runtimeConfig、globalReviewPolicyMode
+ │            runtimeConfig、toolAuthorizationMode
  └─ 每 Pet 独有：petId、petName、modelProfileId、defaultCapabilityName、
                  petDocument、capabilities、sessionStatePath、adoptThreadId
 ```
@@ -410,7 +410,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 
 | 字段 | 实际是什么 | 归属 |
 |---|---|---|
-| `petId`、`petName`、`serverMode` | Pet 的身份 | Host |
+| `petId`、`petName` | Pet 的身份 | Host |
 | `modelProfiles` | 配置来源 | Config |
 | `capabilityCatalog`、`toolkitInventory`、`toolkitRuntimeManager`、`petDocument`、`capabilityArtifactStore` | Host 长期持有的服务 | Host |
 | `chatCheckpointer` | 存储适配器 | Host |
@@ -457,7 +457,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 | 断连清理 | wire（连接自身） | wire |
 
 **没有 `process` 层。** `activeChatOperations` 与 `sessionTransition` 是
-`createLocalServerHandlers` 的闭包局部变量，而 Studio 对每个 Pet 各调一次
+`createChatHostHandlers` 的闭包局部变量，而 Studio 对每个 Pet 各调一次
 `createResidentPetHost` —— 它们是 **Host 级**的，多 Pet 时进程内没有共享准入状态。
 
 ### 现状核对（实施前的事实基线）

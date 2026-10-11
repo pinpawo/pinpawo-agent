@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildAgentEventEnvelope, type AgentServerMessage } from '@pinpawo/agent-session';
 
-import { dispatchLocalServerMessage } from '../wire/messageDispatcher';
+import { dispatchAgentSessionMessage } from '../wire/messageDispatcher';
 import {
   ResidentPetInteractionBusyError,
   type ResidentPetInteraction,
@@ -47,7 +47,7 @@ export function createResidentPetInteraction(
     },
     request: async (message) => {
       if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
-      await dispatchLocalServerMessage(context.hostPeer, JSON.stringify(message), peerHandlers, (_label, error) => {
+      await dispatchAgentSessionMessage(context.hostPeer, JSON.stringify(message), peerHandlers, (_label, error) => {
         if (!('requestId' in message) || !message.requestId) {
           defaultLogError(_label, error);
           return;
@@ -76,7 +76,7 @@ export function createResidentPetInteraction(
         peer.send({ type: 'pong' });
         return;
       }
-      await dispatchLocalServerMessage(peer, JSON.stringify(message), peerHandlers);
+      await dispatchAgentSessionMessage(peer, JSON.stringify(message), peerHandlers);
     },
     disconnect: async (peer) => {
       if (interactivePeer.current !== peer) return;

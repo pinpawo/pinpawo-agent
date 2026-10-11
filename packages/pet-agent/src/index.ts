@@ -220,6 +220,10 @@ export {
   selectLatestCapabilityArtifact,
 } from './agent/orchestrator/capabilityArtifacts';
 export {
+  getAgentMessageRunId,
+  isMainConversationMessage,
+  isPublicConversationMessage,
+  isSyntheticAgentMessage,
   mainConversationMessages,
   readAgentMessageCreatedAt,
   stampAgentMessageCreatedAt,

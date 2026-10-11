@@ -133,7 +133,7 @@ export function createTestModelServerDeps(
   input: Partial<AgentLlmConfig & HostExecutionConfig> = {},
 ): {
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   toolkitInventory: HostToolkitInventoryStore;
   capabilityCatalog: CapabilityCatalogReader;
@@ -141,7 +141,7 @@ export function createTestModelServerDeps(
 } {
   return {
     modelProfiles: createTestModelProfiles(input),
-    globalReviewPolicyMode: input.globalReviewPolicyMode
+    toolAuthorizationMode: input.toolAuthorizationMode
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,

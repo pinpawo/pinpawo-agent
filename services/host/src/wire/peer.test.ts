@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  sendLocalServerPeerEvent,
+  sendAgentSessionPeerEvent,
   type ServerPeer,
 } from './peer';
 
@@ -15,7 +15,7 @@ test('local server peers preserve trusted event payloads by default', () => {
     },
   };
 
-  assert.equal(sendLocalServerPeerEvent(peer, {
+  assert.equal(sendAgentSessionPeerEvent(peer, {
     type: 'operation',
     requestId: 'req-1',
     phase: 'completed',
@@ -27,7 +27,7 @@ test('local server peers preserve trusted event payloads by default', () => {
       input: { path: '/Users/alice/project/private.txt' },
     },
   }), true);
-  assert.equal(sendLocalServerPeerEvent(peer, {
+  assert.equal(sendAgentSessionPeerEvent(peer, {
     type: 'message.delta',
     requestId: 'req-1',
     messageId: 'm-1',

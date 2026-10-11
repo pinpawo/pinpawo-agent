@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { readLocalServerAuthToken } from 'pinpawo/local-server-transport';
+import { readWireAuthToken } from 'pinpawo/wire';
 
 const execFileAsync = promisify(execFile);
 
@@ -166,7 +166,7 @@ function uniquePetIds(values: readonly string[]): string[] {
 }
 
 async function discoverStudioPetIds(studioUrl: string): Promise<string[]> {
-  const token = readLocalServerAuthToken();
+  const token = readWireAuthToken();
   if (!token) {
     throw new Error('Studio bearer token is unavailable. Use --pet to name Pet TUI clients directly.');
   }

@@ -102,3 +102,32 @@ test('ThreadInvocationCoordinator allows different threads to run concurrently',
   first.settle();
   second.settle();
 });
+
+test('ThreadInvocationCoordinator tells a stopped invocation from a superseded one', async () => {
+  const coordinator = new ThreadInvocationCoordinator();
+  const stoppedController = new AbortController();
+  const stopped = coordinator.enqueue({
+    threadId: 'thread-1',
+    requestId: 'request-1',
+    signal: stoppedController.signal,
+    abort: () => stoppedController.abort(),
+  });
+  await stopped.waitForTurn();
+  stoppedController.abort();
+  // A stop ends the run without replacing it.
+  assert.equal(stopped.isCurrent(), false);
+  assert.equal(stopped.isSuperseded(), false);
+
+  const nextController = new AbortController();
+  const next = coordinator.enqueue({
+    threadId: 'thread-1',
+    requestId: 'request-2',
+    signal: nextController.signal,
+    abort: () => nextController.abort(),
+  });
+  assert.equal(stopped.isSuperseded(), true);
+  assert.equal(next.isSuperseded(), false);
+  stopped.settle();
+  await next.waitForTurn();
+  next.settle();
+});

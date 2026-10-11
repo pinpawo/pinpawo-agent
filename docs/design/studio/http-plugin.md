@@ -57,8 +57,8 @@ session，也不创建 session。缺少端口时返回 `503`。
 
 ```json
 {
-  "petId": "planner",
-  "request": "plan this work",
+  "petId": "executor",
+  "request": "handle this work",
   "idempotencyKey": "optional-retry-key"
 }
 ```

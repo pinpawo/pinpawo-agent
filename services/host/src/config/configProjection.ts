@@ -7,20 +7,18 @@ import {
 } from '@pinpawo/agent-contracts';
 import { readHostPackageVersion } from '../packageVersion';
 import type { RuntimeProjectionDeps } from '../serverTypes';
-import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 import { resolveLlmGenerationReserveTokens } from './llmModelPresets';
 
 export type RuntimeProjection = {
   /** The Host projection is always the Chat Host. */
-  serverMode: ServerMode;
   modelProfileId: string;
   modelProfileLabel: string;
   modelProfileAvailable: boolean;
   modelProfileIssues: readonly string[];
   model?: string;
   inputModalities?: readonly ModelInputModality[];
-  globalReviewPolicyMode: ToolAuthorizationMode;
+  toolAuthorizationMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   contextWindow?: number;
   contextCompactionWatermarkTokens?: number;
@@ -39,7 +37,6 @@ export function buildLocalRuntimeProjection(
   const profile = deps.modelProfiles.snapshot.profiles[modelProfileId];
   if (!profile) {
     return {
-      serverMode: deps.serverMode,
       modelProfileId,
       modelProfileLabel: modelProfileId,
       modelProfileAvailable: false,
@@ -47,7 +44,7 @@ export function buildLocalRuntimeProjection(
         deps.modelProfiles.snapshot.unavailableProfiles[modelProfileId]
           ?.map((issue) => issue.message)
         ?? [`Unknown model profile "${modelProfileId}"`],
-      globalReviewPolicyMode: deps.globalReviewPolicyMode,
+      toolAuthorizationMode: deps.toolAuthorizationMode,
       autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
       workdir: runtimeConfig.workdir,
       ...(runtimeConfig.workspace ? {
@@ -65,14 +62,13 @@ export function buildLocalRuntimeProjection(
   );
 
   return {
-    serverMode: deps.serverMode,
     modelProfileId,
     modelProfileLabel: profile.label,
     modelProfileAvailable: true,
     modelProfileIssues: [],
     model: llmConfig.model,
     inputModalities: llmConfig.inputModalities ?? ['text'],
-    globalReviewPolicyMode: deps.globalReviewPolicyMode,
+    toolAuthorizationMode: deps.toolAuthorizationMode,
     autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
     ...(llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: llmConfig.contextWindowTokens }
@@ -93,8 +89,7 @@ export function buildLocalRuntimeProjection(
 export function buildLocalHttpRuntimeProjection(deps: RuntimeProjectionDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
-    local_agent_version: readHostPackageVersion(),
-    server_mode: runtime.serverMode,
+    host_version: readHostPackageVersion(),
     model_profile_id: runtime.modelProfileId,
     model_profile_label: runtime.modelProfileLabel,
     model_profile_available: runtime.modelProfileAvailable,

@@ -5,6 +5,11 @@ import {
 import type { AgentMessageToolCall, AgentOperationEvent } from '@pinpawo/agent-session';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import {
+  getAgentMessageRunId,
+  isMainConversationMessage,
+  isPublicConversationMessage,
+} from '@pinpawo/pet-agent';
+import {
   emptyOperationRegistry,
   type OperationRegistry,
 } from '../events/operationRegistry';
@@ -47,12 +52,13 @@ export function readMessageToolCalls(message: BaseMessage): Array<Omit<AgentMess
 
 /** Main-conversation tool results keyed by the call they answer; lane results are private work. */
 export function readToolResultStatuses(messages: readonly unknown[]) {
-  return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && !isLaneMessage(message)
+  return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && isMainConversationMessage(message)
     ? [[message.tool_call_id, message.status === 'error' ? 'failed' as const : 'completed' as const]]
     : []));
 }
 
-function isLaneMessage(message: BaseMessage) {
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
+/** A public main-conversation message that this run wrote. */
+export function isPublicRunMessage(message: BaseMessage, runId: unknown) {
+  const messageRunId = getAgentMessageRunId(message);
+  return isPublicConversationMessage(message) && messageRunId !== null && messageRunId === runId;
 }

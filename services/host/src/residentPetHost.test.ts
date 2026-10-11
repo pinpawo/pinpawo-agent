@@ -289,7 +289,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     capabilityArtifactStore: testArtifactStore,
     checkpointer,
     runtimeConfig,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
     graphService: graphService as never,
@@ -411,7 +411,7 @@ test('dispatch and conversation publish the same Agent Session event stream', as
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-events-sessions.json'),
     graphService: graphService as never,
@@ -548,9 +548,10 @@ test('dispatch and conversation publish the same Agent Session event stream', as
       type: 'run.interrupt',
       requestId: startedEnvelope.requestId,
     });
-    assert.ok(sourceMessages.some((message) => (
+    // The stop is a signal; the run reports its interruption once it settles.
+    await waitFor(() => sourceMessages.some((message) => (
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
-    )));
+    )), 'interrupted dispatch did not report run.interrupted');
     await waitFor(() => host.interaction.getQueueSnapshot().state === 'open', 'dispatch did not settle');
     // Stop commands cross the transport boundary in either direction.
     for (const owner of ['http', 'tui']) {
@@ -593,7 +594,7 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, 'late-observer-sessions.json'),
     graphService: graphService as never,
@@ -678,14 +679,14 @@ test('resident policy updates reach conversation and dispatch without changing a
       petId, petName: petId,
       modelProfiles: createTestModelProfiles(),
       runtimeConfig,
-      globalReviewPolicyMode: 'full_access',
+      toolAuthorizationMode: 'full_access',
       autoAuthorizationSafetyLevel: 'relaxed',
       capabilities: [],
       toolkitInventory: new HostToolkitInventoryStore(),
       capabilityArtifactStore: testArtifactStore,
       checkpointer: new FileSaver(runtimeConfig.checkpointPath),
       sessionStatePath: runtimeConfig.tuiSessionPath,
-      persistGlobalReviewPolicyMode: (mode, safetyLevel) => { persisted.push({ mode, safetyLevel }); },
+      persistToolAuthorizationMode: (mode, safetyLevel) => { persisted.push({ mode, safetyLevel }); },
       graphService: {
         readThreadState: async () => ({ messages: [], pendingInterrupt: null, hasPendingContinuation: false, currentPlan: null }),
       } as never,
@@ -705,7 +706,7 @@ test('resident policy updates reach conversation and dispatch without changing a
     await hostA.interaction.connect(connection);
     await hostA.interaction.handle(connection, {
       type: 'runtime_config.update', requestId: 'policy',
-      globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
+      toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
     });
     await hostA.interaction.handle(connection, {
       type: 'chat_request', requestId: 'chat', message: 'from conversation',
@@ -753,7 +754,7 @@ test('an aborted resident dispatch preserves a native review by id', async () =>
     petId: 'pet-aborted',
     petName: 'Aborted Pet',
     modelProfiles: createTestModelProfiles(),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
@@ -781,6 +782,120 @@ test('an aborted resident dispatch preserves a native review by id', async () =>
   }
 });
 
+test('an aborted dispatch suspends on the review its settlement returned', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-abort-settled-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  let settleCalls = 0;
+  const graphService = {
+    // Once the settlement has answered, the checkpoint is unreadable: the
+    // dispatch must suspend from what the settlement already returned.
+    readThreadState: async () => {
+      if (settleCalls > 0) throw new Error('checkpoint unavailable');
+      return { messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null };
+    },
+    settleAbortedRun: async () => {
+      settleCalls += 1;
+      return {
+        interruptId: 'interrupt-settled',
+        payload: { kind: 'human_review' as const, reviews: [] },
+      };
+    },
+  };
+  const pet = await createResidentPetHost({
+    petId: 'pet-abort-settled',
+    petName: 'Abort Settled Pet',
+    modelProfiles: createTestModelProfiles(),
+    toolAuthorizationMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-abort-settled-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async () => ({ status: 'interrupted' as const }),
+  });
+  const lifecycle: Array<{ state: string; interruptId?: string; error?: string }> = [];
+  pet.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push({
+    state: event.state,
+    ...(event.pendingInterrupt ? { interruptId: event.pendingInterrupt.interruptId } : {}),
+    ...(event.error ? { error: event.error } : {}),
+  }));
+  try {
+    pet.resident.dispatch.dispatch({ request: 'cancelled into a review', dispatchId: 'settled-dispatch' });
+    await waitFor(
+      () => lifecycle.some((event) => event.state === 'waiting' || event.state === 'failed'),
+      'an aborted dispatch reported no terminal lifecycle',
+    );
+    assert.deepEqual(lifecycle.at(-1), { state: 'waiting', interruptId: 'interrupt-settled' });
+  } finally {
+    await pet.close();
+  }
+});
+
+test('a stopped dispatch whose settlement fails still reports a runtime failure', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-abort-failed-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null,
+    }),
+    settleAbortedRun: async () => {
+      throw new Error('settlement unavailable');
+    },
+  };
+  const pet = await createResidentPetHost({
+    petId: 'pet-abort-failed',
+    petName: 'Abort Failed Pet',
+    modelProfiles: createTestModelProfiles(),
+    toolAuthorizationMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-abort-failed-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async ({ setup }) => new Promise((_, reject) => {
+      const signal = setup.input.signal!;
+      const abort = () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+    }),
+  });
+  const messages: unknown[] = [];
+  const source = peer(messages);
+  await pet.interaction.connect(source);
+  const lifecycle: string[] = [];
+  pet.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event.state));
+  const events = () => messages.flatMap((message) => (
+    (message as { type?: string }).type === 'event'
+      ? [(message as { event: { type: string } }).event.type]
+      : []
+  ));
+  try {
+    pet.resident.dispatch.dispatch({ request: 'stopped mid-run' });
+    await waitFor(() => events().includes('run.started'), 'the dispatch never started');
+    const started = messages.find((message) => (
+      (message as { event?: { type?: string } }).event?.type === 'run.started'
+    )) as { requestId: string };
+    await pet.interaction.handle(source, { type: 'run.interrupt', requestId: started.requestId });
+    await waitFor(() => lifecycle.includes('failed'), 'the dispatch never reported its failure');
+    // Runtime observers see the same terminal state as lifecycle observers;
+    // a stopped run is not left looking like it is still running.
+    await waitFor(() => events().includes('error'), 'runtime observers never saw the run end');
+    assert.deepEqual(events().filter((type) => type === 'error' || type === 'run.interrupted'), ['error']);
+  } finally {
+    await pet.close();
+  }
+});
+
 test('a native review holds dispatch waiting without a resumability guess', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
@@ -801,7 +916,7 @@ test('a native review holds dispatch waiting without a resumability guess', asyn
     petId: 'pet-paused',
     petName: 'Paused Pet',
     modelProfiles: createTestModelProfiles(),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
@@ -851,7 +966,7 @@ test('a refused connection cannot release the interactive client it was refused 
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-refused-sessions.json'),
     graphService: graphService as never,
@@ -900,7 +1015,7 @@ test('interactive roots never inherit another dispatch invocation context', asyn
   const seen: unknown[] = [];
   const host = await createResidentPetHost({
     petId: 'interactive-pet', petName: 'Interactive', modelProfiles: createTestModelProfiles(),
-    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
@@ -1004,7 +1119,7 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
     petId,
     petName: 'Target Pet',
     modelProfiles: createTestModelProfiles(),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
@@ -1091,7 +1206,7 @@ test('a dispatch reports its conversation tool calls as non-terminal messages, w
   const toolCalls = [{ id: 'c1', name: 'delegate_capability', args: { briefing: 'Inspect B.' } }];
   const host = await createResidentPetHost({
     petId: 'message-pet', petName: 'Message', modelProfiles: createTestModelProfiles(),
-    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
@@ -1111,4 +1226,30 @@ test('a dispatch reports its conversation tool calls as non-terminal messages, w
     assert.deepEqual(lifecycle[3].message, { type: 'tool_call.settled', messageId: 'm1', callId: 'c1', status: 'completed' });
     assert.equal(lifecycle[2].scope?.id, 'ch-1');
   } finally { await host.close(); }
+});
+
+test('a dispatch fails through the conversation pipeline: a broken tool history resets the active session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-dispatch-failure-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const runtime = await createResidentPetRuntime({
+    petId: 'failure-pet', petName: 'Failure', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    runAgentTurn: async () => {
+      throw new Error("An assistant message with 'tool_calls' must be followed by tool messages");
+    },
+  });
+  const { sessions, close } = readResidentPetRuntimeContext(runtime);
+  const resident = createResidentPet(runtime);
+  const before = sessions.getActiveSessionId('failure-pet');
+  const lifecycle: PetDispatchLifecycleEvent[] = [];
+  resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
+  try {
+    await resident.dispatch.dispatch({ request: 'continue' });
+    await waitFor(() => lifecycle.some(event => event.state === 'failed'), 'the dispatch did not fail');
+    assert.match(lifecycle.at(-1)?.error ?? '', /must be followed by tool messages/);
+    assert.notEqual(sessions.getActiveSessionId('failure-pet'), before);
+  } finally { await close(); }
 });

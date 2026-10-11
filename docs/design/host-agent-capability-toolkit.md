@@ -191,7 +191,7 @@ Browser、files、shell、web、git、github 都是普通 Toolkit：
    两个 Host 共享能力供给（toolkit / capability / model）以及 checkpointer 的装配方式。
    host 通过中性的 `host-runtime` 子路径暴露 `HostCapabilityAssembly`，Studio
    复用该 Host 装配能力而不复制代码；具体 local wire adapter 则通过独立的
-   `local-server-transport` 子路径暴露，不属于 Host runtime，也不是 Studio core API。
+   `wire` 子路径暴露，不属于 Host runtime，也不是 Studio core API。
    两个 Host 各自持有独立 checkpoint root，不共享 writer ownership、transport
    composition 或 Chat session state。依赖方向只能是 Studio → host public
    surfaces；host Chat 路径不得反向 import Studio。

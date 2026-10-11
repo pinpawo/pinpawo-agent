@@ -8,6 +8,8 @@ export type ThreadInvocation = {
   requestId: string;
   threadId: string;
   isCurrent: () => boolean;
+  /** Whether a later invocation on the same thread replaced this one. */
+  isSuperseded: () => boolean;
   waitForTurn: () => Promise<void>;
   settle: () => void;
 };
@@ -57,6 +59,10 @@ export class ThreadInvocationCoordinator {
       previous.abort();
     }
 
+    const isSuperseded = () => {
+      const active = this.activeByThreadId.get(params.threadId);
+      return active !== undefined && active !== record;
+    };
     const isCurrent = () =>
       this.activeByThreadId.get(params.threadId) === record
       && !params.signal.aborted;
@@ -65,6 +71,7 @@ export class ThreadInvocationCoordinator {
       requestId: params.requestId,
       threadId: params.threadId,
       isCurrent,
+      isSuperseded,
       waitForTurn: async () => {
         await previous?.settled;
         if (!isCurrent()) {

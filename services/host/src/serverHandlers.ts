@@ -16,17 +16,17 @@ import type {
   InterruptResumeMessage,
 } from './wire/protocol';
 import { handleLocalHttpRequest } from './httpHandlers';
-import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
-import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
+import { sendAgentSessionPeerEvent, type ServerPeer } from './wire/peer';
+import type { AgentSessionPeerHandlers } from './wire/messageDispatcher';
 import { SessionAdmission } from './session/sessionAdmission';
 import { SessionCommandQueue } from './session/sessionCommandQueue';
-import { ServerChatHandler } from './agent/serverChatHandler';
+import { ServerChatHandler, type HostTurnOutcome } from './agent/serverChatHandler';
 import type {
   AgentSessionTurnOptions,
   AgentSessionTurnResult,
 } from './agent/chatSessionAdapter';
 import { ServerTuiSessionService } from './session/serverTuiSessions';
-import { persistGlobalReviewPolicyMode } from './config/globalReviewPolicyConfig';
+import { persistToolAuthorizationMode } from './config/toolAuthorizationConfig';
 import { loadAgentContext } from './contextLoader';
 import {
   missingInputModalities,
@@ -39,7 +39,7 @@ import {
 
 export type ServerHandlers = {
   interruptRun: (requestId: string) => boolean;
-  peerHandlers: LocalServerPeerHandlers;
+  peerHandlers: AgentSessionPeerHandlers;
   /**
    * Read one exact session without selecting it. Throws `session_not_found`
    * for a session this Pet does not own; it never falls back to the active
@@ -56,6 +56,18 @@ export type ServerHandlers = {
     sessionId: string,
     message: InterruptResumeMessage,
   ) => Promise<void>;
+  /**
+   * Run one Host-initiated turn (a resident dispatch) through the chat
+   * pipeline. With a session id it runs in that session's own thread and
+   * throws `session_not_found` once that session is gone; without one it runs
+   * in the active session. The caller admits it: no conversation runs
+   * meanwhile.
+   */
+  runHostTurn: (
+    peer: ServerPeer,
+    turn: Parameters<ServerChatHandler['runHostTurn']>[1],
+    sessionId?: string,
+  ) => Promise<HostTurnOutcome>;
   handleHttpRequest: (
     req: IncomingMessage,
     res: ServerResponse,
@@ -65,7 +77,7 @@ export type ServerHandlers = {
 };
 
 export type ServerHandlerOptions = {
-  persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
+  persistToolAuthorizationMode?: typeof persistToolAuthorizationMode;
   /** Composition hook for embedded hosts and deterministic integration tests. */
   chatGraphService?: HostGraphService;
   /** Host-owned session service shared with another surface of the same resident Pet. */
@@ -116,7 +128,7 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * the outer boundary. HTTP endpoints and stdio session commands call the same
  * checkpoint-backed operations below.
  */
-export function createLocalServerHandlers(
+export function createChatHostHandlers(
   runtimeDeps: ServerRuntimeDepsStore,
   options: ServerHandlerOptions = {},
 ): ServerHandlers {
@@ -132,7 +144,7 @@ export function createLocalServerHandlers(
   });
   const publishRuntimeEvent = options.publishRuntimeEvent
     ?? ((peer: ServerPeer, event: AgentRuntimeEvent) => {
-      sendLocalServerPeerEvent(peer, event);
+      sendAgentSessionPeerEvent(peer, event);
     });
   const inflightRequests = new InflightRequestController<ServerPeer>({
     // Local TUI / spawned stdio peer: trusted local transports.
@@ -468,7 +480,7 @@ export function createLocalServerHandlers(
     } catch (error) {
       if (selectionCommitted) {
         console.warn(
-          '[local-server] model selection was committed but acknowledgement failed:',
+          '[chat-host] model selection was committed but acknowledgement failed:',
           error instanceof Error ? error.message : error,
         );
         return;
@@ -636,7 +648,7 @@ export function createLocalServerHandlers(
     });
   };
 
-  const peerHandlers: LocalServerPeerHandlers = {
+  const peerHandlers: AgentSessionPeerHandlers = {
     onChatRequest: (client, message) => {
       return admitHumanMessage(
         client,
@@ -664,38 +676,34 @@ export function createLocalServerHandlers(
         runtimeDeps.get(),
       );
       if (inflight) {
-        console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
+        console.log(`[chat-host] interrupt requestId=${inflight.requestId}`);
       }
     },
     onNewSession: () => {
       const petId = runtimeDeps.get().petId;
       tuiSessions.createNewSession(petId);
-      console.log(`[local-server] new session created for pet ${petId}`);
+      console.log(`[chat-host] new session created for pet ${petId}`);
     },
     onRuntimeConfigUpdate: (client, message) => runSessionCommand(
       async () => {
         try {
-          const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
-            ?? runtimeDeps.get().autoAuthorizationSafetyLevel;
-          (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
-            message.globalReviewPolicyMode,
+          const { autoAuthorizationSafetyLevel } = message;
+          (options.persistToolAuthorizationMode ?? persistToolAuthorizationMode)(
+            message.toolAuthorizationMode,
             autoAuthorizationSafetyLevel,
           );
-          runtimeDeps.updateReviewPolicy(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
-          if (message.requestId) {
-            client.send({
-              type: 'runtime_config.result',
-              requestId: message.requestId,
-              globalReviewPolicyMode: message.globalReviewPolicyMode,
-              autoAuthorizationSafetyLevel,
-            });
-          }
+          runtimeDeps.updateToolAuthorizationMode(message.toolAuthorizationMode, autoAuthorizationSafetyLevel);
+          client.send({
+            type: 'runtime_config.result',
+            requestId: message.requestId,
+            toolAuthorizationMode: message.toolAuthorizationMode,
+            autoAuthorizationSafetyLevel,
+          });
           console.log(
-            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`
+            `[chat-host] tool authorization mode set to ${message.toolAuthorizationMode}`
               + ` (${autoAuthorizationSafetyLevel})`,
           );
         } catch (error) {
-          if (!message.requestId) throw error;
           client.send({
             type: 'runtime_config.error',
             requestId: message.requestId,
@@ -839,6 +847,22 @@ export function createLocalServerHandlers(
         () => chatHandler.handleInterruptResume(peer, message, runtimeDeps.get(), session),
         session.id,
       );
+    },
+    runHostTurn: async (peer, turn, sessionId) => {
+      const requestDeps = runtimeDeps.get();
+      const session = sessionId ? tuiSessions.getSession(requestDeps.petId, sessionId) ?? undefined : undefined;
+      if (sessionId && !session) {
+        throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
+      }
+      const activeRun = activeRuns.begin(
+        turn.requestId,
+        session?.id ?? tuiSessions.getActiveSessionId(requestDeps.petId),
+      );
+      try {
+        return await chatHandler.runHostTurn(peer, turn, requestDeps, session);
+      } finally {
+        activeRuns.finish(activeRun);
+      }
     },
     interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
     close: () => {},

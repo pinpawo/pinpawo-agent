@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   LocalHostConnection,
-  readLocalServerPort,
+  readWirePort,
 } from './localHostConnection';
 
 class FakeSocket {
@@ -180,11 +180,11 @@ test('LocalHostConnection preserves socket arrival order across async payload de
   connection.disconnect();
 });
 
-test('readLocalServerPort validates the configured loopback port', () => {
-  assert.equal(readLocalServerPort(undefined), 3210);
-  assert.equal(readLocalServerPort('4321'), 4321);
-  assert.throws(() => readLocalServerPort('0'), /invalid LOCAL_SERVER_PORT/);
-  assert.throws(() => readLocalServerPort('nope'), /invalid LOCAL_SERVER_PORT/);
+test('readWirePort validates the configured loopback port', () => {
+  assert.equal(readWirePort(undefined), 3210);
+  assert.equal(readWirePort('4321'), 4321);
+  assert.throws(() => readWirePort('0'), /invalid LOCAL_SERVER_PORT/);
+  assert.throws(() => readWirePort('nope'), /invalid LOCAL_SERVER_PORT/);
 });
 
 function blobWithText(read: () => Promise<string>) {

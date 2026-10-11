@@ -7,11 +7,11 @@ import { dirname, resolve } from 'node:path';
 const TOKEN_BYTES = 32;
 const TOKEN_FILE = resolve(homedir(), '.pinpawo', 'local-server-token');
 
-export function createLocalServerAuthToken() {
+export function createWireAuthToken() {
   return randomBytes(TOKEN_BYTES).toString('base64url');
 }
 
-export function writeLocalServerAuthToken(token: string, path = TOKEN_FILE) {
+export function writeWireAuthToken(token: string, path = TOKEN_FILE) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${token}\n`, { encoding: 'utf-8', mode: 0o600 });
   try {
@@ -30,15 +30,15 @@ export function writeLocalServerAuthToken(token: string, path = TOKEN_FILE) {
  * a token nobody could look up, and every Console had to be given a new
  * credential after any restart.
  */
-export function ensureLocalServerAuthToken(path = TOKEN_FILE) {
-  const stored = readLocalServerAuthToken(path);
+export function ensureWireAuthToken(path = TOKEN_FILE) {
+  const stored = readWireAuthToken(path);
   if (stored) return stored;
-  const token = createLocalServerAuthToken();
-  writeLocalServerAuthToken(token, path);
+  const token = createWireAuthToken();
+  writeWireAuthToken(token, path);
   return token;
 }
 
-export function readLocalServerAuthToken(path = TOKEN_FILE) {
+export function readWireAuthToken(path = TOKEN_FILE) {
   try {
     const token = readFileSync(path, 'utf-8').trim();
     return token || null;
@@ -47,16 +47,16 @@ export function readLocalServerAuthToken(path = TOKEN_FILE) {
   }
 }
 
-export function buildLocalServerAuthHeaders(token: string | null | undefined): Record<string, string> {
+export function buildWireAuthHeaders(token: string | null | undefined): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export function isAuthorizedLocalServerRequest(req: IncomingMessage, expectedToken: string) {
+export function isAuthorizedWireRequest(req: IncomingMessage, expectedToken: string) {
   const provided = readBearerToken(req);
   return typeof provided === 'string' && safeTokenEqual(provided, expectedToken);
 }
 
-export function isAllowedLocalServerOrigin(req: IncomingMessage, port: number) {
+export function isAllowedWireOrigin(req: IncomingMessage, port: number) {
   const origin = req.headers.origin;
   if (origin === undefined) return true;
   if (Array.isArray(origin) || !origin.trim()) return false;

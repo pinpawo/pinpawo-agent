@@ -2,13 +2,13 @@ import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
+import type { ExecCommandOptions } from './commands/exec';
 import type { InitCommandOptions } from './commands/init';
 import { readHostPackageVersion } from './packageVersion';
-import type { ServerMode } from './config/serverMode';
 
 type HostCliHandlers = {
-  runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
-  runTuiV2?: (opts: {
+  runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
+  runTui?: (opts: {
     workdir?: string;
     check: boolean;
     qa: boolean;
@@ -16,6 +16,7 @@ type HostCliHandlers = {
     agentSessionPort?: number;
     agentSessionPetId?: string;
   }) => Promise<void> | void;
+  runExec?: (opts: ExecCommandOptions) => Promise<unknown> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
   runBrowser?: (
@@ -97,10 +98,42 @@ export function createHostCli(handlers: HostCliHandlers = {}): Command {
         await runAgent({
           workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
           stdio: options.stdio ?? false,
-          mode: 'chat',
         });
       });
   }
+
+  program
+    .command('exec <instruction>')
+    .description('Run one instruction in a fresh session, print the reply, and exit')
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .option('--approval <policy>', 'tool authorization for this run: full-access, auto, or require')
+    .option('--timeout <seconds>', 'interrupt the run after this many seconds')
+    .option('--trajectory <file>', 'write every Host message of the run as JSONL')
+    .option('--output <file>', 'write the run result as JSON')
+    .option('--json', 'print the run result as JSON instead of the reply')
+    .action(async (instruction: string, options: {
+      workdir?: string;
+      approval?: string;
+      timeout?: string;
+      trajectory?: string;
+      output?: string;
+      json?: boolean;
+    }) => {
+      const timeoutSeconds = options.timeout === undefined ? undefined : Number(options.timeout);
+      if (timeoutSeconds !== undefined && !(timeoutSeconds > 0)) {
+        throw new Error('--timeout must be a positive number of seconds.');
+      }
+      const runExec = handlers.runExec ?? (await import('./commands/exec')).runExec;
+      await runExec({
+        instruction,
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        approval: options.approval,
+        timeoutMs: timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
+        trajectoryPath: options.trajectory,
+        outputPath: options.output,
+        json: options.json ?? false,
+      });
+    });
 
   program
     .command('tui')
@@ -183,9 +216,9 @@ export function createHostCli(handlers: HostCliHandlers = {}): Command {
       if (options.petId !== undefined && !agentSessionPetId) {
         throw new Error('--pet-id must not be empty.');
       }
-      const runTuiV2 = handlers.runTuiV2
-        ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
-      await runTuiV2({
+      const runTui = handlers.runTui
+        ?? (await import('./commands/tuiLauncher')).runTui;
+      await runTui({
         workdir,
         check: options.check ?? false,
         qa: options.qa ?? false,

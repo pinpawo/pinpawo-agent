@@ -118,9 +118,7 @@ function buildResumeCommand(resume: InterruptResume) {
 
 export class HostGraphService {
   /**
-   * Root streamEvents(v3) consumption — the production path since #322
-   * Phase 4 replaced the legacy `graph.stream(['messages','values','custom'])`
-   * + `onToolEvent` bridge. Raw protocol events carry every scope's
+   * Root streamEvents(v3) consumption. Raw protocol events carry every scope's
    * messages/tools/custom/values with namespaces; consumers adapt them via
    * `adaptRootStream`.
    */

@@ -1,4 +1,4 @@
-import { createLocalServerRuntimeDepsStore } from './serverTypes';
+import { createChatHostDepsStore } from './serverTypes';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync,
@@ -13,7 +13,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { HostGraphService } from './agent/agentGraphService';
 import { ActiveRunRegister } from './agent/activeRunRegister';
-import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
+import { createChatHostHandlers as createProductionChatHostHandlers } from './serverHandlers';
 import type { HostServerMessage } from './wire/protocol';
 import type { ServerPeer } from './wire/peer';
 import { buildHostRuntimeConfig } from './config/runtimeConfig';
@@ -24,14 +24,14 @@ import {
 import type { ServerDeps } from './serverTypes';
 import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 
-function createLocalServerHandlers(
+function createChatHostHandlers(
   deps: Omit<ServerDeps, 'toolkitInventory' | 'capabilityCatalog'> & Partial<Pick<
     ServerDeps,
     'toolkitInventory' | 'capabilityCatalog'
   >>,
-  options?: Parameters<typeof createProductionLocalServerHandlers>[1],
+  options?: Parameters<typeof createProductionChatHostHandlers>[1],
 ) {
-  return createProductionLocalServerHandlers(createLocalServerRuntimeDepsStore({
+  return createProductionChatHostHandlers(createChatHostDepsStore({
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityCatalog: createTestModelServerDeps().capabilityCatalog,
     ...deps,
@@ -87,8 +87,7 @@ test('session.new returns an authoritative empty snapshot for a unique session',
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -140,8 +139,7 @@ test('session.compact is a v2 session command and returns the authoritative snap
       throw new Error('empty context must not be written');
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -220,12 +218,11 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
       inputModalities: ['text', 'image'],
     },
   ], 'primary');
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -335,15 +332,14 @@ test('model selection keeps the previous profile when checkpoint preparation fai
       throw new Error('checkpoint unavailable');
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -398,12 +394,11 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   ], 'primary');
   const initialSent: HostServerMessage[] = [];
   const initialPeer = createPeer(initialSent);
-  const initialHandlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const initialHandlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: initialProfiles,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
@@ -432,14 +427,13 @@ test('removed session profile stays visible and blocks runs until explicitly rep
 
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
@@ -515,15 +509,14 @@ test('model selection is rejected while the active session is running', async ()
   const peer = createPeer(sent);
   const started = deferred<void>();
   const release = deferred<void>();
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -615,8 +608,7 @@ test('a run claims the register for the whole admitted turn', async () => {
   const graphService = {
     readThreadState: async () => ({ messages: [], pendingInterrupt: null }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -691,8 +683,7 @@ test('completion snapshot does not reintroduce a settled active run', async () =
       };
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
@@ -758,15 +749,14 @@ test('model selection blocks a chat admitted by another peer until the selection
       };
     },
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -846,15 +836,14 @@ test('model selection is rejected while checkpoint state has pending review', as
       pendingInterrupt: { review },
     }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
       { modelProfileId: 'secondary' },
     ], 'primary'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -910,8 +899,7 @@ test('admitted images gate model selection through the transcript', async () => 
       pendingInterrupt: null,
     }),
   } as unknown as HostGraphService;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
@@ -928,7 +916,7 @@ test('admitted images gate model selection through the transcript', async () => 
         inputModalities: ['text', 'image'],
       },
     ], 'vision-a'),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -1056,8 +1044,7 @@ test('text-only selected profile rejects image admission before graph invocation
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
   let graphInvocations = 0;
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
@@ -1066,7 +1053,7 @@ test('text-only selected profile rejects image admission before graph invocation
         inputModalities: ['text'],
       },
     ]),
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
@@ -1133,15 +1120,14 @@ test('runtime config update persists the safety level, acknowledges, and reaches
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
-      globalReviewPolicyMode: 'require_authorization',
+      toolAuthorizationMode: 'require_authorization',
     }),
   }, {
-    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
+    persistToolAuthorizationMode: (mode, safetyLevel) => {
       persisted.push({ mode, safetyLevel });
     },
   });
@@ -1150,7 +1136,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
       type: 'runtime_config.update',
       requestId: 'policy-1',
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
       autoAuthorizationSafetyLevel: 'relaxed',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
@@ -1165,7 +1151,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     assert.deepEqual(sent[0], {
       type: 'runtime_config.result',
       requestId: 'policy-1',
-      globalReviewPolicyMode: 'auto_authorization',
+      toolAuthorizationMode: 'auto_authorization',
       autoAuthorizationSafetyLevel: 'relaxed',
     });
     const snapshot = sent.find((message) => (
@@ -1173,71 +1159,10 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     ));
     assert.equal(
       snapshot?.type === 'session.new.result'
-        ? snapshot.snapshot.session.runtime?.globalReviewPolicyMode
+        ? snapshot.snapshot.session.runtime?.toolAuthorizationMode
         : null,
       'auto_authorization',
     );
-    assert.equal(
-      snapshot?.type === 'session.new.result'
-        ? snapshot.snapshot.session.runtime?.autoAuthorizationSafetyLevel
-        : null,
-      'relaxed',
-    );
-  } finally {
-    handlers.close();
-    rmSync(workdir, { recursive: true, force: true });
-  }
-});
-
-test('runtime config update preserves the configured safety level when the message omits it', async () => {
-  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-preserve-'));
-  const sent: HostServerMessage[] = [];
-  const persisted: Array<{ mode: string; safetyLevel: string }> = [];
-  const peer: ServerPeer = {
-    isConnected: () => true,
-    send: (message) => {
-      sent.push(message);
-      return true;
-    },
-  };
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
-    petId: 'pet-a',
-    runtimeConfig: buildHostRuntimeConfig(workdir),
-    ...createTestModelServerDeps({
-      globalReviewPolicyMode: 'auto_authorization',
-      autoAuthorizationSafetyLevel: 'relaxed',
-    }),
-  }, {
-    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
-      persisted.push({ mode, safetyLevel });
-    },
-  });
-
-  try {
-    await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
-      type: 'runtime_config.update',
-      requestId: 'policy-preserve-1',
-      globalReviewPolicyMode: 'full_access',
-    });
-    await handlers.peerHandlers.onSessionNew(peer, {
-      type: 'session.new',
-      requestId: 'new-preserve-1',
-    });
-
-    assert.deepEqual(persisted, [{
-      mode: 'full_access',
-      safetyLevel: 'relaxed',
-    }]);
-    assert.deepEqual(sent[0], {
-      type: 'runtime_config.result',
-      requestId: 'policy-preserve-1',
-      globalReviewPolicyMode: 'full_access',
-      autoAuthorizationSafetyLevel: 'relaxed',
-    });
-    const snapshot = sent.find((message) => (
-      message.type === 'session.new.result'
-    ));
     assert.equal(
       snapshot?.type === 'session.new.result'
         ? snapshot.snapshot.session.runtime?.autoAuthorizationSafetyLevel
@@ -1260,15 +1185,14 @@ test('runtime config update reports persistence failures without changing runtim
       return true;
     },
   };
-  const handlers = createLocalServerHandlers({
-    serverMode: 'chat',
+  const handlers = createChatHostHandlers({
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps({
-      globalReviewPolicyMode: 'require_authorization',
+      toolAuthorizationMode: 'require_authorization',
     }),
   }, {
-    persistGlobalReviewPolicyMode: () => {
+    persistToolAuthorizationMode: () => {
       throw new Error('config is read-only');
     },
   });
@@ -1277,7 +1201,8 @@ test('runtime config update reports persistence failures without changing runtim
     await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
       type: 'runtime_config.update',
       requestId: 'policy-1',
-      globalReviewPolicyMode: 'full_access',
+      toolAuthorizationMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'strict',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
       type: 'session.new',
@@ -1294,7 +1219,7 @@ test('runtime config update reports persistence failures without changing runtim
     ));
     assert.equal(
       snapshot?.type === 'session.new.result'
-        ? snapshot.snapshot.session.runtime?.globalReviewPolicyMode
+        ? snapshot.snapshot.session.runtime?.toolAuthorizationMode
         : null,
       'require_authorization',
     );
@@ -1309,9 +1234,9 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
   const { FileSaver } = await import('./fileSaver');
   const checkpointer = new FileSaver(join(workdir, 'host-owned.json'));
   let actual: unknown;
-  const handlers = createLocalServerHandlers({
+  const handlers = createChatHostHandlers({
     ...createTestModelServerDeps(),
-    serverMode: 'chat', petId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     chatCheckpointer: checkpointer,
     capabilityArtifactStore: testArtifactStore,

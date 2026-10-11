@@ -1,6 +1,6 @@
 import type { AgentChannelSetup } from './agent/agentChannel';
 import {
-  getLocalServerToolkitInventory,
+  getToolkitInventory,
   type ServerDeps,
 } from './serverTypes';
 import {
@@ -16,10 +16,10 @@ export function createOperationRegistryForAgentSetup(
   });
 }
 
-export function createOperationRegistryForLocalServerDeps(
+export function createOperationRegistryForDeps(
   deps: Pick<ServerDeps, 'toolkitInventory'>,
 ): OperationRegistry {
-  const toolkitInventory = getLocalServerToolkitInventory(deps);
+  const toolkitInventory = getToolkitInventory(deps);
   return createOperationRegistryFromSources({
     toolkits: [...toolkitInventory.effectiveToolkits],
   });

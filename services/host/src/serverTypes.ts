@@ -7,7 +7,6 @@ import type { ToolAuthorizationSafetyLevel, ToolAuthorizationMode } from '@pinpa
 import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import type { LocalModelProfileRegistry } from './config/llmConfig';
 import type { HostExecutionConfig } from './config/hostExecutionConfig';
-import type { ServerMode } from './config/serverMode';
 import {
   type HostToolkitInventorySnapshot,
   HostToolkitInventoryStore,
@@ -20,7 +19,6 @@ export type CapabilityCatalogReader = Pick<
 
 export type ServerDeps = HostExecutionConfig & {
   /** Host interaction mode; resident Pet adapters reuse the Chat semantics. */
-  serverMode: ServerMode;
   petId: string;
   petName?: string;
   modelProfiles: LocalModelProfileRegistry;
@@ -64,7 +62,7 @@ export type PetIdentityDeps = Pick<ServerDeps, 'petId' | 'petName'>;
 
 /** What a runtime-config projection reads. Owned by Config (domains §一.5). */
 export type RuntimeProjectionDeps =
-  & Pick<ServerDeps, 'serverMode' | 'modelProfiles'>
+  & Pick<ServerDeps, 'modelProfiles'>
   & HostExecutionConfig;
 
 /**
@@ -84,27 +82,27 @@ export type ChatSetupDeps =
 
 export type ServerRuntimeDepsStore = Readonly<{
   get: () => Readonly<ServerDeps>;
-  updateReviewPolicy: (
+  updateToolAuthorizationMode: (
     mode: ToolAuthorizationMode,
     safetyLevel: ToolAuthorizationSafetyLevel,
   ) => Readonly<ServerDeps>;
 }>;
 
-export function getLocalServerToolkitInventory(
+export function getToolkitInventory(
   deps: Pick<ServerDeps, 'toolkitInventory'>,
 ): HostToolkitInventorySnapshot {
   return deps.toolkitInventory.getSnapshot();
 }
 
 /** One Host-owned current snapshot shared by conversation and dispatch surfaces. */
-export function createLocalServerRuntimeDepsStore(
+export function createChatHostDepsStore(
   deps: ServerDeps,
 ): ServerRuntimeDepsStore {
   let current = Object.freeze({ ...deps });
   return Object.freeze({
     get: () => current,
-    updateReviewPolicy: (globalReviewPolicyMode, autoAuthorizationSafetyLevel) => {
-      current = Object.freeze({ ...current, globalReviewPolicyMode, autoAuthorizationSafetyLevel });
+    updateToolAuthorizationMode: (toolAuthorizationMode, autoAuthorizationSafetyLevel) => {
+      current = Object.freeze({ ...current, toolAuthorizationMode, autoAuthorizationSafetyLevel });
       return current;
     },
   });

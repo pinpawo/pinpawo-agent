@@ -47,8 +47,6 @@ export type LoadedCapability = {
   sourceId: string;
 };
 
-/** Global user-registry compatibility name. */
-export type LoadedUserCapability = LoadedCapability;
 
 export type CapabilityPluginValidationResult = {
   ok: boolean;
@@ -194,11 +192,11 @@ export async function validateCapabilityPlugin(
 
 async function loadCapabilitiesFromDir(
   dir: string,
-): Promise<LoadedUserCapability[]> {
+): Promise<LoadedCapability[]> {
   if (!existsSync(dir)) return [];
   const entries = readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryEntry(dir, entry.name)));
-  const loaded: LoadedUserCapability[] = [];
+  const loaded: LoadedCapability[] = [];
 
   for (const entry of entries) {
     const capabilityDir = resolve(dir, entry.name);
@@ -291,8 +289,8 @@ function warnLegacyCapabilityDirectory(dir: string, name: string) {
   );
 }
 
-export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
-  const loaded: LoadedUserCapability[] = [];
+export async function loadUserCapabilities(): Promise<LoadedCapability[]> {
+  const loaded: LoadedCapability[] = [];
   for (const dir of resolveCapabilityDirs()) {
     // Preserve duplicates across configured roots. The Host catalog owns the
     // collision policy and needs every definition plus its source identity.

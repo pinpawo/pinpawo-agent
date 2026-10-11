@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
+import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
 import { TriggerService } from './triggerService';
 
 export type HttpTriggerSource = {
@@ -43,14 +44,25 @@ export type TriggerDefinition = {
   /** Legacy shorthand for a static target. New rules should use target. */
   petId?: string;
   target?: TriggerTarget;
+  /**
+   * Deliver through this Channel: the Trigger posts as its own bot author,
+   * addressed to the target Pet, and the run and its reply live in the Channel.
+   * Without it the Pet receives a bare dispatch.
+   */
+  channelId?: string;
   request: TriggerRequest;
 };
+
+/** A definition after parseDefinitions: the petId shorthand is folded into target. */
+type ParsedTriggerDefinition = Omit<TriggerDefinition, 'petId' | 'target'> & { target: TriggerTarget };
 
 export type CreateTriggerPluginOptions = {
   triggers: readonly TriggerDefinition[];
   service?: TriggerService;
   databasePath?: string;
   httpRoute?: false | { pluginName?: string };
+  /** The Channel Plugin that channel-bound rules post through. */
+  channel?: { pluginName?: string };
 };
 
 export type TriggerPlugin = StudioPlugin & { service: TriggerService };
@@ -160,7 +172,7 @@ function renderTriggerRequest(
 }
 
 function buildTriggerRequestEnvelope(
-  definition: TriggerDefinition,
+  definition: ParsedTriggerDefinition,
   context:
     | { kind: 'http'; payload: unknown }
     | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
@@ -199,7 +211,7 @@ function buildTriggerRequestEnvelope(
 }
 
 function buildTriggerRequest(
-  definition: TriggerDefinition,
+  definition: ParsedTriggerDefinition,
   context:
     | { kind: 'http'; payload: unknown }
     | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
@@ -231,14 +243,8 @@ function buildTriggerRequest(
   return `${definition.request}\n\nTrigger context:\n${stringifyTriggerContext(detail)}`;
 }
 
-function triggerTarget(definition: TriggerDefinition): TriggerTarget {
-  if (definition.target) return definition.target;
-  if (definition.petId) return { kind: 'pet', petId: definition.petId };
-  throw new Error(`Trigger "${definition.triggerId}" has no target.`);
-}
-
-function resolveTargetPetId(definition: TriggerDefinition, envelope: TriggerRequestEnvelope): string {
-  const target = triggerTarget(definition);
+function resolveTargetPetId(definition: ParsedTriggerDefinition, envelope: TriggerRequestEnvelope): string {
+  const target = definition.target;
   if (target.kind === 'pet') return target.petId;
   const value = readEnvelopePath(envelope, target.path);
   if (typeof value !== 'string' || !value.trim()) {
@@ -251,8 +257,8 @@ function resolveTargetPetId(definition: TriggerDefinition, envelope: TriggerRequ
   return petId;
 }
 
-function permitsTargetPetId(definition: TriggerDefinition, petId: string): boolean {
-  const target = triggerTarget(definition);
+function permitsTargetPetId(definition: ParsedTriggerDefinition, petId: string): boolean {
+  const target = definition.target;
   return target.kind === 'pet'
     ? target.petId === petId
     : target.allowedPetIds === undefined || target.allowedPetIds.includes(petId);
@@ -264,7 +270,7 @@ function matchesStudioEvent(source: StudioEventTriggerSource, event: StudioEvent
   return source.typePrefix === undefined || event.type.startsWith(source.typePrefix);
 }
 
-function publicDefinition(definition: TriggerDefinition): Record<string, unknown> {
+function publicDefinition(definition: ParsedTriggerDefinition): Record<string, unknown> {
   return {
     triggerId: definition.triggerId,
     source: definition.source.kind === 'studio_event'
@@ -276,14 +282,15 @@ function publicDefinition(definition: TriggerDefinition): Record<string, unknown
           ...(definition.source.action === undefined ? {} : { action: definition.source.action }),
         }
         : { kind: 'http' },
-    target: triggerTarget(definition),
+    target: definition.target,
+    ...(definition.channelId === undefined ? {} : { channelId: definition.channelId }),
     request: definition.request,
   };
 }
 
-function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, TriggerDefinition> {
-  const definitions = new Map<string, TriggerDefinition>();
-  for (const definition of input) {
+function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, ParsedTriggerDefinition> {
+  const definitions = new Map<string, ParsedTriggerDefinition>();
+  for (const { petId, ...definition } of input) {
     const triggerId = definition.triggerId.trim();
     const target = definition.target
       ? definition.target.kind === 'pet'
@@ -293,7 +300,11 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
           path: validateTemplatePath(definition.target.path, `Trigger "${definition.triggerId}" target path`),
           ...(definition.target.allowedPetIds === undefined ? {} : { allowedPetIds: definition.target.allowedPetIds.map((petId) => petId.trim()) }),
         }
-      : definition.petId === undefined ? undefined : { kind: 'pet' as const, petId: definition.petId.trim() };
+      : petId === undefined ? undefined : { kind: 'pet' as const, petId: petId.trim() };
+    const channelId = definition.channelId?.trim();
+    if (channelId !== undefined && !channelId) {
+      throw new Error(`Trigger "${triggerId}" channelId must not be empty.`);
+    }
     const request = typeof definition.request === 'string'
       ? definition.request.trim()
       : {
@@ -325,7 +336,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
       if (definition.source.secret.length < 16) {
         throw new Error(`HTTP Trigger "${triggerId}" requires a 16+ character secret.`);
       }
-      definitions.set(triggerId, { ...definition, triggerId, target, request });
+      definitions.set(triggerId, { ...definition, triggerId, target, request, ...(channelId ? { channelId } : {}) });
       continue;
     }
     if (definition.source.kind === 'github') {
@@ -341,6 +352,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
         triggerId,
         target,
         request,
+        ...(channelId ? { channelId } : {}),
         source: {
           ...definition.source,
           event,
@@ -366,6 +378,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
       triggerId,
       target,
       request,
+      ...(channelId ? { channelId } : {}),
       source: {
         ...definition.source,
         eventSource,
@@ -387,6 +400,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
   let unsubscribeEvents: (() => void) | undefined;
   let unsubscribeMutations: (() => void) | undefined;
   let unregisterRoutes: (() => void) | undefined;
+  let removeChannelInputs: (() => void) | undefined;
+  let channelInputs: ChannelInputsHook | undefined;
 
   return {
     name: 'trigger',
@@ -396,7 +411,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       if (context) throw new Error('Trigger Plugin is already started.');
       const petIds = new Set(pluginContext.listPets().map(({ petId }) => petId));
       for (const definition of definitions.values()) {
-        const target = triggerTarget(definition);
+        const target = definition.target;
         if (target.kind === 'pet' && !petIds.has(target.petId)) {
           throw new Error(`Trigger "${definition.triggerId}" targets unknown pet "${target.petId}".`);
         }
@@ -408,8 +423,36 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       }
       context = pluginContext;
       try {
+        if ([...definitions.values()].some((definition) => definition.channelId !== undefined)) {
+          removeChannelInputs = pluginContext.hooks.contribute<ChannelInputsHook>(
+            options.channel?.pluginName ?? 'channel',
+            'inputs',
+            (hook) => {
+              channelInputs = hook;
+              return () => { if (channelInputs === hook) channelInputs = undefined; };
+            },
+          );
+        }
+        // A channel-bound rule hands its request to the Channel, which runs the
+        // Pet in its Channel session and keeps the reply; any other rule dispatches.
+        const send = async (definition: ParsedTriggerDefinition, petId: string, request: string, deliveryId: string) => {
+          if (definition.channelId === undefined) {
+            await pluginContext.dispatch({ petId, request, idempotencyKey: `trigger:${deliveryId}` });
+            return;
+          }
+          if (!channelInputs) throw new Error(`Trigger "${definition.triggerId}" needs the Channel Plugin, which is not running.`);
+          // The rule's target is the only addressee; the Channel rejects a request
+          // whose body would address anyone else.
+          const { deliveries } = await channelInputs.post(definition.channelId, {
+            author: { kind: 'bot', id: definition.triggerId },
+            body: request,
+            mentions: [{ petId }],
+          });
+          const failed = deliveries.find((delivery) => delivery.state === 'failed');
+          if (failed) throw new Error(failed.error ?? `Channel did not deliver to Pet "${petId}".`);
+        };
         const dispatchDelivery = async (
-          definition: TriggerDefinition,
+          definition: ParsedTriggerDefinition,
           idempotencyKey: string,
           input:
             | { kind: 'http'; payload: unknown }
@@ -425,11 +468,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
           const claimed = await service.claim(definition.triggerId, idempotencyKey, { targetPetId, request });
           if (claimed.duplicate) return { duplicate: true, delivery: claimed.delivery };
           try {
-            await pluginContext.dispatch({
-              petId: targetPetId,
-              request,
-              idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
-            });
+            await send(definition, targetPetId, request, claimed.delivery.deliveryId);
             return { duplicate: false, delivery: await service.accept(claimed.delivery.deliveryId) };
           } catch (error) {
             const delivery = await service.fail(claimed.delivery.deliveryId, asError(error).message);
@@ -538,7 +577,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       return { kind: 'json', status: 400, body: { error: 'GitHub webhook requires X-GitHub-Event and X-GitHub-Delivery.' } };
                     }
                     const githubDefinitions = [...definitions.values()].filter((definition): definition is (
-                      TriggerDefinition & { source: GitHubTriggerSource }
+                      ParsedTriggerDefinition & { source: GitHubTriggerSource }
                     ) => definition.source.kind === 'github');
                     const signedDefinitions = githubDefinitions.filter((definition) => (
                       verifyGitHubSignature(body, headers['x-hub-signature-256'], definition.source.secret)
@@ -605,7 +644,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                         ? await service.retry(input.deliveryId)
                         : await service.redeliver(input.deliveryId);
                       try {
-                        await pluginContext.dispatch({ petId: targetPetId, request, idempotencyKey: `trigger:${delivery.deliveryId}` });
+                        await send(definition, targetPetId, request, delivery.deliveryId);
                         return { kind: 'json', status: 202, body: { delivery: await service.accept(delivery.deliveryId) } };
                       } catch (error) {
                         return { kind: 'json', status: 422, body: { error: asError(error).message, delivery: await service.fail(delivery.deliveryId, asError(error).message) } };
@@ -631,6 +670,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
         unsubscribeMutations = undefined;
         unregisterRoutes?.();
         unregisterRoutes = undefined;
+        removeChannelInputs?.();
+        removeChannelInputs = undefined;
         if (ownsService) await service.close().catch(() => undefined);
         throw error;
       }
@@ -643,6 +684,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       unsubscribeMutations = undefined;
       unregisterRoutes?.();
       unregisterRoutes = undefined;
+      removeChannelInputs?.();
+      removeChannelInputs = undefined;
       if (ownsService) await service.close();
     },
   };
@@ -712,7 +755,7 @@ export function createStudioPlugin(
   environment: { workdir: string },
 ): TriggerPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'triggers', 'httpRoute']);
+  const allowed = new Set(['databasePath', 'triggers', 'httpRoute', 'channel']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Trigger Plugin option "${unknown}" is not supported.`);
   if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
@@ -724,24 +767,27 @@ export function createStudioPlugin(
       throw new Error(`Trigger Plugin triggers[${index.toString()}] must be an object.`);
     }
     const definition = input as Record<string, unknown>;
-    const definitionAllowed = new Set(['triggerId', 'petId', 'target', 'request', 'source']);
+    const definitionAllowed = new Set(['triggerId', 'petId', 'target', 'channelId', 'request', 'source']);
     const definitionUnknown = Object.keys(definition).find((key) => !definitionAllowed.has(key));
     if (definitionUnknown) {
       throw new Error(
         `Trigger Plugin triggers[${index.toString()}] option "${definitionUnknown}" is not supported.`,
       );
     }
-    const target = parseInstalledTarget(definition.target, definition.petId, index);
+    const target = parseInstalledTarget(definition.target, index);
+    const petId = typeof definition.petId === 'string' ? definition.petId : undefined;
     if (typeof definition.triggerId !== 'string'
-      || !target
-      || !isInstalledTriggerRequest(definition.request, index)) {
+      || target === null || (target === undefined && petId === undefined)
+      || !isInstalledTriggerRequest(definition.request, index)
+      || (definition.channelId !== undefined && typeof definition.channelId !== 'string')) {
       throw new Error(
-        `Trigger Plugin triggers[${index.toString()}] requires triggerId, target, request, and source.`,
+        `Trigger Plugin triggers[${index.toString()}] requires triggerId, target, request, and source, and a string channelId when set.`,
       );
     }
     return {
       triggerId: definition.triggerId,
-      target,
+      ...(target ? { target } : { petId }),
+      ...(typeof definition.channelId === 'string' ? { channelId: definition.channelId } : {}),
       request: definition.request,
       source: parseSource(definition.source, index),
     };
@@ -758,17 +804,25 @@ export function createStudioPlugin(
       || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string'))) {
     throw new Error('Trigger Plugin option "httpRoute" must be false or a route object.');
   }
+  const channel = options.channel;
+  if (channel !== undefined
+    && (!channel || typeof channel !== 'object' || Array.isArray(channel)
+      || Object.keys(channel).some((key) => key !== 'pluginName')
+      || ('pluginName' in channel && typeof channel.pluginName !== 'string'))) {
+    throw new Error('Trigger Plugin option "channel" must be an object with an optional pluginName.');
+  }
   return createTriggerPlugin({
     databasePath,
     triggers,
+    ...(channel !== undefined ? { channel: channel as { pluginName?: string } } : {}),
     ...(httpRoute !== undefined
       ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),
   });
 }
 
-function parseInstalledTarget(value: unknown, legacyPetId: unknown, index: number): TriggerTarget | null {
-  if (value === undefined) return typeof legacyPetId === 'string' ? { kind: 'pet', petId: legacyPetId } : null;
+function parseInstalledTarget(value: unknown, index: number): TriggerTarget | null | undefined {
+  if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const target = value as Record<string, unknown>;
   if (target.kind === 'pet' && typeof target.petId === 'string' && Object.keys(target).every((key) => key === 'kind' || key === 'petId')) {

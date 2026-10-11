@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 import type { HostServerMessage } from './protocol';
-import type { LocalServerPeerHandlers } from './messageDispatcher';
+import type { AgentSessionPeerHandlers } from './messageDispatcher';
 import type { ServerPeer } from './peer';
 import {
-  attachLocalServerStdioTransport,
+  attachHostStdioTransport,
   redirectConsoleToStdioDiagnostics,
 } from './stdioTransport';
 
 function createHandlers(
-  overrides: Partial<LocalServerPeerHandlers> = {},
-): LocalServerPeerHandlers {
+  overrides: Partial<AgentSessionPeerHandlers> = {},
+): AgentSessionPeerHandlers {
   return {
     onChatRequest: () => undefined,
     onInterruptResume: () => undefined,
@@ -88,7 +88,7 @@ test('stdio JSONL dispatch matches typed WebSocket behavior and closes one stabl
   const readOutput = collectText(output);
   const readDiagnostics = collectText(diagnostics);
   const peers: ServerPeer[] = [];
-  const transport = attachLocalServerStdioTransport(createHandlers({
+  const transport = attachHostStdioTransport(createHandlers({
     onChatRequest: (peer) => {
       peers.push(peer);
     },
@@ -145,7 +145,7 @@ test('stdio carries correlated session results without routing them as live even
   const input = new PassThrough();
   const output = new PassThrough();
   const readOutput = collectText(output);
-  const transport = attachLocalServerStdioTransport(createHandlers({
+  const transport = attachHostStdioTransport(createHandlers({
     onSessionList: (peer, message) => {
       peer.send({
         type: 'session.list.result',
@@ -264,7 +264,7 @@ test('stdio framing handles split chunks, CRLF, and a final line without newline
   const input = new PassThrough();
   const output = new PassThrough();
   const readOutput = collectText(output);
-  const transport = attachLocalServerStdioTransport(createHandlers(), {
+  const transport = attachHostStdioTransport(createHandlers(), {
     input,
     output,
     diagnostics: new PassThrough(),
@@ -286,7 +286,7 @@ test('stdio closes the peer when one input line exceeds the byte limit', async (
   const diagnostics = new PassThrough();
   const readDiagnostics = collectText(diagnostics);
   let closeCount = 0;
-  const transport = attachLocalServerStdioTransport(createHandlers({
+  const transport = attachHostStdioTransport(createHandlers({
     onClose: () => {
       closeCount += 1;
     },
@@ -308,7 +308,7 @@ test('stdio closes the peer when one input line exceeds the byte limit', async (
 test('stdio peer queues messages while stdout is backpressured and resumes on drain', async () => {
   const input = new PassThrough();
   const output = new ControlledWritable();
-  const transport = attachLocalServerStdioTransport(createHandlers(), {
+  const transport = attachHostStdioTransport(createHandlers(), {
     input,
     output,
     diagnostics: new PassThrough(),
@@ -342,7 +342,7 @@ test('stdio EOF runs peer cleanup and waits for active dispatch handlers to sett
   const runReleased = new Promise<void>((resolve) => {
     releaseRun = resolve;
   });
-  const transport = attachLocalServerStdioTransport(createHandlers({
+  const transport = attachHostStdioTransport(createHandlers({
     onChatRequest: async () => {
       sequence.push('run-started');
       await runReleased;
@@ -380,7 +380,7 @@ test('stdio peer makes output failures observable and rejects later sends', asyn
       callback(new Error('write exploded'));
     },
   });
-  const transport = attachLocalServerStdioTransport(createHandlers(), {
+  const transport = attachHostStdioTransport(createHandlers(), {
     input: new PassThrough(),
     output,
     diagnostics,
@@ -398,7 +398,7 @@ test('stdio peer closes when the bounded backpressure queue overflows', async ()
   const output = new ControlledWritable();
   const diagnostics = new PassThrough();
   const readDiagnostics = collectText(diagnostics);
-  const transport = attachLocalServerStdioTransport(createHandlers(), {
+  const transport = attachHostStdioTransport(createHandlers(), {
     input: new PassThrough(),
     output,
     diagnostics,

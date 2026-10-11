@@ -201,12 +201,12 @@ test('embedded host collects stderr without writing it to the terminal', async (
 
   connection.connect();
   child.emitSpawn();
-  child.writeStderr('[local-server] stdio JSONL transport ready\n');
+  child.writeStderr('[wire] stdio JSONL transport ready\n');
   child.writeStderr('[host] first\n[host] second\n\n');
   await flushTasks();
 
   assert.deepEqual(diagnostics, [
-    '[local-server] stdio JSONL transport ready',
+    '[wire] stdio JSONL transport ready',
     '[host] first',
     '[host] second',
   ]);

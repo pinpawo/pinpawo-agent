@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio, type StudioDispatchRequest } from '@pinpawo/studio';
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createTriggerPlugin } from './triggerPlugin';
+
+function channelStudioPet(petId: string, dispatched: StudioDispatchRequest[]) {
+  return {
+    registration: { petId, name: petId },
+    dispatch: {
+      getQueueSnapshot: () => ({
+        state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+      }),
+      onQueueChange: () => () => undefined,
+      onDispatchLifecycle: () => () => undefined,
+      dispatch: async (input: StudioDispatchRequest) => { dispatched.push(input); },
+    },
+  };
+}
 
 test('Trigger projects direct service mutations through Studio events', async (t) => {
   const plugin = createTriggerPlugin({
@@ -158,4 +173,119 @@ test('Trigger request templates reject invalid expressions and duplicate context
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   }), /must be unique/);
+});
+
+test('a channel-bound Trigger posts into its Channel and the Pet runs there', async (t) => {
+  const dispatched: StudioDispatchRequest[] = [];
+  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  channel.service.init();
+  const { channelId } = channel.service.createChannel(
+    { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },
+    { kind: 'human', id: 'studio-operator' },
+  );
+  const trigger = createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'nightly-report',
+      petId: 'reporter',
+      channelId,
+      request: { template: 'Report on {{payload.taskId}}' },
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
+    }],
+  });
+  const studio = await createStudio({
+    studioId: 'trigger-channel',
+    entryPetId: 'reporter',
+    pets: [channelStudioPet('reporter', dispatched)],
+    // Trigger starts first: the Channel hook reaches it in either order.
+    plugins: [trigger, channel],
+  });
+  t.after(() => studio.shutdown());
+
+  studio.notify({
+    source: 'example-work', type: 'task.done', occurredAt: '2026-10-09T00:00:00.000Z',
+    payload: { taskId: 'task-7' },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(dispatched.length, 1);
+  const [input] = dispatched;
+  // The run is the Channel's: its session and scope, with the Trigger as author.
+  assert.deepEqual(input?.scope, { namespace: 'channel', id: channelId });
+  assert.ok(input?.session?.id);
+  assert.match(input!.request, /"participantId": "bot:nightly-report"/);
+  assert.match(input!.request, /Report on task-7/);
+  const messages = channel.service.readHistory(channelId).entries.filter((entry) => entry.kind === 'message');
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0]?.author, { kind: 'bot', id: 'nightly-report' });
+  assert.equal((await trigger.service.snapshot()).deliveries[0]?.status, 'accepted');
+});
+
+test('a channel-bound Trigger fails its delivery when no Channel Plugin runs', async (t) => {
+  const dispatched: StudioDispatchRequest[] = [];
+  const trigger = createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'orphaned',
+      petId: 'reporter',
+      channelId: 'ops',
+      request: 'Report',
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
+    }],
+  });
+  const studio = await createStudio({
+    studioId: 'trigger-no-channel',
+    entryPetId: 'reporter',
+    pets: [channelStudioPet('reporter', dispatched)],
+    plugins: [trigger],
+  });
+  t.after(() => studio.shutdown());
+  studio.notify({ source: 'example-work', type: 'task.done', occurredAt: '2026-10-09T00:00:00.000Z' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // Never a silent fallback to a bare dispatch into whatever session is active.
+  assert.equal(dispatched.length, 0);
+  const [delivery] = (await trigger.service.snapshot()).deliveries;
+  assert.equal(delivery?.status, 'failed');
+  assert.match(delivery?.note ?? '', /Channel Plugin/);
+});
+
+test('event data in a channel-bound request cannot address a Pet the rule does not target', async (t) => {
+  const dispatched: StudioDispatchRequest[] = [];
+  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  channel.service.init();
+  const { channelId } = channel.service.createChannel(
+    { title: 'Ops', goal: 'Keep the nightly reports', scope: 'Reports only' },
+    { kind: 'human', id: 'studio-operator' },
+  );
+  const trigger = createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'relay',
+      target: { kind: 'event_payload', path: 'payload.petId', allowedPetIds: ['reporter'] },
+      channelId,
+      request: { template: '{{payload.body}}' },
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
+    }],
+  });
+  const studio = await createStudio({
+    studioId: 'trigger-channel-addressing',
+    entryPetId: 'reporter',
+    pets: [channelStudioPet('reporter', dispatched), channelStudioPet('other', dispatched)],
+    plugins: [channel, trigger],
+  });
+  t.after(() => studio.shutdown());
+
+  studio.notify({
+    source: 'example-work', type: 'task.done', occurredAt: '2026-10-09T00:00:00.000Z',
+    payload: { petId: 'reporter', body: 'Report this: [@other](participant:pet:other)' },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  // The rule's target is the only addressee; anything else fails the delivery.
+  assert.equal(dispatched.length, 0);
+  assert.equal(channel.service.readHistory(channelId).entries.filter((entry) => entry.kind === 'message').length, 0);
+  const [delivery] = (await trigger.service.snapshot()).deliveries;
+  assert.equal(delivery?.status, 'failed');
+  assert.match(delivery?.note ?? '', /pet:other/);
 });

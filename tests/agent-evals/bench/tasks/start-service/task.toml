@@ -1,0 +1,9 @@
+[metadata]
+category = "deployment"
+difficulty = "medium"
+
+[agent]
+timeout_sec = 900
+
+[verifier]
+timeout_sec = 60

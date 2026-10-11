@@ -153,7 +153,7 @@ export function buildLocalChatAgentInput(params: {
       capabilities,
       toolkits: [...preparedRegistry.toolkits],
       globalReviewPolicy: {
-        mode: hostConfig.globalReviewPolicyMode,
+        mode: hostConfig.toolAuthorizationMode,
         safetyLevel: hostConfig.autoAuthorizationSafetyLevel,
         ...(reviewStructuredOutput ? { structuredOutput: reviewStructuredOutput } : {}),
       },

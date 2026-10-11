@@ -83,14 +83,11 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   const { createWebToolkit } = await import('../../../services/host/src/toolkits/web/index');
   const { createGitToolkit } = await import('../../../services/host/src/toolkits/git/index');
   const { createGithubToolkit } = await import('../../../services/host/src/toolkits/github/index');
-  const { createProjectInspectionToolkit } = await import('../../../services/host/src/toolkits/projectInspection');
   const { PosixShellRS } = await import('../../../services/host/src/toolkits/shellRS/index');
-  const { createStudioContextToolkit } = await import('../../../packages/studio/src/host/studioContextToolkit');
   const shell = new PosixShellRS();
   t.after(() => shell.dispose());
   const toolkits = [
-    createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }), createProjectInspectionToolkit({ shell }),
-    createStudioContextToolkit(() => configuration.resolved.pets.map(({ petId, name }) => ({ petId, name }))),
+    createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];
   for (const pet of configuration.resolved.pets) {
@@ -122,7 +119,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   });
   const base = `http://127.0.0.1:${http.address()!.port}`;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['planner', 'executor', 'reviewer', 'wiki']);
+  assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['executor', 'reviewer', 'wiki']);
   for (const route of ['/kanban', '/kanban/events']) {
     assert.equal((await fetch(base + route, { headers })).status, 404);
   }

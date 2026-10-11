@@ -40,7 +40,8 @@ export type {
  *
  * `type` 通常由插件命名(如 `task.done` / `schedule.fired`),studio
  * **不认识**插件类型,只负责广播。Studio core 仅发布自己的边界事实，例如
- * `dispatch.accepted`；它同样不表示 Agent 执行完成。`payload` 不被总线解释或校验。
+ * `dispatch.accepted`；它同样不表示 Agent 执行完成。所有 Plugin 启动完成后，core 发布一次
+ * `plugins.activated`，依赖其他 Plugin hook 的工作可以等它再开始。`payload` 不被总线解释或校验。
  *
  * 这样互不认识的插件之间才能交换信息:发布方不需要知道谁在听,订阅方
  * 按自己认识的 type 过滤即可。

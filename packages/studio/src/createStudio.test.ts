@@ -278,9 +278,11 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'subscribe',
   ]);
   await new Promise((resolve) => setTimeout(resolve, 0));
+  // Activation is announced once, after every Plugin has started.
   assert.deepEqual(receivedEvents, [
     ['schedule.ready', 'scheduler'],
     ['dispatch.accepted', 'studio'],
+    ['plugins.activated', 'studio'],
   ]);
   await studio.shutdown();
 });
@@ -347,6 +349,7 @@ test('Studio core event bus preserves per-subscriber order without cross-subscri
     toolkits: [],
     start: (context) => {
       context.subscribe(async (event) => {
+        if (event.source !== 'publisher') return;
         slowEvents.push(`${event.source}:${event.type}`);
         if (event.type === 'event.first') {
           firstStarted.resolve();
@@ -361,6 +364,7 @@ test('Studio core event bus preserves per-subscriber order without cross-subscri
     toolkits: [],
     start: (context) => {
       context.subscribe((event) => {
+        if (event.source !== 'publisher') return;
         fastEvents.push(`${event.source}:${event.type}`);
         if (event.type === 'event.second') fastDeliveryComplete.resolve();
       });

@@ -7,10 +7,10 @@ import {
 } from '@pinpawo/agent-session';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { ensureLocalServerAuthToken } from './auth';
+import { ensureWireAuthToken } from './auth';
 import {
-  isAllowedLocalServerOrigin,
-  isAuthorizedLocalServerRequest,
+  isAllowedWireOrigin,
+  isAuthorizedWireRequest,
 } from './auth';
 import type { ServerTransport } from './transport';
 import { handleAgentSessionHttp } from './agentSessionHttp';
@@ -127,7 +127,7 @@ export async function startResidentPetAgentSessionTransport(
   interactions: ReadonlyMap<string, ResidentPetInteraction>,
   options: ResidentPetAgentSessionTransportOptions = {},
 ): Promise<ServerTransport> {
-  const authToken = options.authToken ?? ensureLocalServerAuthToken();
+  const authToken = options.authToken ?? ensureWireAuthToken();
   const log = options.log ?? console.log;
   const logError = options.logError ?? ((message, error) => {
     console.error(message, error instanceof Error ? error.message : error);
@@ -168,11 +168,11 @@ export async function startResidentPetAgentSessionTransport(
       rejectUpgrade(socket, 404, 'Not Found');
       return;
     }
-    if (!isAllowedLocalServerOrigin(request, address.port)) {
+    if (!isAllowedWireOrigin(request, address.port)) {
       rejectUpgrade(socket, 403, 'Forbidden');
       return;
     }
-    if (!isAuthorizedLocalServerRequest(request, authToken)) {
+    if (!isAuthorizedWireRequest(request, authToken)) {
       rejectUpgrade(socket, 401, 'Unauthorized');
       return;
     }

@@ -53,7 +53,7 @@ for (const petId of ['alpha', 'beta']) {
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
   hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,
-    modelProfiles: createTestModelProfiles(), globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
+    modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
     capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
       listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },

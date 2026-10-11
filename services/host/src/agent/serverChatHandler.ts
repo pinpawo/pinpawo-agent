@@ -23,7 +23,7 @@ import {
   type InflightOperationRun,
 } from '../inflightOperationRun';
 import { InflightRequestController } from '../inflightRequestController';
-import { emitLocalServerToolOperationEvent } from '../serverOperationEvents';
+import { emitToolOperationEvent } from '../serverOperationEvents';
 import { HostGraphService } from './agentGraphService';
 import {
   ServerTuiSessionService,
@@ -42,23 +42,41 @@ import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { sendLocalServerPeerEvent, type ServerPeer } from '../wire/peer';
+import { sendAgentSessionPeerEvent, type ServerPeer } from '../wire/peer';
 import { ThreadInvocationCoordinator } from '../threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
 
-type LocalServerRunRequest = AgentSessionTurnRequest;
+type ChatTurnRequest = AgentSessionTurnRequest;
 type RunAgentSessionTurn = typeof runAgentSessionTurn;
-type ChatRunOutcome =
+export type ChatRunOutcome =
   | 'completed'
   | 'waiting'
   | 'interrupted'
   | 'failed'
   | 'fatal_failed';
 
-type LocalServerRunSource =
+type ChatTurnSource =
   | { type: 'chat_request' }
+  | { type: 'host_dispatch' }
   | HumanReviewResolutionSource;
+
+/** Per-turn hooks a Host-initiated turn adds to the shared pipeline. */
+type ChatTurnHooks = {
+  /** Decorates this turn's run, as a dispatch adds its own attribution. */
+  runAgentTurn?: RunAgentSessionTurn;
+  /** Receives the error behind a `failed` or `fatal_failed` outcome. */
+  onFailure?: (error: unknown) => void;
+  /** Receives the native review a cancelled run settled into. */
+  onSettledInterrupt?: (pending: PendingInterruptProjection) => void;
+};
+
+export type HostTurnOutcome = {
+  outcome: ChatRunOutcome;
+  error?: unknown;
+  /** The review a cancellation settled into, when the outcome is `waiting`. */
+  pendingInterrupt?: PendingInterruptProjection;
+};
 
 type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
@@ -66,9 +84,9 @@ type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
 };
 
 /**
- * The session a turn runs in when it is not the active one. Only a review
- * resume addressed to an exact session carries it; every other turn runs in
- * the active session, as before.
+ * The session a turn runs in when it is not the active one. A review resume
+ * addressed to an exact session and a dispatch bound to one carry it; every
+ * other turn runs in the active session.
  */
 export type ChatTurnTarget = TuiSessionRecord;
 
@@ -118,7 +136,7 @@ export class ServerChatHandler {
     this.runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
     this.publishRuntimeEvent = options.publishRuntimeEvent
       ?? ((peer, event) => {
-        sendLocalServerPeerEvent(peer, event);
+        sendAgentSessionPeerEvent(peer, event);
       });
     this.interruptHostRun = options.interruptHostRun;
   }
@@ -163,7 +181,7 @@ export class ServerChatHandler {
       return route;
     } catch (err) {
       console.warn(
-        '[local-server] failed to recover pending human_review from checkpoint:',
+        '[chat-host] failed to recover pending human_review from checkpoint:',
         err instanceof Error ? err.message : err,
       );
       return null;
@@ -184,7 +202,7 @@ export class ServerChatHandler {
   }
 
   private sendClosedReviewError(peer: ServerPeer, requestId: string) {
-    sendLocalServerPeerEvent(peer, {
+    sendAgentSessionPeerEvent(peer, {
       type: 'error',
       requestId,
       message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
@@ -241,6 +259,35 @@ export class ServerChatHandler {
     }, deps, { type: 'chat_request' });
   }
 
+  /**
+   * A Host-initiated turn, such as a resident Pet's dispatch. It runs through
+   * the same pipeline as a chat request; it only has no client to answer, so
+   * the outcome is returned instead of being reported to a requester.
+   */
+  async runHostTurn(
+    peer: ServerPeer,
+    turn: { requestId: string; message: string; runAgentTurn?: RunAgentSessionTurn },
+    deps: ServerDeps,
+    target?: ChatTurnTarget,
+  ): Promise<HostTurnOutcome> {
+    let error: unknown;
+    let pendingInterrupt: PendingInterruptProjection | undefined;
+    const outcome = await this.runChatRequest(peer, {
+      kind: 'user_message',
+      requestId: turn.requestId,
+      message: turn.message,
+    }, deps, { type: 'host_dispatch' }, target, {
+      ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
+      onFailure: (failure) => { error = failure; },
+      onSettledInterrupt: (pending) => { pendingInterrupt = pending; },
+    });
+    return {
+      outcome,
+      ...(error === undefined ? {} : { error }),
+      ...(pendingInterrupt ? { pendingInterrupt } : {}),
+    };
+  }
+
   async handleRunInterrupt(
     peer: ServerPeer,
     msg: RunInterruptMessage,
@@ -278,25 +325,27 @@ export class ServerChatHandler {
 
   private async runChatRequest(
     peer: ServerPeer,
-    request: LocalServerRunRequest,
+    request: ChatTurnRequest,
     deps: ServerDeps,
-    source: LocalServerRunSource,
+    source: ChatTurnSource,
     target?: ChatTurnTarget,
+    hooks: ChatTurnHooks = {},
   ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
+    const runAgentTurn = hooks.runAgentTurn ?? this.runAgentTurn;
 
-    if (source.type === 'chat_request') {
-      console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
+    if (source.type === 'chat_request' || source.type === 'host_dispatch') {
+      console.log(`[chat-host] ${source.type} requestId=${requestId} message="${message.slice(0, 80)}"`);
     } else if (source.type === 'review_decision') {
       console.log(
-        `[local-server] review decision requestId=${requestId} `
+        `[chat-host] review decision requestId=${requestId} `
         + `interactionId=${source.interactionId} option=${source.selectedOptionId}`
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     } else {
       console.log(
-        `[local-server] review cancel requestId=${requestId} `
+        `[chat-host] review cancel requestId=${requestId} `
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
@@ -326,11 +375,13 @@ export class ServerChatHandler {
       const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
       const settled = await this.graphService.settleAbortedRun(setup);
       if (settled) {
+        const pendingInterrupt = projectPendingInterrupt(settled);
         this.inflightRequests.finish(peer, inflight, 'interrupted');
+        hooks.onSettledInterrupt?.(pendingInterrupt);
         this.publishRuntimeEvent(peer, {
           type: 'interrupt.requested',
           requestId,
-          pendingInterrupt: projectPendingInterrupt(settled),
+          pendingInterrupt,
         });
         this.inflightRequests.clear(peer, inflight);
         await refreshSummary();
@@ -367,7 +418,8 @@ export class ServerChatHandler {
     ): Promise<ChatRunOutcome> => {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
-      console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
+      hooks.onFailure?.(err);
+      console.error('[chat-host] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       // Resetting replaces the active session; a targeted turn never does that.
       const recoveredFromToolProtocolError = !target && isToolProtocolHistoryError(err);
       if (recoveredFromToolProtocolError) {
@@ -375,10 +427,10 @@ export class ServerChatHandler {
           await this.tuiSessions.resetSession(deps.petId, {
             deletePrevious: true,
           });
-          console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
+          console.warn(`[chat-host] reset TUI chat session after tool protocol error requestId=${requestId}`);
         } catch (resetError) {
           console.warn(
-            '[local-server] failed to reset TUI chat session after tool protocol error:',
+            '[chat-host] failed to reset TUI chat session after tool protocol error:',
             resetError instanceof Error ? resetError.message : resetError,
           );
         }
@@ -409,7 +461,7 @@ export class ServerChatHandler {
       this.publishRuntimeEvent(peer, {
         type: 'run.started',
         requestId,
-        initiator: 'client',
+        initiator: source.type === 'host_dispatch' ? 'host' : 'client',
         ...(request.kind === 'user_message'
           ? { input: { role: 'user', text: request.message } as const }
           : {}),
@@ -427,7 +479,7 @@ export class ServerChatHandler {
         createOperationRegistryForAgentSetup(setup),
       );
       setup.input.signal = controller.signal;
-      const result = await this.runAgentTurn({
+      const result = await runAgentTurn({
         request,
         setup,
         graphService: this.graphService,
@@ -460,7 +512,7 @@ export class ServerChatHandler {
         // waiting on and under which id.
         this.inflightRequests.finish(peer, inflight, 'interrupted');
         await refreshSummary();
-        console.log(`[local-server] interrupt.requested requestId=${requestId}`);
+        console.log(`[chat-host] interrupt.requested requestId=${requestId}`);
         this.inflightRequests.clear(peer, inflight);
         return 'waiting';
       }
@@ -471,21 +523,24 @@ export class ServerChatHandler {
       this.inflightRequests.clear(peer, inflight);
       await refreshSummary();
 
-      console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
+      console.log(`[chat-host] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
     } catch (err) {
       const aborted = controller.signal.aborted
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
-        console.warn(`[local-server] chat interrupted requestId=${requestId}`);
+        console.warn(`[chat-host] chat interrupted requestId=${requestId}`);
         try {
           return await settleInterrupted();
         } catch (settleError) {
           console.error(
-            '[local-server] failed to settle an aborted run:',
+            '[chat-host] failed to settle an aborted run:',
             settleError instanceof Error ? (settleError.stack ?? settleError.message) : settleError,
           );
-          return await reportFailure(settleError, isCurrent());
+          // The run was aborted, so it is no longer current; yet a started
+          // run that nothing replaced still owes its observers one terminal
+          // event. Only a superseded run leaves that to its successor.
+          return await reportFailure(settleError, runStarted && !invocation.isSuperseded());
         }
       }
       return await reportFailure(err, isCurrent());
@@ -505,7 +560,7 @@ export class ServerChatHandler {
       recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps, target),
       emitClosed: () => {
         console.warn(
-          `[local-server] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
+          `[chat-host] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
         );
         this.sendClosedReviewError(peer, msg.requestId);
       },
@@ -532,10 +587,10 @@ export class ServerChatHandler {
     const expectedSessionId = target?.id ?? this.tuiSessions.getActiveSessionId(deps.petId);
     if (route.sessionId && expectedSessionId && route.sessionId !== expectedSessionId) {
       console.warn(
-        `[local-server] interrupt.resume rejected: route sessionId=${route.sessionId} `
+        `[chat-host] interrupt.resume rejected: route sessionId=${route.sessionId} `
         + `does not match ${target ? 'target' : 'active'} session=${expectedSessionId}`,
       );
-      sendLocalServerPeerEvent(peer, {
+      sendAgentSessionPeerEvent(peer, {
         type: 'error',
         requestId: message.requestId,
         message: '请回到发起该 review 的会话再操作。',
@@ -551,7 +606,7 @@ export class ServerChatHandler {
     inflight: InflightRequest,
     payload: StreamToolsPayload,
   ) {
-    emitLocalServerToolOperationEvent({
+    emitToolOperationEvent({
       run: inflight,
       payload,
       // Trusted local peer: include raw input/output so the UI can render diffs etc.

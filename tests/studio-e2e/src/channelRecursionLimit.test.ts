@@ -34,7 +34,7 @@ test('a call announced to the Channel is not left running when the run ends on t
     },
   };
   const host = await createResidentPetHost({ petId: 'one', petName: 'One', runtimeConfig,
-    modelProfiles: createTestModelProfiles(), globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
     capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
       listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },

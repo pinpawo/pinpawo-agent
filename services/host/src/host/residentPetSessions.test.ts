@@ -65,7 +65,7 @@ async function createWaitingHost() {
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
-    globalReviewPolicyMode: 'require_authorization',
+    toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-sessions.json'),
     graphService: {

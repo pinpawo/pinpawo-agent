@@ -56,10 +56,10 @@ export function formatStatusLines(
     || state.connectionDetail?.trim()
     || [
       formatConnection(state.connection),
-      ...(state.session.runtime?.globalReviewPolicyMode
+      ...(state.session.runtime?.toolAuthorizationMode
         ? [
             `policy: ${formatPolicyMode(
-              state.session.runtime.globalReviewPolicyMode,
+              state.session.runtime.toolAuthorizationMode,
               state.session.runtime.autoAuthorizationSafetyLevel ?? 'strict',
             )}`,
           ]

@@ -43,7 +43,7 @@ Plugins. To connect the terminal client to a resident Pet, use the listener port
 and Pet ID:
 
 ```bash
-pinpawo tui --pet-port 3212 --pet-id planner
+pinpawo tui --pet-port 3212 --pet-id executor
 ```
 
 The package also exposes the programmatic Host/runtime API:
@@ -110,7 +110,7 @@ pinpawo-studio queues
 pinpawo-studio pets
 pinpawo-studio snapshot executor --full
 pinpawo-studio events executor --seconds 30
-pinpawo-studio dispatch planner --file task.txt
+pinpawo-studio dispatch executor --file task.txt
 pinpawo-studio send executor --file command.json
 ```
 

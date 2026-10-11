@@ -299,8 +299,12 @@ function appendAssistantDelta(
   context: AgentSessionReductionContext,
 ) {
   if (!token || !ownsRun(session, requestId)) return session;
-  const id = message?.id ?? assistantEntryId(requestId, messageId);
+  // Assistant entries are keyed by the checkpoint message id, the same id a
+  // session snapshot gives them.
+  const id = message?.id ?? messageId;
   const previous = findMessageEntry(session.timeline, id);
+  // A snapshot may already hold this message whole; a late token cannot extend it.
+  if (previous?.status === 'completed') return session;
   const createdAt = message?.createdAt ?? observedAtIso(context.observedAt);
   const entry: AgentMessageEntry = {
     id,
@@ -338,7 +342,7 @@ function completeAssistantMessage(
   const recoveredFromTimeline = !ownsActiveRun && hasTimelineRequest(session, requestId);
   if (!ownsActiveRun && !recoveredFromTimeline) return session;
   if (recoveredFromTimeline && hasLocalInterruptReleaseNotice(session, requestId)) return session;
-  const id = message?.id ?? assistantEntryId(requestId, messageId);
+  const id = message?.id ?? messageId;
   const text = completedText.trim() || findMessageEntry(session.timeline, id)?.text.trim() || '...';
   const withMessage = finalizeAssistantMessage(session, requestId, id, text, message, context);
   if (ownsActiveRun) {
@@ -403,7 +407,7 @@ function appendToolCallMessage(
   context: AgentSessionReductionContext,
 ) {
   if (!event.toolCalls.length || !ownsRun(session, event.requestId)) return session;
-  const id = assistantEntryId(event.requestId, event.messageId);
+  const id = event.messageId;
   const previous = findMessageEntry(session.timeline, id);
   const entry: AgentMessageEntry = {
     id,
@@ -733,11 +737,6 @@ function hasLocalInterruptReleaseNotice(session: AgentSession, requestId: string
     entry.type === 'message'
       && entry.role === 'system'
       && entry.id === `message:${requestId}:interrupt-local-release`);
-}
-
-/** Assistant entries are addressed by the upstream model lifecycle id. */
-function assistantEntryId(requestId: string, messageId: string) {
-  return `${requestId}:assistant:${messageId}`;
 }
 
 function findMessageEntry(timeline: AgentTimelineEntry[], id: string) {

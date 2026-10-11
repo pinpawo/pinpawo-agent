@@ -7,7 +7,7 @@
 > runtime assembly, and Plugin composition. It reuses local Host assembly
 > through the public host
 > [`host-runtime`](../../services/host/src/hostRuntime.ts) surface; the
-> Pet Agent Session adapter is a separate `local-server-transport` surface.
+> Pet Agent Session adapter is a separate `wire` surface.
 > The `pinpawo-studio` executable entry also lives in this package. Concrete
 > Plugins remain externally injected through `StudioPluginResolver`.
 

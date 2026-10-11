@@ -28,12 +28,23 @@ event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自�
 
 ```text
 Scheduler SQLite -> due claim -> context.dispatch()
+Scheduler SQLite -> due claim (channelId) -> Channel `inputs` hook -> Channel delivery
 event source -> Trigger binding condition -> context.dispatch()
+event source -> Trigger binding condition (channelId) -> Channel `inputs` hook -> Channel delivery
 
 Scheduler/Trigger -X-> Agent / thread / checkpoint / Agent Session
-Scheduler/Trigger -X-> another Plugin database or service
+Scheduler/Trigger -X-> another Plugin database or service（Channel 的 `inputs` hook 除外）
 Studio core       -X-> Scheduler/Trigger concrete package
 ```
+
+Channel 是对话和结果的汇集处。规则配置了 `channelId` 时，Trigger 不再自己 dispatch，而是通过
+Channel Plugin 暴露的 `inputs` hook，以自己的 bot 身份（`bot:<triggerId>`）往该 Channel 发一条
+@目标 Pet 的消息。之后的投递与操作员发言完全相同：Channel 为 `(channel, pet)` 绑定 session、
+带上 `channel` scope 派发，Pet 的回复和工具调用都记回 Channel。Channel 是软依赖：没有安装或
+没有启动 Channel Plugin 时，这类 delivery 记为 failed，并不会退回到无 session 的 dispatch。
+消息只 @ 规则解析出的目标 Pet；如果模板渲染出的正文里还 @ 了其他参与者，Channel 会拒收，这次 delivery
+记为 failed，事件数据不能借正文增加收件人。没有 `channelId` 的规则保持原来的直接 dispatch。每次 retry/redeliver 都会在 Channel 里发一条
+新消息。
 
 两个 Plugin 都可向 HTTP Plugin 的 `routes` hook 贡献 API，但不依赖 HTTP 才能启动。
 HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 由贡献 route 的 Plugin
@@ -47,6 +58,13 @@ SQLite transaction 先把记录原子地转成 `dispatching`，再调用 `contex
 标记 `dispatched`，表示 resident queue 已接纳而不是 Agent 执行完成；admission 失败标记
 `failed`。崩溃遗留的 `dispatching` 标记为
 `failed`，避免无法证明安全时重复派发。
+
+schedule 可以带可选的 `channelId`。带了它的 schedule 到期后不直接 dispatch，而是和
+Trigger 一样通过 Channel 的 `inputs` hook，以 `bot:scheduler` 身份往该 Channel 发一条 @`petId`
+的消息，Pet 的执行和回复都落在 Channel 里。Channel Plugin 没有运行时，这条 schedule 标记
+`failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变；已有数据库启动时自动补上
+`channel_id` 列，旧记录视为没有 Channel。Scheduler 等 Studio core 发布 `plugins.activated`（所有 Plugin 启动完成）后才开始处理到期
+schedule，所以停机期间到期的 channel-bound schedule 不会因为 Channel Plugin 启动得比它晚而失败。
 
 管理 API：
 
@@ -88,7 +106,8 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 自身需要 durability/replay 时，应由其 owning Plugin 提供；Trigger 不复制其他领域、GitHub
 或其他领域的事实源。
 
-Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”。
+Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”，
+`channelId` 负责“结果落在哪个 Channel”。
 宽泛的 `typePrefix` 会为每个匹配 mutation 产生一次独立 dispatch；需要昂贵 Agent 工作时，
 配置应优先选择明确的领域终态事件，而不是依赖 Trigger 隐式 debounce 或合并队列。
 
@@ -104,6 +123,6 @@ Plugin 在 `start()` 时通过 `listPets()` 验证目标 Pet。运行中所有 d
 
 ## Kanban 退役后的默认装配
 
-默认仅保留外部请求 → Planner 的显式 HTTP 规则；Wiki 更新需要明确请求，
+默认仅保留外部请求 → Executor 的显式 HTTP 规则；Wiki 更新需要明确请求，
 不以 dispatch.completed 替代交付验收。旧规则迁移见[配置](../../studio/configuration.md#retired-kanban-workdirs)，
 可选周期队列巡检见[Queue Notices](../studio-dispatch-queue-notices.md)。

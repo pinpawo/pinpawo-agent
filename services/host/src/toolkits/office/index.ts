@@ -26,7 +26,7 @@ export const OFFICE_TOOLKIT_INSTRUCTIONS = [
   'Use help only for what you do not know: help docx lists elements, help docx paragraph shows props with examples, help docx add table filters by verb (formats docx, xlsx, pptx). Do not guess prop names; there is no help --version.',
   'Prefer one batch for several edits to one document: one save and atomic, so if any item fails nothing is written (status failed, the result names the item). args: [file, "--commands", "<JSON array>"] or [file, "--input", "<json file>"]. Items are objects, e.g. {"command":"add","parent":"/body","type":"paragraph","props":{"text":"Hi","style":"Heading1"}}, {"command":"set","path":"/Sheet1/A1","props":{"value":"City"}}. --best-effort (any form) and @response files are not allowed.',
   'Read back in few calls: view <file> text (tables appear only as [Table: N rows]; modes are text, annotated, outline, stats, issues); get <file> <one path> --depth 2 shows a subtree including table cells; dump <file> /body (docx), /Sheet1 (xlsx) or /slide[N] (pptx) prints content as replayable batch JSON, add --json to keep CJK unescaped. get takes one path per call. Then validate <file>.',
-  'Results: ok; warning (exit 2) may mean applied with caveats (e.g. an unsupported prop) or not applied at all (e.g. set without --prop), so read back before deciding whether to retry; failed means a single command or batch was not applied: read stderr/stdout, which usually lists the valid props or paths; invalid_arguments means the call never ran.',
+  'Results: ok; warning may mean applied with caveats (e.g. an unsupported prop) or not applied at all (e.g. set without --prop), so read back before deciding whether to retry; with --json the reported success/warnings decide the status, not the exit code; failed means a single command or batch was not applied: read stderr/stdout, which usually lists the valid props or paths; invalid_arguments means the call never ran.',
   'Prefer copies when editing existing documents. Relative paths resolve from the workdir; report actual output paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
 ].join('\n');
 
@@ -58,9 +58,25 @@ function optionMatches(arg: string, name: string) {
   return arg === name || arg.startsWith(`${name}=`) || arg.startsWith(`${name}:`);
 }
 
-function officeExitStatus(code: number | null) {
-  if (code === 0) return 'ok';
-  return code === 2 ? 'warning' : 'failed';
+// With --json OfficeCLI exits 0 even when it applied nothing (success:false)
+// or ignored props (warnings), so its envelope outranks the exit code. Without
+// it, exit 2 covers both "applied with warnings" and usage errors that wrote
+// nothing (e.g. set without --prop): neither ok nor failed is safe.
+function officeOutcome(code: number | null, stdout: string): { status: string; message?: string } {
+  let envelope: unknown;
+  try { envelope = JSON.parse(stdout.trim()); } catch { envelope = undefined; }
+  const record = readRecord(envelope);
+  if (record && typeof record.success === 'boolean') {
+    if (!record.success) {
+      return { status: 'failed', message: 'OfficeCLI reported success:false (e.g. no properties applied). Content is likely unchanged, but read back before retrying.' };
+    }
+    if (Array.isArray(record.warnings) && record.warnings.length > 0) {
+      return { status: 'warning', message: 'Applied with warnings; some props may have been ignored. Read the document back before retrying.' };
+    }
+  }
+  if (code === 0) return { status: 'ok' };
+  if (code === 2) return { status: 'warning', message: 'Exit 2: the edit may be fully, partly or not applied. Read the document back to check before retrying.' };
+  return { status: 'failed' };
 }
 
 export function officeEnabled(config: { capabilities?: Record<string, boolean> }, override?: boolean) {
@@ -139,8 +155,7 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
       // OfficeCLI exit 2 covers both "applied with warnings" and some usage
       // errors that wrote nothing (e.g. set without --prop), so neither
       // failed nor ok is safe: report warning and require a read-back.
-      status: result.status === 'exited' ? officeExitStatus(result.code) : 'timeout',
-      ...(result.status === 'exited' && result.code === 2 ? { message: 'Exit 2: the edit may be fully, partly or not applied. Read the document back to check before retrying.' } : {}),
+      ...(result.status === 'exited' ? officeOutcome(result.code, result.stdout) : { status: 'timeout' }),
       ...(result.status === 'exited' ? { exitCode: result.code } : { termination: result.termination ?? 'unconfirmed' }),
       stdout: truncateCliOutput(result.stdout), stderr: truncateCliOutput(result.stderr),
     });

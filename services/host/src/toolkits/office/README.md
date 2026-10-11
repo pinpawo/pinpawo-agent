@@ -48,7 +48,9 @@ OfficeCLI accepts options before the path). Queued time does not count toward
 `timeoutSeconds`. Args that repeat the command are rejected without running.
 Exit code 2 is reported as status `warning`: it can mean applied with warnings
 or, for some usage errors such as `set` without `--prop`, nothing written, so
-the model must read back before retrying.
+the model must read back before retrying. With `--json` OfficeCLI exits 0 even
+when it applied nothing, so a JSON envelope's `success: false` is reported as
+`failed` and non-empty `warnings` as `warning`, overriding the exit code.
 
 Supported commands are help, create, view, get, query, add, set, remove,
 validate, close, batch and dump. `batch` must pass `--commands` or `--input`

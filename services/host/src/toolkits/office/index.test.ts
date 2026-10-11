@@ -260,3 +260,32 @@ test('batch must be atomic and inline; dump is allowed; usage guide stays brief'
     assert.ok(OFFICE_TOOLKIT_INSTRUCTIONS.length < 4000);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('JSON envelope success and warnings outrank the exit code', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office envelope '));
+  const executable = join(directory, 'officecli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  let reply = { code: 0, stdout: '' };
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async () => ({ status: 'exited', code: reply.code, stdout: reply.stdout, stderr: '' }),
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const tool = createOfficeToolkit({ shell, executable }).tools[0]!.tool;
+    const run = async (code: number, stdout: string) => {
+      reply = { code, stdout };
+      return JSON.parse(String(await tool.invoke({ command: 'set', args: ['a.docx', '/body/p[1]', '--prop', 'bogus=1', '--json'], cwd: directory }, scope)));
+    };
+    const notApplied = await run(0, '{"success":false,"message":"No properties applied"}');
+    assert.equal(notApplied.status, 'failed'); assert.match(notApplied.message, /success:false/);
+    const ignored = await run(0, '{"success":true,"warnings":["unsupported prop bogus"]}');
+    assert.equal(ignored.status, 'warning');
+    assert.equal((await run(0, '{"success":true,"warnings":[]}')).status, 'ok');
+    assert.equal((await run(0, 'plain text')).status, 'ok');
+    const usage = await run(2, 'Error: no --prop given');
+    assert.equal(usage.status, 'warning'); assert.match(usage.message, /not applied/);
+    assert.equal((await run(1, '{"success":true}')).status, 'failed');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

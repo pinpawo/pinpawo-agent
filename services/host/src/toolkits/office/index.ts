@@ -48,7 +48,8 @@ export function officeEnabled(config: { capabilities?: Record<string, boolean> }
 
 // OfficeCLI rewrites the whole package on each edit, so concurrent calls on
 // one document each succeed and the last writer silently drops the others.
-// Calls naming the same document run one at a time.
+// The document cannot be keyed from argv: OfficeCLI accepts options before
+// the path and option arity varies, so all document calls share one queue.
 function createDocumentQueue() {
   const tails = new Map<string, Promise<void>>();
   return async <T>(key: string | null, signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> => {
@@ -86,8 +87,10 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
     if (!executable) throw new Error('Office Toolkit requires iOfficeAI/OfficeCLI on PATH or an absolute PINPAWO_OFFICECLI_PATH. Run pinpawo toolkit install office explicitly; the Toolkit never installs dependencies.');
     const context = readToolExecutionContext(runtime);
     const cwd = resolve(context.workdir ?? process.cwd(), input.cwd ?? '.');
-    const document = input.command !== 'help' && input.args[0] ? resolve(cwd, input.args[0]) : null;
-    const result = await serializeDocument(document, runtime.signal, () => createCliRunner(deps.shell, runtime)([executable, input.command, ...input.args], {
+    if (input.command !== 'help' && input.args[0] === input.command) {
+      return JSON.stringify({ status: 'invalid_arguments', message: `args must not repeat the command "${input.command}"; pass only the arguments after it.` });
+    }
+    const result = await serializeDocument(input.command === 'help' ? null : 'documents', runtime.signal, () => createCliRunner(deps.shell, runtime)([executable, input.command, ...input.args], {
       cwd, timeoutMs: input.timeoutSeconds * 1000,
       maxOutputChars: 4 * 1024 * 1024,
       // Upstream opt-outs: do not let a bounded document call bootstrap or
@@ -140,7 +143,7 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
         reason: 'Office is enabled but iOfficeAI/OfficeCLI is missing. Run pinpawo toolkit install office explicitly, or set absolute PINPAWO_OFFICECLI_PATH; then restart the Host.',
       };
     },
-    instructions: 'Use office_cli help to discover installed command syntax. Read document structure before editing; choose your own operations. Pass the command once in command and the remaining arguments in args, starting with the document path. Use separate argv entries (including paths or text with spaces). Calls on the same document run one at a time; issue edits to one document sequentially. Exit status warning means the edit was applied, so read back instead of retrying. Prefer copies for edits; validate and read back results, close any opened OfficeCLI document session before delivery. Relative output paths resolve from the workdir; report their actual paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
+    instructions: 'Use office_cli help to discover installed command syntax. Read document structure before editing; choose your own operations. Pass the command once in command and the remaining arguments in args, starting with the document path. Use separate argv entries (including paths or text with spaces). Document calls run one at a time; issue edits to one document sequentially. Exit status warning means the edit was applied, so read back instead of retrying. Prefer copies for edits; validate and read back results, close any opened OfficeCLI document session before delivery. Relative output paths resolve from the workdir; report their actual paths. This Toolkit does not install software, publish files, or provide a filesystem sandbox.',
   });
 }
 

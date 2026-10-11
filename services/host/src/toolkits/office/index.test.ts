@@ -145,7 +145,7 @@ test('actual Office tool timeout and cancellation reap the started process', asy
   } finally { await shell.dispose(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('calls on the same document run one at a time; other documents and help do not wait', async () => {
+test('document calls run one at a time whatever the argument order; help does not wait', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'office queue '));
   const executable = join(directory, 'officecli');
   writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
@@ -156,7 +156,7 @@ test('calls on the same document run one at a time; other documents and help do 
     contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
     exec: async (_id, input) => {
       const argv = (input.command as { argv: readonly string[] }).argv;
-      const key = argv[1] === 'help' ? 'help' : argv[2]!;
+      const key = argv[1] === 'help' ? 'help' : 'documents';
       running.set(key, (running.get(key) ?? 0) + 1);
       if (key !== 'help' && running.get(key)! > 1) overlap += 1;
       await new Promise<void>((resolve) => releases.push(resolve));
@@ -171,16 +171,20 @@ test('calls on the same document run one at a time; other documents and help do 
     const call = (args: string[], command = 'add') => tool.invoke({ command, args, cwd: directory }, scope);
     const first = call(['r.docx', '/body', 'p1']);
     const second = call([join(directory, 'r.docx'), '/body', 'warn']);
-    const other = call(['other.docx', '/body', 'p1']);
+    // Options before the path, as models do; must still wait for r.docx.
+    const other = call(['--prop', 'text=x', '--json', 'r.docx', '/body']);
     const help = call([], 'help');
     await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(releases.length, 3, 'second call on r.docx waits for the first');
+    assert.equal(releases.length, 2, 'only the first document call and help run');
     while (releases.length) { releases.shift()!(); await new Promise((resolve) => setTimeout(resolve, 20)); }
     const results = await Promise.all([first, second, other, help]).then((values) => values.map((value) => JSON.parse(String(value))));
     assert.equal(overlap, 0);
     assert.equal(results[0].status, 'ok');
     assert.equal(results[1].status, 'warning');
     assert.match(results[1].message, /Applied with warnings/);
+    const repeated = JSON.parse(String(await call(['create', 'x.docx'], 'create')));
+    assert.equal(repeated.status, 'invalid_arguments');
+    assert.equal(releases.length, 0, 'a repeated command never runs');
 
     const blocker = call(['r.docx', '/body', 'p2']);
     const controller = new AbortController();

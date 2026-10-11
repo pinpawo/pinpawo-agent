@@ -42,8 +42,10 @@ Enabled but missing dependencies produce an unavailable Toolkit diagnostic.
 
 `args` starts with the document path and never repeats the command. OfficeCLI
 rewrites the whole package on each edit, so concurrent calls on one document
-silently drop all but the last write; the Toolkit runs calls that name the same
-document (resolved against `cwd`) one at a time. Exit code 2 means the edit was
+silently drop all but the last write; the Toolkit runs all calls except `help`
+one at a time (the document cannot be identified reliably from argv, since
+OfficeCLI accepts options before the path). Queued time does not count toward
+`timeoutSeconds`. Args that repeat the command are rejected without running. Exit code 2 means the edit was
 applied with warnings and is reported as status `warning`, not `failed`.
 
 Use `help` to discover the installed version's syntax. Supported commands are

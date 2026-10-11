@@ -21,7 +21,10 @@ checks a pinned SHA-256 and atomically writes
 binary, edits PATH/profile files, starts a Host, or enables the Toolkit.
 Repeated installation reports `alreadyInstalled: true` after checksum and
 executable checks. Failed HTTP/checksum/install verification exits with an error.
-Status reports `installed`, `missing` or `invalid` for the managed dependency.
+Status reports `installed`, `missing` or `invalid` for the managed dependency,
+or `unsupported` on platforms without a pinned release asset. The SHA-256 is
+checked by install and status; at run time the Toolkit only checks that the
+managed file is executable.
 Installation supports macOS arm64/x64; other platforms produce an explicit error.
 `--dir <directory>` selects another dependency root; set `PINPAWO_OFFICECLI_PATH`
 to its resulting absolute executable path for Host use.

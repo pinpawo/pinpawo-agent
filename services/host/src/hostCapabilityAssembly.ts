@@ -141,9 +141,10 @@ export class HostCapabilityAssembly {
     this.runtimeConfig = options.runtimeConfig;
     this.executionConfig = resolveHostExecutionConfig(options.runtimeConfig);
     this.sourceId = options.sourceId;
-    const officeSelected = officeEnabled(loadStoredConfig(), options.includeOffice);
+    const storedConfig = loadStoredConfig();
+    const officeSelected = officeEnabled(storedConfig, options.includeOffice);
     const browserSelected = options.includeBrowser
-      ?? loadStoredConfig().capabilities?.browser !== false;
+      ?? storedConfig.capabilities?.browser !== false;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.

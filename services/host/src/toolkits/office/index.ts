@@ -43,8 +43,11 @@ export function officeEnabled(config: { capabilities?: Record<string, boolean> }
 
 export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string }): AgentToolkit {
   const binary = deps.executable ?? process.env.PINPAWO_OFFICECLI_PATH;
-  const executablePath = () => binary ? resolveOfficeExecutable(binary)
-    : resolveOfficeExecutable(managedOfficeExecutable() ?? '/missing/officecli') ?? resolveOfficeExecutable();
+  const executablePath = () => {
+    if (binary) return resolveOfficeExecutable(binary);
+    const managed = managedOfficeExecutable();
+    return (managed ? resolveOfficeExecutable(managed) : null) ?? resolveOfficeExecutable();
+  };
   const officeTool = tool(async (input, runtime: ToolRuntime) => {
     const executable = executablePath();
     if (!executable) throw new Error('Office Toolkit requires iOfficeAI/OfficeCLI on PATH or an absolute PINPAWO_OFFICECLI_PATH. Run pinpawo toolkit install office explicitly; the Toolkit never installs dependencies.');

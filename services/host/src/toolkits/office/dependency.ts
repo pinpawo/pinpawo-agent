@@ -7,11 +7,15 @@ const assets = {
   x64: { asset: 'officecli-mac-x64', sha256: '9487262651e76bf6f586a5edaa41c01b7318991aa10c382d0d46065259fac3bd' },
 } as const;
 
-export function officeDependency(platform = process.platform, arch = process.arch): BinaryDependency {
-  if (platform !== 'darwin' || (arch !== 'arm64' && arch !== 'x64')) {
+export function officeDependencySupported(platform: string = process.platform, arch: string = process.arch) {
+  return platform === 'darwin' && (arch === 'arm64' || arch === 'x64');
+}
+
+export function officeDependency(platform: string = process.platform, arch: string = process.arch): BinaryDependency {
+  if (!officeDependencySupported(platform, arch)) {
     throw new Error(`Office dependency installation currently supports macOS arm64/x64 only; unsupported: ${platform}/${arch}.`);
   }
-  const asset = assets[arch];
+  const asset = assets[arch as keyof typeof assets];
   return {
     toolkit: 'office', version: OFFICECLI_VERSION, filename: 'officecli',
     url: `https://github.com/iOfficeAI/OfficeCLI/releases/download/v${OFFICECLI_VERSION}/${asset.asset}`,

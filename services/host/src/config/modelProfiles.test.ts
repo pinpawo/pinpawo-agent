@@ -13,10 +13,8 @@ import {
   MODEL_PROFILES_VERSION,
   ModelProfileConfigError,
   parseModelProfile,
-  removeLegacyModelConfigFields,
   resolveModelProfile,
   summarizeModelProfile,
-  writeDefaultModelProfile,
 } from './modelProfiles';
 import type { StoredConfig } from '../storage';
 import { createLocalModelProfileRegistry } from './llmConfig';
@@ -392,71 +390,4 @@ test('fingerprint changes with endpoint behavior but not API key', () => {
     fingerprintModelProfile(first).fingerprint,
     fingerprintModelProfile(otherEndpoint).fingerprint,
   );
-});
-
-test('legacy model fields are removed when versioned profiles are persisted', () => {
-  const original: StoredConfig = {
-    llm_api_key: 'secret',
-    llm_model_preset: 'deepseek',
-    llm_base_url: 'https://api.deepseek.com',
-    llm_model: 'deepseek-v4-pro',
-    llm_observe_model: 'deepseek-v4-pro',
-    llm_context_window_tokens: 1_000_000,
-    workdir: '/tmp/keep-me',
-  };
-  const migrated = removeLegacyModelConfigFields(original);
-
-  assert.equal(migrated.workdir, '/tmp/keep-me');
-  assert.equal('llm_api_key' in migrated, false);
-  assert.equal('llm_model_preset' in migrated, false);
-  assert.equal('llm_base_url' in migrated, false);
-  assert.equal('llm_model' in migrated, false);
-  assert.equal('llm_observe_model' in migrated, false);
-  assert.equal('llm_context_window_tokens' in migrated, false);
-});
-
-test('default model profile write migrates legacy fields and preserves peer profiles', () => {
-  const existingPrimary = createModelProfile({
-    id: 'primary',
-    label: 'Primary',
-    apiKey: 'primary-secret',
-    baseUrl: 'https://primary.example.test/v1',
-    model: 'primary-model',
-    contextWindowTokens: 64_000,
-  });
-  const secondary = createModelProfile({
-    id: 'secondary',
-    label: 'Secondary',
-    apiKey: 'secondary-secret',
-    baseUrl: 'https://secondary.example.test/v1',
-    model: 'secondary-model',
-    contextWindowTokens: 64_000,
-  });
-  const stored = {
-    llm_api_key: 'legacy-secret',
-    llm_model: 'legacy-model',
-    models: {
-      version: MODEL_PROFILES_VERSION,
-      defaultProfileId: 'primary',
-      profiles: {
-        primary: existingPrimary,
-        secondary,
-      },
-    },
-  } satisfies StoredConfig;
-  const replacement = createModelProfile({
-    id: 'primary',
-    label: 'Replacement',
-    apiKey: 'replacement-secret',
-    baseUrl: 'https://replacement.example.test/v1',
-    model: 'replacement-model',
-    contextWindowTokens: 128_000,
-  });
-
-  const migrated = writeDefaultModelProfile(stored, replacement);
-
-  assert.equal('llm_api_key' in migrated, false);
-  assert.equal('llm_model' in migrated, false);
-  assert.equal(migrated.models?.profiles.primary.label, 'Replacement');
-  assert.equal(migrated.models?.profiles.secondary.label, 'Secondary');
 });

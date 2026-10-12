@@ -38,13 +38,12 @@ export function supervisorFixture(params: {
   capability?: string;
   evidence?: string;
   remaining?: Array<{ capability: string; objective: string }>;
-  freshUserInput?: boolean;
 }): RunSupervisorInput {
   const capability = params.capability ?? 'general';
   const messages = [new HumanMessage(params.goal)];
   const input: RunSupervisorInput = {
     mode: params.task ? 'boundary' : 'entry',
-    inputId: !params.task || params.freshUserInput ? `human:${params.runId}` : params.runId,
+    inputId: `${params.task ? 'boundary' : 'entry'}:${params.runId}`,
     runId: params.runId, taskId: params.runId, userRequest: params.goal, messages,
     catalog: params.catalog, capabilityDisclosure: createCapabilityDisclosureState({ catalog: params.catalog }),
     state: { runId: params.task ? params.runId : null, goal: params.goal, plan: [

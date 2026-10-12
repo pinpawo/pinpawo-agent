@@ -37,7 +37,7 @@ export function reviewCurrent(
   const current = currentSupervisorTask(context.state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');
   // Review only advances progress; the plan's goal is carried, never re-derived.
-  let state: SupervisorControlContext['state'] = { runId: context.runId,
+  let state: SupervisorControlContext['state'] = { ...context.state, runId: context.runId,
     goal: requirePlanGoal(context.state), plan: [...context.state.plan] };
   if (args.completed) {
     const latestResult = executionsForPlanItem(context, current.id).at(-1)?.result;

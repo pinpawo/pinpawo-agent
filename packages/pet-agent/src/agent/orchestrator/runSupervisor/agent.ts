@@ -64,9 +64,7 @@ export function createRunSupervisorAgent(params: {
       });
       const agentMessages = [...selected.slice(0, at), runContext, ...selected.slice(at), turn];
       const tools: StructuredTool[] = [
-        ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
-          documents, capabilityNames: input.catalog.capabilityNames,
-        })] : []),
+        createSupervisorCapabilityDetailsTool({ documents, capabilityNames: input.catalog.capabilityNames }),
         createSubmitPlanTool(context),
         createReviewCurrentTool(context),
         createAdjustPlanTool(context),

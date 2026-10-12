@@ -137,7 +137,6 @@ assert.ok(selected.size === 0 || [...selected].every((name) => cases.some((scena
 for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
   const input: RunSupervisorInput = { ...supervisorFixture({ catalog, runId: scenario.name, goal: scenario.goal,
     task: scenario.task, evidence: scenario.evidence, remaining: scenario.remaining,
-    freshUserInput: Boolean(scenario.task && !scenario.evidence && !scenario.pendingDispatch),
   }), capabilityDisclosure: disclosure };
   let result: SupervisorDecision | undefined;
   let followUp: SupervisorDecision | undefined;
@@ -164,7 +163,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       const saved = actual.runSupervisorState;
       const resumed: RunSupervisorInput = {
         ...input, state: saved, mode: 'boundary',
-        runId: `${scenario.name}:resume`, taskId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,
+        runId: `${scenario.name}:resume`, taskId: `${scenario.name}:resume`, inputId: `boundary:${scenario.name}:resume`,
         messages: [...input.messages, ...actual.messages, new AIMessage(decisionReply(result)!), new HumanMessage(scenario.supplement)],
         capabilityDisclosure: createCapabilityDisclosureState({ catalog }),
       };

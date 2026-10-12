@@ -43,12 +43,6 @@ const orchestratorStateChannels = {
     reducer: messagesStateReducer,
     default: () => [],
   }),
-  // Consume this run’s explicit user input once, including Entry’s decision
-  // to continue a retained plan into this fresh run.
-  runSupervisorUserMessageId: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
   runUserRequest: Annotation<UserRequest | null>({
     reducer: (_prev, next) => next,
     default: () => null,
@@ -93,7 +87,6 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runCapabilityDisclosure'
-  | 'runSupervisorUserMessageId'
   | 'runUserRequest'
   | 'runIterationCount'
   | 'runTerminalError'
@@ -111,7 +104,6 @@ export function buildRunStateReset(
 ): OrchestratorRunState {
   return {
     runCapabilityDisclosure: null,
-    runSupervisorUserMessageId: null,
     runUserRequest: null,
     runIterationCount: 0,
     runTerminalError: null,

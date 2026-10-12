@@ -4,7 +4,7 @@ import { buildReviewStopMessage } from '../interrupt/reviewStop';
 import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
-import { currentSupervisorTask, requirePlanGoal } from './state';
+import { acceptanceGoal, currentSupervisorTask } from './state';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
@@ -30,7 +30,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const input = buildCapabilityExecutionInput({
       state: state.runSupervisorState, runId: state.runId, allowedCapabilityNames: catalog.capabilityNames,
     }, args, runtime.toolCallId);
-    const userRequest = requirePlanGoal(state.runSupervisorState);
+    const userRequest = acceptanceGoal(state.runSupervisorState);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,

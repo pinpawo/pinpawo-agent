@@ -6,6 +6,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { getAgentMessageMetadata, setAgentMessageMetadata, queryAgentMessages } from '../../messages';
 import { submitPlan } from './submitPlanTool';
 import { reviewCurrent } from './reviewCurrentTool';
+import { acceptanceGoal } from './state';
 import { adjustPlan } from './adjustPlanTool';
 import { buildCapabilityExecutionInput } from './delegateCapabilityTool';
 import { identity, type SupervisorControlContext } from './controlContext';
@@ -21,7 +22,7 @@ const taskA = { capability: 'general', objective: 'Inspect A.' };
 const taskB = { capability: 'general', objective: 'Inspect B.' };
 function context(overrides: Partial<SupervisorControlContext> = {}): SupervisorControlContext {
   return { state: { runId: null, goal: null, plan: [] }, runId: 'r1', taskId: 't1', userRequest: 'Inspect the project.',
-    mode: 'entry', hasNewUserInput: true, allowedCapabilityNames: ['general'], messages: [], ...overrides };
+    mode: 'entry', allowedCapabilityNames: ['general'], messages: [], ...overrides };
 }
 function control(name: string, args: Record<string, unknown>, id: string) {
   return new AIMessage({ id: `request:${id}`, content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
@@ -97,29 +98,38 @@ test('each tool call has its own execution identity and preserves the model brie
   assert.equal('mode' in next, false);
 });
 
-test('adjustment preserves completed work, supersedes replaced executions and checks goal changes', () => {
+test('adjustment preserves completed work, supersedes replaced executions and calibrates beside the goal', () => {
   const input = returned();
   const completed = reviewCurrent(input, { completed: true, reason: 'Verified' });
-  const next = { ...input, state: completed, hasNewUserInput: false };
-  const args = { goal: input.userRequest, reason: 'Use A evidence', currentTask: 'keep' as const, tasks: [taskB] };
+  const next = { ...input, state: completed };
+  const args = { reason: 'Use A evidence', currentTask: 'keep' as const, tasks: [taskB] };
   const revised = adjustPlan(next, args, 'adjust');
   assert.equal(revised.plan[0].status, 'completed');
   assert.equal(revised.plan[1].id, completed.plan[1].id);
-  assert.throws(() => adjustPlan(next, { ...args, goal: 'Different' }, 'adjust'), /fresh user/);
-  assert.equal(adjustPlan({ ...next, hasNewUserInput: true }, { ...args, goal: 'Different' }, 'adjust').goal, 'Different');
+  assert.equal(revised.goal, completed.goal);
+  assert.equal('adjustedGoal' in revised, false);
+  const calibrated = adjustPlan(next, { ...args, adjustedGoal: 'Inspect B only.' }, 'calibrate');
+  assert.equal(calibrated.goal, completed.goal, 'the authorized goal never changes');
+  assert.equal(calibrated.adjustedGoal, 'Inspect B only.');
+  assert.equal(acceptanceGoal(calibrated), 'Inspect B only.');
+  assert.equal(adjustPlan({ ...next, state: calibrated }, args, 'later').adjustedGoal, 'Inspect B only.',
+    'a later adjustment keeps the calibration unless it recalibrates');
+  assert.equal(reviewCurrent({ ...input, state: { ...input.state, adjustedGoal: 'Inspect B only.' } },
+    { completed: true, reason: 'Verified' }).adjustedGoal, 'Inspect B only.');
   const replaced = adjustPlan(input, { ...args, currentTask: 'replace' }, 'replace');
   assert.deepEqual(replaced.plan.map(t => t.status), ['superseded', 'pending']);
   assert.equal(replaced.plan[0].id, input.state.plan[0].id);
 });
 
-test('a boundary re-plan keeps the established goal instead of the run request', () => {
-  const carried = { runId: 'r1', goal: 'Refactor the parser.', plan: [{ ...taskA, id: 'old', status: 'completed' as const }] };
-  // Entry establishes the goal from this run's resolved request.
-  assert.equal(submitPlan(context({ state: carried }), { tasks: [taskB] }, 'entry').goal, 'Inspect the project.');
+test('a plan takes the cleared run request, keeps an established goal and never replaces unfinished work', () => {
+  // plan_request clears the snapshot, so the plan takes this run's resolved request.
+  assert.equal(submitPlan(context(), { tasks: [taskB] }, 'entry').goal, 'Inspect the project.');
   // After continue the run request is just the continuation utterance.
+  const carried = { runId: 'r1', goal: 'Refactor the parser.', plan: [{ ...taskA, id: 'old', status: 'completed' as const }] };
   const continued = context({ state: carried, mode: 'boundary', userRequest: '继续' });
   assert.equal(submitPlan(continued, { tasks: [taskB] }, 'boundary').goal, 'Refactor the parser.');
-  assert.equal(submitPlan({ ...continued, hasNewUserInput: false }, { tasks: [taskB] }, 'later').goal, 'Refactor the parser.');
+  const unfinished = { ...carried, plan: [{ ...taskA, id: 'open', status: 'pending' as const }] };
+  assert.throws(() => submitPlan(context({ state: unfinished, mode: 'boundary' }), { tasks: [taskB] }, 'replace'), /use adjust_plan/);
 });
 
 test('review fails the run when a planned task has lost its goal', () => {
@@ -160,7 +170,7 @@ const catalog = createCapabilityCatalog({ registry: compileAgentRegistry({ toolk
 async function probe(input: SupervisorControlContext, responses: AIMessage[]) {
   const model = new Model(responses);
   const result = await createRunSupervisorProbe({ model }).invoke({
-    ...input, inputId: input.hasNewUserInput ? 'human:input' : 'boundary:input', catalog,
+    ...input, inputId: `${input.mode}:input`, catalog,
     capabilityDisclosure: createCapabilityDisclosureState({ catalog }),
   });
   return { result, model };
@@ -184,7 +194,7 @@ test('review then adjustment shares current plan state before native handoff', a
   const input = returned();
   const { result } = await probe(input, [
     control('review_current', { completed: true, reason: 'A verified' }, 'review'),
-    control('adjust_plan', { goal: input.userRequest, reason: 'Use A evidence', currentTask: 'keep', tasks: [taskB] }, 'adjust'),
+    control('adjust_plan', { reason: 'Use A evidence', currentTask: 'keep', tasks: [taskB] }, 'adjust'),
     control('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
   ]);
   assert.deepEqual(result.runSupervisorState.plan.map(t => t.status), ['completed', 'pending']);

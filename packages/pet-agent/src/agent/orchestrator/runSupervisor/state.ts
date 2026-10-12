@@ -19,6 +19,8 @@ export const supervisorPlanItemSchema = z.object({
 export const runSupervisorStateSchema = z.object({
   runId: z.string().nullable(),
   goal: z.string().nullable(),
+  /** Supervisor's calibration of the goal from execution evidence; acceptance follows it. */
+  adjustedGoal: z.string().optional(),
   plan: z.array(supervisorPlanItemSchema),
 }).strict();
 
@@ -30,12 +32,26 @@ export function currentSupervisorTask(state: RunSupervisorState): SupervisorPlan
 }
 
 /**
+ * Entry owns the goal: plan_request clears the snapshot so a new plan takes the
+ * run's resolved request, and continue adopts the saved goal. Supervisor never
+ * rewrites it; it records a calibrated adjustedGoal next to it instead.
+ */
+export function planGoal(context: { state: RunSupervisorState; userRequest: string }): string {
+  return context.state.goal ?? context.userRequest;
+}
+
+/**
  * Every writer of a plan also writes or preserves its goal, so a planned task
  * without one is an invariant violation, not something to fall back from.
  */
 export function requirePlanGoal(state: RunSupervisorState): string {
   if (!state.goal) throw new Error('Supervisor plan has no goal.');
   return state.goal;
+}
+
+/** The goal work is delegated and accepted against: the calibrated one when set. */
+export function acceptanceGoal(state: RunSupervisorState): string {
+  return state.adjustedGoal ?? requirePlanGoal(state);
 }
 
 export function updateSupervisorTask(

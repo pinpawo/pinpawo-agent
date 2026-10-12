@@ -103,20 +103,31 @@ function entryHandoff(
 }
 
 export function createContinueTool() {
-  return tool(async (_args, runtime: ToolRuntime<OrchestratorStateType>) => {
+  return tool(async ({ goal }: { goal?: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
     const saved = runtime.state.runSupervisorState;
     if (!saved.plan.some((task) => !['completed', 'superseded'].includes(task.status))) {
       throw new Error('No unfinished plan is available to continue.');
     }
     // Choosing to continue adopts the saved plan into this run, so Supervisor
     // enters at a boundary over facts it now owns rather than re-entering.
-    return entryHandoff(runtime, requireRunUserRequest(runtime.state), {
-      runSupervisorState: { ...saved, runId: runtime.state.runId },
+    if (!goal) {
+      return entryHandoff(runtime, requireRunUserRequest(runtime.state), {
+        runSupervisorState: { ...saved, runId: runtime.state.runId },
+      });
+    }
+    // The user widened or changed the goal while continuing: Entry owns the
+    // goal, so it replaces it here, and the old calibration no longer applies.
+    const { adjustedGoal: _calibration, ...plan } = saved;
+    return entryHandoff(runtime, resolveRunUserRequest(runtime.state, goal), {
+      runSupervisorState: { ...plan, runId: runtime.state.runId, goal },
     });
   }, {
     name: 'continue',
-    description: '继续当前计划中尚未完成的任务。',
-    schema: z.object({}).strict(),
+    description: '继续当前计划中尚未完成的任务。计划没有未完成任务时不要使用，新需求用 plan_request。',
+    schema: z.object({
+      goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS).optional()
+        .describe('仅当用户在接续时调整了目标或范围才填写：结合原目标和用户这次的话，写出更新后的完整目标。沿用原目标时省略。'),
+    }).strict(),
   });
 }
 
@@ -125,8 +136,12 @@ export function createPlanRequestTool() {
   return tool(
     async ({ goal }: { goal: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
       // Commit the resolved request with the routing messages before Supervisor runs.
+      // A new request retires the saved plan: Supervisor plans it from an empty
+      // snapshot instead of inheriting an earlier run's goal and items.
       const runUserRequest = resolveRunUserRequest(runtime.state, goal);
-      return entryHandoff(runtime, runUserRequest);
+      return entryHandoff(runtime, runUserRequest, {
+        runSupervisorState: { runId: null, goal: null, plan: [] },
+      });
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
@@ -159,6 +174,7 @@ export function entryPlanMessage(state: RunSupervisorState, runId?: string) {
   const body = state.plan.length > 0 || state.goal
     ? [
         ...(state.goal ? [indentXmlBlock(xmlTextBlock('goal', state.goal), 2)] : []),
+        ...(state.adjustedGoal ? [indentXmlBlock(xmlTextBlock('adjusted_goal', state.adjustedGoal), 2)] : []),
         ...(state.plan.length > 0
           ? [
               '  <plan>',

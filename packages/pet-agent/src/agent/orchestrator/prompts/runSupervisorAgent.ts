@@ -78,15 +78,13 @@ export function buildRunSupervisorContextInput(
 
 /** Facts and instructions for this invocation only. */
 export function buildRunSupervisorTurnInput(input: RunSupervisorInput) {
-  const turnContext = xmlTextBlock('invocation', input.inputId.startsWith('human:')
-    ? input.mode === 'boundary'
-      ? 'Fresh user input: interpret it before any execution. If it explicitly requests or confirms a change, use adjust_plan to update the goal and pending work, choosing whether to continue or replace the active delegation. Do not ask again for an adjustment the user already requested.'
-      : 'Fresh user input: interpret it before submitting the execution plan. Preserve established requirements unless the user requests or confirms a change.'
-    : 'Keep the established goal and authorization scope. Adjust pending work when execution evidence warrants it; preserve the goal verbatim. Ask the user if a goal or scope change is needed.');
+  const turnContext = xmlTextBlock('invocation', input.mode === 'entry'
+    ? 'Interpret the user request before submitting the execution plan. Preserve established requirements unless the user requests a change.'
+    : 'Keep the goal and its authorization scope. Adjust pending work, and calibrate adjustedGoal within that scope, when the latest user message or execution evidence warrants it. Ask the user before going beyond the goal.');
+  // Entry always starts from an empty plan (plan_request clears it), so only a
+  // boundary has plan facts to show.
   return RUN_SUPERVISOR_TURN_PROMPT.render({
-    planContext: input.mode === 'entry'
-      ? xmlTextBlock('remaining_plan', JSON.stringify(input.state.plan))
-      : buildSupervisionBoundary(input),
+    planContext: input.mode === 'entry' ? '' : buildSupervisionBoundary(input),
     turnContext,
-  });
+  }).trim();
 }

@@ -251,9 +251,9 @@ test('a follow-up run plans fresh work after a rejected delegation instead of as
   const supervisorCallsBefore = supervisor.inputs.length;
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(followUp.objective)]), config);
 
-  // plan_request retired the previous run's plan, so Entry starts from an empty one.
+  // plan_request retired the previous run's plan, so Entry shows no plan at all.
   const followUpEntryInput = supervisor.inputs[supervisorCallsBefore].at(-1)!.text;
-  assert.match(followUpEntryInput, /<remaining_plan>\s*<!\[CDATA\[\s*\[\]\s*\]\]>/);
+  assert.doesNotMatch(followUpEntryInput, /Inspect the repository/);
   const rejected = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'premature'));
   assert.ok(ToolMessage.isInstance(rejected));
   assert.match(rejected.text, /There is no planned task to execute/);

@@ -186,6 +186,35 @@ test('plan_request retires the saved plan so Supervisor plans the new request fr
   assert.deepEqual(supervisorInputs[0]?.state, { runId: null, goal: null, plan: [] });
 });
 
+for (const scenario of ['keep', 'widen'] as const) {
+  test(`continue adopts the saved plan and ${scenario === 'keep' ? 'keeps' : 'replaces'} its goal`, async () => {
+    const supervisorInputs: RunSupervisorInput[] = [];
+    const widened = 'Plan the trip and book the restaurant.';
+    const model = { bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
+      id: 'continue', name: 'continue', args: scenario === 'widen' ? { goal: widened } : {},
+    }] }) }) } as unknown as BaseChatModel;
+    const graph = createOrchestratorGraph({ models: { act: model, answer: model },
+      runSupervisorRunner: { async invoke(input) { supervisorInputs.push(input); return { reply: '继续。' }; } } });
+    const saved = { runId: 'earlier-run', goal: 'Plan the trip.', adjustedGoal: 'Plan the Kyoto leg.', plan: [
+      { id: 'open', capability: 'general', objective: 'Book the hotel.', status: 'pending' as const },
+    ] };
+    const output = await graph.invoke({ ...buildOrchestratorRunInput([new HumanMessage('接着做，顺便订餐厅。')]),
+      runSupervisorState: saved }, invokeConfig());
+    const state = supervisorInputs[0]!.state;
+    assert.equal(supervisorInputs[0]?.mode, 'boundary');
+    assert.equal(state.runId, output.runId);
+    assert.deepEqual(state.plan, saved.plan);
+    if (scenario === 'keep') {
+      assert.equal(state.goal, saved.goal);
+      assert.equal(state.adjustedGoal, saved.adjustedGoal);
+    } else {
+      assert.equal(state.goal, widened);
+      assert.equal('adjustedGoal' in state, false, 'a new goal drops the old calibration');
+      assert.equal(supervisorInputs[0]?.userRequest, widened);
+    }
+  });
+}
+
 test('Entry Answer preserves the current textual HumanMessage exactly', async () => {
   const scripted = entryAnswerModel('plan');
   let plannerRequest = '';

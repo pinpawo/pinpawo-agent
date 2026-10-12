@@ -32,7 +32,9 @@ const registry = compileAgentRegistry({
 export const planFirstCatalog = createCapabilityCatalog({ registry });
 
 export type PriorRun = { request: string; task: string; delivery: string; reply: string };
-export type PlanFirstScenario = { name: string; prior: PriorRun[]; request: string; goal: string };
+/** `plan`: the first control decision must be submit_plan. `ask`: only the user can unblock it, so nothing may be delegated. */
+export type PlanFirstExpectation = 'plan' | 'ask';
+export type PlanFirstScenario = { name: string; expect: PlanFirstExpectation; prior: PriorRun[]; request: string; goal: string };
 
 const priorPool: PriorRun[] = [
   { request: '排查 A 模块单测失败的原因并修复。', task: '排查并修复 A 模块失败的单测。',
@@ -53,23 +55,49 @@ export function priorRuns(count: number): PriorRun[] {
   return Array.from({ length: count }, (_, i) => priorPool[i % priorPool.length]);
 }
 
+const fixedA = priorPool[0];
 const proposal: PriorRun = { request: '看看 B 模块还有哪些问题。', task: '检查 B 模块现存问题。',
   delivery: 'B 模块存在三处问题：1) 缓存键未包含 locale；2) 重试没有上限；3) 日志打印了完整 token。',
   reply: 'B 模块有三个问题：缓存键没带 locale、重试没有上限、日志里打印了完整 token。建议依次修复这三处，需要我开始吗？' };
+const blocked: PriorRun = { request: '跑一下 B 模块的单测，看看哪里挂了。', task: '运行 B 模块单测并定位失败。',
+  delivery: '未能运行 B 模块单测：工作区缺少依赖（node_modules 不存在），已停止，未修改任何文件。',
+  reply: 'B 模块的单测没跑起来：工作区还没装依赖。需要我先安装依赖再重试吗？' };
+const releaseNotes: PriorRun = { request: '把本周的发布说明写好。', task: '撰写本周发布说明并保存到 RELEASE.md。',
+  delivery: 'RELEASE.md 已写好，包含 3 项修复与 1 项新功能，并对照提交记录核验。',
+  reply: '本周的发布说明已写进 RELEASE.md。' };
 
-/** Scenarios that pull hardest towards delegating straight after plan_request. */
+/**
+ * Requests that pull hardest towards delegating straight after plan_request,
+ * plus one that must not be delegated at all. The scenario-specific run sits
+ * last in history, after `priorCount` generic runs.
+ */
 export function planFirstScenarios(priorCount: number): PlanFirstScenario[] {
   const prior = priorRuns(priorCount);
   return [
-    { name: 'new-unrelated-request', prior,
+    { name: 'new-unrelated-request', expect: 'plan', prior,
       request: '帮我写一份本周的发布说明，保存到 RELEASE.md。',
       goal: '撰写本周的发布说明并保存到 RELEASE.md。' },
-    { name: 'similar-follow-up', prior: [...prior, priorPool[0]],
+    { name: 'similar-follow-up', expect: 'plan', prior: [...prior, fixedA],
       request: 'B 模块的单测也挂了，同样排查一下并修复。',
       goal: '排查 B 模块单测失败的原因并修复。' },
-    { name: 'confirm-proposed-work', prior: [...prior, proposal],
+    { name: 'same-wording-follow-up', expect: 'plan', prior: [...prior, fixedA],
+      request: '排查 C 模块单测失败的原因并修复。',
+      goal: '排查 C 模块单测失败的原因并修复。' },
+    { name: 'batch-follow-up', expect: 'plan', prior: [...prior, fixedA],
+      request: 'C 和 D 模块也照这个修一下。',
+      goal: '排查并修复 C、D 模块失败的单测。' },
+    { name: 'confirm-proposed-work', expect: 'plan', prior: [...prior, proposal],
       request: '可以，按你说的这三件事修。',
       goal: '修复 B 模块的三个问题：缓存键加入 locale、为重试设置上限、日志中不再打印完整 token。' },
+    { name: 'retry-after-blocked', expect: 'plan', prior: [...prior, blocked],
+      request: '装好依赖再试一次。',
+      goal: '安装依赖后运行 B 模块单测并定位失败。' },
+    { name: 'user-says-skip-planning', expect: 'plan', prior: [...prior, fixedA],
+      request: '不用规划了，直接把 B 模块的单测修好。',
+      goal: '修复 B 模块失败的单测。' },
+    { name: 'needs-user-destination', expect: 'ask', prior: [...prior, releaseNotes],
+      request: '把发布说明发出去。',
+      goal: '将 RELEASE.md 中的发布说明发布到用户选定的位置。' },
   ];
 }
 
@@ -118,38 +146,52 @@ export function planFirstInput(scenario: PlanFirstScenario, runId: string): RunS
 }
 
 /**
- * The first control decision must establish the plan. capability_details may
- * precede it; a delegate before any submit_plan is the failure under test.
+ * `plan`: the first control decision must establish the plan; capability_details
+ * may precede it, and a delegate before any submit_plan is the failure under test.
+ * `ask`: the request waits on the user, so passing means nothing was delegated.
  */
-export function scorePlanFirst(calls: ReadonlyArray<{ name: string }>) {
+export function scorePlanFirst(calls: ReadonlyArray<{ name: string }>, expect: PlanFirstExpectation = 'plan') {
   const control = calls.filter((call) => call.name !== 'capability_details');
   const first = control[0]?.name;
   const firstDelegate = control.findIndex((call) => call.name === 'delegate_capability');
   const firstSubmit = control.findIndex((call) => call.name === 'submit_plan');
   const delegatedBeforePlan = firstDelegate !== -1 && (firstSubmit === -1 || firstDelegate < firstSubmit);
-  return { passed: first === 'submit_plan', first: first ?? 'none', delegatedBeforePlan };
+  const passed = expect === 'ask' ? firstDelegate === -1 : first === 'submit_plan';
+  return { passed, first: first ?? 'none', delegatedBeforePlan };
 }
 
-const CURRENT_GUIDANCE = '本 run 从空计划开始：需要执行时，先用 submit_plan 建立本 run 的计划，读取工具返回后再自主决定下一步；计划建立后才用 delegate_capability 明确交接执行。缺少用户独占的信息、选择或授权时直接询问用户。main messages 中以往的 delegate_capability 都是在各自 run 建立计划后发出的，规划过程不保留在主会话中；它们只是历史执行记录，不表示本 run 可以跳过 submit_plan。';
-const PREVIOUS_GUIDANCE = '通过 submit_plan 建立计划，读取工具返回后自主决定下一步；使用 delegate_capability 明确交接执行，缺少用户独占的信息、选择或授权时直接询问用户。';
-export type GuidanceVariant = 'current' | 'previous';
+// Shipped Entry wording, and the wording each baseline restores.
+const SHIPPED_GUIDANCE = 'delegate_capability 只执行本 run 计划中的下一项，而 Entry 时本 run 的计划为空：需要执行时先用 submit_plan 建立计划，读取工具返回后再自主决定下一步，计划建立后才委派。缺少用户独占的信息、选择或授权时直接询问用户。main messages 只保留以往 run 的委派与交付，不保留它们的规划步骤；新请求即使与以往相似、是对此前提议的确认或要求“同样处理”，也要先为本 run 提交计划。';
+const SHIPPED_INVOCATION = 'This run has no plan yet. Interpret the user request, then call submit_plan before any delegate_capability; delegations in earlier runs followed plans of their own and are not a pattern to repeat. Ask the user directly when only they can supply missing information, a choice or an authorization. Preserve established requirements unless the user requests a change.';
+const PREVIOUS_INVOCATION = 'Interpret the user request before submitting the execution plan. Preserve established requirements unless the user requests a change.';
+const BASELINES = {
+  // First plan-first attempt: system wording only, invocation unchanged.
+  pr955: [[SHIPPED_GUIDANCE, '本 run 从空计划开始：需要执行时，先用 submit_plan 建立本 run 的计划，读取工具返回后再自主决定下一步；计划建立后才用 delegate_capability 明确交接执行。缺少用户独占的信息、选择或授权时直接询问用户。main messages 中以往的 delegate_capability 都是在各自 run 建立计划后发出的，规划过程不保留在主会话中；它们只是历史执行记录，不表示本 run 可以跳过 submit_plan。'],
+    [SHIPPED_INVOCATION, PREVIOUS_INVOCATION]],
+  // Before plan-first.
+  previous: [[SHIPPED_GUIDANCE, '通过 submit_plan 建立计划，读取工具返回后自主决定下一步；使用 delegate_capability 明确交接执行，缺少用户独占的信息、选择或授权时直接询问用户。'],
+    [SHIPPED_INVOCATION, PREVIOUS_INVOCATION]],
+} as const;
+export const GUIDANCE_VARIANTS = ['current', 'pr955', 'previous'] as const;
+export type GuidanceVariant = typeof GUIDANCE_VARIANTS[number];
 
-/** A/B baseline: swap the shipped Entry guidance for the wording before plan-first. */
+/** A/B baselines: swap the shipped Entry guidance and invocation for an earlier wording. */
 export function withGuidance(messages: BaseMessage[], variant: GuidanceVariant): BaseMessage[] {
   if (variant === 'current') return messages;
-  let replaced = false;
-  const swap = (text: string) => {
-    if (!text.includes(CURRENT_GUIDANCE)) return text;
-    replaced = true;
-    return text.replace(CURRENT_GUIDANCE, PREVIOUS_GUIDANCE);
-  };
+  const pending = new Set<string>(BASELINES[variant].map(([from]) => from));
+  const swap = (text: string) => BASELINES[variant].reduce((out, [from, to]) => {
+    if (!out.includes(from)) return out;
+    pending.delete(from);
+    return out.replace(from, to);
+  }, text);
   const output = messages.map((message) => {
-    if (!SystemMessage.isInstance(message)) return message;
+    if (!SystemMessage.isInstance(message) && !HumanMessage.isInstance(message)) return message;
     // The composed role prompt arrives as content blocks; keep the shape.
     const content = typeof message.content === 'string' ? swap(message.content)
       : message.content.map((block) => block.type === 'text' ? { ...block, text: swap(block.text as string) } : block);
-    return new SystemMessage({ ...message, content });
+    if (content === message.content) return message;
+    return SystemMessage.isInstance(message) ? new SystemMessage({ ...message, content }) : new HumanMessage({ ...message, content });
   });
-  if (!replaced) throw new Error('Entry guidance changed; update the A/B baseline.');
+  if (pending.size) throw new Error('Entry guidance changed; update the A/B baselines.');
   return output;
 }

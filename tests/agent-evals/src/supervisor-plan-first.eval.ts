@@ -5,28 +5,32 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createRunSupervisorProbe } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
-import { planFirstInput, planFirstScenarios, scorePlanFirst, withGuidance, type GuidanceVariant as Variant } from './supervisor-plan-first';
+import { GUIDANCE_VARIANTS, planFirstInput, planFirstScenarios, scorePlanFirst, withGuidance, type GuidanceVariant as Variant } from './supervisor-plan-first';
 
 /**
  * Real-model eval: after plan_request, does a new run's Supervisor call
  * submit_plan before delegating, even when every earlier run in main history
- * reads "plan_request → delegate_capability"?
+ * reads "plan_request → delegate_capability"? `ask` scenarios guard the other
+ * side: a request only the user can unblock must not be delegated.
  *
- * Env: PLAN_FIRST_PRIOR_COUNTS (default 0,3,8), PLAN_FIRST_VARIANTS (current,previous),
- * PROMPT_EVAL_REPEATS (default 3), EVAL_CASES (scenario names), PROMPT_EVAL_OUTPUT_DIR.
- * `previous` swaps in the Entry guidance from before the plan-first wording, as an A/B baseline.
+ * Env: PLAN_FIRST_PRIOR_COUNTS (default 0,3,8,16), PLAN_FIRST_VARIANTS (default current,previous;
+ * also pr955), PROMPT_EVAL_REPEATS (default 3), PLAN_FIRST_CONCURRENCY (default 4),
+ * EVAL_CASES (scenario names), PROMPT_EVAL_OUTPUT_DIR.
+ * Baselines swap in earlier Entry wording: `pr955` the first plan-first attempt, `previous` before it.
  */
 
 const configPath = process.env.PROMPT_EVAL_CONFIG_PATH ?? join(homedir(), '.pinpawo', 'config.json');
 const profileId = process.env.PROMPT_EVAL_PROFILE_ID
   ?? (JSON.parse(readFileSync(configPath, 'utf8')) as { models: { defaultProfileId: string } }).models.defaultProfileId;
-const priorCounts = (process.env.PLAN_FIRST_PRIOR_COUNTS ?? '0,3,8').split(',').map(Number);
+const priorCounts = (process.env.PLAN_FIRST_PRIOR_COUNTS ?? '0,3,8,16').split(',').map(Number);
 const variants = (process.env.PLAN_FIRST_VARIANTS ?? 'current,previous').split(',') as Variant[];
 const repeats = Number(process.env.PROMPT_EVAL_REPEATS ?? 3);
+const concurrency = Number(process.env.PLAN_FIRST_CONCURRENCY ?? 4);
 const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? []);
 if (priorCounts.some((n) => !Number.isInteger(n) || n < 0 || n > 40)
-  || variants.some((v) => !['current', 'previous'].includes(v))
-  || !Number.isInteger(repeats) || repeats < 1 || repeats > 10) throw new Error('Invalid evaluation matrix');
+  || variants.some((v) => !GUIDANCE_VARIANTS.includes(v))
+  || !Number.isInteger(repeats) || repeats < 1 || repeats > 10
+  || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('Invalid evaluation matrix');
 const scenarioNames = planFirstScenarios(0).map((s) => s.name);
 if ([...selected].some((name) => !scenarioNames.includes(name))) throw new Error('Unknown EVAL_CASES entry.');
 const output = process.env.PROMPT_EVAL_OUTPUT_DIR ?? '/tmp/supervisor-plan-first';
@@ -38,7 +42,7 @@ const pending = priorCounts.flatMap((count) => planFirstScenarios(count)
     Array.from({ length: repeats }, (_, repeat) => ({ count, scenario, variant, repeat })))));
 const rows: Array<Record<string, unknown>> = [];
 
-await Promise.all(Array.from({ length: 2 }, async () => {
+await Promise.all(Array.from({ length: concurrency }, async () => {
   while (pending.length) {
     const spec = pending.shift()!;
     const id = `${spec.scenario.name}-${spec.count}-${spec.variant}-${spec.repeat}`;
@@ -67,9 +71,10 @@ await Promise.all(Array.from({ length: 2 }, async () => {
       );
     } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
     const calls = turns.flatMap((turn) => turn.calls);
-    const score = scorePlanFirst(calls);
-    const row = { id, case: spec.scenario.name, priorRuns: spec.scenario.prior.length, variant: spec.variant, repeat: spec.repeat,
-      model: subject.metadata.model, passed: score.passed, first: score.first, delegatedBeforePlan: score.delegatedBeforePlan,
+    const score = scorePlanFirst(calls, spec.scenario.expect);
+    const row = { id, case: spec.scenario.name, expect: spec.scenario.expect, history: spec.count, priorRuns: spec.scenario.prior.length,
+      variant: spec.variant, repeat: spec.repeat, model: subject.metadata.model, passed: score.passed, first: score.first,
+      delegatedBeforePlan: score.delegatedBeforePlan, modelTurns: turns.length,
       callSequence: calls.map((call) => call.name), error, turns };
     rows.push(row);
     writeFileSync(join(output, `${id}.json`), JSON.stringify(row, null, 2));
@@ -78,13 +83,16 @@ await Promise.all(Array.from({ length: 2 }, async () => {
 }));
 
 const summary: Record<string, { passed: number; total: number }> = {};
-for (const row of rows) {
-  const key = `${row.variant} / ${row.case} / prior=${row.priorRuns}`;
+const tally = (key: string, passed: unknown) => {
   summary[key] ??= { passed: 0, total: 0 };
   summary[key].total += 1;
-  if (row.passed) summary[key].passed += 1;
+  if (passed) summary[key].passed += 1;
+};
+for (const row of rows) {
+  tally(`${row.variant} / ${row.case} / history=${row.history}`, row.passed);
+  tally(`${row.variant} / ALL`, row.passed);
 }
 writeFileSync(join(output, 'summary.json'), JSON.stringify({ profileId, priorCounts, variants, repeats, summary, rows }, null, 2));
 for (const [key, { passed, total }] of Object.entries(summary).sort()) console.log(`${key}: ${passed}/${total}`);
-// Gate only on the shipped guidance; the previous wording is a baseline.
+// Gate only on the shipped guidance; earlier wordings are baselines.
 process.exitCode = rows.some((row) => row.variant === 'current' && !row.passed) ? 1 : 0;

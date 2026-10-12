@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, SystemMessage } from '@langchain/core/messages';
-import { buildRunSupervisorAgentSystemPrompt } from '../../../packages/pet-agent/src/agent/orchestrator/prompts/runSupervisorAgent';
+import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { buildRunSupervisorAgentSystemPrompt, buildRunSupervisorTurnInput } from '../../../packages/pet-agent/src/agent/orchestrator/prompts/runSupervisorAgent';
 import { planFirstInput, planFirstScenarios, scorePlanFirst, withGuidance } from './supervisor-plan-first';
 
 test('fixture reproduces main history: plan_request then delegate per earlier run, no submit_plan', () => {
@@ -19,14 +19,14 @@ test('fixture reproduces main history: plan_request then delegate per earlier ru
   }
 });
 
-test('zero prior runs keeps only the current request, except where the scenario needs one', () => {
-  const [unrelated, similar, confirm] = planFirstScenarios(0);
-  assert.equal(unrelated.prior.length, 0);
-  assert.equal(similar.prior.length, 1);
-  assert.equal(confirm.prior.length, 1);
+test('zero prior runs keeps only the scenario-specific run', () => {
+  for (const scenario of planFirstScenarios(0)) {
+    assert.equal(scenario.prior.length, scenario.name === 'new-unrelated-request' ? 0 : 1, scenario.name);
+  }
+  assert.equal(planFirstScenarios(16).find((s) => s.name === 'similar-follow-up')!.prior.length, 17);
 });
 
-test('score passes only when submit_plan is the first control decision', () => {
+test('plan scenarios pass only when submit_plan is the first control decision', () => {
   assert.equal(scorePlanFirst([{ name: 'submit_plan' }, { name: 'delegate_capability' }]).passed, true);
   assert.equal(scorePlanFirst([{ name: 'capability_details' }, { name: 'submit_plan' }]).passed, true);
   assert.deepEqual(scorePlanFirst([{ name: 'delegate_capability' }, { name: 'submit_plan' }]),
@@ -34,11 +34,24 @@ test('score passes only when submit_plan is the first control decision', () => {
   assert.deepEqual(scorePlanFirst([]), { passed: false, first: 'none', delegatedBeforePlan: false });
 });
 
-test('previous-guidance baseline swaps exactly the shipped Entry guidance', () => {
+test('ask scenarios pass when nothing is delegated', () => {
+  assert.equal(scorePlanFirst([], 'ask').passed, true);
+  assert.equal(scorePlanFirst([{ name: 'submit_plan' }], 'ask').passed, true);
+  assert.equal(scorePlanFirst([{ name: 'submit_plan' }, { name: 'delegate_capability' }], 'ask').passed, false);
+});
+
+test('baselines swap exactly the shipped Entry guidance and invocation', () => {
   const role = new SystemMessage({ content: [{ type: 'text', text: buildRunSupervisorAgentSystemPrompt('entry') }] });
-  const [swapped] = withGuidance([role], 'previous');
-  const text = JSON.stringify(swapped.content);
-  assert.equal(text.includes('不表示本 run 可以跳过 submit_plan'), false);
-  assert.equal(text.includes('通过 submit_plan 建立计划'), true);
-  assert.equal(withGuidance([role], 'current')[0], role);
+  const scenario = planFirstScenarios(0)[0];
+  const turn = new HumanMessage(buildRunSupervisorTurnInput(planFirstInput(scenario, 'baseline')));
+  for (const variant of ['pr955', 'previous'] as const) {
+    const [swappedRole, swappedTurn] = withGuidance([role, turn], variant);
+    const text = JSON.stringify(swappedRole.content);
+    assert.equal(text.includes('只执行本 run 计划中的下一项'), false);
+    assert.equal(text.includes(variant === 'pr955' ? '不表示本 run 可以跳过 submit_plan' : '通过 submit_plan 建立计划'), true);
+    assert.match(swappedTurn.content as string, /Interpret the user request before submitting the execution plan\./);
+    assert.doesNotMatch(swappedTurn.content as string, /This run has no plan yet/);
+  }
+  assert.deepEqual(withGuidance([role, turn], 'current'), [role, turn]);
+  assert.throws(() => withGuidance([turn], 'previous'), /update the A\/B baselines/);
 });

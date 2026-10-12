@@ -8,10 +8,6 @@ import {
 import { parsePendingInterruptProjection } from './review';
 import { parseResultReferences } from './resultReferences';
 import type {
-  ReviewResponse,
-  ReviewSpec,
-} from './review';
-import type {
   AgentErrorCode,
   AgentOperationRaw,
   AgentOperationPhase,
@@ -32,7 +28,6 @@ import {
   parseAgentSessionSummary,
 } from './parser';
 import {
-  isAgentReviewSpecValue,
   isAgentToolCallStatus,
   parseAgentMessageToolCalls,
   parseAgentPlan,
@@ -434,38 +429,6 @@ function isAbsoluteLocalPath(path: string) {
 function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
   const allowed = new Set(allowedKeys);
   return Object.keys(record).every((key) => allowed.has(key));
-}
-
-function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
-  const review = readRecord(record, key);
-  return isAgentReviewSpecValue(review) ? review : null;
-}
-
-function readReviewResponse(value: unknown): ReviewResponse | null {
-  const record = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  if (!record || !hasOnlyKeys(record, ['interactionId', 'reviewId', 'selectedOptionId', 'input'])) return null;
-  const interactionId = readOptionalString(record, 'interactionId') ?? readString(record, 'reviewId');
-  const selectedOptionId = readString(record, 'selectedOptionId');
-  const input = readRecord(record, 'input');
-  if (record.input !== undefined && (!input || !isJsonValue(input))) return null;
-  return interactionId && selectedOptionId
-    ? {
-        interactionId,
-        selectedOptionId,
-        ...(input ? { input: input as ContractJsonObject } : {}),
-      }
-    : null;
-}
-
-function readReviewResponses(record: Record<string, unknown>, key: string): ReviewResponse[] | null {
-  const value = record[key];
-  if (value === undefined) return null;
-  if (!Array.isArray(value)) return null;
-  const responses = value.map(readReviewResponse);
-  if (responses.some((response) => !response) || responses.length === 0) return null;
-  return responses as ReviewResponse[];
 }
 
 function readToolAuthorizationMode(

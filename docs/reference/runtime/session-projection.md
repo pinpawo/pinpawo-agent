@@ -285,9 +285,8 @@ events and snapshots retain their canonical payload, including operation
 Pending Chat interrupts are durable in the implicit active thread's LangGraph
 checkpoint. Every response attempt reloads that checkpoint and identifies the
 continuation with `interruptId`; `interactionId` identifies one item inside a
-human-review payload. The parser accepts legacy `actionId` and `reviewId` only
-as inbound aliases and normalizes them immediately. Decisions remain ordered as
-supplied by the human-review payload.
+human-review payload. Decisions remain ordered as supplied by the human-review
+payload.
 
 Studio dispatch, `petId`, and backend persistence are outside this Chat
 projection contract. Studio may reuse the `PendingInterrupt` value contract,

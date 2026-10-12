@@ -134,9 +134,11 @@ function toolCallLabel(call: Pick<AgentMessageToolCall, 'name'>) {
   return TOOL_CALL_LABEL[call.name] ?? call.name;
 }
 
+// Labels say what happens from the user's side, never the runtime's own
+// terms (planning requests, capabilities, delegation).
 const TOOL_CALL_LABEL: Record<string, string> = {
-  delegate_capability: '交给能力执行',
-  plan_request: '制定计划',
+  delegate_capability: '执行目标',
+  plan_request: '确定目标',
 };
 
 const TOOL_CALL_DETAIL: Record<string, (args: Record<string, unknown>) => string | null> = {

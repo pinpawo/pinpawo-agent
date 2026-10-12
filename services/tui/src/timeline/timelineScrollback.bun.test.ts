@@ -532,7 +532,7 @@ test('tool-call steps read as work, not as messages', async () => {
       { ...assistantMessage('删好了。', 'completed'), id: 'reply', createdAt: at },
     ]));
     const rows = setup.cellOutput.takeText().split('\n').map(row => row.trimEnd());
-    const step = rows.findIndex(row => row.startsWith('▸ 制定计划 · 删除 venv'));
+    const step = rows.findIndex(row => row.startsWith('▸ 确定目标 · 删除 venv'));
     assert.ok(step > 0);
     // No timestamp of its own, and its work follows without a gap.
     assert.doesNotMatch(rows[step - 1]!, /\[\d\d:\d\d:\d\d\]/);
@@ -540,7 +540,7 @@ test('tool-call steps read as work, not as messages', async () => {
     // The next message steps back out with a blank line.
     assert.deepEqual(rows.slice(step + 2, step + 4).map(row => row.trim() === '' ? '' : 'label'), ['', 'label']);
     const spans = setup.styleOutput.take().flatMap(lines => lines.flatMap(line => line.spans));
-    const stepSpan = spans.find(span => span.text.includes('制定计划'));
+    const stepSpan = spans.find(span => span.text.includes('确定目标'));
     assert.ok(stepSpan?.fg.equals(RGBA.fromHex('#7aa2c8')), 'a step is colored apart from message text');
   } finally {
     timeline.destroy();
@@ -560,13 +560,13 @@ test('a committed call that later fails gets its outcome as a new row', async ()
       kind: 'tool', title: 'Read file', phase: 'completed' };
     timeline.render(session([user, message, work], 'request-1'));
     const first = committedText();
-    assert.match(first, /▸ 制定计划 · 定位问题/);
+    assert.match(first, /▸ 确定目标 · 定位问题/);
     assert.doesNotMatch(first, /失败/);
 
     const failed = { ...message, toolCalls: [{ ...call, status: 'failed' as const }] };
     timeline.render(session([user, failed, work], 'request-1'));
     const outcome = committedText();
-    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 制定计划（失败）'],
+    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 确定目标（失败）'],
       'only the outcome is written; committed rows stay as they are');
 
     // The completion snapshot carries the same outcome: nothing more to write.

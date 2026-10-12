@@ -76,8 +76,8 @@ test('transcript pager holds what each handoff was given and why a failed one st
       { id: 'c2', name: 'delegate_capability', args: { briefing: '## 任务\n检查 PET.md' }, status: 'failed', error: '没有可执行的计划项' },
     ],
   }]));
-  assert.match(content, /▸ 制定计划\n  评估项目说明文档\n  并确认 PET.md 是否存在\n/);
-  assert.match(content, /▸ 交给能力执行（失败）\n  ## 任务\n  检查 PET.md\n  ⎿ 没有可执行的计划项/);
+  assert.match(content, /▸ 确定目标\n  评估项目说明文档\n  并确认 PET.md 是否存在\n/);
+  assert.match(content, /▸ 执行目标（失败）\n  ## 任务\n  检查 PET.md\n  ⎿ 没有可执行的计划项/);
 });
 
 test('transcript pager receives a temporary snapshot and cleans it up', async () => {

@@ -51,10 +51,17 @@ export function readMessageToolCalls(message: BaseMessage): Array<Omit<AgentMess
 }
 
 /** Main-conversation tool results keyed by the call they answer; lane results are private work. */
-export function readToolResultStatuses(messages: readonly unknown[]) {
+export function readToolResults(messages: readonly unknown[]) {
   return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && isMainConversationMessage(message)
-    ? [[message.tool_call_id, message.status === 'error' ? 'failed' as const : 'completed' as const]]
+    ? [[message.tool_call_id, readToolResult(message)]]
     : []));
+}
+
+/** A call's outcome; a failure keeps what the tool returned, which says why. */
+function readToolResult(message: ToolMessage): { status: 'completed' | 'failed'; error?: string } {
+  return message.status === 'error'
+    ? { status: 'failed', error: readFinalMessageText(message) }
+    : { status: 'completed' };
 }
 
 /** A public main-conversation message that this run wrote. */

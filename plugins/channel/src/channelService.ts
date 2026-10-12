@@ -54,6 +54,8 @@ export const channelToolCallSettlementSchema = z.object({
   messageId: identifier,
   callId: identifier,
   status: z.enum(['completed', 'failed']),
+  // Carried with a failure; Channel records only the outcome.
+  error: z.string().optional(),
 }).strict();
 export type ChannelToolCall = AgentMessageToolCall;
 export type ChannelMessage = z.infer<typeof channelMessageSchema> & {

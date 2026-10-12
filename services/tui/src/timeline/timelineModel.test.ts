@@ -53,7 +53,7 @@ test('a running tool call the agent made names the live activity until the run e
     timeline: [{ ...assistant, text: '', toolCalls: [{ id: 'call', name: 'delegate_capability',
       args: { briefing: 'Verify contract extraction\nLong private execution instructions' }, status: 'running' }] }],
   };
-  assert.equal(formatLiveSession(session), '交给能力执行');
+  assert.equal(formatLiveSession(session), '交给能力执行 · Verify contract extraction');
   assert.equal(formatLiveSession({ ...session, activeRun: null }), 'idle');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
@@ -66,11 +66,17 @@ test('a message\'s tool calls head their work and commit before they return', ()
   const call = { id: 'call', name: 'delegate_capability', args: { briefing: '\n读取 issue #826  并定位相关代码\n先看评论' }, status: 'running' as const };
   const message: AgentTimelineEntry = { ...assistant, id: 'dispatch', text: '先看 issue。', toolCalls: [call] };
   const lines = formatTimelineEntry(message, { width: 80 }).split('\n');
-  assert.deepEqual(lines, ['| 先看 issue。', '▸ 交给能力执行']);
-  // The briefing is the Capability's instructions, never shown as if it were said.
-  assert.doesNotMatch(lines.join('\n'), /delegate_capability|issue #826|先看评论/);
-  assert.equal(formatTimelineEntry({ ...message, text: '' }), '▸ 交给能力执行');
-  assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, name: 'plan_request', args: { goal: '检查并评估项目说明文档' } }] }), '▸ 制定计划');
+  // The line names the step, then previews what it was given on one line.
+  assert.deepEqual(lines, ['| 先看 issue。', '▸ 交给能力执行 · 读取 issue #826 并定位相关代码']);
+  assert.doesNotMatch(lines.join('\n'), /delegate_capability|先看评论/);
+  assert.equal(formatTimelineEntry({ ...message, text: '' }), '▸ 交给能力执行 · 读取 issue #826 并定位相关代码');
+  // A briefing's Markdown heading is skipped, and a long argument stays one short line.
+  assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, args: { briefing: '## 任务\n\n检查 PET.md' } }] }),
+    '▸ 交给能力执行 · 检查 PET.md');
+  const goal = '检查并评估项目中的整体处理说明文档（用户特别点名 PET.md），确认该文件在项目中是否存在，并给出缺口清单与补写建议';
+  const planned = formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, name: 'plan_request', args: { goal } }] });
+  assert.match(planned, /^▸ 制定计划 · 检查并评估项目中的.*…$/);
+  assert.ok(stringWidth(planned) < 64);
   assert.match(formatTimelineEntry({ ...message, toolCalls: [{ ...call, status: 'failed' }] }), /（失败）/);
   // Other tools need no knowledge here: they show by name.
   assert.equal(formatTimelineEntry({ ...message, text: '', toolCalls: [{ ...call, name: 'lookup', args: { q: 'x' } }] }), '▸ lookup');
@@ -100,15 +106,18 @@ test('a call that ends badly after its line was committed gets an outcome row, n
   const live = withToolCallOutcomes([user, message, work]);
   const committed = live.slice(0, countSettledTimelinePrefix(live)).map(timelineFingerprint);
   assert.equal(committed.length, 3);
-  for (const [status, outcome] of [['failed', '▸ 制定计划（失败）'], ['interrupted', '▸ 制定计划（已中断）']] as const) {
+  for (const [status, outcome] of [['failed', '▸ 制定计划 · 定位问题（失败）'], ['interrupted', '▸ 制定计划 · 定位问题（已中断）']] as const) {
     // A fresh snapshot (the run's completion) carries the outcome on the call itself.
     const settled = withToolCallOutcomes([{ ...user }, { ...message, id: 'message:1:assistant', toolCalls: [{ ...call, status }] },
       { ...work }, { ...assistant, text: '结束了。' }]);
     assert.equal(findFirstUncommittedEntry(settled, committed), 3, 'nothing committed is written again');
-    assert.equal(formatTimelineEntry(settled[1]!), '▸ 制定计划');
+    assert.equal(formatTimelineEntry(settled[1]!), '▸ 制定计划 · 定位问题');
     assert.deepEqual(settled.slice(3).map(entry => formatTimelineEntry(entry)), [outcome, '| 结束了。']);
     assert.equal(countSettledTimelinePrefix(settled, 3), settled.length);
   }
+  // A failure's outcome row carries what the tool returned: the reason it stopped.
+  const failed = withToolCallOutcomes([user, { ...message, toolCalls: [{ ...call, status: 'failed', error: '没有可执行的计划项\n请先 submit_plan' }] }, work]);
+  assert.equal(formatTimelineEntry(failed[3]!), '▸ 制定计划 · 定位问题（失败）\n  ⎿ 没有可执行的计划项\n    请先 submit_plan');
   // A completed call needs no row of its own.
   const completed = [user, { ...message, toolCalls: [{ ...call, status: 'completed' as const }] }, work];
   assert.equal(withToolCallOutcomes(completed), completed);

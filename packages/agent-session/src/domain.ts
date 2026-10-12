@@ -26,6 +26,8 @@ export type AgentMessageToolCall = {
   name: string;
   args: Record<string, unknown>;
   status: AgentToolCallStatus;
+  /** A failed call's result, as the tool returned it. */
+  error?: string;
 };
 
 export type AgentMessageEntry = {

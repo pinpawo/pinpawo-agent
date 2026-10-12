@@ -98,6 +98,8 @@ export type AgentToolCallSettledEvent = {
   messageId: string;
   callId: string;
   status: Exclude<AgentToolCallStatus, 'running'>;
+  /** A failed call's result, as the tool returned it. */
+  error?: string;
 };
 
 export type AgentOperationPhase =

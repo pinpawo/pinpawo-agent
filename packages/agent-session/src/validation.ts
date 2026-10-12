@@ -35,15 +35,17 @@ export function parseAgentMessageToolCalls(value: unknown, withStatus: boolean) 
   const calls = value.flatMap((call) => {
     if (
       !isRecord(call)
-      || Object.keys(call).some(key => !['id', 'name', 'args', 'status'].includes(key))
+      || Object.keys(call).some(key => !['id', 'name', 'args', 'status', ...(withStatus ? ['error'] : [])].includes(key))
       || typeof call.id !== 'string'
       || typeof call.name !== 'string'
       || !isRecord(call.args)
       || (withStatus ? !isAgentToolCallStatus(call.status) : call.status !== undefined)
+      || (call.error !== undefined && typeof call.error !== 'string')
     ) return [];
     return [{
       id: call.id, name: call.name, args: call.args,
       ...(withStatus ? { status: call.status as AgentToolCallStatus } : {}),
+      ...(typeof call.error === 'string' ? { error: call.error } : {}),
     }];
   });
   return calls.length === value.length ? calls : null;

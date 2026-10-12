@@ -10,6 +10,7 @@ import {
 } from '../terminal/commandLine';
 import { formatTimelineEntry } from '../timeline/timelineModel';
 import { buildOperationDetailText } from '../timeline/operationDisplay';
+import { buildMessageDisplayLines, isToolCallMessageEntry } from '../timeline/messageDisplay';
 
 export type TranscriptPagerSpawn = (
   command: string,
@@ -95,7 +96,11 @@ export function formatTranscriptPagerText(session: AgentSession) {
   for (const entry of session.timeline) {
     if (entry.type === 'message' && entry.role === 'subagent') continue;
     lines.push(
-      sanitizePagerText(entry.type === 'operation' ? buildOperationDetailText(entry) : formatTimelineEntry(entry)),
+      sanitizePagerText(entry.type === 'operation'
+        ? buildOperationDetailText(entry)
+        : isToolCallMessageEntry(entry)
+          ? buildMessageDisplayLines(entry, { toolCallDetail: true }).map(line => line.text).join('\n')
+          : formatTimelineEntry(entry)),
       '',
     );
     if (entry.type === 'message') {

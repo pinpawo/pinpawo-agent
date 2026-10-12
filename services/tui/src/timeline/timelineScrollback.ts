@@ -36,7 +36,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { hasOpenToolCalls, isToolCallMessageEntry, toolCallTitle } from './messageDisplay';
+import { buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, toolCallTitle } from './messageDisplay';
 
 const USER_MESSAGE_BACKGROUND = '#272c33';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
@@ -685,7 +685,7 @@ function populateTimelineRoot(
       });
       detailSurface.add(assistantMarkdown.container);
       if (isToolCallMessageEntry(entry)) {
-        lines.slice(-entry.toolCalls!.length).forEach(line => addLine(line, detailSurface));
+        buildToolCallDisplayLines(entry).forEach(line => addLine(line, detailSurface));
         openToolCallScope(entry);
       }
       if (root.getChildrenCount() > childCountBeforeEntry) {

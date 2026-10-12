@@ -68,6 +68,18 @@ test('transcript pager shows ordered replies and reference bodies, excluding amb
   assert.ok(content.indexOf('Final answer') < content.indexOf('done�[31m'));
 });
 
+test('transcript pager holds what each handoff was given and why a failed one stopped', () => {
+  const content = formatTranscriptPagerText(createSession([{
+    id: 'm1', type: 'message', role: 'assistant', text: '', status: 'completed',
+    toolCalls: [
+      { id: 'c1', name: 'plan_request', args: { goal: '评估项目说明文档\n并确认 PET.md 是否存在' }, status: 'completed' },
+      { id: 'c2', name: 'delegate_capability', args: { briefing: '## 任务\n检查 PET.md' }, status: 'failed', error: '没有可执行的计划项' },
+    ],
+  }]));
+  assert.match(content, /▸ 制定计划\n  评估项目说明文档\n  并确认 PET.md 是否存在\n/);
+  assert.match(content, /▸ 交给能力执行（失败）\n  ## 任务\n  检查 PET.md\n  ⎿ 没有可执行的计划项/);
+});
+
 test('transcript pager receives a temporary snapshot and cleans it up', async () => {
   const tmpRoot = mkdtempSync(path.join(tmpdir(), 'pinpawo-pager-test-'));
   let pagedFile = '';

@@ -432,7 +432,8 @@ export async function runAgentSessionTurn(
           break;
         case 'tool_call.settled':
           emitEvent({ type: 'tool_call.settled', requestId, messageId: chatEvent.messageId,
-            callId: chatEvent.callId, status: chatEvent.status });
+            callId: chatEvent.callId, status: chatEvent.status,
+            ...(chatEvent.error !== undefined ? { error: chatEvent.error } : {}) });
           break;
         case 'guard.decision':
           // Decision records are observability, not chat surface.

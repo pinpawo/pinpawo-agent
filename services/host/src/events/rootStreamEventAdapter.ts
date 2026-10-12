@@ -1,4 +1,4 @@
-import { isPublicRunMessage, readFinalMessageText, readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { isPublicRunMessage, readFinalMessageText, readMessageToolCalls, readToolResults } from '../agent/agentStreamEvents';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentMessageToolCall } from '@pinpawo/agent-session';
 import {
@@ -62,7 +62,7 @@ export type RootStreamChatEvent =
   /** Root committed a main message that calls tools; the run continues. */
   | { type: 'tool_calls.message'; messageId: string; text: string; toolCalls: Array<Omit<AgentMessageToolCall, 'status'>> }
   /** A main tool call announced in this stream, or open when it began, reached its outcome. */
-  | { type: 'tool_call.settled'; messageId: string; callId: string; status: 'completed' | 'failed' }
+  | { type: 'tool_call.settled'; messageId: string; callId: string; status: 'completed' | 'failed'; error?: string }
   /** Root state snapshot (drives final-messages tracking). */
   | { type: 'values'; values: Record<string, unknown> }
   /** The run paused on an interrupt (human review etc.). */
@@ -389,13 +389,13 @@ function* projectMainToolCalls(
   openToolCalls: Map<string, string>,
   announce: boolean,
 ): Generator<RootStreamChatEvent> {
-  const results = readToolResultStatuses(messages);
+  const results = readToolResults(messages);
   function* settle(): Generator<RootStreamChatEvent> {
     for (const [callId, messageId] of openToolCalls) {
-      const status = results.get(callId);
-      if (!status) continue;
+      const result = results.get(callId);
+      if (!result) continue;
       openToolCalls.delete(callId);
-      yield { type: 'tool_call.settled', messageId, callId, status };
+      yield { type: 'tool_call.settled', messageId, callId, ...result };
     }
   }
   // Earlier calls end before the message after them begins.

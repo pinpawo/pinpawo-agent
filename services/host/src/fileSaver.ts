@@ -4,6 +4,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -110,6 +111,36 @@ function safeReadDir(path: string) {
     return readdirSync(path);
   } catch {
     return [];
+  }
+}
+
+function isMissingPathError(error: unknown) {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+/**
+ * Directory listing for GC. Only a missing directory counts as empty; any other
+ * read error (EACCES, EIO, ENOTDIR, ...) propagates so GC stops before it can
+ * treat an unread directory's references as absent and sweep live objects.
+ */
+function readDirForGc(path: string) {
+  try {
+    return readdirSync(path);
+  } catch (error) {
+    if (isMissingPathError(error)) return [];
+    throw new Error(`checkpoint GC could not read directory: ${path}`, { cause: error });
+  }
+}
+
+/** Child directory names for GC; stray files (e.g. .DS_Store) are not store entries. */
+function readSubdirsForGc(path: string) {
+  try {
+    return readdirSync(path, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch (error) {
+    if (isMissingPathError(error)) return [];
+    throw new Error(`checkpoint GC could not read directory: ${path}`, { cause: error });
   }
 }
 
@@ -593,6 +624,15 @@ export class FileSaver extends BaseCheckpointSaver {
     }
   }
 
+  /** GC variant of readWritesManifest: an unreadable manifest aborts GC instead of dropping its references. */
+  private readWritesManifestForGc(path: string): WritesManifest {
+    try {
+      return JSON.parse(readFileSync(path, 'utf-8')) as WritesManifest;
+    } catch (error) {
+      throw new Error(`checkpoint writes manifest is unreadable: ${path}`, { cause: error });
+    }
+  }
+
   private readLatestCheckpointId(threadId: string, namespace: string) {
     try {
       const checkpointId = readFileSync(this.refPath(threadId, namespace), 'utf-8').trim();
@@ -912,6 +952,8 @@ export class FileSaver extends BaseCheckpointSaver {
       if (this.knownThreads.delete(encodePathSegment(threadId))) {
         this._loadedThreadCount -= 1;
       }
+      // If GC cannot scan the store it throws after the thread is already
+      // removed; its objects stay as orphans for the next successful GC.
       this.gcObjects();
     });
   }
@@ -919,12 +961,12 @@ export class FileSaver extends BaseCheckpointSaver {
   private collectReachableObjectHashes() {
     const hashes = new Set<string>();
     const threadsDir = join(this.casRootDir, 'threads');
-    for (const threadSegment of safeReadDir(threadsDir)) {
+    for (const threadSegment of readSubdirsForGc(threadsDir)) {
       const threadDir = join(threadsDir, threadSegment);
       const manifestsDir = join(threadDir, 'manifests');
-      for (const namespaceSegment of safeReadDir(manifestsDir)) {
+      for (const namespaceSegment of readDirForGc(manifestsDir)) {
         const namespaceDir = join(manifestsDir, namespaceSegment);
-        for (const fileName of safeReadDir(namespaceDir)) {
+        for (const fileName of readDirForGc(namespaceDir)) {
           if (!fileName.endsWith('.json')) continue;
           const manifest = this.readManifest(join(namespaceDir, fileName));
           hashes.add(manifest.checkpointShellHash);
@@ -942,12 +984,11 @@ export class FileSaver extends BaseCheckpointSaver {
         }
       }
       const writesDir = join(threadDir, 'writes');
-      for (const namespaceSegment of safeReadDir(writesDir)) {
+      for (const namespaceSegment of readDirForGc(writesDir)) {
         const namespaceDir = join(writesDir, namespaceSegment);
-        for (const fileName of safeReadDir(namespaceDir)) {
+        for (const fileName of readDirForGc(namespaceDir)) {
           if (!fileName.endsWith('.json')) continue;
-          const manifest = this.readWritesManifest(join(namespaceDir, fileName));
-          if (!manifest) continue;
+          const manifest = this.readWritesManifestForGc(join(namespaceDir, fileName));
           for (const write of Object.values(manifest.writes ?? {})) {
             hashes.add(write.valueHash);
           }
@@ -958,22 +999,24 @@ export class FileSaver extends BaseCheckpointSaver {
   }
 
   // GC walks every manifest to build the reachable set, then deletes any object
-  // not in it. Callers must hold the store-wide filesystem lock so another
+  // not in it. A scan that cannot read part of the store throws before any
+  // delete (#928): skipping an unreadable directory would leave its references
+  // out of the reachable set. Callers must hold the store-wide filesystem lock so another
   // process cannot publish an object between the reachability scan and delete.
   private gcObjects() {
     const objectsDir = join(this.casRootDir, 'objects');
     if (!existsSync(objectsDir)) return;
     const reachable = this.collectReachableObjectHashes();
-    for (const prefix of safeReadDir(objectsDir)) {
+    for (const prefix of readSubdirsForGc(objectsDir)) {
       const prefixDir = join(objectsDir, prefix);
-      for (const fileName of safeReadDir(prefixDir)) {
+      for (const fileName of readDirForGc(prefixDir)) {
         const hash = `${prefix}${fileName}`;
         if (!reachable.has(hash)) {
           rmSync(join(prefixDir, fileName), { force: true });
         }
       }
-      if (safeReadDir(prefixDir).length === 0) {
-        rmSync(prefixDir, { recursive: true, force: true });
+      if (readDirForGc(prefixDir).length === 0) {
+        rmdirSync(prefixDir);
       }
     }
   }

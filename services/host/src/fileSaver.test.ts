@@ -2,7 +2,8 @@ import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Checkpoint } from '@langchain/langgraph-checkpoint';
@@ -573,4 +574,158 @@ test('FileSaver bounds long checkpoint path segments without losing logical iden
     checkpoint_ns: namespace,
     checkpoint_id: 'cp-long',
   }]);
+});
+
+function snapshotObjectFiles(root: string) {
+  const objectsDir = join(root, 'checkpoints', 'objects');
+  const files = new Map<string, string>();
+  for (const prefix of readdirSync(objectsDir)) {
+    for (const fileName of readdirSync(join(objectsDir, prefix))) {
+      files.set(`${prefix}/${fileName}`, readFileSync(join(objectsDir, prefix, fileName)).toString('hex'));
+    }
+  }
+  return files;
+}
+
+/** Make readdirSync fail with `code` for one directory only, for the rest of the test. */
+function injectReadDirFailure(t: TestContext, targetDir: string, code: string) {
+  const original = fs.readdirSync;
+  const target = resolve(targetDir);
+  const failing = ((path: Parameters<typeof fs.readdirSync>[0], ...rest: unknown[]) => {
+    if (typeof path === 'string' && resolve(path) === target) {
+      throw Object.assign(new Error(`${code}: injected readdir failure, '${path}'`), { code });
+    }
+    return (original as (...args: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readdirSync;
+  fs.readdirSync = failing;
+  syncBuiltinESMExports();
+  const restore = () => {
+    if (fs.readdirSync !== failing) return;
+    fs.readdirSync = original;
+    syncBuiltinESMExports();
+  };
+  t.after(restore);
+  return restore;
+}
+
+async function seedStoreWithPendingWrite(t: TestContext) {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } }, checkpoint('cp-1', {
+    messages: [{ role: 'human', content: 'keep me' }],
+  }), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['messages', { role: 'ai', content: 'pending' }]], 'task-1');
+  return { root, filePath, config };
+}
+
+async function assertStoreIntact(root: string, filePath: string, config: RunnableConfigLike, before: Map<string, string>) {
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  const tuple = await new FileSaver(filePath).getTuple(config);
+  assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
+  assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);
+}
+
+type RunnableConfigLike = Parameters<FileSaver['getTuple']>[0];
+
+test('FileSaver startup GC fails without deleting when a store directory cannot be read', async (t) => {
+  const threadDir = ['checkpoints', 'threads', 'thread-1'];
+  const layers: Record<string, string[]> = {
+    threads: ['checkpoints', 'threads'],
+    manifests: [...threadDir, 'manifests'],
+    'manifest namespace': [...threadDir, 'manifests', '__root__'],
+    writes: [...threadDir, 'writes'],
+    'writes namespace': [...threadDir, 'writes', '__root__'],
+  };
+  for (const [layer, segments] of Object.entries(layers)) {
+    for (const code of ['EACCES', 'EIO']) {
+      await t.test(`${code} at ${layer}`, async (st) => {
+        const { root, filePath, config } = await seedStoreWithPendingWrite(st);
+        writeObject(root, { orphan: true });
+        const before = snapshotObjectFiles(root);
+        const host = new FileSaver(filePath);
+        host.acquireHostWriterLease('test-host');
+        st.after(() => host.releaseHostWriterLease());
+
+        const restore = injectReadDirFailure(st, join(root, ...segments), code);
+        await assert.rejects(() => host.runHostStartupMaintenance(), /checkpoint GC could not read directory/);
+        restore();
+
+        await assertStoreIntact(root, filePath, config, before);
+      });
+    }
+  }
+});
+
+test('FileSaver deleteThread GC fails without deleting objects of other threads when a scan fails', async (t) => {
+  const { root, filePath, config } = await seedStoreWithPendingWrite(t);
+  const saver = new FileSaver(filePath);
+  await saver.put({ configurable: { thread_id: 'thread-2' } }, checkpoint('cp-2', {
+    messages: [{ role: 'human', content: 'delete me' }],
+  }), { source: 'loop', step: 1, parents: {} });
+  const before = snapshotObjectFiles(root);
+
+  const restore = injectReadDirFailure(t, join(root, 'checkpoints', 'threads', 'thread-1', 'manifests'), 'EIO');
+  await assert.rejects(() => saver.deleteThread('thread-2'), /checkpoint GC could not read directory/);
+  restore();
+
+  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-2')), false);
+  await assertStoreIntact(root, filePath, config, before);
+});
+
+test('FileSaver GC does not remove an object prefix it cannot list', async (t) => {
+  const { root, filePath, config } = await seedStoreWithPendingWrite(t);
+  const orphanHash = writeObject(root, { orphan: true });
+  const before = snapshotObjectFiles(root);
+  const host = new FileSaver(filePath);
+  host.acquireHostWriterLease('test-host');
+  t.after(() => host.releaseHostWriterLease());
+
+  const restore = injectReadDirFailure(t, join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2)), 'EACCES');
+  await assert.rejects(() => host.runHostStartupMaintenance(), /checkpoint GC could not read directory/);
+  restore();
+
+  assert.equal(snapshotObjectFiles(root).get(`${orphanHash.slice(0, 2)}/${orphanHash.slice(2)}`), before.get(`${orphanHash.slice(0, 2)}/${orphanHash.slice(2)}`));
+  await host.runHostStartupMaintenance();
+  assert.equal(existsSync(join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
+  const tuple = await new FileSaver(filePath).getTuple(config);
+  assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
+});
+
+test('FileSaver GC fails without deleting when a manifest is invalid', async (t) => {
+  for (const kind of ['manifests', 'writes']) {
+    await t.test(kind, async (st) => {
+      const { root, filePath } = await seedStoreWithPendingWrite(st);
+      writeObject(root, { orphan: true });
+      const before = snapshotObjectFiles(root);
+      const host = new FileSaver(filePath);
+      host.acquireHostWriterLease('test-host');
+      st.after(() => host.releaseHostWriterLease());
+
+      writeFileSync(join(root, 'checkpoints', 'threads', 'thread-1', kind, '__root__', 'cp-1.json'), '{not json');
+      await assert.rejects(() => host.runHostStartupMaintenance(), /manifest is unreadable/);
+      assert.deepEqual(snapshotObjectFiles(root), before);
+    });
+  }
+});
+
+test('FileSaver startup GC handles a fresh root and ignores stray files in store directories', async (t) => {
+  const fresh = new FileSaver(join(createTempDir(t), 'checkpoints.json'));
+  fresh.acquireHostWriterLease('test-host');
+  t.after(() => fresh.releaseHostWriterLease());
+  await fresh.runHostStartupMaintenance();
+
+  const { root, filePath, config } = await seedStoreWithPendingWrite(t);
+  const orphanHash = writeObject(root, { orphan: true });
+  writeFileSync(join(root, 'checkpoints', 'threads', '.DS_Store'), '');
+  writeFileSync(join(root, 'checkpoints', 'objects', '.DS_Store'), '');
+  const host = new FileSaver(filePath);
+  host.acquireHostWriterLease('test-host');
+  t.after(() => host.releaseHostWriterLease());
+
+  await host.runHostStartupMaintenance();
+
+  assert.equal(existsSync(join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
+  const tuple = await new FileSaver(filePath).getTuple(config);
+  assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);
 });

@@ -719,6 +719,8 @@ test('FileSaver startup GC handles a fresh root and ignores stray files in store
   const orphanHash = writeObject(root, { orphan: true });
   writeFileSync(join(root, 'checkpoints', 'threads', '.DS_Store'), '');
   writeFileSync(join(root, 'checkpoints', 'objects', '.DS_Store'), '');
+  writeFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'manifests', '.DS_Store'), '');
+  writeFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '.DS_Store'), '');
   const host = new FileSaver(filePath);
   host.acquireHostWriterLease('test-host');
   t.after(() => host.releaseHostWriterLease());
@@ -727,5 +729,6 @@ test('FileSaver startup GC handles a fresh root and ignores stray files in store
 
   assert.equal(existsSync(join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
   const tuple = await new FileSaver(filePath).getTuple(config);
+  assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
   assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);
 });

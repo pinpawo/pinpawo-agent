@@ -964,7 +964,7 @@ export class FileSaver extends BaseCheckpointSaver {
     for (const threadSegment of readSubdirsForGc(threadsDir)) {
       const threadDir = join(threadsDir, threadSegment);
       const manifestsDir = join(threadDir, 'manifests');
-      for (const namespaceSegment of readDirForGc(manifestsDir)) {
+      for (const namespaceSegment of readSubdirsForGc(manifestsDir)) {
         const namespaceDir = join(manifestsDir, namespaceSegment);
         for (const fileName of readDirForGc(namespaceDir)) {
           if (!fileName.endsWith('.json')) continue;
@@ -984,7 +984,7 @@ export class FileSaver extends BaseCheckpointSaver {
         }
       }
       const writesDir = join(threadDir, 'writes');
-      for (const namespaceSegment of readDirForGc(writesDir)) {
+      for (const namespaceSegment of readSubdirsForGc(writesDir)) {
         const namespaceDir = join(writesDir, namespaceSegment);
         for (const fileName of readDirForGc(namespaceDir)) {
           if (!fileName.endsWith('.json')) continue;

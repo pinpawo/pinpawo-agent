@@ -24,6 +24,7 @@ export type TimelineDisplayLine = {
     | 'removed'
     | 'subagent'
     | 'system'
+    | 'tool-call'
     | 'user'
     | 'user-label'
     | `operation-${AgentOperationEntry['phase']}`;

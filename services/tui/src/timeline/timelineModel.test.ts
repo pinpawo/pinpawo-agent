@@ -106,7 +106,7 @@ test('a call that ends badly after its line was committed gets an outcome row, n
   const live = withToolCallOutcomes([user, message, work]);
   const committed = live.slice(0, countSettledTimelinePrefix(live)).map(timelineFingerprint);
   assert.equal(committed.length, 3);
-  for (const [status, outcome] of [['failed', '▸ 制定计划 · 定位问题（失败）'], ['interrupted', '▸ 制定计划 · 定位问题（已中断）']] as const) {
+  for (const [status, outcome] of [['failed', '▸ 制定计划（失败）'], ['interrupted', '▸ 制定计划（已中断）']] as const) {
     // A fresh snapshot (the run's completion) carries the outcome on the call itself.
     const settled = withToolCallOutcomes([{ ...user }, { ...message, id: 'message:1:assistant', toolCalls: [{ ...call, status }] },
       { ...work }, { ...assistant, text: '结束了。' }]);
@@ -117,7 +117,7 @@ test('a call that ends badly after its line was committed gets an outcome row, n
   }
   // A failure's outcome row carries what the tool returned: the reason it stopped.
   const failed = withToolCallOutcomes([user, { ...message, toolCalls: [{ ...call, status: 'failed', error: '没有可执行的计划项\n请先 submit_plan' }] }, work]);
-  assert.equal(formatTimelineEntry(failed[3]!), '▸ 制定计划 · 定位问题（失败）\n  ⎿ 没有可执行的计划项\n    请先 submit_plan');
+  assert.equal(formatTimelineEntry(failed[3]!), '▸ 制定计划（失败）\n  ⎿ 没有可执行的计划项\n    请先 submit_plan');
   // A completed call needs no row of its own.
   const completed = [user, { ...message, toolCalls: [{ ...call, status: 'completed' as const }] }, work];
   assert.equal(withToolCallOutcomes(completed), completed);

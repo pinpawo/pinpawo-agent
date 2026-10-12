@@ -10,7 +10,9 @@ export type MessageDisplayTone =
   | 'user'
   | 'user-label'
   | 'subagent'
-  | 'removed';
+  | 'removed'
+  | 'muted'
+  | 'tool-call';
 
 export type MessageDisplayLine = {
   text: string;
@@ -46,7 +48,9 @@ export function buildMessageDisplayLines(
       ];
     case 'assistant':
       return [
-        ...timestampLine(timestampLabel, 'assistant-label'),
+        // A message that only calls tools is a step in the work, like the
+        // operations under it, not something said: it carries no timestamp.
+        ...(isToolCallStep(entry) ? [] : timestampLine(timestampLabel, 'assistant-label')),
         ...(entry.text.trim() || !entry.toolCalls?.length ? logicalLines(
           normalizeAssistantMessageMarkdown(entry.text),
         ).map((line) => ({
@@ -68,6 +72,11 @@ export function isToolCallMessageEntry(entry: AgentTimelineEntry): entry is Agen
   return entry.type === 'message' && entry.role === 'assistant' && Boolean(entry.toolCalls?.length);
 }
 
+/** A message that only calls tools: no words for the user, just the step. */
+export function isToolCallStep(entry: AgentTimelineEntry): entry is AgentMessageEntry {
+  return isToolCallMessageEntry(entry) && !entry.text.trim();
+}
+
 /** Whether any of the message's calls still has work coming. */
 export function hasOpenToolCalls(entry: { toolCalls?: readonly AgentMessageToolCall[] }) {
   return entry.toolCalls?.some(call => call.status === 'running') ?? false;
@@ -81,10 +90,11 @@ export function hasOpenToolCalls(entry: { toolCalls?: readonly AgentMessageToolC
  */
 export function buildToolCallDisplayLines(entry: AgentMessageEntry): MessageDisplayLine[] {
   return (entry.toolCalls ?? []).flatMap(call => [
-    {
-      text: `▸ ${toolCallTitle(call)}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
-      tone: 'assistant' as const,
-    },
+    // A call that ended badly is reported on a row of its own after its work,
+    // so that row names the step and its outcome; the preview is above.
+    TOOL_CALL_OUTCOME[call.status]
+      ? { text: `▸ ${toolCallLabel(call)}（${TOOL_CALL_OUTCOME[call.status]}）`, tone: call.status === 'failed' ? 'removed' as const : 'system' as const }
+      : { text: `▸ ${toolCallTitle(call)}`, tone: 'tool-call' as const },
     ...(call.status === 'failed' ? toolCallErrorLines(call.error) : []),
   ]);
 }
@@ -97,7 +107,7 @@ export function buildToolCallDisplayLines(entry: AgentMessageEntry): MessageDisp
  * it in full.
  */
 export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>) {
-  const label = TOOL_CALL_LABEL[call.name] ?? call.name;
+  const label = toolCallLabel(call);
   const subject = toolCallSubject(call);
   return subject ? `${label} · ${truncateTerminalLine(subject.replace(/\s+/g, ' ').trim(), TOOL_CALL_SUBJECT_WIDTH)}` : label;
 }
@@ -109,8 +119,8 @@ export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>)
 export function buildToolCallDetailLines(entry: AgentMessageEntry): MessageDisplayLine[] {
   return (entry.toolCalls ?? []).flatMap(call => [
     {
-      text: `▸ ${TOOL_CALL_LABEL[call.name] ?? call.name}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
-      tone: 'assistant' as const,
+      text: `▸ ${toolCallLabel(call)}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
+      tone: 'tool-call' as const,
     },
     ...indent(TOOL_CALL_DETAIL[call.name]?.(call.args) ?? JSON.stringify(call.args, null, 2))
       .map(text => ({ text, tone: 'assistant' as const })),
@@ -118,6 +128,10 @@ export function buildToolCallDetailLines(entry: AgentMessageEntry): MessageDispl
       ? indent(call.error.trim(), 4).map((text, index) => ({ text: index === 0 ? `  ⎿ ${text.trimStart()}` : text, tone: 'removed' as const }))
       : []),
   ]);
+}
+
+function toolCallLabel(call: Pick<AgentMessageToolCall, 'name'>) {
+  return TOOL_CALL_LABEL[call.name] ?? call.name;
 }
 
 const TOOL_CALL_LABEL: Record<string, string> = {
@@ -145,8 +159,8 @@ function toolCallErrorLines(error: string | undefined): MessageDisplayLine[] {
   const visible = lines.slice(0, TOOL_CALL_ERROR_MAX_LINES);
   const hidden = lines.length - visible.length;
   return [
-    ...visible.map((line, index) => ({ text: `${index === 0 ? '  ⎿ ' : '    '}${line}`, tone: 'removed' as const })),
-    ...(hidden > 0 ? [{ text: `    … +${hidden} lines`, tone: 'system' as const }] : []),
+    ...visible.map((line, index) => ({ text: `${index === 0 ? '  ⎿ ' : '    '}${line}`, tone: 'muted' as const })),
+    ...(hidden > 0 ? [{ text: `    … +${hidden} lines`, tone: 'muted' as const }] : []),
   ];
 }
 

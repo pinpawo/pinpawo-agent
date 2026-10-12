@@ -701,8 +701,6 @@ function populateTimelineRoot(
       && assistantMarkdownStyle
     ) {
       const detailSurface = root;
-      const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
-      if (label) addLine(label, detailSurface);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
         content: entry.text,

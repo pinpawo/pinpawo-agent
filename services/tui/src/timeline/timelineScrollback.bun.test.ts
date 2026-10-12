@@ -216,12 +216,11 @@ test('user messages render as a neutral full-width surface', async () => {
   }
 });
 
-test('message timestamps align without actor labels', async () => {
+test('only the user\'s own messages carry a timestamp, without actor labels', async () => {
   const setup = await createTimelineRenderer(64);
   const timeline = new TimelineScrollback(setup.renderer);
   const createdAt = '2026-07-15T02:00:00.000Z';
   const updatedAt = '2026-07-15T02:00:01.000Z';
-  const completedAt = '2026-07-15T02:00:02.000Z';
   const entries: AgentTimelineEntry[] = [{
     ...userMessage('user message', 'user-timestamp'),
     createdAt,
@@ -229,26 +228,13 @@ test('message timestamps align without actor labels', async () => {
     ...assistantMessage('assistant message', 'completed'),
     id: 'assistant-timestamp',
     updatedAt,
-  }, {
-    id: 'subagent-timestamp',
-    type: 'message',
-    role: 'subagent',
-    text: 'worker message',
-    status: 'completed',
-    createdAt: completedAt,
   }];
   try {
     timeline.render(session(entries));
     const text = setup.cellOutput.takeText();
-    const headers = entries.map((entry) => (
-      formatTimelineEntry(entry).split('\n')[0]
-    )).filter(Boolean);
-    // The user's bar is a gutter, not part of the header.
-    const rows = text.split('\n').map((row) => row.replace(/^┃/, '').trimStart()).filter((row) => (
-      headers.includes(row)
-    ));
-
-    assert.deepEqual(rows, headers);
+    assert.match(text, new RegExp(`┃\\[${formatTimelineEntry(entries[0]!).split('\n')[0]!.slice(1, -1)}\\]`));
+    assert.match(text, /assistant message/);
+    assert.equal(text.match(/\[\d\d:\d\d:\d\d\]/g)?.length, 1);
     assert.doesNotMatch(text, /\b(?:PinPawo|subagent)\b|你/);
   } finally {
     timeline.destroy();

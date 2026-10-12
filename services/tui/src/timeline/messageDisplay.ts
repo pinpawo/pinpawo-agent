@@ -32,8 +32,8 @@ export function buildMessageDisplayLines(
     case 'system':
       return logicalLines(entry.text).map((line, index) => ({
         text: index === 0
-          ? joinLabel(timestampLabel, 'system', line)
-          : `                 ${line}`,
+          ? joinLabel('system', line)
+          : `       ${line}`,
         tone: 'system',
       }));
     case 'user':
@@ -48,9 +48,8 @@ export function buildMessageDisplayLines(
       ];
     case 'assistant':
       return [
-        // A message that only calls tools is a step in the work, like the
-        // operations under it, not something said: it carries no timestamp.
-        ...(isToolCallStep(entry) ? [] : timestampLine(timestampLabel, 'assistant-label')),
+        // Only the user's own messages carry a timestamp: it marks each turn
+        // the user started, and everything after it belongs to that turn.
         ...(entry.text.trim() || !entry.toolCalls?.length ? logicalLines(
           normalizeAssistantMessageMarkdown(entry.text),
         ).map((line) => ({

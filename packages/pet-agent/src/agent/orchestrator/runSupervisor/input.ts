@@ -23,6 +23,13 @@ export function supervisorControlContext(input: RunSupervisorInput): SupervisorC
   };
 }
 
+/** The input id of this run's latest user message, or null when the run has none. */
+export function latestRunUserInputId(root: Pick<OrchestratorStateType, 'messages' | 'runId'>): string | null {
+  const latestHuman = root.messages.filter((message) => message._getType() === 'human'
+    && !getAgentMessageMetadata(message).lane && getAgentMessageMetadata(message).runId === root.runId).at(-1);
+  return latestHuman ? `human:${latestHuman.id ?? root.runId}` : null;
+}
+
 export function buildRunSupervisorInput(params: {
   root: OrchestratorStateType;
   catalog: RunSupervisorInput['catalog'];
@@ -30,9 +37,7 @@ export function buildRunSupervisorInput(params: {
 }): RunSupervisorInput {
   const { root, catalog, capabilityDisclosure } = params;
   if (!root.runUserRequest) throw new Error('Supervisor requires the current user request.');
-  const latestHuman = root.messages.filter((message) => message._getType() === 'human'
-    && !getAgentMessageMetadata(message).lane && getAgentMessageMetadata(message).runId === root.runId).at(-1);
-  const humanId = latestHuman ? `human:${latestHuman.id ?? root.runId}` : null;
+  const humanId = latestRunUserInputId(root);
   return {
     mode: readSupervisorMode(root),
     inputId: humanId && root.runSupervisorUserMessageId !== humanId

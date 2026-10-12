@@ -27,7 +27,6 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
           runSupervisorState: request.state.runSupervisorState,
           runCapabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure,
             request.state.disclosedCapabilityNames ?? []),
-          ...(input.inputId.startsWith('human:') ? { runSupervisorUserMessageId: input.inputId } : {}),
           messages: supervisorWorkMessages(supervisorControlContext(input), request.state.messages.slice(messageCount), true),
         } });
       }

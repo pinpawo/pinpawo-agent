@@ -224,3 +224,45 @@ test('briefing is prepared at delegation time while the plan retains its objecti
   assert.equal(records[0].execution.briefing, briefing);
   assert.equal(result.runSupervisorState.plan[0].objective, task.objective);
 });
+
+test('a follow-up run plans fresh work after a rejected delegation instead of asking the user again', async () => {
+  const followUp = { capability: 'general', objective: 'Update the readme.' };
+  const supervisor = new RecoveryModel([
+    call('submit_plan', { tasks: [task] }, 'plan'),
+    call('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
+    call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review'),
+    new AIMessage('Inspection complete.'),
+    // The follow-up run delegates before registering any new work.
+    call('delegate_capability', { briefing: 'Update the readme.' }, 'premature'),
+    call('adjust_plan', { goal: followUp.objective, reason: 'User asked for new work.', currentTask: 'replace',
+      tasks: [followUp] }, 'adjust'),
+    call('delegate_capability', { briefing: 'Update the readme.' }, 'execute-follow-up'),
+    call('review_current', { completed: true, reason: 'Readme updated.' }, 'review-follow-up'),
+    new AIMessage('Readme updated.'),
+  ]);
+  const executor = new RecoveryModel([new AIMessage('Repository evidence.'), new AIMessage('Readme updated.')]);
+  const entry = new RecoveryModel([
+    call('plan_request', { goal: task.objective }, 'entry'),
+    call('plan_request', { goal: followUp.objective }, 'entry-follow-up'),
+  ]);
+  const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
+  const config = { configurable: { thread_id: 'follow-up-after-rejection', registry } };
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), config);
+  const supervisorCallsBefore = supervisor.inputs.length;
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(followUp.objective)]), config);
+
+  // Entry no longer presents the previous run's finished items as remaining work.
+  const followUpEntryInput = supervisor.inputs[supervisorCallsBefore].at(-1)!.text;
+  assert.match(followUpEntryInput, /<remaining_plan>\s*<!\[CDATA\[\s*\[\]\s*\]\]>/);
+  const rejected = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'premature'));
+  assert.ok(ToolMessage.isInstance(rejected));
+  assert.match(rejected.text, /There is no planned task to execute/);
+  // The rejected delegation did not consume the user's input, so the goal can follow it.
+  const adjusted = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'adjust');
+  assert.ok(ToolMessage.isInstance(adjusted));
+  assert.notEqual(adjusted.status, 'error');
+  assert.equal(result.runSupervisorState.goal, followUp.objective);
+  assert.deepEqual(readCapabilityExecutions(result.messages).map(e => e.execution.task), [task.objective, followUp.objective]);
+  assert.equal(executor.inputs.length, 2);
+  assert.equal(result.messages.at(-1)?.text, 'Readme updated.');
+});

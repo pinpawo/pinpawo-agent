@@ -51,6 +51,11 @@ function buildCapabilityRoutingManifest(
   ].join('\n');
 }
 
+/** Entry only plans what is left; a previous run's finished items are history, not pending work. */
+function remainingPlan(state: RunSupervisorInput['state']) {
+  return state.plan.filter((task) => task.status !== 'completed' && task.status !== 'superseded');
+}
+
 function buildSupervisionBoundary(input: RunSupervisorInput) {
   return xmlTextBlock('supervisor_plan', JSON.stringify(input.state));
 }
@@ -85,7 +90,7 @@ export function buildRunSupervisorTurnInput(input: RunSupervisorInput) {
     : 'Keep the established goal and authorization scope. Adjust pending work when execution evidence warrants it; preserve the goal verbatim. Ask the user if a goal or scope change is needed.');
   return RUN_SUPERVISOR_TURN_PROMPT.render({
     planContext: input.mode === 'entry'
-      ? xmlTextBlock('remaining_plan', JSON.stringify(input.state.plan))
+      ? xmlTextBlock('remaining_plan', JSON.stringify(remainingPlan(input.state)))
       : buildSupervisionBoundary(input),
     turnContext,
   });

@@ -36,12 +36,14 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { hasOpenToolCalls, isToolCallMessageEntry, toolCallTitle } from './messageDisplay';
+import { buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
 
-const USER_MESSAGE_BACKGROUND = '#272c33';
+const USER_MESSAGE_BACKGROUND = '#303842';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
 const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
+const USER_MESSAGE_BAR_COLOR = '#b8a1e3';
 const ASSISTANT_LABEL_COLOR = '#69c0c8';
+const TOOL_CALL_COLOR = '#7aa2c8';
 const DETAIL_ENTRY_INDENT = 2;
 
 type ActiveTimelineSurface = {
@@ -159,6 +161,7 @@ export class TimelineScrollback {
               [firstEntry],
               true,
               active.mode,
+              session.timeline[firstUncommitted - 1],
             );
             this.committedFingerprints.push(timelineFingerprint(firstEntry));
             this.destroyTimelineSurface();
@@ -185,6 +188,7 @@ export class TimelineScrollback {
     )) {
       this.commitSettledEntries(
         session.timeline.slice(start, end),
+        session.timeline[start - 1],
       );
     }
     this.reconciliationCache = timelineReconciliationCache(
@@ -204,6 +208,7 @@ export class TimelineScrollback {
         liveEntries,
         false,
         mode,
+        session.timeline[settledEnd - 1],
       );
     } else if (this.activeTimelineSurface) {
       this.destroyTimelineSurface();
@@ -230,12 +235,14 @@ export class TimelineScrollback {
 
   private commitSettledEntries(
     entries: readonly AgentTimelineEntry[],
+    previous: AgentTimelineEntry | undefined,
   ) {
     if (entries.length === 0) return;
     const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
     const root = createTimelineRoot(surface.renderContext, {
       id: 'timeline-settled',
       entries,
+      previous,
       width: this.renderer.width,
       assistantMarkdownStyle: this.assistantMarkdownStyle,
     });
@@ -266,6 +273,7 @@ export class TimelineScrollback {
     entries: readonly AgentTimelineEntry[],
     completed: boolean,
     mode: ActiveTimelineSurface['mode'],
+    previous: AgentTimelineEntry | undefined,
   ) {
     const entry = entries[0];
     if (!entry) return;
@@ -303,6 +311,7 @@ export class TimelineScrollback {
         entries,
         this.renderer.width,
         this.assistantMarkdownStyle,
+        previous,
       );
       active.surface.render();
       const stableRows = completed
@@ -590,6 +599,7 @@ function createTimelineRoot(
   options: {
     id: string;
     entries: readonly AgentTimelineEntry[];
+    previous?: AgentTimelineEntry;
     width: number;
     assistantMarkdownStyle: ReturnType<typeof createAssistantMarkdownStyle>;
   },
@@ -606,6 +616,7 @@ function createTimelineRoot(
     options.entries,
     options.width,
     options.assistantMarkdownStyle,
+    options.previous,
   );
   return root;
 }
@@ -616,6 +627,7 @@ function populateTimelineRoot(
   entries: readonly AgentTimelineEntry[],
   width: number,
   assistantMarkdownStyle?: ReturnType<typeof createAssistantMarkdownStyle>,
+  previous?: AgentTimelineEntry,
 ) {
   for (const child of root.getChildren()) {
     root.remove(child);
@@ -643,9 +655,16 @@ function populateTimelineRoot(
   // contiguously behind the message, so tracking one open scope is enough to
   // nest them.
   let delegationScope: BoxRenderable | null = null;
+  // Work (operations and tool-call steps) sits compact under the message
+  // that started it; the next message steps back out with a blank line.
+  let prior = previous;
 
   entries.forEach((entry, entryIndex) => {
     if (entry.type === 'message' && entry.role === 'subagent') return;
+    if (entry.type === 'message' && entry.role !== 'user' && !isToolCallStep(entry) && prior && isWorkEntry(prior)) {
+      addLine({ text: ' ', tone: 'muted' });
+    }
+    prior = entry;
     const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
       now,
@@ -663,9 +682,15 @@ function populateTimelineRoot(
         paddingTop: 1,
         paddingBottom: 1,
         backgroundColor: USER_MESSAGE_BACKGROUND,
+        // A bar marks what the user said even where a terminal theme makes
+        // the background hard to see; agent messages never carry it.
+        border: ['left'],
+        borderStyle: 'heavy',
+        borderColor: USER_MESSAGE_BAR_COLOR,
       });
       root.add(userMessageSurface);
-      lines.forEach((line) => addLine(line, userMessageSurface));
+      // The bar takes the first cell of the gutter user text shares with agent text.
+      lines.forEach((line) => addLine(line.tone === 'user' ? { ...line, text: line.text.replace(/^ /, '') } : line, userMessageSurface));
       addTimelineEntrySpacing(entry);
       return;
     }
@@ -676,8 +701,6 @@ function populateTimelineRoot(
       && assistantMarkdownStyle
     ) {
       const detailSurface = root;
-      const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
-      if (label) addLine(label, detailSurface);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
         content: entry.text,
@@ -685,7 +708,7 @@ function populateTimelineRoot(
       });
       detailSurface.add(assistantMarkdown.container);
       if (isToolCallMessageEntry(entry)) {
-        lines.slice(-entry.toolCalls!.length).forEach(line => addLine(line, detailSurface));
+        buildToolCallDisplayLines(entry).forEach(line => addLine(line, detailSurface));
         openToolCallScope(entry);
       }
       if (root.getChildrenCount() > childCountBeforeEntry) {
@@ -722,9 +745,14 @@ function populateTimelineRoot(
 
   function addTimelineEntrySpacing(entry: AgentTimelineEntry) {
     if (!isSettledTimelineEntry(entry)) return;
-    if (entry.type === 'operation') return;
+    if (isWorkEntry(entry)) return;
     addLine({ text: ' ', tone: 'muted' });
   }
+}
+
+/** Operations, and the messages whose calls start them: the work they head follows without a gap. */
+function isWorkEntry(entry: AgentTimelineEntry) {
+  return entry.type === 'operation' || isToolCallMessageEntry(entry);
 }
 
 /**
@@ -818,6 +846,8 @@ function lineStyle(line: TimelineDisplayLine): {
       return { fg: '#ff5f5f' };
     case 'muted':
       return { fg: '#8f9ba8' };
+    case 'tool-call':
+      return { fg: TOOL_CALL_COLOR };
     case 'operation-started':
     case 'operation-updated':
       return { fg: '#69c0c8' };

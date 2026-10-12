@@ -195,7 +195,8 @@ test('user messages render as a neutral full-width surface', async () => {
   try {
     timeline.render(session([userMessage('hello\nsecond line')]));
     const text = setup.cellOutput.takeText();
-    assert.match(text, /  hello\n  second line/);
+    // A bar marks the user's message; its text keeps the agent text's gutter.
+    assert.match(text, /┃ hello\n┃ second line/);
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
       lines.flatMap((line) => line.spans)
@@ -215,12 +216,11 @@ test('user messages render as a neutral full-width surface', async () => {
   }
 });
 
-test('message timestamps align without actor labels', async () => {
+test('only the user\'s own messages carry a timestamp, without actor labels', async () => {
   const setup = await createTimelineRenderer(64);
   const timeline = new TimelineScrollback(setup.renderer);
   const createdAt = '2026-07-15T02:00:00.000Z';
   const updatedAt = '2026-07-15T02:00:01.000Z';
-  const completedAt = '2026-07-15T02:00:02.000Z';
   const entries: AgentTimelineEntry[] = [{
     ...userMessage('user message', 'user-timestamp'),
     createdAt,
@@ -228,25 +228,13 @@ test('message timestamps align without actor labels', async () => {
     ...assistantMessage('assistant message', 'completed'),
     id: 'assistant-timestamp',
     updatedAt,
-  }, {
-    id: 'subagent-timestamp',
-    type: 'message',
-    role: 'subagent',
-    text: 'worker message',
-    status: 'completed',
-    createdAt: completedAt,
   }];
   try {
     timeline.render(session(entries));
     const text = setup.cellOutput.takeText();
-    const headers = entries.map((entry) => (
-      formatTimelineEntry(entry).split('\n')[0]
-    )).filter(Boolean);
-    const rows = text.split('\n').filter((row) => (
-      headers.includes(row.trimStart())
-    ));
-
-    assert.deepEqual(rows.map((row) => row.trimStart()), headers);
+    assert.match(text, new RegExp(`┃\\[${formatTimelineEntry(entries[0]!).split('\n')[0]!.slice(1, -1)}\\]`));
+    assert.match(text, /assistant message/);
+    assert.equal(text.match(/\[\d\d:\d\d:\d\d\]/g)?.length, 1);
     assert.doesNotMatch(text, /\b(?:PinPawo|subagent)\b|你/);
   } finally {
     timeline.destroy();
@@ -516,6 +504,35 @@ test('a running operation gets a live surface without committing later rows out 
   }
 });
 
+test('tool-call steps read as work, not as messages', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const at = '2026-10-12T07:28:02.000Z';
+    timeline.render(session([
+      { ...userMessage('删掉'), createdAt: at },
+      { ...assistantMessage('', 'completed'), id: 'plan', createdAt: at,
+        toolCalls: [{ id: 'c1', name: 'plan_request', args: { goal: '删除 venv' }, status: 'completed' }] },
+      { id: 'work', type: 'operation', requestId: 'request-1', operationKey: 'work', kind: 'tool', title: 'Read file', phase: 'completed' },
+      { ...assistantMessage('删好了。', 'completed'), id: 'reply', createdAt: at },
+    ]));
+    const rows = setup.cellOutput.takeText().split('\n').map(row => row.trimEnd());
+    const step = rows.findIndex(row => row.startsWith('▸ 确定目标 · 删除 venv'));
+    assert.ok(step > 0);
+    // No timestamp of its own, and its work follows without a gap.
+    assert.doesNotMatch(rows[step - 1]!, /\[\d\d:\d\d:\d\d\]/);
+    assert.match(rows[step + 1]!, /Read file/);
+    // The next message steps back out with a blank line.
+    assert.deepEqual(rows.slice(step + 2, step + 4).map(row => row.trim() === '' ? '' : 'label'), ['', 'label']);
+    const spans = setup.styleOutput.take().flatMap(lines => lines.flatMap(line => line.spans));
+    const stepSpan = spans.find(span => span.text.includes('确定目标'));
+    assert.ok(stepSpan?.fg.equals(RGBA.fromHex('#7aa2c8')), 'a step is colored apart from message text');
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('a committed call that later fails gets its outcome as a new row', async () => {
   const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);
@@ -528,13 +545,13 @@ test('a committed call that later fails gets its outcome as a new row', async ()
       kind: 'tool', title: 'Read file', phase: 'completed' };
     timeline.render(session([user, message, work], 'request-1'));
     const first = committedText();
-    assert.match(first, /▸ 制定计划/);
+    assert.match(first, /▸ 确定目标 · 定位问题/);
     assert.doesNotMatch(first, /失败/);
 
     const failed = { ...message, toolCalls: [{ ...call, status: 'failed' as const }] };
     timeline.render(session([user, failed, work], 'request-1'));
     const outcome = committedText();
-    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 制定计划（失败）'],
+    assert.deepEqual(outcome.split('\n').map(row => row.trim()).filter(Boolean), ['▸ 确定目标（失败）'],
       'only the outcome is written; committed rows stay as they are');
 
     // The completion snapshot carries the same outcome: nothing more to write.
@@ -738,8 +755,10 @@ function userMessage(
   };
 }
 
+/** The user's message as the scrollback draws it: padded, behind a left bar. */
 function formatUserMessageSurface(entry: AgentTimelineEntry): string {
-  return `\n${formatTimelineEntry(entry)}\n`;
+  const rows = ['', ...formatTimelineEntry(entry).split('\n').map(row => row.replace(/^ /, '')), ''];
+  return rows.map(row => `┃${row}`).join('\n');
 }
 
 function assistantMessage(

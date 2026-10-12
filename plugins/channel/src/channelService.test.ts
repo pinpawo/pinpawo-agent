@@ -323,7 +323,7 @@ test('a Pet tool-call message keeps its calls as written, settles in place and a
     // Replays of the same session message record nothing new.
     assert.deepEqual(service.recordToolCallMessage(channelId, source, { messageId: 'm1', text: '', toolCalls: calls }), message);
     service.settleToolCall(channelId, source, { messageId: 'm1', callId: 'c1', status: 'completed' });
-    service.settleToolCall(channelId, source, { messageId: 'unseen', callId: 'c9', status: 'failed' });
+    service.settleToolCall(channelId, source, { messageId: 'unseen', callId: 'c9', status: 'failed', error: 'No plan item.' });
     service.interruptToolCalls(source);
     service.close(); service = new ChannelService(file); service.init();
     assert.deepEqual(service.getMessage(channelId, message.messageId).toolCalls?.map(call => call.status), ['completed', 'interrupted']);

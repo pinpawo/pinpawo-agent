@@ -45,22 +45,15 @@ test('subagent prose and result references stay out of the main timeline', () =>
   assert.doesNotMatch(lines.map(line => line.text).join('\n'), /private result/);
 });
 
-test('message display keeps its timestamp label on one terminal row', () => {
+test('only the user\'s own messages carry a timestamp', () => {
   const createdAt = '2026-07-15T02:00:00.000Z';
-  assert.deepEqual(
-    buildMessageDisplayLines(message({
-      role: 'assistant',
-      text: 'done',
-      createdAt,
-    })),
-    [{
-      text: `[${formatMessageTimestamp(createdAt)}]`,
-      tone: 'assistant-label',
-    }, {
-      text: '| done',
-      tone: 'assistant',
-    }],
-  );
+  assert.deepEqual(buildMessageDisplayLines(message({ role: 'user', text: 'go', createdAt })), [
+    { text: `[${formatMessageTimestamp(createdAt)}]`, tone: 'user-label' },
+    { text: '  go', tone: 'user' },
+  ]);
+  assert.deepEqual(buildMessageDisplayLines(message({ role: 'assistant', text: 'done', createdAt })), [
+    { text: '| done', tone: 'assistant' },
+  ]);
 });
 
 function message(

@@ -1,6 +1,7 @@
 import type { AgentMessageEntry, AgentMessageToolCall, AgentTimelineEntry } from '@pinpawo/agent-session';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
+import { truncateTerminalLine } from '../text/terminalText';
 
 export type MessageDisplayTone =
   | 'assistant'
@@ -8,7 +9,10 @@ export type MessageDisplayTone =
   | 'system'
   | 'user'
   | 'user-label'
-  | 'subagent';
+  | 'subagent'
+  | 'removed'
+  | 'muted'
+  | 'tool-call';
 
 export type MessageDisplayLine = {
   text: string;
@@ -17,6 +21,7 @@ export type MessageDisplayLine = {
 
 export function buildMessageDisplayLines(
   entry: AgentMessageEntry,
+  options: { toolCallDetail?: boolean } = {},
 ): MessageDisplayLine[] {
   const timestamp = entry.updatedAt ?? entry.createdAt;
   const timestampLabel = timestamp
@@ -27,8 +32,8 @@ export function buildMessageDisplayLines(
     case 'system':
       return logicalLines(entry.text).map((line, index) => ({
         text: index === 0
-          ? joinLabel(timestampLabel, 'system', line)
-          : `                 ${line}`,
+          ? joinLabel('system', line)
+          : `       ${line}`,
         tone: 'system',
       }));
     case 'user':
@@ -43,14 +48,15 @@ export function buildMessageDisplayLines(
       ];
     case 'assistant':
       return [
-        ...timestampLine(timestampLabel, 'assistant-label'),
+        // Only the user's own messages carry a timestamp: it marks each turn
+        // the user started, and everything after it belongs to that turn.
         ...(entry.text.trim() || !entry.toolCalls?.length ? logicalLines(
           normalizeAssistantMessageMarkdown(entry.text),
         ).map((line) => ({
           text: `| ${line}`,
           tone: 'assistant' as const,
         })) : []),
-        ...buildToolCallDisplayLines(entry),
+        ...(options.toolCallDetail ? buildToolCallDetailLines(entry) : buildToolCallDisplayLines(entry)),
       ];
     case 'subagent':
       return [];
@@ -65,6 +71,11 @@ export function isToolCallMessageEntry(entry: AgentTimelineEntry): entry is Agen
   return entry.type === 'message' && entry.role === 'assistant' && Boolean(entry.toolCalls?.length);
 }
 
+/** A message that only calls tools: no words for the user, just the step. */
+export function isToolCallStep(entry: AgentTimelineEntry): entry is AgentMessageEntry {
+  return isToolCallMessageEntry(entry) && !entry.text.trim();
+}
+
 /** Whether any of the message's calls still has work coming. */
 export function hasOpenToolCalls(entry: { toolCalls?: readonly AgentMessageToolCall[] }) {
   return entry.toolCalls?.some(call => call.status === 'running') ?? false;
@@ -73,30 +84,96 @@ export function hasOpenToolCalls(entry: { toolCalls?: readonly AgentMessageToolC
 /**
  * One line per call: its title, plus the outcome when it did not complete. A
  * running or completed call shows the title alone, so the line the transcript
- * commits while it runs never has to be rewritten.
+ * commits while it runs never has to be rewritten. A failed call's result
+ * follows its outcome, since that is the reason the step stopped.
  */
 export function buildToolCallDisplayLines(entry: AgentMessageEntry): MessageDisplayLine[] {
-  return (entry.toolCalls ?? []).map(call => ({
-    text: `▸ ${toolCallTitle(call)}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
-    tone: 'assistant' as const,
-  }));
+  return (entry.toolCalls ?? []).flatMap(call => [
+    // A call that ended badly is reported on a row of its own after its work,
+    // so that row names the step and its outcome; the preview is above.
+    TOOL_CALL_OUTCOME[call.status]
+      ? { text: `▸ ${toolCallLabel(call)}（${TOOL_CALL_OUTCOME[call.status]}）`, tone: call.status === 'failed' ? 'removed' as const : 'system' as const }
+      : { text: `▸ ${toolCallTitle(call)}`, tone: 'tool-call' as const },
+    ...(call.status === 'failed' ? toolCallErrorLines(call.error) : []),
+  ]);
 }
 
 /**
- * A call as one line: a fixed label for the handoff tools, else the tool's
- * name. Handoff arguments (Entry's restated goal, Supervisor's briefing) are
- * instructions for the next agent, not words for the user: the one sentence
- * meant for the user is the message's own text, and the current plan item
- * names the work.
+ * A call as one line: what the step is, then a glimpse of what it was given.
+ * Handoff arguments (Entry's restated goal, Supervisor's briefing) are
+ * instructions for the next agent, so the line names the step first and keeps
+ * the argument to a short, single-line preview; the transcript (PageUp) holds
+ * it in full.
  */
-export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name'>) {
+export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>) {
+  const label = toolCallLabel(call);
+  const subject = toolCallSubject(call);
+  return subject ? `${label} · ${truncateTerminalLine(subject.replace(/\s+/g, ' ').trim(), TOOL_CALL_SUBJECT_WIDTH)}` : label;
+}
+
+/**
+ * The full text behind each call's line, for the transcript (PageUp): what the
+ * call was given and, when it failed, everything it returned.
+ */
+export function buildToolCallDetailLines(entry: AgentMessageEntry): MessageDisplayLine[] {
+  return (entry.toolCalls ?? []).flatMap(call => [
+    {
+      text: `▸ ${toolCallLabel(call)}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
+      tone: 'tool-call' as const,
+    },
+    ...indent(TOOL_CALL_DETAIL[call.name]?.(call.args) ?? JSON.stringify(call.args, null, 2))
+      .map(text => ({ text, tone: 'assistant' as const })),
+    ...(call.status === 'failed' && call.error?.trim()
+      ? indent(call.error.trim(), 4).map((text, index) => ({ text: index === 0 ? `  ⎿ ${text.trimStart()}` : text, tone: 'removed' as const }))
+      : []),
+  ]);
+}
+
+function toolCallLabel(call: Pick<AgentMessageToolCall, 'name'>) {
   return TOOL_CALL_LABEL[call.name] ?? call.name;
 }
 
+// Labels say what happens from the user's side, never the runtime's own
+// terms (planning requests, capabilities, delegation).
 const TOOL_CALL_LABEL: Record<string, string> = {
-  delegate_capability: '交给能力执行',
-  plan_request: '制定计划',
+  delegate_capability: '执行目标',
+  plan_request: '确定目标',
 };
+
+const TOOL_CALL_DETAIL: Record<string, (args: Record<string, unknown>) => string | null> = {
+  delegate_capability: args => typeof args.briefing === 'string' ? args.briefing : null,
+  plan_request: args => typeof args.goal === 'string' ? args.goal : null,
+};
+
+const TOOL_CALL_SUBJECT_WIDTH = 48;
+const TOOL_CALL_ERROR_MAX_LINES = 6;
+// A tool's error can be one long line (a JSON result); inline, each line is
+// cut so the reason stays a few rows on a narrow terminal. PageUp keeps it whole.
+const TOOL_CALL_ERROR_LINE_WIDTH = 160;
+
+function toolCallSubject(call: Pick<AgentMessageToolCall, 'name' | 'args'>) {
+  const detail = TOOL_CALL_DETAIL[call.name]?.(call.args);
+  // A briefing often opens with a Markdown heading ("## 任务"); the first line
+  // with content says more.
+  return detail?.split('\n').map(line => line.trim()).find(line => line && !/^#{1,6}(\s|$)/.test(line)) ?? null;
+}
+
+function toolCallErrorLines(error: string | undefined): MessageDisplayLine[] {
+  const lines = error?.trim() ? error.trim().split('\n') : [];
+  const visible = lines.slice(0, TOOL_CALL_ERROR_MAX_LINES);
+  const hidden = lines.length - visible.length;
+  return [
+    ...visible.map((line, index) => ({
+      text: `${index === 0 ? '  ⎿ ' : '    '}${truncateTerminalLine(line, TOOL_CALL_ERROR_LINE_WIDTH)}`,
+      tone: 'muted' as const,
+    })),
+    ...(hidden > 0 ? [{ text: `    … +${hidden} lines`, tone: 'muted' as const }] : []),
+  ];
+}
+
+function indent(text: string, width = 2) {
+  return text.split('\n').map(line => `${' '.repeat(width)}${line}`);
+}
 
 const TOOL_CALL_OUTCOME: Record<AgentMessageToolCall['status'], string> = {
   running: '',

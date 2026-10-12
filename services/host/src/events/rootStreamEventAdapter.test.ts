@@ -532,7 +532,8 @@ test('main tool calls reach the conversation as messages and settle, including c
   const state = Annotation.Root({ ...MessagesAnnotation.spec, runId: Annotation<string>() });
   const graph = new StateGraph(state)
     .addNode('resume', () => ({ messages: [result('open'), call('new')] }))
-    .addNode('tools', () => ({ messages: [result('new')] }))
+    // A failed result keeps what the tool said, which is the reason.
+    .addNode('tools', () => ({ messages: [new ToolMessage({ tool_call_id: 'call:new', content: 'No plan item to run.', status: 'error' })] }))
     .addEdge(START, 'resume').addEdge('resume', 'tools').addEdge('tools', END).compile();
   const run = await graph.streamEvents({ runId: 'current', messages: [
     new HumanMessage('Proceed'), call('done'), result('done'), call('open'),
@@ -544,7 +545,7 @@ test('main tool calls reach the conversation as messages and settle, including c
     { type: 'tool_call.settled', messageId: 'open', callId: 'call:open', status: 'completed' },
     { type: 'tool_calls.message', messageId: 'new', text: 'Looking it up.',
       toolCalls: [{ id: 'call:new', name: 'lookup', args: { q: 'new' } }] },
-    { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'completed' },
+    { type: 'tool_call.settled', messageId: 'new', callId: 'call:new', status: 'failed', error: 'No plan item to run.' },
   ]);
   // Root's own tool node is that message, not a separate operation.
   assert.equal(readRootStreamChatEvent({ type: 'event', seq: 1, method: 'tools', params: {

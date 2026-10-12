@@ -11,7 +11,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
-import { readMessageToolCalls, readToolResultStatuses } from '../agent/agentStreamEvents';
+import { readMessageToolCalls, readToolResults } from '../agent/agentStreamEvents';
 
 /**
  * Transcript projection for the interface.
@@ -41,12 +41,12 @@ export type TuiCheckpointTokenUsage = (TokenUsageSnapshot & { scope: 'session' }
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   // Tool results remain execution evidence; never replay deliveries as chat messages.
-  const results = readToolResultStatuses(messages);
+  const results = readToolResults(messages);
   return messages.flatMap<TuiCheckpointMessage>((message) => {
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readMessageText(message);
-    const toolCalls = readMessageToolCalls(message).map(call => ({ ...call, status: results.get(call.id) ?? 'running' as const }));
+    const toolCalls = readMessageToolCalls(message).map(call => ({ ...call, ...(results.get(call.id) ?? { status: 'running' as const }) }));
     if (!text && !toolCalls.length) {
       return [];
     }

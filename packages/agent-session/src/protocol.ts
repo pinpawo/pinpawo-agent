@@ -567,12 +567,14 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       : null;
   }
   if (type === 'tool_call.settled') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'messageId', 'callId', 'status'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'messageId', 'callId', 'status', 'error'])) return null;
     const messageId = readString(record, 'messageId');
     const callId = readString(record, 'callId');
     const status = record.status;
+    const error = record.error;
+    if (error !== undefined && typeof error !== 'string') return null;
     return messageId && callId && isAgentToolCallStatus(status) && status !== 'running'
-      ? { type, requestId, messageId, callId, status }
+      ? { type, requestId, messageId, callId, status, ...(error !== undefined ? { error } : {}) }
       : null;
   }
   if (type === 'subagent.message.completed') {

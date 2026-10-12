@@ -449,7 +449,8 @@ function settleToolCall(
     ...session,
     timeline: upsertTimelineEntry(session.timeline, {
       ...entry,
-      toolCalls: entry.toolCalls!.map(call => call.id === event.callId ? { ...call, status: event.status } : call),
+      toolCalls: entry.toolCalls!.map(call => call.id === event.callId
+        ? { ...call, status: event.status, ...(event.error !== undefined ? { error: event.error } : {}) } : call),
     }),
   };
 }

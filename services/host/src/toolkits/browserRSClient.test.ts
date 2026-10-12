@@ -9,6 +9,7 @@ import {
   ChromeExtensionBrowserRS,
   createBrowserToolkit,
   type BrowserExtensionBridge,
+  type BrowserRuntimeEvent,
 } from '@pinpawo-toolkit/browser';
 import { RSServiceConnection } from '../rsService/connection';
 import type { RSContractClient } from '../rsService/contractClient';
@@ -27,18 +28,54 @@ type FakeBridge = {
 };
 
 /**
- * A bridge standing in for the extension: navigation succeeds, snapshots
- * report the last URL of each browser context.
+ * A bridge standing in for the extension: navigation succeeds and reports the
+ * page readable through live events, snapshots report the last URL of each
+ * browser context.
  */
 function fakeBridge(state: FakeBridge): BrowserExtensionBridge {
   const urlByContext = new Map<unknown, string>();
+  const generations = new Map<string, number>();
+  const listeners = new Set<(event: BrowserRuntimeEvent) => void>();
+  const reportReadable = (contextId: string, url: string) => {
+    const base = {
+      contextId,
+      tabId: 1,
+      connectionGeneration: 1,
+      targetGeneration: 1,
+      navigationGeneration: generations.get(contextId) ?? 0,
+    };
+    setImmediate(() => {
+      const past = Date.now() - 500;
+      for (const listener of listeners) {
+        listener({ ...base, timestamp: past, type: 'navigation.committed', url });
+        listener({ ...base, timestamp: past, type: 'document.ready', payload: { readyState: 'complete' } });
+        listener({ ...base, timestamp: Date.now(), type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } });
+      }
+    });
+  };
   return {
     async start() {},
     async stop() {},
+    beginNavigation(contextId: string) {
+      const next = (generations.get(contextId) ?? 0) + 1;
+      generations.set(contextId, next);
+      return next;
+    },
+    currentNavigationGeneration(contextId: string) {
+      return generations.get(contextId) ?? 0;
+    },
+    onRuntimeEvent(listener: (event: BrowserRuntimeEvent) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
     async sendCommand(command: string, params: Record<string, unknown>) {
       state.contexts.push(params.browserContextId);
       if (command === 'navigate') {
         urlByContext.set(params.browserContextId, String(params.url));
+        reportReadable(String(params.browserContextId), String(params.url));
         return { ok: true };
       }
       if (command === 'click') {

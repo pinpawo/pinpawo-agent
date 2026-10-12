@@ -130,6 +130,41 @@ function describeError(error: unknown) {
 }
 
 /**
+ * A driver session bound to one opaque browser context of a shared bridge:
+ * every command carries `browserContextId`, navigations use that context's
+ * generation, and only that context's runtime events reach the session.
+ * The extension receives only this opaque id; the Agent session id and
+ * run/delegation tracing metadata never cross the native host boundary.
+ */
+export function createContextBoundExtensionSession(
+  bridge: BrowserExtensionBridge,
+  browserContextId: string = randomUUID(),
+): ChromeExtensionBrowserSession {
+  return new ChromeExtensionBrowserSession({
+    sendCommand: async (command, params, timeoutMs, signal, commandOptions) => await bridge.sendCommand(
+      command,
+      { ...params, browserContextId },
+      timeoutMs,
+      signal,
+      commandOptions,
+    ),
+    getStatus: () => bridge.getStatus(),
+    contextTarget: () => bridge.getStatus().contextTargets?.[browserContextId] ?? null,
+    beginNavigation: () => bridge.beginNavigation(browserContextId),
+    currentNavigationGeneration: () => bridge.currentNavigationGeneration(browserContextId),
+    onRuntimeEvent: (listener: (event: BrowserRuntimeEvent) => void) => bridge.onRuntimeEvent((event) => {
+      if (event.contextId === browserContextId) listener(event);
+    }),
+    onGenerationChanged: (listener: (change: BrowserGenerationChange) => void) => bridge.onGenerationChanged((change) => {
+      // A target change belongs to one context, whereas a connection change
+      // (extension/native-host reconnect) invalidates every in-flight
+      // context. The latter has no contextId and must reach all sessions.
+      if (!change.contextId || change.contextId === browserContextId) listener(change);
+    }),
+  });
+}
+
+/**
  * {@link BrowserRS} over the Chrome extension and its native host.
  *
  * Each Agent session gets one logical session: an isolated browser context in
@@ -189,31 +224,7 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
     const existing = this.sessions.get(agentSessionId);
     if (existing) return existing;
 
-    // The extension receives only this opaque id; the Agent session id and
-    // run/delegation tracing metadata never cross the native host boundary.
-    const browserContextId = randomUUID();
-    const extensionSession = new ChromeExtensionBrowserSession({
-      sendCommand: async (command, params, timeoutMs, signal, commandOptions) => await this.bridge.sendCommand(
-        command,
-        { ...params, browserContextId },
-        timeoutMs,
-        signal,
-        commandOptions,
-      ),
-      getStatus: () => this.bridge.getStatus(),
-      contextTarget: () => this.bridge.getStatus().contextTargets?.[browserContextId] ?? null,
-      beginNavigation: () => this.bridge.beginNavigation(browserContextId),
-      currentNavigationGeneration: () => this.bridge.currentNavigationGeneration(browserContextId),
-      onRuntimeEvent: (listener: (event: BrowserRuntimeEvent) => void) => this.bridge.onRuntimeEvent((event) => {
-        if (event.contextId === browserContextId) listener(event);
-      }),
-      onGenerationChanged: (listener: (change: BrowserGenerationChange) => void) => this.bridge.onGenerationChanged((change) => {
-        // A target change belongs to one context, whereas a connection change
-        // (extension/native-host reconnect) invalidates every in-flight
-        // context. The latter has no contextId and must reach all sessions.
-        if (!change.contextId || change.contextId === browserContextId) listener(change);
-      }),
-    });
+    const extensionSession = createContextBoundExtensionSession(this.bridge);
     const session = new BrowserSession({
       requireExecutionOwner: true,
       // A BrowserRS session is one Agent session's; a tab the user hands it

@@ -26,6 +26,7 @@ export { createBrowserTools } from './tools';
 export { browserOperationMetadata } from './operationMetadata';
 export {
   ChromeExtensionBrowserRS,
+  createContextBoundExtensionSession,
   projectBrowserRuntimeSnapshot,
   type BrowserRuntimeSnapshot,
   type ChromeExtensionBrowserRSDependencies,

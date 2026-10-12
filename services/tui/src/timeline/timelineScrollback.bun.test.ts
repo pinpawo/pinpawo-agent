@@ -195,7 +195,8 @@ test('user messages render as a neutral full-width surface', async () => {
   try {
     timeline.render(session([userMessage('hello\nsecond line')]));
     const text = setup.cellOutput.takeText();
-    assert.match(text, /  hello\n  second line/);
+    // A bar marks the user's message; its text keeps the agent text's gutter.
+    assert.match(text, /┃ hello\n┃ second line/);
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
       lines.flatMap((line) => line.spans)
@@ -242,11 +243,12 @@ test('message timestamps align without actor labels', async () => {
     const headers = entries.map((entry) => (
       formatTimelineEntry(entry).split('\n')[0]
     )).filter(Boolean);
-    const rows = text.split('\n').filter((row) => (
-      headers.includes(row.trimStart())
+    // The user's bar is a gutter, not part of the header.
+    const rows = text.split('\n').map((row) => row.replace(/^┃/, '').trimStart()).filter((row) => (
+      headers.includes(row)
     ));
 
-    assert.deepEqual(rows.map((row) => row.trimStart()), headers);
+    assert.deepEqual(rows, headers);
     assert.doesNotMatch(text, /\b(?:PinPawo|subagent)\b|你/);
   } finally {
     timeline.destroy();
@@ -770,8 +772,10 @@ function userMessage(
   };
 }
 
+/** The user's message as the scrollback draws it: padded, behind a left bar. */
 function formatUserMessageSurface(entry: AgentTimelineEntry): string {
-  return `\n${formatTimelineEntry(entry)}\n`;
+  const rows = ['', ...formatTimelineEntry(entry).split('\n').map(row => row.replace(/^ /, '')), ''];
+  return rows.map(row => `┃${row}`).join('\n');
 }
 
 function assistantMessage(

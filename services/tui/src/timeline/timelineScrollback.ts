@@ -41,6 +41,7 @@ import { buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, is
 const USER_MESSAGE_BACKGROUND = '#303842';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
 const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
+const USER_MESSAGE_BAR_COLOR = '#b8a1e3';
 const ASSISTANT_LABEL_COLOR = '#69c0c8';
 const TOOL_CALL_COLOR = '#7aa2c8';
 const DETAIL_ENTRY_INDENT = 2;
@@ -681,9 +682,15 @@ function populateTimelineRoot(
         paddingTop: 1,
         paddingBottom: 1,
         backgroundColor: USER_MESSAGE_BACKGROUND,
+        // A bar marks what the user said even where a terminal theme makes
+        // the background hard to see; agent messages never carry it.
+        border: ['left'],
+        borderStyle: 'heavy',
+        borderColor: USER_MESSAGE_BAR_COLOR,
       });
       root.add(userMessageSurface);
-      lines.forEach((line) => addLine(line, userMessageSurface));
+      // The bar takes the first cell of the gutter user text shares with agent text.
+      lines.forEach((line) => addLine(line.tone === 'user' ? { ...line, text: line.text.replace(/^ /, '') } : line, userMessageSurface));
       addTimelineEntrySpacing(entry);
       return;
     }

@@ -2,7 +2,7 @@ import { isBaseMessage } from '@langchain/core/messages';
 import type {
   SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
-import { readJsonRecord } from '@pinpawo/pet-agent';
+import { readContentText, readJsonRecord } from '@pinpawo/pet-agent';
 import type {
   AgentOperationEvent,
   AgentOperationPhase,
@@ -24,26 +24,6 @@ export type StreamToolsPayload = {
   operation?: SubagentToolOperationMetadata;
 };
 
-/** Flatten a message `content` (string | content-block array) to display text. */
-function messageContentToText(content: unknown): string | null {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part
-          && typeof (part as { text?: unknown }).text === 'string') {
-          return (part as { text: string }).text;
-        }
-        return '';
-      })
-      .join('');
-  }
-  return null;
-}
-
 /**
  * LangChain's `streamMode: 'tools'` emits `on_tool_end` with `output` set to the
  * full ToolMessage (`_formatToolOutput` wraps a tool's string return into a
@@ -61,7 +41,7 @@ function messageContentToText(content: unknown): string | null {
 function unwrapToolMessageOutput(output: unknown): unknown {
   // Instance form: let LangChain decide what a message is, then read its content.
   if (isBaseMessage(output)) {
-    return messageContentToText(output.content) ?? output;
+    return readContentText(output.content) ?? output;
   }
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
     return output;
@@ -76,7 +56,7 @@ function unwrapToolMessageOutput(output: unknown): unknown {
     && record.kwargs
     && typeof record.kwargs === 'object'
   ) {
-    const text = messageContentToText((record.kwargs as Record<string, unknown>).content);
+    const text = readContentText((record.kwargs as Record<string, unknown>).content);
     if (text !== null) {
       return text;
     }

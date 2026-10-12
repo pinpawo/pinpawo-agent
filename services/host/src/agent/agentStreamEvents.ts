@@ -8,6 +8,7 @@ import {
   getAgentMessageRunId,
   isMainConversationMessage,
   isPublicConversationMessage,
+  readMessageText,
 } from '@pinpawo/pet-agent';
 import {
   emptyOperationRegistry,
@@ -22,26 +23,6 @@ export function buildToolOperationEvent(
   registry: OperationRegistry = emptyOperationRegistry,
 ): AgentOperationEvent {
   return normalizeToolStreamEvent(requestId, payload, registry);
-}
-
-export function readFinalMessageText(message: { content?: unknown }) {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-          return part.text;
-        }
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
 }
 
 /** The tool calls a message makes, exactly as the model wrote them. */
@@ -60,7 +41,7 @@ export function readToolResults(messages: readonly unknown[]) {
 /** A call's outcome; a failure keeps what the tool returned, which says why. */
 function readToolResult(message: ToolMessage): { status: 'completed' | 'failed'; error?: string } {
   return message.status === 'error'
-    ? { status: 'failed', error: readFinalMessageText(message) }
+    ? { status: 'failed', error: readMessageText(message) }
     : { status: 'completed' };
 }
 

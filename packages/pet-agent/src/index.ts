@@ -362,6 +362,6 @@ export {
   type GuardDecisionStreamChunk,
 } from './agent/orchestrator/runtime/guards/decisionEvents';
 export { isGraphRecursionLimitError } from './utils/graphErrors';
-export { clipForPrompt } from './agent/orchestrator/utils';
+export { clipForPrompt, readContentText, readMessageText } from './agent/orchestrator/utils';
 export { createAutoReviewer } from './autoReview';
 export type { AutoReviewer, AutoReviewInput, AutoReviewAction, AutoReviewResult, ReviewAssessment } from './autoReview';

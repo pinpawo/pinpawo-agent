@@ -12,6 +12,7 @@ import type { PendingInterruptSnapshot } from '../agent/serverChatHandler';
 import type { RuntimeProjectionDeps } from '../serverTypes';
 import type { TuiCheckpointMessage } from '../session/serverTuiSessions';
 import { buildLocalRuntimeProjection } from '../config/configProjection';
+import { readHostPackageVersion } from '../packageVersion';
 import {
   missingInputModalities,
   supportsInputModalities,
@@ -83,6 +84,7 @@ export function buildHostRuntimeView(
         ]
       : [];
   return {
+    hostVersion: readHostPackageVersion(),
     modelProfileId: runtime.modelProfileId,
     modelProfileLabel: runtime.modelProfileLabel,
     modelProfileAvailable: runtime.modelProfileAvailable,

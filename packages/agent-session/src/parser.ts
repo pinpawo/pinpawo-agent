@@ -125,6 +125,7 @@ function parseAgentSession(value: unknown): AgentSession | null {
 function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
   if (!isRecord(value)) return null;
   const stringFields = [
+    'hostVersion',
     'model',
     'modelProfileId',
     'modelProfileLabel',
@@ -216,6 +217,7 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     return null;
   }
   return {
+    ...(typeof value.hostVersion === 'string' ? { hostVersion: value.hostVersion } : {}),
     ...(typeof value.modelProfileId === 'string'
       ? { modelProfileId: value.modelProfileId }
       : {}),

@@ -14,6 +14,7 @@ import {
 } from './demoQaScenario';
 
 const DEMO_RUNTIME = {
+  hostVersion: 'demo',
   model: 'gpt-demo',
   cwd: '/Users/pinpawo/demo',
   contextWindow: 128_000,

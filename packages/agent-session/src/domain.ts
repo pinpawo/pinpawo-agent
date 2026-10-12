@@ -133,6 +133,8 @@ export type AgentModelProfileSummary = {
 };
 
 export type AgentRuntimeView = {
+  /** Version of the Host build serving this session. */
+  hostVersion?: string;
   modelProfileId?: string;
   modelProfileLabel?: string;
   modelProfileAvailable?: boolean;

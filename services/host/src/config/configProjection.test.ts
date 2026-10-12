@@ -3,11 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import {
-  buildLocalHttpRuntimeProjection,
-  buildLocalRuntimeProjection,
-} from './configProjection';
-import { readHostPackageVersion } from '../packageVersion';
+import { buildLocalRuntimeProjection } from './configProjection';
 import type { ServerDeps } from '../serverTypes';
 import { buildHostRuntimeConfig, buildWorkspaceRuntimeConfig } from './runtimeConfig';
 import { createTestModelServerDeps } from '../testing/modelProfiles';
@@ -20,23 +16,19 @@ function createDeps(workdir: string): ServerDeps {
   };
 }
 
-test('HTTP and TUI projections expose the same normalized runtime values', () => {
+test('runtime projection exposes normalized workspace runtime values', () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-runtime-projection-'));
   const runtimeConfig = buildWorkspaceRuntimeConfig({ workdir });
   const deps = { ...createDeps('/tmp/stale-workdir'), runtimeConfig };
 
   const runtime = buildLocalRuntimeProjection(deps);
-  const http = buildLocalHttpRuntimeProjection(deps);
 
   assert.equal(runtime.workdir, runtimeConfig.workdir);
-  assert.equal(http.host_version, readHostPackageVersion());
-  assert.equal(http.workdir, runtime.workdir);
-  assert.equal(http.workspace_id, runtime.workspaceId);
-  assert.equal(http.state_root, runtime.stateRoot);
+  assert.equal(runtime.workspaceId, runtimeConfig.workspace?.id);
+  assert.equal(runtime.stateRoot, runtimeConfig.stateRoot);
   assert.equal(runtime.contextCompactionWatermarkTokens, 24_000);
-  assert.equal(http.context_compaction_watermark_tokens, 24_000);
-  assert.equal('studio_config_path' in http, false);
-  assert.equal('pets_dir' in http, false);
+  assert.equal('studioConfigPath' in runtime, false);
+  assert.equal('petsDir' in runtime, false);
 });
 
 test('runtime projection excludes output and thinking reserves before context compaction', () => {
@@ -72,10 +64,4 @@ test('session projection surfaces an unavailable selected profile without fallba
   assert.equal(runtime.modelProfileAvailable, false);
   assert.equal(runtime.model, undefined);
   assert.match(runtime.modelProfileIssues[0] ?? '', /Unknown model profile/);
-});
-
-test('chat projection omits Studio-specific fields', () => {
-  const http = buildLocalHttpRuntimeProjection(createDeps('/tmp/pinpawo-mode-chat'));
-
-  assert.equal('studio_mode' in http, false);
 });

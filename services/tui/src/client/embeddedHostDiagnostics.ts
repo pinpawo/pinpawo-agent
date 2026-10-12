@@ -3,8 +3,8 @@
  *
  * The embedded Host writes startup, toolkit, and shutdown diagnostics to
  * stderr. They must never reach the terminal — OpenTUI owns that screen — and
- * the Host has no HTTP `/runtime` surface in this mode, so the log file is the
- * only place an operator can read them.
+ * the Host has no HTTP side channel in this mode, so the log file is the only
+ * place an operator can read them.
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';

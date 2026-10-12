@@ -147,6 +147,9 @@ const TOOL_CALL_DETAIL: Record<string, (args: Record<string, unknown>) => string
 
 const TOOL_CALL_SUBJECT_WIDTH = 48;
 const TOOL_CALL_ERROR_MAX_LINES = 6;
+// A tool's error can be one long line (a JSON result); inline, each line is
+// cut so the reason stays a few rows on a narrow terminal. PageUp keeps it whole.
+const TOOL_CALL_ERROR_LINE_WIDTH = 160;
 
 function toolCallSubject(call: Pick<AgentMessageToolCall, 'name' | 'args'>) {
   const detail = TOOL_CALL_DETAIL[call.name]?.(call.args);
@@ -160,7 +163,10 @@ function toolCallErrorLines(error: string | undefined): MessageDisplayLine[] {
   const visible = lines.slice(0, TOOL_CALL_ERROR_MAX_LINES);
   const hidden = lines.length - visible.length;
   return [
-    ...visible.map((line, index) => ({ text: `${index === 0 ? '  ⎿ ' : '    '}${line}`, tone: 'muted' as const })),
+    ...visible.map((line, index) => ({
+      text: `${index === 0 ? '  ⎿ ' : '    '}${truncateTerminalLine(line, TOOL_CALL_ERROR_LINE_WIDTH)}`,
+      tone: 'muted' as const,
+    })),
     ...(hidden > 0 ? [{ text: `    … +${hidden} lines`, tone: 'muted' as const }] : []),
   ];
 }

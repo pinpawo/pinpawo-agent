@@ -118,6 +118,14 @@ test('a call that ends badly after its line was committed gets an outcome row, n
   // A failure's outcome row carries what the tool returned: the reason it stopped.
   const failed = withToolCallOutcomes([user, { ...message, toolCalls: [{ ...call, status: 'failed', error: '没有可执行的计划项\n请先 submit_plan' }] }, work]);
   assert.equal(formatTimelineEntry(failed[3]!), '▸ 确定目标（失败）\n  ⎿ 没有可执行的计划项\n    请先 submit_plan');
+  // A long or control-laden error stays a short, safe line inline.
+  const longError = withToolCallOutcomes([user, { ...message, toolCalls: [{ ...call, status: 'failed',
+    error: `{"status":"missing_deliverable","detail":"${'x'.repeat(400)}\u001b[31m"}` }] }, work]);
+  const reason = formatTimelineEntry(longError[3]!).split('\n')[1]!;
+  assert.ok(stringWidth(reason) <= 4 + 160);
+  assert.match(reason, /…$/);
+  const control = withToolCallOutcomes([user, { ...message, toolCalls: [{ ...call, status: 'failed', error: 'bad\u001b[31m' }] }, work]);
+  assert.equal(formatTimelineEntry(control[3]!).split('\n')[1], '  ⎿ bad�[31m');
   // A completed call needs no row of its own.
   const completed = [user, { ...message, toolCalls: [{ ...call, status: 'completed' as const }] }, work];
   assert.equal(withToolCallOutcomes(completed), completed);

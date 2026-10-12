@@ -21,6 +21,7 @@
     "eval:supervisor-tool-history": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm src/supervisor-tool-history.eval.ts",
     "eval:supervisor-boundary": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm src/supervisor-boundary.eval.ts",
     "eval:supervisor-plan-adjustment": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm src/supervisor-plan-adjustment.eval.ts",
+    "eval:supervisor-plan-first": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm src/supervisor-plan-first.eval.ts",
     "eval:subagent": "node --env-file-if-exists=.env --import tsx/esm src/subagent.eval.ts",
     "eval:langfuse:subagent": "node --env-file-if-exists=.env --import tsx/esm src/subagent.eval.ts",
     "eval:entry-answer": "PROMPT_EVAL_DEFAULT_TARGETS=entry_answer node --env-file-if-exists=.env --import tsx/esm src/scripts/run-decision-stability.eval.ts",

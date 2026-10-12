@@ -8,7 +8,6 @@ export type SupervisorControlContext = {
   taskId: string;
   userRequest: string;
   mode: 'entry' | 'boundary';
-  hasNewUserInput: boolean;
   allowedCapabilityNames: readonly string[];
   /** Root-owned records, never the model's proposed transcript. */
   messages: readonly BaseMessage[];

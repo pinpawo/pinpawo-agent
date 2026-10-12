@@ -4,7 +4,7 @@ import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
-import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+import { currentSupervisorTask, planGoal, type RunSupervisorState, type SupervisorAgentState } from './state';
 
 export const submitPlanSchema = z.object({
   tasks: z.array(supervisorTaskSchema).min(1).max(24),
@@ -37,15 +37,10 @@ export function submitPlan(
   if (args.tasks.some(task => !context.allowedCapabilityNames.includes(task.capability))) {
     throw new SupervisorDecisionError('Plan selects a capability outside the current catalog.');
   }
-  if (currentSupervisorTask(context.state) && !context.hasNewUserInput) {
-    throw new SupervisorDecisionError('Replacing unfinished work requires fresh user input.');
+  if (currentSupervisorTask(context.state)) {
+    throw new SupervisorDecisionError('The plan still has unfinished work; use adjust_plan to change it.');
   }
-  // Entry establishes the goal from this run's resolved request. At a boundary
-  // the run already owns a goal — carried in by continue or set by adjust_plan —
-  // and only adjust_plan may change it; on continue the run request is just the
-  // continuation utterance.
-  const goal = context.mode === 'boundary' && context.state.goal ? context.state.goal : context.userRequest;
-  return { runId: context.runId, goal, plan: args.tasks.map((task, index) => ({
+  return { runId: context.runId, goal: planGoal(context), plan: args.tasks.map((task, index) => ({
     ...task, id: identity('task', context.runId, callId, String(index)), status: 'pending',
   })) };
 }

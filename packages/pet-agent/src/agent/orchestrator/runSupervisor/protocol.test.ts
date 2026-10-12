@@ -13,7 +13,7 @@ test('control schemas describe plan, review, adjustment and explicit execution w
     { schema: delegateCapabilitySchema, args: { briefing: 'Execute current objective.' } },
     { schema: reviewCurrentSchema, args: { completed: false, reason: 'Missing verification' } },
     { schema: reviewCurrentSchema, args: { completed: true, reason: 'Verified' } },
-    { schema: adjustPlanSchema, args: { goal: 'Updated goal', reason: 'New request', currentTask: 'replace', tasks } },
+    { schema: adjustPlanSchema, args: { adjustedGoal: 'Calibrated goal', reason: 'New request', currentTask: 'replace', tasks } },
   ]) assert.deepEqual(control.schema.parse(control.args), control.args);
 });
 

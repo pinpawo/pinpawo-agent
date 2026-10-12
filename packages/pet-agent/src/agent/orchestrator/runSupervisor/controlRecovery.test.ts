@@ -91,7 +91,7 @@ test('reviewing the next unexecuted task returns feedback, retains accepted work
 for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability']) {
   test(`${name} schema error reaches the model and correction executes exactly once`, async () => {
     const badArgs = name === 'submit_plan' ? { tasks: [{ ...task, planItemId: 'external-task' }] }
-      : name === 'adjust_plan' ? { goal: task.objective, reason: 'Correct the plan.', currentTask: 'replace', tasks: [{ ...task, planItemId: 'external-task' }] }
+      : name === 'adjust_plan' ? { reason: 'Correct the plan.', currentTask: 'replace', tasks: [{ ...task, planItemId: 'external-task' }] }
       : name === 'review_current' ? { completed: 'yes', reason: 'Evidence returned.' }
       : { briefing: 123 };
     const goodPlan = call('submit_plan', { tasks: [task] }, 'plan');
@@ -234,7 +234,7 @@ test('a follow-up run plans fresh work after a rejected delegation instead of as
     new AIMessage('Inspection complete.'),
     // The follow-up run delegates before registering any new work.
     call('delegate_capability', { briefing: 'Update the readme.' }, 'premature'),
-    call('adjust_plan', { goal: followUp.objective, reason: 'User asked for new work.', currentTask: 'replace',
+    call('adjust_plan', { reason: 'User asked for new work.', currentTask: 'replace',
       tasks: [followUp] }, 'adjust'),
     call('delegate_capability', { briefing: 'Update the readme.' }, 'execute-follow-up'),
     call('review_current', { completed: true, reason: 'Readme updated.' }, 'review-follow-up'),
@@ -257,7 +257,7 @@ test('a follow-up run plans fresh work after a rejected delegation instead of as
   const rejected = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'premature'));
   assert.ok(ToolMessage.isInstance(rejected));
   assert.match(rejected.text, /There is no planned task to execute/);
-  // The rejected delegation did not consume the user's input, so the goal can follow it.
+  // The cleared snapshot gives the recovered plan this run's request as its goal.
   const adjusted = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'adjust');
   assert.ok(ToolMessage.isInstance(adjusted));
   assert.notEqual(adjusted.status, 'error');

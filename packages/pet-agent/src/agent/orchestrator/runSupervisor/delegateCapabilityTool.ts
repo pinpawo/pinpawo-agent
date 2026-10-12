@@ -4,13 +4,12 @@ import { buildReviewStopMessage } from '../interrupt/reviewStop';
 import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
-import { currentSupervisorTask, requirePlanGoal } from './state';
+import { acceptanceGoal, currentSupervisorTask } from './state';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
 import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME } from '../executionMessages';
 import { createCapabilityCatalog } from './capabilityCatalog';
-import { latestRunUserInputId } from './input';
 
 export const delegateCapabilitySchema = z.object({
   briefing: z.string().refine(text => text.trim().length > 0).describe('只为当前计划项准备执行说明。结合用户要求与已返回交付，说明要完成的工作、可复用结论和必要约束；不复制历史交付全文，不展开后续任务。'),
@@ -31,7 +30,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const input = buildCapabilityExecutionInput({
       state: state.runSupervisorState, runId: state.runId, allowedCapabilityNames: catalog.capabilityNames,
     }, args, runtime.toolCallId);
-    const userRequest = requirePlanGoal(state.runSupervisorState);
+    const userRequest = acceptanceGoal(state.runSupervisorState);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,
@@ -62,9 +61,6 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       })] : [])],
       sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
-      // The user input is consumed only by a delegation that actually ran; a
-      // rejected one returns to Supervisor with that input still fresh.
-      runSupervisorUserMessageId: latestRunUserInputId(state) ?? state.runSupervisorUserMessageId,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
     } });
   }, {

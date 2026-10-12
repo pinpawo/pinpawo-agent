@@ -163,6 +163,7 @@ export function entryPlanMessage(state: RunSupervisorState, runId?: string) {
   const body = state.plan.length > 0 || state.goal
     ? [
         ...(state.goal ? [indentXmlBlock(xmlTextBlock('goal', state.goal), 2)] : []),
+        ...(state.adjustedGoal ? [indentXmlBlock(xmlTextBlock('adjusted_goal', state.adjustedGoal), 2)] : []),
         ...(state.plan.length > 0
           ? [
               '  <plan>',

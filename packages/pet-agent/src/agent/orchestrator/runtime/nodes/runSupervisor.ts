@@ -35,7 +35,6 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
     return new Command({
       update: {
         runCapabilityDisclosure: result.capabilityDisclosure,
-        runSupervisorUserMessageId: input.inputId.startsWith('human:') ? input.inputId : root.runSupervisorUserMessageId,
         // Entering is what the mode records, not committing a plan: a rejected
         // decision still spent this run's Supervisor turn, and re-entering at
         // Entry would repeat it.

@@ -44,7 +44,7 @@ assert.ok([...selected].every((name) => cases.some((scenario) => scenario.name =
 for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
   const userRequest = scenario.goal ?? goal;
   const remainingPlan = scenario.name === 'entry' ? [] : [{ capability: 'general', objective: 'Publish the findings.' }];
-  const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest, freshUserInput: scenario.name !== 'autonomous',
+  const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest,
     evidence: scenario.evidence,
     task: scenario.name === 'entry' ? undefined : 'Inspect the example/old repository.', remaining: remainingPlan });
   const input: RunSupervisorInput = { ...fixture, capabilityDisclosure: disclosure,
@@ -62,7 +62,6 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     } else if (scenario.strategy) {
       assert.equal(result.name, 'adjust_plan');
       if (result.name === 'adjust_plan') {
-        if (scenario.name === 'autonomous') assert.equal(result.args.goal, userRequest);
         assert.equal(result.args.currentTask, scenario.strategy);
         assert.equal(result.args.tasks[0].capability, scenario.capability);
         assert.ok(result.args.tasks.length > 0);

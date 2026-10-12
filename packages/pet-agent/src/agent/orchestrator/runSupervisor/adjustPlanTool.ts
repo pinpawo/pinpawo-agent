@@ -4,11 +4,11 @@ import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
-import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+import { currentSupervisorTask, planGoal, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForPlanItem } from '../executionMessages';
 
 export const adjustPlanSchema = z.object({
-  goal: z.string().trim().min(1).max(4_000).describe('没有新用户输入时必须原样保留当前 goal；只有用户明确要求或确认改变目标时才更新。'),
+  adjustedGoal: z.string().trim().min(1).max(4_000).optional().describe('执行证据表明验收目标需要校准时填写调整后的目标，作为后续委派和验收依据；不得超出 goal 的授权范围。无需校准时省略，沿用已有的调整后目标。'),
   reason: z.string().trim().min(1).max(2_000).describe('使原计划无法继续适用的具体执行证据或新用户要求，以及本次必要的最小调整。'),
   currentTask: z.enum(['keep', 'replace']).describe('keep：保留当前计划项及其验收依据，可修改 objective 但保持 Capability；replace：建立新计划项。每次委派均独立执行。'),
   tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的剩余工作。已完成事项由运行时保留，不重新提交；keep 时第一项对应保留身份与交付的当前任务。'),
@@ -38,9 +38,6 @@ export function adjustPlan(
   args: AdjustPlanArgs,
   callId: string,
 ): RunSupervisorState {
-  if (!context.hasNewUserInput && args.goal !== (context.state.goal ?? context.userRequest)) {
-    throw new SupervisorDecisionError('Changing the goal requires fresh user input.');
-  }
   if (args.tasks.some(task => !context.allowedCapabilityNames.includes(task.capability))) {
     throw new SupervisorDecisionError('Plan selects a capability outside the current catalog.');
   }
@@ -52,7 +49,8 @@ export function adjustPlan(
   const retained = context.state.plan.filter(task => task.status === 'completed' || task.status === 'superseded'
     || (executionsForPlanItem(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
     .map(task => task.status === 'completed' ? task : { ...task, status: 'superseded' as const });
-  return { runId: context.runId, goal: args.goal, plan: [...retained, ...args.tasks.map((task, index) => ({
+  const adjustedGoal = args.adjustedGoal ?? context.state.adjustedGoal;
+  return { runId: context.runId, goal: planGoal(context), ...(adjustedGoal ? { adjustedGoal } : {}), plan: [...retained, ...args.tasks.map((task, index) => ({
     ...task,
     id: reuse && index === 0 && current ? current.id : identity('task', context.runId, callId, String(index)),
     status: 'pending' as const,

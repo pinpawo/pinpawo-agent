@@ -109,18 +109,6 @@ test('natural question does not accept the returned task or erase its results', 
   assert.equal(next.messages.at(-1)?.text, 'Which destination?');
 });
 
-test('new user input is consumed once, including guidance added within a native resumed run', async () => {
-  const input = await delivered();
-  const guidance = setAgentMessageMetadata(new HumanMessage({ id: 'guidance', content: 'Change destination.' }),
-    { runId: input.runId, taskId: input.taskId });
-  input.messages.push(guidance);
-  const catalog = createCapabilityCatalog({ registry });
-  const build = (root: OrchestratorStateType) => buildRunSupervisorInput({ root, catalog,
-    capabilityDisclosure: createCapabilityDisclosureState({ catalog }) });
-  assert.equal(build(input).inputId, 'human:guidance');
-  assert.ok(!build({ ...input, runSupervisorUserMessageId: 'human:guidance' }).inputId.startsWith('human:'));
-});
-
 test('accepting a pending task without returned evidence is rejected', async () => {
   const input = state();
   const pending = apply(input, await node({ name: 'submit_plan', args: { tasks } })(input, options));

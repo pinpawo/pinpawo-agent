@@ -1,4 +1,3 @@
-import { getAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import type { RunSupervisorInput } from './runner';
 import type { SupervisorControlContext } from './controlContext';
@@ -18,16 +17,8 @@ export function supervisorControlContext(input: RunSupervisorInput): SupervisorC
   return {
     state: input.state, runId: input.runId, taskId: input.taskId,
     userRequest: input.userRequest, mode: input.mode,
-    hasNewUserInput: input.inputId.startsWith('human:'),
     allowedCapabilityNames: input.catalog.capabilityNames, messages: input.messages,
   };
-}
-
-/** The input id of this run's latest user message, or null when the run has none. */
-export function latestRunUserInputId(root: Pick<OrchestratorStateType, 'messages' | 'runId'>): string | null {
-  const latestHuman = root.messages.filter((message) => message._getType() === 'human'
-    && !getAgentMessageMetadata(message).lane && getAgentMessageMetadata(message).runId === root.runId).at(-1);
-  return latestHuman ? `human:${latestHuman.id ?? root.runId}` : null;
 }
 
 export function buildRunSupervisorInput(params: {
@@ -37,11 +28,10 @@ export function buildRunSupervisorInput(params: {
 }): RunSupervisorInput {
   const { root, catalog, capabilityDisclosure } = params;
   if (!root.runUserRequest) throw new Error('Supervisor requires the current user request.');
-  const humanId = latestRunUserInputId(root);
+  const mode = readSupervisorMode(root);
   return {
-    mode: readSupervisorMode(root),
-    inputId: humanId && root.runSupervisorUserMessageId !== humanId
-      ? humanId : `boundary:${root.runId}:${root.runIterationCount}`,
+    mode,
+    inputId: `${mode}:${root.runId}:${root.runIterationCount}`,
     runId: root.runId, taskId: root.taskId, userRequest: root.runUserRequest,
     state: root.runSupervisorState, messages: root.messages, catalog, capabilityDisclosure,
   };

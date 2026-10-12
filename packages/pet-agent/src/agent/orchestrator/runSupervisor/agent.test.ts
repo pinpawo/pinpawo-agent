@@ -1476,7 +1476,7 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
     toolCalls: [{
       id: 'adjust-new-work', name: 'adjust_plan',
       args: {
-        goal: 'Update the README.', reason: 'User requested the update.', currentTask: 'replace',
+        reason: 'User requested the update.', currentTask: 'replace',
         tasks: [{ capability: 'general', objective: 'Update the README section for issue #587.' }]
       }
     }] }]);
@@ -1991,35 +1991,23 @@ test('repeated empty detail reads do not close disclosure and parallel names mer
   assert.deepEqual(payload.alreadyDisclosed, ['general', 'explore']);
 });
 
-test('adjust_plan is available at every Boundary but changing the goal requires user input', async () => {
+test('adjust_plan is available at every Supervisor turn and calibrates beside the goal', async () => {
   const catalog = createTestCatalog({ general: 'Repository execution.', writer: 'Write reports.' });
   const args = {
-    goal: 'Inspect the corrected repository and prepare a private report.',
+    adjustedGoal: 'Inspect the corrected repository and prepare a private report.',
     reason: 'The user corrected the repository and cancelled publication.',
     currentTask: 'replace',
     tasks: [{ capability: 'writer', objective: 'Prepare a private report from the corrected repository.' }],
   };
   const activeDelegation = { delegationId: 'd1', runId: 'run-test', capability: 'general', task: 'Publish the old repository.' };
-  for (const scenario of ['entry', 'execution', 'user', 'autonomous'] as const) {
+  for (const scenario of ['entry', 'execution', 'user'] as const) {
     const input = supervisorInput(catalog, scenario === 'entry' ? {} : {
-      mode: 'boundary', currentTask: activeDelegation,
-      inputId: scenario === 'user' ? 'human:correction' : 'announce:d1:a1',
-      messages: [new HumanMessage('Use the corrected repository; cancel publication and write a private report.')],
+      mode: 'boundary', currentTask: activeDelegation, inputId: `boundary:${scenario}`,
+      messages: scenario === 'user' ? [new HumanMessage('Use the corrected repository; cancel publication and write a private report.')] : [],
     });
-    const invocationArgs = scenario === 'autonomous' ? { ...args, goal: input.state.goal ?? input.userRequest,
-      reason: 'Execution evidence requires a revised method.', tasks: [{ capability: 'general', objective: activeDelegation.task }] } : args;
-    const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: `adjust-${scenario}`, name: 'adjust_plan', args: invocationArgs }] }]);
-    const invocation = createRunSupervisorAgent({ model }).invoke(input);
-    if (scenario === 'user' || scenario === 'autonomous') {
-      assert.deepEqual(commandOnly(await invocation), { name: 'adjust_plan', args: invocationArgs });
-    } else {
-      const result = await invocation;
-      const feedback = result.messages.find(m => ToolMessage.isInstance(m) && m.status === 'error');
-      assert.ok(feedback);
-      assert.match(feedback.text, /Changing the goal requires fresh user input/);
-    }
+    const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: `adjust-${scenario}`, name: 'adjust_plan', args }] }]);
+    assert.deepEqual(commandOnly(await createRunSupervisorAgent({ model }).invoke(input)), { name: 'adjust_plan', args });
     assert.equal(model.boundToolNames.includes('adjust_plan'), true);
-    assert.ok(model.invocations.length >= 1);
   }
 });
 

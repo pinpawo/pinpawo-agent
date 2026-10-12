@@ -1,6 +1,5 @@
 import type { AgentSession } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
-import type { LocalHostMetadata } from '../client/localHostMetadata';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { formatRuntimeModel } from '../status/statusModel';
 import { truncateTerminalLine } from '../text/terminalText';
@@ -29,7 +28,6 @@ export function buildWelcomeLines(input: {
   width: number;
   connection: string;
   version?: string;
-  hostMetadata?: LocalHostMetadata | null;
 }) {
   const width = Math.max(1, Math.floor(input.width));
   const padded = width >= WELCOME_PAD_COLUMNS * 2 + 2;
@@ -38,9 +36,7 @@ export function buildWelcomeLines(input: {
   const model = formatRuntimeModel(input.session) || 'model loading';
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
   const version = input.version ?? TUI_VERSION;
-  const hostVersion = formatVersion(
-    input.hostMetadata?.hostVersion,
-  );
+  const hostVersion = formatVersion(input.session.runtime?.hostVersion);
   const sideBySide = contentWidth >= 64;
   const shortcutWidth = sideBySide
     ? contentWidth - WELCOME_LOGO_WIDTH - 4

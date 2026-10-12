@@ -5,7 +5,6 @@ import {
   type ToolAuthorizationSafetyLevel,
   type ToolAuthorizationMode,
 } from '@pinpawo/agent-contracts';
-import { readHostPackageVersion } from '../packageVersion';
 import type { RuntimeProjectionDeps } from '../serverTypes';
 import type { ModelInputModality } from './modelProfiles';
 import { resolveLlmGenerationReserveTokens } from './llmModelPresets';
@@ -83,27 +82,5 @@ export function buildLocalRuntimeProjection(
       workspaceRoot: runtimeConfig.workspace.rootPath,
     } : {}),
     stateRoot: runtimeConfig.stateRoot,
-  };
-}
-
-export function buildLocalHttpRuntimeProjection(deps: RuntimeProjectionDeps) {
-  const runtime = buildLocalRuntimeProjection(deps);
-  return {
-    host_version: readHostPackageVersion(),
-    model_profile_id: runtime.modelProfileId,
-    model_profile_label: runtime.modelProfileLabel,
-    model_profile_available: runtime.modelProfileAvailable,
-    ...(runtime.model ? { llm_model: runtime.model } : {}),
-    ...(runtime.contextWindow !== undefined
-      ? { llm_context_window_tokens: runtime.contextWindow }
-      : {}),
-    ...(runtime.contextCompactionWatermarkTokens !== undefined
-      ? { context_compaction_watermark_tokens: runtime.contextCompactionWatermarkTokens }
-      : {}),
-    workdir: runtime.workdir,
-    ...(runtime.workspaceId ? { workspace_id: runtime.workspaceId } : {}),
-    ...(runtime.workspaceName ? { workspace_name: runtime.workspaceName } : {}),
-    ...(runtime.workspaceRoot ? { workspace_root: runtime.workspaceRoot } : {}),
-    ...(runtime.stateRoot ? { state_root: runtime.stateRoot } : {}),
   };
 }

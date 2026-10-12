@@ -16,6 +16,7 @@ const SESSION: AgentSession = {
     summary: 'Local helper',
   },
   runtime: {
+    hostVersion: '0.2.0',
     model: 'gpt-test',
     modelProfileLabel: 'Primary coding',
     cwd: '/Users/mac/Develop/pinpawo-agent',
@@ -30,9 +31,6 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
     session: SESSION,
     width: 80,
     connection: 'connected',
-    hostMetadata: {
-      hostVersion: '0.2.0',
-    },
   });
   assert.equal(lines[0], ' '.repeat(80));
   assert.ok(lines.some((line) => line.includes('████        ████')));

@@ -18,10 +18,6 @@ import {
   createLocalHostConnectionFactory,
   readWirePort,
 } from './client/localHostConnection';
-import {
-  loadLocalHostMetadata,
-  type LocalHostMetadata,
-} from './client/localHostMetadata';
 import { parseTuiLaunchOptions } from './cli/launchOptions';
 import { resolveComposerIntent } from './commands/composerIntent';
 import { createDemoConnectionFactory } from './qa/demoConnection';
@@ -186,16 +182,6 @@ const embeddedHostDiagnostics = createEmbeddedHostDiagnosticsSink();
 // `--server-port` selects a running Host directly; `LOCAL_SERVER_PORT` only
 // supplies the default for the connect paths that do not name a port.
 const port = agentSession?.port ?? launchOptions.serverPort ?? readWirePort();
-const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
-  ? {
-      hostVersion: 'demo',
-    }
-  : agentSession || embeddedHost
-    // A Pet-scoped Agent Session and an embedded Host both skip the loopback
-    // `/runtime` probe: the former is observed through its own route, and the
-    // latter does not start an HTTP side channel at all.
-    ? { hostVersion: null }
-    : await loadLocalHostMetadata({ port });
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
   targetFps: 60,
@@ -487,7 +473,6 @@ const unsubscribe = controller.subscribe((state) => {
       session: state.session,
       width: renderer.width,
       connection: formatConnection(state.connection),
-      hostMetadata,
     }));
   }
   if (!terminalHandoffOpen) {
@@ -935,7 +920,6 @@ function replayCanonicalTimeline() {
       session: state.session,
       width: renderer.width,
       connection: formatConnection(state.connection),
-      hostMetadata,
     }));
   }
   timeline.render(state.session);
@@ -1955,7 +1939,6 @@ function reconcileTimelineAfterHandoff() {
         session: controller.getState().session,
         width: renderer.width,
         connection: formatConnection(controller.getState().connection),
-        hostMetadata,
       }));
     }
     timeline.render(controller.getState().session);

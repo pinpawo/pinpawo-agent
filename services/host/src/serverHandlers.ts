@@ -866,9 +866,6 @@ export function createChatHostHandlers(
     },
     interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
     close: () => {},
-    handleHttpRequest: (req, res, authToken) => {
-      const requestDeps = runtimeDeps.get();
-      return handleLocalHttpRequest(req, res, requestDeps, { authToken });
-    },
+    handleHttpRequest: (req, res, authToken) => handleLocalHttpRequest(req, res, { authToken }),
   };
 }

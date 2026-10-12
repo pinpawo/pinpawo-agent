@@ -341,12 +341,9 @@ test('welcome uses visual hierarchy for identity, metadata, and shortcuts', asyn
   const timeline = new TimelineScrollback(setup.renderer);
   try {
     timeline.renderWelcome(buildWelcomeLines({
-      session: session([]),
+      session: { ...session([]), runtime: { hostVersion: '0.2.0' } },
       width: 80,
       connection: 'connected',
-      hostMetadata: {
-        hostVersion: '0.2.0',
-      },
     }));
     const text = setup.cellOutput.takeText();
     assert.match(text, /PinPawo TUI v2/);

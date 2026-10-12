@@ -319,6 +319,7 @@ test('model protocol accepts correlated selection messages and sanitized profile
     activeRun: null,
     pendingInterrupt: null,
     runtime: {
+      hostVersion: '0.3.0',
       modelProfileId: 'vision',
       modelProfileLabel: 'Vision',
       modelProfileAvailable: true,

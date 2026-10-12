@@ -257,7 +257,7 @@ HTTP 承载的其实是两种不同的东西：
 
 | 路由 | 属于 | 真实消费者 |
 |---|---|---|
-| `/runtime` | **运维面**（装的哪个版本） | TUI `localHostMetadata` |
+| `/runtime` | **运维面**（带 token 的存活探针，只回 `{ ok: true }`） | 无固定消费者；Host 版本号已改走 session 快照的 `runtime.hostVersion` |
 | ~~`/health`~~ | 运维面（存活探针） | 唯一消费者是已停止维护的 macOS 伴侣（已删） |
 | ~~`/snapshot`~~ ~~`/sessions`~~ ~~`/sessions/resume`~~ | 对话能力面 | **零消费者**（已删） |
 
@@ -479,7 +479,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 |---|---|
 | WebSocket（13 个 handler） | 基准 |
 | stdio | 复用**同一组** `peerHandlers` ✅ |
-| HTTP（1 条路由） | 仅 `/runtime`；三条对话能力残留路由与 `/health` 均已删 ✅ |
+| HTTP（1 条路由） | 仅 `/runtime` 存活探针；三条对话能力残留路由与 `/health` 均已删，版本号移进 session 快照 ✅ |
 | resident dispatch | 直接进 `dispatchQueue`，不进 `InflightRequestController` |
 
 #### resident 模式的 4 层叠加

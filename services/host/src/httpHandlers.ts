@@ -1,12 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isAuthorizedWireRequest } from './wire/auth';
-import type { PetIdentityDeps, RuntimeProjectionDeps } from './serverTypes';
-import { buildLocalHttpRuntimeProjection } from './config/configProjection';
 
 /**
- * HTTP carries one operational read: which build this process is running.
- * Conversation capability is the WebSocket/stdio handler set — see
- * [wire 能力统一](../../../docs/design/host/domains.md) §一.6.
+ * HTTP carries one authenticated liveness probe. Conversation capability and
+ * the runtime view (including the Host version) are the WebSocket/stdio
+ * handler set — see [wire 能力统一](../../../docs/design/host/domains.md) §一.6.
  */
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -15,7 +13,6 @@ type LocalHttpHandlerOptions = {
 export function handleLocalHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  deps: PetIdentityDeps & RuntimeProjectionDeps,
   options: LocalHttpHandlerOptions,
 ) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
@@ -26,7 +23,7 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/runtime') {
-    writeJson(res, 200, buildLocalHttpRuntimeProjection(deps));
+    writeJson(res, 200, { ok: true });
     return true;
   }
 

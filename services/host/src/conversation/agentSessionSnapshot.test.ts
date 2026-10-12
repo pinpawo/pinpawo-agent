@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseAgentSessionSnapshot } from '@pinpawo/agent-session';
 import { buildHostSessionSnapshot } from './agentSessionSnapshot';
+import { readHostPackageVersion } from '../packageVersion';
 import type { ServerDeps } from '../serverTypes';
 import { createTestModelServerDeps } from '../testing/modelProfiles';
 import type { TuiCheckpointMessage } from './transcriptProjection';
@@ -95,6 +96,7 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
       status: 'active',
     }],
   });
+  assert.equal(snapshot.session.runtime?.hostVersion, readHostPackageVersion());
   assert.equal(snapshot.session.runtime?.model, 'test-model');
   assert.equal(snapshot.session.runtime?.modelProfileId, 'test-profile');
   assert.deepEqual(

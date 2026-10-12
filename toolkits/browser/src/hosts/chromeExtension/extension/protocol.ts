@@ -1,6 +1,6 @@
 import type { JsonRecord } from './types.js';
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
 export const CAPABILITIES = [
   'navigate',

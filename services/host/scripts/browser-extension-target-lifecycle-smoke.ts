@@ -6,8 +6,8 @@
  */
 import {
   ChromeExtensionBrowserRS,
-  ChromeExtensionBrowserSession,
   BrowserExtensionBridge,
+  createContextBoundExtensionSession,
 } from '@pinpawo-toolkit/browser';
 import { startBrowserScenarioFixture } from './browser-scenario-fixture';
 import { BrowserScenarioReporter } from './browser-scenario-report';
@@ -33,7 +33,8 @@ async function waitForExtension(timeoutMs = 45_000): Promise<void> {
   );
 }
 
-const browser = new ChromeExtensionBrowserSession(bridge);
+// The v4 protocol requires every command to name a browser context.
+const browser = createContextBoundExtensionSession(bridge);
 const fixture = await startBrowserScenarioFixture();
 const reporter = new BrowserScenarioReporter('extension', 'browser-smoke-fixture');
 let extensionConnected = false;

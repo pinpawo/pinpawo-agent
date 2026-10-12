@@ -6,6 +6,7 @@ import {
 } from './drivers/chromeExtension/bridge';
 import { ChromeExtensionBrowserRS } from './chromeExtensionBrowserRS';
 import type { BrowserRSCallContext } from './browserRS';
+import type { BrowserRuntimeEvent } from './lifecycle/events';
 
 function call(
   agentSessionId: string,
@@ -14,6 +15,50 @@ function call(
   return {
     agentSessionId,
     workdir,
+  };
+}
+
+/**
+ * The live-event half of a fake bridge: every navigate is reported readable
+ * for the context that sent it.
+ */
+function readableNavigations() {
+  const listeners = new Set<(event: BrowserRuntimeEvent) => void>();
+  const generations = new Map<string, number>();
+  return {
+    beginNavigation(contextId: string) {
+      const next = (generations.get(contextId) ?? 0) + 1;
+      generations.set(contextId, next);
+      return next;
+    },
+    currentNavigationGeneration(contextId: string) {
+      return generations.get(contextId) ?? 0;
+    },
+    onRuntimeEvent(listener: (event: BrowserRuntimeEvent) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    reportReadable(params: Record<string, unknown>) {
+      const contextId = String(params.browserContextId);
+      const base = {
+        contextId,
+        tabId: 1,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: generations.get(contextId) ?? 0,
+      };
+      setImmediate(() => {
+        const past = Date.now() - 500;
+        for (const listener of listeners) {
+          listener({ ...base, timestamp: past, type: 'navigation.committed', url: String(params.url) });
+          listener({ ...base, timestamp: past, type: 'document.ready', payload: { readyState: 'complete' } });
+          listener({ ...base, timestamp: Date.now(), type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } });
+        }
+      });
+    },
   };
 }
 
@@ -39,11 +84,16 @@ test('the BrowserRS owns its bridge: start listens, dispose stops it', async () 
 
 test('one Agent session keeps its Browser session when the call workdir changes', async (t) => {
   const contexts: unknown[] = [];
+  const navigations = readableNavigations();
   const bridge = {
     ...lease,
+    ...navigations,
     async sendCommand(command: string, params: Record<string, unknown>) {
       contexts.push(params.browserContextId);
-      if (command === 'navigate') return { ok: true };
+      if (command === 'navigate') {
+        navigations.reportReadable(params);
+        return { ok: true };
+      }
       return {
         title: 'Example',
         url: String(params.url ?? 'https://example.com/page'),
@@ -122,11 +172,14 @@ test('BrowserRS routes separate Agent sessions with distinct opaque extension co
     capabilities: ['navigate'],
     socketPath: '/tmp/browser.sock',
   };
+  const live = readableNavigations();
   const bridge = {
     ...lease,
+    ...live,
     async sendCommand(command: string, params: Record<string, unknown>) {
       calls.push({ command, params });
       if (command === 'navigate') {
+        live.reportReadable(params);
         return { ok: true };
       }
       return {

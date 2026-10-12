@@ -236,18 +236,15 @@ test('browser extension protocol parses new page-lifecycle events and payloads',
   assert.deepEqual(dom.payload, { textLength: 1200, textRevision: 2 });
 });
 
-test('browser extension protocol still parses the legacy tab.navigated event', () => {
-  const legacy = parseExtensionToAgentMessage({
+test('browser extension protocol rejects the retired tab.navigated event', () => {
+  assert.throws(() => parseExtensionToAgentMessage({
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
     event: 'tab.navigated',
     tabId: 7,
     url: 'https://example.com/',
-  });
-  assert.equal(legacy.type, 'browser.event');
-  if (legacy.type !== 'browser.event') assert.fail('expected browser event');
-  assert.equal(legacy.event, 'tab.navigated');
+  }));
 });
 
 test('browser extension protocol preserves opaque browser context ids on events', () => {

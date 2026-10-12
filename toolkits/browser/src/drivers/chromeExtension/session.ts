@@ -16,7 +16,6 @@ import {
 import {
   BrowserBridgeError,
   type BrowserExtensionBridge,
-  type BrowserBridgeStatus,
 } from './bridge';
 import type { BrowserContextTargetState } from './protocol';
 import type { BrowserExtensionCommandName } from './protocol';
@@ -108,9 +107,12 @@ export class ChromeExtensionBrowserSession {
   }
 
   constructor(
-    private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand'>
-      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged' | 'beginNavigation'>>
+    private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand' | 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged'>
       & {
+        /** Reserve the next navigation generation of this session's context. */
+        beginNavigation: () => number;
+        /** The navigation generation this session's events carry now. */
+        currentNavigationGeneration: () => number;
         /** This session's current tab as the extension reports it (#867). */
         contextTarget?: () => BrowserContextTargetState | null;
       },
@@ -122,19 +124,6 @@ export class ChromeExtensionBrowserSession {
   }
 
   private buildSnapshotPayload(value: unknown, approvedOrigin: string) {
-    // An extension built before #873 still returns flattened text plus an
-    // interactive list; say so instead of failing on the missing tree.
-    if (
-      value && typeof value === 'object'
-      && !('tree' in value) && 'interactive' in value
-    ) {
-      throw new BrowserOperationError(
-        'browser_extension_outdated',
-        'The Chrome extension returned a snapshot in the format used before accessibility-tree '
-          + 'snapshots. Reload the PinPawo extension.',
-        false,
-      );
-    }
     const snapshot = parseBrowserRawSnapshot(value);
     const handoff = this.handoffPending;
     this.handoffPending = false;
@@ -212,9 +201,6 @@ export class ChromeExtensionBrowserSession {
    * uses `waitForReadiness` backed by a `PendingWait` to reach a terminal
    * verdict — `readable`, `failed` (cross-origin / target closed / connection
    * lost), or `timed_out` — instead of trusting `tab.status` polling.
-   *
-   * Backward compatible: when the bridge is not wired for live events, a
-   * blocking snapshot is taken after the navigate returns.
    */
   private async openAndAwaitReadiness(
     url: string,
@@ -230,35 +216,19 @@ export class ChromeExtensionBrowserSession {
     // Reserve and bind the generation before dispatch. A fast redirect can
     // emit Page/Network events while the navigate command is still in flight;
     // binding afterwards makes those events indistinguishable from stale data.
-    const beforeDispatch = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-    const navigationGeneration = this.bridge.beginNavigation?.();
-    // Current bridges support an explicit reservation: bind before dispatch so
-    // a fast navigation cannot outrun the lifecycle listener. The legacy
-    // fallback has no reservation API, so preserve its post-dispatch binding
-    // rather than treating all of its events as stale.
-    if (navigationGeneration !== undefined) {
-      controller.beginNavigation(
-        url,
-        approvedOrigin,
-        beforeDispatch?.connectionGeneration ?? 1,
-        beforeDispatch?.targetGeneration ?? 1,
-        navigationGeneration,
-      );
-    }
-    const source: ReadinessEventSource | undefined =
-      this.bridge.onRuntimeEvent && this.bridge.onGenerationChanged
-        ? {
-            onRuntimeEvent: (listener) => this.bridge.onRuntimeEvent!(listener),
-            onGenerationChanged: (listener) => this.bridge.onGenerationChanged!(listener),
-          }
-        : undefined;
-
-    const wait = source
-      ? waitForReadiness(controller, {
-          deadlineMs,
-          source,
-        })
-      : null;
+    const beforeDispatch = this.bridge.getStatus();
+    controller.beginNavigation(
+      url,
+      approvedOrigin,
+      beforeDispatch.connectionGeneration ?? 1,
+      beforeDispatch.targetGeneration ?? 1,
+      this.bridge.beginNavigation(),
+    );
+    const source: ReadinessEventSource = {
+      onRuntimeEvent: (listener) => this.bridge.onRuntimeEvent(listener),
+      onGenerationChanged: (listener) => this.bridge.onGenerationChanged(listener),
+    };
+    const wait = waitForReadiness(controller, { deadlineMs, source });
     try {
       // Fire-and-forget navigate: the extension returns immediately and
       // live CDP events drive the controller through the bridge.
@@ -277,31 +247,8 @@ export class ChromeExtensionBrowserSession {
         );
       }
 
-      if (navigationGeneration === undefined) {
-        const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-        controller.beginNavigation(
-          url,
-          approvedOrigin,
-          status?.connectionGeneration ?? 1,
-          status?.targetGeneration ?? 1,
-          status?.navigationGeneration,
-        );
-      }
-
       // Wait for the live event stream to drive the controller to a terminal
-      // state. Without a live source (e.g. bridge not wired), fall back to a
-      // blocking snapshot.
-      if (!wait) {
-        // Backward-compatible: bridge not wired for live events.
-        // Take a snapshot and return it.
-        const snapshot = await this.bridge.sendCommand('snapshot', {
-          approvedOrigin,
-        }, undefined, signal);
-        const built = this.buildSnapshot(snapshot, approvedOrigin);
-        this.approvedOrigin = approvedOrigin;
-        return built;
-      }
-
+      // state.
       const result = await wait.finished;
       this.readinessPhase = result.snapshot.navigation?.phase ?? null;
 
@@ -339,7 +286,7 @@ export class ChromeExtensionBrowserSession {
       if (this.isNavigationTimeout(error)) this.approvedOrigin = approvedOrigin;
       throw error;
     } finally {
-      wait?.dispose();
+      wait.dispose();
     }
   }
 
@@ -376,15 +323,13 @@ export class ChromeExtensionBrowserSession {
   ): Promise<string> {
     const controller = new BrowserLifecycleController();
     const buffered: BrowserRuntimeEvent[] = [];
-    const offEvents =
-      this.bridge.onRuntimeEvent?.((event) => buffered.push(event)) ?? (() => {});
-    const offGenerations =
-      this.bridge.onGenerationChanged?.((change) => {
-        controller.notifyGenerationAdvance(
-          change.connectionGeneration,
-          change.targetGeneration,
-        );
-      }) ?? (() => {});
+    const offEvents = this.bridge.onRuntimeEvent((event) => buffered.push(event));
+    const offGenerations = this.bridge.onGenerationChanged((change) => {
+      controller.notifyGenerationAdvance(
+        change.connectionGeneration,
+        change.targetGeneration,
+      );
+    });
     const startTime = Date.now();
     try {
       const raw = await this.bridge.sendCommand(command, params, timeoutMs, signal);
@@ -398,13 +343,13 @@ export class ChromeExtensionBrowserSession {
       // interaction has no URL of its own, so we seed `requestedUrl` with the
       // approved origin; `createNavigation` normalizes it and any commit during
       // the interaction is same-origin, so it never mis-classifies.
-      const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+      const status = this.bridge.getStatus();
       controller.beginNavigation(
         approvedOrigin,
         approvedOrigin,
-        status?.connectionGeneration ?? 1,
-        status?.targetGeneration ?? 1,
-        status?.navigationGeneration,
+        status.connectionGeneration ?? 1,
+        status.targetGeneration ?? 1,
+        this.bridge.currentNavigationGeneration(),
       );
 
       // Poll once, after the last buffered event, so the settle verdict is

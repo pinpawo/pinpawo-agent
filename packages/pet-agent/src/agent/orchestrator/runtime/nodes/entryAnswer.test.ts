@@ -170,6 +170,22 @@ test('plan_request commits its routing pair to Root before Supervisor reads it',
   assert.equal(result.messages.at(-1)?.content, '当前没有可用的 Capability。');
 });
 
+test('plan_request retires the saved plan so Supervisor plans the new request from empty', async () => {
+  const scripted = entryAnswerModel('plan');
+  const supervisorInputs: RunSupervisorInput[] = [];
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    runSupervisorRunner: { async invoke(input) { supervisorInputs.push(input); return { reply: '已收到。' }; } },
+  });
+  const saved = { runId: 'earlier-run', goal: 'Plan the trip.', plan: [
+    { id: 'done', capability: 'general', objective: 'Book the flight.', status: 'completed' as const },
+    { id: 'open', capability: 'general', objective: 'Book the hotel.', status: 'pending' as const },
+  ] };
+  await graph.invoke({ ...buildOrchestratorRunInput([new HumanMessage('读取仓库文件并检查当前实现。')]), runSupervisorState: saved }, invokeConfig());
+  assert.equal(supervisorInputs[0]?.mode, 'entry');
+  assert.deepEqual(supervisorInputs[0]?.state, { runId: null, goal: null, plan: [] });
+});
+
 test('Entry Answer preserves the current textual HumanMessage exactly', async () => {
   const scripted = entryAnswerModel('plan');
   let plannerRequest = '';

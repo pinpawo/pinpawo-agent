@@ -125,8 +125,12 @@ export function createPlanRequestTool() {
   return tool(
     async ({ goal }: { goal: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
       // Commit the resolved request with the routing messages before Supervisor runs.
+      // A new request retires the saved plan: Supervisor plans it from an empty
+      // snapshot instead of inheriting an earlier run's goal and items.
       const runUserRequest = resolveRunUserRequest(runtime.state, goal);
-      return entryHandoff(runtime, runUserRequest);
+      return entryHandoff(runtime, runUserRequest, {
+        runSupervisorState: { runId: null, goal: null, plan: [] },
+      });
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,

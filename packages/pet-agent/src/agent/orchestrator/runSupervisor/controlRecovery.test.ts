@@ -251,7 +251,7 @@ test('a follow-up run plans fresh work after a rejected delegation instead of as
   const supervisorCallsBefore = supervisor.inputs.length;
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(followUp.objective)]), config);
 
-  // Entry no longer presents the previous run's finished items as remaining work.
+  // plan_request retired the previous run's plan, so Entry starts from an empty one.
   const followUpEntryInput = supervisor.inputs[supervisorCallsBefore].at(-1)!.text;
   assert.match(followUpEntryInput, /<remaining_plan>\s*<!\[CDATA\[\s*\[\]\s*\]\]>/);
   const rejected = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'premature'));
@@ -262,6 +262,7 @@ test('a follow-up run plans fresh work after a rejected delegation instead of as
   assert.ok(ToolMessage.isInstance(adjusted));
   assert.notEqual(adjusted.status, 'error');
   assert.equal(result.runSupervisorState.goal, followUp.objective);
+  assert.deepEqual(result.runSupervisorState.plan.map(t => t.objective), [followUp.objective]);
   assert.deepEqual(readCapabilityExecutions(result.messages).map(e => e.execution.task), [task.objective, followUp.objective]);
   assert.equal(executor.inputs.length, 2);
   assert.equal(result.messages.at(-1)?.text, 'Readme updated.');

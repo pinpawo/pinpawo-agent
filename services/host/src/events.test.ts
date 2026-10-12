@@ -442,7 +442,7 @@ test('unwraps a serialized ToolMessage ({lc,...,kwargs.content}) form', () => {
   assert.equal(event.raw?.output, 'serialized body');
 });
 
-test('unwraps array-content ToolMessage output by concatenating text parts', () => {
+test('unwraps array-content ToolMessage output by joining text parts with newlines', () => {
   const event = normalizeToolStreamEvent(
     'req-1',
     {
@@ -451,7 +451,7 @@ test('unwraps array-content ToolMessage output by concatenating text parts', () 
       toolCallId: 'call-1',
       output: new ToolMessage({
         content: [
-          { type: 'text', text: 'hello ' },
+          { type: 'text', text: 'hello' },
           { type: 'text', text: 'world' },
         ],
         tool_call_id: 'call-1',
@@ -461,7 +461,7 @@ test('unwraps array-content ToolMessage output by concatenating text parts', () 
     createOperationRegistry(),
   );
 
-  assert.equal(event.raw?.output, 'hello world');
+  assert.equal(event.raw?.output, 'hello\nworld');
 });
 
 test('leaves plain string and plain record tool outputs untouched', () => {

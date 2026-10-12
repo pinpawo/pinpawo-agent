@@ -11,6 +11,7 @@ import {
   readMessagesTokenUsage,
   readPendingInterrupt,
   SUBAGENT_OPERATIONS_EVENT,
+  readMessageText,
   type PendingInterrupt,
   type SubagentToolOperationMetadata,
   type TokenUsageSnapshot,
@@ -28,7 +29,6 @@ import type {
   AgentRuntimeEvent,
 } from '@pinpawo/agent-session';
 import {
-  readFinalMessageText,
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import {
@@ -534,7 +534,7 @@ export async function runAgentSessionTurn(
     message === finalMessage || (!!message.id && message.id === finalMessage.id));
   const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
     && !finalMessage.tool_calls?.length && isPublicConversationMessage(finalMessage) && !isOldMessage
-    ? readFinalMessageText(finalMessage) : '';
+    ? readMessageText(finalMessage) : '';
   // FileSaver reloads different objects. Resolve the same reply by stable ID
   // inside the checkpoint collection before projecting its preceding deliveries.
   const checkpointReply = finalThreadState.messages.find(message =>

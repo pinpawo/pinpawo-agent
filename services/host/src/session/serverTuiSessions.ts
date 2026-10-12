@@ -12,6 +12,7 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   mainConversationMessages,
+  readMessageText,
   type PendingInterrupt,
   type ReviewSpec,
   type TokenUsageSnapshot,
@@ -21,7 +22,6 @@ import {
   buildChatSetup,
 } from '../agent/buildChatSetup';
 import { HostGraphService } from '../agent/agentGraphService';
-import { readFinalMessageText } from '../agent/agentStreamEvents';
 import { loadAgentContext } from '../contextLoader';
 import { FileSaver } from '../fileSaver';
 import type { ServerDeps } from '../serverTypes';

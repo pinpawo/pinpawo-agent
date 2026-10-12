@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { connect, type Socket } from 'node:net';
 import test from 'node:test';
-import { BROWSER_EXTENSION_PROTOCOL_VERSION, BROWSER_LEGACY_CONTEXT_ID } from './protocol';
+import { BROWSER_EXTENSION_PROTOCOL_VERSION } from './protocol';
 import { BrowserBridgeError, BrowserExtensionBridge } from './bridge';
 import { BrowserLifecycleController } from '../../lifecycle/controller';
 
@@ -20,13 +20,10 @@ test('browser bridge tracks navigation generations independently per browser con
   assert.equal(bridge.beginNavigation('context-a'), 1);
   assert.equal(bridge.beginNavigation('context-b'), 1);
   assert.equal(bridge.beginNavigation('context-a'), 2);
-  assert.equal(bridge.beginNavigation(), 1);
 });
 
-test('local browser bridge stamps legacy-context events with the context-less navigation generation', async (t) => {
-  // A command sent without browserContextId runs in the extension's legacy
-  // context, whose events must match the generation that command advanced.
-  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-legacy-'));
+test('local browser bridge stamps each context\'s events with that context\'s navigation generation', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-context-'));
   const bridge = new BrowserExtensionBridge({
     socketPath: resolve(root, 'bridge.sock'),
     tokenPath: resolve(root, 'bridge.token'),
@@ -61,18 +58,19 @@ test('local browser bridge stamps legacy-context events with the context-less na
   await waitUntil(() => bridge.getStatus().connectionId === 'connection-1');
 
   bridge.beginNavigation('context-a');
-  const generation = bridge.beginNavigation();
+  bridge.beginNavigation('context-b');
+  const generation = bridge.beginNavigation('context-a');
   peer.send({
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
     event: 'navigation.committed',
-    contextId: BROWSER_LEGACY_CONTEXT_ID,
+    contextId: 'context-a',
     tabId: 42,
     url: 'https://example.com/',
   });
   await waitUntil(() => received.length === 1);
-  assert.equal(received[0].contextId, BROWSER_LEGACY_CONTEXT_ID);
+  assert.equal(received[0].contextId, 'context-a');
   assert.equal(received[0].navigationGeneration, generation);
 });
 
@@ -572,11 +570,12 @@ test('local browser bridge stamps navigationGeneration on navigation-scoped even
 
   // A navigation starts: the explicit boundary stamps subsequent nav-scoped
   // events with a navigation generation.
-  const g1 = bridge.beginNavigation();
+  const g1 = bridge.beginNavigation('context-a');
   peer.send({
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
+    contextId: 'context-a',
     event: 'document.ready',
     tabId: 42,
     payload: { readyState: 'complete' },
@@ -586,12 +585,13 @@ test('local browser bridge stamps navigationGeneration on navigation-scoped even
   assert.equal(received[0].navigationGeneration, g1);
 
   // A second beginNavigation bumps the generation.
-  const g2 = bridge.beginNavigation();
+  const g2 = bridge.beginNavigation('context-a');
   assert.equal(g2, g1 + 1);
   peer.send({
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
+    contextId: 'context-a',
     event: 'navigation.committed',
     tabId: 42,
     url: 'https://example.com/route-a',
@@ -600,8 +600,8 @@ test('local browser bridge stamps navigationGeneration on navigation-scoped even
   assert.equal(received[1].navigationGeneration, g2);
 });
 
-test('local browser bridge maps legacy tab.navigated onto navigation.committed and bumps target generation on close', async (t) => {
-  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-legacy-'));
+test('local browser bridge bumps target generation on close', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-close-'));
   const bridge = new BrowserExtensionBridge({
     socketPath: resolve(root, 'bridge.sock'),
     tokenPath: resolve(root, 'bridge.token'),
@@ -636,18 +636,6 @@ test('local browser bridge maps legacy tab.navigated onto navigation.committed a
   });
   await waitUntil(() => bridge.getStatus().connectionId === 'connection-1');
 
-  peer.send({
-    type: 'browser.event',
-    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
-    connectionId: 'connection-1',
-    event: 'tab.navigated',
-    tabId: 42,
-    url: 'https://example.com/',
-  });
-  await waitUntil(() => received.length === 1);
-  assert.equal(received[0].type, 'navigation.committed');
-  assert.equal(received[0].url, 'https://example.com/');
-
   const before = bridge.getStatus().targetGeneration ?? 0;
   peer.send({
     type: 'browser.event',
@@ -656,8 +644,8 @@ test('local browser bridge maps legacy tab.navigated onto navigation.committed a
     event: 'target.closed',
     tabId: 42,
   });
-  await waitUntil(() => received.length === 2);
-  assert.equal(received[1].type, 'target.closed');
+  await waitUntil(() => received.length === 1);
+  assert.equal(received[0].type, 'target.closed');
   assert.equal(bridge.getStatus().targetGeneration ?? 0, before + 1);
 });
 
@@ -781,7 +769,7 @@ test('bridge events drive a controller that binds the bridge navigation generati
   // The caller binds the bridge's live connection/target generation (which may
   // differ from 1 — the native host connection increments it on registration).
   const { connectionGeneration, targetGeneration } = bridge.getStatus();
-  const g1 = bridge.beginNavigation();
+  const g1 = bridge.beginNavigation('context-a');
   controller.beginNavigation(
     'https://example.com/a',
     'https://example.com',
@@ -794,6 +782,7 @@ test('bridge events drive a controller that binds the bridge navigation generati
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
+    contextId: 'context-a',
     event: 'navigation.committed',
     tabId: 42,
     url: 'https://example.com/a',
@@ -803,7 +792,7 @@ test('bridge events drive a controller that binds the bridge navigation generati
 
   // SPA route change (no `navigate` command): driver calls beginNavigation to
   // demarcate the boundary, then rebinds the controller.
-  const g2 = bridge.beginNavigation();
+  const g2 = bridge.beginNavigation('context-a');
   assert.notEqual(g2, g1);
   controller.beginNavigation(
     'https://example.com/b',
@@ -816,6 +805,7 @@ test('bridge events drive a controller that binds the bridge navigation generati
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
+    contextId: 'context-a',
     event: 'navigation.committed',
     tabId: 42,
     url: 'https://example.com/b',
@@ -827,7 +817,7 @@ test('bridge events drive a controller that binds the bridge navigation generati
   // owner, an SPA route change (which produces no `navigate` command) would
   // desync the two counters and every live event would be mis-rejected as stale.
   assert.equal(controller.getSnapshot().context?.navigationGeneration, g2);
-  assert.equal(bridge.getStatus().navigationGeneration, g2);
+  assert.equal(bridge.currentNavigationGeneration('context-a'), g2);
 
   // A navigation-scoped event dispatched after the SPA boundary is stamped with
   // g2 by the bridge and accepted against the controller's g2 binding.
@@ -835,6 +825,7 @@ test('bridge events drive a controller that binds the bridge navigation generati
     type: 'browser.event',
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
+    contextId: 'context-a',
     event: 'document.ready',
     tabId: 42,
     payload: { readyState: 'complete' },

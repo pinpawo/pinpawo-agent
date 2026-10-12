@@ -202,22 +202,17 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
       ),
       getStatus: () => this.bridge.getStatus(),
       contextTarget: () => this.bridge.getStatus().contextTargets?.[browserContextId] ?? null,
-      ...(typeof this.bridge.beginNavigation === 'function'
-        ? { beginNavigation: () => this.bridge.beginNavigation(browserContextId) }
-        : {}),
-      ...(typeof this.bridge.onRuntimeEvent === 'function'
-        ? { onRuntimeEvent: (listener: (event: BrowserRuntimeEvent) => void) => this.bridge.onRuntimeEvent((event) => {
-            if (event.contextId === browserContextId) listener(event);
-          }) }
-        : {}),
-      ...(typeof this.bridge.onGenerationChanged === 'function'
-        ? { onGenerationChanged: (listener: (change: BrowserGenerationChange) => void) => this.bridge.onGenerationChanged((change) => {
-            // A target change belongs to one context, whereas a connection change
-            // (extension/native-host reconnect) invalidates every in-flight
-            // context. The latter has no contextId and must reach all sessions.
-            if (!change.contextId || change.contextId === browserContextId) listener(change);
-          }) }
-        : {}),
+      beginNavigation: () => this.bridge.beginNavigation(browserContextId),
+      currentNavigationGeneration: () => this.bridge.currentNavigationGeneration(browserContextId),
+      onRuntimeEvent: (listener: (event: BrowserRuntimeEvent) => void) => this.bridge.onRuntimeEvent((event) => {
+        if (event.contextId === browserContextId) listener(event);
+      }),
+      onGenerationChanged: (listener: (change: BrowserGenerationChange) => void) => this.bridge.onGenerationChanged((change) => {
+        // A target change belongs to one context, whereas a connection change
+        // (extension/native-host reconnect) invalidates every in-flight
+        // context. The latter has no contextId and must reach all sessions.
+        if (!change.contextId || change.contextId === browserContextId) listener(change);
+      }),
     });
     const session = new BrowserSession({
       requireExecutionOwner: true,

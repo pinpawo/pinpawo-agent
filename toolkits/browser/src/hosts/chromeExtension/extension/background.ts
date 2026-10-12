@@ -76,7 +76,6 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Runtime.getProperties',
   'Runtime.releaseObjectGroup',
 ]);
-const SESSION_KEY = 'pinpawoBrowserTarget';
 const CONTEXT_TARGETS_KEY = 'pinpawoBrowserTargetsByContext';
 const CONTEXT_GROUPS_KEY = 'pinpawoTabGroupsByContext';
 const RECONNECT_DELAY_MS = 1_000;
@@ -110,7 +109,6 @@ interface PopupRecord {
 
 let popupTracking: PopupTracking | null = null;
 
-const LEGACY_BROWSER_CONTEXT_ID = 'legacy';
 const MAX_BROWSER_CONTEXT_ID_LENGTH = 128;
 
 type BrowserTargetContext = {
@@ -127,16 +125,12 @@ let groupSequence = 0;
  * Like the approval they replace, they live only in the running extension.
  */
 const grantsByTab = new Map<number, string>();
-let activeBrowserContextId = LEGACY_BROWSER_CONTEXT_ID;
+/** The context of the command or tab event being handled; none before the first. */
+let activeBrowserContextId: string | null = null;
 let targets = createTargetStack();
 let userBoundOrigin: string | null = null;
-targetContexts.set(LEGACY_BROWSER_CONTEXT_ID, {
-  targets,
-  userBoundOrigin,
-});
 
 function readBrowserContextId(value: unknown): string {
-  if (value === undefined) return LEGACY_BROWSER_CONTEXT_ID;
   if (
     typeof value !== 'string'
     || !value
@@ -170,6 +164,7 @@ function activateBrowserContext(contextId: string): void {
 }
 
 function persistActiveBrowserContext(): void {
+  if (!activeBrowserContextId) return;
   const context = browserTargetContext(activeBrowserContextId);
   context.userBoundOrigin = userBoundOrigin;
 }
@@ -243,12 +238,11 @@ class ExtensionError extends Error {
 }
 
 async function restoreTarget() {
-  activateBrowserContext(LEGACY_BROWSER_CONTEXT_ID);
-  const stored = await chrome.storage.local.get([SESSION_KEY, CONTEXT_TARGETS_KEY]);
+  const stored = await chrome.storage.local.get(CONTEXT_TARGETS_KEY);
   const persisted = stored[CONTEXT_TARGETS_KEY];
   const candidates = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
     ? Object.entries(persisted as Record<string, unknown>)
-    : [[LEGACY_BROWSER_CONTEXT_ID, stored[SESSION_KEY]]];
+    : [];
   const restored: Record<string, BrowserTarget> = {};
   for (const [contextId, candidate] of candidates) {
     if (
@@ -288,21 +282,19 @@ async function saveTarget(nextTarget: BrowserTarget | null, options: TargetBindO
     userBoundOrigin = grantsByTab.get(target.tabId) ?? null;
   }
   persistActiveBrowserContext();
-  const stored = await chrome.storage.local.get(CONTEXT_TARGETS_KEY);
-  const persisted = stored[CONTEXT_TARGETS_KEY];
-  const nextTargets = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
-    ? { ...(persisted as Record<string, BrowserTarget>) }
-    : {};
-  if (target) nextTargets[activeBrowserContextId] = target;
-  else delete nextTargets[activeBrowserContextId];
-  if (Object.keys(nextTargets).length > 0) {
-    await chrome.storage.local.set({ [CONTEXT_TARGETS_KEY]: nextTargets });
-  } else {
-    await chrome.storage.local.remove(CONTEXT_TARGETS_KEY);
-  }
-  if (activeBrowserContextId === LEGACY_BROWSER_CONTEXT_ID) {
-    if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
-    else await chrome.storage.local.remove(SESSION_KEY);
+  if (activeBrowserContextId) {
+    const stored = await chrome.storage.local.get(CONTEXT_TARGETS_KEY);
+    const persisted = stored[CONTEXT_TARGETS_KEY];
+    const nextTargets = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
+      ? { ...(persisted as Record<string, BrowserTarget>) }
+      : {};
+    if (target) nextTargets[activeBrowserContextId] = target;
+    else delete nextTargets[activeBrowserContextId];
+    if (Object.keys(nextTargets).length > 0) {
+      await chrome.storage.local.set({ [CONTEXT_TARGETS_KEY]: nextTargets });
+    } else {
+      await chrome.storage.local.remove(CONTEXT_TARGETS_KEY);
+    }
   }
   publishBrowserStateChange();
 }
@@ -311,7 +303,6 @@ function contextTargetStates(): Record<string, ContextTargetState> {
   persistActiveBrowserContext();
   const states: Record<string, ContextTargetState> = {};
   for (const [contextId, context] of targetContexts) {
-    if (contextId === LEGACY_BROWSER_CONTEXT_ID) continue;
     const current = context.targets.current();
     if (!current) continue;
     states[contextId] = {
@@ -416,7 +407,7 @@ async function attach(tabId: number) {
   if (attachedTabId === tabId) return;
   const nextContextId = browserContextForTab(tabId) ?? activeBrowserContextId;
   if (attachedTabId !== null) await detach();
-  activateBrowserContext(nextContextId);
+  if (nextContextId) activateBrowserContext(nextContextId);
   try {
     await chrome.debugger.attach({ tabId }, CDP_VERSION);
     attachedTabId = tabId;
@@ -614,7 +605,7 @@ async function restoreContextGroups() {
  */
 async function joinContextGroup(tabId, url?: string) {
   const contextId = activeBrowserContextId;
-  if (contextId === LEGACY_BROWSER_CONTEXT_ID) return;
+  if (!contextId) return;
   try {
     const existing = groupsByContext.get(contextId);
     if (existing) {
@@ -659,7 +650,7 @@ async function handleGroupMembership(tabId, groupId) {
     ? null
     : contextForGroup(groupsByContext, groupId);
   if (holder === joined) return;
-  if (holder && holder !== LEGACY_BROWSER_CONTEXT_ID) {
+  if (holder) {
     activateBrowserContext(holder);
     await releaseTarget(tabId);
   }
@@ -1572,7 +1563,7 @@ async function executeCommand(command) {
 
 async function executeCommandBody(command) {
   ensureCommandAlive(command.deadlineAt);
-  if (command.command === 'detach') return await detach(activeBrowserContextId);
+  if (command.command === 'detach') return await detach(activeBrowserContextId ?? undefined);
 
   const approvedOrigin = command.params.approvedOrigin;
   if (command.command === 'navigate') {

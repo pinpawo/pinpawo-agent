@@ -69,12 +69,12 @@ closed target are rejected — a closed target cannot be resurrected.
 
 The extension already reports navigation and lifecycle transitions as
 `browser.event` messages. `BrowserExtensionBridge` now exposes
-`onRuntimeEvent(listener)` and forwards every incoming event (including the
-legacy `tab.navigated`, mapped onto `navigation.committed`) as a unified
+`onRuntimeEvent(listener)` and forwards every incoming event as a unified
 `BrowserRuntimeEvent`. Navigation-scoped events (`navigation.*`, `document.ready`,
 `network.activity`, `dom.changed`, popup/download) are additionally stamped with
-the active `navigationGeneration` (bumped via `beginNavigation()`, or
-automatically when a `navigate` command is dispatched), so `isEventCurrent` can
+their browser context's `navigationGeneration` (bumped via
+`beginNavigation(contextId)`, or automatically when a `navigate` command is
+dispatched), so `isEventCurrent` can
 drop late events that belong to a superseded navigation.
 
 `BrowserLifecycleController` and `openReadiness.ts` provide the pure consumer of

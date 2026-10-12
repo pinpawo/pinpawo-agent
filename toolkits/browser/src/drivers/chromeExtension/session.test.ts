@@ -18,20 +18,68 @@ const rawSnapshot = {
   source: 'accessibility',
 };
 
+type SessionBridge = ConstructorParameters<typeof ChromeExtensionBrowserSession>[0];
+
+/**
+ * A bridge whose extension reports a readable page right after each navigate,
+ * for tests about what the session does once the page is open.
+ */
+function liveBridge(
+  overrides: Pick<SessionBridge, 'sendCommand'> & Partial<SessionBridge>,
+): SessionBridge {
+  const listeners = new Set<(event: BrowserRuntimeEvent) => void>();
+  let generation = 0;
+  const bridge: SessionBridge = {
+    getStatus: () => ({ connectionGeneration: 1, targetGeneration: 1 }) as BrowserBridgeStatus,
+    onRuntimeEvent(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onGenerationChanged: () => () => {},
+    beginNavigation: () => generation + 1,
+    currentNavigationGeneration: () => generation,
+    ...overrides,
+  };
+  return {
+    ...bridge,
+    beginNavigation: () => (generation = bridge.beginNavigation()),
+    async sendCommand(command, params, timeoutMs, signal, options) {
+      const result = await overrides.sendCommand(command, params, timeoutMs, signal, options);
+      if (command === 'navigate') {
+        const base = {
+          tabId: 1,
+          connectionGeneration: 1,
+          targetGeneration: 1,
+          navigationGeneration: generation,
+        };
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          for (const listener of listeners) {
+            listener({ ...base, timestamp: past, type: 'navigation.committed', url: String(params.url) });
+            listener({ ...base, timestamp: past, type: 'document.ready', payload: { readyState: 'complete' } });
+            listener({ ...base, timestamp: Date.now(), type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } });
+          }
+        });
+      }
+      return result;
+    },
+  };
+}
+
 test('extension session uses one approved origin and the shared payload builder', async () => {
   const calls: Array<{
     command: string;
     params: Record<string, unknown>;
     signal: AbortSignal | undefined;
   }> = [];
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params, _timeoutMs, signal) {
       calls.push({ command, params, signal });
       if (command === 'detach') return { detached: true };
       if (command === 'navigate') return { ok: true };
       return rawSnapshot;
     },
-  });
+  }));
 
   const opened = JSON.parse(await session.open('https://example.com/page')) as {
     tree: string;
@@ -47,8 +95,8 @@ test('extension session uses one approved origin and the shared payload builder'
     },
     signal: undefined,
   });
-  // Issue #601: navigate is fire-and-forget; the backward-compatible path
-  // takes a snapshot after navigate, so calls[1] is the snapshot from open().
+  // Issue #601: navigate is fire-and-forget; once the page is readable open()
+  // takes a snapshot, so calls[1] is that snapshot.
   assert.equal(calls[1]?.command, 'snapshot');
 
   const controller = new AbortController();
@@ -64,7 +112,7 @@ test('extension session uses one approved origin and the shared payload builder'
 
 test('extension session reserves navigation generation before dispatching navigate', async () => {
   const sequence: string[] = [];
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     getStatus() {
       return {
         listening: true,
@@ -82,7 +130,6 @@ test('extension session reserves navigation generation before dispatching naviga
         socketPath: '/tmp/browser.sock',
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 3,
       } as BrowserBridgeStatus;
     },
     beginNavigation() {
@@ -93,7 +140,7 @@ test('extension session reserves navigation generation before dispatching naviga
       sequence.push(`send:${command}:${String(options?.beginNavigation)}`);
       return command === 'navigate' ? { ok: true } : rawSnapshot;
     },
-  });
+  }));
 
   await session.open('https://example.com/page');
   assert.deepEqual(sequence, [
@@ -105,7 +152,7 @@ test('extension session reserves navigation generation before dispatching naviga
 
 test('extension navigation timeout keeps the approved origin for browser_wait', async () => {
   const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params) {
       calls.push({ command, params });
       if (command === 'navigate') {
@@ -113,7 +160,7 @@ test('extension navigation timeout keeps the approved origin for browser_wait', 
       }
       return rawSnapshot;
     },
-  });
+  }));
 
   await assert.rejects(
     session.open('https://example.com/page'),
@@ -132,24 +179,24 @@ test('extension navigation timeout keeps the approved origin for browser_wait', 
 });
 
 test('extension session rejects non-http targets and requires an approved page for actions', async () => {
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand() {
       return rawSnapshot;
     },
-  });
+  }));
   await assert.rejects(session.open('file:///tmp/page.html'), /only supports http/);
   await assert.rejects(session.click('#submit'), /Use browser_open first/);
 });
 
 test('a user-bound tab in the bridge status never becomes a session\'s approved origin', async () => {
   // The bridge status reports whichever browser context the extension
-  // activated last. A user-bound tab lives in the extension's legacy context,
-  // so it must not leak into an Agent session's approval (verified in real
+  // activated last. A user-bound tab may belong to another context, so it
+  // must not leak into an Agent session's approval (verified in real
   // Chrome: binding a tab made another session's snapshot fail with
   // origin_changed against the user's origin).
   const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
   let userBoundOrigin: string | null = 'https://user.example';
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     getStatus() {
       return {
         activeTabBinding: userBoundOrigin ? 'user' : 'agent',
@@ -162,7 +209,7 @@ test('a user-bound tab in the bridge status never becomes a session\'s approved 
       const approvedOrigin = String(params.approvedOrigin);
       return { ...rawSnapshot, url: `${approvedOrigin}/page` };
     },
-  });
+  }));
 
   await assert.rejects(session.snapshot(), /No approved Chrome extension page\. Use browser_open first\./);
   assert.equal(calls.length, 0);
@@ -174,7 +221,7 @@ test('a user-bound tab in the bridge status never becomes a session\'s approved 
 
   assert.deepEqual(calls.map((call) => call.params.approvedOrigin), [
     'https://agent.example', // navigate
-    'https://agent.example', // snapshot from open() backward-compat path
+    'https://agent.example', // snapshot from open()
     'https://agent.example',
     'https://agent.example',
   ]);
@@ -183,7 +230,7 @@ test('a user-bound tab in the bridge status never becomes a session\'s approved 
 test('extension session maps P1 interactions and normalizes extract and screenshot results', async () => {
   const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
   const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-p1-'));
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params) {
       calls.push({ command, params });
       if (command === 'navigate') return { ok: true };
@@ -204,7 +251,7 @@ test('extension session maps P1 interactions and normalizes extract and screensh
       }
       return rawSnapshot;
     },
-  }, () => workdir);
+  }), () => workdir);
 
   await session.open('https://example.com/page');
   await session.click({ ref: 'snapshot-1:1' });
@@ -223,8 +270,7 @@ test('extension session maps P1 interactions and normalizes extract and screensh
   assert.equal(extracted.nextOffset, 4);
   assert.equal(screenshot.byteLength, 1);
   assert.match(screenshot.path, /\.pinpawo\/browser\/screenshots\/.*\.jpg$/);
-  // Issue #601: navigate is fire-and-forget; the backward-compat path adds
-  // a snapshot call after navigate, so command indices shift by 1.
+  // open() sends navigate and then snapshot, so the actions start at calls[2].
   assert.deepEqual(calls.slice(2, 6).map((call) => call.command), [
     'click',
     'type',
@@ -241,7 +287,7 @@ test('extension session maps P1 interactions and normalizes extract and screensh
 });
 
 test('extension session rejects raw snapshots outside the approved origin', async () => {
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command) {
       if (command === 'navigate') return { ok: true };
       return {
@@ -249,7 +295,7 @@ test('extension session rejects raw snapshots outside the approved origin', asyn
         url: 'https://unapproved.example/private',
       };
     },
-  });
+  }));
 
   await assert.rejects(
     session.open('https://example.com/page'),
@@ -266,20 +312,19 @@ test('extension session preserves long browser_type input and budgets enough dri
     params: Record<string, unknown>;
     timeoutMs: number | undefined;
   }> = [];
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params, timeoutMs) {
       calls.push({ command, params, timeoutMs });
       if (command === 'navigate') return { ok: true };
       return rawSnapshot;
     },
-  });
+  }));
   const text = '🙂'.repeat(4_001);
 
   await session.open('https://example.com/page');
   await session.type('#message', text);
 
-  // Issue #601: navigate is fire-and-forget; backward-compat path adds snapshot
-  // at calls[1], so the type command is at calls[2].
+  // open() sends navigate and then snapshot, so the type command is at calls[2].
   assert.equal(calls[2]?.params.text, text);
   assert.ok((calls[2]?.timeoutMs ?? 0) > 30_000);
 });
@@ -303,13 +348,15 @@ test('extension session drives browser_open through the readiness state machine 
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
   const gen = { connectionGeneration: 1, targetGeneration: 1 };
 
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent(listener) {
       listeners.push(listener);
       return () => {};
@@ -326,8 +373,7 @@ test('extension session drives browser_open through the readiness state machine 
         // post-navigate generation. If the session bind the pre-navigate
         // generation (the bug), every event would be dropped as stale and
         // `browser_open` would time out.
-        const gen = (status.navigationGeneration ?? 0) + 1;
-        status.navigationGeneration = gen;
+        const gen = status.navigationGeneration;
         setImmediate(() => {
           const past = Date.now() - 500;
           const base = {
@@ -379,12 +425,14 @@ test('extension session surfaces a cross-origin readiness failure as origin_chan
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
 
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent(listener) {
       listeners.push(listener);
       return () => {};
@@ -396,8 +444,7 @@ test('extension session surfaces a cross-origin readiness failure as origin_chan
       if (command === 'navigate') {
         // Simulate real bridge: navigation generation bumps on dispatch and
         // live events arrive after the navigate command returns (#603 M1).
-        const gen = (status.navigationGeneration ?? 0) + 1;
-        status.navigationGeneration = gen;
+        const gen = status.navigationGeneration;
         setImmediate(() => {
           // Navigation commits to an attacker origin: the readiness state
           // machine must refuse it deterministically, not trust the returned
@@ -426,32 +473,6 @@ test('extension session surfaces a cross-origin readiness failure as origin_chan
   );
 });
 
-test('extension session does NOT mark a text-less (SPA shell) navigation readable', async () => {
-  const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
-  const status = {
-    activeTabId: 11,
-    connectionGeneration: 1,
-    targetGeneration: 1,
-    navigationGeneration: 1,
-  } as BrowserBridgeStatus;
-
-  const session = new ChromeExtensionBrowserSession({
-    async sendCommand(command, params) {
-      if (command === 'navigate') {
-        return { ok: true };
-      }
-      return rawSnapshot;
-    },
-  });
-
-  // Do not throw: the backward-compatible path honors the returned snapshot
-  // while the page is still hydrating. But the readiness verdict must NOT be
-  // `readable` for an empty-body shell (the volcengine scenario).
-  const opened = await session.open('https://example.com/page');
-  assert.ok(/Readable page/.test(opened));
-  assert.notEqual(session.lastReadinessPhase, 'readable');
-});
-
 test('extension session drives a click through the interaction settle state machine', async () => {
   const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
   const status = {
@@ -459,12 +480,14 @@ test('extension session drives a click through the interaction settle state mach
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
 
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent(listener) {
       listeners.push(listener);
       return () => {};
@@ -476,8 +499,7 @@ test('extension session drives a click through the interaction settle state mach
       if (command === 'navigate') {
         // Simulate real bridge: navigation generation bumps on dispatch and
         // live events arrive after the navigate command returns (#603 M1).
-        const gen = (status.navigationGeneration ?? 0) + 1;
-        status.navigationGeneration = gen;
+        const gen = status.navigationGeneration;
         setImmediate(() => {
           const past = Date.now() - 500;
           const base = { tabId: 13, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
@@ -536,12 +558,14 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
 
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent(listener) {
       listeners.push(listener);
       return () => {};
@@ -553,8 +577,7 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
       if (command === 'navigate') {
         // Simulate real bridge: navigation generation bumps on dispatch and
         // live events arrive after the navigate command returns (#603 M1).
-        const gen = (status.navigationGeneration ?? 0) + 1;
-        status.navigationGeneration = gen;
+        const gen = status.navigationGeneration;
         setImmediate(() => {
           const past = Date.now() - 500;
           const base = { tabId: 14, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
@@ -597,12 +620,14 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
 
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent(listener) {
       listeners.push(listener);
       return () => {};
@@ -614,8 +639,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
       if (command === 'navigate') {
         // Simulate real bridge: navigation generation bumps on dispatch and
         // live events arrive after the navigate command returns (#603 M1).
-        const gen = (status.navigationGeneration ?? 0) + 1;
-        status.navigationGeneration = gen;
+        const gen = status.navigationGeneration;
         setImmediate(() => {
           const past = Date.now() - 500;
           const base = { tabId: 15, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
@@ -672,12 +696,14 @@ test('a readiness timeout still leaves the session owning the page for browser_w
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
 
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent() {
       return () => {};
     },
@@ -688,7 +714,6 @@ test('a readiness timeout still leaves the session owning the page for browser_w
       // navigate is fire-and-forget; no readiness events ever arrive, so the
       // wait runs out its deadline.
       if (command === 'navigate') {
-        (status as { navigationGeneration?: number }).navigationGeneration = 2;
         return { ok: true, tabId: 11, url: 'https://example.com/slow' };
       }
       return rawSnapshot;
@@ -723,7 +748,7 @@ test('a performed interaction whose page does not settle in time returns its sna
     connectionGeneration: 1,
     targetGeneration: 1,
     navigationGeneration: 1,
-  } as BrowserBridgeStatus;
+  } as BrowserBridgeStatus & { navigationGeneration: number };
   // Long humanized typing outlasts the settle deadline: the command itself
   // returns only after the deadline has passed.
   const realNow = Date.now.bind(Date);
@@ -734,6 +759,8 @@ test('a performed interaction whose page does not settle in time returns its sna
     getStatus() {
       return status;
     },
+    beginNavigation: () => (status.navigationGeneration += 1),
+    currentNavigationGeneration: () => status.navigationGeneration,
     onRuntimeEvent(listener) {
       listeners.push(listener);
       return () => {};
@@ -743,8 +770,7 @@ test('a performed interaction whose page does not settle in time returns its sna
     },
     async sendCommand(command) {
       if (command === 'navigate') {
-        const gen = (status.navigationGeneration ?? 0) + 1;
-        status.navigationGeneration = gen;
+        const gen = status.navigationGeneration;
         setImmediate(() => {
           const base = { tabId: 15, timestamp: Date.now() - 500, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
           listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
@@ -781,7 +807,7 @@ test('element and full-page screenshots pass their scope and report truncation (
   const calls: Array<Record<string, unknown>> = [];
   const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-shot-scope-'));
   let reply: Record<string, unknown> = {};
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params) {
       if (command === 'navigate') return { ok: true };
       if (command === 'screenshot') {
@@ -790,7 +816,7 @@ test('element and full-page screenshots pass their scope and report truncation (
       }
       return rawSnapshot;
     },
-  }, () => workdir);
+  }), () => workdir);
   await session.open('https://example.com/page');
 
   reply = { scope: 'element' };
@@ -816,14 +842,14 @@ test('element and full-page screenshots pass their scope and report truncation (
 });
 
 test('an extension that ignores the screenshot scope is reported, not passed off as the region (#873)', async () => {
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command) {
       if (command === 'navigate') return { ok: true };
       // An extension built before #873 returns a viewport image without a scope.
       if (command === 'screenshot') return { mimeType: 'image/jpeg', data: 'AQ==' };
       return rawSnapshot;
     },
-  }, () => '/tmp');
+  }), () => '/tmp');
   await session.open('https://example.com/page');
 
   await assert.rejects(
@@ -839,32 +865,16 @@ test('an extension that ignores the screenshot scope is reported, not passed off
   );
 });
 
-test('an extension that still returns the pre-#873 snapshot format is reported as outdated', async () => {
-  const session = new ChromeExtensionBrowserSession({
-    async sendCommand(command) {
-      if (command === 'navigate') return { ok: true };
-      return { title: 'Example', url: 'https://example.com/page', text: 'Readable page', interactive: [] };
-    },
-  }, () => '/tmp');
-
-  await assert.rejects(
-    session.open('https://example.com/page'),
-    (error: unknown) => error instanceof BrowserOperationError
-      && error.code === 'browser_extension_outdated'
-      && /Reload the PinPawo extension/.test(error.message),
-  );
-});
-
 test('snapshot options reach the extension, and an extension ignoring them is reported (#873 3b)', async () => {
   const sent: Array<Record<string, unknown>> = [];
   let applied = true;
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params) {
       if (command === 'navigate') return { ok: true };
       if (command === 'snapshot') sent.push(params);
       return applied ? { ...rawSnapshot, applied: {} } : rawSnapshot;
     },
-  }, () => '/tmp');
+  }), () => '/tmp');
   await session.open('https://example.com/page');
   sent.length = 0;
 
@@ -896,14 +906,14 @@ test('a tab the user handed to this session is its current page, announced once 
     binding: 'user',
     userBoundOrigin: 'https://mail.example',
   };
-  const session = new ChromeExtensionBrowserSession({
+  const session = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand(command, params) {
       sent.push(String(params.approvedOrigin));
       if (command === 'navigate') return { ok: true };
       return { ...rawSnapshot, url: `${String(params.approvedOrigin)}/inbox` };
     },
     contextTarget: () => current,
-  }, () => '/tmp');
+  }), () => '/tmp');
 
   // No browser_open: the hand-off alone makes the session usable.
   const first = JSON.parse(await session.snapshot()) as { url: string; handoff?: string };
@@ -919,9 +929,9 @@ test('a tab the user handed to this session is its current page, announced once 
   assert.equal(sent.at(-1), 'https://agent.example');
 
   // Without a hand-off or an open there is still no page.
-  const fresh = new ChromeExtensionBrowserSession({
+  const fresh = new ChromeExtensionBrowserSession(liveBridge({
     async sendCommand() { return rawSnapshot; },
     contextTarget: () => null,
-  }, () => '/tmp');
+  }), () => '/tmp');
   await assert.rejects(fresh.snapshot(), /Use browser_open first/);
 });

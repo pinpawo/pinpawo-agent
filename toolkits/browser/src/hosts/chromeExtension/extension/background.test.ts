@@ -126,7 +126,7 @@ test('sessions put their tabs in their own group (#867)', async () => {
   assert.match(source, /async function switchToPopup[\s\S]*?saveTarget\([\s\S]*?await joinContextGroup\(tabId\);/);
   assert.match(
     source,
-    /async function joinContextGroup[\s\S]*?LEGACY_BROWSER_CONTEXT_ID\) return;[\s\S]*?chrome\.tabs\.group\(\{ tabIds: tabId \}\)[\s\S]*?title: contextGroupTitle\(url\)/,
+    /async function joinContextGroup[\s\S]*?if \(!contextId\) return;[\s\S]*?chrome\.tabs\.group\(\{ tabIds: tabId \}\)[\s\S]*?title: contextGroupTitle\(url\)/,
   );
   // browser_open keeps the tabs the session holds instead of resetting them.
   const prepare = source.match(/async function prepareNavigationTarget\(\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
@@ -434,4 +434,18 @@ test('snapshot options scope the tree without falling back to a different snapsh
   // A scoped request never silently becomes a whole-page DOM snapshot.
   assert.match(source, /if \(scoped\) throw accessibilityError;[\s\S]*?readDomSnapshot\(tabId\)/);
   assert.match(source, /applied: \{/);
+});
+
+test('every command must name its browser context', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+
+  // There is no default context for a command that leaves it out.
+  assert.match(
+    source,
+    /function readBrowserContextId\(value: unknown\): string \{\n  if \(\n    typeof value !== 'string'/,
+  );
+  assert.doesNotMatch(source, /'legacy'/);
 });

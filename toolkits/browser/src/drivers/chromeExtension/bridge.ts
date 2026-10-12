@@ -12,7 +12,6 @@ import { dirname, resolve } from 'node:path';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
-  BROWSER_LEGACY_CONTEXT_ID,
   type BrowserCommandMessage,
   type BrowserContextTargetState,
   type BrowserCancelMessage,
@@ -156,7 +155,6 @@ export type BrowserBridgeStatus = {
   capabilities: BrowserExtensionCapability[];
   connectionGeneration?: number;
   targetGeneration?: number;
-  navigationGeneration?: number;
   socketPath: string;
 };
 
@@ -237,8 +235,6 @@ export class BrowserExtensionBridge {
   private targetAlive = false;
   private connectionGeneration = 1;
   private targetGeneration = 1;
-  /** Tracks the active navigation generation for event stamping. */
-  private navigationGeneration = 0;
   /** Navigation generations are isolated per managed browser context. */
   private readonly navigationGenerationsByContext = new Map<string, number>();
   private readonly pending = new Map<string, PendingCommand>();
@@ -284,7 +280,6 @@ export class BrowserExtensionBridge {
       capabilities: [...(this.registration?.capabilities ?? [])],
       connectionGeneration: this.connectionGeneration,
       targetGeneration: this.targetGeneration,
-      navigationGeneration: this.navigationGeneration,
       socketPath: this.socketPath,
     };
   }
@@ -343,8 +338,8 @@ export class BrowserExtensionBridge {
    * `isEventCurrent` can drop late events that belong to a superseded
    * navigation. Returns the new generation.
    *
-   * The bridge is the single owner of the navigation generation counter. It is
-   * advanced automatically when a `navigate` command is dispatched
+   * The bridge is the single owner of each browser context's navigation
+   * generation. It is advanced automatically when a `navigate` command is dispatched
    * (`sendCommand('navigate', …)`), and can also be advanced explicitly by
    * caller/embedding code. Consumers should bind the returned value into the
    * controller's `beginNavigation` so both sides agree on the current
@@ -356,20 +351,14 @@ export class BrowserExtensionBridge {
    * explicitly to demarcate such a boundary — otherwise a late event could be
    * mis-scoped to the previous generation.
    */
-  beginNavigation(contextId?: string): number {
-    if (!contextId || contextId === BROWSER_LEGACY_CONTEXT_ID) {
-      this.navigationGeneration += 1;
-      return this.navigationGeneration;
-    }
+  beginNavigation(contextId: string): number {
     const next = (this.navigationGenerationsByContext.get(contextId) ?? 0) + 1;
     this.navigationGenerationsByContext.set(contextId, next);
     return next;
   }
 
-  private navigationGenerationFor(contextId?: string): number {
-    // The extension stamps the legacy context on events from context-less
-    // commands, so it shares the context-less counter those commands advance.
-    if (!contextId || contextId === BROWSER_LEGACY_CONTEXT_ID) return this.navigationGeneration;
+  /** The navigation generation events of `contextId` are stamped with now. */
+  currentNavigationGeneration(contextId: string): number {
     return this.navigationGenerationsByContext.get(contextId) ?? 0;
   }
 
@@ -398,7 +387,7 @@ export class BrowserExtensionBridge {
       tabId: message.tabId ?? this.getStatus().activeTabId ?? 0,
       timestamp: Date.now(),
       ...(NAVIGATION_SCOPED_EVENT_TYPES.has(message.event)
-        ? { navigationGeneration: this.navigationGenerationFor(message.contextId) }
+        ? { navigationGeneration: message.contextId ? this.currentNavigationGeneration(message.contextId) : 0 }
         : {}),
       type: message.event,
       ...(message.url !== undefined ? { url: message.url } : {}),
@@ -531,11 +520,12 @@ export class BrowserExtensionBridge {
 
     // A `navigate` command starts a new navigation: bump the generation so
     // subsequent events (document.ready, network, dom, …) are stamped with it.
-    if (command === 'navigate' && options.beginNavigation !== false) {
-      const contextId = typeof params.browserContextId === 'string'
-        ? params.browserContextId
-        : undefined;
-      this.beginNavigation(contextId);
+    if (
+      command === 'navigate'
+      && options.beginNavigation !== false
+      && typeof params.browserContextId === 'string'
+    ) {
+      this.beginNavigation(params.browserContextId);
     }
 
     const requestId = randomUUID();
@@ -775,18 +765,10 @@ export class BrowserExtensionBridge {
       this.targetAlive = false;
       this.targetGeneration += 1;
       this.notifyGenerationChanged(message.contextId);
-    } else if (message.event === 'tab.navigated') {
-      this.targetAlive = true;
     }
 
     this.emitRuntimeEvent({
-      // The extension still reports navigation via the legacy `tab.navigated`
-      // event; map it onto the unified `navigation.committed` so the current
-      // controller already reacts to the existing emission path.
-      event:
-        message.event === 'tab.navigated'
-          ? 'navigation.committed'
-          : message.event,
+      event: message.event,
       contextId: message.contextId,
       tabId: message.tabId,
       url: message.url,

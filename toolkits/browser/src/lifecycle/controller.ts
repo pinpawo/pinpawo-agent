@@ -237,8 +237,7 @@ export class BrowserLifecycleController {
     switch (event.type) {
       case 'navigation.committed':
         // A commit URL is required to evaluate the origin. A url-less commit is
-        // malformed (the legacy `tab.navigated` can arrive without a URL): it is
-        // not a benign intermediate nor a genuine origin change, so explicitly
+        // malformed: it is not a benign intermediate nor a genuine origin change, so explicitly
         // ignore it rather than route `''` through the origin comparison.
         if (typeof event.url !== 'string') return null;
         return { kind: 'commit', url: event.url };

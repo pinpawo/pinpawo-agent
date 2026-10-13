@@ -44,6 +44,7 @@ test('two users and two Pets share scoped history; a delegated client belongs to
     await runStudioOperator(parseStudioOperatorArgs(['channels', 'member', id, '--file', join(root, 'member.json'), '--studio-url', base, '--token-file', join(root, 'admin-token')])!, { writeOutput: () => {} });
     await assert.rejects(inputs.post(id, { author: { kind: 'bot', id: 'unknownSource' }, body: 'No owner', mentions: [] }), /explicit user mapping/);
     await assert.rejects(inputs.post(id, { author: { kind: 'bot', id: 'constructor' }, body: 'No owner', mentions: [] }), /explicit user mapping/);
+    assert.equal((await request('admin-test-only-long', '/channels/members', { channelId: id, kind: 'human', id: ' u1 ', active: false })).status, 409);
     assert.equal((await request('u2-test', '/channels/members', { channelId: id, kind: 'human', id: 'u1', active: false })).status, 403);
     const participants = await json('u2-test', `/channels/participants?channelId=${id}`);
     assert.deepEqual(new Set(participants.participants.map((p: any) => p.participantId)), new Set(['human:u1', 'human:u2', 'pet:p1', 'pet:p2']));
@@ -61,6 +62,8 @@ test('two users and two Pets share scoped history; a delegated client belongs to
     const sent = await json('u2-test', '/channels/messages', { channelId: id, body: 'Thanks', replyTo: agent.messageId, mentions: [{ participantId: 'human:u1' }] });
     assert.deepEqual(sent.author, { kind: 'human', id: 'u2' });
     assert.equal(calls.length, 2, 'user addressing and replyTo do not execute Pets');
+    assert.equal((await request('u2-test', '/channels/execute', { channelId: id, body: 'reply is a quote', replyTo: agent.messageId })).status, 409);
+    assert.equal(calls.length, 2, 'execute also requires an explicit recipient after the main update');
     assert.equal((await request('u2-test', '/channels/messages', { channelId: id, body: 'unknown', mentions: [{ participantId: 'human:unknown' }] })).status, 409);
     const other = await json('u1-test', '/channels', { title: 'Private', goal: 'Other', scope: 'Other' });
     assert.equal((await request('u2-test', '/channels/messages', { channelId: id, body: 'cross', replyTo: other.channelId })).status, 409);

@@ -298,7 +298,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           }),
           register('POST', '/channels/members', async ({ readJson }, principal) => {
             if (!principal.operator) throw new AccessError(403, 'Only the local Studio operator manages members.');
-            const value = z.object({ channelId: z.string().min(1), kind: z.enum(['human', 'pet']), id: z.string().min(1), active: z.boolean() }).strict().parse(await readJson());
+            const value = z.object({ channelId: z.string().trim().min(1).max(256), kind: z.enum(['human', 'pet']), id: z.string().trim().min(1).max(256), active: z.boolean() }).strict().parse(await readJson());
             access(value.channelId, principal);
             if (value.kind === 'human' && value.id === operator.id && !value.active) throw new Error('The local operator must remain a member.');
             if (value.active && !participants().some(item => item.kind === value.kind && item.id === value.id)) throw new Error('Unknown Channel participant.');

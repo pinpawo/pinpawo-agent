@@ -14,9 +14,10 @@ import { GUIDANCE_VARIANTS, planFirstInput, planFirstScenarios, scorePlanFirst, 
  * side: a request only the user can unblock must not be delegated.
  *
  * Env: PLAN_FIRST_PRIOR_COUNTS (default 0,3,8,16), PLAN_FIRST_VARIANTS (default current,previous;
- * also pr955), PROMPT_EVAL_REPEATS (default 3), PLAN_FIRST_CONCURRENCY (default 4),
+ * also withInvocation, pr955), PROMPT_EVAL_REPEATS (default 3), PLAN_FIRST_CONCURRENCY (default 4),
  * EVAL_CASES (scenario names), PROMPT_EVAL_OUTPUT_DIR.
- * Baselines swap in earlier Entry wording: `pr955` the first plan-first attempt, `previous` before it.
+ * Baselines swap in other Entry wording: `withInvocation` adds the dropped plan-first turn instruction,
+ * `pr955` the first plan-first system wording, `previous` the wording before this PR.
  */
 
 const configPath = process.env.PROMPT_EVAL_CONFIG_PATH ?? join(homedir(), '.pinpawo', 'config.json');

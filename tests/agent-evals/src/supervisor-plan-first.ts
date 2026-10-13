@@ -162,24 +162,24 @@ export function scorePlanFirst(calls: ReadonlyArray<{ name: string }>, expect: P
 
 // Shipped Entry wording, and the wording each baseline restores.
 const SHIPPED_GUIDANCE = 'delegate_capability 只执行本 run 计划中的下一项，而 Entry 时本 run 的计划为空：需要执行时先用 submit_plan 建立计划，读取工具返回后再自主决定下一步，计划建立后才委派。缺少用户独占的信息、选择或授权时直接询问用户。main messages 只保留以往 run 的委派与交付，不保留它们的规划步骤；新请求即使与以往相似、是对此前提议的确认或要求“同样处理”，也要先为本 run 提交计划。';
-const SHIPPED_INVOCATION = 'This run has no plan yet. Interpret the user request, then call submit_plan before any delegate_capability; delegations in earlier runs followed plans of their own and are not a pattern to repeat. Ask the user directly when only they can supply missing information, a choice or an authorization. Preserve established requirements unless the user requests a change.';
-const PREVIOUS_INVOCATION = 'Interpret the user request before submitting the execution plan. Preserve established requirements unless the user requests a change.';
+const SHIPPED_INVOCATION = 'Interpret the user request before submitting the execution plan. Preserve established requirements unless the user requests a change.';
 const BASELINES = {
-  // First plan-first attempt: system wording only, invocation unchanged.
-  pr955: [[SHIPPED_GUIDANCE, '本 run 从空计划开始：需要执行时，先用 submit_plan 建立本 run 的计划，读取工具返回后再自主决定下一步；计划建立后才用 delegate_capability 明确交接执行。缺少用户独占的信息、选择或授权时直接询问用户。main messages 中以往的 delegate_capability 都是在各自 run 建立计划后发出的，规划过程不保留在主会话中；它们只是历史执行记录，不表示本 run 可以跳过 submit_plan。'],
-    [SHIPPED_INVOCATION, PREVIOUS_INVOCATION]],
+  // Shipped system wording plus the plan-first invocation tried in this PR and dropped.
+  withInvocation: [[SHIPPED_INVOCATION, 'This run has no plan yet. Interpret the user request, then call submit_plan before any delegate_capability; delegations in earlier runs followed plans of their own and are not a pattern to repeat. Ask the user directly when only they can supply missing information, a choice or an authorization. Preserve established requirements unless the user requests a change.']],
+  // First plan-first attempt: a different system wording.
+  pr955: [[SHIPPED_GUIDANCE, '本 run 从空计划开始：需要执行时，先用 submit_plan 建立本 run 的计划，读取工具返回后再自主决定下一步；计划建立后才用 delegate_capability 明确交接执行。缺少用户独占的信息、选择或授权时直接询问用户。main messages 中以往的 delegate_capability 都是在各自 run 建立计划后发出的，规划过程不保留在主会话中；它们只是历史执行记录，不表示本 run 可以跳过 submit_plan。']],
   // Before plan-first.
-  previous: [[SHIPPED_GUIDANCE, '通过 submit_plan 建立计划，读取工具返回后自主决定下一步；使用 delegate_capability 明确交接执行，缺少用户独占的信息、选择或授权时直接询问用户。'],
-    [SHIPPED_INVOCATION, PREVIOUS_INVOCATION]],
+  previous: [[SHIPPED_GUIDANCE, '通过 submit_plan 建立计划，读取工具返回后自主决定下一步；使用 delegate_capability 明确交接执行，缺少用户独占的信息、选择或授权时直接询问用户。']],
 } as const;
-export const GUIDANCE_VARIANTS = ['current', 'pr955', 'previous'] as const;
+export const GUIDANCE_VARIANTS = ['current', 'withInvocation', 'pr955', 'previous'] as const;
 export type GuidanceVariant = typeof GUIDANCE_VARIANTS[number];
 
 /** A/B baselines: swap the shipped Entry guidance and invocation for an earlier wording. */
 export function withGuidance(messages: BaseMessage[], variant: GuidanceVariant): BaseMessage[] {
   if (variant === 'current') return messages;
-  const pending = new Set<string>(BASELINES[variant].map(([from]) => from));
-  const swap = (text: string) => BASELINES[variant].reduce((out, [from, to]) => {
+  const baseline: ReadonlyArray<readonly [string, string]> = BASELINES[variant];
+  const pending = new Set<string>(baseline.map(([from]) => from));
+  const swap = (text: string) => baseline.reduce((out, [from, to]) => {
     if (!out.includes(from)) return out;
     pending.delete(from);
     return out.replace(from, to);
@@ -189,7 +189,7 @@ export function withGuidance(messages: BaseMessage[], variant: GuidanceVariant):
     // The composed role prompt arrives as content blocks; keep the shape.
     const content = typeof message.content === 'string' ? swap(message.content)
       : message.content.map((block) => block.type === 'text' ? { ...block, text: swap(block.text as string) } : block);
-    if (content === message.content) return message;
+    if (JSON.stringify(content) === JSON.stringify(message.content)) return message;
     return SystemMessage.isInstance(message) ? new SystemMessage({ ...message, content }) : new HumanMessage({ ...message, content });
   });
   if (pending.size) throw new Error('Entry guidance changed; update the A/B baselines.');

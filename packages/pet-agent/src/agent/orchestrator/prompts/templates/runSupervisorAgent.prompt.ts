@@ -8,7 +8,7 @@ export const RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你�
 
 ${SUPERVISOR_TOOL_SCOPE}
 
-根据 manifest 和已披露的 Capability 信息安排计划；manifest 足以选择能力时直接规划，capability_details 不是执行前置步骤。仅在具体职责、约束或使用说明存在缺口，或用户明确要求阅读时获取详情。通过 submit_plan 建立计划，读取工具返回后自主决定下一步；使用 delegate_capability 明确交接执行，缺少用户独占的信息、选择或授权时直接询问用户。自然回复直接交给用户，不要只宣告将执行工作而不调用工具。调用 delegate_capability 时，同时在正文中用一句话告诉用户这次要做什么、范围是什么；这句话不代替 briefing，不声称已经完成。`, []);
+根据 manifest 和已披露的 Capability 信息安排计划；manifest 足以选择能力时直接规划，capability_details 不是执行前置步骤。仅在具体职责、约束或使用说明存在缺口，或用户明确要求阅读时获取详情。delegate_capability 只执行本 run 计划中的下一项，而 Entry 时本 run 的计划为空：需要执行时先用 submit_plan 建立计划，读取工具返回后再自主决定下一步，计划建立后才委派。缺少用户独占的信息、选择或授权时直接询问用户。main messages 只保留以往 run 的委派与交付，不保留它们的规划步骤；新请求即使与以往相似、是对此前提议的确认或要求“同样处理”，也要先为本 run 提交计划。自然回复直接交给用户，不要只宣告将执行工作而不调用工具。调用 delegate_capability 时，同时在正文中用一句话告诉用户这次要做什么、范围是什么；这句话不代替 briefing，不声称已经完成。`, []);
 
 export const RUN_SUPERVISOR_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是 root 的 Supervisor，当前处于 Boundary。观察保存的计划、当前 run 的工作历史及主会话 delegate_capability 工具结果，以既定 goal（有 adjustedGoal 时以它为准）约束方向，按当前 objective 和实际委派范围验收；后续目标未完成不妨碍当前项结束。计划 pending 表示尚未验收；执行状态读取当前任务最新的 delegate_capability 工具结果。returned 表示交付待验收，不表示完成；missing_deliverable 表示未产生新交付，可决定补做或回复，不能拿旧交付验收。不重复验收已 completed 的任务。
 

@@ -1,0 +1,291 @@
+import assert from 'node:assert/strict';
+import { chmodSync, mkdirSync, realpathSync, readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { createOfficeToolkit, officeEnabled, resolveOfficeExecutable, OFFICE_TOOLKIT_INSTRUCTIONS } from './index';
+import { PosixShellRS } from '../shellRS/posixShellRS';
+import type { ShellRS, ShellExecRequest } from '../shellRS/shellRS';
+
+const scope = { context: { executionScope: { threadId: 'office-test', taskId: 'task', runId: 'run', delegationId: 'delegation' } } };
+
+test('Office requires explicit opt in', () => {
+  assert.equal(officeEnabled({}), false);
+  assert.equal(officeEnabled({ capabilities: { office: false } }), false);
+  assert.equal(officeEnabled({ capabilities: { office: true } }), true);
+  assert.equal(officeEnabled({ capabilities: { office: true } }, false), false);
+});
+
+test('missing dependency has an explicit unavailable reason', async () => {
+  const shell = new PosixShellRS();
+  try {
+    const toolkit = createOfficeToolkit({ shell, executable: '/missing/officecli' });
+    const status = await toolkit.availability!();
+    assert.equal(status.available, false);
+    if (!status.available) assert.match(status.reason, /OfficeCLI is missing/);
+    await assert.rejects(toolkit.tools[0]!.tool.invoke({ command: 'create', args: ['demo.docx'] }, scope), /requires iOfficeAI/);
+    assert.equal(resolveOfficeExecutable('relative/binary'), null);
+  } finally { await shell.dispose(); }
+});
+
+test('argv preserves spaces and shell metacharacters; failures remain structured', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office toolkit '));
+  const executable = join(directory, 'office cli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  let request: ShellExecRequest | undefined;
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async (_id, input) => { request = input; return { status: 'exited', code: 7, stdout: 'partial', stderr: 'failure' }; },
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const toolkit = createOfficeToolkit({ shell, executable });
+    assert.equal((await toolkit.availability!()).available, true);
+    assert.ok(toolkit.tools[0]!.review);
+    const args = ['file with spaces.docx', '/', '--prop', 'text=$(touch nope); hello'];
+    const result = JSON.parse(String(await toolkit.tools[0]!.tool.invoke({ command: 'add', args, cwd: directory }, scope)));
+    assert.deepEqual(request!.command, { argv: [realpathSync(executable), 'add', ...args] });
+    assert.equal(request!.cwd, directory);
+    assert.deepEqual(request!.env, { OFFICECLI_NO_AUTO_INSTALL: '1', OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' });
+    assert.equal(request!.onTimeout, 'terminate');
+    assert.equal(result.status, 'failed'); assert.equal(result.exitCode, 7);
+    await assert.rejects(toolkit.tools[0]!.tool.invoke({ command: 'install' }, scope));
+    shell.exec = async () => ({ status: 'aborted', stdout: '', stderr: '' });
+    await assert.rejects(toolkit.tools[0]!.tool.invoke({ command: 'help' }, scope), (error: Error) => error.name === 'AbortError');
+    shell.exec = async () => ({ status: 'timeout', termination: 'confirmed', stdout: '', stderr: '' });
+    assert.equal(JSON.parse(String(await toolkit.tools[0]!.tool.invoke({ command: 'help' }, scope))).termination, 'confirmed');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('real ShellRS subprocess preserves argv with a spaced executable and output file', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office process '));
+  const executable = join(directory, 'office fixture');
+  const output = join(directory, 'output text.txt');
+  // A local transport fixture, not OfficeCLI and not a format roundtrip.
+  writeFileSync(executable, '#!/bin/sh\nprintf "%s" "$3" > "$2"\ncat "$2"\n');
+  chmodSync(executable, 0o700);
+  const shell = new PosixShellRS();
+  try {
+    const toolkit = createOfficeToolkit({ shell, executable });
+    const result = JSON.parse(String(await toolkit.tools[0]!.tool.invoke({
+      command: 'create', args: [output, 'Hello 中文 $(no execution)'], cwd: directory,
+    }, scope)));
+    assert.equal(result.status, 'ok');
+    assert.equal(result.stdout, 'Hello 中文 $(no execution)');
+  } finally { await shell.dispose(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('official npm shim never triggers a lazy download; requires installed vendor binary', () => {
+  const root = mkdtempSync(join(tmpdir(), 'office npm '));
+  const shim = join(root, 'officecli.js');
+  writeFileSync(shim, '#!/usr/bin/env node\nthrow new Error("must never execute installer");');
+  chmodSync(shim, 0o700);
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@officecli/officecli' }));
+  try {
+    assert.equal(resolveOfficeExecutable(shim), null);
+    mkdirSync(join(root, 'vendor'));
+    const native = join(root, 'vendor', 'officecli');
+    writeFileSync(native, '#!/bin/sh\nexit 0\n'); chmodSync(native, 0o700);
+    assert.equal(resolveOfficeExecutable(shim), realpathSync(native));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Office execution requires human-review support and shows argv/cwd in review', async () => {
+  const shell = new PosixShellRS();
+  try {
+    const definition = createOfficeToolkit({ shell }).tools[0]!;
+    const context = {
+      toolkitName: 'office', toolName: 'office_cli',
+      input: { command: 'set', args: ['Report File.docx', '/body', '--prop', 'text=hello'], cwd: '/project' },
+      operation: definition.operation,
+    };
+    const blocked = await definition.review!.request({ ...context, reviewCapabilities: { humanReview: false, sessionAuthorization: false } });
+    assert.ok(blocked && 'type' in blocked && blocked.type === 'block');
+    const review = await definition.review!.request({ ...context, reviewCapabilities: { humanReview: true, sessionAuthorization: true } });
+    assert.ok(review && 'schemaVersion' in review);
+    if (review && 'schemaVersion' in review && review.view.kind === 'plain') {
+      assert.match(review.view.body, /Report File.docx/);
+      assert.match(review.view.body, /\/project/);
+    }
+  } finally { await shell.dispose(); }
+});
+
+test('actual Office tool timeout and cancellation reap the started process', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office cleanup '));
+  const executable = join(directory, 'office fixture');
+  writeFileSync(executable, '#!/bin/sh\necho $$ > "$2"\nexec /bin/sleep 30\n');
+  chmodSync(executable, 0o700);
+  const shell = new PosixShellRS();
+  try {
+    const tool = createOfficeToolkit({ shell, executable }).tools[0]!.tool;
+    const timedPid = join(directory, 'timed.pid');
+    const result = JSON.parse(String(await tool.invoke({ command: 'create', args: [timedPid], timeoutSeconds: 1 }, scope)));
+    assert.equal(result.status, 'timeout');
+    assert.equal(result.termination, 'confirmed');
+    assert.throws(() => process.kill(Number(readFileSync(timedPid, 'utf8')), 0));
+    const abortedPid = join(directory, 'aborted.pid');
+    const controller = new AbortController();
+    const pending = tool.invoke({ command: 'create', args: [abortedPid] }, { ...scope, signal: controller.signal });
+    // Attach rejection observation before aborting the call.
+    const rejected = assert.rejects(pending, (error: Error) => error.name === 'AbortError');
+    for (let attempt = 0; attempt < 200 && !existsSync(abortedPid); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(existsSync(abortedPid));
+    controller.abort();
+    await rejected;
+    const pid = Number(readFileSync(abortedPid, 'utf8'));
+    // LangChain may reject on AbortSignal before ShellRS finishes cleanup.
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      try { process.kill(pid, 0); } catch { break; }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.throws(() => process.kill(pid, 0));
+  } finally { await shell.dispose(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('document calls run one at a time whatever the argument order; help does not wait', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office queue '));
+  const executable = join(directory, 'officecli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  const running = new Map<string, number>();
+  let overlap = 0;
+  const releases: Array<() => void> = [];
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async (_id, input) => {
+      const argv = (input.command as { argv: readonly string[] }).argv;
+      const key = argv[1] === 'help' ? 'help' : 'documents';
+      running.set(key, (running.get(key) ?? 0) + 1);
+      if (key !== 'help' && running.get(key)! > 1) overlap += 1;
+      await new Promise<void>((resolve) => releases.push(resolve));
+      running.set(key, running.get(key)! - 1);
+      return { status: 'exited', code: argv.includes('warn') ? 2 : 0, stdout: '', stderr: '' };
+    },
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const tool = createOfficeToolkit({ shell, executable }).tools[0]!.tool;
+    const call = (args: string[], command = 'add') => tool.invoke({ command, args, cwd: directory }, scope);
+    const first = call(['r.docx', '/body', 'p1']);
+    const second = call([join(directory, 'r.docx'), '/body', 'warn']);
+    // Options before the path, as models do; must still wait for r.docx.
+    const other = call(['--prop', 'text=x', '--json', 'r.docx', '/body']);
+    const help = call([], 'help');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 2, 'only the first document call and help run');
+    while (releases.length) { releases.shift()!(); await new Promise((resolve) => setTimeout(resolve, 20)); }
+    const results = await Promise.all([first, second, other, help]).then((values) => values.map((value) => JSON.parse(String(value))));
+    assert.equal(overlap, 0);
+    assert.equal(results[0].status, 'ok');
+    assert.equal(results[1].status, 'warning');
+    assert.match(results[1].message, /may be fully, partly or not applied/);
+    const repeated = JSON.parse(String(await call(['create', 'x.docx'], 'create')));
+    assert.equal(repeated.status, 'invalid_arguments');
+    assert.equal(releases.length, 0, 'a repeated command never runs');
+
+    const blocker = call(['r.docx', '/body', 'p2']);
+    const controller = new AbortController();
+    const queued = tool.invoke({ command: 'add', args: ['r.docx', '/body', 'p3'], cwd: directory }, { ...scope, signal: controller.signal });
+    const rejected = assert.rejects(queued, (error: Error) => error.name === 'AbortError');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort();
+    await rejected;
+    releases.shift()!();
+    assert.equal(JSON.parse(String(await blocker)).status, 'ok');
+    const after = call(['r.docx', '/body', 'p4']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 1, 'an aborted waiter does not hold the document');
+    releases.shift()!();
+    await after;
+
+    // A runs, B waits and is cancelled, C arrives before A finishes. C must still wait for A even though B (the old tail) is gone.
+    const runningA = call(['r.docx', '/body', 'A']);
+    const cancelB = new AbortController();
+    const waitingB = tool.invoke({ command: 'add', args: ['r.docx', '/body', 'B'], cwd: directory }, { ...scope, signal: cancelB.signal });
+    const rejectedB = assert.rejects(waitingB, (error: Error) => error.name === 'AbortError');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cancelB.abort();
+    await rejectedB;
+    const waitingC = call(['r.docx', '/body', 'C']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 1, 'C waits for A after B is cancelled');
+    releases.shift()!();
+    await runningA;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(releases.length, 1, 'C runs once A finishes');
+    releases.shift()!();
+    await waitingC;
+    assert.equal(overlap, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('batch must be atomic and inline; dump is allowed; usage guide stays brief', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office batch '));
+  const executable = join(directory, 'officecli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  const argvs: string[][] = [];
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async (_id, input) => {
+      argvs.push([...(input.command as { argv: readonly string[] }).argv]);
+      return { status: 'exited', code: 0, stdout: '', stderr: '' };
+    },
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const toolkit = createOfficeToolkit({ shell, executable });
+    const tool = toolkit.tools[0]!.tool;
+    const call = async (command: string, args: string[]) => JSON.parse(String(await tool.invoke({ command, args, cwd: directory }, scope)));
+    const commands = JSON.stringify([{ command: 'add', parent: '/body', type: 'paragraph', props: { text: '标题 一' } }]);
+    assert.equal((await call('batch', ['r.docx', '--commands', commands])).status, 'ok');
+    assert.deepEqual(argvs.at(-1)!.slice(1), ['batch', 'r.docx', '--commands', commands]);
+    assert.equal((await call('batch', ['r.docx', '--input', 'edits.json'])).status, 'ok');
+    assert.equal((await call('dump', ['r.docx', '/body', '--json'])).status, 'ok');
+    assert.equal((await call('batch', ['r.docx'])).status, 'invalid_arguments');
+    const partial = await call('batch', ['r.docx', '--best-effort', '--commands', commands]);
+    assert.equal(partial.status, 'invalid_arguments'); assert.match(partial.message, /best-effort/);
+    for (const smuggled of ['--best-effort=true', '--best-effort:true', '@args.rsp']) {
+      assert.equal((await call('batch', ['r.docx', smuggled, '--commands', commands])).status, 'invalid_arguments', smuggled);
+    }
+    assert.equal((await call('batch', ['r.docx', `--commands=${commands}`])).status, 'ok', '--commands=value form is accepted');
+    assert.equal(argvs.length, 4, 'rejected batches never run');
+    await assert.rejects(tool.invoke({ command: 'raw-set', args: ['r.docx'] }, scope));
+    assert.equal(toolkit.instructions, OFFICE_TOOLKIT_INSTRUCTIONS);
+    assert.match(OFFICE_TOOLKIT_INSTRUCTIONS, /Apache-2\.0/);
+    // Injected into every capability that uses the Toolkit: keep it ~1k tokens.
+    assert.ok(OFFICE_TOOLKIT_INSTRUCTIONS.length < 4000);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('JSON envelope success and warnings outrank the exit code', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'office envelope '));
+  const executable = join(directory, 'officecli');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n'); chmodSync(executable, 0o700);
+  let reply = { code: 0, stdout: '' };
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs', version: 1, status: () => ({ available: true }), ensureSession: () => {},
+    exec: async () => ({ status: 'exited', code: reply.code, stdout: reply.stdout, stderr: '' }),
+    wait: async () => { throw new Error(); }, read: async () => { throw new Error(); },
+    terminate: async () => { throw new Error(); }, list: async () => [],
+  };
+  try {
+    const tool = createOfficeToolkit({ shell, executable }).tools[0]!.tool;
+    const run = async (code: number, stdout: string) => {
+      reply = { code, stdout };
+      return JSON.parse(String(await tool.invoke({ command: 'set', args: ['a.docx', '/body/p[1]', '--prop', 'bogus=1', '--json'], cwd: directory }, scope)));
+    };
+    const notApplied = await run(0, '{"success":false,"message":"No properties applied"}');
+    assert.equal(notApplied.status, 'failed'); assert.match(notApplied.message, /success:false/);
+    const ignored = await run(0, '{"success":true,"warnings":["unsupported prop bogus"]}');
+    assert.equal(ignored.status, 'warning');
+    assert.equal((await run(0, '{"success":true,"warnings":[]}')).status, 'ok');
+    assert.equal((await run(0, 'plain text')).status, 'ok');
+    const usage = await run(2, 'Error: no --prop given');
+    assert.equal(usage.status, 'warning'); assert.match(usage.message, /not applied/);
+    assert.equal((await run(1, '{"success":true}')).status, 'failed');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

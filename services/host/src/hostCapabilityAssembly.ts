@@ -46,6 +46,7 @@ import { createProjectInspectionToolkit } from './toolkits/projectInspection';
 import { createShellToolkit } from './toolkits/shell';
 import { ShellRSClient } from './toolkits/shellRS';
 import { createWebToolkit } from './toolkits/web';
+import { createOfficeToolkit, createOfficeCapability, officeEnabled } from './toolkits/office';
 import { BrowserRSClient } from './toolkits/browserRSClient';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import {
@@ -72,6 +73,8 @@ export type HostCapabilityAssemblyOptions = {
    * must opt in explicitly.
    */
   includeBrowser?: boolean;
+  /** Optional Office Toolkit; disabled unless explicitly enabled. */
+  includeOffice?: boolean;
 };
 
 export type HostCapabilityAssemblyInitOptions = {
@@ -138,8 +141,10 @@ export class HostCapabilityAssembly {
     this.runtimeConfig = options.runtimeConfig;
     this.executionConfig = resolveHostExecutionConfig(options.runtimeConfig);
     this.sourceId = options.sourceId;
+    const storedConfig = loadStoredConfig();
+    const officeSelected = officeEnabled(storedConfig, options.includeOffice);
     const browserSelected = options.includeBrowser
-      ?? loadStoredConfig().capabilities?.browser !== false;
+      ?? storedConfig.capabilities?.browser !== false;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.
@@ -158,6 +163,7 @@ export class HostCapabilityAssembly {
       this.rsInstances.assemble(createGithubToolkit, { shell }),
       this.rsInstances.assemble(createProjectInspectionToolkit, { shell }),
       createCapabilityCreatorToolkit(),
+      ...(officeSelected ? [this.rsInstances.assemble(createOfficeToolkit, { shell })] : []),
       ...(browser
         ? [this.rsInstances.assemble(createBrowserToolkit, { browser })]
         : []),
@@ -169,6 +175,7 @@ export class HostCapabilityAssembly {
       createHostCapabilities: () => [
         ...createHostBaselineCapabilities(),
         createCapabilityCreatorCapability(),
+        ...(officeSelected ? [createOfficeCapability()] : []),
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });

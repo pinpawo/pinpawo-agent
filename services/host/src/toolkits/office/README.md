@@ -47,10 +47,12 @@ one at a time (the document cannot be identified reliably from argv, since
 OfficeCLI accepts options before the path). Queued time does not count toward
 `timeoutSeconds`. Args that repeat the command are rejected without running.
 Exit code 2 is reported as status `warning`: it can mean applied with warnings
-or, for some usage errors such as `set` without `--prop`, nothing written, so
-the model must read back before retrying. With `--json` OfficeCLI exits 0 even
-when it applied nothing, so a JSON envelope's `success: false` is reported as
-`failed` and non-empty `warnings` as `warning`, overriding the exit code.
+or, for some usage errors such as `set` with a bare `key=value` and no
+`--prop`, nothing written, so the model must read back before retrying. (`set`
+with no properties at all exits 1 and is `failed`.) With `--json` the exit
+code is not a reliable success signal (v1.0.156 exits 2 with `success: false`
+when only invalid props are given), so a JSON envelope's `success: false` is
+reported as `failed` and non-empty `warnings` as `warning`, overriding it.
 
 Supported commands are help, create, view, get, query, add, set, remove,
 validate, close, batch and dump. `batch` must pass `--commands` or `--input`

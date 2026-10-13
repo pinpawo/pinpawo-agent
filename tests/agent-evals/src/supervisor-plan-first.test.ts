@@ -44,17 +44,16 @@ test('baselines swap exactly the shipped Entry guidance or invocation', () => {
   const role = new SystemMessage({ content: [{ type: 'text', text: buildRunSupervisorAgentSystemPrompt('entry') }] });
   const scenario = planFirstScenarios(0)[0];
   const turn = new HumanMessage(buildRunSupervisorTurnInput(planFirstInput(scenario, 'baseline')));
-  assert.match(turn.content as string, /Interpret the user request before submitting the execution plan\./);
-  for (const variant of ['pr955', 'previous'] as const) {
-    const [swappedRole, swappedTurn] = withGuidance([role, turn], variant);
-    const text = JSON.stringify(swappedRole.content);
-    assert.equal(text.includes('只执行本 run 计划中的下一项'), false);
-    assert.equal(text.includes(variant === 'pr955' ? '不表示本 run 可以跳过 submit_plan' : '通过 submit_plan 建立计划'), true);
-    assert.equal(swappedTurn, turn);
-  }
-  const [keptRole, invocationTurn] = withGuidance([role, turn], 'withInvocation');
+  assert.match(turn.content as string, /This run has no plan yet/);
+  const [keptRole, systemOnlyTurn] = withGuidance([role, turn], 'systemOnly');
   assert.equal(keptRole, role);
-  assert.match(invocationTurn.content as string, /This run has no plan yet/);
+  assert.doesNotMatch(systemOnlyTurn.content as string, /This run has no plan yet/);
+  assert.match(systemOnlyTurn.content as string, /Interpret the user request before submitting the execution plan\./);
+  const [previousRole, previousTurn] = withGuidance([role, turn], 'previous');
+  const text = JSON.stringify(previousRole.content);
+  assert.equal(text.includes('只执行本 run 计划中的下一项'), false);
+  assert.equal(text.includes('通过 submit_plan 建立计划'), true);
+  assert.deepEqual(previousTurn.content, systemOnlyTurn.content);
   assert.deepEqual(withGuidance([role, turn], 'current'), [role, turn]);
   assert.throws(() => withGuidance([turn], 'previous'), /update the A\/B baselines/);
 });

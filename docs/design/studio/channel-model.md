@@ -10,7 +10,7 @@
 - **Channel 是自然对话的空间，不是定目标的地方。** 没有必填的目标/范围，也没有修订历史。
 - **Channel 是一等实体**，有自己的一行记录；不从消息日志推导。
 - **所有参与者都是成员**，成员只分 `human` 和 `pet` 两类。human 背后是人还是外部 agent，Channel 不关心。
-  本地 operator 也是普通成员，没有特殊身份。
+  Channel 里没有 operator 概念：持本机 token 的人也只是一个客户身份（见"身份"），和其他成员一样。
 - **作者是事实**：按写入时原样保存，读出时不投影、不随配置改变。
 - **身份由 Studio 提供**：Channel 不存用户目录，也不认证凭据，只接收已认证的 principal 并检查成员关系。
 - **schedule / trigger 是 Pet 的自发行为**：它们驱动某个 Pet 在某个 Channel 里推进工作，本身不是发言者。
@@ -111,7 +111,7 @@ interface ChannelStore {
 1. 每个 Channel 生成一行 `channels`：title 取最新 revision，goal 和 scope 合并进 description，创建者取第一条 revision 的作者。
 2. `channel_entries` 中的 message 行搬到 `channel_messages`，作者提升成列（`bot` 写成 `legacy`），`data` 原样保留。
 3. revision 行不再保留（内容已经并进 description）。
-4. 生成 `channel_members`：配置的 operator、历史 human 作者、历史发言或已绑定 session 的 Pet。
+4. 生成 `channel_members`：历史 human 作者（旧数据里的 `studio-operator` 就是本机 token 的身份，原样保留）、历史发言或已绑定 session 的 Pet。
 5. 删除 `channel_entries`。
 
 ## 需要调整的地方
@@ -130,4 +130,4 @@ interface ChannelStore {
 | 文档 | 实现后更新 `channel-addressing-and-execution.md`、`automation-plugins.md`、`http-plugin.md`、`docs/reference/api/studio.md`、`docs/studio/configuration.md`、`skills/studio/SKILL.md` |
 
 建议按两个 PR 依次实现：先 Channel 侧（表、接口、成员、`run()`、模板），再 Studio 客户身份（认证与 principal）。
-在第二个 PR 之前，本机 token 视为 operator 的 principal。PR #956 不再继续，按本文重做。
+在第二个 PR 之前，本机 token 固定对应 `human:studio-operator`（沿用现有 id，以免历史作者断开），第二个 PR 把它登记为一个普通客户身份。PR #956 不再继续，按本文重做。

@@ -3,8 +3,8 @@ import test from 'node:test';
 import { createStudioStorage, type StudioStorageConfig } from '@pinpawo/studio';
 import { createPglitePool } from '../../../tests/support/pglitePool';
 import { ChannelAccessError, ChannelNotFoundError, ChannelService } from './channelService';
-import type { ChannelStore, MemberRef } from './channelStore';
-import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './kyselyChannelStore';
+import type { ChannelStore, MemberRef } from './store/channelStore';
+import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
 const owner: MemberRef = { kind: 'human', id: 'owner' };
 const guest: MemberRef = { kind: 'human', id: 'guest' };

@@ -2,7 +2,7 @@
 
 > **状态：已实现（Studio 核心 + Channel）。** Scheduler、Trigger、Notice 仍各自使用自己的 SQLite 文件，
 > 之后逐个迁入。代码：[`packages/studio/src/storage/studioStorage.ts`](../../../packages/studio/src/storage/studioStorage.ts)，
-> Channel 的实现：[`plugins/channel/src/kyselyChannelStore.ts`](../../../plugins/channel/src/kyselyChannelStore.ts)。
+> Channel 的实现：[`plugins/channel/src/store/`](../../../plugins/channel/src/store/)。
 
 ## 目标
 
@@ -76,6 +76,18 @@ Kysely 实例。迁移历史记在 `<pluginName>_migrations` 表里（名字里�
 - 规则、权限和事件在上层的服务里（例如 `ChannelService`）。服务只依赖 Store 接口。
 - 默认实现用 Kysely 写一份，两种数据库都能用。需要别的后端时，实现同一个 Store 接口即可，
   Plugin 通过选项注入（Channel 的 `createChannelPlugin({ store })`）。
+
+目录约定（以 Channel 为例）：
+
+```
+src/store/
+  channelStore.ts       Store 接口和行类型
+  kysely/
+    schema.ts           表的类型（Kysely 的 Database 类型）
+    migrations.ts       迁移，按方言生成
+    store.ts            Store 接口的 Kysely 实现
+    index.ts
+```
 
 ### 并发
 

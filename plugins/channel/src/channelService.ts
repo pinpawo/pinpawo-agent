@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
   ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
-} from './channelStore';
+} from './store/channelStore';
 
 const identifier = z.string().trim().min(1).max(256);
 export const memberRefSchema = z.object({ kind: z.enum(['human', 'pet']), id: identifier }).strict();

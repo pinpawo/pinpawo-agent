@@ -10,8 +10,8 @@ import {
   ChannelAccessError, ChannelNotFoundError, ChannelService, channelMessageSchema, channelPageSchema,
   memberRefSchema, type ChannelMessage, type ChannelSessionBinding,
 } from './channelService';
-import type { ChannelStore, MemberRef } from './channelStore';
-import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './kyselyChannelStore';
+import type { ChannelStore, MemberRef } from './store/channelStore';
+import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
 function requireChannelInvocation() {
   const invocation = readPetInvocationContext();

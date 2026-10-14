@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { channelDispatchInput, channelTaskInput } from './channelDispatchInput';
 import { parseChannelMentions } from './channelParticipants';
-import type { ChannelMessageRow } from './channelStore';
+import type { ChannelMessageRow } from './store/channelStore';
 import { readChannelTestInput } from '../../../tests/support/channelDispatchInput';
 
 const message: ChannelMessageRow = {

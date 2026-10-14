@@ -1,5 +1,5 @@
 import { channelParticipantId } from './channelParticipants';
-import type { ChannelMessageRow } from './channelStore';
+import type { ChannelMessageRow } from './store/channelStore';
 
 /** Who started a Pet's spontaneous run in a Channel. */
 export type ChannelRunOrigin = { kind: 'scheduler' | 'trigger'; id: string };

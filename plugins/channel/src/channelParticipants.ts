@@ -1,7 +1,7 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import type { Nodes } from 'mdast';
 import { z } from 'zod';
-import type { ChannelMemberKind, ChannelMention } from './channelStore';
+import type { ChannelMemberKind, ChannelMention } from './store/channelStore';
 
 /** A current Channel member as messages address it. */
 export type ChannelParticipant = {

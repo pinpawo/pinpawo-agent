@@ -157,7 +157,7 @@ interface ChannelStore {
 | `plugins/scheduler`、`plugins/trigger` | 改调 `run()`，在自己的 delivery 记录里保存执行回执 |
 | `plugins/studio-http` | 客户身份认证，向路由传 `principal`；全局路由要求 `scope='studio'` |
 | `packages/studio` | 客户身份存储与 `clients` CLI；`channels` 命令增加成员管理 |
-| `apps/studio-console` | 新建 Channel 只填标题和可选说明；去掉 Goal revision；成员管理；客户身份连接 |
+| `apps/studio-console` | 新建 Channel 只填标题和可选说明；去掉 Goal revision 和执行历史；成员管理；客户身份连接；`PetSessionView` 的入口从执行历史的 "View session" 改到成员列表里的 Pet 和 Pet 的消息上 |
 | 默认 Pet 模板（executor、reviewer、wiki） | PET.md / CAPABILITY.md 去掉"核对最新目标与范围"；增加 `channel_task` 的说明 |
 | 测试 | channel / scheduler / trigger / studio-http / studio-e2e / Console 浏览器测试；agent-evals 里用到 Channel 输入封装的地方 |
 | 文档 | 实现后更新 `channel-addressing-and-execution.md`、`automation-plugins.md`、`http-plugin.md`、`docs/reference/api/studio.md`、`docs/studio/configuration.md`、`skills/studio/SKILL.md` |

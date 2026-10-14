@@ -85,7 +85,9 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   它和人的消息同形、同表、走同一套寻址和交接，不加 Pet 专用字段（不再有 `source`、`toolCalls`）。
   `external_ref` 是通用的幂等字段，任何来自外部系统的消息都可以用。
 - **Pet 怎么把结果说回 Channel**：不通过 toolkit 写。(Channel, Pet) 绑定的专用 session 里，Pet 的公开 assistant message
-  就是它在 Channel 里的发言。Channel 按 session 订阅 Agent Session 的 `message.completed`（带 messageId），写入后解析 @ 做交接。
+  就是它在 Channel 里的发言。Channel 按 session 订阅 Agent Session 中承载主对话 assistant 正文的两种事件：
+  `message.completed`，以及 `message.tool_calls` 里的正文（调用本身忽略，正文为空则跳过）。两者都以 messageId 作
+  `external_ref` 去重，写入后解析 @ 做交接。工具调用过程仍不进入 Channel。
   这样与人发言对称：人的消息进 Pet 的 session 成为输入，Pet 的公开回复进 Channel 成为消息。Pet 不需要知道 Channel 的写入协议，
   Channel toolkit 只保留读（`channel_read_context`）。每条公开消息都可以 @；PET.md 写清楚只在要交接时才写 @。
 - **@ 没有特殊路径。** Pet @ 其他成员（人或 Pet）和人 @ 成员完全一样：一条带 mentions 的消息写入 Channel，
@@ -97,6 +99,9 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
   投递结果不落库：发起请求的一方在响应里拿到；同时 Channel 在全局事件总线上发布投递事件（含失败），
   不区分发言者是人还是 Pet。
+- **投递失败是 best-effort 边界。** Pet 的公开消息由订阅写入，没有请求方：它 @ 的对象投递失败时，只有全局事件可见
+  （持本机 token 的 Console 能看到），Pet 自己和普通成员不会收到回执。本阶段接受这个边界，不恢复执行历史、重试或协调者。
+  以后如需有限反馈，再单独设计（例如把失败作为一条可见消息写回 Channel）。
 
 ## 事件
 
@@ -154,7 +159,9 @@ interface ChannelStore {
    不再属于 Channel 的字段（`kind`、`channelId`、`messageId`、`author`、`occurredAt`、`revision`、`source`、`toolCalls`），
    正文、replyTo、mentions、artifacts 原样保留。
 3. revision 行不再保留（内容已经并进 description）。
-4. 生成 `channel_members`：历史 human 作者（旧数据里的 `studio-operator` 就是本机 token 的身份，原样保留）、历史发言或已绑定 session 的 Pet。
+4. 生成 `channel_members`：已配置的 operatorId（默认 `studio-operator`，旧版本里本机 token 的身份，对所有旧 Channel 都有访问权，
+   所以加入每一个旧 Channel）、其他历史 human 作者、历史发言或已绑定 session 的 Pet。历史作者原样保留，不改写。
+   迁移验收包含自定义 operatorId（例如 `alice`）的旧 workdir：迁移后本机 token 仍能访问全部旧 Channel。
 5. 删除 `channel_entries`、`channel_outputs`、`channel_executions`、`channel_tool_call_messages`、
    `channel_tool_calls`、`channel_interrupt_notifications`。
 
@@ -176,4 +183,5 @@ interface ChannelStore {
 | 文档 | 实现后更新 `channel-addressing-and-execution.md`、`automation-plugins.md`、`http-plugin.md`、`docs/reference/api/studio.md`、`docs/studio/configuration.md`、`skills/studio/SKILL.md` |
 
 建议按两个 PR 依次实现：先 Channel 侧（表、接口、成员、`run()`、模板），再 Studio 客户身份（认证与 principal）。
-在第二个 PR 之前，本机 token 固定对应 `human:studio-operator`（沿用现有 id，以免历史作者断开），第二个 PR 把它登记为一个普通客户身份。PR #956 不再继续，按本文重做。
+在第二个 PR 之前，本机 token 对应 `human:<已配置的 operatorId>`（默认 `studio-operator`，沿用现有配置以免历史作者断开）；
+第二个 PR 用同一个 id 把本机 token 登记为普通客户身份。PR #956 不再继续，按本文重做。

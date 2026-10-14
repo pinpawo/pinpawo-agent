@@ -83,8 +83,13 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   按普通消息写入 `channel_messages`：作者 `pet:<id>`，`external_ref` 是它在 Agent Session 里的消息 id，正文原样保存。
   它和人的消息同形、同表、走同一套寻址和交接，不加 Pet 专用字段（不再有 `source`、`toolCalls`）。
   `external_ref` 是通用的幂等字段，任何来自外部系统的消息都可以用。
+- **Pet 怎么把结果说回 Channel**：不通过 toolkit 写。(Channel, Pet) 绑定的专用 session 里，Pet 的公开 assistant message
+  就是它在 Channel 里的发言。Channel 按 session 订阅 Agent Session 的 `message.completed`（带 messageId），写入后解析 @ 做交接。
+  这样与人发言对称：人的消息进 Pet 的 session 成为输入，Pet 的公开回复进 Channel 成为消息。Pet 不需要知道 Channel 的写入协议，
+  Channel toolkit 只保留读（`channel_read_context`）。每条公开消息都可以 @；PET.md 写清楚只在要交接时才写 @。
 - **过程不存。** Pet 的 operation（工具执行等）和运行状态（排队、运行、等待审批、失败）不写进 Channel。
-  Console 通过 `channel_sessions` 找到 session，直接订阅或读取 Agent Session 的 operation 与状态来展示。
+  Console 通过 `channel_sessions` 找到 session，用已有的 Pet session 视图（`PetSessionView`，
+  `/pet-sessions/snapshot|events|review`，#925）只读查看过程并处理审批。
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
   投递是否被受理在发言请求的响应里同步返回，不落库。
 

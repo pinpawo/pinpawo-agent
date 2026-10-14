@@ -46,13 +46,24 @@ CREATE TABLE channel_messages (
   author_kind TEXT NOT NULL CHECK(author_kind IN ('human','pet','legacy')),
   author_id   TEXT NOT NULL,
   occurred_at TEXT NOT NULL,
-  data        TEXT NOT NULL                       -- body、replyTo、mentions、artifacts、source、toolCalls，原样保存
+  external_ref TEXT,                              -- 来自外部系统的消息 id（如 Agent Session 消息 id），用于幂等写入
+  data        TEXT NOT NULL,                      -- body、replyTo、mentions、artifacts，原样保存
+  UNIQUE(author_kind, author_id, external_ref)
 );
 CREATE INDEX channel_message_history ON channel_messages(channel_id, sequence);
+
+CREATE TABLE channel_sessions (                   -- 保留：Channel 里的某个 Pet 用哪个 session
+  channel_id TEXT NOT NULL REFERENCES channels(channel_id),
+  pet_id     TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  registered INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(channel_id, pet_id), UNIQUE(pet_id, session_id)
+);
 ```
 
-不变的表：`channel_sessions`、`channel_outputs`、`channel_executions`、`channel_tool_call_messages`、
-`channel_tool_calls`、`channel_interrupt_notifications`。工具调用结果仍然单独存放，读出时合并进 `toolCalls[].status`。
+Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、`channel_tool_calls`、`channel_executions`、
+`channel_interrupt_notifications` 都去掉：它们是 Pet 运行过程（工具调用、dispatch 生命周期、审批）的副本，
+属于 Host 和 Agent Session。
 
 - 成员关系同时决定能否访问、发言、被 @。离开设置 `left_at`；重新加入清空它。历史消息不受影响。
 - `legacy` 只用于迁移来的旧 `bot` 消息，新数据不会产生。前端按"旧来源"显示。
@@ -65,6 +76,17 @@ CREATE INDEX channel_message_history ON channel_messages(channel_id, sequence);
 - **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 只要求操作者是成员（创建时创建者自动成为成员）。
   新 Channel 默认加入创建者，Pet 由创建者或其他成员加入，不会自动加入所有 Pet。
 - **Pet 视角**：`channel_read_context` 返回 Channel 的标题、说明、成员和分页消息。
+
+## Pet 在 Channel 里
+
+- **Pet 的消息就是普通消息。** Pet 的 Agent Session 里公开的 assistant message（沿用 `isPublicConversationMessage` 的判断）
+  按普通消息写入 `channel_messages`：作者 `pet:<id>`，`external_ref` 是它在 Agent Session 里的消息 id，正文原样保存。
+  它和人的消息同形、同表、走同一套寻址和交接，不加 Pet 专用字段（不再有 `source`、`toolCalls`）。
+  `external_ref` 是通用的幂等字段，任何来自外部系统的消息都可以用。
+- **过程不存。** Pet 的 operation（工具执行等）和运行状态（排队、运行、等待审批、失败）不写进 Channel。
+  Console 通过 `channel_sessions` 找到 session，直接订阅或读取 Agent Session 的 operation 与状态来展示。
+- **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
+  投递是否被受理在发言请求的响应里同步返回，不落库。
 
 ## schedule / trigger
 
@@ -97,10 +119,13 @@ interface ChannelStore {
   listChannels(filter: { member?: MemberRef }, page: Page): PageOf<ChannelRow>;
   listMembers(channelId: string): ChannelMemberRow[];
   upsertMember(row: ChannelMemberRow): void;
-  appendMessage(row: ChannelMessageRow): ChannelMessageRow;
+  appendMessage(row: ChannelMessageRow): ChannelMessageRow;     // 带 external_ref 时幂等
   getMessage(channelId: string, messageId: string): ChannelMessageRow | undefined;
   readMessages(channelId: string, page: Page): PageOf<ChannelMessageRow>;
-  // sessions / outputs / executions / tool calls / interrupts：与现有方法一一对应
+  getSession(channelId: string, petId: string): ChannelSessionRow | undefined;
+  reserveSession(row: ChannelSessionRow): ChannelSessionRow;
+  confirmSession(row: ChannelSessionRow): void;
+  listSessions(channelId: string): ChannelSessionRow[];
 }
 ```
 
@@ -109,17 +134,20 @@ interface ChannelStore {
 ## 迁移（v5 → v6，一个事务）
 
 1. 每个 Channel 生成一行 `channels`：title 取最新 revision，goal 和 scope 合并进 description，创建者取第一条 revision 的作者。
-2. `channel_entries` 中的 message 行搬到 `channel_messages`，作者提升成列（`bot` 写成 `legacy`），`data` 原样保留。
+2. `channel_entries` 中的 message 行搬到 `channel_messages`，作者提升成列（`bot` 写成 `legacy`）。
+   只有 `toolCalls`、没有正文的 Pet 工具调用消息不迁移（过程不再属于 Channel）；其余 `data` 原样保留。
 3. revision 行不再保留（内容已经并进 description）。
 4. 生成 `channel_members`：历史 human 作者（旧数据里的 `studio-operator` 就是本机 token 的身份，原样保留）、历史发言或已绑定 session 的 Pet。
-5. 删除 `channel_entries`。
+5. 删除 `channel_entries`、`channel_outputs`、`channel_executions`、`channel_tool_call_messages`、
+   `channel_tool_calls`、`channel_interrupt_notifications`。
 
 ## 需要调整的地方
 
 | 模块 | 调整 |
 |---|---|
 | `plugins/channel` 存储 | 新表结构和迁移；抽出 `ChannelStore` 接口与 SQLite 实现；去掉 revision、`expectedRevision`、`channelGoalSchema` 必填的 goal/scope |
-| `plugins/channel` 服务/插件 | 成员规则、principal 驱动的访问控制；`inputs` 改为 `run()`；去掉 `bot` 作者、`POST /channels/revisions`；`channel_read_context` 返回标题/说明/成员/消息 |
+| `plugins/channel` 服务/插件 | 成员规则、principal 驱动的访问控制；`inputs` 改为 `run()`；去掉 `bot` 作者、`POST /channels/revisions`；`channel_read_context` 返回标题/说明/成员/消息；不再订阅 `dispatch.message` 的工具调用，也不记录执行、审批；Pet 公开消息按普通消息映射 |
+| `GET /channels/executions`、`/channels/interrupts` | 去掉；Console 按 `channel_sessions` 读 Agent Session 的 operation 与状态 |
 | `plugins/channel` 派发输入 | 新增 `channel_task` 封装；`channel_message` 去掉 revision 相关字段 |
 | `plugins/scheduler`、`plugins/trigger` | 改调 `run()`，在自己的 delivery 记录里保存执行回执 |
 | `plugins/studio-http` | 客户身份认证，向路由传 `principal`；全局路由要求 `scope='studio'` |

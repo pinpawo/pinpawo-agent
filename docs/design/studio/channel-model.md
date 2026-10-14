@@ -1,6 +1,6 @@
 # Channel 模型（#943 重新设计）
 
-> 状态：已定，待实现
+> 状态：Channel 侧已实现；Studio 客户身份待实现
 > 更新：2026-10-14
 > 来源：PR #956 评审后的设计回顾。本文取代 [Channel 寻址、执行与状态](channel-addressing-and-execution.md)
 > 中关于目标/修订、参与者登记、Plugin 输入作者、Pet 输出路径和执行/审批观察的部分；寻址语法、replyTo 和 session 绑定规则不变。

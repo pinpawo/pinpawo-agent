@@ -1,8 +1,8 @@
 import React from 'react';
-import { channelPetIdentity, type ChannelGoal, type ChannelPet, type DispatchQueue, type DispatchQueueEntry } from './channelData';
+import { channelPetIdentity, type ChannelPet, type ChannelRow, type DispatchQueue, type DispatchQueueEntry } from './channelData';
 
 export function ChannelDispatchQueues({ queues, pets, channels, connected, error }: {
-  queues: DispatchQueue[]; pets: ChannelPet[]; channels: ChannelGoal[]; connected: boolean; error?: string;
+  queues: DispatchQueue[]; pets: ChannelPet[]; channels: ChannelRow[]; connected: boolean; error?: string;
 }) {
   const source = (entry: DispatchQueueEntry) => entry.scope?.namespace === 'channel'
     ? channels.find(channel => channel.channelId === entry.scope!.id)?.title ?? 'Other Channel'
@@ -14,7 +14,7 @@ export function ChannelDispatchQueues({ queues, pets, channels, connected, error
     {error && <p className="channel-record-error" role="alert">{error}</p>}
     {unknown && <p className="channel-history-hint">Last observed queue; current work is unknown.</p>}
     {queues.map(queue => <article className="channel-queue" key={queue.petId}>
-      <div className="channel-execution-head"><strong>{channelPetIdentity(queue.petId, pets).name}</strong>
+      <div className="channel-queue-head"><strong>{channelPetIdentity(queue.petId, pets).name}</strong>
         <em>{unknown ? 'status unknown' : queue.state === 'open' ? 'available' : queue.state === 'busy' ? 'working' : queue.state === 'waiting' ? 'waiting' : 'blocked'}</em></div>
       {queue.activeDispatch && <p className="channel-active-source">{unknown ? 'Last observed' : 'Working'} · {source(queue.activeDispatch)}</p>}
       {queue.queuedConversations > 0 && <p>Conversation in progress</p>}

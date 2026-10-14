@@ -37,8 +37,8 @@ try {
     host.on('exit', code => { clearTimeout(timer); reject(new Error(`Host exited ${code}`)); });
     host.stdout.on('data', data => {
       buffer += data;
-      for (const line of buffer.split('\n')) {
-        if (!line.startsWith('{')) continue;
+      for (const line of buffer.split('\n').slice(0, -1)) {
+        if (!line.startsWith('{"ready"')) continue;
         const value = JSON.parse(line);
         if (value.ready) { clearTimeout(timer); resolve(value); return; }
       }
@@ -55,7 +55,7 @@ try {
     assert.equal(response.status, 200, path);
     return response.json();
   };
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_EXECUTABLE ? { executablePath: process.env.CHANNEL_BROWSER_EXECUTABLE } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   const writes = [];
@@ -69,29 +69,27 @@ try {
   await page.getByRole('button', { name: 'channel', exact: true }).click();
   await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
   await page.getByLabel('Channel title').fill('Session reading');
-  await page.getByLabel('Channel goal').fill('Read Pet sessions from the Console.');
-  await page.getByLabel('Channel scope').fill('Observe and answer reviews only.');
+  await page.getByRole('checkbox', { name: 'Alpha', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Beta', exact: true }).check();
   await page.getByRole('button', { name: 'Create Channel', exact: true }).click();
   await page.getByRole('heading', { name: 'Session reading', exact: true }).waitFor();
   const channelId = (await api('/channels')).channels[0].channelId;
-  const executions = async () => (await api(`/channels/executions?channelId=${channelId}`)).executions;
-  const outputs = async () => (await api(`/channels/context?channelId=${channelId}&limit=200`)).history.entries.filter(item => item.kind === 'message' && item.source);
+  const sessions = async () => (await api(`/channels/sessions?channelId=${channelId}`)).sessions;
+  const outputs = async () => (await api(`/channels/context?channelId=${channelId}&limit=200`)).messages.filter(item => item.author.kind === 'pet');
 
   await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('Investigate the current scope.');
+  await page.getByLabel('Message', { exact: true }).fill('Investigate the current state.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await outputs()).length === 1, 'alpha output');
   await page.getByLabel('Channel recipient').selectOption('pet:beta');
   await page.getByLabel('Message', { exact: true }).fill('review');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await waitFor(async () => (await executions()).some(item => item.petId === 'beta' && item.state === 'waiting'), 'beta waits for review');
-  const waiting = (await executions()).find(item => item.petId === 'beta');
+  const waiting = await waitFor(async () => (await sessions()).find(item => item.petId === 'beta' && item.registered), 'beta session registered');
 
-  // Open the waiting execution's own session and answer its current review.
-  const activity = page.locator('#execution-' + waiting.executionId);
-  await activity.getByText('review requested', { exact: true }).waitFor();
+  // Open Beta's Channel session from the member list and answer its current review there.
+  const member = page.getByRole('region', { name: 'Channel members' }).locator('.channel-member').filter({ hasText: 'pet:beta' });
   const writesBeforeReading = writes.length;
-  await activity.getByRole('button', { name: 'View session', exact: true }).click();
+  await member.getByRole('button', { name: 'View session', exact: true }).click();
   const viewer = page.getByRole('dialog', { name: /session/ });
   await viewer.getByText('Waiting for review', { exact: true }).waitFor();
   await viewer.getByText('Authorize fixture tool?', { exact: true }).waitFor();
@@ -100,8 +98,7 @@ try {
   assert.equal(writes.length, writesBeforeReading, 'reading a session sends nothing');
   await page.screenshot({ path: resolve(screenshotDir, '01-session-review.png') });
   await viewer.getByRole('button', { name: 'Approve', exact: true }).click();
-  await waitFor(async () => (await executions()).find(item => item.executionId === waiting.executionId)?.state === 'completed', 'approved dispatch continues and completes');
-  await waitFor(async () => (await outputs()).some(item => item.author.id === 'beta'), 'beta output delivered to the Channel');
+  await waitFor(async () => (await outputs()).some(item => item.author.id === 'beta'), 'approved dispatch continues and Beta posts to the Channel');
   await viewer.getByText('Idle', { exact: true }).waitFor();
   await viewer.getByText('Public delivery from beta.', { exact: false }).first().waitFor();
   assert.equal(await viewer.getByRole('button', { name: 'Approve', exact: true }).count(), 0, 'an answered review is no longer offered');
@@ -110,17 +107,18 @@ try {
   await page.keyboard.press('Escape');
   await viewer.waitFor({ state: 'detached' });
 
-  // A finished execution is still readable at any time.
-  const finished = (await executions()).find(item => item.petId === 'alpha');
-  await page.locator('#execution-' + finished.executionId).getByRole('button', { name: 'View session', exact: true }).click();
+  // A Pet's message opens the session it was written in.
+  const alphaMessage = page.locator('[data-message-id="' + (await outputs()).find(item => item.author.id === 'alpha').messageId + '"]');
+  await alphaMessage.getByRole('button', { name: 'View Alpha session', exact: true }).click();
   await viewer.getByText('Public delivery from alpha.', { exact: false }).first().waitFor();
   await viewer.getByText('Idle', { exact: true }).waitFor();
+  await viewer.getByText((await sessions()).find(item => item.petId === 'alpha').sessionId, { exact: true }).first().waitFor();
   await page.setViewportSize({ width: 390, height: 800 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: resolve(screenshotDir, '03-session-mobile.png') });
   await viewer.getByRole('button', { name: 'Close session view' }).click();
   await viewer.waitFor({ state: 'detached' });
-  assert.equal((await executions()).length, 2, 'reading sessions created no execution');
+  assert.equal((await outputs()).length, 2, 'reading sessions created no message');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'passed', modelCalls: 0, screenshots: screenshotDir }));
 } finally {

@@ -139,7 +139,9 @@ that resolver entirely. Options pass through unchanged for the Plugin to validat
 Install each configured package beside `@pinpawo/studio`; configuration does not
 download missing packages at startup.
 
-`@pinpawo-plugin/channel` owns goal/message history and fixed Channel/Pet sessions.
+`@pinpawo-plugin/channel` owns Channels, their members, message history and fixed
+Channel/Pet sessions. Its data lives in `.pinpawo/channel/channels-v2.sqlite`;
+Channels stored by earlier versions in `channels.sqlite` are not migrated or shown.
 Its [current design](../design/studio/channel-addressing-and-execution.md) specifies
 unified message addressing, Reply defaults, server-assigned source envelopes and limits.
 Default PET.md and Capability templates contain the runtime protocol; existing

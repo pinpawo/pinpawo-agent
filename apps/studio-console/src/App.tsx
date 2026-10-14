@@ -9,6 +9,7 @@ import React, {
 import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, type DispatchRecord } from './dispatchActivity';
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
+import { appendChannelDeliveries, type ChannelDelivery } from './channelData';
 
 type Page = 'channel' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'error';
@@ -117,7 +118,8 @@ export function App() {
   const [pets, setPets] = useState<Pet[]>([]);
   const [petsReady, setPetsReady] = useState(false);
   const [channelVersion, setChannelVersion] = useState(0);
-  const [channelFailures, setChannelFailures] = useState<{ channelId: string; invocationId?: string; error: string }[]>([]);
+  const [channelDeliveries, setChannelDeliveries] = useState<ChannelDelivery[]>([]);
+  const [channelFailures, setChannelFailures] = useState<{ channelId: string; petId?: string; error: string }[]>([]);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
   const [notices, setNotices] = useState<Resource<Notice[]>>(empty);
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
@@ -219,13 +221,16 @@ export function App() {
         const record = dispatchRecordFromEvent(event);
         if (record) setDispatches((current) => appendDispatchRecord(current, record));
         if (['scheduler', 'notice', 'trigger'].includes(event.source)) refreshInBackground();
-        const payload = event.payload as { channelId?: string; invocationId?: string; error?: string; scope?: { namespace?: string } } | undefined;
-        if (event.source === 'channel' || (event.source === 'resident-pet' && payload?.scope?.namespace === 'channel')) {
+        if (event.source === 'channel') {
           setChannelVersion(value => value + 1);
-        }
-        if (event.source === 'channel' && event.type === 'channel.delivery_failed' && payload?.channelId && payload.error) {
-          const failure = { channelId: payload.channelId, invocationId: payload.invocationId, error: payload.error };
-          setChannelFailures(current => [...current.slice(-19), failure]);
+          const payload = event.payload as Partial<ChannelDelivery> & { petId?: string } | undefined;
+          if (event.type === 'channel.delivery' && payload?.channelId && payload.state) {
+            setChannelDeliveries(current => appendChannelDeliveries(current, [payload as ChannelDelivery]));
+          }
+          if (event.type === 'channel.message_failed' && payload?.channelId && payload.error) {
+            const failure = { channelId: payload.channelId, petId: payload.petId, error: payload.error };
+            setChannelFailures(current => [...current.slice(-19), failure]);
+          }
         }
       },
     });
@@ -259,6 +264,7 @@ export function App() {
     activeHost.current = nextUrl;
     if (nextUrl !== normalizedUrl) {
       setPets([]);
+      setChannelDeliveries([]);
       setChannelFailures([]);
       setSchedules(empty());
       setNotices(empty());
@@ -478,7 +484,8 @@ export function App() {
       <section className={'content' + (page === 'channel' ? ' channel-content' : '')}>
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
-            active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady} failures={channelFailures} />
+            active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
+            deliveries={channelDeliveries} failures={channelFailures} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>CONNECTION FAILED</strong>

@@ -1,7 +1,7 @@
 {
   "name": "@pinpawo-plugin/channel",
   "version": "0.1.0",
-  "description": "Persistent goal Channels, messages and invocation-scoped collaboration tools",
+  "description": "Member Channels for humans and Pets: messages, addressing and invocation-scoped context",
   "license": "MIT",
   "publishConfig": {
     "access": "public"

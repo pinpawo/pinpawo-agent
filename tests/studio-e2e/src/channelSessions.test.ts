@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Annotation, Command, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
-import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudio } from '@pinpawo/studio';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -19,8 +19,6 @@ async function waitFor(done: () => boolean) {
   for (let i = 0; i < 500; i++) { if (done()) return; await new Promise(r => setTimeout(r, 5)); }
   throw new Error('Timed out');
 }
-const human = { kind: 'human', id: 'owner' } as const;
-const goal = { title: 'Goal', goal: 'Long term', scope: 'This round' };
 async function fixture(root: string, pets = ['one'], reply?: (input: string) => string) {
   const channel = createChannelPlugin({ databasePath: join(root, 'channels.sqlite'), httpRoute: false });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
@@ -71,56 +69,69 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
   const studio = await createStudio({ studioId: 'sessions', entryPetId: pets[0]!, plugins: [channel],
     pets: hosts.map((host, i) => ({ registration: { petId: pets[i]!, name: pets[i]! }, dispatch: host.resident.dispatch })),
   });
-  return { channel, hosts, studio, calls, maxActive: () => maxActive, active: () => active, barrier,
+  const events: Array<{ type: string; payload?: any }> = [];
+  studio.subscribe(event => { events.push(event); });
+  return { channel, hosts, studio, calls, events, pets, maxActive: () => maxActive, active: () => active, barrier,
     close: async () => { await Promise.all(hosts.map(h => h.close())); await studio.shutdown(); } };
 }
-function outputs(f: Awaited<ReturnType<typeof fixture>>, channelId: string) {
-  return f.channel.service.readHistory(channelId).entries.filter((m): m is ChannelMessage => m.kind === 'message' && !!m.source);
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+function outputs(f: Fixture, channelId: string) {
+  return f.channel.service.readContext(f.channel.operator, channelId, { limit: 200 }).messages.filter(m => m.author.kind === 'pet');
 }
+const open = (f: Fixture) => f.channel.service.createChannel(f.channel.operator, { title: 'Goal', pets: f.pets }).channel.channelId;
+const ask = (f: Fixture, channelId: string, petId: string, body: string, replyTo?: string) =>
+  f.channel.sendMessage(channelId, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: `pet:${petId}` }] });
+/** The dispatch.message event a Channel message was written from. */
+const replyOf = (f: Fixture, externalRef?: string) =>
+  f.events.find(e => e.type === 'dispatch.message' && e.payload.message.messageId === externalRef)?.payload;
+const failures = (f: Fixture) => f.events.filter(e => e.type === 'channel.message_failed').map(e => e.payload);
 
 test('Markdown targets a legal special Pet identity without dispatching its registered prefix', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-special-identity-'));
   const f = await fixture(root, ['a', 'a)b'], () => 'Special identity delivery.');
   try {
-    const id = f.channel.service.createChannel(goal, human).channelId;
+    const id = open(f);
     const result = await f.channel.sendMessage(id, { body: '[@Same name](participant:pet:a%29b) Inspect this.' });
-    assert.equal(result.deliveries[0]?.participantId, 'pet:a%29b');
+    assert.deepEqual(result.deliveries.map(d => [d.participantId, d.state]), [['pet:a%29b', 'accepted']]);
     await waitFor(() => outputs(f, id).length === 1);
     assert.deepEqual(f.calls.map(call => call.petId), ['a)b']);
     assert.equal(outputs(f, id)[0]!.author.id, 'a)b');
-    assert.equal(f.channel.service.getBinding(id, 'a'), null);
+    assert.equal(f.channel.service.getSession(id, 'a'), undefined);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('Channel pair sessions survive new tasks, replies and restart; four Pets keep independent threads', async () => {
+test('Channel pair sessions survive new messages, replies and restart; four Pets keep independent threads', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-sessions-'));
-  let f = await fixture(root, ['one', 'two', 'three', 'four']);
+  const pets = ['one', 'two', 'three', 'four'];
+  let f = await fixture(root, pets);
   try {
-    const a = f.channel.service.createChannel(goal, human).channelId;
-    const b = f.channel.service.createChannel(goal, human).channelId;
-    await Promise.all(['one', 'two', 'three', 'four'].map(petId => f.channel.execute(petId === 'one' ? ` \t${a}\n ` : a, { petId, body: 'ask' })));
+    const a = open(f);
+    const b = open(f);
+    const first = await f.channel.sendMessage(` \t${a}\n `, { body: 'ask', mentions: pets.map(p => ({ participantId: `pet:${p}` })) });
     await waitFor(() => outputs(f, a).length === 4);
-    const bindings = ['one', 'two', 'three', 'four'].map(p => f.channel.service.getBinding(a, p)!);
+    const bindings = pets.map(p => f.channel.service.getSession(a, p)!);
+    assert.deepEqual(first.deliveries.map(d => [d.state, d.sessionId]), bindings.map(binding => ['accepted', binding.sessionId]));
     assert.equal(new Set(bindings.map(b => b.sessionId)).size, 4);
     assert.ok(f.maxActive() > 1, 'different Pets retain parallel execution');
     const question = outputs(f, a).find(m => m.author.id === 'one')!;
-    await f.channel.execute(` ${a} `, { petId: 'one', replyTo: question.messageId, body: 'staging' });
+    await ask(f, ` ${a} `, 'one', 'staging', question.messageId);
     await waitFor(() => outputs(f, a).length === 5);
     assert.equal(outputs(f, a).at(-1)!.body, 'Answer 2: staging');
     assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
       messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet' }, body: question.body,
     });
     assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:studio-operator', kind: 'human' });
-    await assert.rejects(f.channel.execute(a, { replyTo: question.messageId, body: 'no recipient' }), /Select an existing Pet/);
-    await assert.rejects(f.channel.execute(b, { petId: 'one', replyTo: question.messageId, body: 'wrong Channel' }), /reference/);
-    await assert.rejects(f.channel.execute(a, { petId: 'missing', replyTo: question.messageId, body: 'unknown target' }), /Unknown/);
-    await f.channel.execute(b, { petId: 'one', body: 'new Channel' });
+    assert.deepEqual((await f.channel.sendMessage(a, { body: 'no recipient', replyTo: question.messageId })).deliveries, []);
+    await assert.rejects(ask(f, b, 'one', 'wrong Channel', question.messageId), /reference/);
+    await assert.rejects(ask(f, a, 'missing', 'unknown target', question.messageId), /Unknown/);
+    await ask(f, b, 'one', 'new Channel');
     await waitFor(() => outputs(f, b).length === 1);
-    assert.notEqual(f.channel.service.getBinding(b, 'one')!.sessionId, bindings[0]!.sessionId);
+    assert.equal(f.calls.length, 6, 'an unaddressed reply dispatches nobody');
+    assert.notEqual(f.channel.service.getSession(b, 'one')!.sessionId, bindings[0]!.sessionId);
     await f.close();
-    f = await fixture(root, ['one', 'two', 'three', 'four']);
-    assert.deepEqual(['one', 'two', 'three', 'four'].map(p => f.channel.service.getBinding(a, p)), bindings);
-    await Promise.all([f.channel.execute(a, { petId: 'one', body: 'next task' }), f.channel.execute(a, { petId: 'one', body: 'another task' })]);
+    f = await fixture(root, pets);
+    assert.deepEqual(pets.map(p => f.channel.service.getSession(a, p)), bindings);
+    await Promise.all([ask(f, a, 'one', 'next task'), ask(f, a, 'one', 'another task')]);
     await waitFor(() => outputs(f, a).length === 7);
     assert.deepEqual(f.calls.map(c => [c.thread, c.count]), [[bindings[0]!.sessionId, 3], [bindings[0]!.sessionId, 4]]);
     assert.equal(f.maxActive(), 1, 'same Pet remains serial');
@@ -129,9 +140,11 @@ test('Channel pair sessions survive new tasks, replies and restart; four Pets ke
     const saved = JSON.parse(await readFile(registry, 'utf8'));
     delete saved.sessions[bindings[0]!.sessionId];
     await writeFile(registry, JSON.stringify(saved));
-    f = await fixture(root, ['one', 'two', 'three', 'four']);
-    await assert.rejects(f.channel.execute(a, { petId: 'one', body: 'must not recreate' }), /no longer exists/);
-    assert.equal(f.channel.service.getBinding(a, 'one')!.sessionId, bindings[0]!.sessionId);
+    f = await fixture(root, pets);
+    const { deliveries: [lost] } = await ask(f, a, 'one', 'must not recreate');
+    assert.equal(lost!.state, 'failed');
+    assert.match(lost!.error!, /no longer exists/);
+    assert.equal(f.channel.service.getSession(a, 'one')!.sessionId, bindings[0]!.sessionId);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -143,23 +156,18 @@ test('waiting target is skipped; background execution does not pollute active TU
     const initial = await host.interaction.snapshot();
     const observed: unknown[] = [];
     host.interaction.subscribe(m => observed.push(m));
-    const a = f.channel.service.createChannel(goal, human).channelId;
-    const b = f.channel.service.createChannel(goal, human).channelId;
-    await f.channel.execute(a, { petId: 'one', body: 'approval' });
+    const a = open(f);
+    const b = open(f);
     const waiting: string[] = [];
     const stop = host.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
+    const { deliveries: [approval] } = await ask(f, a, 'one', 'approval');
     await waitFor(() => waiting.length === 1);
-    const binding = f.channel.service.getBinding(a, 'one')!;
-    await waitFor(() => f.channel.service.readInterruptNotifications(a).notifications.length === 1);
-    const notice = f.channel.service.readInterruptNotifications(a).notifications[0]!;
-    assert.equal(notice.source.sessionId, binding.sessionId);
-    assert.equal(notice.pendingInterrupt.payload.kind, 'human_review');
-    assert.ok(!JSON.stringify(notice).includes('graph.authorize_tool_action'));
-    const read = f.channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context');
-    assert.ok(read);
-    assert.ok(!JSON.stringify(f.channel.service.readContext(a)).includes('Authorize?'));
-    await f.channel.execute(a, { petId: 'one', body: 'after approval' });
-    await f.channel.execute(b, { petId: 'one', body: 'other session' });
+    const binding = f.channel.service.getSession(a, 'one')!;
+    assert.deepEqual(waiting, [binding.sessionId]);
+    assert.equal(outputs(f, a).length, 0, 'a pending review is not a Channel message');
+    assert.ok(!JSON.stringify(f.channel.service.readContext(f.channel.operator, a)).includes('Authorize?'));
+    await ask(f, a, 'one', 'after approval');
+    await ask(f, b, 'one', 'other session');
     await waitFor(() => outputs(f, b).length === 1);
     assert.equal(f.calls.length, 1);
     assert.equal(observed.length, 0, 'background run does not enter active-session stream');
@@ -170,44 +178,44 @@ test('waiting target is skipped; background execution does not pollute active TU
     assert.deepEqual(snapshot.snapshot, initial.snapshot);
     await host.interaction.request({ type: 'session.resume', requestId: 'select-a', sessionId: binding.sessionId });
     const selected = await host.interaction.snapshot();
-    const text = JSON.stringify(selected);
-    assert.ok(text.includes(binding.sessionId));
+    assert.ok(JSON.stringify(selected).includes(binding.sessionId));
     // Read the actual projected interrupt, then send the existing TUI command.
     if (selected.type !== 'session.snapshot.result') throw Error('snapshot');
     const pending = selected.snapshot.session.pendingInterrupt;
     assert.ok(pending);
-    await f.channel.execute(b, { petId: 'one', body: 'while active session awaits approval' });
+    assert.equal(pending.payload.kind, 'human_review');
+    await ask(f, b, 'one', 'while active session awaits approval');
     await waitFor(() => outputs(f, b).length === 2);
     const stillWaiting = await host.interaction.snapshot();
     if (stillWaiting.type !== 'session.snapshot.result') throw Error('snapshot');
     assert.equal(stillWaiting.snapshot.session.pendingInterrupt?.interruptId, pending.interruptId);
     await host.interaction.request({ type: 'interrupt.resume', requestId: 'approve-a', interruptId: pending.interruptId,
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
-    // Approving the review continues the original dispatch: its reply returns to
-    // the Channel, under the original scope, before the queued follow-up runs.
+    // Approving the review continues the original dispatch: its reply lands in
+    // the Channel as the Pet's message, before the queued follow-up runs.
     await waitFor(() => outputs(f, a).length === 2);
     assert.deepEqual(outputs(f, a).map(m => m.body), ['Answer 1: approval', 'Answer 2: after approval']);
-    assert.equal(outputs(f, a)[0]?.source?.invocationId, notice.source.invocationId);
+    assert.deepEqual([replyOf(f, outputs(f, a)[0]!.externalRef)?.invocationId, replyOf(f, outputs(f, a)[0]!.externalRef)?.sessionId],
+      [approval!.invocationId, binding.sessionId]);
     assert.ok(f.calls.some(call => call.text === 'approval' && call.thread === binding.sessionId), 'continuation keeps dispatch attribution');
-    const executions = f.channel.service.readExecutions(a).executions;
-    assert.equal(executions.find(e => e.invocationId === notice.source.invocationId)?.state, 'completed');
     stop();
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-
-test('a review answered after Host restart still returns the dispatch result to its Channel', async () => {
+test('a review answered after Host restart still lands the dispatch result in its Channel', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-restart-approval-'));
   let f = await fixture(root);
   try {
-    const a = f.channel.service.createChannel(goal, human).channelId;
-    await f.channel.execute(a, { petId: 'one', body: 'approval' });
-    await waitFor(() => f.channel.service.readInterruptNotifications(a).notifications.length === 1);
-    const notice = f.channel.service.readInterruptNotifications(a).notifications[0]!;
+    const a = open(f);
+    const waiting: string[] = [];
+    f.hosts[0]!.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
+    const { deliveries: [approval] } = await ask(f, a, 'one', 'approval');
+    await waitFor(() => waiting.length === 1);
+    assert.equal(waiting[0], f.channel.service.getSession(a, 'one')!.sessionId);
     await f.close();
     f = await fixture(root);
     const host = f.hosts[0]!;
-    await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: notice.source.sessionId });
+    await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: waiting[0]! });
     const selected = await host.interaction.snapshot();
     if (selected.type !== 'session.snapshot.result') throw Error('snapshot');
     const pending = selected.snapshot.session.pendingInterrupt;
@@ -216,10 +224,8 @@ test('a review answered after Host restart still returns the dispatch result to 
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
     await waitFor(() => outputs(f, a).length === 1);
     assert.equal(outputs(f, a)[0]?.body, 'Answer 1: approval');
-    assert.equal(outputs(f, a)[0]?.source?.invocationId, notice.source.invocationId);
-    assert.equal(f.calls[0]?.thread, notice.source.sessionId, 'restored scope reaches Channel tools');
-    const execution = f.channel.service.readExecutions(a).executions.find(e => e.invocationId === notice.source.invocationId);
-    assert.equal(execution?.state, 'completed');
+    assert.equal(replyOf(f, outputs(f, a)[0]!.externalRef)?.invocationId, approval!.invocationId);
+    assert.equal(f.calls[0]?.thread, waiting[0], 'restored scope reaches the Channel session');
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -229,26 +235,27 @@ test('concurrent first use reserves one session; queued targets survive a TUI sw
   let release!: () => void;
   f.barrier.wait = new Promise<void>(resolve => { release = resolve; });
   try {
-    const a = f.channel.service.createChannel(goal, human).channelId;
-    const b = f.channel.service.createChannel(goal, human).channelId;
-    await Promise.all([f.channel.execute(a, { petId: 'one', body: 'first' }), f.channel.execute(a, { petId: 'one', body: 'second' })]);
+    const a = open(f);
+    const b = open(f);
+    const sent = await Promise.all([ask(f, a, 'one', 'first'), ask(f, a, 'one', 'second')]);
     await waitFor(() => f.active() === 1);
-    const binding = f.channel.service.getBinding(a, 'one')!;
+    const binding = f.channel.service.getSession(a, 'one')!;
+    assert.deepEqual(sent.map(result => result.deliveries[0]!.sessionId), [binding.sessionId, binding.sessionId]);
     const snapshot = await f.hosts[0]!.interaction.snapshot();
     if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
     assert.equal(snapshot.snapshot.session.activeRun, null);
-    await f.channel.execute(b, { petId: 'one', body: 'third' });
+    await ask(f, b, 'one', 'third');
     const switched = f.hosts[0]!.interaction.request({ type: 'session.new', requestId: 'new-tui' });
     f.barrier.wait = undefined; release();
     await switched;
     await waitFor(() => outputs(f, a).length === 2 && outputs(f, b).length === 1);
-    assert.deepEqual(f.calls.map(c => c.thread), [binding.sessionId, binding.sessionId, f.channel.service.getBinding(b, 'one')!.sessionId]);
+    assert.deepEqual(f.calls.map(c => c.thread), [binding.sessionId, binding.sessionId, f.channel.service.getSession(b, 'one')!.sessionId]);
     assert.equal(f.maxActive(), 1);
     await assert.rejects(f.hosts[0]!.resident.dispatch.dispatch({ request: 'wrong pet', session: { id: 'other:12345678', create: true } }), /identity/);
   } finally { release(); await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('failed first admission keeps the reserved identity for retry; completed output replay is idempotent', async () => {
+test('failed first admission keeps the reserved identity for retry; a replayed public reply is written once', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-reservation-'));
   const file = join(root, 'channels.sqlite');
   let fail = true;
@@ -263,44 +270,62 @@ test('failed first admission keeps the reserved identity for retry; completed ou
   }] });
   let studio = await create();
   try {
-    const id = channel.service.createChannel(goal, human).channelId;
-    await assert.rejects(channel.execute(id, { petId: 'one', body: 'start' }), /unavailable/);
-    const reserved = channel.service.getBinding(id, 'one')!;
+    const id = channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] }).channel.channelId;
+    const start = { body: 'start', mentions: [{ participantId: 'pet:one' }] };
+    const { deliveries: [failed] } = await channel.sendMessage(id, start);
+    assert.equal(failed!.state, 'failed');
+    assert.match(failed!.error!, /unavailable/);
+    const reserved = channel.service.getSession(id, 'one')!;
     assert.equal(reserved.registered, false);
     await studio.shutdown();
     channel = createChannelPlugin({ databasePath: file, httpRoute: false });
     studio = await create(); fail = false;
-    await channel.execute(id, { petId: 'one', body: 'retry' });
+    const { deliveries: [retried] } = await channel.sendMessage(id, { ...start, body: 'retry' });
+    assert.deepEqual([retried!.state, retried!.sessionId], ['accepted', reserved.sessionId]);
     assert.deepEqual(targets, [reserved.sessionId, reserved.sessionId]);
-    assert.equal(channel.service.getBinding(id, 'one')!.registered, true);
-    const source = { petId: 'one', sessionId: reserved.sessionId, invocationId: 'completed' };
-    const first = channel.service.recordOutput(id, source, 'Which destination?');
-    assert.deepEqual(channel.service.recordOutput(id, source, 'Which destination?'), first);
+    assert.equal(channel.service.getSession(id, 'one')!.registered, true);
+    const events: Array<{ type: string; payload?: any }> = [];
+    studio.subscribe(event => { events.push(event); });
+    const reply = (sessionId: string) => studio.notify({ source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
+      payload: { petId: 'one', invocationId: retried!.invocationId, sessionId, scope: { namespace: 'channel', id },
+        message: { type: 'message.completed', messageId: 'reply-1', role: 'assistant', text: 'Which destination?' } } });
+    reply(reserved.sessionId); reply(reserved.sessionId); reply('one:forged');
+    // Events reach the Channel in order: once the forged one has failed, the replay was handled.
+    await waitFor(() => events.some(event => event.type === 'channel.message_failed'));
+    const messages = channel.service.readContext(channel.operator, id).messages.filter(message => message.author.kind === 'pet');
+    assert.deepEqual(messages.map(message => [message.body, message.externalRef]), [['Which destination?', 'reply-1']]);
   } finally { await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('a bound session alone does not publish; scope mismatch reports failure; native review is a read-only notice', async () => {
+test('a bound session alone does not publish; scope mismatch and a departed Pet report failure; native review is not a message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-destination-'));
   const f = await fixture(root);
-  const events: Array<{ type: string; payload?: unknown }> = [];
-  f.studio.subscribe(event => { events.push(event); });
   try {
-    assert.ok(!f.channel.toolkits.flatMap(t => t.tools).some(t => t.tool.name === 'channel_send_message'));
-    const a = f.channel.service.createChannel(goal, human).channelId;
-    const b = f.channel.service.createChannel(goal, human).channelId;
-    const { binding } = await f.channel.execute(a, { petId: 'one', body: 'ask' });
+    assert.deepEqual(f.channel.toolkits.flatMap(t => t.tools).map(t => t.tool.name), ['channel_read_context']);
+    const a = open(f);
+    const b = open(f);
+    const { deliveries: [first] } = await ask(f, a, 'one', 'ask');
+    const sessionId = first!.sessionId!;
     await waitFor(() => outputs(f, a).length === 1);
-    const receipt = await f.studio.dispatch({ petId: 'one', request: 'not public', session: { id: binding.sessionId }, metadata: { channelId: a } });
-    await waitFor(() => events.some(e => e.type === 'dispatch.completed' && (e.payload as any).invocationId === receipt.invocationId));
+    const receipt = await f.studio.dispatch({ petId: 'one', request: 'not public', session: { id: sessionId }, metadata: { channelId: a } });
+    await waitFor(() => f.events.some(e => e.type === 'dispatch.completed' && e.payload.invocationId === receipt.invocationId));
     assert.equal(outputs(f, a).length, 1);
-    await f.studio.dispatch({ petId: 'one', request: 'wrong destination', session: { id: binding.sessionId }, scope: { namespace: 'channel', id: b } });
-    await waitFor(() => events.some(e => e.type === 'channel.delivery_failed'));
+    await f.studio.dispatch({ petId: 'one', request: 'wrong destination', session: { id: sessionId }, scope: { namespace: 'channel', id: b } });
+    await waitFor(() => failures(f).length === 1);
+    assert.deepEqual([failures(f)[0].channelId, failures(f)[0].sessionId], [b, sessionId]);
+    assert.match(failures(f)[0].error, /session does not match/);
     assert.equal(outputs(f, b).length, 0);
+    f.channel.service.removeMember(f.channel.operator, a, { kind: 'pet', id: 'one' });
+    await f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } });
+    await waitFor(() => failures(f).length === 2);
+    assert.deepEqual([failures(f)[1].channelId, failures(f)[1].petId], [a, 'one']);
+    assert.match(failures(f)[1].error, /not a member/);
     assert.equal(outputs(f, a).length, 1);
-    await f.channel.execute(b, { petId: 'one', body: 'approval' });
-    await waitFor(() => f.channel.service.readInterruptNotifications(b).notifications.length === 1);
-    assert.equal(f.channel.service.readInterruptNotifications(b).notifications[0]?.pendingInterrupt.payload.kind, 'human_review');
+    const waiting: string[] = [];
+    f.hosts[0]!.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
+    await ask(f, b, 'one', 'approval');
+    await waitFor(() => waiting.length === 1);
     assert.equal(outputs(f, b).length, 0);
-    assert.ok(!JSON.stringify(f.channel.service.readContext(b)).includes('interruptId'));
+    assert.ok(!/interruptId|Authorize\?/.test(JSON.stringify(f.channel.service.readContext(f.channel.operator, b))));
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });

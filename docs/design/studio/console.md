@@ -8,7 +8,7 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 
 | 页面/操作 | API 与范围 |
 |---|---|
-| Channel（默认页） | `/channels/*`；消息与协作语义统一见 [Channel 设计](channel-addressing-and-execution.md)。 |
+| Channel（默认页） | `/channels/*`；成员与消息模型见 [Channel 模型](channel-model.md)，寻址语义见 [Channel 设计](channel-addressing-and-execution.md)。 |
 | 直接 Pet 请求 | `/pets`、`/dispatch`、`/dispatch/queues`；只对自身 HTTP 失败请求创建新的 retry dispatch。 |
 | Scheduler | `/scheduler`、`/scheduler/events`；创建一次性计划与取消未触发计划。 |
 | Notice | `/notices`；读取持久通知，不控制运行。 |
@@ -17,16 +17,19 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 
 ## Channel 布局与交互
 
-左侧 232px 列表、中间独立滚动消息与固定 composer、右侧可折叠 320px Activity。
+左侧 232px 列表、中间独立滚动消息与固定 composer、右侧可折叠 320px 成员与详情面板。
+新建 Channel 填标题、可选说明，并显式勾选加入的 Pet；面板里可增删成员（Pet 或人的 id），
+@ 目标只列当前成员。
 低于 1101px 时 Activity 为 modal drawer，低于 701px 时列表也为 drawer。
 抽屉和创建弹窗限制键盘焦点，Escape/背景关闭，关闭后恢复触发控件焦点。
 
-正文完整显示；宽代码在块内滚动。普通连续笔记可视觉分组，执行请求、输出与引用
-保留独立边界。每条消息保留稳定 ID，引用只展示一层摘要并定位原文；Activity 按
-invocation 定位请求/输出。技术身份放在展开详情和复制操作。
+正文完整显示；宽代码在块内滚动。普通连续笔记可视觉分组，引用保留独立边界。
+每条消息保留稳定 ID，引用只展示一层摘要并定位原文。技术身份放在展开详情和复制操作。
+Channel 只显示成员的公开消息；工具调用和运行过程不在 Channel 里显示。
 登记 label 用于显示，同名选择器携带身份，移除作者标明历史身份。
 
-Reply 预选、改选/清除、全局队列、失败与审批历史按 Channel 设计处理。
+Reply 预选、改选/清除与全局队列按 Channel 设计处理。投递结果不落库：Console 显示本页
+发送响应和 SSE `channel.delivery` 中看到的结果，刷新后不再显示。
 未发送草稿不派发；重复提交保护只防本次表单并发提交，不承诺网络重试恰好一次。
 阅读旧消息时 SSE 不移动阅读位置；切换全局页保留位置，切换 Channel/Host 清除草稿、
 引用与目标。拒绝提交保留草稿，不自动重试。
@@ -38,18 +41,16 @@ Reply 预选、改选/清除、全局队列、失败与审批历史按 Channel �
 鉴权失败要求更正凭证。token 保存在浏览器 session，不写入 URL。
 
 SSE 是 live-only，断线后重读各领域自己的持久事实，不用事件流重建历史。
-Channel 完整读取分页，执行时补读观察。未结束的旧 Host 记录、丢失的 live 观察显示
-status unknown；已知终态保留。completed 不代表业务目标验收。
+Channel 完整读取消息分页和 session 绑定。completed 不代表业务验收。
 直接 dispatch 的 receipt 只表示接纳，不是可恢复 execution handle。
 
 Console 不接管独占 TUI WebSocket，也不提供 chat、dispatch、resume、cancel 或其他
-Agent Session 控制。每条 Channel execution、Pet session binding 与 Review 通知都有
-“View session” 入口（#923）：按记录自己的 `petId + sessionId` 打开只读阅读视图，首帧是
+Agent Session 控制。成员列表里的 Pet 和 Pet 发的消息都有 “View session” 入口（#923）：
+按 `GET /channels/sessions` 给出的 `petId + sessionId` 打开只读阅读视图，首帧是
 Host 权威 snapshot，之后只收该 session 的事件；打开、关闭、重连都不切换 active session。
 唯一写操作是回答该 session **当前** review（服务端 view/options、`defer/immediate`
 批量语义），提交后等待同一 requestId 的 `run.started` 或 closed/stale 错误；结果不明时
-重读 snapshot，不自动重发。断线期间保留已读内容、禁用审批。Channel Review 通知本身仍只是
-历史记录。
+重读 snapshot，不自动重发。断线期间保留已读内容、禁用审批。
 Agent Session HTTP 工具是独立操作入口，见 [API](../../reference/api/studio.md#host-agent-session-http)。
 
 ## 验证与迁移

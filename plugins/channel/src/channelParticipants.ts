@@ -1,34 +1,31 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import type { Nodes } from 'mdast';
 import { z } from 'zod';
+import type { ChannelMemberKind, ChannelMention } from './channelStore';
 
+/** A current Channel member as messages address it. */
 export type ChannelParticipant = {
-  participantId: string; kind: 'human' | 'pet' | 'bot'; id: string; label: string;
+  participantId: string; kind: ChannelMemberKind; id: string; label: string;
 };
 export const channelMentionSchema = z.object({
-  participantId: z.string().trim().min(1).max(1024).optional(),
-  // Read old records and explicit callers without introducing another protocol.
-  petId: z.string().trim().min(1).max(256).optional(),
+  participantId: z.string().trim().min(1).max(1024),
   label: z.string().max(500).optional(),
-}).strict().refine(value => Boolean(value.participantId) !== Boolean(value.petId), 'A mention needs one unique identity.');
-export type ChannelMention = z.infer<typeof channelMentionSchema>;
+}).strict();
 
-export function channelParticipantId(kind: ChannelParticipant['kind'], id: string): string {
+export function channelParticipantId(kind: ChannelMemberKind, id: string): string {
   // encodeURIComponent leaves Markdown delimiters such as parentheses intact.
   // Encode them too so every registered identity is safe in a direct link.
   const encoded = encodeURIComponent(id).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   return `${kind}:${encoded}`;
 }
-export function channelMentionId(mention: ChannelMention): string {
-  return mention.participantId ?? channelParticipantId('pet', mention.petId!);
-}
 
 /** Direct Markdown links carry identity; labels never select a destination.
- * Quotes and code are examples, not addressed requests. This same parser is
- * used for operator messages and Host-authenticated Pet replies.
+ * Quotes and code are examples, not addressed requests. Every member's
+ * message, a human's or a Pet's, is parsed the same way against the
+ * Channel's current members.
  */
 export function parseChannelMentions(body: string, explicit: ChannelMention[], participants: ChannelParticipant[]): ChannelMention[] {
-  const candidates = explicit.map(channelMentionId);
+  const candidates = explicit.map(mention => mention.participantId);
   const quotes = [...body.matchAll(/"[^"\n]*"|“[^”]*”|‘(?:[^’]|(?<=[\p{L}\p{N}])’(?=[\p{L}\p{N}]))*’|(?<![\p{L}\p{N}])'(?:[^'\n]|(?<=[\p{L}\p{N}])'(?=[\p{L}\p{N}]))*'(?![\p{L}\p{N}])/gu)]
     .map(match => [match.index, match.index + match[0].length] as const);
   function visit(node: Nodes): void {

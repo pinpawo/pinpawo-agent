@@ -3,13 +3,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
   AgentMessageEntry,
+  AgentMessageToolCall,
   AgentOperationEntry,
   AgentServerMessage,
   AgentSession,
   AgentSessionSnapshot,
   HumanReviewPendingInterruptProjection,
 } from '@pinpawo/agent-session';
-import { ChannelCopy, ChannelToolCalls } from './ChannelConversation';
+import { ChannelCopy } from './ChannelConversation';
 import { channelPetIdentity, type ChannelPet } from './channelData';
 import {
   applyPetSessionMessage,
@@ -17,6 +18,8 @@ import {
   currentPetSessionReview,
   observePetSession,
   petSessionQuery,
+  petSessionToolCallDetail,
+  petSessionToolCallTitle,
   readPetSessionReviewOutcome,
   readPetSessionSnapshot,
   type PetSessionReviewBody,
@@ -50,13 +53,32 @@ function roleLabel(entry: AgentMessageEntry, petName: string): string {
   return 'System';
 }
 
+const TOOL_CALL_STATUS: Record<AgentMessageToolCall['status'], string> = {
+  running: 'Running', completed: 'Done', failed: 'Failed', interrupted: 'Interrupted',
+};
+
+/** Each call the Pet made, rendered from its own structure. */
+function SessionToolCalls({ calls }: { calls: AgentMessageToolCall[] }) {
+  return <ul className="channel-tool-calls" aria-label="Tool calls">{calls.map(call => {
+    const detail = petSessionToolCallDetail(call);
+    const head = <><span className="channel-tool-call-title">{petSessionToolCallTitle(call)}</span>
+      <span className={'channel-tool-call-state ' + call.status}>{TOOL_CALL_STATUS[call.status]}</span></>;
+    return <li key={call.id} className="channel-tool-call" data-tool={call.name}>
+      {detail.markdown || detail.json ? <details><summary>{head}</summary>
+        {detail.markdown ? <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.markdown}</ReactMarkdown></div>
+          : <pre><code>{detail.json}</code></pre>}
+      </details> : <div className="channel-tool-call-head">{head}</div>}
+    </li>;
+  })}</ul>;
+}
+
 function SessionMessage({ entry, petName }: { entry: AgentMessageEntry; petName: string }) {
   return <article className={'pet-session-entry message ' + entry.role} data-entry-id={entry.id}>
     <div className="pet-session-entry-head"><strong>{roleLabel(entry, petName)}</strong>
       {entry.status === 'streaming' && <span className="pet-session-streaming">Streaming…</span>}
       {entry.createdAt && <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>}</div>
     {entry.text.trim() && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown></div>}
-    {entry.toolCalls?.length ? <ChannelToolCalls calls={entry.toolCalls} /> : null}
+    {entry.toolCalls?.length ? <SessionToolCalls calls={entry.toolCalls} /> : null}
     {entry.resultReferences?.map(reference => <details className="pet-session-reference" key={reference.id}>
       <summary>Result · {reference.title}</summary>
       <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{reference.text}</ReactMarkdown></div>
@@ -300,7 +322,6 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
         <p id="pet-session-description">Read-only. Opening or closing this view does not change the Pet's active session.</p>
         <dl className="pet-session-identity">
           <dt>Session</dt><dd><ChannelCopy label="viewed session ID" value={target.sessionId} /></dd>
-          {target.executionId && <><dt>Execution</dt><dd><ChannelCopy label="viewed execution ID" value={target.executionId} /></dd></>}
         </dl>
       </div>
       <div className="pet-session-head-actions">

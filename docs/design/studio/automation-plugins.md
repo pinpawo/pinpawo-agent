@@ -28,23 +28,24 @@ event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自�
 
 ```text
 Scheduler SQLite -> due claim -> context.dispatch()
-Scheduler SQLite -> due claim (channelId) -> Channel `inputs` hook -> Channel delivery
+Scheduler SQLite -> due claim (channelId) -> Channel `inputs.run()` -> Pet's Channel session
 event source -> Trigger binding condition -> context.dispatch()
-event source -> Trigger binding condition (channelId) -> Channel `inputs` hook -> Channel delivery
+event source -> Trigger binding condition (channelId) -> Channel `inputs.run()` -> Pet's Channel session
 
 Scheduler/Trigger -X-> Agent / thread / checkpoint / Agent Session
 Scheduler/Trigger -X-> another Plugin database or service（Channel 的 `inputs` hook 除外）
 Studio core       -X-> Scheduler/Trigger concrete package
 ```
 
-Channel 是对话和结果的汇集处。规则配置了 `channelId` 时，Trigger 不再自己 dispatch，而是通过
-Channel Plugin 暴露的 `inputs` hook，以自己的 bot 身份（`bot:<triggerId>`）往该 Channel 发一条
-@目标 Pet 的消息。之后的投递与操作员发言完全相同：Channel 为 `(channel, pet)` 绑定 session、
-带上 `channel` scope 派发，Pet 的回复和工具调用都记回 Channel。Channel 是软依赖：没有安装或
-没有启动 Channel Plugin 时，这类 delivery 记为 failed，并不会退回到无 session 的 dispatch。
-消息只 @ 规则解析出的目标 Pet；如果模板渲染出的正文里还 @ 了其他参与者，Channel 会拒收，这次 delivery
-记为 failed，事件数据不能借正文增加收件人。没有 `channelId` 的规则保持原来的直接 dispatch。每次 retry/redeliver 都会在 Channel 里发一条
-新消息。
+Channel 是对话和结果的汇集处。schedule / trigger 是 Pet 的自发行为，本身不是 Channel 成员或发言者。
+规则配置了 `channelId` 时，Trigger 不再自己 dispatch，而是调用 Channel Plugin 暴露的 `inputs` hook：
+`run(channelId, petId, request, {kind:'trigger', id: triggerId}, {idempotencyKey})`。Channel 只校验目标 Pet
+是该 Channel 的成员，然后在 `(channel, pet)` 绑定的 session、带 `channel` scope 派发
+`{type:'channel_task', version:1, channelId, origin, body}`。指令不写入 Channel；Pet 随后的公开回复照常以
+Pet 身份成为 Channel 消息，其中的 @ 照常交接。指令不是消息，正文里的寻址链接不会投递给任何成员。
+`run()` 返回 Host 回执（invocationId、sessionId），Trigger 存在 delivery 记录的 `receipt` 里。
+Channel 是软依赖：没有安装或没有启动 Channel Plugin、或 Pet 不是成员时，这类 delivery 记为 failed，
+并不会退回到无 session 的 dispatch。没有 `channelId` 的规则保持原来的直接 dispatch，同样保存回执。
 
 两个 Plugin 都可向 HTTP Plugin 的 `routes` hook 贡献 API，但不依赖 HTTP 才能启动。
 HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 由贡献 route 的 Plugin
@@ -60,10 +61,10 @@ SQLite transaction 先把记录原子地转成 `dispatching`，再调用 `contex
 `failed`，避免无法证明安全时重复派发。
 
 schedule 可以带可选的 `channelId`。带了它的 schedule 到期后不直接 dispatch，而是和
-Trigger 一样通过 Channel 的 `inputs` hook，以 `bot:scheduler` 身份往该 Channel 发一条 @`petId`
-的消息，Pet 的执行和回复都落在 Channel 里。Channel Plugin 没有运行时，这条 schedule 标记
-`failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变；已有数据库启动时自动补上
-`channel_id` 列，旧记录视为没有 Channel。Scheduler 等 Studio core 发布 `plugins.activated`（所有 Plugin 启动完成）后才开始处理到期
+Trigger 一样调用 Channel 的 `inputs.run()`（origin `{kind:'scheduler', id: scheduleId}`），Pet 在该 Channel 的
+session 里执行，它的公开回复落在 Channel 里。Channel Plugin 没有运行或 Pet 不是成员时，这条 schedule 标记
+`failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变。两种情况都把 Host 回执保存为 schedule 的
+`receipt`。已有数据库启动时自动补上 `channel_id` 与回执列，旧记录视为没有 Channel、没有回执。Scheduler 等 Studio core 发布 `plugins.activated`（所有 Plugin 启动完成）后才开始处理到期
 schedule，所以停机期间到期的 channel-bound schedule 不会因为 Channel Plugin 启动得比它晚而失败。
 
 管理 API：

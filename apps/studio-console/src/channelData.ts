@@ -1,80 +1,49 @@
-export type ChannelGoal = {
-  kind: 'revision'; channelId: string; sequence: number; title: string;
-  goal: string; scope: string; reason: string; occurredAt: string;
-  author: { kind: string; id: string }; references: ArtifactReference[];
+export type ChannelMemberKind = 'human' | 'pet';
+export type ChannelAuthor = { kind: string; id: string };
+export type ChannelRow = {
+  channelId: string; title: string; description?: string;
+  createdBy: ChannelAuthor; createdAt: string; updatedAt: string;
 };
 type ArtifactReference = { uri: string; label?: string; version?: string };
 export type ChannelMessage = {
-  kind: 'message'; channelId: string; sequence: number; messageId: string; body: string;
-  author: { kind: string; id: string }; occurredAt: string; revision: number; replyTo?: string;
-  source?: { petId: string; sessionId: string; invocationId: string };
-  artifacts: ArtifactReference[]; mentions: { participantId?: string; petId?: string; label?: string }[];
-  /** Tools the Pet called in this message, exactly as it called them. */
-  toolCalls?: ChannelToolCall[];
+  sequence: number; messageId: string; channelId: string; author: ChannelAuthor; occurredAt: string;
+  externalRef?: string; body: string; replyTo?: string;
+  mentions: { participantId: string; label?: string }[]; artifacts: ArtifactReference[];
 };
-export type ChannelToolCall = {
-  id: string; name: string; args: Record<string, unknown>;
-  status: 'running' | 'completed' | 'failed' | 'interrupted';
-};
-
-/** A call as one line: what it was asked to do, else the tool's name. */
-export function channelToolCallTitle(call: Pick<ChannelToolCall, 'name' | 'args'>): string {
-  const subject = call.name === 'delegate_capability' ? call.args.briefing
-    : call.name === 'plan_request' ? call.args.goal : undefined;
-  const line = typeof subject === 'string' ? subject.split('\n').find(part => part.trim())?.trim() : undefined;
-  return line || call.name;
-}
-
-/** The detail a call carries: a delegation's briefing as written, otherwise its arguments. */
-export function channelToolCallDetail(call: Pick<ChannelToolCall, 'name' | 'args'>): { markdown?: string; json?: string } {
-  if (call.name === 'delegate_capability' && typeof call.args.briefing === 'string') return { markdown: call.args.briefing };
-  return Object.keys(call.args).length ? { json: JSON.stringify(call.args, null, 2) } : {};
-}
-
-/** What a message says in one line, for quotes: its text, else what it called. */
-export function channelMessageSummary(message: Pick<ChannelMessage, 'body' | 'toolCalls'>): string {
-  return message.body.trim() ? channelQuote(message.body) : channelQuote((message.toolCalls ?? []).map(channelToolCallTitle).join(' · '));
-}
-export type ChannelEntry = ChannelGoal | ChannelMessage;
-export type ChannelExecution = {
-  sequence: number; executionId: string; channelId: string; petId: string; sessionId: string;
-  messageId?: string; invocationId?: string;
-  state: 'admitting' | 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
-  occurredAt: string; error?: string; deliveryError?: string; observationLost: boolean;
-};
+/** A current member, as messages address it. */
+export type ChannelMember = { participantId: string; kind: ChannelMemberKind | string; id: string; label: string; joinedAt?: string };
 export type ChannelContext = {
-  channel: ChannelGoal;
-  sessions: { petId: string; sessionId: string; registered: boolean }[];
-  history: { entries: ChannelEntry[]; nextAfter: number; hasMore: boolean };
-  participants?: ChannelParticipant[];
-  viewerParticipantId?: string;
+  channel: ChannelRow; members: ChannelMember[]; messages: ChannelMessage[];
+  nextAfter: number; hasMore: boolean; viewerParticipantId?: string;
 };
-export type ChannelParticipant = { participantId: string; kind: string; id: string; label: string };
+/** The session a Pet uses in this Channel. */
+export type ChannelSession = { channelId: string; petId: string; sessionId: string; registered: boolean };
+/** What happened to one addressed member, from a send response or a `channel.delivery` event. Not stored by the Host. */
+export type ChannelDelivery = {
+  channelId: string; messageId?: string; participantId?: string;
+  state: 'delivered' | 'accepted' | 'failed'; invocationId?: string; sessionId?: string; error?: string;
+};
 export type DispatchQueueEntry = { dispatchId: string; enqueuedAt: string; sessionId?: string; scope?: { namespace: string; id: string } };
 export type DispatchQueue = {
   petId: string; state: 'open' | 'busy' | 'waiting' | 'blocked'; activeOperation: 'conversation' | 'dispatch' | null;
   queuedConversations: number; queuedDispatches: number; entries?: DispatchQueueEntry[]; activeDispatch?: DispatchQueueEntry;
 };
+export type ChannelPet = { petId: string; name: string };
 
-/** Reply preselects a registered author; labels and removed identities never route. */
-export function channelReplyRecipientId(author: ChannelMessage['author'] | undefined, participants: ChannelParticipant[] = []): string {
-  return participants.find(item => item.kind === author?.kind && item.id === author?.id)?.participantId ?? '';
-}
-
-export function channelAuthorParticipantId(author: ChannelMessage['author'], participants: ChannelParticipant[] = []): string {
-  const registered = participants.find(item => item.kind === author.kind && item.id === author.id);
-  if (registered) return registered.participantId;
+/** Same encoding as the Channel Plugin, so every identity is safe in a direct Markdown link. */
+export function channelParticipantId(author: ChannelAuthor): string {
   const encoded = encodeURIComponent(author.id).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   return `${author.kind}:${encoded}`;
 }
 
-export function channelMentionLabel(mention: ChannelMessage['mentions'][number], participants: ChannelParticipant[], pets: ChannelPet[], viewerParticipantId?: string): string {
-  const id = mention.participantId ?? channelAuthorParticipantId({ kind: 'pet', id: mention.petId ?? '' }, participants);
-  if (id === viewerParticipantId) return 'Me';
-  const participant = participants.find(item => item.participantId === id);
-  if (participant) return participant.label;
-  if (mention.petId) return channelPetIdentity(mention.petId, pets).name;
-  return mention.label ?? id;
+/** Reply preselects the author while it is a current member; former members never route. */
+export function channelReplyRecipientId(author: ChannelAuthor | undefined, members: ChannelMember[] = []): string {
+  return members.find(item => item.kind === author?.kind && item.id === author?.id)?.participantId ?? '';
+}
+
+export function channelMentionLabel(mention: ChannelMessage['mentions'][number], members: ChannelMember[], viewerParticipantId?: string): string {
+  if (mention.participantId === viewerParticipantId) return 'Me';
+  return members.find(item => item.participantId === mention.participantId)?.label ?? mention.label ?? mention.participantId;
 }
 
 /** Composer serializes an explicit identity. Channel owns parsing and validation. */
@@ -84,13 +53,6 @@ export function channelMessageInput(channelId: string, participantId: string, bo
   return { channelId, body: body.trim(), ...(participantId ? { mentions: [{ participantId }] } : {}),
     ...(reply ? { replyTo: reply.messageId } : {}) };
 }
-export type ChannelNotice = {
-  sequence: number; occurredAt: string;
-  source: { petId: string; sessionId: string; invocationId: string };
-  pendingInterrupt: { interruptId?: string; payload: { interactions: { view: { kind: string; body?: string; title?: string } }[] } };
-};
-
-export type ChannelPet = { petId: string; name: string };
 
 /** Names are presentation only; stable Pet IDs remain the routing identity. */
 export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKnown = true) {
@@ -100,31 +62,30 @@ export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKn
   return { name, removed: registryKnown && !pet, optionLabel: duplicate ? `${name} (${petId})` : name };
 }
 
-export function channelMessageIdentity(message: ChannelMessage, pets: ChannelPet[], registryKnown = true,
-  participants: ChannelParticipant[] = [], viewerParticipantId?: string) {
-  const participantId = channelAuthorParticipantId(message.author, participants);
+/** Authors are stored as written; a former member keeps its id and is named from the registry when possible. */
+export function channelMessageIdentity(message: Pick<ChannelMessage, 'author'>, pets: ChannelPet[], registryKnown = true,
+  members: ChannelMember[] = [], viewerParticipantId?: string) {
+  const participantId = channelParticipantId(message.author);
   if (participantId === viewerParticipantId) return { name: 'Me', removed: false };
-  const participant = participants.find(item => item.participantId === participantId);
-  if (participant) return { name: participant.label, removed: false };
+  const member = members.find(item => item.participantId === participantId);
+  if (member) return { name: member.label, removed: false };
   return message.author.kind === 'pet'
     ? channelPetIdentity(message.author.id, pets, registryKnown)
-    : { name: message.author.id === 'studio-operator' ? 'Studio operator' : message.author.id, removed: false };
+    : { name: message.author.id, removed: false };
 }
 
-export function channelMessageExecution(message: ChannelMessage, executions: ChannelExecution[]) {
-  return channelMessageExecutions(message, executions)[0];
+/** The registered session to read a Pet's work in this Channel, if it has one. */
+export function channelPetSession(petId: string, sessions: ChannelSession[]): ChannelSession | undefined {
+  return sessions.find(item => item.petId === petId && item.registered);
 }
 
-export function channelMessageExecutions(message: ChannelMessage, executions: ChannelExecution[]) {
-  return executions.filter(item => item.channelId === message.channelId && (item.messageId === message.messageId
-    || (!!message.source && item.invocationId === message.source.invocationId
-      && item.petId === message.source.petId && item.sessionId === message.source.sessionId)));
+/** Pets that can still join: registered with Studio and not current members. */
+export function channelJoinablePets(pets: ChannelPet[], members: ChannelMember[]): ChannelPet[] {
+  return pets.filter(pet => !members.some(member => member.kind === 'pet' && member.id === pet.petId));
 }
 
-export function channelExecutionOutputs(execution: ChannelExecution, entries: ChannelEntry[]): ChannelMessage[] {
-  return entries.filter((item): item is ChannelMessage => item.kind === 'message' && item.channelId === execution.channelId
-    && !!item.source && !!execution.invocationId && item.source.invocationId === execution.invocationId
-    && item.source.petId === execution.petId && item.source.sessionId === execution.sessionId);
+export function channelMessageSummary(message: Pick<ChannelMessage, 'body'>): string {
+  return channelQuote(message.body);
 }
 
 export function channelDateKey(occurredAt: string): string {
@@ -132,10 +93,9 @@ export function channelDateKey(occurredAt: string): string {
   return Number.isFinite(date.getTime()) ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` : occurredAt;
 }
 
-export function channelMessagesGroup(previous: ChannelEntry | undefined, current: ChannelEntry, executions: ChannelExecution[]): boolean {
-  if (!previous || previous.kind !== 'message' || current.kind !== 'message') return false;
-  if (previous.source || current.source || previous.replyTo || current.replyTo
-    || channelMessageExecution(previous, executions) || channelMessageExecution(current, executions)) return false;
+/** Nearby messages from one author group; replies and day boundaries keep their own header. */
+export function channelMessagesGroup(previous: ChannelMessage | undefined, current: ChannelMessage): boolean {
+  if (!previous || previous.replyTo || current.replyTo) return false;
   const gap = Date.parse(current.occurredAt) - Date.parse(previous.occurredAt);
   return previous.channelId === current.channelId && previous.author.kind === current.author.kind
     && previous.author.id === current.author.id && channelDateKey(previous.occurredAt) === channelDateKey(current.occurredAt)
@@ -147,8 +107,22 @@ export function channelQuote(body: string): string {
   return text.length > 160 ? `${text.slice(0, 157)}…` : text;
 }
 
+/** The outcome of one delivery, as shown next to its message. */
+export function channelDeliveryLabel(delivery: ChannelDelivery): string {
+  if (delivery.state === 'accepted') return 'dispatch accepted';
+  return delivery.state;
+}
+
+/** Later observations of the same (message, recipient) replace earlier ones. */
+export function appendChannelDeliveries(current: ChannelDelivery[], next: ChannelDelivery[]): ChannelDelivery[] {
+  const key = (item: ChannelDelivery) => `${item.channelId}\n${item.messageId ?? ''}\n${item.participantId ?? ''}\n${item.participantId ? '' : item.error ?? ''}`;
+  const keys = new Set(next.map(key));
+  return [...current.filter(item => !keys.has(key(item))), ...next].slice(-200);
+}
+
 /** Load every ordered page; reject a broken cursor rather than hiding recent results. */
-export async function readChannelPages<T>(read: (path: string) => Promise<unknown>, path: string, key: string): Promise<T[]> {
+export async function readChannelPages<T>(read: (path: string) => Promise<unknown>, path: string, key: string,
+  onPage?: (page: Record<string, unknown>) => void): Promise<T[]> {
   const entries: T[] = [];
   let after = 0;
   for (;;) {
@@ -158,15 +132,18 @@ export async function readChannelPages<T>(read: (path: string) => Promise<unknow
       throw new Error('Invalid Channel history response.');
     }
     entries.push(...values as T[]);
+    onPage?.(page);
     if (!page.hasMore) return entries;
     if (page.nextAfter <= after || !Number.isSafeInteger(page.nextAfter)) throw new Error('Channel history cursor did not advance.');
     after = page.nextAfter;
   }
 }
 
-export function executionLabel(execution: ChannelExecution, connected: boolean): string {
-  if ((execution.observationLost || !connected) && ['admitting', 'queued', 'running', 'waiting'].includes(execution.state)) return 'status unknown';
-  if (execution.state === 'waiting') return 'review requested';
-  if (execution.state === 'completed') return 'invocation ended';
-  return execution.state;
+/** The Channel, its current members and every message, taking members from the last page read. */
+export async function readChannelContext(read: (path: string) => Promise<unknown>, channelId: string): Promise<ChannelContext> {
+  let latest: ChannelContext | undefined;
+  const messages = await readChannelPages<ChannelMessage>(read, `/channels/context?channelId=${encodeURIComponent(channelId)}`, 'messages',
+    page => { latest = page as ChannelContext; });
+  if (!latest?.channel || !Array.isArray(latest.members)) throw new Error('Invalid Channel context response.');
+  return { ...latest, messages };
 }

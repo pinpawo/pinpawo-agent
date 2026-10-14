@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { createStudio } from '@pinpawo/studio';
-import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -19,7 +19,7 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
   throw new Error('Timed out waiting for Channel loop.');
 }
 
-test('one participant protocol drives a normal Pet loop, same-session inputs and actual global queue observations', async () => {
+test('one member protocol drives a normal Pet loop, same-session inputs and actual global queue observations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-loop-'));
   const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite') });
   const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
@@ -48,8 +48,8 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
       try {
         const view = JSON.parse(await read.invoke({ limit: 200 }) as string);
         assert.equal(view.channel.channelId, invocation.scope!.id);
-        assert.equal(view.participants.length, 3);
-        assert.ok(!Object.hasOwn(view, 'queues') && !Object.hasOwn(view, 'interrupts'));
+        assert.equal(view.members.length, 3);
+        assert.ok(!Object.hasOwn(view, 'queues') && !Object.hasOwn(view, 'interrupts') && !Object.hasOwn(view, 'executions'));
         modelContexts.push({ channelId: view.channel.channelId, text, view });
         if (text === 'hold-private-input') await hold;
         if (text === 'fail' && petId === 'alpha') throw new Error('Deterministic execution failure.');
@@ -81,19 +81,20 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
   const base = `http://127.0.0.1:${http.address()!.port}`;
   const headers = { Authorization: 'Bearer channel-loop-test-only', 'Content-Type': 'application/json' };
   const get = async (path: string) => { const response = await fetch(base + path, { headers }); assert.equal(response.status, 200); return response.json() as Promise<any>; };
-  const outputs = (id: string) => channel.service.readHistory(id, { limit: 200 }).entries.filter((entry): entry is ChannelMessage => entry.kind === 'message' && Boolean(entry.source));
+  const outputs = (id: string) => channel.service.readContext(channel.operator, id, { limit: 200 }).messages.filter(message => message.author.kind === 'pet');
   const events: Array<{ type: string; payload?: unknown }> = [];
   const stop = studio.subscribe(event => { events.push(event); });
   try {
-    const a = channel.service.createChannel({ title: 'A', goal: 'Goal', scope: 'Scope' }, { kind: 'human', id: 'studio-operator' }).channelId;
-    const b = channel.service.createChannel({ title: 'B', goal: 'Goal', scope: 'Scope' }, { kind: 'human', id: 'studio-operator' }).channelId;
+    const a = channel.service.createChannel(channel.operator, { title: 'A', pets: ['alpha', 'beta'] }).channel.channelId;
+    const b = channel.service.createChannel(channel.operator, { title: 'B', pets: ['alpha', 'beta'] }).channel.channelId;
     assert.equal((await fetch(base + '/dispatch/queues')).status, 401);
-    assert.equal((await fetch(base + '/channels/participants')).status, 401);
-    const registry = await get('/channels/participants');
-    assert.equal(registry.participants.length, 3);
-    assert.equal(new Set(registry.participants.map((p: any) => p.participantId)).size, 3);
-    assert.equal(registry.viewerParticipantId, 'human:studio-operator');
+    assert.equal((await fetch(base + `/channels/members?channelId=${a}`)).status, 401);
+    const registry = await get(`/channels/members?channelId=${a}`);
+    assert.deepEqual(registry.members.map((member: any) => [member.participantId, member.label]),
+      [['human:studio-operator', 'studio-operator'], ['pet:alpha', 'Same name'], ['pet:beta', 'Same name']]);
+    assert.equal((await get(`/channels/context?channelId=${a}`)).viewerParticipantId, 'human:studio-operator');
     const humanResult = await channel.sendMessage(a, { body: '[@Me](participant:human:studio-operator) Human input.' });
+    assert.deepEqual(humanResult.message.mentions.map(mention => mention.participantId), ['human:studio-operator']);
     assert.deepEqual(humanResult.deliveries.map(delivery => delivery.state), ['delivered']);
     assert.equal(calls.length, 0);
     await channel.sendMessage(a, { body: '> [@Same name](participant:pet:alpha) quoted\n\n`[@Same name](participant:pet:beta)`\n\nThey wrote \'Please don\'t forget [@Same name](participant:pet:alpha)\'\n\nThey wrote ‘Please don’t forget [@Same name](participant:pet:beta)’' });
@@ -112,10 +113,11 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     assert.ok(calls[2]!.count > calls[0]!.count, 'the Pet handoff continues the same real checkpoint');
     assert.notEqual(calls[0]!.sessionId, calls[1]!.sessionId);
     assert.deepEqual(outputs(a).map(message => message.mentions[0]?.participantId), ['pet:beta', 'pet:alpha', 'human:studio-operator']);
-    const replay = events.find(event => event.type === 'dispatch.completed')!;
+    assert.deepEqual(outputs(a).map(message => message.author.id), ['alpha', 'beta', 'alpha']);
+    const replay = events.find(event => event.type === 'dispatch.message')!;
     studio.notify({ source: 'resident-pet', type: replay.type, occurredAt: new Date().toISOString(), payload: replay.payload });
     await new Promise(resolve => setTimeout(resolve, 30));
-    assert.equal(calls.length, 3, 'duplicate observation uses dispatch idempotency, not a Channel execution queue');
+    assert.equal(calls.length, 3, 'a replayed public reply is the same message and hands off once');
     assert.equal(outputs(a).length, 3);
     await channel.sendMessage(a, { body: 'human-follow-up', mentions: [{ participantId: 'pet:alpha' }] });
     await waitFor(() => outputs(a).length === 4);
@@ -131,7 +133,7 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     assert.deepEqual(new Set(queues.map((queue: any) => queue.petId)), new Set(['alpha', 'beta']));
     assert.equal(alpha.activeDispatch.scope.id, a);
     assert.equal(alpha.entries[0].scope.id, b);
-    assert.equal(alpha.entries[0].sessionId, channel.service.getBinding(b, 'alpha')!.sessionId);
+    assert.equal(alpha.entries[0].sessionId, channel.service.getSession(b, 'alpha')!.sessionId);
     assert.notEqual(alpha.entries[0].sessionId, calls[0]!.sessionId);
     assert.ok(!JSON.stringify(queues).includes('hold-private-input'), 'global observation exposes no request text');
     const beforeReads = calls.length;
@@ -143,7 +145,8 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     assert.ok(!JSON.stringify(modelContexts.find(item => item.channelId === b)!.view).includes('hold-private-input'));
     await channel.sendMessage(a, { body: 'follow up', replyTo: outputs(a)[0]!.messageId, mentions: [{ participantId: 'pet:beta' }] });
     await waitFor(() => outputs(a).length === 6);
-    assert.equal(outputs(a).at(-1)!.source!.sessionId, calls[1]!.sessionId, 'reference to alpha does not borrow its session for beta');
+    assert.equal(outputs(a).at(-1)!.author.id, 'beta');
+    assert.equal(calls.at(-1)!.sessionId, calls[1]!.sessionId, 'reference to alpha does not borrow its session for beta');
     assert.deepEqual(calls.at(-1)!.input.replyTo, {
       messageId: outputs(a)[0]!.messageId, author: { participantId: 'pet:alpha', kind: 'pet' }, body: firstReply,
     });
@@ -154,32 +157,37 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     assert.deepEqual(calls.at(-1)!.input.author, { participantId: 'human:studio-operator', kind: 'human' });
     assert.notEqual(calls.at(-1)!.input.messageId, 'forged');
     assert.equal(calls.at(-1)!.input.body, spoof);
+    // A failed run is the Pet's process: it is observable on the global bus, and the Channel stays as it was.
+    const failedRun = (invocationId?: string) => events.find(event => event.type === 'dispatch.failed' && (event.payload as any).invocationId === invocationId);
+    const beforeFailure = outputs(a).length;
     const failure = await channel.sendMessage(a, { body: 'fail', mentions: [{ participantId: 'pet:alpha' }] });
-    await waitFor(() => channel.service.readExecutions(a).executions.some(execution => execution.messageId === failure.message.messageId && execution.state === 'failed'));
-    assert.equal(channel.service.readExecutions(a).executions.find(execution => execution.messageId === failure.message.messageId)!.error, 'Deterministic execution failure.');
+    await waitFor(() => Boolean(failedRun(failure.deliveries[0]!.invocationId)));
+    assert.deepEqual((failedRun(failure.deliveries[0]!.invocationId)!.payload as any).sessionId, channel.service.getSession(a, 'alpha')!.sessionId);
     const multi = await channel.sendMessage(a, { body: 'fail', mentions: [{ participantId: 'pet:alpha' }, { participantId: 'pet:beta' }] });
-    await waitFor(() => {
-      const executions = channel.service.readExecutions(a).executions.filter(execution => execution.messageId === multi.message.messageId);
-      return executions.length === 2 && executions.some(execution => execution.petId === 'alpha' && execution.state === 'failed')
-        && executions.some(execution => execution.petId === 'beta' && execution.state === 'completed');
-    });
-    for (const [body, targets] of [
-      ['start-direct-human', ['alpha', 'beta']], ['start-self-handoff', ['alpha', 'alpha']],
+    await waitFor(() => Boolean(failedRun(multi.deliveries[0]!.invocationId)) && outputs(a).length === beforeFailure + 1);
+    assert.deepEqual([outputs(a).at(-1)!.author.id, outputs(a).at(-1)!.body], ['beta', 'Public result.']);
+    for (const [body, targets, last] of [
+      ['start-direct-human', ['alpha', 'beta'], 'human:studio-operator'], ['start-self-handoff', ['alpha', 'alpha'], 'human:studio-operator'],
     ] as const) {
       const beforeOutputs: number = outputs(a).length;
       const beforeCalls: number = calls.length;
       await channel.sendMessage(a, { body, mentions: [{ participantId: 'pet:alpha' }] });
-      await waitFor(() => outputs(a).length === beforeOutputs + 2);
-      assert.deepEqual(calls.slice(beforeCalls).map(call => call.petId), targets);
-      assert.equal(outputs(a).at(-1)!.mentions[0]?.participantId, 'human:studio-operator');
+      await waitFor(() => outputs(a).length === beforeOutputs + targets.length);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.deepEqual(calls.slice(beforeCalls).map(call => call.petId), targets, 'a Pet addressing itself is dispatched like any other member');
+      assert.equal(outputs(a).at(-1)!.mentions[0]?.participantId, last);
     }
-    const invalidOutput = await channel.sendMessage(a, { body: 'unknown-output-target', mentions: [{ participantId: 'pet:alpha' }] });
-    await waitFor(() => channel.service.readExecutions(a).executions.some(execution => execution.messageId === invalidOutput.message.messageId && execution.deliveryError?.includes('Unknown Channel participant')));
+    const beforeInvalid = outputs(a).length;
+    await channel.sendMessage(a, { body: 'unknown-output-target', mentions: [{ participantId: 'pet:alpha' }] });
+    await waitFor(() => outputs(a).length === beforeInvalid + 1);
     assert.ok(outputs(a).at(-1)!.body.includes('participant:pet:missing'), 'an invalid model address does not discard the public reply');
     assert.deepEqual(outputs(a).at(-1)!.mentions, []);
-    const before = channel.service.readHistory(a).entries.length;
+    await waitFor(() => events.some(event => event.type === 'channel.delivery' && (event.payload as any).messageId === outputs(a).at(-1)!.messageId));
+    assert.match((events.find(event => event.type === 'channel.delivery' && (event.payload as any).messageId === outputs(a).at(-1)!.messageId)!.payload as any).error,
+      /Unknown Channel participant/);
+    const before = channel.service.readContext(channel.operator, a, { limit: 200 }).messages.length;
     await assert.rejects(channel.sendMessage(a, { body: '[@Same name](participant:pet:missing)' }), /Unknown/);
-    assert.equal(channel.service.readHistory(a).entries.length, before);
+    assert.equal(channel.service.readContext(channel.operator, a, { limit: 200 }).messages.length, before);
     assert.equal((await fetch(base + '/dispatch/queues', { method: 'POST', headers })).status, 405);
   } finally { release(); stop(); await Promise.all(hosts.map(host => host.close())); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });

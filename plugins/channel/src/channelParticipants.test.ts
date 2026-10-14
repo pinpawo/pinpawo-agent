@@ -10,7 +10,7 @@ const participants: ChannelParticipant[] = [
 
 test('identity-bearing mentions route independently of duplicate and changed labels, normalize targets and include humans', () => {
   const body = '[@Old name](participant:pet:two) handle this. [@Me](participant:human:owner) gets the result.';
-  const result = parseChannelMentions(body, [{ petId: 'two' }, { participantId: 'pet:one' }], participants);
+  const result = parseChannelMentions(body, [{ participantId: 'pet:two' }, { participantId: 'pet:one' }], participants);
   assert.deepEqual(result.map(item => item.participantId), ['pet:two', 'pet:one', 'human:owner']);
   assert.equal(result[0]?.label, 'Same name');
   const renamed = participants.map(item => item.id === 'two' ? { ...item, label: 'Renamed' } : item);
@@ -22,7 +22,7 @@ test('identity-bearing mentions route independently of duplicate and changed lab
     const prefix = { participantId: channelParticipantId(kind, 'a'), kind, id: 'a', label: 'Same name' };
     const serialized = `[@Same name](participant:${participant.participantId})`;
     assert.deepEqual(parseChannelMentions(serialized, [], [prefix, participant]), [{ participantId: participant.participantId, label: participant.label }]);
-    if (kind === 'pet') assert.deepEqual(parseChannelMentions('work', [{ petId: id }], [participant]), [{ participantId: participant.participantId, label: participant.label }]);
+    assert.deepEqual(parseChannelMentions('work', [{ participantId: participant.participantId }], [participant]), [{ participantId: participant.participantId, label: participant.label }]);
   }
 });
 

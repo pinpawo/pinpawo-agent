@@ -12,12 +12,13 @@ import {
   applyPetSessionMessage,
   choosePetSessionReviewOption,
   observePetSession,
+  petSessionToolCallDetail,
+  petSessionToolCallTitle,
   readPetSessionReviewOutcome,
 } from '../src/petSession';
 import { PetSessionReview, PetSessionTranscript, petSessionRunLabel } from '../src/PetSessionView';
-import { ChannelExecutionHistory } from '../src/ChannelPanel';
 
-const target = { petId: 'worker', sessionId: 'worker:0000000b', executionId: 'e-1' };
+const target = { petId: 'worker', sessionId: 'worker:0000000b' };
 
 const review: HumanReviewPendingInterruptProjection = {
   interruptId: 'interrupt-1',
@@ -162,9 +163,16 @@ test('the current review shows the server view and options, disabled while not l
   assert.match(offline, /only while the session is observed live/);
 });
 
-test('each execution keeps an entry to its own session', () => {
-  const execution = { sequence: 1, executionId: 'e-1', channelId: 'a', petId: 'worker', sessionId: 'worker:0000000b',
-    state: 'completed' as const, occurredAt: '2026-10-04T00:00:00Z', observationLost: false };
-  const html = renderToStaticMarkup(<ChannelExecutionHistory executions={[execution]} connected onViewSession={() => undefined} />);
-  assert.match(html, />View session<\/button>/);
+test('the session reader renders each call the Pet made from its own structure', () => {
+  const html = renderToStaticMarkup(<PetSessionTranscript petName="Worker" session={session({ timeline: [{ id: 'm2', type: 'message', role: 'assistant', text: '', status: 'completed',
+    toolCalls: [
+      { id: 'c1', name: 'delegate_capability', args: { briefing: '\nInspect the CRM record\nThen report.' }, status: 'running' },
+      { id: 'c2', name: 'lookup', args: { q: 'x' }, status: 'failed' },
+    ] }] })} />);
+  assert.match(html, /Inspect the CRM record/); assert.match(html, /Then report\./);
+  assert.match(html, /&quot;q&quot;: &quot;x&quot;/);
+  assert.match(html, />Running</); assert.match(html, />Failed</);
+  assert.equal(petSessionToolCallTitle({ name: 'plan_request', args: { goal: 'Plan it' } }), 'Plan it');
+  assert.equal(petSessionToolCallTitle({ name: 'lookup', args: {} }), 'lookup');
+  assert.deepEqual(petSessionToolCallDetail({ name: 'lookup', args: {} }), {});
 });

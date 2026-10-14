@@ -102,7 +102,7 @@ route 默认使用 Studio Bearer；外部 webhook 一类入口可以显式选择
 贡献方在 handler 中完成领域凭证验证。内置 `/dispatch`、`/events` 与 `/pets` 是保留路径，
 贡献方不能覆盖。
 
-Channel 向名为 `http` 的 Plugin 贡献 `/channels` 的目标、消息、执行与历史 API。
+Channel 向名为 `http` 的 Plugin 贡献 `/channels` 的 Channel、成员、消息与 session 绑定 API。
 它可以在没有 HTTP Plugin 时独立运行：hook contribution 保持未挂载状态。
 Plugin 启动顺序不影响挂载；任一方停止时，Studio 托管的 hook lifecycle 移除 route。
 HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。

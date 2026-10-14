@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { buildOrchestratorRunInput, buildReviewSpec, compileAgentRegistry, createOrchestratorGraph,
   defineInstructionDocument, readPendingInterrupt, type AgentModels } from '@pinpawo/pet-agent';
 import { withScriptedDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
-import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudio } from '@pinpawo/studio';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -25,7 +25,7 @@ async function waitFor(done: () => boolean) {
 }
 
 for (const decision of ['reject', 'cancel'] as const) {
-  test(`Channel review ${decision} releases queued execute and replyTo on the same binding`, async () => {
+  test(`Channel review ${decision} releases queued messages and replyTo on the same binding`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'channel-review-stop-'));
     const runtimeConfig = buildHostRuntimeConfig(join(root, 'one'));
     const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
@@ -92,17 +92,22 @@ for (const decision of ['reject', 'cancel'] as const) {
     const studio = await createStudio({ studioId: 'review-stop', entryPetId: 'one', plugins: [channel],
       pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
     });
-    const outputs = (id: string) => channel.service.readHistory(id).entries
-      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && !!entry.source && !entry.toolCalls);
+    const outputs = (id: string) => channel.service.readContext(channel.operator, id).messages.filter(message => message.author.kind === 'pet');
+    const events: Array<{ type: string; payload?: any }> = [];
+    studio.subscribe(event => { events.push(event); });
     try {
-      const id = channel.service.createChannel({ title: 'Goal', goal: 'Inspect.', scope: 'Round' }, { kind: 'human', id: 'owner' }).channelId;
-      await channel.execute(id, { petId: 'one', body: 'Which destination?' });
+      const id = channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] }).channel.channelId;
+      const ask = (body: string, replyTo?: string) => channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] });
+      await ask('Which destination?');
       await waitFor(() => outputs(id).length === 1);
       const question = outputs(id)[0]!;
-      const { binding } = await channel.execute(id, { petId: 'one', body: 'Inspect and report.' });
-      await waitFor(() => channel.service.readInterruptNotifications(id).notifications.length === 1);
-      await channel.execute(id, { petId: 'one', body: 'Continue with different constraints.' });
-      await channel.execute(id, { petId: 'one', replyTo: question.messageId, body: 'Use staging.' });
+      const { deliveries: [waiting] } = await ask('Inspect and report.');
+      const binding = channel.service.getSession(id, 'one')!;
+      assert.equal(waiting!.sessionId, binding.sessionId);
+      await waitFor(() => events.some(event => event.type === 'dispatch.waiting' && event.payload.invocationId === waiting!.invocationId));
+      assert.equal(outputs(id).length, 1, 'a waiting review is not a Channel message');
+      await ask('Continue with different constraints.');
+      await ask('Use staging.', question.messageId);
       await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedDispatches === 2);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 1, 0, 0]);
       await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });
@@ -116,15 +121,14 @@ for (const decision of ['reject', 'cancel'] as const) {
       });
       await waitFor(() => outputs(id).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [4, 3, 0, 0]);
-      assert.equal(channel.service.getBinding(id, 'one')?.sessionId, binding.sessionId);
+      assert.equal(channel.service.getSession(id, 'one')?.sessionId, binding.sessionId);
       // The declined dispatch reports its own ending to the Channel before queued work runs.
-      const notice = channel.service.readInterruptNotifications(id).notifications[0]!;
-      assert.equal(outputs(id)[1]!.source?.invocationId, notice.source.invocationId);
-      assert.equal(channel.service.readExecutions(id).executions
-        .find(execution => execution.invocationId === notice.source.invocationId)?.state, 'completed');
+      const replyOf = (externalRef?: string) => events.find(event => event.type === 'dispatch.message' && event.payload.message.messageId === externalRef)?.payload;
+      assert.equal(replyOf(outputs(id)[1]!.externalRef)?.invocationId, waiting!.invocationId);
+      assert.equal(replyOf(outputs(id)[1]!.externalRef)?.sessionId, binding.sessionId);
+      assert.ok(events.some(event => event.type === 'dispatch.completed' && event.payload.invocationId === waiting!.invocationId));
       assert.ok(outputs(id)[2]!.body.includes('Continue with different constraints.'));
       assert.ok(outputs(id)[3]!.body.includes('Use staging.'));
-      assert.equal(channel.service.readInterruptNotifications(id).notifications.length, 1);
       const completed = await host.interaction.snapshot();
       if (completed.type !== 'session.snapshot.result') throw Error('snapshot');
       assert.equal(completed.snapshot.session.pendingInterrupt, null);

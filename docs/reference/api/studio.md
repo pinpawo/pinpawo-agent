@@ -92,27 +92,33 @@ only; a reconnect rebuilds from the checkpoint snapshot.
 
 ## Channel messages and addressing
 
-Channel contributes these routes to the HTTP Plugin under Studio Bearer:
+Channel contributes these routes to the HTTP Plugin under Studio Bearer. Until
+Studio carries per-client identities, every request acts as the configured
+operator member (`human:<operatorId>`, default `studio-operator`). A request on a
+Channel the actor is not a current member of is `403`; an unknown Channel is `404`.
 
 | Route | Input / result |
 |---|---|
-| `GET /channels` | Paginated current goals. |
-| `POST /channels` | `title`, `goal`, `scope`, optional references. |
-| `POST /channels/revisions` | `channelId`, goal fields, `expectedRevision`, `reason`, optional `sourceMessageId`. |
-| `GET /channels/participants` | Registry plus viewerParticipantId. |
-| `GET /channels/context?channelId=...` | Current revision, bindings, paginated history and participants. |
+| `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. |
+| `POST /channels` | `title`, optional `description`, required `pets: [...]`; the creator and those Pets are the initial members. `201 { channel, members }`. |
+| `POST /channels/update` | `channelId`, optional `title`, optional `description` (`null` clears it). |
+| `GET /channels/context?channelId=...` | Channel, current members, a page of messages, `viewerParticipantId`. |
+| `GET /channels/members?channelId=...` | Current members. |
+| `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. |
+| `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. |
+| `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
-| `POST /channels/execute` | Legacy action with an explicit `petId` or `mentions` (`replyTo` only quotes); admission receipt and binding. |
-| `GET /channels/executions?channelId=...` | Per-target lifecycle / failure observations, not queue state. |
-| `GET /channels/interrupts?channelId=...` | Read-only historical PendingInterruptProjection notifications. |
 
 Pagination uses `after` / `limit` and returns `nextAfter` / `hasMore`; schemas and
 limits are defined by [ChannelService](../../../plugins/channel/src/channelService.ts).
 `mentions: [{participantId}]` and direct Markdown `[@label](participant:pet:reviewer)`
-share one parser; request-body author, source and scope claims are rejected.
-Addressing, default Reply, source envelopes, fixed sessions, publication and
-reliability limits are specified once in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
-Delivery acceptance is not execution completion or goal acceptance.
+share one parser and address only current members; request-body author, source and
+scope claims are rejected. Deliveries are not stored: the response carries them and
+Channel publishes each as a global `channel.delivery` event. A Pet's final reply
+without tool calls in its Channel session is saved as its message and delivered the
+same way. The model is specified in [Channel model](../../design/studio/channel-model.md);
+addressing syntax and fixed sessions in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
+Delivery acceptance is not execution completion.
 
 ## Host lifecycle
 

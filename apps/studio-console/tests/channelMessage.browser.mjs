@@ -12,17 +12,18 @@ const root = resolve(app, '../..');
 const screenshots = process.env.CHANNEL_SCREENSHOTS ?? '/tmp/channel-message-fullscreen-screenshots';
 const port = process.env.CHANNEL_MESSAGE_TEST_PORT ?? '5208';
 const date = '2026-10-06T00:00:00Z';
-const channel = { kind: 'revision', channelId: 'fixture', sequence: 1, title: 'Message reading fixture', goal: 'Inspect public Markdown', scope: 'Frontend only', reason: 'created', occurredAt: date, author: { kind: 'human', id: 'owner' }, references: [] };
-const participants = [{ participantId: 'pet:analyst', kind: 'pet', id: 'analyst', label: 'Analyst' }];
+const channel = { channelId: 'fixture', title: 'Message reading fixture', description: 'Inspect public Markdown', createdBy: { kind: 'human', id: 'owner' }, createdAt: date, updatedAt: date };
+const members = [{ participantId: 'human:owner', kind: 'human', id: 'owner', label: 'owner', joinedAt: date },
+  { participantId: 'pet:analyst', kind: 'pet', id: 'analyst', label: 'Analyst', joinedAt: date }];
 const originalBody = '# Public evidence\n\n[Analyst](participant:pet:analyst) · 中文🙂\n\n' +
   '| Check | Result |\n| --- | --- |\n| Reader | Passed |\n\n```ts\nconst wide = "' + 'evidence'.repeat(120) + '";\n```\n\n' +
   Array.from({ length: 70 }, (_, i) => 'Reading paragraph ' + i + '. ' + 'Public evidence remains read-only. '.repeat(4)).join('\n\n') +
   '\n\n[Unsafe](javascript:alert(1))\n\n<script>window.bad = true</script>';
-const makeMessage = (id, sequence, body) => ({ kind: 'message', channelId: channel.channelId, messageId: id, sequence, body, revision: 1,
+const makeMessage = (id, sequence, body) => ({ channelId: channel.channelId, messageId: id, sequence, body,
   author: { kind: 'pet', id: 'analyst' }, occurredAt: date, mentions: [], artifacts: [] });
-const entries = Array.from({ length: 20 }, (_, i) => makeMessage('older-' + i, i + 2, 'Older evidence ' + i + '. '.repeat(40)));
-entries.push(makeMessage('long', 22, originalBody));
-for (let i = 0; i < 20; i++) entries.push(makeMessage('newer-' + i, 23 + i, 'Newer evidence ' + i + '. '.repeat(40)));
+const messages = Array.from({ length: 20 }, (_, i) => makeMessage('older-' + i, i + 2, 'Older evidence ' + i + '. '.repeat(40)));
+messages.push(makeMessage('long', 22, originalBody));
+for (let i = 0; i < 20; i++) messages.push(makeMessage('newer-' + i, 23 + i, 'Newer evidence ' + i + '. '.repeat(40)));
 const streams = new Set();
 const writes = [];
 const requests = [];
@@ -41,8 +42,8 @@ const server = createServer((request, response) => {
     '/pets': { pets: [{ petId: 'analyst', name: 'Analyst' }] }, '/scheduler': { schedules: [] }, '/notices': { notices: [] },
     '/triggers': { triggers: [], deliveries: [] }, '/knowledge': { documents: [] }, '/scheduler/events': { events: [] }, '/triggers/events': { events: [] },
     '/channels': { channels: [channel], nextAfter: 1, hasMore: false }, '/dispatch/queues': { queues: [] },
-    '/channels/context': { channel, participants, viewerParticipantId: 'human:owner', sessions: [], history: { entries, nextAfter: entries.at(-1).sequence, hasMore: false } },
-    '/channels/executions': { executions: [], nextAfter: 0, hasMore: false }, '/channels/interrupts': { notifications: [], nextAfter: 0, hasMore: false },
+    '/channels/context': { channel, members, messages, viewerParticipantId: 'human:owner', nextAfter: messages.at(-1).sequence, hasMore: false },
+    '/channels/sessions': { sessions: [] },
   };
   response.writeHead(path in values ? 200 : 404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(values[path] ?? { error: 'Unknown fixture route' }));
 });
@@ -133,9 +134,9 @@ try {
   await expand.scrollIntoViewIfNeeded();
   const beforeUpdate = await readPosition();
   await expand.click(); await dialog.waitFor();
-  entries.find(item => item.messageId === 'long').body = originalBody + '\n\nUpdated stored body.';
-  entries.push(makeMessage('incoming', 50, 'New message during full-screen reading.'));
-  for (const stream of streams) stream.write('data: ' + JSON.stringify({ type: 'channel.message', source: 'channel', occurredAt: date, payload: { channelId: channel.channelId } }) + '\n\n');
+  messages.find(item => item.messageId === 'long').body = originalBody + '\n\nUpdated stored body.';
+  messages.push(makeMessage('incoming', 50, 'New message during full-screen reading.'));
+  for (const stream of streams) stream.write('data: ' + JSON.stringify({ type: 'channel.message.created', source: 'channel', occurredAt: date, payload: messages.at(-1) }) + '\n\n');
   await page.locator('[data-message-id="incoming"]').waitFor({ state: 'attached' });
   assert.equal(await message.getByText('Updated stored body.', { exact: true }).count(), 1);
   assert.equal(await dialog.getByText('Updated stored body.', { exact: true }).count(), 0, 'open reader holds a stable snapshot');

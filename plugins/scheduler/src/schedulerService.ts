@@ -5,15 +5,19 @@ import { DatabaseSync } from 'node:sqlite';
 
 export type ScheduleStatus = 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled';
 
+/** Host's receipt for the run a schedule started; sessionId is set for a Channel run. */
+export type ScheduleReceipt = { invocationId: string; sessionId?: string };
+
 export type Schedule = {
   scheduleId: string;
   petId: string;
-  /** Deliver through this Channel instead of a bare dispatch. */
+  /** Run the Pet in this Channel instead of a bare dispatch. */
   channelId?: string;
   request: string;
   runAt: string;
   status: ScheduleStatus;
   note?: string;
+  receipt?: ScheduleReceipt;
   createdAt: string;
   updatedAt: string;
 };
@@ -40,6 +44,8 @@ type ScheduleRow = {
   run_at: string;
   status: string;
   note: string | null;
+  invocation_id: string | null;
+  session_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -81,6 +87,9 @@ function scheduleFromRow(row: ScheduleRow): Schedule {
     runAt: row.run_at,
     status: row.status as ScheduleStatus,
     ...(row.note === null ? {} : { note: row.note }),
+    ...(row.invocation_id === null ? {} : {
+      receipt: { invocationId: row.invocation_id, ...(row.session_id === null ? {} : { sessionId: row.session_id }) },
+    }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -128,6 +137,8 @@ export class SchedulerService {
         run_at TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','dispatched','failed','cancelled')),
         note TEXT,
+        invocation_id TEXT,
+        session_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -147,6 +158,10 @@ export class SchedulerService {
     const columns = this.database.prepare('PRAGMA table_info(schedules)').all() as { name: string }[];
     if (!columns.some(({ name }) => name === 'channel_id')) {
       this.database.exec('ALTER TABLE schedules ADD COLUMN channel_id TEXT;');
+    }
+    // Nor did they keep the Host's receipt.
+    if (!columns.some(({ name }) => name === 'invocation_id')) {
+      this.database.exec('ALTER TABLE schedules ADD COLUMN invocation_id TEXT; ALTER TABLE schedules ADD COLUMN session_id TEXT;');
     }
     this.initialized = true;
     for (const mutation of this.recoverInterrupted()) this.publish(mutation);
@@ -225,8 +240,8 @@ export class SchedulerService {
     return schedule;
   }
 
-  async markDispatched(scheduleId: string): Promise<Schedule> {
-    return this.transition(scheduleId, ['dispatching'], 'dispatched', 'dispatched');
+  async markDispatched(scheduleId: string, receipt?: ScheduleReceipt): Promise<Schedule> {
+    return this.transition(scheduleId, ['dispatching'], 'dispatched', 'dispatched', undefined, receipt);
   }
 
   async fail(scheduleId: string, note: string): Promise<Schedule> {
@@ -302,6 +317,7 @@ export class SchedulerService {
     status: ScheduleStatus,
     eventType: ScheduleEvent['eventType'],
     note?: string,
+    receipt?: ScheduleReceipt,
   ): Promise<Schedule> {
     this.assertReady();
     const id = nonEmpty(scheduleId, 'scheduleId');
@@ -315,9 +331,10 @@ export class SchedulerService {
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       const result = this.database.prepare(`
-        UPDATE schedules SET status = ?, note = ?, updated_at = ?
+        UPDATE schedules SET status = ?, note = ?, updated_at = ?,
+          invocation_id = COALESCE(?, invocation_id), session_id = COALESCE(?, session_id)
         WHERE schedule_id = ? AND status = ?
-      `).run(status, note ?? null, now, id, current.status);
+      `).run(status, note ?? null, now, receipt?.invocationId ?? null, receipt?.sessionId ?? null, id, current.status);
       if (result.changes !== 1) throw new Error(`Scheduler schedule "${id}" changed concurrently.`);
       event = this.insertEvent(id, eventType, status, note, now);
       this.database.exec('COMMIT;');

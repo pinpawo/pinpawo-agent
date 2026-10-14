@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudio } from '@pinpawo/studio';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -15,7 +15,7 @@ async function waitFor(done: () => boolean) {
   throw new Error('Timed out waiting for the dispatch to end.');
 }
 
-test('a call announced to the Channel is not left running when the run ends on the recursion limit', async () => {
+test('a run ending on the recursion limit lands its notice as the Pet message, never the tool call it announced', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-recursion-limit-'));
   const runtimeConfig = buildHostRuntimeConfig(join(root, 'one'));
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
@@ -45,15 +45,16 @@ test('a call announced to the Channel is not left running when the run ends on t
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
   });
   try {
-    const id = channel.service.createChannel({ title: 'Goal', goal: 'Inspect.', scope: 'Round' }, { kind: 'human', id: 'owner' }).channelId;
-    await channel.execute(id, { petId: 'one', body: 'Inspect.' });
-    const published = () => channel.service.readHistory(id).entries
-      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && !!entry.source);
-    await waitFor(() => published().some(message => !message.toolCalls));
-    assert.deepEqual(channel.service.readExecutions(id).executions.map(execution => execution.state), ['completed']);
-    assert.match(published().find(message => !message.toolCalls)!.body, /步数已达上限/);
-    // The run ended without the call's result: it stops being Running, and is not reported as a success.
-    assert.deepEqual(published().filter(message => message.toolCalls)
-      .map(message => message.toolCalls!.map(call => [call.name, call.status])), [[['plan_request', 'interrupted']]]);
+    const id = channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] }).channel.channelId;
+    const completed: string[] = [];
+    studio.subscribe(event => { if (event.type === 'dispatch.completed') completed.push((event.payload as { invocationId: string }).invocationId); });
+    const { deliveries } = await channel.sendMessage(id, { body: 'Inspect.', mentions: [{ participantId: 'pet:one' }] });
+    const published = () => channel.service.readContext(channel.operator, id).messages.filter(message => message.author.kind === 'pet');
+    await waitFor(() => published().length > 0 && completed.length > 0);
+    assert.deepEqual(completed, [deliveries[0]!.invocationId]);
+    // Only the notice is public; the announced plan_request call stays in Agent Session.
+    assert.equal(published().length, 1);
+    assert.match(published()[0]!.body, /步数已达上限/);
+    assert.deepEqual(published()[0]!.mentions, []);
   } finally { await host.close(); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });

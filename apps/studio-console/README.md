@@ -5,11 +5,25 @@ Channel is the default page, alongside Scheduler, Notice, Trigger and Knowledge.
 Enable `@pinpawo-plugin/channel`, allow the Console origin in the HTTP Plugin,
 and enter the Host URL and existing Studio Bearer token in the connection dialog.
 
-[Channel design](../../docs/design/studio/channel-addressing-and-execution.md) owns
-participant addressing, default Reply, fixed sessions, trusted input and limitations.
+[Channel model](../../docs/design/studio/channel-model.md) owns members, messages,
+deliveries and Pet sessions; [Channel addressing](../../docs/design/studio/channel-addressing-and-execution.md)
+owns the @ syntax, default Reply and session binding rules.
 [Console design](../../docs/design/studio/console.md) owns layout, connection,
 observation and keyboard behavior. Configuration and migration steps live in
 [Studio configuration](../../docs/studio/configuration.md).
+
+## Channel members
+
+A new Channel takes a title, an optional description and an explicit choice of
+Studio Pets; no Pet joins implicitly. **Members & details** lists the current
+members, adds a Pet that is not yet a member or a human by id, and removes members
+(the Console cannot remove its own member). Only current members appear in the
+@ recipient list. Delivery outcomes are shown next to a message only as observed by
+this Console; the Host does not store them.
+
+A Pet's work in a Channel is not part of the Channel. **View session** on a Pet in the
+member list, or on a Pet's message, opens that Pet's Channel session read-only, where
+its tool calls and current review are visible.
 
 ## Full-screen Channel messages
 
@@ -43,9 +57,11 @@ SQLite paths with deterministic responders. They use no real credentials, user
 state or LLM calls, and close their fixture processes on exit. Run them sequentially:
 both reserve Console port 5199 and refuse to replace an existing listener.
 
-The functional suite covers default Reply without manual recipient selection,
-changed/cleared and human recipients, same-session continuation, participant loops,
-global cross-Channel queues, duplicate submission, failure, Review, reconnect and restart.
+The functional suite covers explicit Pet selection, member add/remove, default Reply
+without manual recipient selection, changed/cleared and human recipients, same-session
+continuation, participant loops, global cross-Channel queues, duplicate submission,
+reconnect and restart. The session suite opens Pet sessions from the member list and
+from a Pet's message and answers a review there.
 The layout suite covers duplicate/removed authors, long Markdown/code,
 1440/900/390/320px, focus and drawers, quotes and ID links, reading position,
 Channel/Host switching, 401/404 responses and standalone dispatch isolation.
@@ -61,4 +77,6 @@ Studio Host or Pets. It checks desktop and 390×300/320×200 windows, keyboard f
 independent scrolling, repeated opening, updates while reading and zero writes.
 Screenshots default to `/tmp/channel-message-fullscreen-screenshots`.
 `CHANNEL_BROWSER_EXECUTABLE` optionally selects an existing Chromium executable
-with an isolated temporary profile.
+with an isolated temporary profile for every browser suite. Without built workspace
+packages, `TSX_TSCONFIG_PATH=apps/studio-console/tsconfig.browser.json` lets the Host
+fixture run from source.

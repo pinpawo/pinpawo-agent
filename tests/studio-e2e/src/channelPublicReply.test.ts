@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudio } from '@pinpawo/studio';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, loadCapabilityDirectory, loadPetDocumentFile } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -130,21 +130,15 @@ test('capability handoff reaches Channel only through the selected final root re
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),
     });
-    const id = channel.service.createChannel({ title: 'Plan', goal: 'Plan and review.', scope: 'Round' }, { kind: 'human', id: 'studio-operator' }).channelId;
-    const published = () => channel.service.readHistory(id).entries
-      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && Boolean(entry.source));
-    const outputs = () => published().filter(message => !message.toolCalls);
+    const id = channel.service.createChannel(channel.operator, { title: 'Plan', pets: ['acceptance-a', 'acceptance-b'] }).channel.channelId;
+    const outputs = () => channel.service.readContext(channel.operator, id, { limit: 200 }).messages.filter(message => message.author.kind === 'pet');
     const alphaOutputs = () => outputs().filter(message => message.author.id === 'acceptance-a');
     const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] });
     await send('Produce the plan and selected handoff.');
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
-    assert.equal(outputs().length, 0, 'internal delivery and Supervisor work are not published');
-    // The Pet's own tool calls are its conversation: they reach the Channel while it runs, in their own shape.
-    assert.deepEqual(published().map(message => [message.body, message.mentions, message.toolCalls?.map(call => [call.name, call.args, call.status])]), [
-      ['', [], [['plan_request', { goal: 'Publish the plan.' }, 'completed']]],
-      ['', [], [['delegate_capability', { briefing: 'Produce a plan with the chosen handoff.' }, 'completed']]],
-    ]);
+    // Tool-call messages (plan_request, delegate_capability) are the run's process: they stay in Agent Session.
+    assert.equal(outputs().length, 0, 'internal delivery, Supervisor work and tool calls are not published');
     assert.equal(betaCalls, 0, 'internal @ is not a dispatch');
     release();
     await waitFor(() => outputs().length === 2 && betaCalls === 1);
@@ -161,7 +155,10 @@ test('capability handoff reaches Channel only through the selected final root re
     await waitFor(() => outputs().length === 7 && betaCalls === 2);
     assert.equal(boundaryDeliveries.length, 4, 'direct Entry reply does not repeat execution');
     assert.equal(alphaOutputs().at(-1)!.body, handoff);
-    assert.equal(new Set(alphaOutputs().map(message => message.source!.sessionId)).size, 1);
+    assert.ok(alphaOutputs().every(message => message.externalRef), 'each reply is keyed by its Agent Session message');
+    assert.equal(new Set(alphaOutputs().map(message => message.externalRef)).size, alphaOutputs().length);
+    assert.deepEqual(channel.service.listSessions(channel.operator, id).map(binding => [binding.petId, binding.registered]),
+      [['acceptance-a', true], ['acceptance-b', true]]);
     assert.ok(outputs().every(message => !message.body.includes('Internal analysis only.')));
     assert.deepEqual(['entry', 'supervisor', 'capability'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 16, 4]);
     assert.equal(seenContexts.filter(context => context.petId === 'acceptance-b' && context.stage === 'entry').length, 2);

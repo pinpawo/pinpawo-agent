@@ -5,8 +5,7 @@ import type {
   AgentRuntimeEvent,
   AgentServerMessage,
   AgentSessionSnapshot,
-  AgentToolCallMessageEvent,
-  AgentToolCallSettledEvent,
+  AgentMessageCompletedEvent,
   HumanReviewResponse,
 } from '@pinpawo/agent-session';
 
@@ -62,17 +61,18 @@ export type PetDispatchLifecycleState =
   | 'completed'
   | 'interrupted'
   | 'failed'
-  /** Non-terminal: the running dispatch's conversation gained or settled a tool call. */
+  /** Non-terminal: the running dispatch's conversation completed its public reply. */
   | 'message';
 
-/** A conversation message event of the dispatch's run, as Agent Session carries it. */
-export type PetDispatchMessage =
-  | Omit<AgentToolCallMessageEvent, 'requestId'>
-  | Omit<AgentToolCallSettledEvent, 'requestId'>;
+/**
+ * The dispatch's public reply, as Agent Session carries it. Tool-call messages
+ * and their settlements are the run's process and stay in Agent Session.
+ */
+export type PetDispatchMessage = Omit<AgentMessageCompletedEvent, 'requestId'>;
 
 /** Narrow a runtime event to what dispatch observers see of the conversation. */
 export function readPetDispatchMessage(event: AgentRuntimeEvent): PetDispatchMessage | null {
-  if (event.type !== 'message.tool_calls' && event.type !== 'tool_call.settled') return null;
+  if (event.type !== 'message.completed') return null;
   const { requestId: _requestId, ...message } = event;
   return message;
 }

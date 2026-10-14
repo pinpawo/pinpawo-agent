@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
-import { TriggerService } from './triggerService';
+import { TriggerService, type TriggerDeliveryReceipt } from './triggerService';
 
 export type HttpTriggerSource = {
   kind: 'http';
@@ -433,23 +433,18 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
             },
           );
         }
-        // A channel-bound rule hands its request to the Channel, which runs the
-        // Pet in its Channel session and keeps the reply; any other rule dispatches.
-        const send = async (definition: ParsedTriggerDefinition, petId: string, request: string, deliveryId: string) => {
+        // A channel-bound rule runs the Pet in its Channel session, where the
+        // Pet's reply becomes its Channel message; any other rule dispatches.
+        // The request is the Pet's task, not a Channel message, so nothing in
+        // it addresses another member. Either way the delivery keeps the receipt.
+        const send = async (definition: ParsedTriggerDefinition, petId: string, request: string, deliveryId: string): Promise<TriggerDeliveryReceipt> => {
+          const idempotencyKey = `trigger:${deliveryId}`;
           if (definition.channelId === undefined) {
-            await pluginContext.dispatch({ petId, request, idempotencyKey: `trigger:${deliveryId}` });
-            return;
+            const { invocationId } = await pluginContext.dispatch({ petId, request, idempotencyKey });
+            return { invocationId };
           }
           if (!channelInputs) throw new Error(`Trigger "${definition.triggerId}" needs the Channel Plugin, which is not running.`);
-          // The rule's target is the only addressee; the Channel rejects a request
-          // whose body would address anyone else.
-          const { deliveries } = await channelInputs.post(definition.channelId, {
-            author: { kind: 'bot', id: definition.triggerId },
-            body: request,
-            mentions: [{ petId }],
-          });
-          const failed = deliveries.find((delivery) => delivery.state === 'failed');
-          if (failed) throw new Error(failed.error ?? `Channel did not deliver to Pet "${petId}".`);
+          return channelInputs.run(definition.channelId, petId, request, { kind: 'trigger', id: definition.triggerId }, { idempotencyKey });
         };
         const dispatchDelivery = async (
           definition: ParsedTriggerDefinition,
@@ -468,8 +463,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
           const claimed = await service.claim(definition.triggerId, idempotencyKey, { targetPetId, request });
           if (claimed.duplicate) return { duplicate: true, delivery: claimed.delivery };
           try {
-            await send(definition, targetPetId, request, claimed.delivery.deliveryId);
-            return { duplicate: false, delivery: await service.accept(claimed.delivery.deliveryId) };
+            const receipt = await send(definition, targetPetId, request, claimed.delivery.deliveryId);
+            return { duplicate: false, delivery: await service.accept(claimed.delivery.deliveryId, receipt) };
           } catch (error) {
             const delivery = await service.fail(claimed.delivery.deliveryId, asError(error).message);
             return { duplicate: false, delivery, error: asError(error) };
@@ -644,8 +639,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                         ? await service.retry(input.deliveryId)
                         : await service.redeliver(input.deliveryId);
                       try {
-                        await send(definition, targetPetId, request, delivery.deliveryId);
-                        return { kind: 'json', status: 202, body: { delivery: await service.accept(delivery.deliveryId) } };
+                        const receipt = await send(definition, targetPetId, request, delivery.deliveryId);
+                        return { kind: 'json', status: 202, body: { delivery: await service.accept(delivery.deliveryId, receipt) } };
                       } catch (error) {
                         return { kind: 'json', status: 422, body: { error: asError(error).message, delivery: await service.fail(delivery.deliveryId, asError(error).message) } };
                       }

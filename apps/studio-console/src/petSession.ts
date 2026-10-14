@@ -4,6 +4,7 @@ import {
   prepareReviewDecision,
   readHumanReviewPendingInterrupt,
   reduceSession,
+  type AgentMessageToolCall,
   type AgentServerMessage,
   type AgentSession,
   type AgentSessionSnapshot,
@@ -12,8 +13,22 @@ import {
 } from '@pinpawo/agent-session';
 import { EventStreamError, observeEventStream } from './studioEvents';
 
-/** Exactly which session a reader is looking at, and where it was opened from. */
-export type PetSessionTarget = { petId: string; sessionId: string; executionId?: string };
+/** Exactly which session a reader is looking at. */
+export type PetSessionTarget = { petId: string; sessionId: string };
+
+/** A call as one line: what it was asked to do, else the tool's name. */
+export function petSessionToolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>): string {
+  const subject = call.name === 'delegate_capability' ? call.args.briefing
+    : call.name === 'plan_request' ? call.args.goal : undefined;
+  const line = typeof subject === 'string' ? subject.split('\n').find(part => part.trim())?.trim() : undefined;
+  return line || call.name;
+}
+
+/** The detail a call carries: a delegation's briefing as written, otherwise its arguments. */
+export function petSessionToolCallDetail(call: Pick<AgentMessageToolCall, 'name' | 'args'>): { markdown?: string; json?: string } {
+  if (call.name === 'delegate_capability' && typeof call.args.briefing === 'string') return { markdown: call.args.briefing };
+  return Object.keys(call.args).length ? { json: JSON.stringify(call.args, null, 2) } : {};
+}
 
 export function petSessionQuery(target: PetSessionTarget): string {
   return `petId=${encodeURIComponent(target.petId)}&sessionId=${encodeURIComponent(target.sessionId)}`;

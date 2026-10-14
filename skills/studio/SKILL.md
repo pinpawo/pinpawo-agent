@@ -1,6 +1,6 @@
 ---
 name: studio
-description: 'Operate a running PinPawo Studio through its CLI: read Channels, address registered participants, inspect Pet progress and reviews, dispatch work, and observe execution.'
+description: 'Operate a running PinPawo Studio through its CLI: read Channels, manage and address members, inspect Pet progress and reviews, dispatch work, and observe execution.'
 ---
 
 # Studio
@@ -21,38 +21,42 @@ pinpawo-studio --studio-url http://127.0.0.1:3291 --agent-url http://127.0.0.1:3
 
 ```sh
 pinpawo-studio channels list --limit 50
+pinpawo-studio channels create --title "Release 1.0" --description "Ship it" --pet executor --pet reviewer
 pinpawo-studio channels read CHANNEL_ID --after 0 --limit 50
-pinpawo-studio channels participants
+pinpawo-studio channels members CHANNEL_ID
+pinpawo-studio channels add-member CHANNEL_ID --member pet:wiki
+pinpawo-studio channels remove-member CHANNEL_ID --member human:alice
 pinpawo-studio channels send CHANNEL_ID --file /tmp/message.md --mention PARTICIPANT_ID
-pinpawo-studio channels executions CHANNEL_ID
-pinpawo-studio channels interrupts CHANNEL_ID
+pinpawo-studio channels sessions CHANNEL_ID
 pinpawo-studio queues
 ```
 
-Read the current goal/scope and relevant history before acting. Reads return one
-page; continue with `nextAfter` while `hasMore`. Channel history includes both
-goal revisions and messages. Execution records change in place: refresh pages
-from `after=0` to observe existing executions, rather than treating their cursor
-as an incremental event stream. `observationLost` means an unfinished observation
-belongs to an earlier Host instance; `deliveryError` is distinct from execution
-failure. Check artifacts and public replies for acceptance evidence.
+A Channel is a conversation among its members (humans and Pets); it has a title
+and optional description, not a goal. Only current members can read it, speak or
+be addressed, and only listed `--pet`s join a new Channel with you. Read the
+description, members and relevant history before acting. Reads return one page;
+continue with `nextAfter` while `hasMore`. The Channel holds only members' public
+messages: a Pet's message is its final reply without tool calls; its tool calls,
+progress and reviews stay in its Agent Session, which `channels sessions` locates
+for each Pet. Check artifacts and public replies for acceptance evidence.
 
-Resolve `participantId` from the registry; labels are display names. Repeat
+Resolve `participantId` from `channels members`; labels are display names. Repeat
 `--mention` for multiple targets. `--reply-to MESSAGE_ID` supplies a reference,
 not a recipient. Plain `@label` does not address anyone; valid direct Markdown
 links such as `[@Reviewer](participant:pet:reviewer)` also address participants,
 so inspect the body even when no `--mention` is passed. Code and quoted examples
 do not address recipients. A send without valid addressing only saves a message.
-Pet targets dispatch work; human targets do not. The response includes per-target
-`deliveries`; saved/accepted does not mean execution completed. Ordinary replies
-continue the Channel's existing Pet/session binding. Do not blindly retry an
-uncertain send: independent sends create independent messages.
+Pet targets dispatch work; human targets do not. A Pet's reply that addresses a
+member is delivered the same way. The response includes per-target `deliveries`
+(not stored; also published as `channel.delivery` events); saved/accepted does not
+mean execution completed. Ordinary replies continue the Channel's existing
+Pet/session binding. Do not blindly retry an uncertain send: independent sends
+create independent messages.
 
-Channel interrupt notifications are historical, not current approval state.
 The Pet snapshot command observes its active interactive session, which may
-not be the Channel binding. Check session identity and use the original Pet
-TUI/session for a Channel review; do not switch sessions or approve a different
-review merely to unblock a queue.
+not be the Channel's session. Check session identity and use the original Pet
+TUI/session (or the Studio Console's Pet session view) for a Channel review; do
+not switch sessions or approve a different review merely to unblock a queue.
 
 ## Inspect and coordinate
 
@@ -73,7 +77,7 @@ Queue `waiting` means pending interrupt; queue `blocked` means the Host could no
 read settled session state. Preserve the user's scope; do not turn a request for
 status into new work or an approval. Generic dispatch does not publish into a
 Channel. See the
-[Channel design](../../docs/design/studio/channel-addressing-and-execution.md) for
+[Channel model](../../docs/design/studio/channel-model.md) for
 message/source semantics; keep the operational review rules below.
 
 ## Review and continue

@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { StudioDispatchQueue, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
-import { SchedulerService, type Schedule } from './schedulerService';
+import { SchedulerService, type Schedule, type ScheduleReceipt } from './schedulerService';
 
 export type CreateSchedulerPluginOptions = {
   service?: SchedulerService;
@@ -71,25 +71,18 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   let channelInputs: ChannelInputsHook | undefined;
   let polling: Promise<void> | undefined;
 
-  // A channel-bound schedule hands its request to the Channel, which runs the
-  // Pet in its Channel session and keeps the reply; any other schedule dispatches.
-  const send = async (host: StudioPluginContext, schedule: Schedule) => {
+  // A channel-bound schedule runs the Pet in its Channel session, where the
+  // Pet's reply becomes its Channel message; any other schedule dispatches.
+  // Either way the schedule keeps the Host's receipt.
+  const send = async (host: StudioPluginContext, schedule: Schedule): Promise<ScheduleReceipt> => {
+    const idempotencyKey = `schedule:${schedule.scheduleId}`;
     if (schedule.channelId === undefined) {
-      await host.dispatch({
-        petId: schedule.petId,
-        request: schedule.request,
-        idempotencyKey: `schedule:${schedule.scheduleId}`,
-      });
-      return;
+      const { invocationId } = await host.dispatch({ petId: schedule.petId, request: schedule.request, idempotencyKey });
+      return { invocationId };
     }
     if (!channelInputs) throw new Error('This schedule needs the Channel Plugin, which is not running.');
-    const { deliveries } = await channelInputs.post(schedule.channelId, {
-      author: { kind: 'bot', id: 'scheduler' },
-      body: schedule.request,
-      mentions: [{ petId: schedule.petId }],
-    });
-    const failed = deliveries.find((delivery) => delivery.state === 'failed');
-    if (failed) throw new Error(failed.error ?? `Channel did not deliver to Pet "${schedule.petId}".`);
+    return channelInputs.run(schedule.channelId, schedule.petId, schedule.request,
+      { kind: 'scheduler', id: schedule.scheduleId }, { idempotencyKey });
   };
 
   const poll = async () => {
@@ -99,8 +92,8 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         const schedule = await service.claimDue();
         if (!schedule) break;
         try {
-          await send(context, schedule);
-          await service.markDispatched(schedule.scheduleId);
+          const receipt = await send(context, schedule);
+          await service.markDispatched(schedule.scheduleId, receipt);
         } catch (error) {
           await service.fail(schedule.scheduleId, asError(error).message);
         }
@@ -156,6 +149,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
               petId: schedule.petId,
               ...(schedule.channelId === undefined ? {} : { channelId: schedule.channelId }),
               status: schedule.status,
+              ...(schedule.receipt === undefined ? {} : { receipt: schedule.receipt }),
               sequence: event.sequence,
               ...(event.note === undefined ? {} : { note: event.note }),
             },

@@ -3,29 +3,9 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
 import {
-  channelDateKey, channelExecutionOutputs, channelMessageExecutions, channelMessageIdentity, channelMentionLabel,
-  channelMessagesGroup, channelMessageSummary, channelPetIdentity, channelToolCallDetail, channelToolCallTitle, executionLabel,
-  type ChannelEntry, type ChannelExecution, type ChannelMessage, type ChannelPet, type ChannelParticipant, type ChannelToolCall,
+  channelDateKey, channelDeliveryLabel, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
+  channelPetSession, type ChannelDelivery, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession,
 } from './channelData';
-
-const TOOL_CALL_STATUS: Record<ChannelToolCall['status'], string> = {
-  running: 'Running', completed: 'Done', failed: 'Failed', interrupted: 'Interrupted',
-};
-
-/** Each call the Pet made, rendered from its own structure. */
-export function ChannelToolCalls({ calls }: { calls: ChannelToolCall[] }) {
-  return <ul className="channel-tool-calls" aria-label="Tool calls">{calls.map(call => {
-    const detail = channelToolCallDetail(call);
-    const head = <><span className="channel-tool-call-title">{channelToolCallTitle(call)}</span>
-      <span className={'channel-tool-call-state ' + call.status}>{TOOL_CALL_STATUS[call.status]}</span></>;
-    return <li key={call.id} className="channel-tool-call" data-tool={call.name}>
-      {detail.markdown || detail.json ? <details><summary>{head}</summary>
-        {detail.markdown ? <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.markdown}</ReactMarkdown></div>
-          : <pre><code>{detail.json}</code></pre>}
-      </details> : <div className="channel-tool-call-head">{head}</div>}
-    </li>;
-  })}</ul>;
-}
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
   const [result, setResult] = useState('');
@@ -39,27 +19,25 @@ export function ChannelCopy({ label, value }: { label: string; value: string }) 
   return <span className="channel-copy"><code>{value}</code><button type="button" aria-label={'Copy ' + label} onClick={() => { void copy(); }}>Copy</button><span role="status">{result}</span></span>;
 }
 
-export function ChannelTechnicalDetails({ message, execution }: { message?: ChannelMessage; execution?: ChannelExecution }) {
+export function ChannelTechnicalDetails({ message }: { message: ChannelMessage }) {
   return <details className="channel-technical"><summary>Technical details</summary><dl>
-    {message && <><dt>Message</dt><dd><ChannelCopy label="message ID" value={message.messageId} /></dd><dt>Author</dt><dd>{message.author.kind} · <code>{message.author.id}</code></dd></>}
-    {execution && <><dt>Execution</dt><dd><ChannelCopy label="execution ID" value={execution.executionId} /></dd></>}
-    {(message?.source || execution) && <><dt>Pet</dt><dd><code>{message?.source?.petId ?? execution!.petId}</code></dd>
-      <dt>Session</dt><dd><ChannelCopy label="session ID" value={message?.source?.sessionId ?? execution!.sessionId} /></dd>
-      {(message?.source?.invocationId ?? execution?.invocationId) && <><dt>Invocation</dt><dd><ChannelCopy label="invocation ID" value={(message?.source?.invocationId ?? execution?.invocationId)!} /></dd></>}</>}
+    <dt>Message</dt><dd><ChannelCopy label="message ID" value={message.messageId} /></dd>
+    <dt>Author</dt><dd>{message.author.kind} · <code>{message.author.id}</code></dd>
+    {message.externalRef && <><dt>Source</dt><dd><ChannelCopy label="source message ID" value={message.externalRef} /></dd></>}
   </dl></details>;
 }
 
-type MessageMarkdownProps = { body: string; participants: ChannelParticipant[]; pets: ChannelPet[]; viewerParticipantId?: string };
+type MessageMarkdownProps = { body: string; members: ChannelMember[]; viewerParticipantId?: string };
 
-export function ChannelMessageMarkdown({ body, participants, pets, viewerParticipantId }: MessageMarkdownProps) {
+export function ChannelMessageMarkdown({ body, members, viewerParticipantId }: MessageMarkdownProps) {
   return <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
     urlTransform={url => url.startsWith('participant:') ? url : defaultUrlTransform(url)}
     components={{ a: ({ href, children }) => href?.startsWith('participant:')
-      ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, participants, pets, viewerParticipantId)}</span>
+      ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, members, viewerParticipantId)}</span>
       : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{body}</ReactMarkdown></div>;
 }
 
-function ChannelMessageViewer({ body, author, occurredAt, participants, pets, viewerParticipantId, onClose }: MessageMarkdownProps & {
+function ChannelMessageViewer({ body, author, occurredAt, members, viewerParticipantId, onClose }: MessageMarkdownProps & {
   author: string; occurredAt: string; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -87,36 +65,37 @@ function ChannelMessageViewer({ body, author, occurredAt, participants, pets, vi
       <button type="button" autoFocus onClick={onClose} aria-label="Close full-screen message">Close <span aria-hidden="true">×</span></button>
     </header>
     <div className="channel-message-viewer-scroll" tabIndex={0} aria-label="Full message content">
-      <ChannelMessageMarkdown body={body} participants={participants} pets={pets} viewerParticipantId={viewerParticipantId} />
+      <ChannelMessageMarkdown body={body} members={members} viewerParticipantId={viewerParticipantId} />
     </div>
   </dialog>;
 }
 
 type TimelineProps = {
-  entries: ChannelEntry[]; pending: boolean; onReply: (item: ChannelMessage) => void;
-  pets?: ChannelPet[]; petsReady?: boolean; executions?: ChannelExecution[]; connected?: boolean; highlighted?: string;
-  onLocateMessage?: (messageId: string) => void; onLocateExecution?: (executionId: string) => void;
-  participants?: ChannelParticipant[]; viewerParticipantId?: string; onViewerChange?: (open: boolean) => void;
+  messages: ChannelMessage[]; pending: boolean; onReply: (item: ChannelMessage) => void;
+  pets?: ChannelPet[]; petsReady?: boolean; connected?: boolean; highlighted?: string;
+  onLocateMessage?: (messageId: string) => void;
+  members?: ChannelMember[]; viewerParticipantId?: string; onViewerChange?: (open: boolean) => void;
+  /** Deliveries observed by this Console; the Host does not store them. */
+  deliveries?: ChannelDelivery[];
+  sessions?: ChannelSession[]; onViewSession?: (session: ChannelSession) => void;
 };
 
-export function ChannelTimeline({ entries, pending, onReply, pets = [], petsReady = true, executions = [], connected = true,
-  highlighted, onLocateMessage, onLocateExecution, participants = [], viewerParticipantId, onViewerChange }: TimelineProps) {
+export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
+  members = [], viewerParticipantId, onViewerChange, deliveries = [], sessions = [], onViewSession }: TimelineProps) {
   const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
-  const messages = new Map(entries.filter((item): item is ChannelMessage => item.kind === 'message').map(item => [item.messageId, item]));
-  return <><div className="channel-timeline">{entries.map((item, index) => {
-    const previous = entries[index - 1];
+  const byId = new Map(messages.map(item => [item.messageId, item]));
+  return <><div className="channel-timeline">{messages.map((item, index) => {
+    const previous = messages[index - 1];
     const showDate = !previous || channelDateKey(previous.occurredAt) !== channelDateKey(item.occurredAt);
     const date = new Date(item.occurredAt);
     const separator = showDate && <div className="channel-date"><time dateTime={item.occurredAt}>{date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}</time></div>;
-    if (item.kind === 'revision') return <React.Fragment key={item.sequence}>{separator}<details className="channel-revision">
-      <summary>Goal revision · {item.reason} · {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</summary><p>{item.goal}</p><p>{item.scope}</p>
-    </details></React.Fragment>;
-    const identity = channelMessageIdentity(item, pets, petsReady, participants, viewerParticipantId);
-    const grouped = channelMessagesGroup(previous, item, executions);
-    const messageExecutions = channelMessageExecutions(item, executions);
-    const original = item.replyTo ? messages.get(item.replyTo) : undefined;
+    const identity = channelMessageIdentity(item, pets, petsReady, members, viewerParticipantId);
+    const grouped = channelMessagesGroup(previous, item);
+    const original = item.replyTo ? byId.get(item.replyTo) : undefined;
     const avatar = identity.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
+    const outcomes = deliveries.filter(delivery => delivery.channelId === item.channelId && delivery.messageId === item.messageId);
+    const session = item.author.kind === 'pet' ? channelPetSession(item.author.id, sessions) : undefined;
     return <React.Fragment key={item.messageId}>{separator}<article id={'message-' + item.messageId} tabIndex={-1}
       className={'channel-message' + (grouped ? ' grouped' : '') + (highlighted === item.messageId ? ' located' : '')}
       data-message-id={item.messageId} aria-label={identity.name + ' at ' + date.toLocaleTimeString()}>
@@ -124,60 +103,33 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
       <div className="channel-message-content">
         <div className="channel-message-head">{!grouped && <><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">Removed Pet</span>}</>}
           <time dateTime={item.occurredAt} title={date.toLocaleString()}>{date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
-          {messageExecutions.map(execution => <span key={execution.executionId} className={'channel-inline-state ' + execution.state}>
-            {channelPetIdentity(execution.petId, pets, petsReady).name} · {executionLabel(execution, connected)}</span>)}
+          {outcomes.filter(delivery => delivery.participantId).map(delivery => <span key={delivery.participantId} className={'channel-inline-state ' + delivery.state}>
+            {channelMentionLabel({ participantId: delivery.participantId! }, members, viewerParticipantId)} · {channelDeliveryLabel(delivery)}</span>)}
         </div>
-        {item.body.trim() && <button type="button" className="channel-message-expand" aria-haspopup="dialog" onClick={() => {
+        <button type="button" className="channel-message-expand" aria-haspopup="dialog" onClick={() => {
           onViewerChange?.(true);
           setViewer({ body: item.body, author: identity.name, occurredAt: item.occurredAt,
-            participants: participants.map(participant => ({ ...participant })), pets: pets.map(pet => ({ ...pet })), viewerParticipantId });
-        }}>View full screen</button>}
+            members: members.map(member => ({ ...member })), viewerParticipantId });
+        }}>View full screen</button>
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
-          <strong>{original ? channelMessageIdentity(original, pets, petsReady, participants, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
+          <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
-        {item.mentions.length > 0 && <div className="channel-mentions" aria-label="Addressed participants">{item.mentions.map((mention, index) =>
-          <span className="channel-mention" key={index}>@{channelMentionLabel(mention, participants, pets, viewerParticipantId)}</span>)}</div>}
-        {item.body.trim() && <ChannelMessageMarkdown body={item.body} participants={participants} pets={pets} viewerParticipantId={viewerParticipantId} />}
-        {item.toolCalls?.length ? <ChannelToolCalls calls={item.toolCalls} /> : null}
-        {messageExecutions.filter(execution => execution.error || execution.deliveryError).map(execution =>
-          <p className="channel-record-error" role="alert" key={execution.executionId}>
-            {channelPetIdentity(execution.petId, pets, petsReady).name}: {execution.error ?? execution.deliveryError}</p>)}
+        {item.mentions.length > 0 && <div className="channel-mentions" aria-label="Addressed participants">{item.mentions.map((mention, mentionIndex) =>
+          <span className="channel-mention" key={mentionIndex}>@{channelMentionLabel(mention, members, viewerParticipantId)}</span>)}</div>}
+        <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} />
+        {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
+          <p className="channel-record-error" role="alert" key={failureIndex}>
+            {delivery.participantId ? `${channelMentionLabel({ participantId: delivery.participantId }, members, viewerParticipantId)}: ` : 'Mentions were not delivered: '}{delivery.error ?? 'Delivery failed.'}</p>)}
         {item.artifacts.map((artifact, artifactIndex) => <div className="channel-artifact" key={artifactIndex}>
           {/^https?:\/\//i.test(artifact.uri) ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label ?? artifact.uri}</a> : <code>{artifact.label ?? artifact.uri}</code>}
           {artifact.version && <span> · {artifact.version}</span>}
         </div>)}
         <div className="channel-message-actions">
           <button type="button" disabled={pending} onClick={() => onReply(item)}>{'Reply to ' + identity.name}</button>
-          {messageExecutions.map(execution => <button type="button" key={execution.executionId} onClick={() => onLocateExecution?.(execution.executionId)}>View {channelPetIdentity(execution.petId, pets, petsReady).name} execution</button>)}
+          {session && onViewSession && <button type="button" disabled={!connected} onClick={() => onViewSession(session)}>View {identity.name} session</button>}
           <ChannelTechnicalDetails message={item} />
         </div>
       </div>
     </article></React.Fragment>;
   })}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
-}
-
-export function ChannelExecutionHistory({ executions, connected, pets = [], petsReady = true, entries = [], highlighted, onLocateMessage, onViewSession }: {
-  executions: ChannelExecution[]; connected: boolean; pets?: ChannelPet[]; petsReady?: boolean; entries?: ChannelEntry[]; highlighted?: string;
-  onLocateMessage?: (messageId: string) => void;
-  /** Opens the execution's own session; never the binding's or the TUI's current one. */
-  onViewSession?: (execution: ChannelExecution) => void;
-}) {
-  return <div className="channel-executions">{!executions.length && <div className="compact-empty">No executions recorded.</div>}{[...executions].reverse().map(item => {
-    const identity = channelPetIdentity(item.petId, pets, petsReady);
-    const outputs = channelExecutionOutputs(item, entries);
-    return <article id={'execution-' + item.executionId} tabIndex={-1} key={item.executionId}
-      className={'channel-execution' + (highlighted === item.executionId ? ' located' : '')}>
-      <div className="channel-execution-head"><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">Removed Pet</span>}
-        <em className={item.observationLost || (!connected && ['admitting', 'queued', 'running', 'waiting'].includes(item.state)) ? 'unknown' : item.state}>{executionLabel(item, connected)}</em></div>
-      <time dateTime={item.occurredAt}>{new Date(item.occurredAt).toLocaleString()}</time>
-      <div className="channel-execution-links">{item.messageId && <button type="button" onClick={() => onLocateMessage?.(item.messageId!)}>Locate request</button>}
-        {outputs.map((output, index) => <button type="button" key={output.messageId} onClick={() => onLocateMessage?.(output.messageId)}>{outputs.length > 1 ? 'Locate output ' + (index + 1) : 'Locate output'}</button>)}
-        {onViewSession && <button type="button" disabled={!connected} onClick={() => onViewSession(item)}>View session</button>}</div>
-      {(item.observationLost || (!connected && ['admitting', 'queued', 'running', 'waiting'].includes(item.state))) && <p>Observation was interrupted. Last recorded: {item.state}. Refresh and inspect the Pet session; tasks are not replayed automatically.</p>}
-      {item.state === 'waiting' && <p>Review was requested. This record is not the current approval state; open the session to see whether the review is still current.</p>}
-      {item.error && <p className="channel-record-error" role="alert">{item.error}</p>}
-      {item.deliveryError && <p className="channel-record-error" role="alert">Reply or notice storage failed: {item.deliveryError}</p>}
-      <ChannelTechnicalDetails execution={item} />
-    </article>;
-  })}</div>;
 }

@@ -1,31 +1,26 @@
-import { parsePendingInterruptProjection, type AgentMessageToolCall, type PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { channelMentionSchema, channelMentionId, type ChannelMention } from './channelParticipants';
+import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
+import type {
+  ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
+} from './channelStore';
 
 const identifier = z.string().trim().min(1).max(256);
-export const channelAuthorSchema = z.object({
-  kind: z.enum(['human', 'bot', 'pet']),
-  id: identifier,
-}).strict();
+export const memberRefSchema = z.object({ kind: z.enum(['human', 'pet']), id: identifier }).strict();
 export const artifactReferenceSchema = z.object({
   uri: z.string().trim().min(1).max(4096),
   label: z.string().max(500).optional(),
   version: z.string().min(1).max(500).optional(),
 }).strict();
-export const channelGoalSchema = z.object({
+export const channelCreateSchema = z.object({
   title: z.string().trim().min(1).max(160),
-  goal: z.string().trim().min(1).max(50_000),
-  scope: z.string().trim().min(1).max(50_000),
-  references: z.array(artifactReferenceSchema).max(100).default([]),
+  description: z.string().trim().max(50_000).optional(),
+  /** The Pets that join with the creator. Required: no Pet joins implicitly. */
+  pets: z.array(identifier).max(100),
 }).strict();
-export const channelRevisionSchema = channelGoalSchema.extend({
-  expectedRevision: z.number().int().positive().safe(),
-  reason: z.string().trim().min(1).max(10_000),
-  sourceMessageId: identifier.optional(),
+export const channelUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(160).optional(),
+  description: z.string().trim().max(50_000).nullable().optional(),
 }).strict();
 export const channelMessageSchema = z.object({
   body: z.string().trim().min(1).max(100_000),
@@ -37,431 +32,215 @@ export const channelPageSchema = z.object({
   after: z.number().int().nonnegative().safe().default(0),
   limit: z.number().int().min(1).max(200).default(50),
 }).strict();
-export type ChannelAuthor = z.infer<typeof channelAuthorSchema>;
-export type ChannelRevision = z.infer<typeof channelGoalSchema> & {
-  kind: 'revision'; channelId: string; sequence: number; author: ChannelAuthor;
-  occurredAt: string; reason: string; sourceMessageId?: string;
-};
-export type ChannelSessionBinding = { channelId: string; petId: string; sessionId: string; registered: boolean };
-export type ChannelMessageSource = { petId: string; sessionId: string; invocationId: string };
-/** A Pet conversation message that called tools, as Agent Session carries it. */
-export const channelToolCallMessageSchema = z.object({
-  messageId: identifier,
-  text: z.string().max(100_000),
-  toolCalls: z.array(z.object({ id: identifier, name: identifier, args: z.record(z.unknown()) }).strict()).min(1).max(100),
-}).strict();
-export const channelToolCallSettlementSchema = z.object({
-  messageId: identifier,
-  callId: identifier,
-  status: z.enum(['completed', 'failed']),
-  // Carried with a failure; Channel records only the outcome.
-  error: z.string().optional(),
-}).strict();
-export type ChannelToolCall = AgentMessageToolCall;
-export type ChannelMessage = z.infer<typeof channelMessageSchema> & {
-  source?: ChannelMessageSource;
-  /** Tools the Pet called in this message, in their own shape; the body may then be empty. */
-  toolCalls?: ChannelToolCall[];
-  kind: 'message'; channelId: string; sequence: number; messageId: string;
-  author: ChannelAuthor; occurredAt: string; revision: number;
-};
-/** Historical observation only, never an authoritative approval state. */
-export type ChannelInterruptNotification = {
-  sequence: number; channelId: string; source: ChannelMessageSource;
-  occurredAt: string; pendingInterrupt: PendingInterruptProjection;
-};
-export type ChannelEntry = ChannelRevision | ChannelMessage;
-export type ChannelPage = { entries: ChannelEntry[]; nextAfter: number; hasMore: boolean };
-export type ChannelExecutionState = 'admitting' | 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
-export type ChannelExecution = {
-  executionId: string; channelId: string; petId: string; sessionId: string;
-  messageId?: string; invocationId?: string; state: ChannelExecutionState;
-  occurredAt: string; error?: string; deliveryError?: string; observerId: string;
+
+export type ChannelMessage = ChannelMessageRow;
+export type ChannelSessionBinding = ChannelSessionRow;
+export type ChannelMember = ChannelParticipant & { joinedAt: string };
+export type ChannelEvent =
+  | { type: 'channel.created'; payload: { channel: ChannelRow; members: ChannelMember[] } }
+  | { type: 'channel.updated'; payload: { channel: ChannelRow } }
+  | { type: 'channel.member.joined' | 'channel.member.left'; payload: { channelId: string; member: MemberRef; actor: MemberRef } }
+  | { type: 'channel.message.created'; payload: ChannelMessage };
+
+/** The actor is not a current member of an existing Channel. */
+export class ChannelAccessError extends Error {}
+export class ChannelNotFoundError extends Error {}
+
+export type ChannelServiceOptions = {
+  store: ChannelStore;
+  /** The Studio's Pets; only these can join. */
+  pets: () => Array<{ petId: string; name: string }>;
 };
 
-/** One append-only journal is the source of truth, including goal revisions.
+/**
+ * Channel rules over a ChannelStore: membership decides who may read, speak,
+ * be addressed and manage members. Who may call at all is Studio's decision.
  * Notifications are best effort after commit, not a durable delivery guarantee.
  */
 export class ChannelService {
-  private db: DatabaseSync | undefined;
-  private observerId = randomUUID();
-  private readonly listeners = new Set<(entry: ChannelEntry) => void>();
+  readonly store: ChannelStore;
+  private readonly pets: ChannelServiceOptions['pets'];
+  private readonly listeners = new Set<(event: ChannelEvent) => void>();
 
-  constructor(private readonly databasePath: string = ':memory:') {}
-
-  init(): void {
-    if (this.db) return;
-    if (this.databasePath !== ':memory:') mkdirSync(path.dirname(this.databasePath), { recursive: true });
-    const db = new DatabaseSync(this.databasePath);
-    try {
-      if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
-      db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
-      const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (![0, 1, 2, 3, 4, 5].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS channel_entries (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-          channel_id TEXT NOT NULL,
-          kind TEXT NOT NULL CHECK(kind IN ('revision', 'message')),
-          message_id TEXT UNIQUE,
-          data TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS channel_history ON channel_entries(channel_id, sequence);
-        CREATE INDEX IF NOT EXISTS channel_revisions ON channel_entries(channel_id, kind, sequence);
-        CREATE TABLE IF NOT EXISTS channel_sessions (
-          channel_id TEXT NOT NULL, pet_id TEXT NOT NULL, session_id TEXT NOT NULL,
-          registered INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY(channel_id, pet_id), UNIQUE(pet_id, session_id)
-        );
-        CREATE TABLE IF NOT EXISTS channel_outputs (
-          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
-          message_id TEXT NOT NULL,
-          PRIMARY KEY(pet_id, session_id, invocation_id)
-        );
-        CREATE TABLE IF NOT EXISTS channel_interrupt_notifications (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT, channel_id TEXT NOT NULL,
-          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
-          interrupt_id TEXT NOT NULL, data TEXT NOT NULL,
-          UNIQUE(pet_id, session_id, invocation_id, interrupt_id)
-        );
-        CREATE INDEX IF NOT EXISTS channel_interrupt_history ON channel_interrupt_notifications(channel_id, sequence);
-        CREATE TABLE IF NOT EXISTS channel_executions (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT, execution_id TEXT UNIQUE NOT NULL,
-          channel_id TEXT NOT NULL, invocation_id TEXT UNIQUE, data TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS channel_execution_history ON channel_executions(channel_id, sequence);
-        CREATE TABLE IF NOT EXISTS channel_tool_call_messages (
-          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, session_message_id TEXT NOT NULL,
-          invocation_id TEXT NOT NULL, message_id TEXT NOT NULL,
-          PRIMARY KEY(pet_id, session_id, session_message_id)
-        );
-        CREATE TABLE IF NOT EXISTS channel_tool_calls (
-          message_id TEXT NOT NULL, call_id TEXT NOT NULL, status TEXT NOT NULL,
-          PRIMARY KEY(message_id, call_id)
-        );
-        PRAGMA user_version=5;
-      `);
-      this.observerId = randomUUID();
-      this.db = db;
-    } catch (error) { db.close(); throw error; }
+  constructor(options: ChannelServiceOptions) {
+    this.store = options.store;
+    this.pets = options.pets;
   }
 
-  close(): void { this.db?.close(); this.db = undefined; }
-  private database(): DatabaseSync {
-    if (!this.db) throw new Error('Channel service is not started.');
-    return this.db;
-  }
-  private decode(row: unknown): ChannelEntry | null {
-    if (!row) return null;
-    const value = row as { sequence: number; data: string };
-    const entry = { ...JSON.parse(value.data), sequence: value.sequence } as ChannelEntry;
-    if (entry.kind !== 'message' || !entry.toolCalls) return entry;
-    // The message is the journal's; each call's outcome is observed afterwards.
-    const statuses = new Map((this.database().prepare('SELECT call_id, status FROM channel_tool_calls WHERE message_id=?')
-      .all(entry.messageId) as { call_id: string; status: ChannelToolCall['status'] }[]).map(row => [row.call_id, row.status]));
-    return { ...entry, toolCalls: entry.toolCalls.map(call => ({ ...call, status: statuses.get(call.id) ?? 'running' })) };
-  }
-  private transaction<T>(run: () => T, readOnly = false): T {
-    const db = this.database();
-    db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
-    try { const result = run(); db.exec('COMMIT'); return result; }
-    catch (error) { db.exec('ROLLBACK'); throw error; }
-  }
-  private append(entry: Omit<ChannelRevision, 'sequence'> | Omit<ChannelMessage, 'sequence'>): ChannelEntry {
-    const result = this.database().prepare(
-      'INSERT INTO channel_entries(channel_id, kind, message_id, data) VALUES (?, ?, ?, ?)',
-    ).run(entry.channelId, entry.kind, entry.kind === 'message' ? entry.messageId : null, JSON.stringify(entry));
-    return { ...entry, sequence: Number(result.lastInsertRowid) } as ChannelEntry;
-  }
-  private publish<T extends ChannelEntry>(entry: T): T {
-    for (const listener of this.listeners) {
-      try { listener(structuredClone(entry)); }
-      catch (error) { console.error('[channel] committed entry notification failed:', error); }
-    }
-    return entry;
-  }
-  subscribe(listener: (entry: ChannelEntry) => void): () => void {
+  subscribe(listener: (event: ChannelEvent) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
-  getChannel(channelId: string): ChannelRevision {
-    const id = identifier.parse(channelId);
-    const entry = this.decode(this.database().prepare(
-      "SELECT sequence, data FROM channel_entries WHERE channel_id=? AND kind='revision' ORDER BY sequence DESC LIMIT 1",
-    ).get(id));
-    if (!entry) throw new Error(`Unknown Channel "${id}".`);
-    return entry as ChannelRevision;
-  }
-  listChannels(page: unknown = {}): { channels: ChannelRevision[]; nextAfter: number; hasMore: boolean } {
-    const { after, limit } = channelPageSchema.parse(page);
-    // Page by immutable creation sequence; revisions cannot move a Channel across pages.
-    const rows = this.database().prepare(`SELECT MIN(sequence) AS created, channel_id FROM channel_entries
-      WHERE kind='revision' GROUP BY channel_id HAVING MIN(sequence)>? ORDER BY created LIMIT ?`).all(after, limit + 1) as { created: number; channel_id: string }[];
-    const selected = rows.slice(0, limit);
-    return { channels: selected.map((row) => this.getChannel(row.channel_id)), nextAfter: selected.at(-1)?.created ?? after, hasMore: rows.length > limit };
-  }
-  createChannel(input: unknown, author: ChannelAuthor): ChannelRevision {
-    const goal = channelGoalSchema.parse(input);
-    const trustedAuthor = channelAuthorSchema.parse(author);
-    const entry = this.transaction(() => this.append({
-      ...goal, kind: 'revision', channelId: randomUUID(), author: trustedAuthor,
-      occurredAt: new Date().toISOString(), reason: 'created',
-    })) as ChannelRevision;
-    return this.publish(entry);
-  }
-  reviseChannel(channelId: string, input: unknown, author: ChannelAuthor): ChannelRevision {
-    const { expectedRevision, reason, sourceMessageId, ...goal } = channelRevisionSchema.parse(input);
-    const trustedAuthor = channelAuthorSchema.parse(author);
-    const entry = this.transaction(() => {
-      const current = this.getChannel(channelId);
-      if (current.sequence !== expectedRevision) throw new Error('Channel revision conflict; read current context before revising.');
-      if (sourceMessageId) this.getMessage(current.channelId, sourceMessageId);
-      return this.append({ ...goal, kind: 'revision', channelId: current.channelId, author: trustedAuthor,
-        occurredAt: new Date().toISOString(), reason, ...(sourceMessageId ? { sourceMessageId } : {}),
-      });
-    }) as ChannelRevision;
-    return this.publish(entry);
-  }
-  getMessage(channelId: string, messageId: string): ChannelMessage {
-    const entry = this.decode(this.database().prepare(
-      "SELECT sequence, data FROM channel_entries WHERE channel_id=? AND message_id=? AND kind='message'",
-    ).get(identifier.parse(channelId), identifier.parse(messageId)));
-    if (!entry) throw new Error('Message reference does not exist in this Channel.');
-    return entry as ChannelMessage;
-  }
-  sendMessage(channelId: string, input: unknown, author: ChannelAuthor, source?: ChannelMessageSource): ChannelMessage {
-    const message = channelMessageSchema.parse(input);
-    const trustedAuthor = channelAuthorSchema.parse(author);
-    const seen = new Set<string>();
-    message.mentions = message.mentions.filter(mention => {
-      const id = channelMentionId(mention);
-      if (seen.has(id)) return false;
-      seen.add(id); return true;
-    });
-    const entry = this.transaction(() => {
-      const channel = this.getChannel(channelId);
-      if (message.replyTo) this.getMessage(channel.channelId, message.replyTo);
-      if (source && (source.petId !== trustedAuthor.id || trustedAuthor.kind !== 'pet'
-        || this.getBinding(channelId, source.petId)?.sessionId !== source.sessionId)) throw new Error('Message source does not match Channel binding.');
-      return this.append({ ...message, ...(source ? { source } : {}), kind: 'message', channelId: channel.channelId,
-        messageId: randomUUID(), revision: channel.sequence, author: trustedAuthor, occurredAt: new Date().toISOString(),
-      });
-    }) as ChannelMessage;
-    return this.publish(entry);
-  }
-  private decodeBinding(row: unknown): ChannelSessionBinding | null {
-    if (!row) return null;
-    const value = row as { channel_id: string; pet_id: string; session_id: string; registered: number };
-    return { channelId: value.channel_id, petId: value.pet_id, sessionId: value.session_id, registered: !!value.registered };
-  }
-  getBinding(channelId: string, petId: string): ChannelSessionBinding | null {
-    return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? AND pet_id=?').get(identifier.parse(channelId), petId));
-  }
-  listBindings(channelId: string): ChannelSessionBinding[] {
-    const channel = this.getChannel(channelId);
-    return this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? ORDER BY pet_id')
-      .all(channel.channelId).map(row => this.decodeBinding(row)!);
-  }
-  findBinding(petId: string, sessionId: string): ChannelSessionBinding | null {
-    return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE pet_id=? AND session_id=?').get(petId, sessionId));
-  }
-  reserveBinding(channelId: string, petId: string, allocate: () => string): ChannelSessionBinding {
-    return this.transaction(() => {
-      channelId = this.getChannel(channelId).channelId;
-      identifier.parse(petId);
-      const existing = this.getBinding(channelId, petId);
-      if (existing) return existing;
-      const sessionId = identifier.parse(allocate());
-      this.database().prepare('INSERT INTO channel_sessions(channel_id, pet_id, session_id) VALUES (?, ?, ?)').run(channelId, petId, sessionId);
-      return this.getBinding(channelId, petId)!;
-    });
-  }
-  confirmBinding(binding: ChannelSessionBinding): void {
-    const result = this.database().prepare('UPDATE channel_sessions SET registered=1 WHERE channel_id=? AND pet_id=? AND session_id=?')
-      .run(identifier.parse(binding.channelId), binding.petId, binding.sessionId);
-    if (result.changes !== 1) throw new Error('Channel session binding changed.');
-  }
-  private requireOutputBinding(channelId: string, source: ChannelMessageSource): ChannelSessionBinding {
-    const binding = this.getBinding(channelId, source.petId);
-    if (!binding || binding.sessionId !== source.sessionId) throw new Error('Output destination does not match Channel binding.');
-    return binding;
-  }
-  recordOutput(channelId: string, source: ChannelMessageSource, body: string, mentions: ChannelMention[] = []): ChannelMessage {
-    const binding = this.requireOutputBinding(channelId, source);
-    let created = false;
-    const entry = this.transaction(() => {
-      const saved = this.database().prepare('SELECT message_id FROM channel_outputs WHERE pet_id=? AND session_id=? AND invocation_id=?')
-        .get(source.petId, source.sessionId, source.invocationId) as { message_id: string } | undefined;
-      if (saved) return this.getMessage(binding.channelId, saved.message_id);
-      const channel = this.getChannel(binding.channelId);
-      const message = this.append({ ...channelMessageSchema.parse({ body, mentions }), kind: 'message',
-        channelId: channel.channelId, messageId: randomUUID(), revision: channel.sequence,
-        author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
-      }) as ChannelMessage;
-      this.database().prepare('INSERT INTO channel_outputs VALUES (?, ?, ?, ?)')
-        .run(source.petId, source.sessionId, source.invocationId, message.messageId);
-      created = true;
-      return message;
-    });
-    return created ? this.publish(entry) : entry;
-  }
-  /**
-   * Record a conversation message in which the Pet called tools. It addresses
-   * nobody; routing stays with the final reply. Idempotent per session message.
-   */
-  recordToolCallMessage(channelId: string, source: ChannelMessageSource, value: unknown): ChannelMessage {
-    const binding = this.requireOutputBinding(channelId, source);
-    const { messageId, text, toolCalls } = channelToolCallMessageSchema.parse(value);
-    let created = false;
-    const entry = this.transaction(() => {
-      const saved = this.database().prepare('SELECT message_id FROM channel_tool_call_messages WHERE pet_id=? AND session_id=? AND session_message_id=?')
-        .get(source.petId, source.sessionId, messageId) as { message_id: string } | undefined;
-      if (saved) return this.getMessage(binding.channelId, saved.message_id);
-      const channel = this.getChannel(binding.channelId);
-      const message = this.append({ body: text.trim(), mentions: [], artifacts: [], toolCalls: toolCalls as ChannelToolCall[], kind: 'message',
-        channelId: channel.channelId, messageId: randomUUID(), revision: channel.sequence,
-        author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
-      }) as ChannelMessage;
-      this.database().prepare('INSERT INTO channel_tool_call_messages VALUES (?, ?, ?, ?, ?)')
-        .run(source.petId, source.sessionId, messageId, source.invocationId, message.messageId);
-      created = true;
-      return this.getMessage(binding.channelId, message.messageId);
-    });
-    return created ? this.publish(entry) : entry;
-  }
-  /** Record one call's outcome. A call this Channel never saw is not its to record. */
-  settleToolCall(channelId: string, source: ChannelMessageSource, value: unknown): void {
-    this.requireOutputBinding(channelId, source);
-    const { messageId, callId, status } = channelToolCallSettlementSchema.parse(value);
-    const saved = this.database().prepare('SELECT message_id FROM channel_tool_call_messages WHERE pet_id=? AND session_id=? AND session_message_id=?')
-      .get(source.petId, source.sessionId, messageId) as { message_id: string } | undefined;
-    if (!saved) return;
-    this.database().prepare(`INSERT INTO channel_tool_calls VALUES (?, ?, ?)
-      ON CONFLICT(message_id, call_id) DO UPDATE SET status=excluded.status`).run(saved.message_id, callId, status);
-  }
-  /** An invocation that stopped leaves its open calls interrupted. */
-  interruptToolCalls(source: ChannelMessageSource): void {
-    const db = this.database();
-    const rows = db.prepare('SELECT message_id FROM channel_tool_call_messages WHERE pet_id=? AND session_id=? AND invocation_id=?')
-      .all(source.petId, source.sessionId, source.invocationId) as { message_id: string }[];
-    for (const { message_id } of rows) {
-      const entry = this.decode(db.prepare("SELECT sequence, data FROM channel_entries WHERE message_id=? AND kind='message'").get(message_id));
-      for (const call of entry?.kind === 'message' ? entry.toolCalls ?? [] : []) {
-        if (call.status === 'running') db.prepare('INSERT OR IGNORE INTO channel_tool_calls VALUES (?, ?, ?)').run(message_id, call.id, 'interrupted');
-      }
+  private publish(event: ChannelEvent): void {
+    for (const listener of this.listeners) {
+      try { listener(structuredClone(event)); }
+      catch (error) { console.error('[channel] committed change notification failed:', error); }
     }
-  }
-  recordInterrupt(channelId: string, source: ChannelMessageSource, value: unknown): ChannelInterruptNotification {
-    const binding = this.requireOutputBinding(channelId, source);
-    const pendingInterrupt = parsePendingInterruptProjection(value);
-    if (!pendingInterrupt) throw new Error('Invalid public pending interrupt projection.');
-    return this.transaction(() => {
-      const data = { channelId: binding.channelId, source, occurredAt: new Date().toISOString(), pendingInterrupt };
-      this.database().prepare(`INSERT OR IGNORE INTO channel_interrupt_notifications
-        (channel_id, pet_id, session_id, invocation_id, interrupt_id, data) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(binding.channelId, source.petId, source.sessionId, source.invocationId, pendingInterrupt.interruptId, JSON.stringify(data));
-      const row = this.database().prepare(`SELECT sequence, data FROM channel_interrupt_notifications
-        WHERE pet_id=? AND session_id=? AND invocation_id=? AND interrupt_id=?`)
-        .get(source.petId, source.sessionId, source.invocationId, pendingInterrupt.interruptId) as { sequence: number; data: string };
-      return { ...JSON.parse(row.data), sequence: row.sequence };
-    });
-  }
-  /** Operator-only history: deliberately absent from readContext and message history. */
-  readInterruptNotifications(channelId: string, page: unknown = {}) {
-    const { after, limit } = channelPageSchema.parse(page);
-    const channel = this.getChannel(channelId);
-    const rows = this.database().prepare(`SELECT sequence, data FROM channel_interrupt_notifications
-      WHERE channel_id=? AND sequence>? ORDER BY sequence LIMIT ?`).all(channel.channelId, after, limit + 1) as { sequence: number; data: string }[];
-    const notifications: ChannelInterruptNotification[] = rows.slice(0, limit).map(row => {
-      const data = JSON.parse(row.data);
-      const pendingInterrupt = parsePendingInterruptProjection(data.pendingInterrupt);
-      if (!pendingInterrupt) {
-        throw new Error(`Unsupported Channel interrupt notification ${row.sequence}. The original record has been preserved.`);
-      }
-      return { ...data, pendingInterrupt, sequence: row.sequence };
-    });
-    return { notifications, nextAfter: notifications.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
-  }
-  readHistory(channelId: string, page: unknown = {}): ChannelPage {
-    const { after, limit } = channelPageSchema.parse(page);
-    const channel = this.getChannel(channelId);
-    const rows = this.database().prepare(
-      'SELECT sequence, data FROM channel_entries WHERE channel_id=? AND sequence>? ORDER BY sequence LIMIT ?',
-    ).all(channel.channelId, after, limit + 1);
-    const entries = rows.slice(0, limit).map((row) => this.decode(row)!);
-    return { entries, nextAfter: entries.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
-  }
-  readContext(channelId: string, page: unknown = {}) {
-    return this.transaction(() => ({ channel: this.getChannel(channelId), history: this.readHistory(channelId, page), sessions: this.listBindings(channelId) }), true);
   }
 
-  private saveExecution(value: ChannelExecution): ChannelExecution {
-    this.database().prepare(`INSERT INTO channel_executions(execution_id, channel_id, invocation_id, data)
-      VALUES (?, ?, ?, ?) ON CONFLICT(execution_id) DO UPDATE SET invocation_id=excluded.invocation_id, data=excluded.data`)
-      .run(value.executionId, value.channelId, value.invocationId ?? null, JSON.stringify(value));
-    return value;
+  private requireChannel(channelId: string): ChannelRow {
+    const id = identifier.parse(channelId);
+    const channel = this.store.getChannel(id);
+    if (!channel) throw new ChannelNotFoundError(`Unknown Channel "${id}".`);
+    return channel;
   }
-  private executionRow(executionId: string): ChannelExecution | null {
-    const row = this.database().prepare('SELECT data FROM channel_executions WHERE execution_id=?').get(executionId) as { data: string } | undefined;
-    return row ? JSON.parse(row.data) : null;
+  /** The Channel, if `member` currently belongs to it. */
+  requireMember(channelId: string, member: MemberRef): ChannelRow {
+    const channel = this.requireChannel(channelId);
+    const row = this.store.listMembers(channel.channelId).find(item => item.kind === member.kind && item.id === member.id);
+    if (!row || row.leftAt) throw new ChannelAccessError(`${member.kind}:${member.id} is not a member of Channel "${channel.channelId}".`);
+    return channel;
   }
-  beginExecution(channelId: string, source: { petId: string; sessionId: string }, messageId: string, executionId = messageId): ChannelExecution {
-    const binding = this.requireOutputBinding(channelId, { ...source, invocationId: '' });
-    this.getMessage(binding.channelId, messageId);
-    const existing = this.executionRow(executionId);
-    if (existing) return existing;
-    return this.saveExecution({ petId: source.petId, sessionId: source.sessionId, channelId: binding.channelId, executionId, messageId,
-      state: 'admitting', occurredAt: new Date().toISOString(), observerId: this.observerId });
+  private requirePet(petId: string): void {
+    if (!this.pets().some(pet => pet.petId === petId)) throw new Error(`Unknown Pet "${petId}".`);
   }
-  acceptExecution(executionId: string, invocationId: string): ChannelExecution {
-    return this.transaction(() => {
-      const pending = this.executionRow(executionId);
-      if (!pending) throw new Error('Unknown Channel execution request.');
-      const observed = this.database().prepare('SELECT execution_id, data FROM channel_executions WHERE invocation_id=?')
-        .get(invocationId) as { execution_id: string; data: string } | undefined;
-      if (observed && observed.execution_id !== executionId) {
-        const value = JSON.parse(observed.data) as ChannelExecution;
-        if (value.channelId !== pending.channelId || value.petId !== pending.petId || value.sessionId !== pending.sessionId) {
-          throw new Error('Channel execution receipt does not match its observation.');
-        }
-        this.database().prepare('DELETE FROM channel_executions WHERE execution_id=?').run(observed.execution_id);
-        return this.saveExecution({ ...pending, ...value, executionId, messageId: pending.messageId });
+  private label(member: MemberRef): string {
+    return member.kind === 'pet' ? this.pets().find(pet => pet.petId === member.id)?.name ?? member.id : member.id;
+  }
+  private memberView(row: ChannelMemberRow): ChannelMember {
+    return { participantId: channelParticipantId(row.kind, row.id), kind: row.kind, id: row.id, label: this.label(row), joinedAt: row.joinedAt };
+  }
+  /** Current members, as messages address them. */
+  members(channelId: string): ChannelMember[] {
+    return this.store.listMembers(channelId).filter(row => !row.leftAt).map(row => this.memberView(row));
+  }
+
+  createChannel(actor: MemberRef, input: unknown): { channel: ChannelRow; members: ChannelMember[] } {
+    const value = channelCreateSchema.parse(input);
+    const creator = memberRefSchema.parse(actor);
+    const pets = [...new Set(value.pets)];
+    for (const petId of pets) this.requirePet(petId);
+    const now = new Date().toISOString();
+    const channel: ChannelRow = {
+      channelId: randomUUID(), title: value.title, ...(value.description ? { description: value.description } : {}),
+      createdBy: creator, createdAt: now, updatedAt: now,
+    };
+    this.store.transaction(() => {
+      this.store.createChannel(channel);
+      for (const member of [creator, ...pets.filter(id => creator.kind !== 'pet' || creator.id !== id).map(id => ({ kind: 'pet' as const, id }))]) {
+        this.store.upsertMember({ channelId: channel.channelId, ...member, joinedAt: now });
       }
-      return this.saveExecution({ ...pending, invocationId, state: pending.state === 'admitting' ? 'queued' : pending.state });
+    });
+    const result = { channel, members: this.members(channel.channelId) };
+    this.publish({ type: 'channel.created', payload: result });
+    return result;
+  }
+
+  updateChannel(actor: MemberRef, channelId: string, input: unknown): ChannelRow {
+    const patch = channelUpdateSchema.parse(input);
+    const channel = this.store.transaction(() => {
+      const current = this.requireMember(channelId, actor);
+      this.store.updateChannel(current.channelId, {
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.description !== undefined ? { description: patch.description || null } : {}),
+        updatedAt: new Date().toISOString(),
+      });
+      return this.store.getChannel(current.channelId)!;
+    });
+    this.publish({ type: 'channel.updated', payload: { channel } });
+    return channel;
+  }
+
+  listChannels(actor: MemberRef, page: unknown = {}): { channels: ChannelRow[]; nextAfter: number; hasMore: boolean } {
+    const { items, ...rest } = this.store.listChannels({ member: memberRefSchema.parse(actor) }, channelPageSchema.parse(page));
+    return { channels: items, ...rest };
+  }
+
+  readContext(actor: MemberRef, channelId: string, page: unknown = {}) {
+    const value = channelPageSchema.parse(page);
+    const channel = this.requireMember(channelId, actor);
+    const { items, ...rest } = this.store.readMessages(channel.channelId, value);
+    return { channel, members: this.members(channel.channelId), messages: items, ...rest };
+  }
+
+  listMembers(actor: MemberRef, channelId: string): ChannelMember[] {
+    return this.members(this.requireMember(channelId, actor).channelId);
+  }
+
+  addMember(actor: MemberRef, channelId: string, value: unknown): ChannelMember {
+    const member = memberRefSchema.parse(value);
+    if (member.kind === 'pet') this.requirePet(member.id);
+    const row = this.store.transaction(() => {
+      const channel = this.requireMember(channelId, actor);
+      const existing = this.store.listMembers(channel.channelId).find(item => item.kind === member.kind && item.id === member.id);
+      if (existing && !existing.leftAt) return { row: existing, joined: false };
+      const row = { channelId: channel.channelId, ...member, joinedAt: new Date().toISOString() };
+      this.store.upsertMember(row);
+      return { row, joined: true };
+    });
+    if (row.joined) this.publish({ type: 'channel.member.joined', payload: { channelId: row.row.channelId, member, actor } });
+    return this.memberView(row.row);
+  }
+
+  removeMember(actor: MemberRef, channelId: string, value: unknown): void {
+    const member = memberRefSchema.parse(value);
+    const left = this.store.transaction(() => {
+      const channel = this.requireMember(channelId, actor);
+      const existing = this.store.listMembers(channel.channelId).find(item => item.kind === member.kind && item.id === member.id);
+      if (!existing || existing.leftAt) return null;
+      this.store.upsertMember({ ...existing, leftAt: new Date().toISOString() });
+      return channel.channelId;
+    });
+    if (left) this.publish({ type: 'channel.member.left', payload: { channelId: left, member, actor } });
+  }
+
+  /**
+   * Save one member's message. Mentions are resolved against current members.
+   * A human's unknown mention rejects the message; a Pet's reply has no one to
+   * reject it to, so it is kept without mentions and `mentionError` says why.
+   * With an externalRef already saved for this author, the earlier message
+   * is returned and `created` is false.
+   */
+  postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string } = {}): {
+    message: ChannelMessage; created: boolean; mentionError?: string;
+  } {
+    const value = channelMessageSchema.parse(input);
+    const trustedAuthor = memberRefSchema.parse(author);
+    let mentionError: string | undefined;
+    const result = this.store.transaction(() => {
+      const channel = this.requireMember(channelId, trustedAuthor);
+      if (value.replyTo && !this.store.getMessage(channel.channelId, value.replyTo)) {
+        throw new Error('Message reference does not exist in this Channel.');
+      }
+      let mentions: ChannelMention[];
+      try { mentions = parseChannelMentions(value.body, value.mentions, this.members(channel.channelId)); }
+      catch (error) {
+        if (trustedAuthor.kind !== 'pet') throw error;
+        mentionError = error instanceof Error ? error.message : String(error);
+        mentions = [];
+      }
+      const messageId = randomUUID();
+      const message = this.store.appendMessage({
+        messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),
+        ...(options.externalRef ? { externalRef: options.externalRef } : {}),
+        body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}), mentions, artifacts: value.artifacts,
+      });
+      return { message, created: message.messageId === messageId };
+    });
+    if (result.created) this.publish({ type: 'channel.message.created', payload: result.message });
+    return { ...result, ...(result.created && mentionError ? { mentionError } : {}) };
+  }
+
+  getMessage(channelId: string, messageId: string): ChannelMessage | undefined {
+    return this.store.getMessage(channelId, messageId);
+  }
+
+  /** The (Channel, Pet) session, reserved on first use. */
+  reserveSession(channelId: string, petId: string, allocate: () => string): ChannelSessionBinding {
+    return this.store.transaction(() => {
+      const channel = this.requireChannel(channelId);
+      return this.store.getSession(channel.channelId, petId)
+        ?? this.store.reserveSession({ channelId: channel.channelId, petId, sessionId: identifier.parse(allocate()), registered: false });
     });
   }
-  failExecution(messageId: string, error: string): void {
-    const value = this.executionRow(messageId);
-    if (!value) throw new Error('Unknown Channel execution request.');
-    this.saveExecution({ ...value, state: 'failed', error, occurredAt: new Date().toISOString() });
+  confirmSession(binding: ChannelSessionBinding): ChannelSessionBinding {
+    if (!binding.registered) this.store.confirmSession(binding);
+    return { ...binding, registered: true };
   }
-  recordExecution(channelId: string, source: ChannelMessageSource, state: Exclude<ChannelExecutionState, 'admitting'>, occurredAt: string, error?: string): ChannelExecution {
-    const binding = this.requireOutputBinding(channelId, source);
-    const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(source.invocationId) as { data: string } | undefined;
-    const existing = row ? JSON.parse(row.data) as ChannelExecution : null;
-    if (existing && (existing.channelId !== binding.channelId || existing.petId !== source.petId || existing.sessionId !== source.sessionId)) {
-      throw new Error('Channel execution identity does not match its original observation.');
-    }
-    // A waiting execution continues when its review is answered.
-    if (existing && ['completed', 'interrupted', 'failed'].includes(existing.state)) return existing;
-    return this.saveExecution({ ...(existing ?? {}), ...source, channelId: binding.channelId,
-      executionId: existing?.executionId ?? `dispatch:${source.invocationId}`, state, occurredAt,
-      ...(error ? { error } : {}), observerId: this.observerId });
+  getSession(channelId: string, petId: string): ChannelSessionBinding | undefined {
+    return this.store.getSession(channelId, petId);
   }
-  recordDeliveryFailure(invocationId: string, error: string): void {
-    const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(invocationId) as { data: string } | undefined;
-    if (row) this.saveExecution({ ...JSON.parse(row.data), deliveryError: error });
-  }
-  readExecutions(channelId: string, page: unknown = {}) {
-    const { after, limit } = channelPageSchema.parse(page);
-    const channel = this.getChannel(channelId);
-    const rows = this.database().prepare('SELECT sequence, data FROM channel_executions WHERE channel_id=? AND sequence>? ORDER BY sequence LIMIT ?')
-      .all(channel.channelId, after, limit + 1) as { sequence: number; data: string }[];
-    const executions = rows.slice(0, limit).map(row => {
-      const { observerId, ...value } = JSON.parse(row.data) as ChannelExecution;
-      return { ...value, sequence: row.sequence,
-        observationLost: observerId !== this.observerId && ['admitting', 'queued', 'running', 'waiting'].includes(value.state) };
-    });
-    return { executions, nextAfter: executions.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
+  listSessions(actor: MemberRef, channelId: string): ChannelSessionBinding[] {
+    return this.store.listSessions(this.requireMember(channelId, actor).channelId);
   }
 }

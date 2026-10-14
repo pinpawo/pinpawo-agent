@@ -11,7 +11,10 @@ import {
 } from 'pinpawo/host-runtime';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
-import { createChannelPlugin, type ChannelMessage } from '@pinpawo-plugin/channel';
+import {
+  ChannelAccessError, createChannelPlugin, type ChannelDelivery, type ChannelMessage,
+} from '@pinpawo-plugin/channel';
+import { readChannelTestInput, readChannelTestTask } from '../../support/channelDispatchInput';
 
 async function waitFor(done: () => boolean) {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -21,73 +24,116 @@ async function waitFor(done: () => boolean) {
   throw new Error('Timed out waiting for resident dispatch.');
 }
 
-test('HTTP authenticates operators, preserves notes and dispatches only explicitly addressed requests', async () => {
-  let dispatches = 0;
+type Dispatched = { request: string; session?: { id: string; create?: boolean }; scope?: PetInvocationScope };
+const fakePet = (petId: string, dispatched: Dispatched[]) => ({
+  registration: { petId, name: petId[0]!.toUpperCase() + petId.slice(1) }, dispatch: {
+    getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
+    onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
+    dispatch: async (input: Dispatched) => { dispatched.push(input); },
+  },
+});
+
+test('HTTP acts as the operator member: authenticates, rejects spoofing and non-members, manages members and dispatches only addressed Pets', async () => {
+  const dispatched: Dispatched[] = [];
   const channel = createChannelPlugin();
   const http = createStudioHttpPlugin({ port: 0, authToken: 'channel-test-token' });
   const studio = await createStudio({
     studioId: 'test', entryPetId: 'reviewer', plugins: [channel, http],
-    pets: [{ registration: { petId: 'reviewer', name: 'Reviewer' }, dispatch: {
-      getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
-      onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
-      dispatch: async () => { dispatches++; },
-    } }],
+    pets: [fakePet('reviewer', dispatched), fakePet('writer', dispatched)],
   });
   const base = `http://127.0.0.1:${http.address()!.port}`;
-  const post = (route: string, body: unknown) => fetch(base + route, {
-    method: 'POST', headers: { Authorization: 'Bearer channel-test-token', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
+  const headers = { Authorization: 'Bearer channel-test-token', 'Content-Type': 'application/json' };
+  const post = (route: string, body: unknown) => fetch(base + route, { method: 'POST', headers, body: JSON.stringify(body) });
+  const get = (route: string) => fetch(base + route, { headers });
   try {
     assert.equal((await fetch(base + '/channels')).status, 401);
     assert.equal((await fetch(base + '/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
-    const created = await post('/channels', { title: 'Goal', goal: 'Long term', scope: 'Round one' });
+    assert.equal((await post('/channels', { title: 'Old shape', goal: 'Long term', scope: 'Round one', pets: [] })).status, 400);
+    assert.equal((await post('/channels', { title: 'No Pets named' })).status, 400);
+    assert.equal((await post('/channels', { title: 'Unknown', pets: ['ghost'] })).status, 409);
+    const created = await post('/channels', { title: 'Release', description: 'Ship 1.0', pets: ['reviewer'] });
     assert.equal(created.status, 201);
-    const { channelId, sequence } = await created.json() as { channelId: string; sequence: number };
-    assert.equal(dispatches, 0);
-    assert.equal((await post('/channels/messages', { channelId, body: 'spoof', author: { kind: 'pet', id: 'reviewer' } })).status, 400);
+    const { channel: { channelId }, members } = await created.json() as { channel: { channelId: string }; members: Array<{ participantId: string }> };
+    assert.deepEqual(members.map(member => member.participantId), ['human:studio-operator', 'pet:reviewer']);
+    assert.equal(dispatched.length, 0);
     for (const forged of [
+      { author: { kind: 'pet', id: 'reviewer' } },
       { source: { petId: 'reviewer', sessionId: 'forged', invocationId: 'forged' } },
       { scope: { namespace: 'channel', id: channelId } },
       { participantId: 'pet:reviewer' },
+      { mentions: [{ petId: 'reviewer' }] },
     ]) assert.equal((await post('/channels/messages', { channelId, body: 'spoof', ...forged })).status, 400);
-    assert.equal((await post('/channels/messages', { channelId, body: 'unknown', mentions: [{ petId: 'missing' }] })).status, 409);
-    const plain = await (await post('/channels/messages', { channelId, body: 'quoted @reviewer' })).json() as ChannelMessage;
+    assert.equal((await post('/channels/messages', { channelId, body: 'not here', mentions: [{ participantId: 'pet:writer' }] })).status, 409,
+      'only current members can be addressed');
+    const plain = await (await post('/channels/messages', { channelId, body: 'quoted @reviewer' })).json() as ChannelMessage & { deliveries: ChannelDelivery[] };
     assert.deepEqual(plain.author, { kind: 'human', id: 'studio-operator' });
-    assert.deepEqual(plain.mentions, []);
-    const reply = await post('/channels/messages', { channelId, body: 'Review this', replyTo: plain.messageId, mentions: [{ petId: 'reviewer' }], artifacts: [{ uri: 'repo:commit-a', version: 'a' }] });
+    assert.deepEqual([plain.mentions, plain.deliveries], [[], []]);
+    const reply = await post('/channels/messages', { channelId, body: 'Review this', replyTo: plain.messageId,
+      mentions: [{ participantId: 'pet:reviewer' }], artifacts: [{ uri: 'repo:commit-a', version: 'a' }] });
     assert.equal(reply.status, 201);
-    assert.equal((await post('/channels/revisions', { channelId, title: 'Goal', goal: 'Long term', scope: 'Round two', reason: 'User direction', expectedRevision: sequence })).status, 201);
-    assert.equal((await post('/channels/revisions', { channelId, title: 'Goal', goal: 'Long term', scope: 'Stale', reason: 'Stale', expectedRevision: sequence })).status, 409);
-    const context = await fetch(base + `/channels/context?channelId=${channelId}&limit=2`, { headers: { Authorization: 'Bearer channel-test-token' } });
-    const result = await context.json() as { channel: { scope: string }; history: { hasMore: boolean; entries: unknown[] } };
-    assert.equal(result.channel.scope, 'Round two');
-    assert.equal(result.history.entries.length, 2);
-    assert.equal(result.history.hasMore, true);
-    assert.equal(dispatches, 1, 'the addressed message dispatches; plain quoted labels and creation do not');
-    assert.equal((await fetch(base + '/channels/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channelId, petId: 'reviewer', body: 'start' }) })).status, 401);
-    assert.equal((await post('/channels/execute', { channelId, petId: 'reviewer', body: 'start', sessionId: 'forged' })).status, 400);
-    const execution = await post('/channels/execute', { channelId, petId: 'reviewer', body: 'start explicitly' });
-    assert.equal(execution.status, 202);
-    assert.equal(dispatches, 2);
-    assert.ok(channel.service.getBinding(channelId, 'reviewer')?.registered);
-    const sameInput = { channelId, body: 'Same text, two new messages', mentions: [{ participantId: 'pet:reviewer' }] };
+    const { deliveries } = await reply.json() as { deliveries: ChannelDelivery[] };
+    assert.deepEqual(deliveries.map(delivery => [delivery.participantId, delivery.state]), [['pet:reviewer', 'accepted']]);
+    assert.deepEqual(dispatched.map(item => [item.session, item.scope]), [[{ id: deliveries[0]!.sessionId, create: true }, { namespace: 'channel', id: channelId }]]);
+    const input = readChannelTestInput(dispatched[0]!.request);
+    assert.deepEqual([input.author, input.replyTo?.messageId], [{ participantId: 'human:studio-operator', kind: 'human' }, plain.messageId]);
+    const context = await (await get(`/channels/context?channelId=${channelId}&limit=1`)).json() as {
+      channel: { description: string }; members: unknown[]; messages: unknown[]; hasMore: boolean; viewerParticipantId: string;
+    };
+    assert.deepEqual([context.channel.description, context.members.length, context.messages.length, context.hasMore, context.viewerParticipantId],
+      ['Ship 1.0', 2, 1, true, 'human:studio-operator']);
+    assert.deepEqual((await (await get(`/channels/sessions?channelId=${channelId}`)).json() as { sessions: unknown[] }).sessions,
+      [{ channelId, petId: 'reviewer', sessionId: deliveries[0]!.sessionId, registered: true }]);
+    assert.equal((await (await post('/channels/update', { channelId, title: 'Release 1.0' })).json() as { title: string }).title, 'Release 1.0');
+    for (const route of ['/channels/execute', '/channels/revisions', '/channels/participants', '/channels/executions', '/channels/interrupts']) {
+      assert.equal((await get(route)).status, 404, route);
+    }
+
+    const guest = await post('/channels/members', { channelId, kind: 'human', id: 'guest' });
+    assert.equal(guest.status, 201);
+    assert.equal((await guest.json() as { participantId: string }).participantId, 'human:guest');
+    assert.equal((await post('/channels/members', { channelId, kind: 'pet', id: 'writer' })).status, 201);
+    assert.equal((await post('/channels/members', { channelId, kind: 'pet', id: 'ghost' })).status, 409);
+    assert.equal((await post('/channels/members', { channelId, kind: 'bot', id: 'x' })).status, 400);
+    assert.equal((await post('/channels/members/remove', { channelId, kind: 'pet', id: 'reviewer' })).status, 200);
+    const listed = await (await get(`/channels/members?channelId=${channelId}`)).json() as { members: Array<{ participantId: string }> };
+    assert.deepEqual(listed.members.map(member => member.participantId), ['human:studio-operator', 'human:guest', 'pet:writer']);
+    assert.equal((await post('/channels/messages', { channelId, body: 'gone', mentions: [{ participantId: 'pet:reviewer' }] })).status, 409);
+    const toHuman = await (await post('/channels/messages', { channelId, body: '[@guest](participant:human:guest) FYI' })).json() as { deliveries: ChannelDelivery[] };
+    assert.deepEqual(toHuman.deliveries, [{ participantId: 'human:guest', state: 'delivered' }]);
+    assert.equal(dispatched.length, 1, 'addressing a human dispatches nothing');
+
+    // A Channel the operator never joined is invisible and closed to it.
+    const other = channel.service.createChannel({ kind: 'human', id: 'someone-else' }, { title: 'Private', pets: ['reviewer'] }).channel.channelId;
+    const listing = await (await get('/channels')).json() as { channels: Array<{ channelId: string }>; viewerParticipantId: string };
+    assert.deepEqual(listing.channels.map(item => item.channelId), [channelId]);
+    for (const route of ['context', 'members', 'sessions']) assert.equal((await get(`/channels/${route}?channelId=${other}`)).status, 403, route);
+    for (const [route, body] of [
+      ['/channels/messages', { body: 'let me in', mentions: [{ participantId: 'pet:reviewer' }] }],
+      ['/channels/update', { title: 'Taken' }],
+      ['/channels/members', { kind: 'human', id: 'studio-operator' }],
+      ['/channels/members/remove', { kind: 'human', id: 'someone-else' }],
+    ] as const) assert.equal((await post(route, { channelId: other, ...body })).status, 403, route);
+    assert.equal((await get('/channels/context?channelId=missing')).status, 404);
+    assert.equal(dispatched.length, 1);
+
+    const sameInput = { channelId, body: 'Same text, two new messages', mentions: [{ participantId: 'pet:writer' }] };
     const independent = await Promise.all([post('/channels/messages', sameInput), post('/channels/messages', sameInput)]);
     assert.ok(independent.every(response => response.status === 201));
     const messages = await Promise.all(independent.map(response => response.json() as Promise<ChannelMessage>));
     assert.notEqual(messages[0]!.messageId, messages[1]!.messageId);
-    assert.equal(dispatches, 4, 'independent messages have distinct identities; equal text is not an execution retry');
+    assert.equal(dispatched.length, 3, 'independent messages have distinct identities; equal text is not a retry');
+    assert.equal(new Set(dispatched.slice(1).map(item => item.session!.id)).size, 1);
   } finally { await studio.shutdown(); }
 });
 
-test('real resident queue binds tools to current Channel and Pet, rejects spoofing and metadata fallback', async () => {
+test('real resident queue binds tools to current Channel and Pet, rejects spoofing, non-members and metadata fallback', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'channel-resident-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   const channel = createChannelPlugin({ httpRoute: false });
-  assert.ok(!channel.toolkits[0]!.tools.some((entry) => entry.tool.name === 'channel_send_message'));
-  const read = channel.toolkits[0]!.tools.find((entry) => entry.tool.name === 'channel_read_context')!.tool;
+  assert.deepEqual(channel.toolkits[0]!.tools.map((entry) => entry.tool.name), ['channel_read_context']);
+  const read = channel.toolkits[0]!.tools[0]!.tool;
   const failures: unknown[] = [];
-  const snapshots: Array<{ channel: { channelId: string; scope: string } }> = [];
+  const snapshots: Array<{ channel: { channelId: string; description?: string }; members: Array<{ participantId: string }> }> = [];
   const threads: string[] = [];
   let started = false;
   let release!: () => void;
@@ -116,83 +162,109 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     pets: [{ registration: { petId: 'executor', name: 'Executor' }, dispatch: host.resident.dispatch }], plugins: [channel],
   });
   try {
-    const author = { kind: 'human', id: 'owner' } as const;
-    const a = channel.service.createChannel({ title: 'A', goal: 'A goal', scope: 'A scope' }, author);
-    const b = channel.service.createChannel({ title: 'B', goal: 'B goal', scope: 'B scope' }, author);
+    const owner = { kind: 'human', id: 'owner' } as const;
+    const a = channel.service.createChannel(owner, { title: 'A', pets: ['executor'] }).channel.channelId;
+    const b = channel.service.createChannel(owner, { title: 'B', description: 'B before', pets: ['executor'] }).channel.channelId;
+    const outside = channel.service.createChannel(owner, { title: 'Not joined', pets: [] }).channel.channelId;
     await assert.rejects(read.invoke({}), /Host-admitted/);
-    const scope: PetInvocationScope = { namespace: 'channel', id: a.channelId };
+    const scope: PetInvocationScope = { namespace: 'channel', id: a };
     await studio.dispatch({ petId: 'executor', request: 'first', scope });
     await waitFor(() => started);
-    await studio.dispatch({ petId: 'executor', request: 'second', scope: { namespace: 'channel', id: b.channelId } });
-    await studio.dispatch({ petId: 'executor', request: 'unscoped', metadata: { channelId: a.channelId } });
-    (scope as { id: string }).id = b.channelId;
-    channel.service.reviseChannel(b.channelId, { title: 'B', goal: 'B goal', scope: 'B revised while queued', expectedRevision: b.sequence, reason: 'New input' }, author);
+    await studio.dispatch({ petId: 'executor', request: 'second', scope: { namespace: 'channel', id: b } });
+    await studio.dispatch({ petId: 'executor', request: 'unscoped', metadata: { channelId: a } });
+    await studio.dispatch({ petId: 'executor', request: 'not a member', scope: { namespace: 'channel', id: outside } });
+    (scope as { id: string }).id = b;
+    channel.service.updateChannel(owner, b, { description: 'B revised while queued' });
     release();
-    await waitFor(() => snapshots.length + failures.length === 3);
-    assert.deepEqual(snapshots.map(item => item.channel.channelId), [a.channelId, b.channelId]);
-    assert.equal(snapshots[1]?.channel.scope, 'B revised while queued');
+    await waitFor(() => snapshots.length + failures.length === 4);
+    assert.deepEqual(snapshots.map(item => item.channel.channelId), [a, b]);
+    assert.equal(snapshots[1]?.channel.description, 'B revised while queued');
+    assert.deepEqual(snapshots[0]?.members.map(member => member.participantId), ['human:owner', 'pet:executor']);
     assert.equal(new Set(threads).size, 1, 'same Session serves distinct Channel scopes');
-    assert.equal(failures.length, 1);
+    assert.equal(failures.length, 2);
     assert.match(String(failures[0]), /Host-admitted/);
+    assert.ok(failures[1] instanceof ChannelAccessError, 'a Pet reads only Channels it belongs to');
     await assert.rejects(read.invoke({}), /Host-admitted/);
-    assert.equal(channel.service.readHistory(a.channelId).entries.length, 1);
-    assert.equal(channel.service.readHistory(b.channelId).entries.length, 2);
+    for (const id of [a, b]) assert.equal(channel.service.readContext(owner, id).messages.length, 0);
   } finally { release(); await host.close(); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('storage failure is observable and interrupt history is operator-only, read-only HTTP', async () => {
-  const channel = createChannelPlugin();
-  const http = createStudioHttpPlugin({ port: 0, authToken: 'notification-test' });
-  const studio = await createStudio({ studioId: 'notification', entryPetId: 'one', plugins: [channel, http], pets: [{
-    registration: { petId: 'one', name: 'One' }, dispatch: {
-      getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
-      onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
-    },
-  }] });
-  const events: Array<{ type: string; payload?: unknown }> = [];
+test('a Pet message is its Channel session public reply, written once, handed off through the mention path; failures are only events', async () => {
+  const dispatched: Dispatched[] = [];
+  const channel = createChannelPlugin({ httpRoute: false });
+  const studio = await createStudio({ studioId: 'pet-message', entryPetId: 'one', plugins: [channel],
+    pets: [fakePet('one', dispatched), fakePet('two', dispatched)] });
+  const events: Array<{ type: string; payload?: any }> = [];
   studio.subscribe(event => { events.push(event); });
-  const base = `http://127.0.0.1:${http.address()!.port}`;
-  const headers = { Authorization: 'Bearer notification-test' };
   try {
-    const id = channel.service.createChannel({ title: 'Goal', goal: 'Long term', scope: 'Round' }, { kind: 'human', id: 'owner' }).channelId;
-    const binding = channel.service.reserveBinding(id, 'one', () => 'one:12345678');
-    const source = { petId: 'one', sessionId: binding.sessionId, invocationId: 'waiting' };
-    const pendingInterrupt = { interruptId: 'i', payload: { kind: 'human_review', interactions: [{
-      interactionId: 'review', schemaVersion: 2, view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', batchSubmission: 'immediate' }],
-    }] } };
-    studio.notify({ source: 'resident-pet', type: 'dispatch.waiting', occurredAt: new Date().toISOString(),
-      payload: { ...source, scope: { namespace: 'channel', id }, pendingInterrupt } });
-    await waitFor(() => channel.service.readInterruptNotifications(id).notifications.length === 1);
-    assert.equal((await fetch(`${base}/channels/interrupts?channelId=${id}`)).status, 401);
-    const response = await fetch(`${base}/channels/interrupts?channelId=${id}`, { headers });
-    assert.equal(response.status, 200);
-    const page = await response.json() as { notifications: Array<{ pendingInterrupt: unknown; source: unknown }> };
-    assert.deepEqual(page.notifications[0]?.pendingInterrupt, pendingInterrupt);
-    assert.deepEqual(page.notifications[0]?.source, source);
-    assert.equal((await fetch(`${base}/channels/interrupts?channelId=${id}`, { method: 'POST', headers })).status, 405);
-    const context = await (await fetch(`${base}/channels/context?channelId=${id}`, { headers })).json();
-    assert.ok(!JSON.stringify(context).includes('pendingInterrupt'));
-    studio.notify({ source: 'resident-pet', type: 'dispatch.failed', occurredAt: new Date().toISOString(),
-      payload: { ...source, invocationId: 'provider-failure', scope: { namespace: 'channel', id }, error: 'Provider rejected request (403).' } });
-    await waitFor(() => channel.service.readExecutions(id).executions.some(item => item.state === 'failed'));
-    assert.equal((await fetch(`${base}/channels/executions?channelId=${id}`)).status, 401);
-    const executionResponse = await fetch(`${base}/channels/executions?channelId=${id}`, { headers });
-    assert.equal(executionResponse.status, 200);
-    const executionPage = await executionResponse.json() as { executions: Array<{ state: string; error?: string; sessionId: string }> };
-    assert.equal(executionPage.executions.find(item => item.state === 'failed')?.error, 'Provider rejected request (403).');
-    assert.ok(executionPage.executions.every(item => item.sessionId === binding.sessionId));
-    assert.equal((await fetch(`${base}/channels/executions?channelId=${id}`, { method: 'POST', headers })).status, 405);
-    channel.service.recordOutput = () => { throw new Error('disk unavailable'); };
-    studio.notify({ source: 'resident-pet', type: 'dispatch.completed', occurredAt: new Date().toISOString(),
-      payload: { ...source, scope: { namespace: 'channel', id }, reply: 'not saved' } });
-    await waitFor(() => events.some(event => event.type === 'channel.delivery_failed'));
-    assert.deepEqual(events.find(event => event.type === 'channel.delivery_failed')?.payload,
-      { channelId: id, ...source, eventType: 'dispatch.completed', error: 'disk unavailable' });
-    assert.equal(channel.service.readHistory(id).entries.length, 1);
-    channel.service.recordInterrupt = () => { throw new Error('notice disk unavailable'); };
-    studio.notify({ source: 'resident-pet', type: 'dispatch.waiting', occurredAt: new Date().toISOString(),
-      payload: { ...source, scope: { namespace: 'channel', id }, pendingInterrupt } });
-    await waitFor(() => events.filter(event => event.type === 'channel.delivery_failed').length === 2);
+    const { operator } = channel;
+    const id = channel.service.createChannel(operator, { title: 'Goal', pets: ['one', 'two'] }).channel.channelId;
+    const { deliveries: [delivery] } = await channel.sendMessage(id, { body: 'Start', mentions: [{ participantId: 'pet:one' }] });
+    const sessionId = delivery!.sessionId!;
+    const petMessages = () => channel.service.readContext(operator, id).messages.filter(message => message.author.kind === 'pet');
+    const failures = () => events.filter(event => event.type === 'channel.message_failed').map(event => event.payload);
+    const emit = (message: Record<string, unknown>, payload: Record<string, unknown> = {}) => studio.notify({
+      source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
+      payload: { petId: 'one', invocationId: delivery!.invocationId, sessionId, scope: { namespace: 'channel', id }, message, ...payload },
+    });
+    const completed = (messageId: string, text: string) => ({ type: 'message.completed', messageId, role: 'assistant', text });
+    const handoff = 'Over to [@Two](participant:pet:two).';
+    emit({ type: 'message.tool_calls', messageId: 'tool-1', text: handoff, toolCalls: [{ id: 'c', name: 'plan_request', args: {} }] });
+    emit({ type: 'tool_call.settled', messageId: 'tool-1', toolCallId: 'c', status: 'completed' });
+    emit(completed('empty', '  '));
+    emit(completed('reply-1', handoff));
+    await waitFor(() => petMessages().length === 1 && dispatched.length === 2);
+    assert.deepEqual(petMessages().map(message => [message.author, message.externalRef, message.body, message.mentions]),
+      [[{ kind: 'pet', id: 'one' }, 'reply-1', handoff, [{ participantId: 'pet:two', label: 'Two' }]]]);
+    const input = readChannelTestInput(dispatched[1]!.request);
+    assert.deepEqual([input.author, input.messageId], [{ participantId: 'pet:one', kind: 'pet' }, petMessages()[0]!.messageId]);
+    assert.deepEqual(dispatched[1]!.session, { id: channel.service.getSession(id, 'two')!.sessionId, create: true });
+    await waitFor(() => events.some(event => event.type === 'channel.delivery' && event.payload.participantId === 'pet:two'));
+    assert.equal(events.find(event => event.type === 'channel.delivery' && event.payload.participantId === 'pet:two')!.payload.state, 'accepted');
+
+    emit(completed('reply-1', handoff));
+    emit(completed('reply-3', 'Not a Channel run.'), { scope: undefined });
+    emit(completed('reply-2', 'Not from the bound session.'), { sessionId: 'one:forged' });
+    await waitFor(() => failures().length === 1);
+    channel.service.removeMember(operator, id, { kind: 'pet', id: 'one' });
+    emit(completed('reply-4', 'After leaving.'));
+    await waitFor(() => failures().length === 2);
+    assert.deepEqual(failures().map(payload => [payload.externalRef, payload.petId, payload.sessionId]),
+      [['reply-2', 'one', 'one:forged'], ['reply-4', 'one', sessionId]]);
+    assert.match(failures()[0].error, /session does not match/);
+    assert.match(failures()[1].error, /not a member/);
+    channel.service.addMember(operator, id, { kind: 'pet', id: 'one' });
+    channel.service.postMessage = () => { throw new Error('disk unavailable'); };
+    emit(completed('reply-5', 'Not saved.'));
+    await waitFor(() => failures().length === 3);
+    assert.equal(failures()[2].error, 'disk unavailable');
+    assert.deepEqual(petMessages().map(message => message.externalRef), ['reply-1'], 'replays, tool calls and failed writes leave no message');
+    assert.equal(dispatched.length, 2, 'a replayed reply hands off once');
+  } finally { await studio.shutdown(); }
+});
+
+test('run sends a channel_task to a member Pet session without writing a Channel message', async () => {
+  const dispatched: Dispatched[] = [];
+  const channel = createChannelPlugin({ httpRoute: false });
+  const studio = await createStudio({ studioId: 'run', entryPetId: 'one', plugins: [channel],
+    pets: [fakePet('one', dispatched), fakePet('two', dispatched)] });
+  try {
+    const id = channel.service.createChannel(channel.operator, { title: 'Ops', pets: ['one'] }).channel.channelId;
+    const origin = { kind: 'scheduler', id: 'nightly' } as const;
+    const receipt = await channel.run(` ${id} `, 'one', 'Nightly check', origin, { idempotencyKey: 'nightly:1' });
+    assert.equal(receipt.sessionId, channel.service.getSession(id, 'one')!.sessionId);
+    assert.deepEqual(await channel.run(id, 'one', 'Nightly check', origin, { idempotencyKey: 'nightly:1' }), receipt);
+    await channel.run(id, 'one', 'Triggered check', { kind: 'trigger', id: 'external-request' });
+    assert.deepEqual(dispatched.map(item => [item.session, item.scope]), [
+      [{ id: receipt.sessionId, create: true }, { namespace: 'channel', id }],
+      [{ id: receipt.sessionId }, { namespace: 'channel', id }],
+    ]);
+    assert.deepEqual(readChannelTestTask(dispatched[0]!.request), { type: 'channel_task', version: 1, channelId: id, origin, body: 'Nightly check' });
+    assert.deepEqual(readChannelTestTask(dispatched[1]!.request).origin, { kind: 'trigger', id: 'external-request' });
+    assert.deepEqual(channel.service.readContext(channel.operator, id).messages, []);
+    await assert.rejects(channel.run(id, 'two', 'Not a member', origin), ChannelAccessError);
+    await assert.rejects(channel.run(id, 'one', 'Bad origin', { kind: 'bot', id: 'x' } as never));
+    await assert.rejects(channel.run(id, 'one', '   ', origin));
+    assert.equal(dispatched.length, 2);
   } finally { await studio.shutdown(); }
 });

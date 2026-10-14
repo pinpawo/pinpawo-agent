@@ -86,9 +86,11 @@ instead open a separately deployed Console with `pinpawo-studio console --url
 
 ## Channel and migration
 
-The default template enables Channel. Its [current design](../../docs/design/studio/channel-addressing-and-execution.md)
-explains participant handoff, Reply defaults, trusted input and fixed sessions.
-Wiki maintenance requires an explicit request; dispatch completion is not goal acceptance.
+The default template enables Channel: a conversation among human and Pet members.
+Its [model](../../docs/design/studio/channel-model.md) and [addressing design](../../docs/design/studio/channel-addressing-and-execution.md)
+explain membership, member handoff, Reply defaults, trusted input and fixed sessions.
+Channels stored by earlier versions are not migrated. Wiki maintenance requires an
+explicit request; dispatch completion is not acceptance.
 
 Existing workdirs are never rewritten by startup or `init`. Follow the single
 [configuration migration guide](../../docs/studio/configuration.md#retired-kanban-workdirs),
@@ -101,11 +103,12 @@ start a Host, open Console, or connect an exclusive TUI client:
 
 ```sh
 pinpawo-studio channels list
-pinpawo-studio channels participants
+pinpawo-studio channels create --title "Release" --pet executor --pet reviewer
 pinpawo-studio channels read CHANNEL_ID --after 0 --limit 50
+pinpawo-studio channels members CHANNEL_ID
+pinpawo-studio channels add-member CHANNEL_ID --member pet:wiki
 pinpawo-studio channels send CHANNEL_ID --file message.md --mention PARTICIPANT_ID
-pinpawo-studio channels executions CHANNEL_ID
-pinpawo-studio channels interrupts CHANNEL_ID
+pinpawo-studio channels sessions CHANNEL_ID
 pinpawo-studio queues
 pinpawo-studio pets
 pinpawo-studio snapshot executor --full
@@ -118,15 +121,14 @@ pinpawo-studio send executor --file command.json
 Host and existing Bearer authority. Defaults are `http://127.0.0.1:3211`,
 `http://127.0.0.1:3212`, and `~/.pinpawo/local-server-token`. Connection flags
 may precede or follow operator commands; `--file -` reads stdin. Repeat
-`--mention` for registered participant IDs; `--reply-to` supplies a message
+`--mention` for current members' participant IDs; `--reply-to` supplies a message
 reference. `channels --help` lists the operator command contract.
 
 Output is JSON, with bounded live SSE observations emitted as JSON lines.
-Reads return one page and preserve `nextAfter`/`hasMore`; execution pages are
-mutable snapshots, so cursor advancement alone cannot track existing executions.
+Reads return one page and preserve `nextAfter`/`hasMore`.
 Commands do not retry. Dispatch accepts an optional `--idempotency-key`, scoped
 by the Host's process-local admission contract; Channel sends create a new
-message each time. Saved/accepted/completed does not establish goal acceptance.
+message each time. Saved/accepted/completed does not establish acceptance.
 
 The [Studio skill](../../skills/studio/SKILL.md) explains operator workflows,
 identity resolution and review boundaries. Its former Python helper has been

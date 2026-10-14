@@ -36,8 +36,8 @@ const host = async seed => {
     child.once('exit', code => { clearTimeout(timer); reject(Error('Host exited ' + code)); });
     child.stdout.on('data', data => {
       buffer += data;
-      for (const line of buffer.split('\n')) {
-        if (!line.startsWith('{')) continue;
+      for (const line of buffer.split('\n').slice(0, -1)) {
+        if (!line.startsWith('{"ready"')) continue;
         const result = JSON.parse(line);
         if (result.ready) { clearTimeout(timer); resolve(result); }
       }
@@ -59,15 +59,16 @@ try {
   };
   const channel = (await api('/channels')).channels[0];
   const context = () => api('/channels/context?channelId=' + channel.channelId + '&limit=200');
-  const execute = body => api('/channels/execute', { channelId: channel.channelId, petId: 'alpha', body });
+  const execute = body => api('/channels/messages', { channelId: channel.channelId, body, mentions: [{ participantId: 'pet:alpha' }] });
   const note = body => api('/channels/messages', { channelId: channel.channelId, body });
   const longBody = '# Investigation notes\n\n' + Array.from({ length: 12 }, (_, i) => 'Evidence ' + (i + 1) + ': ' + 'A complete paragraph of public findings. '.repeat(5)).join('\n\n')
     + '\n\n~~~ts\nconst veryLongLine = "' + 'stored-evidence-'.repeat(90) + '";\nconsole.log(veryLongLine);\n~~~\n\n| Record | Observation |\n| --- | --- |\n| A | Verified against the stated scope |';
   await note(longBody);
   await execute('Summarize public evidence.');
-  await until(async () => (await context()).history.entries.some(item => item.source?.petId === 'alpha'), 'public output');
+  await until(async () => (await context()).messages.some(item => item.author.kind === 'pet' && item.author.id === 'alpha'), 'public output');
   for (let i = 0; i < 18; i++) await note('Progress note ' + i + '. Evidence remains available for the next round.');
-  browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_CHANNEL ? { channel: process.env.CHANNEL_BROWSER_CHANNEL } : {}) });
+  browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_CHANNEL ? { channel: process.env.CHANNEL_BROWSER_CHANNEL } : {}),
+    ...(process.env.CHANNEL_BROWSER_EXECUTABLE ? { executablePath: process.env.CHANNEL_BROWSER_EXECUTABLE } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   const retiredRequests = [];
@@ -92,9 +93,8 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Reply to retired-pet', exact: true }).isDisabled(), false);
   assert.ok(await page.locator('.channel-message').filter({ hasText: 'Historical public delivery' }).getByText('Removed Pet', { exact: true }).count());
   const snapshot = await context();
-  const output = snapshot.history.entries.find(item => item.source?.petId === 'alpha');
-  const longMessage = snapshot.history.entries.find(item => item.body === longBody);
-  const execution = (await api('/channels/executions?channelId=' + channel.channelId)).executions.find(item => item.petId === 'alpha');
+  const output = snapshot.messages.find(item => item.author.kind === 'pet' && item.author.id === 'alpha');
+  const longMessage = snapshot.messages.find(item => item.body === longBody);
   const message = id => page.locator('[data-message-id="' + id + '"]');
   const focusIs = id => until(() => page.evaluate(id => document.activeElement?.id === id, id), 'focus ' + id);
   const fits = async () => {
@@ -105,7 +105,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1), true, 'document does not scroll');
   };
   await fits();
-  const shortWindowChannel = await api('/channels', { title: 'Short-window second Channel', goal: 'Verify independent scrolling.', scope: 'Layout fixture only.' });
+  const { channel: shortWindowChannel } = await api('/channels', { title: 'Short-window second Channel', description: 'Verify independent scrolling.', pets: [] });
   for (let i = 0; i < 20; i++) await api('/channels/messages', { channelId: shortWindowChannel.channelId, body: 'Second Channel evidence ' + i + '. ' + 'Review observation. '.repeat(20) });
   const layoutEvidence = [];
   for (const target of [channel, shortWindowChannel]) {
@@ -193,12 +193,11 @@ try {
   await page.getByRole('button', { name: 'knowledge', exact: true }).click();
   await page.getByRole('button', { name: 'channel', exact: true }).click();
   assert.equal(await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop), readingPosition, 'global navigation preserves an older reading position');
-  await message(output.messageId).getByRole('button', { name: 'View Analyst execution', exact: true }).click();
-  await focusIs('execution-' + execution.executionId);
-  await page.locator('[id="execution-' + execution.executionId + '"]').getByRole('button', { name: 'Locate request', exact: true }).click();
-  await focusIs('message-' + execution.messageId);
-  await page.locator('[id="execution-' + execution.executionId + '"]').getByRole('button', { name: 'Locate output', exact: true }).click();
-  await focusIs('message-' + output.messageId);
+  const sessionViewer = page.getByRole('dialog', { name: /session/ });
+  await message(output.messageId).getByRole('button', { name: 'View Analyst session', exact: true }).click();
+  await sessionViewer.getByText(output.body.split('\n')[0], { exact: false }).first().waitFor();
+  await page.keyboard.press('Escape');
+  await sessionViewer.waitFor({ state: 'detached' });
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
   await input.fill('Keep this draft when cancelling the reply.');
   assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);
@@ -210,8 +209,8 @@ try {
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
   await input.fill('Continue from the public reply.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await until(async () => (await context()).history.entries.some(item => item.replyTo === output.messageId), 'persisted reply');
-  const reply = (await context()).history.entries.find(item => item.replyTo === output.messageId);
+  await until(async () => (await context()).messages.some(item => item.replyTo === output.messageId), 'persisted reply');
+  const reply = (await context()).messages.find(item => item.replyTo === output.messageId);
   await message(reply.messageId).locator('.channel-quote').click();
   await focusIs('message-' + output.messageId);
   assert.equal(await message(reply.messageId).locator('.channel-quote').count(), 1);
@@ -226,14 +225,18 @@ try {
   assert.equal(await page.getByRole('dialog', { name: 'Create Channel' }).evaluate(node => node.contains(document.activeElement)), true);
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('button', { name: '+ New Channel', exact: true }).evaluate(node => document.activeElement === node), true);
-  await page.getByRole('button', { name: 'Hide execution details', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Channel details', exact: true }).click();
+  await page.getByRole('region', { name: 'Channel members' }).getByText('pet:alpha', { exact: true }).waitFor();
+  await fits();
+  await page.getByRole('button', { name: 'Hide Channel details', exact: true }).click();
   assert.equal(await page.locator('#channel-activity-panel').isVisible(), false);
   await fits();
   for (const width of [900, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await fits();
-    await page.getByRole('button', { name: 'Show execution details', exact: true }).click();
-    const drawer = page.getByRole('dialog', { name: 'Channel execution details', exact: true });
+    await page.getByRole('button', { name: 'Show Channel details', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'Channel details', exact: true });
+    await drawer.getByRole('region', { name: 'Channel members' }).getByText('pet:beta', { exact: true }).waitFor();
     await drawer.waitFor();
     await page.keyboard.press('Shift+Tab');
     assert.equal(await drawer.evaluate(node => node.contains(document.activeElement)), true, 'activity focus remains in drawer');
@@ -241,7 +244,7 @@ try {
     assert.equal(await drawer.evaluate(node => node.contains(document.activeElement)), true);
     await page.screenshot({ path: resolve(screenshots, '02-activity-' + width + '.png'), fullPage: true });
     await page.keyboard.press('Escape');
-    assert.equal(await page.getByRole('button', { name: 'Show execution details', exact: true }).evaluate(node => document.activeElement === node), true);
+    assert.equal(await page.getByRole('button', { name: 'Show Channel details', exact: true }).evaluate(node => document.activeElement === node), true);
     if (width <= 700) {
       await page.getByRole('button', { name: 'Show Channel navigation', exact: true }).click();
       const nav = page.getByRole('dialog', { name: 'Channel navigation', exact: true });
@@ -251,15 +254,13 @@ try {
       await page.getByRole('button', { name: 'Close panel', exact: true }).click({ position: { x: width - 10, y: 450 } });
       assert.equal(await page.getByRole('button', { name: 'Show Channel navigation', exact: true }).evaluate(node => document.activeElement === node), true);
     }
-    await message(output.messageId).getByRole('button', { name: 'View Analyst execution', exact: true }).click();
-    await focusIs('execution-' + execution.executionId);
-    await page.locator('[id="execution-' + execution.executionId + '"]').getByRole('button', { name: 'Locate output', exact: true }).click();
+    await message(reply.messageId).locator('.channel-quote').click();
     await focusIs('message-' + output.messageId);
-    assert.equal(await page.getByRole('dialog', { name: 'Channel execution details', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('dialog', { name: 'Channel details', exact: true }).count(), 0);
     await page.screenshot({ path: resolve(screenshots, '03-conversation-' + width + '.png'), fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const historyBeforeDispatch = (await context()).history.entries.length;
+  const historyBeforeDispatch = (await context()).messages.length;
   for (const name of ['scheduler', 'notice', 'trigger', 'knowledge']) {
     await page.getByRole('button', { name, exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'kanban', exact: true }).count(), 0);
@@ -275,7 +276,7 @@ try {
   assert.equal(standaloneRequests.length, 1, 'standalone dispatch retains its duplicate guard');
   assert.deepEqual(standaloneRequests[0], { petId: 'alpha', request: 'Standalone dispatch remains available.' });
   assert.equal(await direct.getByText('Check the Pet session for its reply and verify the requested outcome.', { exact: true }).count(), 1);
-  assert.equal((await context()).history.entries.length, historyBeforeDispatch, 'standalone dispatch cannot publish into Channel');
+  assert.equal((await context()).messages.length, historyBeforeDispatch, 'standalone dispatch cannot publish into Channel');
   await direct.getByRole('button', { name: 'Close dispatch', exact: true }).click();
   await page.getByRole('button', { name: 'channel', exact: true }).click();
   let rejectedWrites = 0;
@@ -290,7 +291,7 @@ try {
   assert.equal(await input.inputValue(), 'Keep rejected draft.');
   assert.equal(rejectedWrites, 1, 'rejected submission is not retried');
   await page.unroute(first.url + '/channels/messages');
-  const other = await api('/channels', { title: 'Separate layout', goal: 'A separate goal.', scope: 'A separate scope.' });
+  const { channel: other } = await api('/channels', { title: 'Separate layout', description: 'A separate conversation.', pets: ['alpha'] });
   await page.locator('.channel-list button').filter({ hasText: other.title }).waitFor();
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
   await input.fill('Channel A draft must not cross Channels.');
@@ -312,8 +313,6 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Cancel reply', exact: true }).count(), 0);
   await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
   await page.getByLabel('Channel title').fill('Host B fresh');
-  await page.getByLabel('Channel goal').fill('Independent goal.');
-  await page.getByLabel('Channel scope').fill('Independent scope.');
   await page.getByRole('button', { name: 'Create Channel', exact: true }).click();
   await input.waitFor();
   assert.equal(await input.inputValue(), '');
@@ -330,9 +329,9 @@ try {
   assert.deepEqual(retiredRequests, [], 'Console never requests retired Kanban API routes');
   console.log(JSON.stringify({ result: 'passed', modelCalls: 0, screenshots,
     coverage: ['long Markdown and internal code scrolling', 'fixed composer and independent timeline', 'SSE preserves older reading position',
-      'duplicate Pet names and removed Pet', 'real request/output association', 'reply cancel retains draft and focus', 'one-level quote location',
+      'duplicate Pet names and removed Pet', 'session view from a Pet message', 'reply cancel retains draft and focus', 'one-level quote location',
       'copy stored message ID', 'global navigation retains reading position', 'create modal keyboard focus', 'collapsible activity', '900/390/320px drawers and focus/Escape/backdrop',
-      'drawer execution/output focus', '833/400/300px heights across two Channels with document and column wheels', 'reachable composer controls without overlap', '200% zoom equivalent CSS viewport', '401 retains draft without retry', 'Channel and Host switch clear history/reply/draft/target', '404 plugin unavailable',
+      'member panel in drawers and quote focus', '833/400/300px heights across two Channels with document and column wheels', 'reachable composer controls without overlap', '200% zoom equivalent CSS viewport', '401 retains draft without retry', 'Channel and Host switch clear history/reply/draft/target', '404 plugin unavailable',
       'Channel default and navigation without Kanban', 'no Kanban API requests across pages/reload/Host switch', 'standalone dispatch duplicate guard and Channel isolation'] }));
 } finally {
   await browser?.close();

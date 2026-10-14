@@ -5,6 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 
 export type TriggerDeliveryStatus = 'dispatching' | 'accepted' | 'failed';
 
+/** Host's receipt for the run a delivery started; sessionId is set for a Channel run. */
+export type TriggerDeliveryReceipt = { invocationId: string; sessionId?: string };
+
 export type TriggerDelivery = {
   deliveryId: string;
   triggerId: string;
@@ -14,6 +17,7 @@ export type TriggerDelivery = {
   request?: string;
   status: TriggerDeliveryStatus;
   note?: string;
+  receipt?: TriggerDeliveryReceipt;
   occurredAt: string;
   updatedAt: string;
 };
@@ -41,6 +45,8 @@ type DeliveryRow = {
   request_text: string | null;
   status: TriggerDeliveryStatus;
   note: string | null;
+  invocation_id: string | null;
+  session_id: string | null;
   occurred_at: string;
   updated_at: string;
 };
@@ -70,6 +76,9 @@ function fromRow(row: DeliveryRow): TriggerDelivery {
     ...(row.request_text === null ? {} : { request: row.request_text }),
     status: row.status,
     ...(row.note === null ? {} : { note: row.note }),
+    ...(row.invocation_id === null ? {} : {
+      receipt: { invocationId: row.invocation_id, ...(row.session_id === null ? {} : { sessionId: row.session_id }) },
+    }),
     occurredAt: row.occurred_at,
     updatedAt: row.updated_at,
   };
@@ -110,6 +119,8 @@ export class TriggerService {
         request_text TEXT,
         status TEXT NOT NULL CHECK (status IN ('dispatching','accepted','failed')),
         note TEXT,
+        invocation_id TEXT,
+        session_id TEXT,
         occurred_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(trigger_id, idempotency_key)
@@ -132,6 +143,9 @@ export class TriggerService {
     }
     if (!columns.some(({ name }) => name === 'request_text')) {
       this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN request_text TEXT;');
+    }
+    if (!columns.some(({ name }) => name === 'invocation_id')) {
+      this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN invocation_id TEXT; ALTER TABLE trigger_deliveries ADD COLUMN session_id TEXT;');
     }
     this.initialized = true;
     for (const mutation of this.recoverInterrupted()) this.publish(mutation);
@@ -190,8 +204,8 @@ export class TriggerService {
     return { delivery, duplicate: false };
   }
 
-  async accept(deliveryId: string): Promise<TriggerDelivery> {
-    return this.transition(deliveryId, 'accepted', 'accepted');
+  async accept(deliveryId: string, receipt?: TriggerDeliveryReceipt): Promise<TriggerDelivery> {
+    return this.transition(deliveryId, 'accepted', 'accepted', undefined, receipt);
   }
 
   async fail(deliveryId: string, note: string): Promise<TriggerDelivery> {
@@ -329,6 +343,7 @@ export class TriggerService {
     status: 'accepted' | 'failed',
     eventType: 'accepted' | 'failed',
     note?: string,
+    receipt?: TriggerDeliveryReceipt,
   ): Promise<TriggerDelivery> {
     this.assertReady();
     const now = new Date().toISOString();
@@ -341,9 +356,10 @@ export class TriggerService {
         throw new Error(`Trigger delivery "${normalizedId}" is not dispatching.`);
       }
       this.database.prepare(`
-        UPDATE trigger_deliveries SET status = ?, note = ?, updated_at = ?
+        UPDATE trigger_deliveries SET status = ?, note = ?, updated_at = ?,
+          invocation_id = COALESCE(?, invocation_id), session_id = COALESCE(?, session_id)
         WHERE delivery_id = ?
-      `).run(status, note ?? null, now, normalizedId);
+      `).run(status, note ?? null, now, receipt?.invocationId ?? null, receipt?.sessionId ?? null, normalizedId);
       event = this.insertEvent(normalizedId, current.triggerId, eventType, status, note, now);
       this.database.exec('COMMIT;');
     } catch (error) {

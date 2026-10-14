@@ -29,8 +29,8 @@ class ScriptedModel extends BaseChatModel {
 const call = (name: string, args: Record<string, unknown>, id: string) =>
   new AIMessage({ content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
 
-async function waitFor(done: () => boolean) {
-  for (let i = 0; i < 1000; i++) { if (done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+async function waitFor(done: () => boolean | Promise<boolean>) {
+  for (let i = 0; i < 1000; i++) { if (await done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   throw new Error('Timed out waiting for final public reply.');
 }
 
@@ -59,7 +59,7 @@ test('capability handoff reaches Channel only through the selected final root re
   let arrivedAtFinal = false, release!: () => void, betaCalls = 0;
   const holdFinal = new Promise<void>(resolve => { release = resolve; });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
-  const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite'), httpRoute: false });
+  const channel = createChannelPlugin({ httpRoute: false });
   let studio: Awaited<ReturnType<typeof createStudio>> | undefined;
   try {
     const capabilitiesRoot = join(root, 'capabilities');
@@ -127,44 +127,45 @@ test('capability handoff reaches Channel only through the selected final root re
       }));
     }
     studio = await createStudio({ studioId: 'final-reply', entryPetId: 'acceptance-a', plugins: [channel],
+      storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),
     });
-    const id = channel.service.createChannel(channel.operator, { title: 'Plan', pets: ['acceptance-a', 'acceptance-b'] }).channel.channelId;
-    const outputs = () => channel.service.readContext(channel.operator, id, { limit: 200 }).messages.filter(message => message.author.kind === 'pet');
-    const alphaOutputs = () => outputs().filter(message => message.author.id === 'acceptance-a');
+    const id = (await channel.service.createChannel(channel.operator, { title: 'Plan', pets: ['acceptance-a', 'acceptance-b'] })).channel.channelId;
+    const outputs = async () => (await channel.service.readContext(channel.operator, id, { limit: 200 })).messages.filter(message => message.author.kind === 'pet');
+    const alphaOutputs = async () => (await outputs()).filter(message => message.author.id === 'acceptance-a');
     const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] });
     await send('Produce the plan and selected handoff.');
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
     // Tool-call messages (plan_request, delegate_capability) are the run's process: they stay in Agent Session.
-    assert.equal(outputs().length, 0, 'internal delivery, Supervisor work and tool calls are not published');
+    assert.equal((await outputs()).length, 0, 'internal delivery, Supervisor work and tool calls are not published');
     assert.equal(betaCalls, 0, 'internal @ is not a dispatch');
     release();
-    await waitFor(() => outputs().length === 2 && betaCalls === 1);
-    assert.equal(alphaOutputs()[0]!.body, handoff);
-    assert.deepEqual(alphaOutputs()[0]!.mentions.map(mention => mention.participantId), ['pet:acceptance-b']);
+    await waitFor(async () => (await outputs()).length === 2 && betaCalls === 1);
+    assert.equal((await alphaOutputs())[0]!.body, handoff);
+    assert.deepEqual((await alphaOutputs())[0]!.mentions.map(mention => mention.participantId), ['pet:acceptance-b']);
     for (let index = 1; index < replies.length; index++) {
       await send(`Produce plan variant ${index}.`);
-      await waitFor(() => alphaOutputs().length === index + 1);
-      assert.equal(alphaOutputs()[index]!.body, replies[index]);
-      assert.deepEqual(alphaOutputs()[index]!.mentions, [], 'code, quotes and unselected internal links remain inert');
+      await waitFor(async () => (await alphaOutputs()).length === index + 1);
+      assert.equal((await alphaOutputs())[index]!.body, replies[index]);
+      assert.deepEqual((await alphaOutputs())[index]!.mentions, [], 'code, quotes and unselected internal links remain inert');
       assert.equal(betaCalls, 1, 'the system never adds a handoff from the internal delivery');
     }
     await send('Now publish the chosen handoff directly.');
-    await waitFor(() => outputs().length === 7 && betaCalls === 2);
+    await waitFor(async () => (await outputs()).length === 7 && betaCalls === 2);
     assert.equal(boundaryDeliveries.length, 4, 'direct Entry reply does not repeat execution');
-    assert.equal(alphaOutputs().at(-1)!.body, handoff);
-    assert.ok(alphaOutputs().every(message => message.externalRef), 'each reply is keyed by its Agent Session message');
-    assert.equal(new Set(alphaOutputs().map(message => message.externalRef)).size, alphaOutputs().length);
-    assert.deepEqual(channel.service.listSessions(channel.operator, id).map(binding => [binding.petId, binding.registered]),
+    assert.equal((await alphaOutputs()).at(-1)!.body, handoff);
+    assert.ok((await alphaOutputs()).every(message => message.externalRef), 'each reply is keyed by its Agent Session message');
+    assert.equal(new Set((await alphaOutputs()).map(message => message.externalRef)).size, (await alphaOutputs()).length);
+    assert.deepEqual((await channel.service.listSessions(channel.operator, id)).map(binding => [binding.petId, binding.registered]),
       [['acceptance-a', true], ['acceptance-b', true]]);
-    assert.ok(outputs().every(message => !message.body.includes('Internal analysis only.')));
+    assert.ok((await outputs()).every(message => !message.body.includes('Internal analysis only.')));
     assert.deepEqual(['entry', 'supervisor', 'capability'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 16, 4]);
     assert.equal(seenContexts.filter(context => context.petId === 'acceptance-b' && context.stage === 'entry').length, 2);
     for (const { petId, input } of entryInputs) {
       assert.equal(input.channelId, id);
-      const stored = channel.service.getMessage(id, input.messageId)!;
+      const stored = (await channel.service.getMessage(id, input.messageId))!;
       assert.equal(input.body, stored.body);
       assert.deepEqual(input.author, petId === 'acceptance-a'
         ? { participantId: 'human:studio-operator', kind: 'human' }

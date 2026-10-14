@@ -12,4 +12,7 @@ export default defineConfig({
   clean: true,
   splitting: false,
   dts: true,
+  // Keep `node:sqlite`: it exists only under the node: scheme, and stripping the
+  // prefix turns it into an import of a missing `sqlite` package.
+  removeNodeProtocol: false,
 });

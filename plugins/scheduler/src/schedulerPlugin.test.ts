@@ -3,8 +3,10 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { createStudio, type StudioDispatchRequest } from '@pinpawo/studio';
-import { ChannelService, SqliteChannelStore, createChannelPlugin } from '@pinpawo-plugin/channel';
+import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio';
+import {
+  ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
+} from '@pinpawo-plugin/channel';
 import { createSchedulerPlugin } from './schedulerPlugin';
 import { SchedulerService } from './schedulerService';
 
@@ -86,6 +88,10 @@ test('Scheduler audits configured dispatch queues without changing their admissi
       expose: () => () => undefined,
       contribute: () => () => undefined,
     },
+    storage: {
+      dialect: 'sqlite',
+      open: async () => { throw new Error('not used'); },
+    },
   });
   t.after(() => plugin.stop?.());
 
@@ -107,7 +113,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
 
 test('a channel-bound schedule runs its Pet in the Channel without posting there, and keeps the receipt', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  const channel = createChannelPlugin({ httpRoute: false });
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
   const studio = await createStudio({
     studioId: 'scheduler-channel',
@@ -116,7 +122,7 @@ test('a channel-bound schedule runs its Pet in the Channel without posting there
     plugins: [scheduler, channel],
   });
   t.after(() => studio.shutdown());
-  const { channel: { channelId } } = channel.service.createChannel(channel.operator, { title: 'Ops', pets: ['reporter'] });
+  const { channel: { channelId } } = await channel.service.createChannel(channel.operator, { title: 'Ops', pets: ['reporter'] });
 
   const schedule = await scheduler.service.create({
     petId: 'reporter', channelId, request: 'Write the nightly report',
@@ -129,7 +135,7 @@ test('a channel-bound schedule runs its Pet in the Channel without posting there
   assert.ok(dispatched[0]?.session?.id);
   assert.match(dispatched[0]!.request, /"type": "channel_task"/);
   assert.match(dispatched[0]!.request, new RegExp(`"origin": \\{\\s*"kind": "scheduler",\\s*"id": "${schedule.scheduleId}"`));
-  assert.deepEqual(channel.service.readContext(channel.operator, channelId).messages, []);
+  assert.deepEqual((await channel.service.readContext(channel.operator, channelId)).messages, []);
   const stored = await scheduler.service.get(schedule.scheduleId);
   assert.equal(stored?.status, 'dispatched');
   assert.equal(stored?.receipt?.sessionId, dispatched[0]?.session?.id);
@@ -138,7 +144,7 @@ test('a channel-bound schedule runs its Pet in the Channel without posting there
 
 test('a channel-bound schedule fails when its Pet is not a member of the Channel', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const channel = createChannelPlugin({ databasePath: ':memory:', httpRoute: false });
+  const channel = createChannelPlugin({ httpRoute: false });
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
   const studio = await createStudio({
     studioId: 'scheduler-channel-member',
@@ -147,7 +153,7 @@ test('a channel-bound schedule fails when its Pet is not a member of the Channel
     plugins: [scheduler, channel],
   });
   t.after(() => studio.shutdown());
-  const { channel: { channelId } } = channel.service.createChannel(channel.operator, { title: 'Ops', pets: [] });
+  const { channel: { channelId } } = await channel.service.createChannel(channel.operator, { title: 'Ops', pets: [] });
 
   const schedule = await scheduler.service.create({
     petId: 'reporter', channelId, request: 'Write the nightly report',
@@ -190,12 +196,12 @@ for (const order of ['scheduler first', 'channel first'] as const) {
     const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-scheduler-restart-'));
     const databasePath = path.join(root, 'scheduler.sqlite');
     const channelPath = path.join(root, 'channels.sqlite');
-    const store = new SqliteChannelStore(channelPath);
-    store.init();
-    const { channel: { channelId } } = new ChannelService({ store, pets: () => [{ petId: 'reporter', name: 'reporter' }] })
+    const storage = createStudioStorage({ kind: 'sqlite', path: channelPath });
+    const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
+    const { channel: { channelId } } = await new ChannelService({ store, pets: () => [{ petId: 'reporter', name: 'reporter' }] })
       .createChannel({ kind: 'human', id: 'studio-operator' }, { title: 'Ops', pets: ['reporter'] });
-    store.close();
-    const channel = createChannelPlugin({ databasePath: channelPath, httpRoute: false });
+    await storage.close();
+    const channel = createChannelPlugin({ httpRoute: false });
     // Stored before the restart and already due when the Studio comes back.
     const offline = new SchedulerService(databasePath);
     await offline.init();
@@ -212,6 +218,7 @@ for (const order of ['scheduler first', 'channel first'] as const) {
       entryPetId: 'reporter',
       pets: [recordingPet('reporter', dispatched)],
       plugins: order === 'scheduler first' ? [scheduler, channel] : [channel, scheduler],
+      storage: { kind: 'sqlite', path: channelPath },
     });
     t.after(() => studio.shutdown());
     await new Promise((resolve) => setTimeout(resolve, 60));

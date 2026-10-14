@@ -15,12 +15,12 @@ import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/t
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 
-async function waitFor(done: () => boolean) {
-  for (let i = 0; i < 500; i++) { if (done()) return; await new Promise(r => setTimeout(r, 5)); }
+async function waitFor(done: () => boolean | Promise<boolean>) {
+  for (let i = 0; i < 500; i++) { if (await done()) return; await new Promise(r => setTimeout(r, 5)); }
   throw new Error('Timed out');
 }
 async function fixture(root: string, pets = ['one'], reply?: (input: string) => string) {
-  const channel = createChannelPlugin({ databasePath: join(root, 'channels.sqlite'), httpRoute: false });
+  const channel = createChannelPlugin({ httpRoute: false });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const calls: Array<{ petId: string; thread: string; text: string; count: number; input?: ChannelTestInput }> = [];
   let active = 0, maxActive = 0;
@@ -67,6 +67,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
     }));
   }
   const studio = await createStudio({ studioId: 'sessions', entryPetId: pets[0]!, plugins: [channel],
+    storage: { kind: 'sqlite', path: join(root, 'channels.sqlite') },
     pets: hosts.map((host, i) => ({ registration: { petId: pets[i]!, name: pets[i]! }, dispatch: host.resident.dispatch })),
   });
   const events: Array<{ type: string; payload?: any }> = [];
@@ -75,10 +76,10 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
     close: async () => { await Promise.all(hosts.map(h => h.close())); await studio.shutdown(); } };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-function outputs(f: Fixture, channelId: string) {
-  return f.channel.service.readContext(f.channel.operator, channelId, { limit: 200 }).messages.filter(m => m.author.kind === 'pet');
+async function outputs(f: Fixture, channelId: string) {
+  return (await f.channel.service.readContext(f.channel.operator, channelId, { limit: 200 })).messages.filter(m => m.author.kind === 'pet');
 }
-const open = (f: Fixture) => f.channel.service.createChannel(f.channel.operator, { title: 'Goal', pets: f.pets }).channel.channelId;
+const open = async (f: Fixture) => (await f.channel.service.createChannel(f.channel.operator, { title: 'Goal', pets: f.pets })).channel.channelId;
 const ask = (f: Fixture, channelId: string, petId: string, body: string, replyTo?: string) =>
   f.channel.sendMessage(channelId, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: `pet:${petId}` }] });
 /** The dispatch.message event a Channel message was written from. */
@@ -90,13 +91,13 @@ test('Markdown targets a legal special Pet identity without dispatching its regi
   const root = await mkdtemp(join(tmpdir(), 'channel-special-identity-'));
   const f = await fixture(root, ['a', 'a)b'], () => 'Special identity delivery.');
   try {
-    const id = open(f);
+    const id = await open(f);
     const result = await f.channel.sendMessage(id, { body: '[@Same name](participant:pet:a%29b) Inspect this.' });
     assert.deepEqual(result.deliveries.map(d => [d.participantId, d.state]), [['pet:a%29b', 'accepted']]);
-    await waitFor(() => outputs(f, id).length === 1);
+    await waitFor(async () => (await outputs(f, id)).length === 1);
     assert.deepEqual(f.calls.map(call => call.petId), ['a)b']);
-    assert.equal(outputs(f, id)[0]!.author.id, 'a)b');
-    assert.equal(f.channel.service.getSession(id, 'a'), undefined);
+    assert.equal((await outputs(f, id))[0]!.author.id, 'a)b');
+    assert.equal(await f.channel.service.getSession(id, 'a'), undefined);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -105,18 +106,18 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
   const pets = ['one', 'two', 'three', 'four'];
   let f = await fixture(root, pets);
   try {
-    const a = open(f);
-    const b = open(f);
+    const a = await open(f);
+    const b = await open(f);
     const first = await f.channel.sendMessage(` \t${a}\n `, { body: 'ask', mentions: pets.map(p => ({ participantId: `pet:${p}` })) });
-    await waitFor(() => outputs(f, a).length === 4);
-    const bindings = pets.map(p => f.channel.service.getSession(a, p)!);
+    await waitFor(async () => (await outputs(f, a)).length === 4);
+    const bindings = (await Promise.all(pets.map(p => f.channel.service.getSession(a, p)))).map(binding => binding!);
     assert.deepEqual(first.deliveries.map(d => [d.state, d.sessionId]), bindings.map(binding => ['accepted', binding.sessionId]));
     assert.equal(new Set(bindings.map(b => b.sessionId)).size, 4);
     assert.ok(f.maxActive() > 1, 'different Pets retain parallel execution');
-    const question = outputs(f, a).find(m => m.author.id === 'one')!;
+    const question = (await outputs(f, a)).find(m => m.author.id === 'one')!;
     await ask(f, ` ${a} `, 'one', 'staging', question.messageId);
-    await waitFor(() => outputs(f, a).length === 5);
-    assert.equal(outputs(f, a).at(-1)!.body, 'Answer 2: staging');
+    await waitFor(async () => (await outputs(f, a)).length === 5);
+    assert.equal((await outputs(f, a)).at(-1)!.body, 'Answer 2: staging');
     assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
       messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet' }, body: question.body,
     });
@@ -125,14 +126,14 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
     await assert.rejects(ask(f, b, 'one', 'wrong Channel', question.messageId), /reference/);
     await assert.rejects(ask(f, a, 'missing', 'unknown target', question.messageId), /Unknown/);
     await ask(f, b, 'one', 'new Channel');
-    await waitFor(() => outputs(f, b).length === 1);
+    await waitFor(async () => (await outputs(f, b)).length === 1);
     assert.equal(f.calls.length, 6, 'an unaddressed reply dispatches nobody');
-    assert.notEqual(f.channel.service.getSession(b, 'one')!.sessionId, bindings[0]!.sessionId);
+    assert.notEqual((await f.channel.service.getSession(b, 'one'))!.sessionId, bindings[0]!.sessionId);
     await f.close();
     f = await fixture(root, pets);
-    assert.deepEqual(pets.map(p => f.channel.service.getSession(a, p)), bindings);
+    assert.deepEqual(await Promise.all(pets.map(p => f.channel.service.getSession(a, p))), bindings);
     await Promise.all([ask(f, a, 'one', 'next task'), ask(f, a, 'one', 'another task')]);
-    await waitFor(() => outputs(f, a).length === 7);
+    await waitFor(async () => (await outputs(f, a)).length === 7);
     assert.deepEqual(f.calls.map(c => [c.thread, c.count]), [[bindings[0]!.sessionId, 3], [bindings[0]!.sessionId, 4]]);
     assert.equal(f.maxActive(), 1, 'same Pet remains serial');
     await f.close();
@@ -144,7 +145,7 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
     const { deliveries: [lost] } = await ask(f, a, 'one', 'must not recreate');
     assert.equal(lost!.state, 'failed');
     assert.match(lost!.error!, /no longer exists/);
-    assert.equal(f.channel.service.getSession(a, 'one')!.sessionId, bindings[0]!.sessionId);
+    assert.equal((await f.channel.service.getSession(a, 'one'))!.sessionId, bindings[0]!.sessionId);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -156,19 +157,19 @@ test('waiting target is skipped; background execution does not pollute active TU
     const initial = await host.interaction.snapshot();
     const observed: unknown[] = [];
     host.interaction.subscribe(m => observed.push(m));
-    const a = open(f);
-    const b = open(f);
+    const a = await open(f);
+    const b = await open(f);
     const waiting: string[] = [];
     const stop = host.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
     const { deliveries: [approval] } = await ask(f, a, 'one', 'approval');
     await waitFor(() => waiting.length === 1);
-    const binding = f.channel.service.getSession(a, 'one')!;
+    const binding = (await f.channel.service.getSession(a, 'one'))!;
     assert.deepEqual(waiting, [binding.sessionId]);
-    assert.equal(outputs(f, a).length, 0, 'a pending review is not a Channel message');
-    assert.ok(!JSON.stringify(f.channel.service.readContext(f.channel.operator, a)).includes('Authorize?'));
+    assert.equal((await outputs(f, a)).length, 0, 'a pending review is not a Channel message');
+    assert.ok(!JSON.stringify(await f.channel.service.readContext(f.channel.operator, a)).includes('Authorize?'));
     await ask(f, a, 'one', 'after approval');
     await ask(f, b, 'one', 'other session');
-    await waitFor(() => outputs(f, b).length === 1);
+    await waitFor(async () => (await outputs(f, b)).length === 1);
     assert.equal(f.calls.length, 1);
     assert.equal(observed.length, 0, 'background run does not enter active-session stream');
     const snapshot = await host.interaction.snapshot();
@@ -185,7 +186,7 @@ test('waiting target is skipped; background execution does not pollute active TU
     assert.ok(pending);
     assert.equal(pending.payload.kind, 'human_review');
     await ask(f, b, 'one', 'while active session awaits approval');
-    await waitFor(() => outputs(f, b).length === 2);
+    await waitFor(async () => (await outputs(f, b)).length === 2);
     const stillWaiting = await host.interaction.snapshot();
     if (stillWaiting.type !== 'session.snapshot.result') throw Error('snapshot');
     assert.equal(stillWaiting.snapshot.session.pendingInterrupt?.interruptId, pending.interruptId);
@@ -193,9 +194,9 @@ test('waiting target is skipped; background execution does not pollute active TU
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
     // Approving the review continues the original dispatch: its reply lands in
     // the Channel as the Pet's message, before the queued follow-up runs.
-    await waitFor(() => outputs(f, a).length === 2);
-    assert.deepEqual(outputs(f, a).map(m => m.body), ['Answer 1: approval', 'Answer 2: after approval']);
-    assert.deepEqual([replyOf(f, outputs(f, a)[0]!.externalRef)?.invocationId, replyOf(f, outputs(f, a)[0]!.externalRef)?.sessionId],
+    await waitFor(async () => (await outputs(f, a)).length === 2);
+    assert.deepEqual((await outputs(f, a)).map(m => m.body), ['Answer 1: approval', 'Answer 2: after approval']);
+    assert.deepEqual([replyOf(f, (await outputs(f, a))[0]!.externalRef)?.invocationId, replyOf(f, (await outputs(f, a))[0]!.externalRef)?.sessionId],
       [approval!.invocationId, binding.sessionId]);
     assert.ok(f.calls.some(call => call.text === 'approval' && call.thread === binding.sessionId), 'continuation keeps dispatch attribution');
     stop();
@@ -206,12 +207,12 @@ test('a review answered after Host restart still lands the dispatch result in it
   const root = await mkdtemp(join(tmpdir(), 'channel-restart-approval-'));
   let f = await fixture(root);
   try {
-    const a = open(f);
+    const a = await open(f);
     const waiting: string[] = [];
     f.hosts[0]!.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
     const { deliveries: [approval] } = await ask(f, a, 'one', 'approval');
     await waitFor(() => waiting.length === 1);
-    assert.equal(waiting[0], f.channel.service.getSession(a, 'one')!.sessionId);
+    assert.equal(waiting[0], (await f.channel.service.getSession(a, 'one'))!.sessionId);
     await f.close();
     f = await fixture(root);
     const host = f.hosts[0]!;
@@ -222,9 +223,9 @@ test('a review answered after Host restart still lands the dispatch result in it
     assert.ok(pending);
     await host.interaction.request({ type: 'interrupt.resume', requestId: 'approve', interruptId: pending.interruptId,
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
-    await waitFor(() => outputs(f, a).length === 1);
-    assert.equal(outputs(f, a)[0]?.body, 'Answer 1: approval');
-    assert.equal(replyOf(f, outputs(f, a)[0]!.externalRef)?.invocationId, approval!.invocationId);
+    await waitFor(async () => (await outputs(f, a)).length === 1);
+    assert.equal((await outputs(f, a))[0]?.body, 'Answer 1: approval');
+    assert.equal(replyOf(f, (await outputs(f, a))[0]!.externalRef)?.invocationId, approval!.invocationId);
     assert.equal(f.calls[0]?.thread, waiting[0], 'restored scope reaches the Channel session');
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
@@ -235,11 +236,11 @@ test('concurrent first use reserves one session; queued targets survive a TUI sw
   let release!: () => void;
   f.barrier.wait = new Promise<void>(resolve => { release = resolve; });
   try {
-    const a = open(f);
-    const b = open(f);
+    const a = await open(f);
+    const b = await open(f);
     const sent = await Promise.all([ask(f, a, 'one', 'first'), ask(f, a, 'one', 'second')]);
     await waitFor(() => f.active() === 1);
-    const binding = f.channel.service.getSession(a, 'one')!;
+    const binding = (await f.channel.service.getSession(a, 'one'))!;
     assert.deepEqual(sent.map(result => result.deliveries[0]!.sessionId), [binding.sessionId, binding.sessionId]);
     const snapshot = await f.hosts[0]!.interaction.snapshot();
     if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
@@ -248,8 +249,8 @@ test('concurrent first use reserves one session; queued targets survive a TUI sw
     const switched = f.hosts[0]!.interaction.request({ type: 'session.new', requestId: 'new-tui' });
     f.barrier.wait = undefined; release();
     await switched;
-    await waitFor(() => outputs(f, a).length === 2 && outputs(f, b).length === 1);
-    assert.deepEqual(f.calls.map(c => c.thread), [binding.sessionId, binding.sessionId, f.channel.service.getSession(b, 'one')!.sessionId]);
+    await waitFor(async () => (await outputs(f, a)).length === 2 && (await outputs(f, b)).length === 1);
+    assert.deepEqual(f.calls.map(c => c.thread), [binding.sessionId, binding.sessionId, (await f.channel.service.getSession(b, 'one'))!.sessionId]);
     assert.equal(f.maxActive(), 1);
     await assert.rejects(f.hosts[0]!.resident.dispatch.dispatch({ request: 'wrong pet', session: { id: 'other:12345678', create: true } }), /identity/);
   } finally { release(); await f.close(); await rm(root, { recursive: true, force: true }); }
@@ -260,8 +261,8 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
   const file = join(root, 'channels.sqlite');
   let fail = true;
   const targets: string[] = [];
-  let channel = createChannelPlugin({ databasePath: file, httpRoute: false });
-  const create = () => createStudio({ studioId: 'retry', entryPetId: 'one', plugins: [channel], pets: [{
+  let channel = createChannelPlugin({ httpRoute: false });
+  const create = () => createStudio({ studioId: 'retry', entryPetId: 'one', plugins: [channel], storage: { kind: 'sqlite', path: file }, pets: [{
     registration: { petId: 'one', name: 'One' }, dispatch: {
       getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
@@ -270,20 +271,20 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
   }] });
   let studio = await create();
   try {
-    const id = channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] }).channel.channelId;
+    const id = (await channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] })).channel.channelId;
     const start = { body: 'start', mentions: [{ participantId: 'pet:one' }] };
     const { deliveries: [failed] } = await channel.sendMessage(id, start);
     assert.equal(failed!.state, 'failed');
     assert.match(failed!.error!, /unavailable/);
-    const reserved = channel.service.getSession(id, 'one')!;
+    const reserved = (await channel.service.getSession(id, 'one'))!;
     assert.equal(reserved.registered, false);
     await studio.shutdown();
-    channel = createChannelPlugin({ databasePath: file, httpRoute: false });
+    channel = createChannelPlugin({ httpRoute: false });
     studio = await create(); fail = false;
     const { deliveries: [retried] } = await channel.sendMessage(id, { ...start, body: 'retry' });
     assert.deepEqual([retried!.state, retried!.sessionId], ['accepted', reserved.sessionId]);
     assert.deepEqual(targets, [reserved.sessionId, reserved.sessionId]);
-    assert.equal(channel.service.getSession(id, 'one')!.registered, true);
+    assert.equal((await channel.service.getSession(id, 'one'))!.registered, true);
     const events: Array<{ type: string; payload?: any }> = [];
     studio.subscribe(event => { events.push(event); });
     const reply = (sessionId: string) => studio.notify({ source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
@@ -292,7 +293,7 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
     reply(reserved.sessionId); reply(reserved.sessionId); reply('one:forged');
     // Events reach the Channel in order: once the forged one has failed, the replay was handled.
     await waitFor(() => events.some(event => event.type === 'channel.message_failed'));
-    const messages = channel.service.readContext(channel.operator, id).messages.filter(message => message.author.kind === 'pet');
+    const messages = (await channel.service.readContext(channel.operator, id)).messages.filter(message => message.author.kind === 'pet');
     assert.deepEqual(messages.map(message => [message.body, message.externalRef]), [['Which destination?', 'reply-1']]);
   } finally { await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
@@ -302,30 +303,30 @@ test('a bound session alone does not publish; scope mismatch and a departed Pet 
   const f = await fixture(root);
   try {
     assert.deepEqual(f.channel.toolkits.flatMap(t => t.tools).map(t => t.tool.name), ['channel_read_context']);
-    const a = open(f);
-    const b = open(f);
+    const a = await open(f);
+    const b = await open(f);
     const { deliveries: [first] } = await ask(f, a, 'one', 'ask');
     const sessionId = first!.sessionId!;
-    await waitFor(() => outputs(f, a).length === 1);
+    await waitFor(async () => (await outputs(f, a)).length === 1);
     const receipt = await f.studio.dispatch({ petId: 'one', request: 'not public', session: { id: sessionId }, metadata: { channelId: a } });
     await waitFor(() => f.events.some(e => e.type === 'dispatch.completed' && e.payload.invocationId === receipt.invocationId));
-    assert.equal(outputs(f, a).length, 1);
+    assert.equal((await outputs(f, a)).length, 1);
     await f.studio.dispatch({ petId: 'one', request: 'wrong destination', session: { id: sessionId }, scope: { namespace: 'channel', id: b } });
     await waitFor(() => failures(f).length === 1);
     assert.deepEqual([failures(f)[0].channelId, failures(f)[0].sessionId], [b, sessionId]);
     assert.match(failures(f)[0].error, /session does not match/);
-    assert.equal(outputs(f, b).length, 0);
-    f.channel.service.removeMember(f.channel.operator, a, { kind: 'pet', id: 'one' });
+    assert.equal((await outputs(f, b)).length, 0);
+    await f.channel.service.removeMember(f.channel.operator, a, { kind: 'pet', id: 'one' });
     await f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } });
     await waitFor(() => failures(f).length === 2);
     assert.deepEqual([failures(f)[1].channelId, failures(f)[1].petId], [a, 'one']);
     assert.match(failures(f)[1].error, /not a member/);
-    assert.equal(outputs(f, a).length, 1);
+    assert.equal((await outputs(f, a)).length, 1);
     const waiting: string[] = [];
     f.hosts[0]!.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
     await ask(f, b, 'one', 'approval');
     await waitFor(() => waiting.length === 1);
-    assert.equal(outputs(f, b).length, 0);
-    assert.ok(!/interruptId|Authorize\?/.test(JSON.stringify(f.channel.service.readContext(f.channel.operator, b))));
+    assert.equal((await outputs(f, b)).length, 0);
+    assert.ok(!/interruptId|Authorize\?/.test(JSON.stringify(await f.channel.service.readContext(f.channel.operator, b))));
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });

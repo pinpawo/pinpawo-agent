@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { createStudio, type StudioDispatchRequest } from '@pinpawo/studio';
-import { ChannelService, SqliteChannelStore, createChannelPlugin } from '@pinpawo-plugin/channel';
+import { test, type TestContext } from 'node:test';
+import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio';
+import {
+  ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
+} from '@pinpawo-plugin/channel';
 import { createTriggerPlugin } from './triggerPlugin';
 
 /** Trigger rules name their Channel up front, so it exists before the Studio starts. */
-function seedChannel(petIds: string[]) {
-  const store = new SqliteChannelStore(':memory:');
-  store.init();
+async function seedChannel(t: TestContext, petIds: string[]) {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
   const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })) });
-  const { channel: { channelId } } = service.createChannel({ kind: 'human', id: 'studio-operator' }, { title: 'Ops', pets: petIds });
+  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'studio-operator' }, { title: 'Ops', pets: petIds });
   return { channelId, channel: createChannelPlugin({ store, httpRoute: false }), service };
 }
 
@@ -186,7 +189,7 @@ test('Trigger request templates reject invalid expressions and duplicate context
 
 test('a channel-bound Trigger runs its Pet in the Channel without posting there, and keeps the receipt', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const { channelId, channel, service } = seedChannel(['reporter']);
+  const { channelId, channel, service } = await seedChannel(t, ['reporter']);
   const trigger = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -220,7 +223,7 @@ test('a channel-bound Trigger runs its Pet in the Channel without posting there,
   assert.match(input!.request, /"type": "channel_task"/);
   assert.match(input!.request, /"origin": \{\s*"kind": "trigger",\s*"id": "nightly-report"/);
   assert.match(input!.request, /Report on task-7/);
-  assert.deepEqual(service.readContext({ kind: 'human', id: 'studio-operator' }, channelId).messages, []);
+  assert.deepEqual((await service.readContext({ kind: 'human', id: 'studio-operator' }, channelId)).messages, []);
   const [delivery] = (await trigger.service.snapshot()).deliveries;
   assert.equal(delivery?.status, 'accepted');
   assert.equal(delivery?.receipt?.sessionId, input?.session?.id);
@@ -258,7 +261,7 @@ test('a channel-bound Trigger fails its delivery when no Channel Plugin runs', a
 
 test('event data in a channel-bound request addresses nobody: it reaches only the rule target', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const { channelId, channel, service } = seedChannel(['reporter', 'other']);
+  const { channelId, channel, service } = await seedChannel(t, ['reporter', 'other']);
   const trigger = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -286,7 +289,7 @@ test('event data in a channel-bound request addresses nobody: it reaches only th
   // The request is the target's task, not a Channel message: a link in it addresses no one.
   assert.equal(dispatched.length, 1);
   assert.match(dispatched[0]!.request, /"type": "channel_task"/);
-  assert.deepEqual(service.readContext({ kind: 'human', id: 'studio-operator' }, channelId).messages, []);
+  assert.deepEqual((await service.readContext({ kind: 'human', id: 'studio-operator' }, channelId)).messages, []);
   const [delivery] = (await trigger.service.snapshot()).deliveries;
   assert.equal(delivery?.status, 'accepted');
 });

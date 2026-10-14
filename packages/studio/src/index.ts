@@ -21,6 +21,14 @@ export type {
   StudioPluginHooks,
 } from './studioContract';
 export { StudioPetUnavailableError } from './studioContract';
+export { createStudioStorage } from './storage/studioStorage';
+export type {
+  StudioMigrations,
+  StudioPluginStorage,
+  StudioStorage,
+  StudioStorageConfig,
+  StudioStorageDialect,
+} from './storage/studioStorage';
 export { parseStudioDispatchRequest } from './studioInvocation';
 export type { StudioWireDispatchRequest } from './studioInvocation';
 
@@ -32,6 +40,7 @@ export type {
   ResolvedStudio,
   StudioLocalConfig,
   StudioPluginConfig,
+  StudioStorageSettings,
 } from './configSchema';
 
 export * from './types';
@@ -43,6 +52,7 @@ export type { StudioHostOptions } from './host/StudioHost';
 export {
   buildStudio,
   resolveStudioHostConfig,
+  resolveStudioStorage,
   StudioNotConfiguredError,
 } from './host/buildStudio';
 export type {

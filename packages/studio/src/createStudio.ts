@@ -16,12 +16,15 @@ import type {
 import type { StudioPetBinding, StudioPetRegistration } from './types';
 import { StudioEventBus } from './studioEventBus';
 import { StudioPluginHookRegistry } from './studioPluginHooks';
+import { createStudioStorage, type StudioStorageConfig } from './storage/studioStorage';
 
 export type CreateStudioInput = {
   studioId: string;
   pets: StudioPetBinding[];
   entryPetId: string;
   plugins?: StudioPlugin[];
+  /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
+  storage?: StudioStorageConfig;
 };
 
 export type PreparedStudio = {
@@ -60,6 +63,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const idempotencyRecords = new Map<string, Promise<StudioDispatchReceipt>>();
   const stopDispatchLifecycleObservers: Array<() => void> = [];
   const pluginHooks = new StudioPluginHookRegistry();
+  const storage = createStudioStorage(input.storage ?? { kind: 'sqlite', path: ':memory:' });
   const startedPlugins: StudioPlugin[] = [];
   let activationPromise: Promise<void> | null = null;
   let shutdownPromise: Promise<void> | null = null;
@@ -189,6 +193,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       listDispatchQueues,
       petSessions,
       hooks: pluginHooks.contextFor(plugin.name),
+      storage: {
+        dialect: storage.dialect,
+        open: (migrations) => storage.open(plugin.name, migrations),
+      },
     };
   }
 
@@ -215,6 +223,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     for (const stop of stopDispatchLifecycleObservers.splice(0)) stop();
     await eventBus.close();
     idempotencyRecords.clear();
+    // After every Plugin stopped: none of them may still be writing.
+    await storage.close().catch((error: unknown) => {
+      console.error('[studio] storage failed to close:', error instanceof Error ? error.message : error);
+    });
   }
 
   async function activatePlugins(): Promise<void> {

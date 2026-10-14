@@ -44,8 +44,11 @@ publishing another accepted event. Simultaneous submissions share the pending
 admission Promise. Keys are scoped to producer and Pet; a failed admission releases
 the process-local reservation. This is not a durable replay or exactly-once guarantee.
 
-Plugins receive `dispatch`, `notify`, `subscribe`, `listPets`, `listDispatchQueues`, and Plugin
-hook installation. A Plugin may define Toolkits, but it cannot construct a Pet,
+Plugins receive `dispatch`, `notify`, `subscribe`, `listPets`, `listDispatchQueues`, Plugin
+hook installation, and `storage`: `storage.open(migrations)` applies the Plugin's pending
+migrations in the shared Studio database (SQLite or Postgres, set by `studio.json` `storage`)
+and returns a Kysely instance. Each Plugin owns its tables and its `<name>_migrations` history;
+Studio closes the database after every Plugin has stopped. A Plugin may define Toolkits, but it cannot construct a Pet,
 inspect a runtime, or participate in Agent Session conversation.
 
 ## Global dispatch observation

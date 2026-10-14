@@ -40,6 +40,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
 | `plugins` | No | Explicit plugin list; order is plugin start order. |
 | `plugins[].id` | When a Plugin is listed | Installed Plugin package name resolved by `StudioPluginResolver`. |
 | `plugins[].options` | No | Opaque object passed to that Plugin resolver. |
+| `storage` | No | Where Plugins keep data. Default `{ "kind": "sqlite", "path": ".pinpawo/studio/studio.sqlite" }` (path relative to the workdir). Postgres: `{ "kind": "postgres", "urlEnv": "PINPAWO_STUDIO_DATABASE_URL" }` or `{ "kind": "postgres", "url": "postgres://…" }`. See [Studio storage](../design/studio/storage.md). |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
 is not listed, or a referenced pet file that is missing. A configured Plugin
@@ -140,8 +141,8 @@ Install each configured package beside `@pinpawo/studio`; configuration does not
 download missing packages at startup.
 
 `@pinpawo-plugin/channel` owns Channels, their members, message history and fixed
-Channel/Pet sessions. Its data lives in `.pinpawo/channel/channels-v2.sqlite`;
-Channels stored by earlier versions in `channels.sqlite` are not migrated or shown.
+Channel/Pet sessions. Its data lives in the Studio database (`storage`);
+Channels stored by earlier versions in `channels.sqlite` or `channels-v2.sqlite` are not migrated or shown.
 Its [current design](../design/studio/channel-addressing-and-execution.md) specifies
 unified message addressing, Reply defaults, server-assigned source envelopes and limits.
 Default PET.md and Capability templates contain the runtime protocol; existing
@@ -165,7 +166,10 @@ Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
 broker. Studio matches Plugin and hook names and owns lifecycle cleanup without
 importing or interpreting extension contracts. The HTTP Plugin exposes a
 `routes` hook; Channel, Scheduler, Trigger, Notice, and Project Files can
-contribute their own routes. Each Plugin retains ownership of its stored data.
+contribute their own routes. Each Plugin retains ownership of its stored data:
+Plugins on `StudioPluginContext.storage` own their tables and migration history
+in the shared Studio database; Scheduler, Trigger and Notice still use their own
+SQLite files under `.pinpawo/studio/`.
 
 ## Retired Kanban workdirs
 

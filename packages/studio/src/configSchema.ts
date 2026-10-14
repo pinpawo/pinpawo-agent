@@ -28,6 +28,16 @@ export type StudioPluginConfig = {
 };
 
 /**
+ * 插件数据存在哪里。省略时是 `<workdir>/.pinpawo/studio/studio.sqlite`。
+ * SQLite 的 `path` 相对 workdir;Postgres 用 `url`,或用 `urlEnv` 指定
+ * 存放连接串的环境变量,避免把密码写进配置文件。
+ */
+export type StudioStorageSettings =
+  | { kind: 'sqlite'; path?: string }
+  | { kind: 'postgres'; url: string }
+  | { kind: 'postgres'; urlEnv: string };
+
+/**
  * Studio 本地配置——单 workdir 单 studio。
  *
  * Studio 是一块插板:它只声明**有哪些 pet**、**装哪些插件**、以及外部
@@ -55,7 +65,30 @@ export type StudioLocalConfig = {
    * 这个 studio 由什么驱动。顺序即 start 顺序。
    */
   plugins?: StudioPluginConfig[];
+
+  storage?: StudioStorageSettings;
 };
+
+function parseStorage(reader: ConfigReader): StudioStorageSettings | undefined {
+  const section = reader.optionalSection('storage');
+  if (!section) return undefined;
+  const kind = section.requiredString('kind');
+  if (kind !== 'sqlite' && kind !== 'postgres') return section.fail('"kind" must be "sqlite" or "postgres"', 'kind');
+  const allowed = kind === 'sqlite' ? ['kind', 'path'] : ['kind', 'url', 'urlEnv'];
+  for (const field of Object.keys(section.raw)) {
+    if (!allowed.includes(field)) section.fail(`"${field}" is not a ${kind} storage setting`, field);
+  }
+  if (kind === 'sqlite') {
+    const path = section.optionalString('path');
+    return { kind, ...(path !== undefined ? { path } : {}) };
+  }
+  const url = section.optionalString('url');
+  const urlEnv = section.optionalString('urlEnv');
+  if ((url === undefined) === (urlEnv === undefined)) {
+    section.fail('postgres storage needs exactly one of "url" and "urlEnv"');
+  }
+  return url !== undefined ? { kind, url } : { kind, urlEnv: urlEnv! };
+}
 
 function parsePluginConfigs(reader: ConfigReader): StudioPluginConfig[] | undefined {
   const raw = reader.raw.plugins;
@@ -100,6 +133,7 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
     }
 
     const plugins = parsePluginConfigs(reader);
+    const storage = parseStorage(reader);
 
     return {
       studioId: reader.requiredString('studioId'),
@@ -108,6 +142,7 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
       entryPetId: reader.requiredString('entryPetId'),
       pets,
       ...(plugins !== undefined ? { plugins } : {}),
+      ...(storage !== undefined ? { storage } : {}),
     };
   },
 });

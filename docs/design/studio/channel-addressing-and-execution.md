@@ -49,8 +49,9 @@ Console 点击 Reply 按原作者的 kind / 原始 id 预选已登记 participan
 
 ## 持久事实与 session
 
-Channel 默认使用 `.pinpawo/channel/channels-v2.sqlite`，SQLite WAL 与事务独立于其他 Plugin；
-不读取旧模型的 `channels.sqlite`。存储在 `ChannelStore` 接口后面，表结构见 [Channel 模型](channel-model.md)：
+Channel 的数据放在 [Studio 存储](storage.md)（默认 SQLite，可配置为 Postgres），
+不读取旧模型的 `channels.sqlite` / `channels-v2.sqlite`。存储在异步的 `ChannelStore` 接口后面，
+默认实现是 `KyselyChannelStore`，表结构见 [Channel 模型](channel-model.md)：
 `channels`、`channel_members`、`channel_messages`（作者列 + `external_ref` 幂等）和 `channel_sessions`
 （唯一 `(channelId, petId)` → sessionId 映射与注册标记）。跨 Channel 引用拒绝，提交后才发通知。
 

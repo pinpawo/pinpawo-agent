@@ -152,7 +152,7 @@ interface ChannelStore {
 
 ## 旧数据
 
-不兼容旧数据，不做迁移。新实现使用新的存储（新的 SQLite 文件或新的 schema 版本），启动时不读取旧的 `channels.sqlite`；
+不兼容旧数据，不做迁移。新实现使用新的存储（现在是 [Studio 存储](storage.md) 里的 Channel 表），启动时不读取旧的 `channels.sqlite`；
 旧 Channel、消息和绑定不再可见。发布说明里写明这一点。
 
 ## 需要调整的地方

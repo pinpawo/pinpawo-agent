@@ -1,5 +1,5 @@
 export * from './channelStore';
-export * from './sqliteChannelStore';
+export * from './kyselyChannelStore';
 export * from './channelService';
 export * from './channelPlugin';
 export * from './channelParticipants';

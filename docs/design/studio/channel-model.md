@@ -73,13 +73,14 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 - **访问**：请求必须带 Studio 认证后的 principal。不是当前成员的请求返回 403。
 - **发言**：作者来自 principal，请求正文不能指定作者。
 - **寻址**：只能 @ 当前成员；Pet 回复里的 @ 也按当前 Channel 的成员解析。
-- **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 只要求操作者是成员（创建时创建者自动成为成员）。
-  新 Channel 默认加入创建者，Pet 由创建者或其他成员加入，不会自动加入所有 Pet。
+- **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 只要求操作者是成员。
+  创建时必须明确列出要加入的 Pet（`pets: [...]`），它们和创建者一起成为初始成员；不会自动加入所有 Pet。之后仍可增删。
 - **Pet 视角**：`channel_read_context` 返回 Channel 的标题、说明、成员和分页消息。
 
 ## Pet 在 Channel 里
 
-- **Pet 的消息就是普通消息。** Pet 的 Agent Session 里公开的 assistant message（沿用 `isPublicConversationMessage` 的判断）
+- **Pet 的消息就是普通消息。** Pet 的 Agent Session 里主对话的公开 assistant message（沿用 `isPublicConversationMessage`：
+  只取主对话，subagent 等私有 lane 和合成消息不算）
   按普通消息写入 `channel_messages`：作者 `pet:<id>`，`external_ref` 是它在 Agent Session 里的消息 id，正文原样保存。
   它和人的消息同形、同表、走同一套寻址和交接，不加 Pet 专用字段（不再有 `source`、`toolCalls`）。
   `external_ref` 是通用的幂等字段，任何来自外部系统的消息都可以用。
@@ -87,11 +88,20 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   就是它在 Channel 里的发言。Channel 按 session 订阅 Agent Session 的 `message.completed`（带 messageId），写入后解析 @ 做交接。
   这样与人发言对称：人的消息进 Pet 的 session 成为输入，Pet 的公开回复进 Channel 成为消息。Pet 不需要知道 Channel 的写入协议，
   Channel toolkit 只保留读（`channel_read_context`）。每条公开消息都可以 @；PET.md 写清楚只在要交接时才写 @。
-- **过程不存。** Pet 的 operation（工具执行等）和运行状态（排队、运行、等待审批、失败）不写进 Channel。
-  Console 通过 `channel_sessions` 找到 session，用已有的 Pet session 视图（`PetSessionView`，
-  `/pet-sessions/snapshot|events|review`，#925）只读查看过程并处理审批。
+- **@ 没有特殊路径。** Pet @ 其他成员（人或 Pet）和人 @ 成员完全一样：一条带 mentions 的消息写入 Channel，
+  再由 Channel 统一的 mention 机制投递。不为 Pet 做任何特殊处理。
+- **过程不存，成员也不看过程。** Pet 的 operation（工具执行等）、subagent 消息和运行状态（排队、运行、等待审批、失败）
+  不写进 Channel，Channel 成员只能看到主对话的公开消息。持本机 token 的人仍可通过 `channel_sessions` 找到 session，
+  用已有的 Pet session 视图（`PetSessionView`，`/pet-sessions/snapshot|events|review`，#925）查看过程并处理审批；
+  这属于全局 Studio API，不是 Channel 成员权限。
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
-  投递是否被受理在发言请求的响应里同步返回，不落库。
+  投递结果不落库：发起请求的一方在响应里拿到；同时 Channel 在全局事件总线上发布投递事件（含失败），
+  不区分发言者是人还是 Pet。
+
+## 事件
+
+Channel 只向 Studio 的全局事件总线发布事件（新消息、投递结果、成员变化）。事件和成员关系没有关联：
+谁能收到、怎么消费，由暴露事件的 Plugin（例如 `studio-http`）决定，Channel 不做按成员过滤的事件流。
 
 ## schedule / trigger
 
@@ -154,7 +164,8 @@ interface ChannelStore {
 |---|---|
 | `plugins/channel` 存储 | 新表结构和迁移；抽出 `ChannelStore` 接口与 SQLite 实现；去掉 revision、`expectedRevision`、`channelGoalSchema` 必填的 goal/scope |
 | `plugins/channel` 服务/插件 | 成员规则、principal 驱动的访问控制；`inputs` 改为 `run()`；去掉 `bot` 作者、`POST /channels/revisions`；`channel_read_context` 返回标题/说明/成员/消息；不再订阅 `dispatch.message` 的工具调用，也不记录执行、审批；Pet 公开消息按普通消息映射 |
-| `GET /channels/executions`、`/channels/interrupts` | 去掉；Console 按 `channel_sessions` 读 Agent Session 的 operation 与状态 |
+| `GET /channels/executions`、`/channels/interrupts`、`POST /channels/execute` | 去掉；交给 Pet 统一用带 @ 的消息；过程由本机 token 按 `channel_sessions` 读 Agent Session |
+| `POST /channels` | 增加必填的 `pets: [...]`，创建时一起加入 |
 | `plugins/channel` 派发输入 | 新增 `channel_task` 封装；`channel_message` 去掉 revision 相关字段 |
 | `plugins/scheduler`、`plugins/trigger` | 改调 `run()`，在自己的 delivery 记录里保存执行回执 |
 | `plugins/studio-http` | 客户身份认证，向路由传 `principal`；全局路由要求 `scope='studio'` |

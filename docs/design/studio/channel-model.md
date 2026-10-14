@@ -43,7 +43,7 @@ CREATE TABLE channel_messages (
   sequence    INTEGER PRIMARY KEY AUTOINCREMENT,  -- 分页游标
   message_id  TEXT NOT NULL UNIQUE,
   channel_id  TEXT NOT NULL REFERENCES channels(channel_id),
-  author_kind TEXT NOT NULL CHECK(author_kind IN ('human','pet','legacy')),
+  author_kind TEXT NOT NULL CHECK(author_kind IN ('human','pet')),
   author_id   TEXT NOT NULL,
   occurred_at TEXT NOT NULL,
   external_ref TEXT,                              -- 来自外部系统的消息 id（如 Agent Session 消息 id），用于幂等写入
@@ -66,7 +66,6 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 属于 Host 和 Agent Session。
 
 - 成员关系同时决定能否访问、发言、被 @。离开设置 `left_at`；重新加入清空它。历史消息不受影响。
-- `legacy` 只用于迁移来的旧 `bot` 消息，新数据不会产生。前端按"旧来源"显示。
 
 ## 规则
 
@@ -85,9 +84,9 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   它和人的消息同形、同表、走同一套寻址和交接，不加 Pet 专用字段（不再有 `source`、`toolCalls`）。
   `external_ref` 是通用的幂等字段，任何来自外部系统的消息都可以用。
 - **Pet 怎么把结果说回 Channel**：不通过 toolkit 写。(Channel, Pet) 绑定的专用 session 里，Pet 的公开 assistant message
-  就是它在 Channel 里的发言。Channel 按 session 订阅 Agent Session 中承载主对话 assistant 正文的两种事件：
-  `message.completed`，以及 `message.tool_calls` 里的正文（调用本身忽略，正文为空则跳过）。两者都以 messageId 作
-  `external_ref` 去重，写入后解析 @ 做交接。工具调用过程仍不进入 Channel。
+  就是它在 Channel 里的发言。Channel 按 session 只订阅 Agent Session 的 `message.completed`（带 messageId，作 `external_ref` 去重），
+  写入后解析 @ 做交接。带工具调用的 assistant 消息（`message.tool_calls`，包括它附带的正文）属于执行过程，不展示、不写入 Channel，
+  其中的 @ 也不交接；PET.md 写清楚交接要写在不调用工具的回复里。
   这样与人发言对称：人的消息进 Pet 的 session 成为输入，Pet 的公开回复进 Channel 成为消息。Pet 不需要知道 Channel 的写入协议，
   Channel toolkit 只保留读（`channel_read_context`）。每条公开消息都可以 @；PET.md 写清楚只在要交接时才写 @。
 - **@ 没有特殊路径。** Pet @ 其他成员（人或 Pet）和人 @ 成员完全一样：一条带 mentions 的消息写入 Channel，
@@ -149,27 +148,18 @@ interface ChannelStore {
 }
 ```
 
-接口不做权限判断，读方法不写数据，不保存配置状态。成员规则、默认成员和迁移放在上层的 Channel 服务里。
+接口不做权限判断，读方法不写数据，不保存配置状态。成员规则和默认成员放在上层的 Channel 服务里。
 
-## 迁移（v5 → v6，一个事务）
+## 旧数据
 
-1. 每个 Channel 生成一行 `channels`：title 取最新 revision，goal 和 scope 合并进 description，创建者取第一条 revision 的作者。
-2. `channel_entries` 中的 message 行搬到 `channel_messages`，作者提升成列（`bot` 写成 `legacy`）。
-   只有 `toolCalls`、没有正文的 Pet 工具调用消息不迁移（过程不再属于 Channel）；其余消息的 `data` 去掉已经变成列或
-   不再属于 Channel 的字段（`kind`、`channelId`、`messageId`、`author`、`occurredAt`、`revision`、`source`、`toolCalls`），
-   正文、replyTo、mentions、artifacts 原样保留。
-3. revision 行不再保留（内容已经并进 description）。
-4. 生成 `channel_members`：已配置的 operatorId（默认 `studio-operator`，旧版本里本机 token 的身份，对所有旧 Channel 都有访问权，
-   所以加入每一个旧 Channel）、其他历史 human 作者、历史发言或已绑定 session 的 Pet。历史作者原样保留，不改写。
-   迁移验收包含自定义 operatorId（例如 `alice`）的旧 workdir：迁移后本机 token 仍能访问全部旧 Channel。
-5. 删除 `channel_entries`、`channel_outputs`、`channel_executions`、`channel_tool_call_messages`、
-   `channel_tool_calls`、`channel_interrupt_notifications`。
+不兼容旧数据，不做迁移。新实现使用新的存储（新的 SQLite 文件或新的 schema 版本），启动时不读取旧的 `channels.sqlite`；
+旧 Channel、消息和绑定不再可见。发布说明里写明这一点。
 
 ## 需要调整的地方
 
 | 模块 | 调整 |
 |---|---|
-| `plugins/channel` 存储 | 新表结构和迁移；抽出 `ChannelStore` 接口与 SQLite 实现；去掉 revision、`expectedRevision`、`channelGoalSchema` 必填的 goal/scope |
+| `plugins/channel` 存储 | 新表结构（不迁移旧数据）；抽出 `ChannelStore` 接口与 SQLite 实现；去掉 revision、`expectedRevision`、`channelGoalSchema` 必填的 goal/scope |
 | `plugins/channel` 服务/插件 | 成员规则、principal 驱动的访问控制；`inputs` 改为 `run()`；去掉 `bot` 作者、`POST /channels/revisions`；`channel_read_context` 返回标题/说明/成员/消息；不再订阅 `dispatch.message` 的工具调用，也不记录执行、审批；Pet 公开消息按普通消息映射 |
 | `GET /channels/executions`、`/channels/interrupts`、`POST /channels/execute` | 去掉；交给 Pet 统一用带 @ 的消息；过程由本机 token 按 `channel_sessions` 读 Agent Session |
 | `POST /channels` | 增加必填的 `pets: [...]`，创建时一起加入 |
@@ -183,5 +173,4 @@ interface ChannelStore {
 | 文档 | 实现后更新 `channel-addressing-and-execution.md`、`automation-plugins.md`、`http-plugin.md`、`docs/reference/api/studio.md`、`docs/studio/configuration.md`、`skills/studio/SKILL.md` |
 
 建议按两个 PR 依次实现：先 Channel 侧（表、接口、成员、`run()`、模板），再 Studio 客户身份（认证与 principal）。
-在第二个 PR 之前，本机 token 对应 `human:<已配置的 operatorId>`（默认 `studio-operator`，沿用现有配置以免历史作者断开）；
-第二个 PR 用同一个 id 把本机 token 登记为普通客户身份。PR #956 不再继续，按本文重做。
+在第二个 PR 之前，本机 token 对应 `human:<已配置的 operatorId>`（默认 `studio-operator`）；第二个 PR 把本机 token 登记为普通客户身份。PR #956 不再继续，按本文重做。

@@ -18,7 +18,7 @@ import type { InterruptResume } from '../../../../services/host/src/agent/agentG
 const root = process.env.CHANNEL_HOST_TEST_ROOT ?? await mkdtemp(join(tmpdir(), 'channel-console-browser-'));
 const token = 'console-browser-test-only';
 const http = createStudioHttpPlugin({ port: Number(process.env.CHANNEL_HOST_TEST_PORT ?? 0), authToken: token, allowedOrigins: ['http://127.0.0.1:5199'] });
-const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite') });
+const channel = createChannelPlugin();
 const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
 const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
 const petNames = process.env.CHANNEL_HOST_TEST_DUPLICATE_NAMES ? ['Analyst', 'Analyst'] : ['Alpha', 'Beta'];
@@ -71,17 +71,18 @@ for (const petId of ['alpha', 'beta']) {
   }));
 }
 const studio = await createStudio({ studioId: 'console-browser', entryPetId: 'alpha', plugins: [channel, http],
+  storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
   pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: petNames[index]! },
     dispatch: host.resident.dispatch, sessions: host.sessions })),
 });
 // Historical fixture data lives only in this temporary database. No model calls.
 if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
-  const { channel: seeded } = channel.service.createChannel(channel.operator,
+  const { channel: seeded } = await channel.service.createChannel(channel.operator,
     { title: 'Layout investigation', description: 'Review public evidence and choose the next round.', pets: ['alpha', 'beta'] });
   // A former member whose Pet is no longer registered; its message stays as written.
   const joinedAt = new Date().toISOString();
-  channel.service.store.upsertMember({ channelId: seeded.channelId, kind: 'pet', id: 'retired-pet', joinedAt, leftAt: joinedAt });
-  channel.service.store.appendMessage({ messageId: 'retired-delivery', channelId: seeded.channelId, author: { kind: 'pet', id: 'retired-pet' },
+  await channel.service.store.upsertMember({ channelId: seeded.channelId, kind: 'pet', id: 'retired-pet', joinedAt, leftAt: joinedAt });
+  await channel.service.store.appendMessage({ messageId: 'retired-delivery', channelId: seeded.channelId, author: { kind: 'pet', id: 'retired-pet' },
     occurredAt: joinedAt, body: 'Historical public delivery from a Pet that is no longer registered.', mentions: [], artifacts: [] });
 }
 console.log(JSON.stringify({ ready: true, url: `http://127.0.0.1:${http.address()!.port}`, token }));

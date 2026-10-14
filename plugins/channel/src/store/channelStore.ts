@@ -51,28 +51,28 @@ export type PageOf<T> = { items: T[]; nextAfter: number; hasMore: boolean };
 /**
  * Channel persistence. Data operations only: no permission checks, no writes
  * while reading, no configuration. Membership and every other rule belong to
- * ChannelService above it.
+ * ChannelService above it. Every operation is async so the store can sit on
+ * any database; the store does not own the connection's lifecycle.
  */
 export interface ChannelStore {
-  init(): void;
-  close(): void;
-  transaction<T>(run: () => T): T;
-  createChannel(row: ChannelRow): void;
-  updateChannel(channelId: string, patch: { title?: string; description?: string | null; updatedAt: string }): void;
-  getChannel(channelId: string): ChannelRow | undefined;
+  /** Runs `work` atomically against the store it is given; nested calls join the outer transaction. */
+  transaction<T>(work: (store: ChannelStore) => Promise<T>): Promise<T>;
+  createChannel(row: ChannelRow): Promise<void>;
+  updateChannel(channelId: string, patch: { title?: string; description?: string | null; updatedAt: string }): Promise<void>;
+  getChannel(channelId: string): Promise<ChannelRow | undefined>;
   /** Pages in creation order. With `member`, only Channels where it is current. */
-  listChannels(filter: { member?: MemberRef }, page: Page): PageOf<ChannelRow>;
+  listChannels(filter: { member?: MemberRef }, page: Page): Promise<PageOf<ChannelRow>>;
   /** Current and former members. */
-  listMembers(channelId: string): ChannelMemberRow[];
-  upsertMember(row: ChannelMemberRow): void;
+  listMembers(channelId: string): Promise<ChannelMemberRow[]>;
+  upsertMember(row: ChannelMemberRow): Promise<void>;
   /** With an externalRef the author already recorded, returns that earlier row unchanged. */
-  appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): ChannelMessageRow;
-  getMessage(channelId: string, messageId: string): ChannelMessageRow | undefined;
-  readMessages(channelId: string, page: Page): PageOf<ChannelMessageRow>;
-  getSession(channelId: string, petId: string): ChannelSessionRow | undefined;
+  appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
+  getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
+  readMessages(channelId: string, page: Page): Promise<PageOf<ChannelMessageRow>>;
+  getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined>;
   /** Returns the existing reservation for (channel, pet) if there is one. */
-  reserveSession(row: ChannelSessionRow): ChannelSessionRow;
+  reserveSession(row: ChannelSessionRow): Promise<ChannelSessionRow>;
   /** Marks the reserved session registered; throws when the reservation changed. */
-  confirmSession(row: ChannelSessionRow): void;
-  listSessions(channelId: string): ChannelSessionRow[];
+  confirmSession(row: ChannelSessionRow): Promise<void>;
+  listSessions(channelId: string): Promise<ChannelSessionRow[]>;
 }

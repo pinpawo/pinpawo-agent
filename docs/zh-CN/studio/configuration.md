@@ -48,6 +48,11 @@ standalone CLI 把 Plugin id 作为已安装 package 名交给 `StudioPluginReso
 启动过程不会联网下载。Plugin 可以定义 Toolkit，但 Capability 属于 Agent，并只从每个
 Pet 的约定目录加载。
 
+`storage` 决定 Plugin 数据放在哪里，省略时是 workdir 下的 `.pinpawo/studio/studio.sqlite`。
+改用 Postgres 时写 `{ "kind": "postgres", "urlEnv": "PINPAWO_STUDIO_DATABASE_URL" }`（连接串放在环境变量里）
+或 `{ "kind": "postgres", "url": "postgres://…" }`。每个 Plugin 在这个库里有自己的表和迁移历史，
+详见 [Studio 存储](../../design/studio/storage.md)。
+
 Studio 只登记 Pet 的稳定 id、公开名称和 `PetDispatchPort`。Agent 私有字段、
 Capability inventory、Agent Session 与 checkpoint 都不进入 Studio 注册表。
 

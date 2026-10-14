@@ -10,8 +10,8 @@ import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpaw
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 
-async function waitFor(done: () => boolean) {
-  for (let i = 0; i < 1000; i++) { if (done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+async function waitFor(done: () => boolean | Promise<boolean>) {
+  for (let i = 0; i < 1000; i++) { if (await done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   throw new Error('Timed out waiting for the dispatch to end.');
 }
 
@@ -40,21 +40,22 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
       listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
     graphService: graphService as never,
   });
-  const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite'), httpRoute: false });
+  const channel = createChannelPlugin({ httpRoute: false });
   const studio = await createStudio({ studioId: 'recursion-limit', entryPetId: 'one', plugins: [channel],
+    storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
   });
   try {
-    const id = channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] }).channel.channelId;
+    const id = (await channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] })).channel.channelId;
     const completed: string[] = [];
     studio.subscribe(event => { if (event.type === 'dispatch.completed') completed.push((event.payload as { invocationId: string }).invocationId); });
     const { deliveries } = await channel.sendMessage(id, { body: 'Inspect.', mentions: [{ participantId: 'pet:one' }] });
-    const published = () => channel.service.readContext(channel.operator, id).messages.filter(message => message.author.kind === 'pet');
-    await waitFor(() => published().length > 0 && completed.length > 0);
+    const published = async () => (await channel.service.readContext(channel.operator, id)).messages.filter(message => message.author.kind === 'pet');
+    await waitFor(async () => (await published()).length > 0 && completed.length > 0);
     assert.deepEqual(completed, [deliveries[0]!.invocationId]);
     // Only the notice is public; the announced plan_request call stays in Agent Session.
-    assert.equal(published().length, 1);
-    assert.match(published()[0]!.body, /步数已达上限/);
-    assert.deepEqual(published()[0]!.mentions, []);
+    assert.equal((await published()).length, 1);
+    assert.match((await published())[0]!.body, /步数已达上限/);
+    assert.deepEqual((await published())[0]!.mentions, []);
   } finally { await host.close(); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });

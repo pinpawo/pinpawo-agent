@@ -50,6 +50,8 @@ See [Reference](../reference/index.md) for the current public reading path.
   for dispatch, events, and Plugin routes
 - [Studio automation Plugins](studio/automation-plugins.md) — durable Scheduler and
   Trigger domain/API boundaries
+- [Studio 存储](studio/storage.md) — Plugin 共用的 SQLite / Postgres 数据库（Kysely）、
+  按 Plugin 的迁移和异步 Store 接口
 
 ## Historical Kanban designs
 

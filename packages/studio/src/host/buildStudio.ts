@@ -19,6 +19,8 @@ import {
 } from 'pinpawo/host-runtime';
 import { loadPetConfigs } from 'pinpawo/host-runtime';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
+import type { StudioStorageSettings } from '../configSchema';
+import type { StudioStorageConfig } from '../storage/studioStorage';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -113,6 +115,21 @@ function validateResolvedPlugins(studioId: string, plugins: readonly StudioPlugi
       throw new Error(`studio "${studioId}": plugin "${plugin.name}" stop must be a function`);
     }
   }
+}
+
+/** Where this workdir's Studio keeps Plugin data. */
+export function resolveStudioStorage(
+  settings: StudioStorageSettings | undefined,
+  workdir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): StudioStorageConfig {
+  if (!settings || settings.kind === 'sqlite') {
+    return { kind: 'sqlite', path: path.resolve(workdir, settings?.path ?? '.pinpawo/studio/studio.sqlite') };
+  }
+  if ('url' in settings) return { kind: 'postgres', url: settings.url };
+  const url = env[settings.urlEnv]?.trim();
+  if (!url) throw new Error(`Studio storage: environment variable ${settings.urlEnv} is not set.`);
+  return { kind: 'postgres', url };
 }
 
 /** Read one Studio config snapshot and resolve its selected Plugins. */
@@ -243,6 +260,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       entryPetId: studioConfig.entryPetId,
       pets,
       plugins,
+      storage: resolveStudioStorage(studioConfig.storage, input.configuration.workdir),
     };
     const prepared = prepareStudio(studioInput);
     studio = prepared.studio;

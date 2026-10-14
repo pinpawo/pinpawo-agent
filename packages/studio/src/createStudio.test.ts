@@ -275,6 +275,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'listPets',
     'notify',
     'petSessions',
+    'storage',
     'subscribe',
   ]);
   await new Promise((resolve) => setTimeout(resolve, 0));

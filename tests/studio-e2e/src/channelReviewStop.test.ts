@@ -19,8 +19,8 @@ import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/t
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 
-async function waitFor(done: () => boolean) {
-  for (let i = 0; i < 1000; i++) { if (done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+async function waitFor(done: () => boolean | Promise<boolean>) {
+  for (let i = 0; i < 1000; i++) { if (await done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   throw new Error('Timed out waiting for review/dispatch completion.');
 }
 
@@ -88,24 +88,25 @@ for (const decision of ['reject', 'cancel'] as const) {
         listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: graphService as never,
     });
-    const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite'), httpRoute: false });
+    const channel = createChannelPlugin({ httpRoute: false });
     const studio = await createStudio({ studioId: 'review-stop', entryPetId: 'one', plugins: [channel],
+      storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
     });
-    const outputs = (id: string) => channel.service.readContext(channel.operator, id).messages.filter(message => message.author.kind === 'pet');
+    const outputs = async (id: string) => (await channel.service.readContext(channel.operator, id)).messages.filter(message => message.author.kind === 'pet');
     const events: Array<{ type: string; payload?: any }> = [];
     studio.subscribe(event => { events.push(event); });
     try {
-      const id = channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] }).channel.channelId;
+      const id = (await channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] })).channel.channelId;
       const ask = (body: string, replyTo?: string) => channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] });
       await ask('Which destination?');
-      await waitFor(() => outputs(id).length === 1);
-      const question = outputs(id)[0]!;
+      await waitFor(async () => (await outputs(id)).length === 1);
+      const question = (await outputs(id))[0]!;
       const { deliveries: [waiting] } = await ask('Inspect and report.');
-      const binding = channel.service.getSession(id, 'one')!;
+      const binding = (await channel.service.getSession(id, 'one'))!;
       assert.equal(waiting!.sessionId, binding.sessionId);
       await waitFor(() => events.some(event => event.type === 'dispatch.waiting' && event.payload.invocationId === waiting!.invocationId));
-      assert.equal(outputs(id).length, 1, 'a waiting review is not a Channel message');
+      assert.equal((await outputs(id)).length, 1, 'a waiting review is not a Channel message');
       await ask('Continue with different constraints.');
       await ask('Use staging.', question.messageId);
       await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedDispatches === 2);
@@ -119,16 +120,16 @@ for (const decision of ['reject', 'cancel'] as const) {
         value: decision === 'cancel' ? { action: 'cancel' }
           : { decisions: [{ interactionId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId: 'reject' }] },
       });
-      await waitFor(() => outputs(id).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
+      await waitFor(async () => (await outputs(id)).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [4, 3, 0, 0]);
-      assert.equal(channel.service.getSession(id, 'one')?.sessionId, binding.sessionId);
+      assert.equal((await channel.service.getSession(id, 'one'))?.sessionId, binding.sessionId);
       // The declined dispatch reports its own ending to the Channel before queued work runs.
       const replyOf = (externalRef?: string) => events.find(event => event.type === 'dispatch.message' && event.payload.message.messageId === externalRef)?.payload;
-      assert.equal(replyOf(outputs(id)[1]!.externalRef)?.invocationId, waiting!.invocationId);
-      assert.equal(replyOf(outputs(id)[1]!.externalRef)?.sessionId, binding.sessionId);
+      assert.equal(replyOf((await outputs(id))[1]!.externalRef)?.invocationId, waiting!.invocationId);
+      assert.equal(replyOf((await outputs(id))[1]!.externalRef)?.sessionId, binding.sessionId);
       assert.ok(events.some(event => event.type === 'dispatch.completed' && event.payload.invocationId === waiting!.invocationId));
-      assert.ok(outputs(id)[2]!.body.includes('Continue with different constraints.'));
-      assert.ok(outputs(id)[3]!.body.includes('Use staging.'));
+      assert.ok((await outputs(id))[2]!.body.includes('Continue with different constraints.'));
+      assert.ok((await outputs(id))[3]!.body.includes('Use staging.'));
       const completed = await host.interaction.snapshot();
       if (completed.type !== 'session.snapshot.result') throw Error('snapshot');
       assert.equal(completed.snapshot.session.pendingInterrupt, null);

@@ -15,7 +15,8 @@
  *
  * Studio 不解释 event 的内容,也不持有由 event 推导出的状态。事件是
  * "发生了什么"(一次性、单向),不是"当前是什么样"(可查询、有生命周期)。
- * 这个区别决定了 studio 不需要存储、不需要一致性、不需要处理并发写。
+ * 这个区别决定了 studio 自己不存数据。插件的数据放在 Studio 提供的一个共享
+ * 数据库里(`storage`),表和迁移归各插件所有,studio 只负责打开、迁移与关闭。
  *
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
  */
@@ -24,6 +25,7 @@ import type { JsonObject } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 
 import type { StudioPetRegistration } from './types';
+import type { StudioPluginStorage } from './storage/studioStorage';
 import type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
@@ -102,6 +104,13 @@ export type StudioPluginContext = {
    */
   petSessions: StudioPetSessions;
   hooks: StudioPluginHooks;
+  /**
+   * The Studio database. `open(migrations)` applies this Plugin's pending
+   * migrations and returns the shared Kysely instance; the Plugin owns its
+   * tables (prefixed with its name) and never touches another Plugin's.
+   * Studio closes it after every Plugin has stopped.
+   */
+  storage: StudioPluginStorage;
 };
 
 type PetSessionPort = import('pinpawo/host-runtime').PetSessionPort;

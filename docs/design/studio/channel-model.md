@@ -3,7 +3,7 @@
 > 状态：已定，待实现
 > 更新：2026-10-14
 > 来源：PR #956 评审后的设计回顾。本文取代 [Channel 寻址、执行与状态](channel-addressing-and-execution.md)
-> 中关于目标/修订、参与者登记和 Plugin 输入作者的部分；寻址、session 绑定、可信来源与执行观察规则不变。
+> 中关于目标/修订、参与者登记、Plugin 输入作者、Pet 输出路径和执行/审批观察的部分；寻址语法、replyTo 和 session 绑定规则不变。
 
 ## 原则
 
@@ -97,10 +97,10 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 
 - Channel 的 `inputs` hook 改为 `run(channelId, petId, request, origin)`，`origin = {kind: 'scheduler' | 'trigger', id}`。
 - Channel 只校验 Pet 是该 Channel 的成员，然后用 (channel, pet) 的 session 和 `scope:{namespace:'channel'}` 派发。
-  Pet 的工具调用消息和回复以 Pet 身份写入 `channel_messages`，回复里的 @ 照常交接。
+  Pet 的公开消息照常以 Pet 身份写入 `channel_messages`，其中的 @ 照常交接。
 - 指令不写入 Channel 时间线，只进入 Pet 的 session，封装为
   `{type:'channel_task', version:1, channelId, origin, body}`（没有 author）。
-- `run()` 返回执行回执（executionId、sessionId）。触发记录和原始指令由 scheduler / trigger 自己的 delivery 日志保存，
+- `run()` 返回 Host 的派发回执（invocationId）和 sessionId。触发记录和原始指令由 scheduler / trigger 自己的 delivery 日志保存，
   关联方向是它们指向 Channel。
 
 ## 身份（Studio）
@@ -140,7 +140,9 @@ interface ChannelStore {
 
 1. 每个 Channel 生成一行 `channels`：title 取最新 revision，goal 和 scope 合并进 description，创建者取第一条 revision 的作者。
 2. `channel_entries` 中的 message 行搬到 `channel_messages`，作者提升成列（`bot` 写成 `legacy`）。
-   只有 `toolCalls`、没有正文的 Pet 工具调用消息不迁移（过程不再属于 Channel）；其余 `data` 原样保留。
+   只有 `toolCalls`、没有正文的 Pet 工具调用消息不迁移（过程不再属于 Channel）；其余消息的 `data` 去掉已经变成列或
+   不再属于 Channel 的字段（`kind`、`channelId`、`messageId`、`author`、`occurredAt`、`revision`、`source`、`toolCalls`），
+   正文、replyTo、mentions、artifacts 原样保留。
 3. revision 行不再保留（内容已经并进 description）。
 4. 生成 `channel_members`：历史 human 作者（旧数据里的 `studio-operator` 就是本机 token 的身份，原样保留）、历史发言或已绑定 session 的 Pet。
 5. 删除 `channel_entries`、`channel_outputs`、`channel_executions`、`channel_tool_call_messages`、

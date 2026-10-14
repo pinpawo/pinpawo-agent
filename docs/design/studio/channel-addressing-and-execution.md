@@ -3,6 +3,9 @@
 状态：当前实现设计，2026-10-05；基础由 [#897](https://github.com/pinpawo/pinpawo-agent/pull/897)
 引入，统一参与者与来源修复由 [#904](https://github.com/pinpawo/pinpawo-agent/pull/904) 合并。
 本文是 Channel 当前设计入口；合并不表示已更新任何用户 workdir 或部署。
+
+> 2026-10-14：多成员、目标/修订和 Plugin 输入作者已重新设计，见 [Channel 模型](channel-model.md)（待实现）。
+
 早期方案与验收沿革见[历史记录](../../history/studio/channel-evolution.md)。
 
 ## 职责

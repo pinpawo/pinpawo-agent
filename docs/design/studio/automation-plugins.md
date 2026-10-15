@@ -98,10 +98,16 @@ parser。
 
 HTTP 与 GitHub source 是当前 Trigger Plugin 内置的 ingress adapter。HTTP 外部调用固定
 `POST /triggers/invoke`，携带 `Authorization: Trigger <secret>` 和
-`{ triggerId, idempotencyKey, payload }`。SQLite 只保存该 HTTP delivery，不保存明文
+`{ triggerId, idempotencyKey, payload }`。存储只保存该 HTTP delivery，不保存明文
 secret。Trigger 先验证定义、secret、body 和 idempotency key，再以
 `(triggerId, idempotencyKey)` 原子创建 delivery；首次接收调用 `context.dispatch()`，重复
 调用返回已有 delivery，不再次派发。admission 失败持久化为 `failed`，不自动重试。
+
+Trigger 的数据在 [Studio 存储](storage.md)里（表 `trigger_deliveries`、`trigger_delivery_events`，迁移
+`0001_trigger_deliveries`），SQLite 和 Postgres 都可以；接口是 `TriggerStore`（`plugins/trigger/src/store/`），
+规则在 `TriggerService`。`(triggerId, idempotencyKey)` 唯一约束让共用一个数据库的多个 Studio 也只创建一条
+delivery；状态变化是条件更新。启动时仍是 `dispatching` 的 delivery 标记为 `failed`（结果未知），可由操作者重试。
+以前的 `trigger.sqlite` 不读取。
 
 GitHub webhook 固定投递到 `POST /triggers/github`。它要求 `X-GitHub-Event`、
 `X-GitHub-Delivery` 与 `X-Hub-Signature-256`；签名针对原始 JSON body 用每条 GitHub

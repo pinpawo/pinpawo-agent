@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import path from 'node:path';
 import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
 import { TriggerService, type TriggerDeliveryReceipt } from './triggerService';
+import type { TriggerStore } from './store/triggerStore';
+import { KyselyTriggerStore, triggerMigrations, type TriggerDatabase } from './store/kysely';
 
 export type HttpTriggerSource = {
   kind: 'http';
@@ -58,14 +59,17 @@ type ParsedTriggerDefinition = Omit<TriggerDefinition, 'petId' | 'target'> & { t
 
 export type CreateTriggerPluginOptions = {
   triggers: readonly TriggerDefinition[];
-  service?: TriggerService;
-  databasePath?: string;
+  /** Defaults to the Trigger tables in the Studio database. */
+  store?: TriggerStore;
   httpRoute?: false | { pluginName?: string };
   /** The Channel Plugin that channel-bound rules post through. */
   channel?: { pluginName?: string };
 };
 
-export type TriggerPlugin = StudioPlugin & { service: TriggerService };
+export type TriggerPlugin = StudioPlugin & {
+  /** Available once the Plugin has started. */
+  service: TriggerService;
+};
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -394,8 +398,11 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Pars
 
 export function createTriggerPlugin(options: CreateTriggerPluginOptions): TriggerPlugin {
   const definitions = parseDefinitions(options.triggers);
-  const ownsService = !options.service;
-  const service = options.service ?? new TriggerService(options.databasePath);
+  let current: TriggerService | undefined;
+  const triggerService = () => {
+    if (!current) throw new Error('Trigger Plugin has not started.');
+    return current;
+  };
   let context: StudioPluginContext | undefined;
   let unsubscribeEvents: (() => void) | undefined;
   let unsubscribeMutations: (() => void) | undefined;
@@ -406,7 +413,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
   return {
     name: 'trigger',
     toolkits: [],
-    service,
+    get service() { return triggerService(); },
     start: async (pluginContext) => {
       if (context) throw new Error('Trigger Plugin is already started.');
       const petIds = new Set(pluginContext.listPets().map(({ petId }) => petId));
@@ -423,6 +430,10 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       }
       context = pluginContext;
       try {
+        const service = new TriggerService(options.store ?? new KyselyTriggerStore(
+          await pluginContext.storage.open<TriggerDatabase>(triggerMigrations(pluginContext.storage.dialect)),
+        ));
+        current = service;
         if ([...definitions.values()].some((definition) => definition.channelId !== undefined)) {
           removeChannelInputs = pluginContext.hooks.contribute<ChannelInputsHook>(
             options.channel?.pluginName ?? 'channel',
@@ -495,7 +506,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
             },
           });
         });
-        await service.init();
+        await service.recoverInterrupted();
         const route = options.httpRoute;
         if (route !== false) {
           unregisterRoutes = pluginContext.hooks.contribute<StudioHttpRoutesHook>(
@@ -667,7 +678,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
         unregisterRoutes = undefined;
         removeChannelInputs?.();
         removeChannelInputs = undefined;
-        if (ownsService) await service.close().catch(() => undefined);
+        current = undefined;
         throw error;
       }
     },
@@ -681,7 +692,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       unregisterRoutes = undefined;
       removeChannelInputs?.();
       removeChannelInputs = undefined;
-      if (ownsService) await service.close();
+      current = undefined;
     },
   };
 }
@@ -745,17 +756,11 @@ function parseSource(
   );
 }
 
-export function createStudioPlugin(
-  value: Record<string, unknown> | undefined,
-  environment: { workdir: string },
-): TriggerPlugin {
+export function createStudioPlugin(value: Record<string, unknown> | undefined): TriggerPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'triggers', 'httpRoute', 'channel']);
+  const allowed = new Set(['triggers', 'httpRoute', 'channel']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Trigger Plugin option "${unknown}" is not supported.`);
-  if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
-    throw new Error('Trigger Plugin option "databasePath" must be a string.');
-  }
   if (!Array.isArray(options.triggers)) throw new Error('Trigger Plugin option "triggers" must be an array.');
   const triggers = options.triggers.map((input, index) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -787,11 +792,6 @@ export function createStudioPlugin(
       source: parseSource(definition.source, index),
     };
   });
-  const databasePath = typeof options.databasePath === 'string'
-    ? (path.isAbsolute(options.databasePath)
-      ? options.databasePath
-      : path.resolve(environment.workdir, options.databasePath))
-    : path.join(environment.workdir, '.pinpawo', 'studio', 'trigger.sqlite');
   const httpRoute = options.httpRoute;
   if (httpRoute !== undefined && httpRoute !== false
     && (!httpRoute || typeof httpRoute !== 'object' || Array.isArray(httpRoute)
@@ -807,7 +807,6 @@ export function createStudioPlugin(
     throw new Error('Trigger Plugin option "channel" must be an object with an optional pluginName.');
   }
   return createTriggerPlugin({
-    databasePath,
     triggers,
     ...(channel !== undefined ? { channel: channel as { pluginName?: string } } : {}),
     ...(httpRoute !== undefined

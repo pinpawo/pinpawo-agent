@@ -10,9 +10,14 @@ export type {
   TriggerRequestTemplate,
 } from './triggerPlugin';
 export { TriggerService } from './triggerService';
+export type { TriggerDeliveryMutation } from './triggerService';
 export type {
   TriggerDelivery,
   TriggerDeliveryEvent,
-  TriggerDeliveryMutation,
+  TriggerDeliveryReceipt,
   TriggerDeliveryStatus,
-} from './triggerService';
+  TriggerDeliveryTransition,
+  TriggerStore,
+} from './store/triggerStore';
+export { KyselyTriggerStore, triggerMigrations } from './store/kysely';
+export type { TriggerDatabase } from './store/kysely';

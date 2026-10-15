@@ -119,7 +119,9 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     const fromGuest = await (await fetch(base + '/channels/messages', { method: 'POST', headers: asGuest,
       body: JSON.stringify({ channelId, body: 'Thanks' }) })).json() as ChannelMessage;
     assert.deepEqual(fromGuest.author, { kind: 'human', id: 'guest' });
-    for (const route of ['/pets', '/events', '/clients']) assert.equal((await fetch(base + route, { headers: asGuest })).status, 403, route);
+    for (const route of ['/events', '/clients', '/dispatch/queues']) assert.equal((await fetch(base + route, { headers: asGuest })).status, 403, route);
+    assert.deepEqual(await (await fetch(base + '/me', { headers: asGuest })).json(), { clientId: 'guest', scope: 'client' });
+    assert.equal((await fetch(base + '/pets', { headers: asGuest })).status, 200, 'a client reads the Pet directory to create Channels');
     const guestAll = await (await fetch(base + '/channels?all=true', { headers: asGuest })).json() as { channels: Array<{ channelId: string }> };
     assert.deepEqual(guestAll.channels.map(item => item.channelId), [channelId], 'all is for the local token only');
     await post('/clients/revoke', { clientId: 'guest' });

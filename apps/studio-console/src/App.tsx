@@ -87,6 +87,8 @@ function noticeDetail(notice: Notice): string {
   return labels.length > 0 ? labels.join(', ') : `${notice.source}:${notice.eventType}`;
 }
 
+const CLIENT_POLL_MS = 3000;
+
 function connectionErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/failed \(401\)/.test(message)) {
@@ -116,6 +118,9 @@ export function App() {
   const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState(storedToken ? 'Connecting…' : 'Enter the Studio HTTP token, then connect.');
   const [pets, setPets] = useState<Pet[]>([]);
+  // Who the token is; a client key or JWT sees only its Channels.
+  const [identity, setIdentity] = useState<{ clientId: string; scope: 'studio' | 'client' } | null>(null);
+  const clientMode = identity?.scope === 'client';
   const [petsReady, setPetsReady] = useState(false);
   const [channelVersion, setChannelVersion] = useState(0);
   const [channelDeliveries, setChannelDeliveries] = useState<ChannelDelivery[]>([]);
@@ -148,14 +153,23 @@ export function App() {
     if (!token || connectionKey === 0) return undefined;
     const abort = new AbortController();
     setPetsReady(false);
+    setIdentity(null);
     const read = async <T,>(path: string): Promise<Resource<T>> => {
       const response = await fetch(`${normalizedUrl}${path}`, { headers, signal: abort.signal });
       if (response.status === 404) return { value: null, unavailable: true };
       if (!response.ok) throw new Error(`${path} failed (${response.status.toString()}).`);
       return { value: await response.json() as T, unavailable: false };
     };
+    let clientOnly = false;
     const refresh = async () => {
       const petResponse = await read<{ pets: Pet[] }>('/pets');
+      if (clientOnly) {
+        if (abort.signal.aborted) return;
+        const nextPets = petResponse.value?.pets ?? [];
+        setPets(nextPets);
+        setPetsReady(true);
+        return;
+      }
       const [scheduler, notice, trigger, projectFiles, schedulerEvents, triggerEvents] = await Promise.all([
         read<{ schedules: Schedule[] }>('/scheduler').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ notices: Notice[] }>('/notices').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
@@ -201,7 +215,7 @@ export function App() {
         if (!abort.signal.aborted) setNotice(connectionErrorMessage(error));
       });
     };
-    void observeStudioEvents({
+    const observe = () => observeStudioEvents({
       url: `${normalizedUrl}/events`, headers, signal: abort.signal,
       onConnected: () => {
         setConnectionState('connected');
@@ -234,8 +248,42 @@ export function App() {
         }
       },
     });
+    // The event stream is the local token's; a client has none and polls its Channels instead.
+    let poll: ReturnType<typeof setInterval> | undefined;
+    void read<{ clientId: string; scope: 'studio' | 'client' }>('/me').then((me) => {
+      if (abort.signal.aborted) return;
+      if (!me.value) throw new Error('/me failed (404).');
+      setIdentity(me.value);
+      if (me.value.scope === 'studio') return observe();
+      clientOnly = true;
+      setPage('channel');
+      setConnectionState('connected');
+      setConnectionError('');
+      setConnectionModalOpen(false);
+      setNotice(`Connected as ${me.value.clientId}. Channels refresh every few seconds.`);
+      refreshInBackground();
+      // Each poll checks the token too, so a stopped Host or revoked client shows as disconnected.
+      poll = setInterval(() => {
+        void read('/me').then(() => {
+          if (abort.signal.aborted) return;
+          setConnectionState('connected');
+          setConnectionError('');
+          setChannelVersion(value => value + 1);
+        }).catch((error) => {
+          if (abort.signal.aborted) return;
+          setConnectionState('reconnecting');
+          setConnectionError(connectionErrorMessage(error));
+        });
+      }, CLIENT_POLL_MS);
+    }).catch((error) => {
+      if (abort.signal.aborted) return;
+      setConnectionState('error');
+      setConnectionError(connectionErrorMessage(error));
+      setConnectionModalOpen(true);
+    });
     return () => {
       abort.abort();
+      if (poll) clearInterval(poll);
       refreshRef.current = async () => undefined;
     };
   }, [connectionKey, headers, normalizedUrl, token]);
@@ -472,12 +520,12 @@ export function App() {
             setConnectionModalOpen(true);
           }} type="button">CONNECTION</button>
           <span className={`connection-state ${connectionState}`} role="status">
-            <i />{connectionState}
+            <i />{connectionState}{identity && connectionState === 'connected' ? ` · ${identity.clientId}` : ''}
           </span>
         </div>
       </header>
       <nav aria-label="Studio pages">
-        {(['channel', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
+        {(clientMode ? ['channel'] as const : ['channel', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
@@ -485,7 +533,7 @@ export function App() {
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
-            deliveries={channelDeliveries} failures={channelFailures} />
+            deliveries={channelDeliveries} failures={channelFailures} clientMode={clientMode} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>CONNECTION FAILED</strong>
@@ -543,7 +591,7 @@ export function App() {
           </div>
         </> : unavailable(knowledge, 'Project Files'))}
       </section>
-      {page !== 'channel' && <button className="dispatch-launcher" disabled={connectionState !== 'connected'} onClick={() => openDispatch()} type="button">
+      {page !== 'channel' && !clientMode && <button className="dispatch-launcher" disabled={connectionState !== 'connected'} onClick={() => openDispatch()} type="button">
         <span>+</span> DISPATCH
       </button>}
       {dispatchDrawerOpen && <div className="drawer-layer" role="presentation" onMouseDown={(event) => {

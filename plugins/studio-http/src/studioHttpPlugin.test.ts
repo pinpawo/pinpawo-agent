@@ -606,9 +606,14 @@ test('HTTP Plugin authenticates Studio clients: the Host token has the global AP
   assert.equal((await call('/clients', AUTH_TOKEN, { clientId: 'bad id', label: 'Bad' })).status, 400);
 
   assert.deepEqual(await (await call('/whoami', key)).json(), { clientId: 'alice', scope: 'client' });
-  for (const path of ['/studio-only', '/pets', '/clients', '/dispatch/queues']) {
+  for (const path of ['/studio-only', '/clients', '/dispatch/queues', '/events', '/pet-sessions/snapshot']) {
     assert.equal((await call(path, key)).status, 403, path);
   }
+  // A client may learn who it is and read the Pet directory (registration only).
+  assert.deepEqual(await (await call('/me', key)).json(), { clientId: 'alice', scope: 'client' });
+  assert.deepEqual(await (await call('/me', AUTH_TOKEN)).json(), { clientId: 'local', scope: 'studio' });
+  assert.equal((await call('/pets', key)).status, 200);
+  assert.equal((await call('/pets', key, {})).status, 403, 'only the listed methods are open');
   assert.equal((await call('/whoami', `${key}x`)).status, 401);
 
   const second = await call('/clients/keys', AUTH_TOKEN, { clientId: 'alice' });

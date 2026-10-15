@@ -129,8 +129,20 @@ Delivery acceptance is not execution completion.
 Every HTTP request is authenticated as a Studio client. The local Host token is
 the client `local` and may use every route; other clients authenticate with a
 key and may use only routes registered with `client` authorization (the Channel
-routes). Keys are `pps_…`, shown once, stored as SHA-256 hashes. These routes
-take the local Host token:
+routes) plus `GET /me` and `GET /pets`. Keys are `pps_…`, shown once, stored as
+SHA-256 hashes.
+
+| Route | Input / result |
+|---|---|
+| `GET /me` | `{ clientId, scope }` for the token, `scope` is `studio` or `client`. |
+| `GET /pets` | `{ pets: [{ petId, name }] }`, the Pet directory a client needs to create a Channel. |
+
+`/events`, `/dispatch`, `/dispatch/queues` and `/pet-sessions/*` stay with the
+local Host token, so a client follows its Channels by polling the Channel
+routes. The Console does this when it connects with a client key or JWT: it
+shows only the Channel page, without dispatch queues or Pet sessions.
+
+These routes take the local Host token:
 
 | Route | Input / result |
 |---|---|

@@ -39,7 +39,7 @@ const server = createServer((request, response) => {
     streams.add(response); request.on('close', () => streams.delete(response)); return;
   }
   const values = {
-    '/pets': { pets: [{ petId: 'analyst', name: 'Analyst' }] }, '/scheduler': { schedules: [] }, '/notices': { notices: [] },
+    '/me': { clientId: 'local', scope: 'studio' }, '/pets': { pets: [{ petId: 'analyst', name: 'Analyst' }] }, '/scheduler': { schedules: [] }, '/notices': { notices: [] },
     '/triggers': { triggers: [], deliveries: [] }, '/knowledge': { documents: [] }, '/scheduler/events': { events: [] }, '/triggers/events': { events: [] },
     '/channels': { channels: [channel], nextAfter: 1, hasMore: false }, '/dispatch/queues': { queues: [] },
     '/channels/context': { channel, members, messages, viewerParticipantId: 'human:owner', nextAfter: messages.at(-1).sequence, hasMore: false },

@@ -155,7 +155,9 @@ HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。
 
 ## 2. Security boundary
 
-- server 只监听 `127.0.0.1`；当前 Plugin 不提供公网 bind 配置；
+- server 只监听 `127.0.0.1`；当前 Plugin 不提供公网 bind 配置。别的机器上的成员（client key
+  或 JWT）经同机反向代理连入：代理终结 TLS 后转发到 `127.0.0.1:<port>`，原样传 `Authorization`；
+  从浏览器用 Console 时，把 Console 的源加进 `allowedOrigins`。client 不用事件流，只发普通请求；
 - 所有路由（除显式 route-owned auth）都要求 Bearer：本机 token、客户 key 或配置的签发者发的 JWT；SSE client 使用支持自定义 header 的 streaming
   `fetch`，不把 token 放入 query string；
 - client 携带 `Origin` 时必须命中显式 `allowedOrigins`；Plugin 处理受限 CORS preflight；

@@ -36,8 +36,8 @@ not completion. No request is retried automatically. Read actual state before
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
 Each --pet joins the new Channel with you; no other Pet joins implicitly.
-A client key reaches only channels commands, as the member human:<clientId>;
-everything else needs the local Host token. clients add and add-key print the
+A client key reaches channels commands, as the member human:<clientId>, and
+pets; everything else needs the local Host token. clients add and add-key print the
 new key once; only its hash is stored. Revoking a client stops all its keys.
 `;
 

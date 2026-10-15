@@ -132,17 +132,24 @@ class PinpawoAgent(BaseInstalledAgent):
 
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:
-        result_path = self.logs_dir / "exec.json"
-        if not result_path.is_file():
+        # Harbor calls this from the finally block of its agent phase, also
+        # after an agent timeout, and an exception here stops the verifier
+        # from running. `pinpawo exec` truncates exec.json when it starts and
+        # writes it only when the run ends, so a cancelled run leaves the file
+        # empty. Any unreadable result is recorded as a diagnostic instead.
+        result, exec_json = _read_exec_result(self.logs_dir / "exec.json")
+        if result is None:
+            context.metadata = {**(context.metadata or {}), "pinpawo_exec_json": exec_json}
             return
-        result = json.loads(result_path.read_text())
-        usage = result.get("usage") or {}
+        usage = result.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
         if isinstance(usage.get("inputTokens"), int):
             context.n_input_tokens = usage["inputTokens"]
         if isinstance(usage.get("outputTokens"), int):
             context.n_output_tokens = usage["outputTokens"]
         context.metadata = {
             **(context.metadata or {}),
+            "pinpawo_exec_json": exec_json,
             "pinpawo_status": result.get("status"),
             "pinpawo_main_tool_calls": result.get("mainToolCalls"),
             "pinpawo_executed_tool_calls": result.get("executedToolCalls"),
@@ -150,3 +157,22 @@ class PinpawoAgent(BaseInstalledAgent):
             "pinpawo_pending_interrupt": result.get("pendingInterruptKind"),
             "pinpawo_error": result.get("error"),
         }
+
+
+def _read_exec_result(path: Path) -> tuple[dict | None, str]:
+    """Returns exec.json's object (or None) and \"ok\" or why it could not be used."""
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError as error:
+        return None, f"unreadable: {error}"
+    if not text.strip():
+        return None, "empty"
+    try:
+        result = json.loads(text)
+    except ValueError as error:
+        return None, f"invalid JSON: {error}"
+    if not isinstance(result, dict):
+        return None, f"not a JSON object: {type(result).__name__}"
+    return result, "ok"

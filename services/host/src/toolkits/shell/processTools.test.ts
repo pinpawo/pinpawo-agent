@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { readFileSync, rmSync } from 'node:fs';
 import { test } from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
@@ -258,4 +259,19 @@ test('the process tool inventory is static', () => {
     TERMINATE_PROCESS_TOOL_NAME,
     LIST_PROCESSES_TOOL_NAME,
   ]);
+});
+
+test('wait_process names a file holding the output its preview cut', { skip: isWindows }, async (t) => {
+  const { startProcess, waitTool, shell } = setup();
+  t.after(() => shell.dispose());
+  const marker = 'MIDDLE_DIAGNOSTIC_6789';
+  const script = `process.stdout.write('A'.repeat(15000)+'${marker}'+'B'.repeat(15000));process.stderr.write('E'.repeat(15000)+'${marker}'+'F'.repeat(15000));`;
+  const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
+  const processId = processIdFrom(String(await startProcess.invoke({ command }, call())));
+  const output = String(await waitTool.invoke({ processId, waitSeconds: 5 }, call()));
+  assert.equal(output.includes(marker), false);
+  const paths = [...output.matchAll(/full output: (\S+\.txt)/g)].map((match) => match[1]!);
+  assert.equal(paths.length, 2, 'stdout and stderr each name their file');
+  t.after(() => { for (const path of paths) rmSync(path, { force: true }); });
+  for (const path of paths) assert.match(readFileSync(path, 'utf8'), new RegExp(marker));
 });

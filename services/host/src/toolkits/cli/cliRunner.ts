@@ -5,6 +5,7 @@ import { readRecord, readString } from '../operationMetadata';
 import { requireAgentSession } from '../executionContext';
 import type { ShellExecResult, ShellRS } from '../shellRS/shellRS';
 import type { CliVerdict } from './cliLevels';
+import { fullOutputNote } from '../toolOutputFile';
 
 /** Shared plumbing for tools that run one git/gh invocation as argv through ShellRS. */
 
@@ -51,7 +52,7 @@ export type CliCommandResult = {
 
 export function truncateCliOutput(output: string) {
   if (output.length <= MAX_CLI_OUTPUT_CHARS) return output;
-  return `${output.slice(0, MAX_CLI_OUTPUT_CHARS)}\n[truncated ${output.length - MAX_CLI_OUTPUT_CHARS} chars]`;
+  return `${output.slice(0, MAX_CLI_OUTPUT_CHARS)}\n[truncated ${output.length - MAX_CLI_OUTPUT_CHARS} chars${fullOutputNote(output)}]`;
 }
 
 export function formatCliResult(result: CliCommandResult) {

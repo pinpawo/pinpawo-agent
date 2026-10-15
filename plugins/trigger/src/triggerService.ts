@@ -1,64 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type {
+  TriggerDelivery, TriggerDeliveryEvent, TriggerDeliveryReceipt, TriggerDeliveryStatus, TriggerStore,
+} from './store/triggerStore';
 
-export type TriggerDeliveryStatus = 'dispatching' | 'accepted' | 'failed';
-
-/** Host's receipt for the run a delivery started; sessionId is set for a Channel run. */
-export type TriggerDeliveryReceipt = { invocationId: string; sessionId?: string };
-
-export type TriggerDelivery = {
-  deliveryId: string;
-  triggerId: string;
-  idempotencyKey: string;
-  /** Retained only so a failed delivery can be retried without reconstructing its event. */
-  targetPetId?: string;
-  request?: string;
-  status: TriggerDeliveryStatus;
-  note?: string;
-  receipt?: TriggerDeliveryReceipt;
-  occurredAt: string;
-  updatedAt: string;
-};
-
-export type TriggerDeliveryEvent = {
-  sequence: number;
-  deliveryId: string;
-  triggerId: string;
-  eventType: 'received' | 'accepted' | 'failed' | 'recovered' | 'retried' | 'redelivered';
-  status: TriggerDeliveryStatus;
-  note?: string;
-  occurredAt: string;
-};
+export type {
+  TriggerDelivery, TriggerDeliveryEvent, TriggerDeliveryReceipt, TriggerDeliveryStatus,
+} from './store/triggerStore';
 
 export type TriggerDeliveryMutation = {
   delivery: TriggerDelivery;
   event: TriggerDeliveryEvent;
-};
-
-type DeliveryRow = {
-  delivery_id: string;
-  trigger_id: string;
-  idempotency_key: string;
-  target_pet_id: string | null;
-  request_text: string | null;
-  status: TriggerDeliveryStatus;
-  note: string | null;
-  invocation_id: string | null;
-  session_id: string | null;
-  occurred_at: string;
-  updated_at: string;
-};
-
-type EventRow = {
-  sequence: number;
-  delivery_id: string;
-  trigger_id: string;
-  event_type: TriggerDeliveryEvent['eventType'];
-  status: TriggerDeliveryStatus;
-  note: string | null;
-  occurred_at: string;
 };
 
 function nonEmpty(value: string, label: string): string {
@@ -67,171 +18,71 @@ function nonEmpty(value: string, label: string): string {
   return normalized;
 }
 
-function fromRow(row: DeliveryRow): TriggerDelivery {
-  return {
-    deliveryId: row.delivery_id,
-    triggerId: row.trigger_id,
-    idempotencyKey: row.idempotency_key,
-    ...(row.target_pet_id === null ? {} : { targetPetId: row.target_pet_id }),
-    ...(row.request_text === null ? {} : { request: row.request_text }),
-    status: row.status,
-    ...(row.note === null ? {} : { note: row.note }),
-    ...(row.invocation_id === null ? {} : {
-      receipt: { invocationId: row.invocation_id, ...(row.session_id === null ? {} : { sessionId: row.session_id }) },
-    }),
-    occurredAt: row.occurred_at,
-    updatedAt: row.updated_at,
-  };
-}
-
+/**
+ * Delivery rules over a TriggerStore: idempotent claims, allowed transitions,
+ * retry and redelivery, and recovery of deliveries interrupted by a restart.
+ * Notifications are best effort after commit.
+ */
 export class TriggerService {
-  private readonly database: DatabaseSync;
   private readonly listeners = new Set<(mutation: TriggerDeliveryMutation) => void>();
-  private initialized = false;
-  private closed = false;
 
-  constructor(databasePath = ':memory:') {
-    if (databasePath !== ':memory:' && !path.isAbsolute(databasePath)) {
-      throw new Error('Trigger databasePath must be absolute or :memory:.');
-    }
-    if (databasePath !== ':memory:') {
-      const directory = path.dirname(databasePath);
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-      chmodSync(directory, 0o700);
-    }
-    this.database = new DatabaseSync(databasePath, { timeout: 5_000 });
-  }
-
-  async init(): Promise<void> {
-    if (this.closed) throw new Error('Trigger service is closed.');
-    if (this.initialized) return;
-    this.database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = FULL;
-      PRAGMA busy_timeout = 5000;
-      PRAGMA trusted_schema = OFF;
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS trigger_deliveries (
-        delivery_id TEXT PRIMARY KEY,
-        trigger_id TEXT NOT NULL,
-        idempotency_key TEXT NOT NULL,
-        target_pet_id TEXT,
-        request_text TEXT,
-        status TEXT NOT NULL CHECK (status IN ('dispatching','accepted','failed')),
-        note TEXT,
-        invocation_id TEXT,
-        session_id TEXT,
-        occurred_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(trigger_id, idempotency_key)
-      );
-      CREATE TABLE IF NOT EXISTS trigger_delivery_events (
-        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-        delivery_id TEXT NOT NULL,
-        trigger_id TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        note TEXT,
-        occurred_at TEXT NOT NULL,
-        FOREIGN KEY (delivery_id) REFERENCES trigger_deliveries(delivery_id) ON DELETE RESTRICT
-      );
-      COMMIT;
-    `);
-    const columns = this.database.prepare('PRAGMA table_info(trigger_deliveries)').all() as Array<{ name: string }>;
-    if (!columns.some(({ name }) => name === 'target_pet_id')) {
-      this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN target_pet_id TEXT;');
-    }
-    if (!columns.some(({ name }) => name === 'request_text')) {
-      this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN request_text TEXT;');
-    }
-    if (!columns.some(({ name }) => name === 'invocation_id')) {
-      this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN invocation_id TEXT; ALTER TABLE trigger_deliveries ADD COLUMN session_id TEXT;');
-    }
-    this.initialized = true;
-    for (const mutation of this.recoverInterrupted()) this.publish(mutation);
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.listeners.clear();
-    this.closed = true;
-    this.database.close();
-  }
+  constructor(readonly store: TriggerStore) {}
 
   subscribe(listener: (mutation: TriggerDeliveryMutation) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
+  /** Records a delivery once per trigger and idempotency key; a repeat returns the first one. */
   async claim(triggerId: string, idempotencyKey: string, dispatch?: { targetPetId: string; request: string }): Promise<{
     delivery: TriggerDelivery;
     duplicate: boolean;
   }> {
-    this.assertReady();
     const normalizedTriggerId = nonEmpty(triggerId, 'triggerId');
     const normalizedKey = nonEmpty(idempotencyKey, 'idempotencyKey');
-    const targetPetId = dispatch === undefined ? undefined : nonEmpty(dispatch.targetPetId, 'targetPetId');
-    const request = dispatch === undefined ? undefined : nonEmpty(dispatch.request, 'request');
-    const existing = this.find(normalizedTriggerId, normalizedKey);
+    const existing = await this.store.findDelivery(normalizedTriggerId, normalizedKey);
     if (existing) return { delivery: existing, duplicate: true };
-    const deliveryId = randomUUID();
     const now = new Date().toISOString();
-    let event: TriggerDeliveryEvent;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      this.database.prepare(`
-        INSERT INTO trigger_deliveries(
-          delivery_id, trigger_id, idempotency_key, target_pet_id, request_text, status, occurred_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'dispatching', ?, ?)
-      `).run(deliveryId, normalizedTriggerId, normalizedKey, targetPetId ?? null, request ?? null, now, now);
-      event = this.insertEvent(
-        deliveryId,
-        normalizedTriggerId,
-        'received',
-        'dispatching',
-        undefined,
-        now,
-      );
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      const raced = this.find(normalizedTriggerId, normalizedKey);
-      if (raced) return { delivery: raced, duplicate: true };
-      throw error;
+    const delivery: TriggerDelivery = {
+      deliveryId: randomUUID(),
+      triggerId: normalizedTriggerId,
+      idempotencyKey: normalizedKey,
+      ...(dispatch === undefined ? {} : {
+        targetPetId: nonEmpty(dispatch.targetPetId, 'targetPetId'),
+        request: nonEmpty(dispatch.request, 'request'),
+      }),
+      status: 'dispatching',
+      occurredAt: now,
+      updatedAt: now,
+    };
+    const event = await this.store.transaction(async (store) => {
+      if (!(await store.insertDelivery(delivery))) return null;
+      return store.appendEvent({
+        deliveryId: delivery.deliveryId, triggerId: delivery.triggerId, eventType: 'received', status: 'dispatching', occurredAt: now,
+      });
+    });
+    if (!event) {
+      // Another claim for the same key committed first.
+      return { delivery: (await this.store.findDelivery(normalizedTriggerId, normalizedKey))!, duplicate: true };
     }
-    const delivery = this.get(deliveryId)!;
-    this.publish({ delivery, event: event! });
+    this.publish({ delivery, event });
     return { delivery, duplicate: false };
   }
 
   async accept(deliveryId: string, receipt?: TriggerDeliveryReceipt): Promise<TriggerDelivery> {
-    return this.transition(deliveryId, 'accepted', 'accepted', undefined, receipt);
+    return this.transition(deliveryId, 'dispatching', 'accepted', 'accepted', undefined, receipt);
   }
 
   async fail(deliveryId: string, note: string): Promise<TriggerDelivery> {
-    return this.transition(deliveryId, 'failed', 'failed', nonEmpty(note, 'failure'));
+    return this.transition(deliveryId, 'dispatching', 'failed', 'failed', nonEmpty(note, 'failure'));
   }
 
   async retry(deliveryId: string): Promise<TriggerDelivery> {
-    this.assertReady();
-    const normalizedId = nonEmpty(deliveryId, 'deliveryId');
-    const now = new Date().toISOString();
-    let event: TriggerDeliveryEvent;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      const current = this.get(normalizedId);
-      if (!current || current.status !== 'failed') throw new Error(`Trigger delivery "${normalizedId}" is not retryable.`);
-      if (!current.targetPetId || !current.request) throw new Error(`Trigger delivery "${normalizedId}" has no retained dispatch input.`);
-      this.database.prepare("UPDATE trigger_deliveries SET status = 'dispatching', note = NULL, updated_at = ? WHERE delivery_id = ?").run(now, normalizedId);
-      event = this.insertEvent(normalizedId, current.triggerId, 'retried', 'dispatching', undefined, now);
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
-    }
-    const delivery = this.get(normalizedId)!;
-    this.publish({ delivery, event: event! });
-    return delivery;
+    const id = nonEmpty(deliveryId, 'deliveryId');
+    const current = await this.store.getDelivery(id);
+    if (!current || current.status !== 'failed') throw new Error(`Trigger delivery "${id}" is not retryable.`);
+    if (!current.targetPetId || !current.request) throw new Error(`Trigger delivery "${id}" has no retained dispatch input.`);
+    return this.transition(id, 'failed', 'dispatching', 'retried');
   }
 
   /**
@@ -241,190 +92,102 @@ export class TriggerService {
    * whether a later runtime interruption occurred before useful work began.
    */
   async redeliver(deliveryId: string): Promise<TriggerDelivery> {
-    this.assertReady();
-    const normalizedId = nonEmpty(deliveryId, 'deliveryId');
-    const current = this.get(normalizedId);
+    const id = nonEmpty(deliveryId, 'deliveryId');
+    const current = await this.store.getDelivery(id);
     if (!current || current.status !== 'accepted') {
-      throw new Error(`Trigger delivery "${normalizedId}" is not accepted and cannot be redelivered.`);
+      throw new Error(`Trigger delivery "${id}" is not accepted and cannot be redelivered.`);
     }
     if (!current.targetPetId || !current.request) {
-      throw new Error(`Trigger delivery "${normalizedId}" has no retained dispatch input.`);
+      throw new Error(`Trigger delivery "${id}" has no retained dispatch input.`);
     }
-
-    const nextDeliveryId = randomUUID();
     const now = new Date().toISOString();
-    let event: TriggerDeliveryEvent;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      this.database.prepare(`
-        INSERT INTO trigger_deliveries(
-          delivery_id, trigger_id, idempotency_key, target_pet_id, request_text, status, note, occurred_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'dispatching', ?, ?, ?)
-      `).run(
-        nextDeliveryId,
-        current.triggerId,
-        `${current.idempotencyKey}:redelivery:${nextDeliveryId}`,
-        current.targetPetId,
-        current.request,
-        `Redelivery requested for accepted delivery ${normalizedId}.`,
-        now,
-        now,
-      );
-      event = this.insertEvent(
-        nextDeliveryId,
-        current.triggerId,
-        'redelivered',
-        'dispatching',
-        `Redelivered from ${normalizedId}.`,
-        now,
-      );
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
-    }
-    const delivery = this.get(nextDeliveryId)!;
-    this.publish({ delivery, event: event! });
+    const nextId = randomUUID();
+    const delivery: TriggerDelivery = {
+      deliveryId: nextId,
+      triggerId: current.triggerId,
+      idempotencyKey: `${current.idempotencyKey}:redelivery:${nextId}`,
+      targetPetId: current.targetPetId,
+      request: current.request,
+      status: 'dispatching',
+      note: `Redelivery requested for accepted delivery ${id}.`,
+      occurredAt: now,
+      updatedAt: now,
+    };
+    const event = await this.store.transaction(async (store) => {
+      if (!(await store.insertDelivery(delivery))) throw new Error(`Trigger delivery "${nextId}" already exists.`);
+      return store.appendEvent({
+        deliveryId: nextId, triggerId: current.triggerId, eventType: 'redelivered', status: 'dispatching',
+        note: `Redelivered from ${id}.`, occurredAt: now,
+      });
+    });
+    this.publish({ delivery, event });
     return delivery;
   }
 
   async snapshot(): Promise<{ deliveries: TriggerDelivery[]; lastEventSequence: number }> {
-    this.assertReady();
-    const rows = this.database.prepare(
-      'SELECT * FROM trigger_deliveries ORDER BY occurred_at DESC LIMIT 500',
-    ).all() as DeliveryRow[];
-    const cursor = this.database.prepare(
-      'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM trigger_delivery_events',
-    ).get() as { sequence: number };
-    return { deliveries: rows.map(fromRow), lastEventSequence: cursor.sequence };
+    const [deliveries, lastEventSequence] = await Promise.all([
+      this.store.listDeliveries({ limit: 500 }),
+      this.store.lastEventSequence(),
+    ]);
+    return { deliveries, lastEventSequence };
   }
 
   async getDelivery(deliveryId: string): Promise<TriggerDelivery | null> {
-    this.assertReady();
-    return this.get(nonEmpty(deliveryId, 'deliveryId'));
+    return (await this.store.getDelivery(nonEmpty(deliveryId, 'deliveryId'))) ?? null;
   }
 
   async events(after = 0, limit = 200): Promise<TriggerDeliveryEvent[]> {
-    this.assertReady();
     if (!Number.isSafeInteger(after) || after < 0) throw new Error('Trigger cursor is invalid.');
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
       throw new Error('Trigger event limit must be from 1 to 1000.');
     }
-    const rows = this.database.prepare(`
-      SELECT sequence, delivery_id, trigger_id, event_type, status, note, occurred_at
-      FROM trigger_delivery_events WHERE sequence > ? ORDER BY sequence LIMIT ?
-    `).all(after, limit) as EventRow[];
-    return rows.map((row) => ({
-      sequence: row.sequence,
-      deliveryId: row.delivery_id,
-      triggerId: row.trigger_id,
-      eventType: row.event_type,
-      status: row.status,
-      ...(row.note === null ? {} : { note: row.note }),
-      occurredAt: row.occurred_at,
-    }));
+    return this.store.readEvents(after, limit);
   }
 
-  private get(deliveryId: string): TriggerDelivery | null {
-    const row = this.database.prepare('SELECT * FROM trigger_deliveries WHERE delivery_id = ?')
-      .get(deliveryId) as DeliveryRow | undefined;
-    return row ? fromRow(row) : null;
-  }
-
-  private find(triggerId: string, idempotencyKey: string): TriggerDelivery | null {
-    const row = this.database.prepare(`
-      SELECT * FROM trigger_deliveries WHERE trigger_id = ? AND idempotency_key = ?
-    `).get(triggerId, idempotencyKey) as DeliveryRow | undefined;
-    return row ? fromRow(row) : null;
+  /**
+   * A delivery left dispatching by a stopped Studio may or may not have
+   * reached its Pet; it is marked failed so an operator can retry it.
+   */
+  async recoverInterrupted(): Promise<void> {
+    const note = 'dispatch outcome unknown after restart';
+    for (const delivery of await this.store.listDeliveries({ status: 'dispatching' })) {
+      const occurredAt = new Date().toISOString();
+      const event = await this.store.transaction(async (store) => {
+        if (!(await store.transition(delivery.deliveryId, { from: 'dispatching', status: 'failed', note, updatedAt: occurredAt }))) return null;
+        return store.appendEvent({
+          deliveryId: delivery.deliveryId, triggerId: delivery.triggerId, eventType: 'recovered', status: 'failed', note, occurredAt,
+        });
+      });
+      if (event) this.publish({ delivery: (await this.store.getDelivery(delivery.deliveryId))!, event });
+    }
   }
 
   private async transition(
     deliveryId: string,
-    status: 'accepted' | 'failed',
-    eventType: 'accepted' | 'failed',
+    from: TriggerDeliveryStatus,
+    status: TriggerDeliveryStatus,
+    eventType: TriggerDeliveryEvent['eventType'],
     note?: string,
     receipt?: TriggerDeliveryReceipt,
   ): Promise<TriggerDelivery> {
-    this.assertReady();
-    const now = new Date().toISOString();
-    const normalizedId = nonEmpty(deliveryId, 'deliveryId');
-    let event: TriggerDeliveryEvent;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      const current = this.get(normalizedId);
-      if (!current || current.status !== 'dispatching') {
-        throw new Error(`Trigger delivery "${normalizedId}" is not dispatching.`);
-      }
-      this.database.prepare(`
-        UPDATE trigger_deliveries SET status = ?, note = ?, updated_at = ?,
-          invocation_id = COALESCE(?, invocation_id), session_id = COALESCE(?, session_id)
-        WHERE delivery_id = ?
-      `).run(status, note ?? null, now, receipt?.invocationId ?? null, receipt?.sessionId ?? null, normalizedId);
-      event = this.insertEvent(normalizedId, current.triggerId, eventType, status, note, now);
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
-    }
-    const delivery = this.get(normalizedId)!;
-    this.publish({ delivery, event: event! });
+    const id = nonEmpty(deliveryId, 'deliveryId');
+    const current = await this.store.getDelivery(id);
+    if (!current || current.status !== from) throw new Error(`Trigger delivery "${id}" is not ${from}.`);
+    const occurredAt = new Date().toISOString();
+    const event = await this.store.transaction(async (store) => {
+      const changed = await store.transition(id, {
+        from, status, updatedAt: occurredAt,
+        ...(note === undefined ? {} : { note }),
+        ...(receipt === undefined ? {} : { receipt }),
+      });
+      if (!changed) throw new Error(`Trigger delivery "${id}" is not ${from}.`);
+      return store.appendEvent({
+        deliveryId: id, triggerId: current.triggerId, eventType, status, ...(note === undefined ? {} : { note }), occurredAt,
+      });
+    });
+    const delivery = (await this.store.getDelivery(id))!;
+    this.publish({ delivery, event });
     return delivery;
-  }
-
-  private recoverInterrupted(): TriggerDeliveryMutation[] {
-    const rows = this.database.prepare(`
-      SELECT delivery_id, trigger_id FROM trigger_deliveries WHERE status = 'dispatching'
-    `).all() as Array<{ delivery_id: string; trigger_id: string }>;
-    if (rows.length === 0) return [];
-    const events: TriggerDeliveryEvent[] = [];
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      for (const row of rows) {
-        const now = new Date().toISOString();
-        const note = 'dispatch outcome unknown after restart';
-        this.database.prepare(`
-          UPDATE trigger_deliveries SET status = 'failed', note = ?, updated_at = ?
-          WHERE delivery_id = ?
-        `).run(note, now, row.delivery_id);
-        events.push(this.insertEvent(
-          row.delivery_id,
-          row.trigger_id,
-          'recovered',
-          'failed',
-          note,
-          now,
-        ));
-      }
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
-    }
-    return events.map((event) => ({ delivery: this.get(event.deliveryId)!, event }));
-  }
-
-  private insertEvent(
-    deliveryId: string,
-    triggerId: string,
-    eventType: TriggerDeliveryEvent['eventType'],
-    status: TriggerDeliveryStatus,
-    note: string | undefined,
-    occurredAt: string,
-  ): TriggerDeliveryEvent {
-    const result = this.database.prepare(`
-      INSERT INTO trigger_delivery_events(
-        delivery_id, trigger_id, event_type, status, note, occurred_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(deliveryId, triggerId, eventType, status, note ?? null, occurredAt);
-    return {
-      sequence: Number(result.lastInsertRowid),
-      deliveryId,
-      triggerId,
-      eventType,
-      status,
-      ...(note === undefined ? {} : { note }),
-      occurredAt,
-    };
   }
 
   private publish(mutation: TriggerDeliveryMutation): void {
@@ -438,9 +201,5 @@ export class TriggerService {
         );
       }
     }
-  }
-
-  private assertReady(): void {
-    if (!this.initialized || this.closed) throw new Error('Trigger service is not active.');
   }
 }

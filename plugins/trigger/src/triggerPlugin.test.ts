@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio';
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';
 import { createTriggerPlugin } from './triggerPlugin';
+import { TriggerService } from './triggerService';
+import { KyselyTriggerStore, triggerMigrations, type TriggerDatabase } from './store/kysely';
 
 /** Trigger rules name their Channel up front, so it exists before the Studio starts. */
 async function seedChannel(t: TestContext, petIds: string[]) {
@@ -292,4 +297,38 @@ test('event data in a channel-bound request addresses nobody: it reaches only th
   assert.deepEqual((await service.readContext({ kind: 'human', id: 'local' }, channelId)).messages, []);
   const [delivery] = (await trigger.service.snapshot()).deliveries;
   assert.equal(delivery?.status, 'accepted');
+});
+
+test('Trigger keeps deliveries in the Studio database and fails the ones a stop interrupted', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-trigger-restart-'));
+  const databasePath = path.join(root, 'studio.sqlite');
+  const storage = createStudioStorage({ kind: 'sqlite', path: databasePath });
+  // Claimed by a Studio that stopped before the dispatch outcome was recorded.
+  const { delivery } = await new TriggerService(new KyselyTriggerStore(
+    await storage.open<TriggerDatabase>('trigger', triggerMigrations(storage.dialect)),
+  )).claim('build', 'delivery-1', { targetPetId: 'worker', request: 'Handle build' });
+  await storage.close();
+
+  const plugin = createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'build',
+      petId: 'worker',
+      request: 'Handle build',
+      source: { kind: 'http', secret: 'trigger-secret-with-at-least-16-characters' },
+    }],
+  });
+  assert.throws(() => plugin.service, /has not started/);
+  const studio = await createStudio({
+    studioId: 'trigger-restart',
+    entryPetId: 'worker',
+    pets: [channelStudioPet('worker', [])],
+    plugins: [plugin],
+    storage: { kind: 'sqlite', path: databasePath },
+  });
+  t.after(() => studio.shutdown());
+
+  const recovered = await plugin.service.getDelivery(delivery.deliveryId);
+  assert.deepEqual([recovered?.status, recovered?.note], ['failed', 'dispatch outcome unknown after restart']);
+  assert.equal((await plugin.service.claim('build', 'delivery-1')).duplicate, true);
 });

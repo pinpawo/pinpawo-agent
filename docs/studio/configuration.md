@@ -156,7 +156,8 @@ to a Pet request. Static strings and logic-free templates remain supported; sour
 credentials, template projection, deduplication and endpoints are documented once in
 [Automation Plugins](../design/studio/automation-plugins.md). The default external
 request Trigger requires `PINPAWO_STUDIO_TRIGGER_SECRET`; it does not automatically
-update Wiki on task or dispatch completion.
+update Wiki on task or dispatch completion. Deliveries live in the Studio database and the
+Plugin no longer takes a `databasePath` option; deliveries in an earlier `trigger.sqlite` are not migrated.
 
 `@pinpawo-plugin/project-files` is an optional, read-only projection of Markdown
 under a workdir-relative directory (default `wiki`). It contributes
@@ -170,8 +171,8 @@ importing or interpreting extension contracts. The HTTP Plugin exposes a
 `routes` hook; Channel, Scheduler, Trigger, Notice, and Project Files can
 contribute their own routes. Each Plugin retains ownership of its stored data:
 Plugins on `StudioPluginContext.storage` own their tables and migration history
-in the shared Studio database; Scheduler, Trigger and Notice still use their own
-SQLite files under `.pinpawo/studio/`.
+in the shared Studio database; Notice still uses its own SQLite file under
+`.pinpawo/studio/`.
 
 ## Retired Kanban workdirs
 

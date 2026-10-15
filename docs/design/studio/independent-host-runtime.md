@@ -58,7 +58,7 @@ Plugin 可提供 Toolkit definitions，Host 与其他来源合成 inventory，Ca
 | Chat/TUI checkpoint root | Host，按 runtimeConfig 和 Chat adapter 定位。 |
 | Studio checkpoint root | Host，`resolveHostCheckpointPath(runtimeConfig, 'studio')`；与 Chat 独立。 |
 | Session 注册、活动 session、checkpoint | resident / Agent Session，不进入 Studio registry。 |
-| Plugin 业务历史 | [Studio 存储](storage.md)里各 Plugin 自己的表和迁移历史，不读写其他 Plugin 的表。Notice 迁入前仍用自己的 SQLite 文件。 |
+| Plugin 业务历史 | [Studio 存储](storage.md)里各 Plugin 自己的表和迁移历史，不读写其他 Plugin 的表。 |
 | 事件总线、队列投影、幂等接纳记录 | 当前进程，不能当作持久恢复来源。 |
 
 Host 在 Capability assembly 前取得 checkpoint root 生命周期 writer lease。

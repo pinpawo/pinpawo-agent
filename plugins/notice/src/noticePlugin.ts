@@ -1,7 +1,8 @@
-import path from 'node:path';
 import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { NoticeService, type NoticeLevel } from './noticeService';
+import type { NoticeStore } from './store/noticeStore';
+import { KyselyNoticeStore, noticeMigrations, type NoticeDatabase } from './store/kysely';
 
 export type NoticeEventSource = {
   kind: 'studio_event';
@@ -19,12 +20,15 @@ export type NoticeRule = {
 
 export type CreateNoticePluginOptions = {
   rules: readonly NoticeRule[];
-  service?: NoticeService;
-  databasePath?: string;
+  /** Defaults to the Notice table in the Studio database. */
+  store?: NoticeStore;
   httpRoute?: false | { pluginName?: string };
 };
 
-export type NoticePlugin = StudioPlugin & { service: NoticeService };
+export type NoticePlugin = StudioPlugin & {
+  /** Available once the Plugin has started. */
+  service: NoticeService;
+};
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -91,8 +95,7 @@ export function createNoticePlugin(options: CreateNoticePluginOptions): NoticePl
   if (new Set(rules.map(({ noticeId }) => noticeId)).size !== rules.length) {
     throw new Error('Notice rule ids must be unique.');
   }
-  const ownsService = !options.service;
-  const service = options.service ?? new NoticeService(options.databasePath);
+  let current: NoticeService | undefined;
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let unsubscribeNotices: (() => void) | undefined;
@@ -101,12 +104,18 @@ export function createNoticePlugin(options: CreateNoticePluginOptions): NoticePl
   return {
     name: 'notice',
     toolkits: [],
-    service,
+    get service() {
+      if (!current) throw new Error('Notice Plugin has not started.');
+      return current;
+    },
     start: async (pluginContext) => {
       if (context) throw new Error('Notice Plugin is already started.');
       context = pluginContext;
       try {
-        await service.init();
+        const service = new NoticeService(options.store ?? new KyselyNoticeStore(
+          await pluginContext.storage.open<NoticeDatabase>(noticeMigrations()),
+        ));
+        current = service;
         unsubscribeNotices = service.subscribe((notice) => {
           pluginContext.notify({
             type: 'notice.created',
@@ -167,7 +176,7 @@ export function createNoticePlugin(options: CreateNoticePluginOptions): NoticePl
         unsubscribeNotices = undefined;
         unregisterRoutes?.();
         unregisterRoutes = undefined;
-        if (ownsService) await service.close().catch(() => undefined);
+        current = undefined;
         throw error;
       }
     },
@@ -179,24 +188,20 @@ export function createNoticePlugin(options: CreateNoticePluginOptions): NoticePl
       unsubscribeNotices = undefined;
       unregisterRoutes?.();
       unregisterRoutes = undefined;
-      if (ownsService) await service.close();
+      current = undefined;
     },
   };
 }
 
 function readInstalledOptions(value: Record<string, unknown> | undefined): {
   rules: NoticeRule[];
-  databasePath?: string;
   httpRoute?: false | { pluginName?: string };
 } {
   const options = value ?? {};
-  const allowed = new Set(['rules', 'databasePath', 'httpRoute']);
+  const allowed = new Set(['rules', 'httpRoute']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Notice Plugin option "${unknown}" is not supported.`);
   if (!Array.isArray(options.rules)) throw new Error('Notice Plugin option "rules" must be an array.');
-  if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
-    throw new Error('Notice Plugin option "databasePath" must be a string.');
-  }
   const httpRoute = options.httpRoute;
   if (httpRoute !== undefined && httpRoute !== false
     && (!httpRoute || typeof httpRoute !== 'object' || Array.isArray(httpRoute)
@@ -206,24 +211,14 @@ function readInstalledOptions(value: Record<string, unknown> | undefined): {
   }
   return {
     rules: options.rules as NoticeRule[],
-    ...(typeof options.databasePath === 'string' ? { databasePath: options.databasePath } : {}),
     ...(httpRoute === undefined ? {} : { httpRoute: httpRoute as false | { pluginName?: string } }),
   };
 }
 
-export function createStudioPlugin(
-  value: Record<string, unknown> | undefined,
-  environment: { workdir: string },
-): NoticePlugin {
+export function createStudioPlugin(value: Record<string, unknown> | undefined): NoticePlugin {
   const options = readInstalledOptions(value);
-  const databasePath = options.databasePath === undefined
-    ? path.join(environment.workdir, '.pinpawo', 'studio', 'notice.sqlite')
-    : path.isAbsolute(options.databasePath)
-      ? options.databasePath
-      : path.resolve(environment.workdir, options.databasePath);
   return createNoticePlugin({
     rules: options.rules,
-    databasePath,
     ...(options.httpRoute === undefined ? {} : { httpRoute: options.httpRoute }),
   });
 }

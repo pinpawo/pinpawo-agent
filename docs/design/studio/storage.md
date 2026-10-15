@@ -1,7 +1,7 @@
 # Studio 存储
 
-> **状态：已实现（Studio 核心、客户身份、Channel、Scheduler、Trigger）。** Notice 仍使用自己的 SQLite 文件，
-> 之后迁入。代码：[`packages/studio/src/storage/studioStorage.ts`](../../../packages/studio/src/storage/studioStorage.ts)，
+> **状态：已实现（Studio 核心、客户身份、Channel、Scheduler、Trigger、Notice）。** 所有 Studio Plugin 的数据都在 Studio 数据库里，
+> 不再有各自的 SQLite 文件。代码：[`packages/studio/src/storage/studioStorage.ts`](../../../packages/studio/src/storage/studioStorage.ts)，
 > Channel 的实现：[`plugins/channel/src/store/`](../../../plugins/channel/src/store/)。
 
 ## 目标
@@ -107,6 +107,6 @@ Postgres，devDependency），不需要数据库服务；`tests/support/pglitePo
 
 ## 后续
 
-1. Scheduler、Trigger 已迁入（`plugins/scheduler/src/store/`、`plugins/trigger/src/store/`）。Notice 再一个 PR 迁入，删掉它自己的 SQLite 文件。
+1. Scheduler、Trigger、Notice 已迁入（各自的 `src/store/`），它们自己的 SQLite 文件和逐列 `ALTER TABLE` 都已删掉。
 2. Studio 客户身份已建在这里：所有者是 `studio`（迁移表 `studio_migrations`），表 `studio_clients`、`studio_client_keys`。
    `studio` 因此是保留的 Plugin 名。

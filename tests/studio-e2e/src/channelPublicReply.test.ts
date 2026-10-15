@@ -15,6 +15,9 @@ import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../s
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 
+/** The local Host token's Studio client, as a Channel member. */
+const me = { kind: 'human' as const, id: 'local' };
+
 class ScriptedModel extends BaseChatModel {
   private calls = 0;
   constructor(private readonly respond: (messages: BaseMessage[], index: number) => AIMessage | Promise<AIMessage>) { super({}); }
@@ -131,10 +134,10 @@ test('capability handoff reaches Channel only through the selected final root re
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),
     });
-    const id = (await channel.service.createChannel(channel.operator, { title: 'Plan', pets: ['acceptance-a', 'acceptance-b'] })).channel.channelId;
-    const outputs = async () => (await channel.service.readContext(channel.operator, id, { limit: 200 })).messages.filter(message => message.author.kind === 'pet');
+    const id = (await channel.service.createChannel(me, { title: 'Plan', pets: ['acceptance-a', 'acceptance-b'] })).channel.channelId;
+    const outputs = async () => (await channel.service.readContext(me, id, { limit: 200 })).messages.filter(message => message.author.kind === 'pet');
     const alphaOutputs = async () => (await outputs()).filter(message => message.author.id === 'acceptance-a');
-    const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] });
+    const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] }, me);
     await send('Produce the plan and selected handoff.');
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
@@ -158,7 +161,7 @@ test('capability handoff reaches Channel only through the selected final root re
     assert.equal((await alphaOutputs()).at(-1)!.body, handoff);
     assert.ok((await alphaOutputs()).every(message => message.externalRef), 'each reply is keyed by its Agent Session message');
     assert.equal(new Set((await alphaOutputs()).map(message => message.externalRef)).size, (await alphaOutputs()).length);
-    assert.deepEqual((await channel.service.listSessions(channel.operator, id)).map(binding => [binding.petId, binding.registered]),
+    assert.deepEqual((await channel.service.listSessions(me, id)).map(binding => [binding.petId, binding.registered]),
       [['acceptance-a', true], ['acceptance-b', true]]);
     assert.ok((await outputs()).every(message => !message.body.includes('Internal analysis only.')));
     assert.deepEqual(['entry', 'supervisor', 'capability'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 16, 4]);
@@ -168,7 +171,7 @@ test('capability handoff reaches Channel only through the selected final root re
       const stored = (await channel.service.getMessage(id, input.messageId))!;
       assert.equal(input.body, stored.body);
       assert.deepEqual(input.author, petId === 'acceptance-a'
-        ? { participantId: 'human:studio-operator', kind: 'human' }
+        ? { participantId: 'human:local', kind: 'human' }
         : { participantId: 'pet:acceptance-a', kind: 'pet' });
     }
   } finally {

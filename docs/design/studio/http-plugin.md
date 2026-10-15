@@ -98,9 +98,32 @@ subscription，HTTP Plugin 保留显式退订仅用于及时清理自己的 tran
 
 HTTP Plugin 在自己的 `StudioPluginContext.hooks` 上暴露 `routes`。贡献方注册
 `method + absolute path + handler`，HTTP 统一负责监听、Origin/CORS、body 上限和响应发送。
-route 默认使用 Studio Bearer；外部 webhook 一类入口可以显式选择 route-owned auth，由
-贡献方在 handler 中完成领域凭证验证。内置 `/dispatch`、`/events` 与 `/pets` 是保留路径，
-贡献方不能覆盖。
+route 的 `authorization` 有三种：
+
+- `studio`（默认）：只接受本机 Host token；
+- `client`：接受任何有效的 Studio 客户 key（也包括本机 token）；
+- `route`：HTTP 不认证，外部 webhook 一类入口由贡献方在 handler 中完成领域凭证验证。
+
+认证过的请求在 `StudioHttpRouteRequest.principal` 里带上 `{clientId, scope}`：本机 token 是
+`{clientId: 'local', scope: 'studio'}`，其他客户是 `scope: 'client'`。内置路由（`/dispatch`、
+`/events`、`/pets`、`/pet-sessions/*`、`/clients*`）是保留路径，贡献方不能覆盖，且只接受本机 token。
+
+### 客户身份
+
+客户身份由 Studio 保存（`StudioPluginContext.clients`，表 `studio_clients` / `studio_client_keys`，
+key 只存 SHA-256）。HTTP Plugin 只负责认证和管理入口：
+
+| Route | 说明 |
+|---|---|
+| `GET /clients` | 所有客户和 `localClientId` |
+| `POST /clients` | `{clientId, label}`，`201 {client, key}`；key 只在这里返回一次 |
+| `POST /clients/keys` | `{clientId}`，给客户再发一个 key（换 key 或第二台设备），`201 {clientId, key}` |
+| `POST /clients/revoke` | `{clientId}`，客户的所有 key 立即失效；历史数据保留 |
+
+启动时把本机 token 登记为客户 `local`（label `Local`），它不能被吊销，也不发 key。
+命令行入口是 `pinpawo-studio clients`。
+
+已知限制：`/events` 是全局事件流，`client` 范围的客户不能订阅，只能轮询 Channel 路由。
 
 Channel 向名为 `http` 的 Plugin 贡献 `/channels` 的 Channel、成员、消息与 session 绑定 API。
 它可以在没有 HTTP Plugin 时独立运行：hook contribution 保持未挂载状态。
@@ -110,13 +133,13 @@ HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。
 ## 2. Security boundary
 
 - server 只监听 `127.0.0.1`；当前 Plugin 不提供公网 bind 配置；
-- dispatch 与 SSE 都要求 Bearer token；SSE client 使用支持自定义 header 的 streaming
+- 所有路由（除显式 route-owned auth）都要求 Bearer：本机 token 或客户 key；SSE client 使用支持自定义 header 的 streaming
   `fetch`，不把 token 放入 query string；
 - client 携带 `Origin` 时必须命中显式 `allowedOrigins`；Plugin 处理受限 CORS preflight；
 - POST body 有明确字节上限；SSE client 数量有上限；慢客户端背压治理仍须在 HTTP Plugin
   内收紧，不能由领域 Plugin 或 Studio core 处理；
-- Plugin 贡献的管理 route 默认进入同一 Bearer 与 Origin 边界；route-owned auth 必须显式
-  声明，且贡献方必须在 handler 中拒绝无效凭证；
+- Plugin 贡献的管理 route 默认只接受本机 token；对其他客户开放必须声明 `client`，
+  route-owned auth 必须声明 `route`，且贡献方必须在 handler 中拒绝无效凭证；
 - Plugin options 与 token 由外部 resolver/application composition root 提供，Studio
   config schema 不解释这些字段，也不读取 token。
 

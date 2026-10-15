@@ -22,6 +22,10 @@ export type {
 } from './studioContract';
 export { StudioPetUnavailableError } from './studioContract';
 export { createStudioStorage } from './storage/studioStorage';
+export { StudioClients, StudioClientError } from './clients/studioClients';
+export type { StudioClient } from './clients/studioClients';
+export type { ClientKeyRow, ClientRow, ClientStore } from './clients/store/clientStore';
+export { KyselyClientStore, clientMigrations, type ClientDatabase } from './clients/store/kysely';
 export type {
   StudioMigrations,
   StudioPluginStorage,

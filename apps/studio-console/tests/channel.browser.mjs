@@ -98,7 +98,7 @@ try {
   assert.equal(listed.channels[0].description, 'Auditable public messages between members.');
   const context = () => api(`/channels/context?channelId=${firstId}&limit=200`);
   const publicMessages = async () => (await context()).messages.filter(item => item.author.kind === 'pet');
-  assert.deepEqual((await context()).members.map(item => item.participantId), ['human:studio-operator', 'pet:alpha', 'pet:beta']);
+  assert.deepEqual((await context()).members.map(item => item.participantId), ['human:local', 'pet:alpha', 'pet:beta']);
   const memberPanel = page.getByRole('region', { name: 'Channel members' });
   await memberPanel.getByText('pet:beta', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
@@ -125,7 +125,7 @@ try {
   assert.ok((await publicMessages())[1].body.includes(`Session: ${originalSession}`));
   assert.ok((await publicMessages())[1].body.includes('Continue with the same evidence.'));
   assert.ok((await publicMessages())[1].body.includes(`Referenced message: ${(await publicMessages())[0].messageId}.`));
-  assert.ok((await publicMessages())[1].body.includes('Input source: human:studio-operator.'));
+  assert.ok((await publicMessages())[1].body.includes('Input source: human:local.'));
   await page.getByLabel('Channel recipient').selectOption('pet:beta');
   await page.getByLabel('Message', { exact: true }).fill('Read prior public evidence and review the delivery.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -150,7 +150,7 @@ try {
   const saved = (await context()).messages.find(item => item.body === 'Saved reply with recipient cleared.');
   assert.ok(saved.replyTo); assert.deepEqual(saved.mentions, []);
   await page.locator(`[data-message-id="${saved.messageId}"]`).getByRole('button', { name: 'Reply to Me', exact: true }).click();
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'human:studio-operator');
+  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'human:local');
   await page.getByLabel('Message', { exact: true }).fill('Human author reply stays public.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Human author reply stays public.', { exact: true }).waitFor();
@@ -159,7 +159,7 @@ try {
 
   await create('Separate investigation', ['Alpha']);
   assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'new Channel requires a fresh explicit recipient');
-  assert.deepEqual(await page.getByLabel('Channel recipient').locator('option').allTextContents(), ['No @ recipient', 'Me · human:studio-operator', 'Alpha · pet:alpha'],
+  assert.deepEqual(await page.getByLabel('Channel recipient').locator('option').allTextContents(), ['No @ recipient', 'Me · human:local', 'Alpha · pet:alpha'],
     'only members can be addressed');
   listed = await api('/channels');
   assert.equal(listed.channels.length, 2);
@@ -205,15 +205,17 @@ try {
   await memberPanel.getByRole('button', { name: 'Add Pet', exact: true }).click();
   await memberPanel.getByText('pet:beta', { exact: true }).waitFor();
   assert.equal(await memberPanel.getByLabel('Pet to add').isDisabled(), true, 'every Pet is a member again');
+  // A human member is a Studio client; it must be registered before it can join.
+  await apiPost('/clients', { clientId: 'reviewer-1', label: 'Reviewer One' });
   await memberPanel.getByLabel('Human member ID').fill('reviewer-1');
   await memberPanel.getByRole('button', { name: 'Add human', exact: true }).click();
   await memberPanel.getByText('human:reviewer-1', { exact: true }).waitFor();
-  assert.ok((await page.getByLabel('Channel recipient').locator('option').allTextContents()).includes('reviewer-1 · human:reviewer-1'));
+  assert.ok((await page.getByLabel('Channel recipient').locator('option').allTextContents()).includes('Reviewer One · human:reviewer-1'));
   await page.getByLabel('Channel recipient').selectOption('human:reviewer-1');
   await page.getByLabel('Message', { exact: true }).fill('A human member is addressed without waking a Pet.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await page.locator('.channel-inline-state').filter({ hasText: 'reviewer-1 · delivered' }).waitFor();
-  await memberPanel.getByRole('button', { name: 'Remove reviewer-1', exact: true }).click();
+  await page.locator('.channel-inline-state').filter({ hasText: 'Reviewer One · delivered' }).waitFor();
+  await memberPanel.getByRole('button', { name: 'Remove Reviewer One', exact: true }).click();
   await waitFor(async () => !(await api(`/channels/members?channelId=${firstId}`)).members.some(item => item.id === 'reviewer-1'), 'human left');
   // A Pet's session opens from the member list.
   await memberPanel.locator('.channel-member').filter({ hasText: 'pet:alpha' }).getByRole('button', { name: 'View session', exact: true }).click();
@@ -235,11 +237,11 @@ try {
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await loopOutputs()).length === 3, 'normal Alpha → Beta → Alpha loop');
   assert.deepEqual((await loopOutputs()).map(item => item.author.id), ['alpha', 'beta', 'alpha']);
-  assert.deepEqual((await loopOutputs()).map(item => item.mentions[0].participantId), ['pet:beta', 'pet:alpha', 'human:studio-operator']);
+  assert.deepEqual((await loopOutputs()).map(item => item.mentions[0].participantId), ['pet:beta', 'pet:alpha', 'human:local']);
   await page.locator('.channel-mentions').getByText('@Me', { exact: true }).waitFor();
   await page.locator('.channel-message-head').getByText('Me', { exact: true }).first().waitFor();
   const memberIds = (await api(`/channels/members?channelId=${loopId}`)).members.map(item => item.participantId);
-  assert.deepEqual(new Set(memberIds), new Set(['human:studio-operator', 'pet:alpha', 'pet:beta']));
+  assert.deepEqual(new Set(memberIds), new Set(['human:local', 'pet:alpha', 'pet:beta']));
   await apiPost('/channels/messages', { channelId: secondId, body: 'queue-hold', mentions: [{ participantId: 'pet:alpha' }] });
   await waitFor(async () => (await api('/dispatch/queues')).queues.find(item => item.petId === 'alpha')?.activeDispatch?.scope?.id === secondId, 'global active work from another Channel');
   await page.getByLabel('Channel recipient').selectOption('pet:alpha');

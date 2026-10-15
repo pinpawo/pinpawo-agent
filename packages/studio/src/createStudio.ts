@@ -17,6 +17,8 @@ import type { StudioPetBinding, StudioPetRegistration } from './types';
 import { StudioEventBus } from './studioEventBus';
 import { StudioPluginHookRegistry } from './studioPluginHooks';
 import { createStudioStorage, type StudioStorageConfig } from './storage/studioStorage';
+import { StudioClients } from './clients/studioClients';
+import { KyselyClientStore, clientMigrations, type ClientDatabase } from './clients/store/kysely';
 
 export type CreateStudioInput = {
   studioId: string;
@@ -53,6 +55,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const pluginNames = new Set<string>();
   for (const plugin of plugins) {
     if (!plugin.name.trim()) throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
+    // `studio` is the core's own event source and storage owner.
+    if (plugin.name === 'studio') throw new Error(`studio "${input.studioId}": plugin name "studio" is reserved`);
     if (pluginNames.has(plugin.name)) {
       throw new Error(`studio "${input.studioId}": duplicate plugin "${plugin.name}"`);
     }
@@ -64,6 +68,12 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const stopDispatchLifecycleObservers: Array<() => void> = [];
   const pluginHooks = new StudioPluginHookRegistry();
   const storage = createStudioStorage(input.storage ?? { kind: 'sqlite', path: ':memory:' });
+  let clientStore: Promise<KyselyClientStore> | undefined;
+  const clients = new StudioClients(() => {
+    clientStore ??= storage.open<ClientDatabase>('studio', clientMigrations).then(db => new KyselyClientStore(db));
+    clientStore.catch(() => { clientStore = undefined; });
+    return clientStore;
+  });
   const startedPlugins: StudioPlugin[] = [];
   let activationPromise: Promise<void> | null = null;
   let shutdownPromise: Promise<void> | null = null;
@@ -193,6 +203,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       listDispatchQueues,
       petSessions,
       hooks: pluginHooks.contextFor(plugin.name),
+      clients,
       storage: {
         dialect: storage.dialect,
         open: (migrations) => storage.open(plugin.name, migrations),

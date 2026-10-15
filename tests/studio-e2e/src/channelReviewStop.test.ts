@@ -19,6 +19,9 @@ import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/t
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 
+/** The local Host token's Studio client, as a Channel member. */
+const me = { kind: 'human' as const, id: 'local' };
+
 async function waitFor(done: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 1000; i++) { if (await done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   throw new Error('Timed out waiting for review/dispatch completion.');
@@ -93,12 +96,12 @@ for (const decision of ['reject', 'cancel'] as const) {
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
     });
-    const outputs = async (id: string) => (await channel.service.readContext(channel.operator, id)).messages.filter(message => message.author.kind === 'pet');
+    const outputs = async (id: string) => (await channel.service.readContext(me, id)).messages.filter(message => message.author.kind === 'pet');
     const events: Array<{ type: string; payload?: any }> = [];
     studio.subscribe(event => { events.push(event); });
     try {
-      const id = (await channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] })).channel.channelId;
-      const ask = (body: string, replyTo?: string) => channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] });
+      const id = (await channel.service.createChannel(me, { title: 'Goal', pets: ['one'] })).channel.channelId;
+      const ask = (body: string, replyTo?: string) => channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] }, me);
       await ask('Which destination?');
       await waitFor(async () => (await outputs(id)).length === 1);
       const question = (await outputs(id))[0]!;

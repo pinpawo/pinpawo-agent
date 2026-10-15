@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio';
+import { createStudio, createStudioStorage, StudioClients, type StudioDispatchRequest } from '@pinpawo/studio';
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';
@@ -92,6 +92,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
       dialect: 'sqlite',
       open: async () => { throw new Error('not used'); },
     },
+    clients: new StudioClients(async () => { throw new Error('not used'); }),
   });
   t.after(() => plugin.stop?.());
 
@@ -122,7 +123,7 @@ test('a channel-bound schedule runs its Pet in the Channel without posting there
     plugins: [scheduler, channel],
   });
   t.after(() => studio.shutdown());
-  const { channel: { channelId } } = await channel.service.createChannel(channel.operator, { title: 'Ops', pets: ['reporter'] });
+  const { channel: { channelId } } = await channel.service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: ['reporter'] });
 
   const schedule = await scheduler.service.create({
     petId: 'reporter', channelId, request: 'Write the nightly report',
@@ -135,7 +136,7 @@ test('a channel-bound schedule runs its Pet in the Channel without posting there
   assert.ok(dispatched[0]?.session?.id);
   assert.match(dispatched[0]!.request, /"type": "channel_task"/);
   assert.match(dispatched[0]!.request, new RegExp(`"origin": \\{\\s*"kind": "scheduler",\\s*"id": "${schedule.scheduleId}"`));
-  assert.deepEqual((await channel.service.readContext(channel.operator, channelId)).messages, []);
+  assert.deepEqual((await channel.service.readContext({ kind: 'human', id: 'local' }, channelId)).messages, []);
   const stored = await scheduler.service.get(schedule.scheduleId);
   assert.equal(stored?.status, 'dispatched');
   assert.equal(stored?.receipt?.sessionId, dispatched[0]?.session?.id);
@@ -153,7 +154,7 @@ test('a channel-bound schedule fails when its Pet is not a member of the Channel
     plugins: [scheduler, channel],
   });
   t.after(() => studio.shutdown());
-  const { channel: { channelId } } = await channel.service.createChannel(channel.operator, { title: 'Ops', pets: [] });
+  const { channel: { channelId } } = await channel.service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: [] });
 
   const schedule = await scheduler.service.create({
     petId: 'reporter', channelId, request: 'Write the nightly report',
@@ -198,8 +199,8 @@ for (const order of ['scheduler first', 'channel first'] as const) {
     const channelPath = path.join(root, 'channels.sqlite');
     const storage = createStudioStorage({ kind: 'sqlite', path: channelPath });
     const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-    const { channel: { channelId } } = await new ChannelService({ store, pets: () => [{ petId: 'reporter', name: 'reporter' }] })
-      .createChannel({ kind: 'human', id: 'studio-operator' }, { title: 'Ops', pets: ['reporter'] });
+    const { channel: { channelId } } = await new ChannelService({ store, pets: () => [{ petId: 'reporter', name: 'reporter' }], humans: async () => undefined })
+      .createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: ['reporter'] });
     await storage.close();
     const channel = createChannelPlugin({ httpRoute: false });
     // Stored before the restart and already due when the Studio comes back.

@@ -1,12 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type {
-  StudioDispatchReceipt,
-  StudioDispatchRequest,
-  StudioEvent,
-  StudioEventHandler,
-  StudioPetRegistration,
+import {
+  KyselyClientStore,
+  StudioClients,
+  clientMigrations,
+  createStudioStorage,
+  type ClientDatabase,
+  type StudioDispatchReceipt,
+  type StudioDispatchRequest,
+  type StudioEvent,
+  type StudioEventHandler,
+  type StudioPetRegistration,
 } from '@pinpawo/studio';
 
 import {
@@ -555,4 +560,68 @@ test('HTTP Plugin reports session access as unavailable without a session port',
     headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
   });
   assert.equal(response.status, 503);
+});
+
+test('HTTP Plugin authenticates Studio clients: the Host token has the global API, other clients only client routes', async (t) => {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  const harness = createContext();
+  harness.context.clients = new StudioClients(async () => new KyselyClientStore(
+    await storage.open<ClientDatabase>('studio', clientMigrations),
+  ));
+  let routes: StudioHttpRoutesHook | undefined;
+  harness.context.hooks = {
+    expose: (_hookName, hook) => {
+      routes = hook as StudioHttpRoutesHook;
+      return () => { routes = undefined; };
+    },
+    contribute: () => () => undefined,
+  };
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  assert.ok(routes);
+  routes.register({ method: 'GET', path: '/whoami', authorization: 'client', handle: ({ principal }) => ({ kind: 'json', body: principal }) });
+  routes.register({ method: 'GET', path: '/studio-only', handle: ({ principal }) => ({ kind: 'json', body: principal }) });
+  const address = plugin.address();
+  assert.ok(address);
+  const call = (path: string, token: string, body?: unknown) => fetch(pluginUrl(address.port, path), {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  // The Host token is the local client, registered on start.
+  assert.deepEqual(await (await call('/whoami', AUTH_TOKEN)).json(), { clientId: 'local', scope: 'studio' });
+  assert.deepEqual(await (await call('/studio-only', AUTH_TOKEN)).json(), { clientId: 'local', scope: 'studio' });
+  const listed = await (await call('/clients', AUTH_TOKEN)).json() as { clients: Array<{ clientId: string; label: string }>; localClientId: string };
+  assert.deepEqual([listed.localClientId, listed.clients.map((client) => [client.clientId, client.label])], ['local', [['local', 'Local']]]);
+
+  const created = await call('/clients', AUTH_TOKEN, { clientId: 'alice', label: 'Alice' });
+  assert.equal(created.status, 201);
+  const { client, key } = await created.json() as { client: { clientId: string; label: string }; key: string };
+  assert.deepEqual([client.clientId, client.label], ['alice', 'Alice']);
+  assert.match(key, /^pps_/);
+  assert.equal((await call('/clients', AUTH_TOKEN, { clientId: 'alice', label: 'Again' })).status, 409);
+  assert.equal((await call('/clients', AUTH_TOKEN, { clientId: 'bad id', label: 'Bad' })).status, 400);
+
+  assert.deepEqual(await (await call('/whoami', key)).json(), { clientId: 'alice', scope: 'client' });
+  for (const path of ['/studio-only', '/pets', '/clients', '/dispatch/queues']) {
+    assert.equal((await call(path, key)).status, 403, path);
+  }
+  assert.equal((await call('/whoami', `${key}x`)).status, 401);
+
+  const second = await call('/clients/keys', AUTH_TOKEN, { clientId: 'alice' });
+  assert.equal(second.status, 201);
+  const { key: secondKey } = await second.json() as { key: string };
+  assert.equal((await call('/whoami', secondKey)).status, 200);
+  assert.equal((await call('/clients/keys', AUTH_TOKEN, { clientId: 'nobody' })).status, 404);
+
+  assert.equal((await call('/clients/revoke', AUTH_TOKEN, { clientId: 'local' })).status, 400);
+  assert.equal((await call('/clients/keys', AUTH_TOKEN, { clientId: 'local' })).status, 400);
+  const revoked = await call('/clients/revoke', AUTH_TOKEN, { clientId: 'alice' });
+  assert.ok((await revoked.json() as { client: { revokedAt?: string } }).client.revokedAt);
+  assert.equal((await call('/whoami', key)).status, 401);
+  assert.equal((await call('/whoami', secondKey)).status, 401);
+  assert.equal((await call('/clients/keys', AUTH_TOKEN, { clientId: 'alice' })).status, 404);
 });

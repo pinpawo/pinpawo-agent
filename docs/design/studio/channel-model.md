@@ -1,6 +1,6 @@
 # Channel 模型（#943 重新设计）
 
-> 状态：Channel 侧已实现；Studio 客户身份待实现
+> 状态：已实现（Channel 侧 PR #958，存储 PR #959，Studio 客户身份见下文"身份"）
 > 更新：2026-10-14
 > 来源：PR #956 评审后的设计回顾。本文取代 [Channel 寻址、执行与状态](channel-addressing-and-execution.md)
 > 中关于目标/修订、参与者登记、Plugin 输入作者、Pet 输出路径和执行/审批观察的部分；寻址语法、replyTo 和 session 绑定规则不变。
@@ -119,13 +119,17 @@ Channel 只向 Studio 的全局事件总线发布事件（新消息、投递结�
 
 ## 身份（Studio）
 
-- 现状：Host 只有一个共享 Bearer（`~/.pinpawo/local-server-token`），`studio-http` 逐个请求比对它。
-- 改为客户身份：Studio 维护 `studio_clients(client_id, label, created_at, revoked_at)` 和
-  `studio_client_keys(key_hash, client_id, created_at, revoked_at)`，key 只存 SHA-256。同样放在可替换的存储接口后面。
-- 本机 token 对应一个普通客户身份，额外拥有全局 Studio API（dispatch、events、pet-sessions）的权限；其他客户只能访问 Channel 路由。
-- `studio-http` 统一认证，把 `principal = {clientId, scope: 'studio' | 'channel'}` 放进 `StudioHttpRouteRequest`。
-  Channel 把它当作 `human:<clientId>` 使用；label 向 Studio 查询。
-- 管理入口：`pinpawo-studio clients add <id> --label <name>`（key 只在创建时打印一次）、`clients revoke`、`clients keys add`。
+- 以前 Host 只有一个共享 Bearer（`~/.pinpawo/local-server-token`）。现在是客户身份：Studio 维护 `studio_clients(client_id, label, created_at, revoked_at)` 和
+  `studio_client_keys(key_hash, client_id, created_at, revoked_at)`，key 只存 SHA-256。表建在 [Studio 存储](storage.md) 里，存储接口是 `ClientStore`
+  （[`packages/studio/src/clients/`](../../../packages/studio/src/clients/)）。
+- 本机 token 对应普通客户 `local`（启动时登记），额外拥有全局 Studio API（dispatch、events、pets、pet-sessions、clients）的权限；
+  其他客户只能访问以 `authorization: 'client'` 注册的路由，目前就是 Channel 路由。
+- `studio-http` 统一认证，把 `principal = {clientId, scope: 'studio' | 'client'}` 放进 `StudioHttpRouteRequest`。
+  Channel 把它当作 `human:<clientId>` 使用；label 向 Studio 查询；只有未吊销的客户能被加为 human 成员。
+- 管理入口：`pinpawo-studio clients add <id> --label <name>`（key 只在创建时打印一次）、`clients add-key`、`clients revoke`、`clients list`，
+  对应 HTTP 的 `/clients*`。
+- 谁能管理成员：任何当前成员（不区分角色）。
+- 已知限制：`/events` 是全局事件流，只给本机 token；其他客户看 Channel 只能轮询。
 
 ## 存储接口
 
@@ -172,5 +176,4 @@ interface ChannelStore {
 | 测试 | channel / scheduler / trigger / studio-http / studio-e2e / Console 浏览器测试；agent-evals 里用到 Channel 输入封装的地方 |
 | 文档 | 实现后更新 `channel-addressing-and-execution.md`、`automation-plugins.md`、`http-plugin.md`、`docs/reference/api/studio.md`、`docs/studio/configuration.md`、`skills/studio/SKILL.md` |
 
-建议按两个 PR 依次实现：先 Channel 侧（表、接口、成员、`run()`、模板），再 Studio 客户身份（认证与 principal）。
-在第二个 PR 之前，本机 token 对应 `human:<已配置的 operatorId>`（默认 `studio-operator`）；第二个 PR 把本机 token 登记为普通客户身份。PR #956 不再继续，按本文重做。
+按 PR 依次实现：Channel 侧（#958）、Studio 存储（#959）、Studio 客户身份。PR #956 不再继续，按本文重做。

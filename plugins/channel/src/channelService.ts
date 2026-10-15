@@ -50,6 +50,8 @@ export type ChannelServiceOptions = {
   store: ChannelStore;
   /** The Studio's Pets; only these can join. */
   pets: () => Array<{ petId: string; name: string }>;
+  /** A Studio client by id; only active clients can be added as human members. */
+  humans: (clientId: string) => Promise<{ label: string; active: boolean } | undefined>;
 };
 
 /**
@@ -60,11 +62,13 @@ export type ChannelServiceOptions = {
 export class ChannelService {
   readonly store: ChannelStore;
   private readonly pets: ChannelServiceOptions['pets'];
+  private readonly humans: ChannelServiceOptions['humans'];
   private readonly listeners = new Set<(event: ChannelEvent) => void>();
 
   constructor(options: ChannelServiceOptions) {
     this.store = options.store;
     this.pets = options.pets;
+    this.humans = options.humans;
   }
 
   subscribe(listener: (event: ChannelEvent) => void): () => void {
@@ -97,18 +101,34 @@ export class ChannelService {
   private requirePet(petId: string): void {
     if (!this.pets().some(pet => pet.petId === petId)) throw new Error(`Unknown Pet "${petId}".`);
   }
-  private label(member: MemberRef): string {
-    return member.kind === 'pet' ? this.pets().find(pet => pet.petId === member.id)?.name ?? member.id : member.id;
+  private async requireJoinable(member: MemberRef): Promise<void> {
+    if (member.kind === 'pet') return this.requirePet(member.id);
+    if (!(await this.humans(member.id))?.active) throw new Error(`Unknown Studio client "${member.id}".`);
   }
-  private memberView(row: ChannelMemberRow): ChannelMember {
-    return { participantId: channelParticipantId(row.kind, row.id), kind: row.kind, id: row.id, label: this.label(row), joinedAt: row.joinedAt };
+  /**
+   * Labels of these humans, read when shown so a renamed client shows its
+   * current name. Never call inside a store transaction: the client lookup
+   * is another query, and on SQLite's single connection it would wait for
+   * the transaction forever.
+   */
+  private async humanLabels(rows: MemberRef[]): Promise<Map<string, string>> {
+    const ids = [...new Set(rows.filter(row => row.kind === 'human').map(row => row.id))];
+    const labels = await Promise.all(ids.map(async id => [id, (await this.humans(id))?.label ?? id] as const));
+    return new Map(labels);
   }
-  private async membersIn(store: ChannelStore, channelId: string): Promise<ChannelMember[]> {
-    return (await store.listMembers(channelId)).filter(row => !row.leftAt).map(row => this.memberView(row));
+  private memberView(row: ChannelMemberRow, humans: Map<string, string>): ChannelMember {
+    const label = row.kind === 'pet' ? this.pets().find(pet => pet.petId === row.id)?.name ?? row.id : humans.get(row.id) ?? row.id;
+    return { participantId: channelParticipantId(row.kind, row.id), kind: row.kind, id: row.id, label, joinedAt: row.joinedAt };
+  }
+  /** Current members of a Channel, with human labels read before any transaction began. */
+  private async membersIn(store: ChannelStore, channelId: string, humans: Map<string, string>): Promise<ChannelMember[]> {
+    return (await store.listMembers(channelId)).filter(row => !row.leftAt).map(row => this.memberView(row, humans));
   }
   /** Current members, as messages address them. */
-  members(channelId: string): Promise<ChannelMember[]> {
-    return this.membersIn(this.store, channelId);
+  async members(channelId: string): Promise<ChannelMember[]> {
+    const rows = (await this.store.listMembers(channelId)).filter(row => !row.leftAt);
+    const labels = await this.humanLabels(rows);
+    return rows.map(row => this.memberView(row, labels));
   }
 
   async createChannel(actor: MemberRef, input: unknown): Promise<{ channel: ChannelRow; members: ChannelMember[] }> {
@@ -116,6 +136,7 @@ export class ChannelService {
     const creator = memberRefSchema.parse(actor);
     const pets = [...new Set(value.pets)];
     for (const petId of pets) this.requirePet(petId);
+    const labels = await this.humanLabels([creator]);
     const now = new Date().toISOString();
     const channel: ChannelRow = {
       channelId: randomUUID(), title: value.title, ...(value.description ? { description: value.description } : {}),
@@ -126,7 +147,7 @@ export class ChannelService {
       for (const member of [creator, ...pets.filter(id => creator.kind !== 'pet' || creator.id !== id).map(id => ({ kind: 'pet' as const, id }))]) {
         await store.upsertMember({ channelId: channel.channelId, ...member, joinedAt: now });
       }
-      return { channel, members: await this.membersIn(store, channel.channelId) };
+      return { channel, members: await this.membersIn(store, channel.channelId, labels) };
     });
     this.publish({ type: 'channel.created', payload: result });
     return result;
@@ -165,7 +186,7 @@ export class ChannelService {
 
   async addMember(actor: MemberRef, channelId: string, value: unknown): Promise<ChannelMember> {
     const member = memberRefSchema.parse(value);
-    if (member.kind === 'pet') this.requirePet(member.id);
+    await this.requireJoinable(member);
     const result = await this.store.transaction(async (store) => {
       const channel = await this.requireMemberIn(store, channelId, actor);
       const existing = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
@@ -175,7 +196,7 @@ export class ChannelService {
       return { row, joined: true };
     });
     if (result.joined) this.publish({ type: 'channel.member.joined', payload: { channelId: result.row.channelId, member, actor } });
-    return this.memberView(result.row);
+    return this.memberView(result.row, await this.humanLabels([result.row]));
   }
 
   async removeMember(actor: MemberRef, channelId: string, value: unknown): Promise<void> {
@@ -202,6 +223,8 @@ export class ChannelService {
   }> {
     const value = channelMessageSchema.parse(input);
     const trustedAuthor = memberRefSchema.parse(author);
+    // Mentions record labels; read them first (a member who joins meanwhile is labelled by id).
+    const labels = await this.humanLabels(await this.store.listMembers(identifier.parse(channelId)));
     let mentionError: string | undefined;
     const result = await this.store.transaction(async (store) => {
       const channel = await this.requireMemberIn(store, channelId, trustedAuthor);
@@ -209,7 +232,7 @@ export class ChannelService {
         throw new Error('Message reference does not exist in this Channel.');
       }
       let mentions: ChannelMention[];
-      try { mentions = parseChannelMentions(value.body, value.mentions, await this.membersIn(store, channel.channelId)); }
+      try { mentions = parseChannelMentions(value.body, value.mentions, await this.membersIn(store, channel.channelId, labels)); }
       catch (error) {
         if (trustedAuthor.kind !== 'pet') throw error;
         mentionError = error instanceof Error ? error.message : String(error);

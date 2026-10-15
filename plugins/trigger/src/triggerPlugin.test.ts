@@ -11,8 +11,8 @@ async function seedChannel(t: TestContext, petIds: string[]) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-  const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })) });
-  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'studio-operator' }, { title: 'Ops', pets: petIds });
+  const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })), humans: async () => undefined });
+  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: petIds });
   return { channelId, channel: createChannelPlugin({ store, httpRoute: false }), service };
 }
 
@@ -223,7 +223,7 @@ test('a channel-bound Trigger runs its Pet in the Channel without posting there,
   assert.match(input!.request, /"type": "channel_task"/);
   assert.match(input!.request, /"origin": \{\s*"kind": "trigger",\s*"id": "nightly-report"/);
   assert.match(input!.request, /Report on task-7/);
-  assert.deepEqual((await service.readContext({ kind: 'human', id: 'studio-operator' }, channelId)).messages, []);
+  assert.deepEqual((await service.readContext({ kind: 'human', id: 'local' }, channelId)).messages, []);
   const [delivery] = (await trigger.service.snapshot()).deliveries;
   assert.equal(delivery?.status, 'accepted');
   assert.equal(delivery?.receipt?.sessionId, input?.session?.id);
@@ -289,7 +289,7 @@ test('event data in a channel-bound request addresses nobody: it reaches only th
   // The request is the target's task, not a Channel message: a link in it addresses no one.
   assert.equal(dispatched.length, 1);
   assert.match(dispatched[0]!.request, /"type": "channel_task"/);
-  assert.deepEqual((await service.readContext({ kind: 'human', id: 'studio-operator' }, channelId)).messages, []);
+  assert.deepEqual((await service.readContext({ kind: 'human', id: 'local' }, channelId)).messages, []);
   const [delivery] = (await trigger.service.snapshot()).deliveries;
   assert.equal(delivery?.status, 'accepted');
 });

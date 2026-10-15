@@ -95,10 +95,11 @@ only; a reconnect rebuilds from the checkpoint snapshot.
 
 ## Channel messages and addressing
 
-Channel contributes these routes to the HTTP Plugin under Studio Bearer. Until
-Studio carries per-client identities, every request acts as the configured
-operator member (`human:<operatorId>`, default `studio-operator`). A request on a
+Channel contributes these routes to the HTTP Plugin with `client` authorization:
+any Studio client key, or the local Host token, may call them. The caller is the
+member `human:<clientId>` (the local token is `human:local`). A request on a
 Channel the actor is not a current member of is `403`; an unknown Channel is `404`.
+A human joins only as an active Studio client, and its label is the client's label.
 
 | Route | Input / result |
 |---|---|
@@ -122,6 +123,23 @@ without tool calls in its Channel session is saved as its message and delivered 
 same way. The model is specified in [Channel model](../../design/studio/channel-model.md);
 addressing syntax and fixed sessions in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
 Delivery acceptance is not execution completion.
+
+## Studio clients
+
+Every HTTP request is authenticated as a Studio client. The local Host token is
+the client `local` and may use every route; other clients authenticate with a
+key and may use only routes registered with `client` authorization (the Channel
+routes). Keys are `pps_…`, shown once, stored as SHA-256 hashes. These routes
+take the local Host token:
+
+| Route | Input / result |
+|---|---|
+| `GET /clients` | `{ clients, localClientId }`. |
+| `POST /clients` | `clientId` (1–64 of letters, digits, `.`, `_`, `-`), `label`; `201 { client, key }`. `409` if the id exists. |
+| `POST /clients/keys` | `clientId`; another key for an active client, `201 { clientId, key }`. |
+| `POST /clients/revoke` | `clientId`; all its keys stop working. The local client cannot be revoked. |
+
+The CLI equivalents are `pinpawo-studio clients list|add|add-key|revoke`.
 
 ## Host lifecycle
 

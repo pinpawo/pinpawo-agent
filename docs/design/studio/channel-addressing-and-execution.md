@@ -29,8 +29,8 @@ Studio core、HTTP 与 Plugin 装配边界见 [Host 设计](independent-host-run
 可寻址的是 Channel 的当前成员（`human` 或 `pet`）。`participantId` 为
 `kind:<RFC3986 百分号编码的原始 id>`，包括编码 `!'()*`；例如 `pet:reviewer`。
 名称只作 label，不按同名、改名或正文自称猜测身份。“Me”只是查看者显示称呼。
-在 Studio 客户身份之前，HTTP 请求的成员身份由 `operatorId` 确定（默认 `studio-operator`），
-共享 Bearer 的浏览器共享此身份；不是成员的请求返回 403。也不隔离恶意进程内 Node Plugin。
+HTTP 请求的成员身份是认证出的 Studio 客户 `human:<clientId>`（本机 token 是 `human:local`），
+共享同一个 key 的浏览器共享此身份；不是成员的请求返回 403。也不隔离恶意进程内 Node Plugin。
 
 统一入口 `POST /channels/messages` 保存正文、可选 `replyTo`、artifacts 和
 `mentions: [{participantId}]`。正文直接链接 `[@Reviewer](participant:pet:reviewer)`
@@ -93,7 +93,7 @@ Agent Session 消息 id 为 `external_ref` 幂等写入普通消息，再走统�
   "body": "本轮参与者正文",
   "replyTo": {
     "messageId": "quoted-message",
-    "author": { "participantId": "human:studio-operator", "kind": "human" },
+    "author": { "participantId": "human:local", "kind": "human" },
     "body": "被引用的历史正文"
   }
 }

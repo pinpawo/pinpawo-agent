@@ -350,7 +350,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
             event.preventDefault();
             if (joiningHuman.trim()) manageMember('/channels/members', { kind: 'human', id: joiningHuman.trim() }, () => setJoiningHuman(''));
           }}>
-            <input aria-label="Human member ID" placeholder="Human ID" maxLength={256} disabled={pending} value={joiningHuman} onChange={event => setJoiningHuman(event.target.value)} />
+            <input aria-label="Human member ID" placeholder="Studio client ID" maxLength={256} disabled={pending} value={joiningHuman} onChange={event => setJoiningHuman(event.target.value)} />
             <button disabled={!connected || pending || !joiningHuman.trim()}>Add human</button>
           </form>
           {memberError && <p className="channel-record-error" role="alert">{memberError}</p>}

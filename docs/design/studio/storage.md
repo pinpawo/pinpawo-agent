@@ -92,6 +92,10 @@ src/store/
 ### 并发
 
 - SQLite：一个 Studio 进程只有一个连接，Kysely 在连接上排队，事务串行执行。
+  所以**事务里只能用 `work` 拿到的 store**：在事务里调用别的 store、别的 Plugin 或任何会查库的回调
+  （例如 Channel 查客户的 label），这个查询要排在事务后面，事务又在等它，就永远等下去。
+  需要别处的数据时，在开事务之前读好（Channel 的 `humanLabels`）。Postgres 不会卡住，但同样的写法
+  会多占一个连接，也不在同一个事务里。
 - Postgres：默认的读已提交隔离级别。会被并发写到的唯一键用 `INSERT … ON CONFLICT` 处理
   （Channel 的会话预留和带 `external_ref` 的幂等消息），不靠"先查后写"。
 
@@ -104,4 +108,5 @@ Postgres，devDependency），不需要数据库服务；`tests/support/pglitePo
 ## 后续
 
 1. Scheduler、Trigger、Notice 各一个 PR 迁入，删掉它们自己的 SQLite 文件和逐列 `ALTER TABLE`。
-2. Studio 客户端身份（下一个 PR）的表直接建在这里。
+2. Studio 客户身份已建在这里：所有者是 `studio`（迁移表 `studio_migrations`），表 `studio_clients`、`studio_client_keys`。
+   `studio` 因此是保留的 Plugin 名。

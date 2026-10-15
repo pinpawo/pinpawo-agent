@@ -2,7 +2,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
-import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
+import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { allocatePetSessionId, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelParticipantId } from './channelParticipants';
@@ -25,11 +25,6 @@ export type CreateChannelPluginOptions = {
   /** Defaults to the Channel tables in the Studio database. */
   store?: ChannelStore;
   httpRoute?: false | { pluginName?: string };
-  /**
-   * The human member a Studio Bearer-token request acts as, until Studio
-   * provides per-client identities. Not a claimed request-body author.
-   */
-  operatorId?: string;
 };
 /** What happened to one addressed member. Not stored: returned to the poster and published as `channel.delivery`. */
 export type ChannelDelivery = {
@@ -59,10 +54,8 @@ export type ChannelInputsHook = {
 export type ChannelPlugin = StudioPlugin & {
   /** Available once the Plugin has started. */
   service: ChannelService;
-  /** The member Studio Bearer-token requests act as. */
-  operator: MemberRef;
-  /** Post as `author` (the operator by default) and deliver to the Pets the message addresses. */
-  sendMessage: (channelId: string, input: unknown, author?: MemberRef) => Promise<{ message: ChannelMessage; deliveries: ChannelDelivery[] }>;
+  /** Post as `author` and deliver to the Pets the message addresses. */
+  sendMessage: (channelId: string, input: unknown, author: MemberRef) => Promise<{ message: ChannelMessage; deliveries: ChannelDelivery[] }>;
   run: ChannelInputsHook['run'];
 };
 
@@ -81,7 +74,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     if (!current) throw new Error('Channel Plugin is not started.');
     return current;
   }
-  const operator: MemberRef = { kind: 'human', id: z.string().trim().min(1).max(256).parse(options.operatorId ?? 'studio-operator') };
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHost: (() => void) | undefined;
   let removeHttp: (() => void) | undefined;
@@ -130,7 +122,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     return deliveries;
   }
 
-  async function sendMessage(channelId: string, input: unknown, author: MemberRef = operator) {
+  async function sendMessage(channelId: string, input: unknown, author: MemberRef) {
     const { message } = await channelService().postMessage(author, channelId, input);
     return { message, deliveries: await deliver(message) };
   }
@@ -189,12 +181,19 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   const inputs: ChannelInputsHook = { run };
 
   return {
-    name: 'channel', operator, sendMessage, run, toolkits: [toolkit],
+    name: 'channel', sendMessage, run, toolkits: [toolkit],
     get service() { return channelService(); },
     start: async (studio) => {
       const store = options.store
         ?? new KyselyChannelStore(await studio.storage.open<ChannelDatabase>(channelMigrations(studio.storage.dialect)));
-      current = new ChannelService({ store, pets: () => studio.listPets().map(pet => ({ petId: pet.petId, name: pet.name })) });
+      current = new ChannelService({
+        store,
+        pets: () => studio.listPets().map(pet => ({ petId: pet.petId, name: pet.name })),
+        humans: async (clientId) => {
+          const client = await studio.clients.get(clientId);
+          return client && { label: client.label, active: !client.revokedAt };
+        },
+      });
       const service = current;
       context = studio;
       unsubscribeHost = studio.subscribe(async (event) => {
@@ -204,9 +203,13 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       unsubscribe = service.subscribe(event => studio.notify(event));
       if (options.httpRoute === false) return;
       removeHttp = studio.hooks.contribute<StudioHttpRoutesHook>(options.httpRoute?.pluginName ?? 'http', 'routes', (routes) => {
-        const register = (method: string, route: string, handle: StudioHttpRoute['handle']) => routes.register({
-          method, path: route, authorization: 'studio', handle: async (request) => {
-            try { return await handle(request); }
+        // Any Studio client may call; membership decides what it can see. The caller is the human member `human:<clientId>`.
+        const register = (method: string, route: string, handle: (request: StudioHttpRouteRequest, actor: MemberRef) => ReturnType<StudioHttpRoute['handle']>) => routes.register({
+          method, path: route, authorization: 'client', handle: async (request) => {
+            try {
+              if (!request.principal) throw new ChannelAccessError('Channel routes require a Studio client.');
+              return await handle(request, { kind: 'human', id: request.principal.clientId });
+            }
             catch (error) {
               const status = error instanceof z.ZodError ? 400
                 : error instanceof ChannelAccessError ? 403
@@ -221,31 +224,31 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         });
         const channelOf = (url: URL) => url.searchParams.get('channelId') ?? '';
         const withChannel = z.object({ channelId: z.string().min(1) }).passthrough();
-        // Until Studio carries client identities, every Bearer-token request acts as the operator member.
-        const actor = operator;
-        const viewerParticipantId = channelParticipantId(actor.kind, actor.id);
+        const viewer = (actor: MemberRef) => channelParticipantId(actor.kind, actor.id);
         const remove = [
-          register('GET', '/channels', async ({ url }) => ({ kind: 'json', body: { ...await service.listChannels(actor, page(url)), viewerParticipantId } })),
-          register('GET', '/channels/context', async ({ url }) => ({ kind: 'json', body: {
-            ...await service.readContext(actor, channelOf(url), page(url)), viewerParticipantId,
+          register('GET', '/channels', async ({ url }, actor) => ({ kind: 'json', body: {
+            ...await service.listChannels(actor, page(url)), viewerParticipantId: viewer(actor),
           } })),
-          register('GET', '/channels/members', async ({ url }) => ({ kind: 'json', body: { members: await service.listMembers(actor, channelOf(url)) } })),
-          register('GET', '/channels/sessions', async ({ url }) => ({ kind: 'json', body: { sessions: await service.listSessions(actor, channelOf(url)) } })),
-          register('POST', '/channels', async ({ readJson }) => ({ kind: 'json', status: 201, body: await service.createChannel(actor, await readJson()) })),
-          register('POST', '/channels/update', async ({ readJson }) => {
+          register('GET', '/channels/context', async ({ url }, actor) => ({ kind: 'json', body: {
+            ...await service.readContext(actor, channelOf(url), page(url)), viewerParticipantId: viewer(actor),
+          } })),
+          register('GET', '/channels/members', async ({ url }, actor) => ({ kind: 'json', body: { members: await service.listMembers(actor, channelOf(url)) } })),
+          register('GET', '/channels/sessions', async ({ url }, actor) => ({ kind: 'json', body: { sessions: await service.listSessions(actor, channelOf(url)) } })),
+          register('POST', '/channels', async ({ readJson }, actor) => ({ kind: 'json', status: 201, body: await service.createChannel(actor, await readJson()) })),
+          register('POST', '/channels/update', async ({ readJson }, actor) => {
             const { channelId, ...patch } = withChannel.parse(await readJson());
             return { kind: 'json', body: await service.updateChannel(actor, channelId, patch) };
           }),
-          register('POST', '/channels/members', async ({ readJson }) => {
+          register('POST', '/channels/members', async ({ readJson }, actor) => {
             const { channelId, ...member } = withChannel.parse(await readJson());
             return { kind: 'json', status: 201, body: await service.addMember(actor, channelId, member) };
           }),
-          register('POST', '/channels/members/remove', async ({ readJson }) => {
+          register('POST', '/channels/members/remove', async ({ readJson }, actor) => {
             const { channelId, ...member } = withChannel.parse(await readJson());
             await service.removeMember(actor, channelId, member);
             return { kind: 'json', body: { removed: true } };
           }),
-          register('POST', '/channels/messages', async ({ readJson }) => {
+          register('POST', '/channels/messages', async ({ readJson }, actor) => {
             const { channelId, ...message } = channelMessageSchema.extend({ channelId: z.string().min(1) }).strict().parse(await readJson());
             const result = await sendMessage(channelId, message, actor);
             return { kind: 'json', status: 201, body: { ...result.message, deliveries: result.deliveries } };
@@ -267,7 +270,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
 
 export function createStudioPlugin(value: Record<string, unknown> | undefined): ChannelPlugin {
   const options = z.object({
-    operatorId: z.string().trim().min(1).max(256).optional(),
     httpRoute: z.union([z.literal(false), z.object({ pluginName: z.string().min(1).optional() }).strict()]).optional(),
   }).strict().parse(value ?? {});
   return createChannelPlugin(options);

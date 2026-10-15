@@ -12,4 +12,5 @@ export type {
   StudioHttpRoutesHook,
   StudioHttpPlugin,
   StudioHttpPluginAddress,
+  StudioHttpPrincipal,
 } from './studioHttpPlugin';

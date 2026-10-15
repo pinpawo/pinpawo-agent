@@ -45,7 +45,7 @@ for (const petId of ['alpha', 'beta']) {
       return { messages: [new AIMessage('[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.')] };
     }
     if (last === '[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.') {
-      return { messages: [new AIMessage('[@Me](participant:human:studio-operator) Result delivered.')] };
+      return { messages: [new AIMessage('[@Me](participant:human:local) Result delivered.')] };
     }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string) as { messages: Array<{ author: { kind: string } }> };
     const prior = snapshot.messages.filter(entry => entry.author.kind === 'pet');
@@ -77,7 +77,7 @@ const studio = await createStudio({ studioId: 'console-browser', entryPetId: 'al
 });
 // Historical fixture data lives only in this temporary database. No model calls.
 if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
-  const { channel: seeded } = await channel.service.createChannel(channel.operator,
+  const { channel: seeded } = await channel.service.createChannel({ kind: 'human', id: 'local' },
     { title: 'Layout investigation', description: 'Review public evidence and choose the next round.', pets: ['alpha', 'beta'] });
   // A former member whose Pet is no longer registered; its message stays as written.
   const joinedAt = new Date().toISOString();

@@ -53,6 +53,22 @@ mean execution completed. Ordinary replies continue the Channel's existing
 Pet/session binding. Do not blindly retry an uncertain send: independent sends
 create independent messages.
 
+## Studio clients
+
+```sh
+pinpawo-studio clients list
+pinpawo-studio clients add alice --label "Alice"
+pinpawo-studio clients add-key alice
+pinpawo-studio clients revoke alice
+```
+
+Each person or external program that connects is a Studio client; in a Channel
+it is the member `human:<clientId>`, and the local token is `human:local`. Only
+a registered, unrevoked client can be added as a human member. `add` and
+`add-key` print a key once; hand it to that client and do not log it. A client
+key works as `--token-file` for `channels` commands only; everything else needs
+the local token. `revoke` stops all of a client's keys and keeps its history.
+
 The Pet snapshot command observes its active interactive session, which may
 not be the Channel's session. Check session identity and use the original Pet
 TUI/session (or the Studio Console's Pet session view) for a Channel review; do

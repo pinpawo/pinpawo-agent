@@ -130,10 +130,31 @@ Channel 向名为 `http` 的 Plugin 贡献 `/channels` 的 Channel、成员、�
 Plugin 启动顺序不影响挂载；任一方停止时，Studio 托管的 hook lifecycle 移除 route。
 HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。
 
+### 外部 JWT
+
+配置 `jwt.issuers` 后，别的系统签发的 JWT 也能当 Bearer 用。每个签发者写明 `issuer`（精确匹配 `iss`）、
+`audience`（必须出现在 `aud`）、`clientPrefix`，以及 `jwksUrl`（https；仅回环地址允许 http）或
+`publicKey`（SPKI PEM）之一；`algorithms` 默认 `RS256`、`ES256`，只允许非对称算法。用 `jose` 校验签名、
+`iss`、`aud`、`nbf`，并要求有 `exp` 和 `sub`。
+
+- 客户 id 是 `<clientPrefix>.<sub>`，必须符合客户 id 规则，否则拒绝。前缀里不能有点，所以这个命名空间
+  只属于这个签发者；不要手工登记带同样前缀的客户。
+- 第一次收到有效 token 时自动登记这个客户，label 取 `name` claim，没有就用 `sub`；之后 label 不随 token 变。
+- JWT 客户永远是 `client` 范围，和 key 客户一样只能用 `client` 路由。
+- 在本地吊销这个客户后，它之后的 token 一律拒绝，即使签发方仍认为有效。
+- 三段式 token 走 JWT 校验，其他 token 走本机 token 和客户 key；校验失败都返回 `401`。
+
+```json
+{ "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211, "jwt": { "issuers": [
+  { "issuer": "https://id.acme.example", "audience": "pinpawo", "clientPrefix": "acme",
+    "jwksUrl": "https://id.acme.example/.well-known/jwks.json" }
+] } } }
+```
+
 ## 2. Security boundary
 
 - server 只监听 `127.0.0.1`；当前 Plugin 不提供公网 bind 配置；
-- 所有路由（除显式 route-owned auth）都要求 Bearer：本机 token 或客户 key；SSE client 使用支持自定义 header 的 streaming
+- 所有路由（除显式 route-owned auth）都要求 Bearer：本机 token、客户 key 或配置的签发者发的 JWT；SSE client 使用支持自定义 header 的 streaming
   `fetch`，不把 token 放入 query string；
 - client 携带 `Origin` 时必须命中显式 `allowedOrigins`；Plugin 处理受限 CORS preflight；
 - POST body 有明确字节上限；SSE client 数量有上限；慢客户端背压治理仍须在 HTTP Plugin

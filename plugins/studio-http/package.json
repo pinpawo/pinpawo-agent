@@ -34,6 +34,7 @@
     "@pinpawo/agent-contracts": "^0.2.1",
     "@pinpawo/studio": "^0.1.0",
     "hono": "^4.13.3",
+    "jose": "^6.2.12",
     "pinpawo": "^0.2.1"
   },
   "devDependencies": {

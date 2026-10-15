@@ -30,8 +30,10 @@ for (const petId of ['alpha', 'beta']) {
     const raw = state.messages.at(-1)!.text;
     const input = /^`{3,}json\n/.test(raw) ? readChannelTestInput(raw) : undefined;
     const last = input?.body ?? raw;
+    // The Console composer puts a picked @ first; fixture commands follow it.
+    const command = last.replace(/^\[@[^\]]*\]\(participant:[^)\s]+\)\s*/, '');
     if (last === 'fail-provider') throw new Error('Deterministic provider denied request (403).');
-    if (last === 'review') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'fixture-review',
+    if (command === 'review') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'fixture-review',
       view: { kind: 'plain', body: 'Authorize fixture tool?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' },
         effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
     }) });
@@ -40,7 +42,7 @@ for (const petId of ['alpha', 'beta']) {
     if (invocation.scope?.namespace !== 'channel') {
       return { messages: [new AIMessage('Standalone deterministic reply. Inspect this Pet session for the result.')] };
     }
-    if (last === 'handoff' || last === 'handoff [@Alpha](participant:pet:alpha)') return { messages: [new AIMessage('[@Beta](participant:pet:beta) Please inspect this delivery.')] };
+    if (command === 'handoff' || last === 'handoff [@Alpha](participant:pet:alpha)') return { messages: [new AIMessage('[@Beta](participant:pet:beta) Please inspect this delivery.')] };
     if (last === '[@Beta](participant:pet:beta) Please inspect this delivery.') {
       return { messages: [new AIMessage('[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.')] };
     }

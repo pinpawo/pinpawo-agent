@@ -84,12 +84,23 @@ try {
   await page.getByLabel('Studio bearer token').fill(first.token);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
-  assert.equal(await page.getByRole('button', { name: 'channel', exact: true }).getAttribute('class'), 'active', 'Channel is the default page');
-  assert.deepEqual(await page.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').allTextContents(), ['channel', 'scheduler', 'notice', 'trigger', 'knowledge']);
+  assert.equal(await page.getByRole('button', { name: 'Channel', exact: true }).getAttribute('aria-current'), 'page', 'Channel is the default page');
+  assert.deepEqual(await page.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))),
+    ['Channel', 'Scheduler', 'Notice', 'Trigger', 'Knowledge']);
   await page.getByRole('heading', { name: channel.title, exact: true }).waitFor();
   const input = page.getByLabel('Message', { exact: true });
   await input.waitFor();
-  assert.deepEqual(await page.getByLabel('Channel recipient').locator('option').allTextContents(), ['No @ recipient', 'Me · human:local', 'Analyst · pet:alpha', 'Analyst · pet:beta']);
+  // The composer is a rich-text editor; a picked @ member is an inline mention node.
+  const mentionList = page.getByRole('listbox', { name: 'Members to mention' });
+  const composerMentions = () => input.locator('[data-type="mention"]').evaluateAll(nodes => nodes.map(node => node.dataset.id));
+  const draft = async () => (await input.innerText()).trim();
+  const clearComposer = async () => { await input.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('Backspace'); };
+  await input.click();
+  await page.keyboard.type('@');
+  assert.deepEqual(await mentionList.locator('code').allTextContents(), ['human:local', 'pet:alpha', 'pet:beta']);
+  assert.deepEqual(await mentionList.locator('strong').allTextContents(), ['Me', 'Analyst', 'Analyst'], 'same-named Pets stay apart by id');
+  await page.keyboard.press('Escape');
+  await clearComposer();
   assert.equal(await page.getByRole('button', { name: 'Reply to retired-pet', exact: true }).isDisabled(), false);
   assert.ok(await page.locator('.channel-message').filter({ hasText: 'Historical public delivery' }).getByText('Removed Pet', { exact: true }).count());
   const snapshot = await context();
@@ -148,7 +159,7 @@ try {
         }
       }
       await page.evaluate(() => window.scrollTo(0, 0));
-      await page.mouse.move(700, 135);
+      await page.locator('.channel-conversation-head').hover(); // Not a scroll container: the wheel moves the document.
       await page.mouse.wheel(0, 900);
       if (height < 640) await until(() => page.evaluate(() => scrollY > 0), 'document wheel');
       await page.waitForTimeout(250);
@@ -158,10 +169,10 @@ try {
       const buttonBox = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox();
       assert.ok(buttonBox && buttonBox.y >= 0 && buttonBox.y + buttonBox.height <= height, 'send control remains reachable');
       assert.equal(await composer.evaluate(node => {
-        const controls = node.querySelector('.channel-composer-controls').getBoundingClientRect();
+        const send = node.querySelector('.channel-send').getBoundingClientRect();
         const hint = node.querySelector('.channel-composer-hint').getBoundingClientRect();
-        return controls.bottom <= hint.top + 1;
-      }), true, 'composer controls and hint do not overlap');
+        return hint.width === 0 || hint.right <= send.left + 1 || hint.bottom <= send.top + 1;
+      }), true, 'composer hint and send control do not overlap');
       layoutEvidence.push({ channel: target.title, ...geometry });
       await page.screenshot({ path: resolve(screenshots, 'short-window-' + target.channelId + '-' + height + '.png'), fullPage: true });
     }
@@ -176,7 +187,7 @@ try {
   console.log(JSON.stringify({ shortWindowLayout: layoutEvidence }));
   await until(() => page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop > 0), 'initial latest scroll');
   await page.getByRole('button', { name: 'Reply to retired-pet', exact: true }).click();
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'removed author has no guessed recipient');
+  assert.deepEqual(await composerMentions(), [], 'removed author has no guessed recipient');
   await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
   await page.locator('.channel-timeline-scroll').evaluate(node => { node.scrollTop = 0; });
   await page.getByRole('button', { name: 'Back to latest ↓', exact: true }).waitFor();
@@ -190,8 +201,8 @@ try {
   await fits();
   await page.screenshot({ path: resolve(screenshots, '01-desktop-long-code.png'), fullPage: true });
   const readingPosition = await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop);
-  await page.getByRole('button', { name: 'knowledge', exact: true }).click();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Knowledge', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   assert.equal(await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop), readingPosition, 'global navigation preserves an older reading position');
   const sessionViewer = page.getByRole('dialog', { name: /session/ });
   await message(output.messageId).getByRole('button', { name: 'View Analyst session', exact: true }).click();
@@ -199,15 +210,14 @@ try {
   await page.keyboard.press('Escape');
   await sessionViewer.waitFor({ state: 'detached' });
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
-  await input.fill('Keep this draft when cancelling the reply.');
-  assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'pet:alpha', 'duplicate labels preserve the exact original author');
+  await page.keyboard.type('Keep this draft when cancelling the reply.');
+  assert.deepEqual(await composerMentions(), ['pet:alpha'], 'duplicate labels preserve the exact original author');
   await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
-  assert.equal(await input.inputValue(), 'Keep this draft when cancelling the reply.');
-  assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);
+  assert.equal(await draft(), '@Analyst Keep this draft when cancelling the reply.');
+  assert.deepEqual(await composerMentions(), ['pet:alpha']);
   assert.equal(await input.evaluate(node => document.activeElement === node), true);
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
-  await input.fill('Continue from the public reply.');
+  await page.keyboard.type('Continue from the public reply.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await until(async () => (await context()).messages.some(item => item.replyTo === output.messageId), 'persisted reply');
   const reply = (await context()).messages.find(item => item.replyTo === output.messageId);
@@ -261,9 +271,9 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   const historyBeforeDispatch = (await context()).messages.length;
-  for (const name of ['scheduler', 'notice', 'trigger', 'knowledge']) {
+  for (const name of ['Scheduler', 'Notice', 'Trigger', 'Knowledge']) {
     await page.getByRole('button', { name, exact: true }).click();
-    assert.equal(await page.getByRole('button', { name: 'kanban', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Kanban', exact: true }).count(), 0);
   }
   await page.getByRole('button', { name: '+ DISPATCH', exact: true }).click();
   const direct = page.getByRole('dialog', { name: 'Dispatch to Pet', exact: true });
@@ -278,34 +288,37 @@ try {
   assert.equal(await direct.getByText('Check the Pet session for its reply and verify the requested outcome.', { exact: true }).count(), 1);
   assert.equal((await context()).messages.length, historyBeforeDispatch, 'standalone dispatch cannot publish into Channel');
   await direct.getByRole('button', { name: 'Close dispatch', exact: true }).click();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   let rejectedWrites = 0;
   await page.route(first.url + '/channels/messages', route => {
     rejectedWrites++;
     return route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"Unauthorized fixture request"}' });
   });
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await input.fill('Keep rejected draft.');
+  await clearComposer();
+  await page.keyboard.type('@');
+  await mentionList.getByRole('option').filter({ hasText: 'pet:alpha' }).click();
+  await page.keyboard.type('Keep rejected draft.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Unauthorized fixture request' }).waitFor();
-  assert.equal(await input.inputValue(), 'Keep rejected draft.');
+  assert.equal(await draft(), '@Analyst Keep rejected draft.');
+  assert.deepEqual(await composerMentions(), ['pet:alpha']);
   assert.equal(rejectedWrites, 1, 'rejected submission is not retried');
   await page.unroute(first.url + '/channels/messages');
   const { channel: other } = await api('/channels', { title: 'Separate layout', description: 'A separate conversation.', pets: ['alpha'] });
   await page.locator('.channel-list button').filter({ hasText: other.title }).waitFor();
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
-  await input.fill('Channel A draft must not cross Channels.');
+  await page.keyboard.type('Channel A draft must not cross Channels.');
   await page.locator('.channel-list button').filter({ hasText: other.title }).click();
   await input.waitFor();
-  assert.equal(await input.inputValue(), '');
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '');
+  assert.equal(await draft(), '');
+  assert.deepEqual(await composerMentions(), []);
   assert.equal(await page.locator('.channel-message').count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Cancel reply', exact: true }).count(), 0);
   await page.locator('.channel-list button').filter({ hasText: channel.title }).click();
   await message(output.messageId).waitFor();
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
-  await input.fill('Host A draft must not cross hosts.');
-  await page.getByRole('button', { name: 'CONNECTION', exact: true }).click();
+  await page.keyboard.type('Host A draft must not cross hosts.');
+  await page.getByRole('button', { name: 'Connection', exact: true }).click();
   await page.getByLabel('Studio HTTP URL').fill(second.url);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.getByText('No Channels yet.', { exact: true }).waitFor();
@@ -315,13 +328,13 @@ try {
   await page.getByLabel('Channel title').fill('Host B fresh');
   await page.getByRole('button', { name: 'Create Channel', exact: true }).click();
   await input.waitFor();
-  assert.equal(await input.inputValue(), '');
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '');
+  assert.equal(await draft(), '');
+  assert.deepEqual(await composerMentions(), []);
   await page.screenshot({ path: resolve(screenshots, '04-host-switch-empty.png'), fullPage: true });
   await page.route(second.url + '/channels**', route => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"fixture plugin unavailable"}' }));
   await page.reload();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   await page.getByText('Channel Plugin unavailable', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '+ New Channel', exact: true }).isDisabled(), true);
   await page.screenshot({ path: resolve(screenshots, '05-plugin-unavailable.png'), fullPage: true });

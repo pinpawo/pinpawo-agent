@@ -17,9 +17,12 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 
 ## Channel 布局与交互
 
+页面导航是最左侧 56px 图标栏（移动端 48px）：顶部是 PinPawo 标志（`assets/brand` 白色 24px 版），每个页面一个图标，悬停或聚焦显示名称；底部是连接按钮，带状态点。连接状态文字在底部状态栏。
 左侧 232px 列表、中间独立滚动消息与固定 composer、右侧可折叠 320px 成员与详情面板。
-新建 Channel 填标题、可选说明，并显式勾选加入的 Pet；面板里可增删成员（Pet 或人的 id），
-@ 目标只列当前成员。
+新建 Channel 填标题、可选说明，并显式勾选加入的 Pet；面板里可增删成员（Pet 或人的 id）。
+输入框用 Tiptap（Mention 扩展）：键入 `@` 在光标处弹出当前成员列表，选中后成为行内 mention，
+发送时序列化为 `[@label](participant:id)`；手打的 `@text` 不寻址。Enter 发送，Shift+Enter 换行，
+输入法组字时 Enter 不发送。消息里正文已有的 @ 只显示一次，只有正文没写出的 `mentions` 单独列在正文上方。
 低于 1101px 时 Activity 为 modal drawer，低于 701px 时列表也为 drawer。
 抽屉和创建弹窗限制键盘焦点，Escape/背景关闭，关闭后恢复触发控件焦点。
 

@@ -70,7 +70,7 @@ try {
   await page.getByLabel('Studio bearer token').fill('synthetic-only-token');
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   const message = page.locator('[data-message-id="long"]');
   const expand = message.getByRole('button', { name: 'View full screen', exact: true });
   const timeline = page.locator('.channel-timeline-scroll');

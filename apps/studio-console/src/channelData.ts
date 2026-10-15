@@ -46,6 +46,27 @@ export function channelMentionLabel(mention: ChannelMessage['mentions'][number],
   return members.find(item => item.participantId === mention.participantId)?.label ?? mention.label ?? mention.participantId;
 }
 
+/** A member as the composer's @ list offers it. */
+export type ChannelMentionCandidate = { participantId: string; kind: string; label: string };
+
+/** The Markdown link Channel reads as an @ of one participant. */
+export function channelMentionMarkdown(mention: { participantId: string; label?: string | null }): string {
+  const label = (mention.label || mention.participantId).replace(/[[\]\\]/g, '');
+  return `[@${label}](participant:${mention.participantId})`;
+}
+
+/** Members whose name or id contains the typed text, names that start with it first. */
+export function channelMentionMatches(members: ChannelMentionCandidate[], query: string): ChannelMentionCandidate[] {
+  const text = query.trim().toLowerCase();
+  const matches = members.filter(item => item.label.toLowerCase().includes(text) || item.participantId.toLowerCase().includes(text));
+  return text ? [...matches].sort((a, b) => Number(!a.label.toLowerCase().startsWith(text)) - Number(!b.label.toLowerCase().startsWith(text))) : matches;
+}
+
+/** Participants a message body already shows as inline @ links. */
+export function channelInlineMentionIds(body: string): Set<string> {
+  return new Set([...body.matchAll(/\]\(participant:([^)\s]+)\)/g)].map(match => match[1]));
+}
+
 /** Composer serializes an explicit identity. Channel owns parsing and validation. */
 export function channelMessageInput(channelId: string, participantId: string, body: string, reply?: ChannelMessage) {
   if (!body.trim()) throw new Error('Enter a message.');
@@ -103,7 +124,7 @@ export function channelMessagesGroup(previous: ChannelMessage | undefined, curre
 }
 
 export function channelQuote(body: string): string {
-  const text = body.replace(/\s+/g, ' ').trim();
+  const text = body.replace(/\[@([^\]]*)\]\(participant:[^)\s]+\)/g, '@$1').replace(/\s+/g, ' ').trim();
   return text.length > 160 ? `${text.slice(0, 157)}…` : text;
 }
 

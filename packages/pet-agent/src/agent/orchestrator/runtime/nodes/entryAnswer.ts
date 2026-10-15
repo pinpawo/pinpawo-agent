@@ -1,6 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { isDeepStrictEqual } from 'node:util';
 import { Command, END, START, StateGraph } from '@langchain/langgraph';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
@@ -204,8 +205,8 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   if (!answerModel.bindTools) {
     throw new Error('Entry Answer model must support tool binding.');
   }
-  // Ask for one routing call. A provider that still returns several fails the
-  // protocol check below; the hint is not paired with a repair turn.
+  // Ask for one routing call. A provider that still returns several distinct
+  // calls fails the protocol check below; the hint is not paired with a repair turn.
   const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1]
     & { parallel_tool_calls: boolean } = { parallel_tool_calls: false };
   const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
@@ -232,16 +233,21 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }
     // Routing picks one path per turn and a reply must say something; any other
     // output is a protocol error, not something to repair or paper over.
-    if ((response.tool_calls?.length ?? 0) > 1) {
-      const names = response.tool_calls!.map((call) => call.name).join(', ');
-      throw new Error(`Entry routing requires one tool call, got ${response.tool_calls!.length}: ${names}.`);
+    // Some providers ignore parallel_tool_calls and emit the same call twice
+    // under different IDs; repeats of one name and arguments are still one
+    // route, so they collapse to the first. Calls that differ in either fail.
+    const toolCalls = response.tool_calls?.filter((call, index, calls) => calls.findIndex((other) =>
+      other.name === call.name && isDeepStrictEqual(other.args, call.args)) === index);
+    if ((toolCalls?.length ?? 0) > 1) {
+      const names = toolCalls!.map((call) => call.name).join(', ');
+      throw new Error(`Entry routing requires one tool call, got ${toolCalls!.length} distinct: ${names}.`);
     }
-    if (!response.tool_calls?.length && !response.text.trim()) {
+    if (!toolCalls?.length && !response.text.trim()) {
       throw new Error('Entry Answer must reply or request routing.');
     }
     // Scope provider call IDs to this model turn; history may reuse them across runs or retries.
     // Some providers omit the ID entirely, so the position stands in for it.
-    const committed = new AIMessage({ ...response, tool_calls: response.tool_calls?.map((call, index) => ({
+    const committed = new AIMessage({ ...response, tool_calls: toolCalls?.map((call, index) => ({
       ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id || `index:${index}`),
     })) });
     return {

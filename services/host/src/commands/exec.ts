@@ -317,6 +317,10 @@ export async function runExec(
       timeoutMs: options.timeoutMs,
       onMessage: (message) => { trajectory?.write(`${JSON.stringify(message)}\n`); },
     });
+    // Preserve the terminal result before shutdown can stall or be interrupted.
+    if (options.outputPath) {
+      writeFileSync(options.outputPath, `${JSON.stringify(result, null, 2)}\n`);
+    }
   } finally {
     // Closing stdin is the Host's shutdown signal; kill only if it lingers.
     host.stdin.end();
@@ -329,9 +333,6 @@ export async function runExec(
     });
   }
 
-  if (options.outputPath) {
-    writeFileSync(options.outputPath, `${JSON.stringify(result, null, 2)}\n`);
-  }
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } else {

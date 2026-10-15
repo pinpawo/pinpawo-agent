@@ -84,7 +84,8 @@ test('HTTP Plugin accepts JWTs from configured issuers as auto-registered client
   assert.deepEqual(await (await call('/whoami', alice)).json(), { clientId: 'acme.alice', scope: 'client' });
   assert.equal((await clients.get('acme.alice'))?.label, 'Alice Liu', 'registered on first use with the name claim');
   assert.equal(await status(await sign(acme.privateKey, 'RS256', acmeClaims)), 200, 'a later token reuses the client');
-  for (const path of ['/pets', '/clients', '/dispatch/queues']) assert.equal((await call(path, alice)).status, 403, path);
+  for (const path of ['/events', '/clients', '/dispatch/queues']) assert.equal((await call(path, alice)).status, 403, path);
+  assert.equal((await call('/pets', alice)).status, 200, 'a JWT client reads the Pet directory');
 
   const partnerToken = await sign(partner.privateKey, 'ES256', { iss: 'https://partner.test', aud: 'studio-1', sub: 'svc-7' });
   assert.deepEqual(await (await call('/whoami', partnerToken)).json(), { clientId: 'partner.svc-7', scope: 'client' });

@@ -33,6 +33,7 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/dispatch/queues',
   '/events',
   '/pets',
+  '/me',
   '/pet-sessions/snapshot',
   '/pet-sessions/events',
   '/pet-sessions/review',
@@ -41,6 +42,8 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/clients/keys',
 ]);
 const DEFAULT_LOCAL_CLIENT_ID = 'local';
+/** Built-in routes every authenticated client may use; the rest are for the local token. */
+const CLIENT_BUILTIN_ROUTES = new Set(['GET /me', 'GET /pets']);
 
 /**
  * Who sent an authenticated request. The local Host token is the client with
@@ -500,7 +503,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         return requestContext.json({ error: 'Unauthorized.' }, 401);
       }
       // Built-in routes are the global Studio API; only client routes are open to other clients.
-      if (principal.scope !== 'studio' && route?.authorization !== 'client') {
+      if (principal.scope !== 'studio' && route?.authorization !== 'client'
+        && !CLIENT_BUILTIN_ROUTES.has(`${requestContext.req.method} ${requestContext.req.path}`)) {
         return requestContext.json({ error: 'This client may not use this route.' }, 403);
       }
       requestContext.set('principal', principal);
@@ -541,6 +545,13 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return requestContext.json({ queues: context.listDispatchQueues() });
     });
     app.all('/dispatch/queues', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+
+    // Who this token is, so a client can tell what it may do (Console hides the rest).
+    app.get('/me', (requestContext) => {
+      const { clientId, scope } = requestContext.get('principal')!;
+      return requestContext.json({ clientId, scope });
+    });
+    app.all('/me', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/pets', (requestContext) => {
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');

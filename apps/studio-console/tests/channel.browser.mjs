@@ -259,8 +259,29 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: resolve(screenshotDir, '04-channel-members-mobile.png'), fullPage: true });
   await waitFor(async () => (await loopOutputs()).length === 4, 'queued input starts after global work finishes');
+  // A second person connects with their own client key: only their Channels, polled, no local-token views.
+  const { key: bobKey } = await apiPost('/clients', { clientId: 'bob', label: 'Bob' });
+  await apiPost('/channels/members', { channelId: loopId, kind: 'human', id: 'bob' });
+  const bob = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  bob.on('pageerror', error => errors.push(error.message));
+  await bob.goto('http://127.0.0.1:5199');
+  await bob.getByLabel('Studio HTTP URL').fill(ready.url);
+  await bob.getByLabel('Studio bearer token').fill(bobKey);
+  await bob.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await bob.locator('.connection-state.connected').getByText('bob', { exact: false }).waitFor();
+  assert.deepEqual(await bob.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').allTextContents(), ['channel']);
+  await bob.getByRole('heading', { name: 'Participant loop', exact: true }).waitFor();
+  assert.equal(await bob.getByRole('button', { name: 'Separate investigation', exact: false }).count(), 0, 'a client lists only its own Channels');
+  assert.equal(await bob.getByRole('button', { name: 'View session', exact: true }).count(), 0, 'Pet sessions stay with the local token');
+  assert.equal(await bob.locator('.channel-queue').count(), 0, 'dispatch queues stay with the local token');
+  await bob.getByLabel('Message', { exact: true }).fill('Bob checking in.');
+  await bob.getByRole('button', { name: 'Send message', exact: true }).click();
+  await waitFor(async () => (await loopContext()).messages.some(item => item.body === 'Bob checking in.' && item.author.id === 'bob'), 'Bob posts as himself');
+  await apiPost('/channels/messages', { channelId: loopId, body: 'Local reply for Bob.' });
+  await bob.getByText('Local reply for Bob.', { exact: true }).waitFor({ timeout: 10000 });
+  await bob.screenshot({ path: resolve(screenshotDir, '05-channel-client.png'), fullPage: true });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

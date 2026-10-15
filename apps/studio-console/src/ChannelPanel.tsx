@@ -12,6 +12,8 @@ import {
 
 type Props = {
   url: string; token: string; connected: boolean; refreshVersion: number;
+  /** A client key or JWT: no dispatch queues or Pet sessions, which are the local token's. */
+  clientMode?: boolean;
   active?: boolean;
   pets: { petId: string; name: string }[];
   petsReady?: boolean;
@@ -22,7 +24,7 @@ type Props = {
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore'>;
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], failures = [] }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], failures = [], clientMode = false }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<OpenChannel | null>(null);
@@ -84,7 +86,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const refresh = () => setLocalVersion(value => value + 1);
 
   useEffect(() => {
-    if (!connected || !active) return;
+    if (!connected || !active || clientMode) return;
     const abort = new AbortController();
     const load = async () => {
       try {
@@ -96,7 +98,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     void load();
     const timer = setInterval(() => { void load(); }, 1500);
     return () => { abort.abort(); clearInterval(timer); };
-  }, [connected, active, refreshVersion, localVersion, read]);
+  }, [connected, active, clientMode, refreshVersion, localVersion, read]);
 
   useEffect(() => {
     if (!connected) return;
@@ -255,7 +257,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               }}>
               <ChannelTimeline messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage}
                 members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)}
-                sessions={sessions} onViewSession={viewSession}
+                sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
                 onViewerChange={open => {
                   if (open) {
                     viewerPosition.current = { top: timeline.current?.scrollTop ?? 0, follow: followLatest.current };
@@ -331,7 +333,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               <div className="channel-member-head"><strong>{name}</strong><em>{member.kind === 'pet' ? 'Pet' : 'Human'}</em></div>
               <code>{member.participantId}</code>
               <div className="channel-member-actions">
-                {session && <button type="button" disabled={!connected} onClick={() => viewSession(session)}>View session</button>}
+                {session && !clientMode && <button type="button" disabled={!connected} onClick={() => viewSession(session)}>View session</button>}
                 {member.kind === 'pet' && !session && <span>No session yet</span>}
                 <button type="button" aria-label={'Remove ' + name} disabled={!connected || pending || member.participantId === viewerParticipantId}
                   title={member.participantId === viewerParticipantId ? 'You cannot remove yourself from this Console.' : undefined}
@@ -355,7 +357,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           </form>
           {memberError && <p className="channel-record-error" role="alert">{memberError}</p>}
         </section>}
-        {messages.length > 0 && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
+        {messages.length > 0 && !clientMode && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
         <button className="channel-refresh" type="button" disabled={!connected || pending} onClick={refresh}>Refresh persisted history</button>
       </div>
     </aside>

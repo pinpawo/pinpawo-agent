@@ -36,6 +36,12 @@ export const channelPageSchema = z.object({
 export type ChannelMessage = ChannelMessageRow;
 export type ChannelSessionBinding = ChannelSessionRow;
 export type ChannelMember = ChannelParticipant & { joinedAt: string };
+/**
+ * `studio`: the caller holds the Studio's own authority (the local Host
+ * token). It may list every Channel and manage any Channel's members without
+ * being a member, so a Channel can always be recovered.
+ */
+export type ChannelManageAccess = { studio?: boolean };
 export type ChannelEvent =
   | { type: 'channel.created'; payload: { channel: ChannelRow; members: ChannelMember[] } }
   | { type: 'channel.updated'; payload: { channel: ChannelRow } }
@@ -45,6 +51,8 @@ export type ChannelEvent =
 /** The actor is not a current member of an existing Channel. */
 export class ChannelAccessError extends Error {}
 export class ChannelNotFoundError extends Error {}
+/** Removing this member would leave the Channel without a human. */
+export class ChannelLastHumanError extends Error {}
 
 export type ChannelServiceOptions = {
   store: ChannelStore;
@@ -56,7 +64,9 @@ export type ChannelServiceOptions = {
 
 /**
  * Channel rules over a ChannelStore: membership decides who may read, speak,
- * be addressed and manage members. Who may call at all is Studio's decision.
+ * be addressed and manage members. Any member may add or remove members, but
+ * the last human member cannot be removed; the Studio authority may manage
+ * every Channel. Who may call at all is Studio's decision.
  * Notifications are best effort after commit, not a durable delivery guarantee.
  */
 export class ChannelService {
@@ -93,6 +103,10 @@ export class ChannelService {
     const row = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
     if (!row || row.leftAt) throw new ChannelAccessError(`${member.kind}:${member.id} is not a member of Channel "${channel.channelId}".`);
     return channel;
+  }
+  /** The Channel, if the actor belongs to it or acts with Studio authority. */
+  private requireManagerIn(store: ChannelStore, channelId: string, actor: MemberRef, access: ChannelManageAccess): Promise<ChannelRow> {
+    return access.studio ? this.requireChannel(store, channelId) : this.requireMemberIn(store, channelId, actor);
   }
   /** The Channel, if `member` currently belongs to it. */
   requireMember(channelId: string, member: MemberRef): Promise<ChannelRow> {
@@ -168,8 +182,10 @@ export class ChannelService {
     return channel;
   }
 
-  async listChannels(actor: MemberRef, page: unknown = {}): Promise<{ channels: ChannelRow[]; nextAfter: number; hasMore: boolean }> {
-    const { items, ...rest } = await this.store.listChannels({ member: memberRefSchema.parse(actor) }, channelPageSchema.parse(page));
+  /** The actor's Channels; with `all` and Studio authority, every Channel. */
+  async listChannels(actor: MemberRef, page: unknown = {}, access: ChannelManageAccess & { all?: boolean } = {}): Promise<{ channels: ChannelRow[]; nextAfter: number; hasMore: boolean }> {
+    const filter = access.all && access.studio ? {} : { member: memberRefSchema.parse(actor) };
+    const { items, ...rest } = await this.store.listChannels(filter, channelPageSchema.parse(page));
     return { channels: items, ...rest };
   }
 
@@ -180,15 +196,15 @@ export class ChannelService {
     return { channel, members: await this.members(channel.channelId), messages: items, ...rest };
   }
 
-  async listMembers(actor: MemberRef, channelId: string): Promise<ChannelMember[]> {
-    return this.members((await this.requireMember(channelId, actor)).channelId);
+  async listMembers(actor: MemberRef, channelId: string, access: ChannelManageAccess = {}): Promise<ChannelMember[]> {
+    return this.members((await this.requireManagerIn(this.store, channelId, actor, access)).channelId);
   }
 
-  async addMember(actor: MemberRef, channelId: string, value: unknown): Promise<ChannelMember> {
+  async addMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<ChannelMember> {
     const member = memberRefSchema.parse(value);
     await this.requireJoinable(member);
     const result = await this.store.transaction(async (store) => {
-      const channel = await this.requireMemberIn(store, channelId, actor);
+      const channel = await this.requireManagerIn(store, channelId, actor, access);
       const existing = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
       if (existing && !existing.leftAt) return { row: existing, joined: false };
       const row = { channelId: channel.channelId, ...member, joinedAt: new Date().toISOString() };
@@ -199,12 +215,16 @@ export class ChannelService {
     return this.memberView(result.row, await this.humanLabels([result.row]));
   }
 
-  async removeMember(actor: MemberRef, channelId: string, value: unknown): Promise<void> {
+  async removeMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<void> {
     const member = memberRefSchema.parse(value);
     const left = await this.store.transaction(async (store) => {
-      const channel = await this.requireMemberIn(store, channelId, actor);
-      const existing = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
-      if (!existing || existing.leftAt) return null;
+      const channel = await this.requireManagerIn(store, channelId, actor, access);
+      const current = (await store.listMembers(channel.channelId)).filter(item => !item.leftAt);
+      const existing = current.find(item => item.kind === member.kind && item.id === member.id);
+      if (!existing) return null;
+      if (existing.kind === 'human' && current.filter(item => item.kind === 'human').length === 1) {
+        throw new ChannelLastHumanError(`human:${existing.id} is the last human member of Channel "${channel.channelId}" and cannot be removed.`);
+      }
       await store.upsertMember({ ...existing, leftAt: new Date().toISOString() });
       return channel.channelId;
     });

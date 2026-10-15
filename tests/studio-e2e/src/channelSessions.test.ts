@@ -122,9 +122,9 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
     await waitFor(async () => (await outputs(f, a)).length === 5);
     assert.equal((await outputs(f, a)).at(-1)!.body, 'Answer 2: staging');
     assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
-      messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet' }, body: question.body,
+      messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet', label: 'one' }, body: question.body,
     });
-    assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:local', kind: 'human' });
+    assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:local', kind: 'human', label: 'local' });
     assert.deepEqual((await f.channel.sendMessage(a, { body: 'no recipient', replyTo: question.messageId }, me)).deliveries, []);
     await assert.rejects(ask(f, b, 'one', 'wrong Channel', question.messageId), /reference/);
     await assert.rejects(ask(f, a, 'missing', 'unknown target', question.messageId), /Unknown/);

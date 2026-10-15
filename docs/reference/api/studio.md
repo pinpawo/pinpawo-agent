@@ -103,13 +103,13 @@ A human joins only as an active Studio client, and its label is the client's lab
 
 | Route | Input / result |
 |---|---|
-| `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. |
+| `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. With `all=true`, the local Host token lists every Channel. |
 | `POST /channels` | `title`, optional `description`, required `pets: [...]`; the creator and those Pets are the initial members. `201 { channel, members }`. |
 | `POST /channels/update` | `channelId`, optional `title`, optional `description` (`null` clears it). |
 | `GET /channels/context?channelId=...` | Channel, current members, a page of messages, `viewerParticipantId`. |
-| `GET /channels/members?channelId=...` | Current members. |
-| `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. |
-| `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. |
+| `GET /channels/members?channelId=...` | Current members. The local Host token may read any Channel's members. |
+| `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
+| `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
 

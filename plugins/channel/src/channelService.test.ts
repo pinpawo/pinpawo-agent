@@ -4,7 +4,7 @@ import {
   KyselyClientStore, StudioClients, clientMigrations, createStudioStorage, type ClientDatabase, type StudioStorageConfig,
 } from '@pinpawo/studio';
 import { createPglitePool } from '../../../tests/support/pglitePool';
-import { ChannelAccessError, ChannelNotFoundError, ChannelService } from './channelService';
+import { ChannelAccessError, ChannelLastHumanError, ChannelNotFoundError, ChannelService } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';
 import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
@@ -81,6 +81,31 @@ for (const [backend, config] of backends) {
       assert.deepEqual((await service.listMembers(owner, channelId)).map(member => member.label), ['owner', 'Executor', 'Guest']);
     } finally { clients.set('guest', 'guest'); }
     assert.deepEqual(events, ['channel.member.joined', 'channel.message.created', 'channel.member.left', 'channel.member.joined']);
+  }));
+
+  test(`${backend}: the last human member cannot be removed, and Studio authority manages any Channel`, () => withService(async (service) => {
+    const { channelId } = (await service.createChannel(owner, { title: 'Release', pets: ['executor'] })).channel;
+    await service.createChannel(guest, { title: 'Guest only', pets: [] });
+    // The only human can neither be removed nor leave; a Pet can.
+    await assert.rejects(service.removeMember(owner, channelId, owner), ChannelLastHumanError);
+    await service.removeMember(owner, channelId, executor);
+    await service.addMember(owner, channelId, guest);
+    await service.removeMember(guest, channelId, owner);
+    await assert.rejects(service.removeMember(guest, channelId, guest), ChannelLastHumanError);
+    await assert.rejects(service.readContext(owner, channelId), ChannelAccessError);
+
+    // Without membership only Studio authority may list, inspect and repair a Channel.
+    const local: MemberRef = { kind: 'human', id: 'local' };
+    await assert.rejects(service.addMember(local, channelId, owner), ChannelAccessError);
+    await assert.rejects(service.listMembers(local, channelId), ChannelAccessError);
+    assert.deepEqual((await service.listChannels(local, {}, { all: true })).channels, [], 'all needs Studio authority');
+    assert.deepEqual((await service.listChannels(local, {}, { studio: true, all: true })).channels.map(item => item.title), ['Release', 'Guest only']);
+    assert.deepEqual((await service.listMembers(local, channelId, { studio: true })).map(member => member.participantId), ['human:guest']);
+    await service.addMember(local, channelId, owner, { studio: true });
+    await service.removeMember(local, channelId, guest, { studio: true });
+    await assert.rejects(service.removeMember(local, channelId, owner, { studio: true }), ChannelLastHumanError);
+    assert.equal((await service.readContext(owner, channelId)).members.length, 1);
+    await assert.rejects(service.readContext(local, channelId), ChannelAccessError, 'managing is not reading');
   }));
 
   test(`${backend}: messages keep their author as stored, resolve mentions against current members and reject cross-Channel or spoofed input`, () => withService(async (service) => {

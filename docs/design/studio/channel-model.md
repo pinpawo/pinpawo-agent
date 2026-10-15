@@ -10,7 +10,8 @@
 - **Channel 是自然对话的空间，不是定目标的地方。** 没有必填的目标/范围，也没有修订历史。
 - **Channel 是一等实体**，有自己的一行记录；不从消息日志推导。
 - **所有参与者都是成员**，成员只分 `human` 和 `pet` 两类。human 背后是人还是外部 agent，Channel 不关心。
-  Channel 里没有 operator 概念：持本机 token 的人也只是一个客户身份（见"身份"），和其他成员一样。
+  Channel 里没有 operator 角色：持本机 token 的人在 Channel 里也只是一个客户身份（见"身份"），读写要先成为成员。
+  它唯一多出的权力是管理任何 Channel 的成员，保证 Channel 总能被修复（见"规则"）。
 - **作者是事实**：按写入时原样保存，读出时不投影、不随配置改变。
 - **身份由 Studio 提供**：Channel 不存用户目录，也不认证凭据，只接收已认证的 principal 并检查成员关系。
 - **schedule / trigger 是 Pet 的自发行为**：它们驱动某个 Pet 在某个 Channel 里推进工作，本身不是发言者。
@@ -72,7 +73,9 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 - **访问**：请求必须带 Studio 认证后的 principal。不是当前成员的请求返回 403。
 - **发言**：作者来自 principal，请求正文不能指定作者。
 - **寻址**：只能 @ 当前成员；Pet 回复里的 @ 也按当前 Channel 的成员解析。
-- **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 只要求操作者是成员。
+- **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 要求操作者是成员。
+  不能移除最后一个人类成员（返回 409），所以 Channel 不会只剩 Pet。持本机 token（`studio` 范围）的调用方
+  不是成员也能列出所有 Channel（`GET /channels?all=true`）、查看和增删任何 Channel 的成员，但读消息、发言仍要先加入。
   创建时必须明确列出要加入的 Pet（`pets: [...]`），它们和创建者一起成为初始成员；不会自动加入所有 Pet。之后仍可增删。
 - **Pet 视角**：`channel_read_context` 返回 Channel 的标题、说明、成员和分页消息。
 
@@ -128,7 +131,7 @@ Channel 只向 Studio 的全局事件总线发布事件（新消息、投递结�
   Channel 把它当作 `human:<clientId>` 使用；label 向 Studio 查询；只有未吊销的客户能被加为 human 成员。
 - 管理入口：`pinpawo-studio clients add <id> --label <name>`（key 只在创建时打印一次）、`clients add-key`、`clients revoke`、`clients list`，
   对应 HTTP 的 `/clients*`。
-- 谁能管理成员：任何当前成员（不区分角色）。
+- 谁能管理成员：任何当前成员（不区分角色），以及本机 token；最后一个人类成员不能被移除。
 - 已知限制：`/events` 是全局事件流，只给本机 token；其他客户看 Channel 只能轮询。
 
 ## 存储接口

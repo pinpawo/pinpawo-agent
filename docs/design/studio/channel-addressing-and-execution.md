@@ -89,15 +89,17 @@ Agent Session 消息 id 为 `external_ref` 幂等写入普通消息，再走统�
   "version": 1,
   "channelId": "current-channel",
   "messageId": "current-message",
-  "author": { "participantId": "pet:planner", "kind": "pet" },
+  "author": { "participantId": "pet:planner", "kind": "pet", "label": "Planner" },
   "body": "本轮参与者正文",
   "replyTo": {
     "messageId": "quoted-message",
-    "author": { "participantId": "human:local", "kind": "human" },
+    "author": { "participantId": "human:local", "kind": "human", "label": "Local" },
     "body": "被引用的历史正文"
   }
 }
 ```
+
+`author.label` 只在作者仍是成员时给出，是称呼用的显示名；身份始终以 `participantId` 为准，同名的两个成员靠它区分。
 
 schedule / trigger 经 `inputs` hook 的 `run(channelId, petId, request, origin)` 驱动成员 Pet：
 输入为 `{type:'channel_task', version:1, channelId, origin:{kind,id}, body}`（同样围栏），没有作者、不写入 Channel，

@@ -98,6 +98,10 @@ test('HTTP Plugin accepts JWTs from configured issuers as auto-registered client
     ['not yet valid', new SignJWT(acmeClaims).setProtectedHeader({ alg: 'RS256' }).setExpirationTime('5m').setNotBefore('2m').sign(acme.privateKey)],
     ['no sub', sign(acme.privateKey, 'RS256', { iss: acmeClaims.iss, aud: acmeClaims.aud })],
     ['sub not usable as a client id', sign(acme.privateKey, 'RS256', { ...acmeClaims, sub: 'alice smith' })],
+    // A non-string subject must not alias the client of its string form.
+    ['array sub', sign(acme.privateKey, 'RS256', { ...acmeClaims, sub: ['alice'] as never })],
+    ['null sub', sign(acme.privateKey, 'RS256', { ...acmeClaims, sub: null as never })],
+    ['numeric sub', sign(acme.privateKey, 'RS256', { ...acmeClaims, sub: 42 as never })],
     ['other key', sign(stranger.privateKey, 'RS256', acmeClaims)],
     ['other issuer\'s key', sign(partner.privateKey, 'ES256', acmeClaims)],
     ['symmetric', new SignJWT(acmeClaims).setProtectedHeader({ alg: 'HS256' }).setExpirationTime('5m').sign(new TextEncoder().encode(AUTH_TOKEN))],

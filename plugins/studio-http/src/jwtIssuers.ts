@@ -126,10 +126,13 @@ export function createJwtVerifier(options: StudioHttpJwtOptions): (token: string
         algorithms: verifier.algorithms,
         requiredClaims: ['exp', 'sub'],
       });
-      const clientId = `${verifier.clientPrefix}.${payload.sub!}`;
+      // jose checks only that sub is present; a non-string would alias a real subject.
+      const subject = payload.sub as unknown;
+      if (typeof subject !== 'string') return undefined;
+      const clientId = `${verifier.clientPrefix}.${subject}`;
       if (!CLIENT_ID.test(clientId)) return undefined;
       const name = typeof payload.name === 'string' ? payload.name.trim() : '';
-      return { clientId, label: name && name.length <= 160 ? name : payload.sub! };
+      return { clientId, label: name && name.length <= 160 ? name : subject };
     } catch {
       return undefined;
     }

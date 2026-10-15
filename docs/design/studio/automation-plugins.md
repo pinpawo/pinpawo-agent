@@ -27,8 +27,8 @@ payload 塞给 Agent。静态字符串继续保留原有的“固定 request + �
 event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自补发事件。
 
 ```text
-Scheduler SQLite -> due claim -> context.dispatch()
-Scheduler SQLite -> due claim (channelId) -> Channel `inputs.run()` -> Pet's Channel session
+Scheduler store -> due claim -> context.dispatch()
+Scheduler store -> due claim (channelId) -> Channel `inputs.run()` -> Pet's Channel session
 event source -> Trigger binding condition -> context.dispatch()
 event source -> Trigger binding condition (channelId) -> Channel `inputs.run()` -> Pet's Channel session
 
@@ -55,7 +55,8 @@ HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 
 
 第一版支持 durable one-shot schedule：`scheduleId/petId/request/runAt/status`。启动时把所有
 已到期且仍为 `scheduled` 的记录视为 missed fire，并按原计划只 claim/dispatch 一次。
-SQLite transaction 先把记录原子地转成 `dispatching`，再调用 `context.dispatch()`；接受后
+一次带条件的更新（只在仍是 `scheduled` 时生效）先把记录转成 `dispatching`，所以多个 Studio 共用一个数据库时
+同一条 schedule 只会被 claim 一次；然后调用 `context.dispatch()`；接受后
 标记 `dispatched`，表示 resident queue 已接纳而不是 Agent 执行完成；admission 失败标记
 `failed`。崩溃遗留的 `dispatching` 标记为
 `failed`，避免无法证明安全时重复派发。
@@ -64,7 +65,11 @@ schedule 可以带可选的 `channelId`。带了它的 schedule 到期后不直�
 Trigger 一样调用 Channel 的 `inputs.run()`（origin `{kind:'scheduler', id: scheduleId}`），Pet 在该 Channel 的
 session 里执行，它的公开回复落在 Channel 里。Channel Plugin 没有运行或 Pet 不是成员时，这条 schedule 标记
 `failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变。两种情况都把 Host 回执保存为 schedule 的
-`receipt`。已有数据库启动时自动补上 `channel_id` 与回执列，旧记录视为没有 Channel、没有回执。Scheduler 等 Studio core 发布 `plugins.activated`（所有 Plugin 启动完成）后才开始处理到期
+`receipt`。
+
+Scheduler 的数据在 [Studio 存储](storage.md)里（表 `schedules`、`schedule_events`，迁移 `0001_schedules`），
+SQLite 和 Postgres 都可以；接口是 `ScheduleStore`（`plugins/scheduler/src/store/`）。以前的 `scheduler.sqlite`
+不读取。Scheduler 等 Studio core 发布 `plugins.activated`（所有 Plugin 启动完成）后才开始处理到期
 schedule，所以停机期间到期的 channel-bound schedule 不会因为 Channel Plugin 启动得比它晚而失败。
 
 管理 API：

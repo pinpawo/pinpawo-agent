@@ -43,7 +43,7 @@ HTTP 请求的成员身份是认证出的 Studio 客户 `human:<clientId>`（本
   其中无法解析的 @ 不阻止保存，消息不带目标，并发布失败的 `channel.delivery` 事件。
 - `replyTo` 只提供同 Channel 引用，不选择目标或授权借用原作者的 session。
 
-Console 点击 Reply 按原作者的 kind / 原始 id 预选已登记 participantId，可改选或清除；
+Console 点击 Reply 按原作者的 kind / 原始 id 预选已登记 participantId（输入框开头放入该成员的 @），可改选或删除；
 已移除作者不猜目标。人作者默认选择人，不派发 Pet。清除且正文无有效寻址时仅保存；
 正文主动寻址仍生效，UI 明确说明该条件。这个人的 UI 默认不替 Pet 输出补目标。
 

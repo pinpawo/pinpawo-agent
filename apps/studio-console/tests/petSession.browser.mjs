@@ -77,12 +77,17 @@ try {
   const sessions = async () => (await api(`/channels/sessions?channelId=${channelId}`)).sessions;
   const outputs = async () => (await api(`/channels/context?channelId=${channelId}&limit=200`)).messages.filter(item => item.author.kind === 'pet');
 
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('Investigate the current state.');
+  const mentionList = page.getByRole('listbox', { name: 'Members to mention' });
+  const address = async (participantId, text) => {
+    await page.getByLabel('Message', { exact: true }).click();
+    await page.keyboard.type('@');
+    await mentionList.getByRole('option').filter({ hasText: participantId }).click();
+    await page.keyboard.type(text);
+  };
+  await address('pet:alpha', 'Investigate the current state.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await outputs()).length === 1, 'alpha output');
-  await page.getByLabel('Channel recipient').selectOption('pet:beta');
-  await page.getByLabel('Message', { exact: true }).fill('review');
+  await address('pet:beta', 'review');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const waiting = await waitFor(async () => (await sessions()).find(item => item.petId === 'beta' && item.registered), 'beta session registered');
 

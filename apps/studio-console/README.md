@@ -15,11 +15,13 @@ observation and keyboard behavior. Configuration and migration steps live in
 ## Channel members
 
 A new Channel takes a title, an optional description and an explicit choice of
-Studio Pets; no Pet joins implicitly. **Members & details** lists the current
+Studio Pets; no Pet joins implicitly. The **Members** panel lists the current
 members, adds a Pet that is not yet a member or a human by id, and removes members
-(the Console cannot remove its own member). Only current members appear in the
-@ recipient list. Delivery outcomes are shown next to a message only as observed by
-this Console; the Host does not store them.
+(the Console cannot remove its own member). Typing `@` in the message editor opens
+the list of current members at the caret; a picked member becomes an inline mention,
+sent as `[@label](participant:id)`. Enter sends and Shift+Enter starts a new line.
+Delivery outcomes are shown next to a message only as observed by this Console; the
+Host does not store them.
 
 A Pet's work in a Channel is not part of the Channel. **View session** on a Pet in the
 member list, or on a Pet's message, opens that Pet's Channel session read-only, where
@@ -27,7 +29,7 @@ its tool calls and current review are visible.
 
 ## Full-screen Channel messages
 
-Each Timeline message offers **View full screen**, including while disconnected.
+Each Timeline message offers **Full screen** in its hover toolbar, including while disconnected.
 The read-only viewer uses the same safe Markdown renderer as the Timeline. Long
 messages scroll vertically; wide code blocks and tables scroll within their blocks.
 Tab stays in the viewer. Escape or **Close** restores the opening button and the

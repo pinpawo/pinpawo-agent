@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 
 import { ChannelTimeline } from './ChannelConversation';
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
 import { ChannelDispatchQueues } from './ChannelDispatchQueues';
+import { ChannelMessageInput, type ChannelMessageInputHandle } from './ChannelMessageInput';
 import { PetSessionView } from './PetSessionView';
 import type { PetSessionTarget } from './petSession';
 import {
@@ -41,7 +42,6 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [description, setDescription] = useState('');
   const [createPets, setCreatePets] = useState<string[]>([]);
   const [body, setBody] = useState('');
-  const [recipientId, setRecipientId] = useState('');
   const [joiningPet, setJoiningPet] = useState('');
   const [joiningHuman, setJoiningHuman] = useState('');
   const [queues, setQueues] = useState<DispatchQueue[]>([]);
@@ -50,7 +50,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [localVersion, setLocalVersion] = useState(0);
   const [sessionView, setSessionView] = useState<PetSessionTarget | null>(null);
   const submitting = useRef(false);
-  const composer = useRef<HTMLTextAreaElement>(null);
+  const composer = useRef<ChannelMessageInputHandle>(null);
+  const composerForm = useRef<HTMLFormElement>(null);
   const timeline = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLElement>(null);
   const activity = useRef<HTMLElement>(null);
@@ -135,7 +136,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const selectChannel = (id: string) => {
     if (submitting.current) return;
     setSelected(id); setContext(null); setMessages([]); setSessions([]);
-    setReply(undefined); setBody(''); setRecipientId(''); setError(''); setMemberError(''); setJoiningHuman('');
+    setReply(undefined); setBody(''); setError(''); setMemberError(''); setJoiningHuman('');
     setHighlightedMessage(''); setNavigationOpen(false);
     followLatest.current = true; setAtLatest(true);
   };
@@ -163,7 +164,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
         title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}), pets: createPets,
       }) as { channel: ChannelRow; members: ChannelMember[] };
       setChannels(current => [...current, value.channel]); setSelected(value.channel.channelId);
-      setContext(null); setMessages([]); setSessions([]); setReply(undefined); setBody(''); setRecipientId('');
+      setContext(null); setMessages([]); setSessions([]); setReply(undefined); setBody('');
       followLatest.current = true; focusComposer.current = true; setAtLatest(true);
       setHighlightedMessage(''); setNavigationOpen(false);
       setCreating(false); setTitle(''); setDescription(''); setCreatePets([]);
@@ -173,10 +174,10 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     event.preventDefault();
     void submit(async () => {
       followLatest.current = true;
-      const result = await post('/channels/messages', channelMessageInput(selected, recipientId, body, reply)) as ChannelMessage & {
+      const result = await post('/channels/messages', channelMessageInput(selected, '', body, reply)) as ChannelMessage & {
         deliveries?: Omit<ChannelDelivery, 'channelId' | 'messageId'>[];
       };
-      setBody(''); setReply(undefined); setRecipientId('');
+      setBody(''); setReply(undefined); composer.current?.reset();
       if (result.deliveries?.length) {
         setSent(current => appendChannelDeliveries(current, result.deliveries!.map(item => ({ ...item, channelId: result.channelId, messageId: result.messageId }))));
       }
@@ -214,6 +215,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const members = context?.members ?? [];
   const viewerParticipantId = context?.viewerParticipantId;
   const memberName = (member: ChannelMember) => member.participantId === viewerParticipantId ? 'Me' : member.label;
+  const mentionCandidates = members.map(member => ({ participantId: member.participantId, kind: member.kind, label: memberName(member) }));
   const joinable = channelJoinablePets(pets, members);
   const petToAdd = joinable.some(pet => pet.petId === joiningPet) ? joiningPet : joinable[0]?.petId ?? '';
   return <div className={'channel-layout' + (activityOpen && !activityDrawer ? ' with-activity' : '')}>
@@ -269,7 +271,11 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                   }
                 }}
                 pending={pending || !connected} onLocateMessage={locateMessage}
-                onReply={item => { setReply(item); setRecipientId(channelReplyRecipientId(item.author, members)); setBody(''); composer.current?.focus(); }} />
+                onReply={item => {
+                  setReply(item);
+                  const author = mentionCandidates.find(member => member.participantId === channelReplyRecipientId(item.author, members));
+                  composer.current?.reset(author);
+                }} />
               {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}
               {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>
                 {item.petId ? `${channelPetIdentity(item.petId, pets, petsReady).name} reply was not saved` : 'Pet reply was not saved'}: {item.error}</p>)}
@@ -279,38 +285,23 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               timeline.current?.scrollTo({ top: timeline.current.scrollHeight, behavior: 'auto' });
             }}>Back to latest ↓</button>}
           </div>
-          <form className="channel-composer" onSubmit={send}>
+          <form ref={composerForm} className="channel-composer" onSubmit={send}>
             {reply && <div className="channel-composer-quote">
               <button className="channel-quote" type="button" onClick={() => locateMessage(reply.messageId)}>
                 <strong>{'Reply to ' + channelMessageIdentity(reply, pets, petsReady, members, viewerParticipantId).name}</strong><span>{channelMessageSummary(reply)}</span>
               </button>
               <button type="button" aria-label="Cancel reply" disabled={pending} onClick={() => { setReply(undefined); composer.current?.focus(); }}>×</button>
             </div>}
-            <div className="chat-input"><label htmlFor="channel-message">Message</label>
-              <textarea ref={composer} id="channel-message" disabled={pending} value={body} onChange={event => setBody(event.target.value)}
-                placeholder={reply ? 'Write a reply…' : 'Write a message or address a member…'} rows={3} />
+            <div className="chat-input channel-chat-input">
+              <ChannelMessageInput ref={composer} members={mentionCandidates} disabled={pending} onChange={setBody}
+                placeholder={reply ? 'Write a reply…' : `Message ${selectedChannel?.title ?? 'this Channel'} · type @ to mention a member`}
+                onSubmit={() => { if (body.trim() && connected && !pending) composerForm.current?.requestSubmit(); }} />
               <div className="channel-composer-controls">
-                <label className="composer-target"><span>@ member</span>
-                  <select aria-label="Channel recipient" disabled={pending} value={recipientId} onChange={event => setRecipientId(event.target.value)}>
-                    <option value="">No @ recipient</option>{members.map(member =>
-                      <option key={member.participantId} value={member.participantId}>{memberName(member)} · {member.participantId}</option>)}
-                  </select>
-                </label>
-                <div className="channel-send-actions">
-                  <button type="button" disabled={pending || !recipientId} onClick={() => {
-                    const member = members.find(item => item.participantId === recipientId);
-                    if (!member) return;
-                    const label = memberName(member).replace(/[\[\]\\]/g, '');
-                    setBody(value => `${value}${value && !value.endsWith(' ') ? ' ' : ''}[@${label}](participant:${member.participantId}) `);
-                    setRecipientId(''); composer.current?.focus();
-                  }}>Insert @</button>
-                  <button disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
-                </div>
+                <p className="channel-composer-hint"><kbd>@</kbd> mention · <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line
+                  · Without an @, the message is saved and wakes no Pet.</p>
+                <button className="channel-send" disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
               </div>
             </div>
-            <p className="channel-composer-hint">{!recipientId
-              ? 'No recipient selected. Without a valid @ in the message, this saves only and will not wake a Pet.'
-              : 'Send to the selected member. You can change or clear the recipient; valid @ links in the message also address members.'}</p>
           </form>
         </> : <div className="empty-state"><strong>{loading ? 'Loading Channel…' : 'Start a Channel'}</strong>
           <span>Talk with people and Pets in one shared conversation.</span>
@@ -321,44 +312,50 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     <aside id="channel-activity-panel" ref={activity} hidden={!activityOpen} role={activityModal ? 'dialog' : 'complementary'}
       aria-label="Channel details" aria-modal={activityModal ? true : undefined} tabIndex={-1} inert={modalOpen && !activityModal}
       className={'channel-activity' + (activityModal ? ' channel-drawer right' : '')}>
-      <div className="channel-sidebar-head"><h2>Members & details</h2><button type="button" aria-label="Close Channel details" onClick={() => setActivityOpen(false)}>×</button></div>
+      <div className="channel-sidebar-head"><h2>Members <span className="channel-count">{members.length}</span></h2>
+        <button type="button" aria-label="Close Channel details" onClick={() => setActivityOpen(false)}>×</button></div>
       <div className="channel-activity-scroll">
         {context && <section className="channel-activity-section" aria-label="Channel members">
-          <div className="channel-section-label"><h3>Members</h3><span>{members.length}</span></div>
           <p className="channel-history-hint">Only members can read, post and be addressed here.</p>
           <ul className="channel-members">{members.map(member => {
             const session = member.kind === 'pet' ? channelPetSession(member.id, sessions) : undefined;
             const name = memberName(member);
+            const self = member.participantId === viewerParticipantId;
             return <li className="channel-member" key={member.participantId}>
-              <div className="channel-member-head"><strong>{name}</strong><em>{member.kind === 'pet' ? 'Pet' : 'Human'}</em></div>
-              <code>{member.participantId}</code>
+              <span className={'channel-avatar small ' + member.kind} aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+              <div className="channel-member-main">
+                <div className="channel-member-head"><strong>{name}</strong><em className={'channel-kind ' + member.kind}>{member.kind === 'pet' ? 'Pet' : 'Human'}</em></div>
+                <code title={member.participantId}>{member.participantId}</code>
+              </div>
               <div className="channel-member-actions">
-                {session && !clientMode && <button type="button" disabled={!connected} onClick={() => viewSession(session)}>View session</button>}
+                {session && !clientMode && <button type="button" disabled={!connected} aria-label="View session" onClick={() => viewSession(session)}>Session</button>}
                 {member.kind === 'pet' && !session && <span>No session yet</span>}
-                <button type="button" aria-label={'Remove ' + name} disabled={!connected || pending || member.participantId === viewerParticipantId}
-                  title={member.participantId === viewerParticipantId ? 'You cannot remove yourself from this Console.' : undefined}
-                  onClick={() => manageMember('/channels/members/remove', member)}>Remove</button>
+                {/* The Console cannot remove its own member. */}
+                {!self && <button type="button" className="channel-member-remove" aria-label={'Remove ' + name} disabled={!connected || pending}
+                  onClick={() => manageMember('/channels/members/remove', member)}>Remove</button>}
               </div>
             </li>;
           })}</ul>
-          <form className="channel-member-add" onSubmit={event => { event.preventDefault(); if (petToAdd) manageMember('/channels/members', { kind: 'pet', id: petToAdd }); }}>
-            <select aria-label="Pet to add" disabled={pending || !joinable.length} value={petToAdd} onChange={event => setJoiningPet(event.target.value)}>
-              {!joinable.length && <option value="">Every Pet is a member</option>}
-              {joinable.map(pet => <option key={pet.petId} value={pet.petId}>{channelPetIdentity(pet.petId, pets).optionLabel}</option>)}
-            </select>
-            <button disabled={!connected || pending || !petToAdd}>Add Pet</button>
-          </form>
-          <form className="channel-member-add" onSubmit={event => {
-            event.preventDefault();
-            if (joiningHuman.trim()) manageMember('/channels/members', { kind: 'human', id: joiningHuman.trim() }, () => setJoiningHuman(''));
-          }}>
-            <input aria-label="Human member ID" placeholder="Studio client ID" maxLength={256} disabled={pending} value={joiningHuman} onChange={event => setJoiningHuman(event.target.value)} />
-            <button disabled={!connected || pending || !joiningHuman.trim()}>Add human</button>
-          </form>
+          <div className="channel-member-adders">
+            <form className="channel-member-add" onSubmit={event => { event.preventDefault(); if (petToAdd) manageMember('/channels/members', { kind: 'pet', id: petToAdd }); }}>
+              <select aria-label="Pet to add" disabled={pending || !joinable.length} value={petToAdd} onChange={event => setJoiningPet(event.target.value)}>
+                {!joinable.length && <option value="">Every Pet is a member</option>}
+                {joinable.map(pet => <option key={pet.petId} value={pet.petId}>{channelPetIdentity(pet.petId, pets).optionLabel}</option>)}
+              </select>
+              <button disabled={!connected || pending || !petToAdd}>Add Pet</button>
+            </form>
+            <form className="channel-member-add" onSubmit={event => {
+              event.preventDefault();
+              if (joiningHuman.trim()) manageMember('/channels/members', { kind: 'human', id: joiningHuman.trim() }, () => setJoiningHuman(''));
+            }}>
+              <input aria-label="Human member ID" placeholder="Studio client ID" maxLength={256} disabled={pending} value={joiningHuman} onChange={event => setJoiningHuman(event.target.value)} />
+              <button disabled={!connected || pending || !joiningHuman.trim()}>Add human</button>
+            </form>
+          </div>
           {memberError && <p className="channel-record-error" role="alert">{memberError}</p>}
         </section>}
         {messages.length > 0 && !clientMode && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
-        <button className="channel-refresh" type="button" disabled={!connected || pending} onClick={refresh}>Refresh persisted history</button>
+        <button className="channel-refresh" type="button" disabled={!connected || pending} onClick={refresh}>↻ Refresh persisted history</button>
       </div>
     </aside>
     {sessionView && <PetSessionView url={url} token={token} target={sessionView} pets={pets} petsReady={petsReady}

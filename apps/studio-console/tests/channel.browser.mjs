@@ -100,14 +100,26 @@ try {
   const publicMessages = async () => (await context()).messages.filter(item => item.author.kind === 'pet');
   assert.deepEqual((await context()).members.map(item => item.participantId), ['human:local', 'pet:alpha', 'pet:beta']);
   const memberPanel = page.getByRole('region', { name: 'Channel members' });
+  // The composer is a rich-text editor: @ opens the member list and a picked member becomes an inline mention.
+  const input = page.getByLabel('Message', { exact: true });
+  const mentionList = page.getByRole('listbox', { name: 'Members to mention' });
+  const composerMentions = () => input.locator('[data-type="mention"]').evaluateAll(nodes => nodes.map(node => node.dataset.id));
+  const clearComposer = async () => { await input.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('Backspace'); };
+  const openMentions = async () => { await input.click(); await page.keyboard.press('End'); await page.keyboard.type('@'); await mentionList.waitFor(); };
+  const mentionable = async () => { await openMentions(); return mentionList.locator('code').allTextContents(); };
+  const mention = async participantId => {
+    if (!(await mentionList.isVisible())) await openMentions();
+    await mentionList.getByRole('option').filter({ hasText: participantId }).click();
+    await mentionList.waitFor({ state: 'detached' });
+  };
   await memberPanel.getByText('pet:beta', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
   await page.getByLabel('Message', { exact: true }).fill('A note mentioning @beta without addressing anyone.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('A note mentioning @beta without addressing anyone.', { exact: true }).waitFor();
   assert.deepEqual(await sessions(firstId), [], 'a note wakes no Pet');
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('Investigate the current state.');
+  await mention('pet:alpha');
+  await page.keyboard.type('Investigate the current state.');
   await page.locator('.channel-composer').evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
   await waitFor(async () => (await publicMessages()).length === 1, 'first Pet message');
   await page.getByText('Full handoff evidence:', { exact: false }).first().waitFor();
@@ -117,17 +129,16 @@ try {
   const originalSession = (await sessions(firstId)).find(item => item.petId === 'alpha').sessionId;
   assert.equal((await publicMessages())[0].externalRef !== undefined, true, 'a Pet message keeps its session message id');
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
-  assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'pet:alpha', 'Reply preselects the original author without manual selection');
-  await page.getByLabel('Message', { exact: true }).fill('Continue with the same evidence.');
+  assert.deepEqual(await composerMentions(), ['pet:alpha'], 'Reply preselects the original author without manual selection');
+  await page.keyboard.type('Continue with the same evidence.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 2, 'reply completed');
   assert.ok((await publicMessages())[1].body.includes(`Session: ${originalSession}`));
   assert.ok((await publicMessages())[1].body.includes('Continue with the same evidence.'));
   assert.ok((await publicMessages())[1].body.includes(`Referenced message: ${(await publicMessages())[0].messageId}.`));
   assert.ok((await publicMessages())[1].body.includes('Input source: human:local.'));
-  await page.getByLabel('Channel recipient').selectOption('pet:beta');
-  await page.getByLabel('Message', { exact: true }).fill('Read prior public evidence and review the delivery.');
+  await mention('pet:beta');
+  await page.keyboard.type('Read prior public evidence and review the delivery.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 3, 'second Pet completed');
   assert.ok((await publicMessages())[2].body.includes('Prior public deliveries read: 2.'));
@@ -135,37 +146,39 @@ try {
   await page.screenshot({ path: resolve(screenshotDir, '01-channel-timeline.png'), fullPage: true });
   // Override and clear the default through the real UI and inspect what the Host did.
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'pet:alpha');
-  await page.getByLabel('Channel recipient').selectOption('pet:beta');
-  await page.getByLabel('Message', { exact: true }).fill('Changed recipient, same quoted Alpha message.');
+  assert.deepEqual(await composerMentions(), ['pet:alpha']);
+  await clearComposer();
+  await mention('pet:beta');
+  await page.keyboard.type('Changed recipient, same quoted Alpha message.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 4, 'changed reply target runs Beta');
   assert.equal((await publicMessages()).at(-1).author.id, 'beta');
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
-  await page.getByLabel('Channel recipient').selectOption('');
-  await page.getByText('No recipient selected. Without a valid @ in the message, this saves only and will not wake a Pet.', { exact: true }).waitFor();
-  await page.getByLabel('Message', { exact: true }).fill('Saved reply with recipient cleared.');
+  await clearComposer();
+  assert.deepEqual(await composerMentions(), []);
+  await page.locator('.channel-composer-hint').getByText('Without an @, the message is saved and wakes no Pet.', { exact: false }).waitFor();
+  await page.keyboard.type('Saved reply with recipient cleared.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Saved reply with recipient cleared.', { exact: true }).waitFor();
   const saved = (await context()).messages.find(item => item.body === 'Saved reply with recipient cleared.');
   assert.ok(saved.replyTo); assert.deepEqual(saved.mentions, []);
   await page.locator(`[data-message-id="${saved.messageId}"]`).getByRole('button', { name: 'Reply to Me', exact: true }).click();
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'human:local');
-  await page.getByLabel('Message', { exact: true }).fill('Human author reply stays public.');
+  assert.deepEqual(await composerMentions(), ['human:local']);
+  await page.keyboard.type('Human author reply stays public.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await page.getByText('Human author reply stays public.', { exact: true }).waitFor();
+  await page.getByText('Human author reply stays public.').waitFor();
   await new Promise(resolve => setTimeout(resolve, 1000));
   assert.equal((await publicMessages()).length, 4, 'cleared and human recipients wake no Pet');
 
   await create('Separate investigation', ['Alpha']);
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'new Channel requires a fresh explicit recipient');
-  assert.deepEqual(await page.getByLabel('Channel recipient').locator('option').allTextContents(), ['No @ recipient', 'Me · human:local', 'Alpha · pet:alpha'],
-    'only members can be addressed');
+  assert.deepEqual(await composerMentions(), [], 'new Channel requires a fresh explicit recipient');
+  assert.deepEqual(await mentionable(), ['human:local', 'pet:alpha'], 'only members can be addressed');
+  await page.screenshot({ path: resolve(screenshotDir, '06-channel-mention-autocomplete.png') });
   listed = await api('/channels');
   assert.equal(listed.channels.length, 2);
   const secondId = listed.channels.find(item => item.title === 'Separate investigation').channelId;
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('Check the isolated Channel.');
+  await mention('pet:alpha');
+  await page.keyboard.type('Check the isolated Channel.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const other = await waitFor(async () => {
     const value = await api(`/channels/context?channelId=${secondId}`);
@@ -179,7 +192,7 @@ try {
   await page.reload();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'channel', exact: true }).click();
-  await page.getByText('Human author reply stays public.', { exact: true }).waitFor();
+  await page.getByText('Human author reply stays public.').waitFor();
   assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect, 'page reload creates no dispatch');
   host.kill('SIGTERM');
   await page.locator('.connection-state.reconnecting').waitFor();
@@ -188,8 +201,8 @@ try {
   await startHost(Number(new URL(ready.url).port));
   await page.locator('.connection-state.connected').waitFor();
   assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect, 'Host restart and SSE reconnect create no dispatch');
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('Continue after Host restart.');
+  await mention('pet:alpha');
+  await page.keyboard.type('Continue after Host restart.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 5, 'Pet message after Host restart');
   assert.ok((await publicMessages())[4].body.includes(`Session: ${originalSession}`), 'restart keeps the Channel session');
@@ -198,8 +211,11 @@ try {
   // Members: removing a Pet stops it being addressed; adding it back restores the same session.
   await memberPanel.getByRole('button', { name: 'Remove Beta', exact: true }).click();
   await waitFor(async () => !(await api(`/channels/members?channelId=${firstId}`)).members.some(item => item.participantId === 'pet:beta'), 'Beta left');
-  await waitFor(async () => !(await page.getByLabel('Channel recipient').locator('option').allTextContents()).some(text => text.includes('pet:beta')), 'Beta is no longer addressable');
-  assert.equal(await memberPanel.getByRole('button', { name: 'Remove Me', exact: true }).isDisabled(), true, 'the Console cannot remove its own member');
+  await memberPanel.getByText('pet:beta', { exact: true }).waitFor({ state: 'detached' });
+  assert.ok(!(await mentionable()).includes('pet:beta'), 'Beta is no longer addressable');
+  await page.keyboard.press('Escape');
+  await clearComposer();
+  assert.equal(await memberPanel.getByRole('button', { name: 'Remove Me', exact: true }).count(), 0, 'the Console cannot remove its own member');
   await page.locator('[data-message-id]').filter({ hasText: 'Public delivery from beta.' }).first().getByText('Beta', { exact: true }).first().waitFor();
   await memberPanel.getByLabel('Pet to add').selectOption('beta');
   await memberPanel.getByRole('button', { name: 'Add Pet', exact: true }).click();
@@ -210,9 +226,9 @@ try {
   await memberPanel.getByLabel('Human member ID').fill('reviewer-1');
   await memberPanel.getByRole('button', { name: 'Add human', exact: true }).click();
   await memberPanel.getByText('human:reviewer-1', { exact: true }).waitFor();
-  assert.ok((await page.getByLabel('Channel recipient').locator('option').allTextContents()).includes('Reviewer One · human:reviewer-1'));
-  await page.getByLabel('Channel recipient').selectOption('human:reviewer-1');
-  await page.getByLabel('Message', { exact: true }).fill('A human member is addressed without waking a Pet.');
+  assert.ok((await mentionable()).includes('human:reviewer-1'));
+  await mention('human:reviewer-1');
+  await page.keyboard.type('A human member is addressed without waking a Pet.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.locator('.channel-inline-state').filter({ hasText: 'Reviewer One · delivered' }).waitFor();
   await memberPanel.getByRole('button', { name: 'Remove Reviewer One', exact: true }).click();
@@ -229,23 +245,26 @@ try {
   const loopContext = () => api(`/channels/context?channelId=${loopId}&limit=200`);
   const loopOutputs = async () => (await loopContext()).messages.filter(item => item.author.kind === 'pet');
   assert.equal(await page.locator('.channel-global-queues').count(), 0, 'no pre-send global status hint');
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('handoff');
-  await page.getByRole('button', { name: 'Insert @', exact: true }).click();
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '');
-  assert.ok((await page.getByLabel('Message', { exact: true }).inputValue()).includes('participant:pet:alpha'));
-  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  // Keyboard only: filter the @ list by typing, Enter picks the highlighted member, Enter again sends.
+  await input.click();
+  await page.keyboard.type('@Alp');
+  assert.deepEqual(await mentionList.locator('code').allTextContents(), ['pet:alpha']);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('handoff');
+  assert.deepEqual(await composerMentions(), ['pet:alpha']);
+  await page.keyboard.press('Enter');
   await waitFor(async () => (await loopOutputs()).length === 3, 'normal Alpha → Beta → Alpha loop');
   assert.deepEqual((await loopOutputs()).map(item => item.author.id), ['alpha', 'beta', 'alpha']);
   assert.deepEqual((await loopOutputs()).map(item => item.mentions[0].participantId), ['pet:beta', 'pet:alpha', 'human:local']);
-  await page.locator('.channel-mentions').getByText('@Me', { exact: true }).waitFor();
+  await page.locator('.channel-message-body .channel-mention').getByText('@Me', { exact: true }).waitFor();
+  assert.equal(await page.locator('.channel-mentions').count(), 0, 'an inline @ is not repeated above the message');
   await page.locator('.channel-message-head').getByText('Me', { exact: true }).first().waitFor();
   const memberIds = (await api(`/channels/members?channelId=${loopId}`)).members.map(item => item.participantId);
   assert.deepEqual(new Set(memberIds), new Set(['human:local', 'pet:alpha', 'pet:beta']));
   await apiPost('/channels/messages', { channelId: secondId, body: 'queue-hold', mentions: [{ participantId: 'pet:alpha' }] });
   await waitFor(async () => (await api('/dispatch/queues')).queues.find(item => item.petId === 'alpha')?.activeDispatch?.scope?.id === secondId, 'global active work from another Channel');
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
-  await page.getByLabel('Message', { exact: true }).fill('queue-next');
+  await mention('pet:alpha');
+  await page.keyboard.type('queue-next');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const alphaQueue = page.locator('.channel-queue').filter({ hasText: 'Alpha' });
   await alphaQueue.getByText('1 queued', { exact: true }).waitFor();
@@ -281,7 +300,7 @@ try {
   await bob.getByText('Local reply for Bob.', { exact: true }).waitFor({ timeout: 10000 });
   await bob.screenshot({ path: resolve(screenshotDir, '05-channel-client.png'), fullPage: true });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

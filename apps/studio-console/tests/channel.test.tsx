@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  appendChannelDeliveries, channelJoinablePets, channelMentionLabel, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
+  appendChannelDeliveries, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   readChannelContext, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
@@ -66,7 +66,7 @@ test('timeline renders the stored body and safe references; every message offers
   const markup = renderToStaticMarkup(<ChannelTimeline messages={[message, { ...message, messageId: 'note', author: { kind: 'human', id: 'owner' }, body: '<script>bad()</script>' }]}
     pending={false} onReply={() => undefined} />);
   assert.ok(markup.includes('Missing work remains.')); assert.ok(markup.includes('evidence = 42'));
-  assert.equal((markup.match(/>Reply to /g) ?? []).length, 2);
+  assert.equal((markup.match(/aria-label="Reply to /g) ?? []).length, 2);
   assert.ok(!markup.includes('href="javascript:')); assert.ok(!markup.includes('<script>'));
   assert.ok(!markup.includes('Tool calls'), 'Channel messages carry no tool calls');
 });
@@ -78,6 +78,30 @@ test('mentions and authors are named from current members; the viewer is Me', ()
   assert.ok(markup.includes('Me')); assert.ok(markup.includes('@Analyst'));
   assert.equal(channelMentionLabel({ participantId: 'pet:gone', label: 'Stored label' }, members), 'Stored label', 'a former member keeps its stored label');
   assert.equal(channelMentionLabel({ participantId: 'pet:gone' }, members), 'pet:gone');
+});
+
+test('an @ shows once: inline links stay in the body and only body-less mentions are listed', () => {
+  const inline = { ...message, body: '[@Analyst](participant:pet:worker) please check.', mentions: [{ participantId: 'pet:worker' }] };
+  const explicit = { ...message, messageId: 'x', body: 'please check.', mentions: [{ participantId: 'pet:worker' }] };
+  const markup = renderToStaticMarkup(<ChannelTimeline messages={[inline]} pending={false} onReply={() => undefined} members={members} />);
+  assert.equal((markup.match(/@Analyst/g) ?? []).length, 1);
+  assert.ok(!markup.includes('Addressed participants'));
+  const listed = renderToStaticMarkup(<ChannelTimeline messages={[explicit]} pending={false} onReply={() => undefined} members={members} />);
+  assert.ok(listed.includes('Addressed participants')); assert.equal((listed.match(/@Analyst/g) ?? []).length, 1);
+  assert.deepEqual([...channelInlineMentionIds('[@A](participant:pet:a) and [@B](participant:human:b%20c)')], ['pet:a', 'human:b%20c']);
+});
+
+test('composer @ list matches name or id and serializes to the Channel link', () => {
+  const candidates = [
+    { participantId: 'human:local', kind: 'human', label: 'Me' },
+    { participantId: 'pet:reviewer', kind: 'pet', label: 'Reviewer' },
+    { participantId: 'pet:executor', kind: 'pet', label: 'Executor' },
+  ];
+  assert.deepEqual(channelMentionMatches(candidates, '').map(item => item.label), ['Me', 'Reviewer', 'Executor']);
+  assert.deepEqual(channelMentionMatches(candidates, 'e').map(item => item.label), ['Executor', 'Me', 'Reviewer'], 'names starting with the text come first');
+  assert.deepEqual(channelMentionMatches(candidates, 'pet:rev').map(item => item.label), ['Reviewer']);
+  assert.equal(channelMentionMarkdown({ participantId: 'pet:a', label: 'A [x]\\' }), '[@A x](participant:pet:a)');
+  assert.equal(channelMentionMarkdown({ participantId: 'pet:a' }), '[@pet:a](participant:pet:a)');
 });
 
 test('delivery outcomes observed by the Console show next to their message without being stored', () => {
@@ -105,7 +129,7 @@ test('a Pet message opens its Channel session only once that session is register
   const opened: string[] = [];
   const markup = renderToStaticMarkup(<ChannelTimeline messages={[message, { ...message, messageId: 'h', author: { kind: 'human', id: 'studio-operator' } }]}
     pending={false} onReply={() => undefined} members={members} sessions={sessions} onViewSession={session => opened.push(session.sessionId)} />);
-  assert.equal((markup.match(/>View Analyst session</g) ?? []).length, 1);
+  assert.equal((markup.match(/aria-label="View Analyst session"/g) ?? []).length, 1);
   assert.equal(channelPetSession('worker', sessions)?.sessionId, 'worker:0001');
   assert.equal(channelPetSession('worker', [{ ...sessions[0]!, registered: false }]), undefined);
   const unregistered = renderToStaticMarkup(<ChannelTimeline messages={[message]} pending={false} onReply={() => undefined}
@@ -168,6 +192,7 @@ test('references show one compact quote without truncating the message or losing
   const original = { ...message, body: 'Full evidence. '.repeat(40) };
   const response = { ...message, messageId: 'reply', replyTo: original.messageId, body: 'Use this evidence.' };
   assert.ok(channelQuote(original.body).length <= 160);
+  assert.equal(channelQuote('[@Alpha](participant:pet:alpha) Continue.'), '@Alpha Continue.', 'a quote shows an @ by name');
   assert.equal(channelMessageSummary(response), 'Use this evidence.');
   const markup = renderToStaticMarkup(<ChannelTimeline messages={[original, response]} pets={[{ petId: 'worker', name: 'Analyst' }]} pending={false} onReply={() => undefined} />);
   assert.ok(markup.includes(original.body.trim()));

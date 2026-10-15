@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES, getConfig } from '@langchain/langgraph';
+import { withToolCalls } from '../messages';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -224,19 +225,6 @@ function materializeToolCallIds(
   messageIndex: number,
 ): ToolCall[] {
   return toolCalls.map((toolCall, index) => materializeToolCallId(toolCall, messageIndex, index));
-}
-
-function cloneAIMessageWithToolCalls(message: AIMessage, toolCalls: ToolCall[]): AIMessage {
-  return new AIMessage({
-    content: message.content,
-    id: message.id,
-    name: message.name,
-    additional_kwargs: { ...message.additional_kwargs },
-    response_metadata: { ...message.response_metadata },
-    tool_calls: toolCalls,
-    invalid_tool_calls: message.invalid_tool_calls,
-    usage_metadata: message.usage_metadata,
-  });
 }
 
 function replaceMessageInState(
@@ -641,7 +629,7 @@ function materializeAIMessageToolCalls(params: {
     toolCall !== params.aiMessage.tool_calls?.[index]);
   return {
     message: replacedMessage
-      ? cloneAIMessageWithToolCalls(params.aiMessage, toolCalls)
+      ? withToolCalls(params.aiMessage, toolCalls)
       : params.aiMessage,
     messageIndex: params.aiMessageIndex,
     toolCalls,

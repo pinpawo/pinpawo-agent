@@ -376,6 +376,26 @@ test('Entry routing asks the provider for a single routing call', () => {
   assert.deepEqual(bindOptions, [{ parallel_tool_calls: false }]);
 });
 
+test('Entry hands off once when a streamed turn also carries its call as a content block', async () => {
+  // Streamed turns (streamEvents v3) keep the provider's call as a `tool_call`
+  // content block; rewriting only tool_calls used to leave both IDs on the
+  // message, so the handoff saw two calls and Entry looped on its own error.
+  const call = { id: 'call-A', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
+  const { graph, seen, requests } = routingScript([new AIMessage({
+    content: [{ type: 'reasoning', reasoning: 'think' }, { type: 'tool_call', ...call }],
+    tool_calls: [call],
+    additional_kwargs: { tool_calls: [{ id: 'call-A', type: 'function', function: { name: PLAN_REQUEST_TOOL_NAME, arguments: '{}' } }] },
+    response_metadata: { output_version: 'v1' },
+  })]);
+  const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
+  assert.equal(seen.length, 1);
+  assert.deepEqual(requests, ['截图所有页面']);
+  const routed = output.messages.find((message) => AIMessage.isInstance(message) && message.tool_calls?.length) as AIMessage;
+  assert.equal(routed.tool_calls?.length, 1);
+  assert.ok(routed.content.length && Array.isArray(routed.content));
+  assert.deepEqual((routed.content as Array<{ type: string }>).map((block) => block.type).filter((type) => type !== 'tool_call'), ['reasoning']);
+});
+
 test('Entry routing accepts a tool call whose provider omitted the id', async () => {
   const { graph, seen, requests } = routingScript([new AIMessage({
     content: '', tool_calls: [{ id: undefined, name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } }],

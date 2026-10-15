@@ -63,7 +63,6 @@ export type ReviewInterruptOptions = {
   messages: BaseMessage[];
   aiMessage: AIMessage;
   aiMessageIndex: number;
-  actionWasMaterialized: boolean;
 };
 
 export type ReviewInterruptStateUpdate = {
@@ -291,16 +290,7 @@ export class ReviewInterrupt implements AgentInterrupt<
         type: resolution.type,
         authorizations: resolution.authorizations,
         approvedReviewIds: resolution.approvedReviewIds,
-        stateUpdate: this.#options.actionWasMaterialized
-          ? {
-              messages: replaceMessageInState(
-                this.#options.messages,
-                this.#options.aiMessageIndex,
-                this.#options.aiMessage,
-                [],
-              ),
-            }
-          : {},
+        stateUpdate: {},
       };
     }
 

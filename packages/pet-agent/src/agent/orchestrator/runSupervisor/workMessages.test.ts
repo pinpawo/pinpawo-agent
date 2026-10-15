@@ -140,14 +140,13 @@ test('review fails the run when a planned task has lost its goal', () => {
     /no task to review/, 'a missing plan stays a correctable decision');
 });
 
-test('work projection scopes delegation IDs per run without changing arguments or the original message', () => {
+test('work projection keeps the delegation call as the model produced it', () => {
   const request = control('delegate_capability', { briefing: 'Execute the current objective.' }, 'native-call');
   const projected = supervisorWorkMessages(context(), [request], true);
   const projectedCall = (projected[0] as AIMessage).tool_calls![0];
-  assert.equal(projectedCall.id, identity('call', context().runId, 'native-call'));
+  assert.equal(projectedCall.id, 'native-call');
   assert.deepEqual(projectedCall.args, request.tool_calls![0].args);
   assert.equal(request.tool_calls![0].id, 'native-call');
-  assert.notEqual((supervisorWorkMessages(context({ runId: 'other' }), [request], true)[0] as AIMessage).tool_calls![0].id, projectedCall.id);
   assert.equal(getAgentMessageMetadata(projected[0]).execution, undefined);
   assert.equal(queryAgentMessages(projected).main().select().messages.length, 1);
 });
@@ -216,7 +215,7 @@ test('correcting delegation arguments preserves the review conversation', async 
   assert.equal(model.inputs.length, 3);
   assert.ok(model.inputs.at(-1)!.some(message => AIMessage.isInstance(message)
     && message.tool_calls?.some(call => call.name === 'review_current' && call.args.reason === 'Verify missing evidence')));
-  const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', context().runId, 'invalid')) as ToolMessage;
+  const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'invalid') as ToolMessage;
   assert.equal(error.status, 'error');
 });
 
@@ -232,4 +231,15 @@ test('final publication preserves structured model content and usage without a p
   assert.equal(message.id, identity('supervisor-message', context().runId, 'final-model'));
   assert.equal(queryAgentMessages(result.messages).main().select().messages[0], message);
   assert.equal(queryAgentMessages(result.messages).supervisor(context().runId).select().messages.length, 0);
+});
+
+test('dispatch keeps a streamed call as one call', () => {
+  const call = { name: 'delegate_capability', args: { briefing: 'Execute the current objective.' }, id: 'call-A', type: 'tool_call' as const };
+  const streamed = new AIMessage({
+    id: 'request:call-A', content: [{ type: 'reasoning', reasoning: 'think' }, { ...call }], tool_calls: [call],
+    response_metadata: { output_version: 'v1' },
+  });
+  const [dispatch] = supervisorWorkMessages(context(), [streamed], true) as AIMessage[];
+  const rebuilt = new AIMessage({ ...dispatch });
+  assert.deepEqual(rebuilt.tool_calls?.map((item) => item.id), ['call-A']);
 });

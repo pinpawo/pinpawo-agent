@@ -13,7 +13,7 @@ import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentSystemPrompt, buildRunSupervisorContextInput, buildRunSupervisorTurnInput } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
 import { queryAgentMessages, getAgentMessageMetadata, getAgentMessageRunId, stampAgentMessageCreatedAt } from '../../messages';
-import { toolProtocolMiddleware } from '../modelInvocation';
+import { createToolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 import { createSupervisorCapabilityDetailsTool } from './detailsTool';
@@ -78,7 +78,7 @@ export function createRunSupervisorAgent(params: {
         middleware: [
           createSupervisorControlValidationMiddleware(input, agentMessages.length),
           systemPromptMiddleware,
-          toolProtocolMiddleware,
+          createToolProtocolMiddleware({ uniqueInHistory: true }),
         ],
       });
       // A stricter caller limit stays the caller's hard breaker; only this

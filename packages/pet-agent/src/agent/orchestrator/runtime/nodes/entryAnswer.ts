@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { isDeepStrictEqual } from 'node:util';
@@ -14,7 +14,6 @@ import {
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
-import { identity } from '../../runSupervisor/controlContext';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
@@ -198,6 +197,23 @@ export function entryPlanMessage(state: RunSupervisorState, runId?: string) {
   });
 }
 
+/** Drop repeated calls everywhere the message lists them, keeping `kept`. */
+function withoutRepeatedCalls(message: AIMessage, kept: ToolCall[]) {
+  const ids = new Set(kept.map((call) => call.id));
+  const isDropped = (block: unknown) => !ids.has((block as { id?: string }).id);
+  const rawCalls = message.additional_kwargs?.tool_calls;
+  return new AIMessage({
+    ...message,
+    content: Array.isArray(message.content)
+      ? message.content.filter((block) => (block as { type?: string }).type !== 'tool_call' || !isDropped(block))
+      : message.content,
+    additional_kwargs: Array.isArray(rawCalls)
+      ? { ...message.additional_kwargs, tool_calls: rawCalls.filter((call) => !isDropped(call)) }
+      : message.additional_kwargs,
+    tool_calls: kept,
+  });
+}
+
 export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   const planRequest = createPlanRequestTool();
   const continuePlan = createContinueTool();
@@ -227,6 +243,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     const response = await invokeOrchestratorModel(model, {
       systemMessage,
       messages: [snapshot, ...mainSelection.messages],
+      history: state.messages,
     }, runnableConfig);
     if (!AIMessage.isInstance(response)) {
       throw new Error('Entry Answer model must return an AIMessage.');
@@ -245,11 +262,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     if (!toolCalls?.length && !response.text.trim()) {
       throw new Error('Entry Answer must reply or request routing.');
     }
-    // Scope provider call IDs to this model turn; history may reuse them across runs or retries.
-    // Some providers omit the ID entirely, so the position stands in for it.
-    const committed = new AIMessage({ ...response, tool_calls: toolCalls?.map((call, index) => ({
-      ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id || `index:${index}`),
-    })) });
+    const committed = toolCalls?.length === response.tool_calls?.length ? response : withoutRepeatedCalls(response, toolCalls!);
     return {
       messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],
     };

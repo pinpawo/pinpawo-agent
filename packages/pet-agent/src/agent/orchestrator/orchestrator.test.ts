@@ -2031,55 +2031,6 @@ test('deterministic toolkit policy block terminates without another model call',
   assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
 });
 
-test('toolkit review materializes distinct fallback ids for missing tool call ids', async () => {
-  const blockedTool = tool(async () => 'blocked should not run', {
-    name: 'blocked_tool',
-    description: 'blocked tool',
-    schema: z.object({ path: z.string() }),
-  });
-  const toolkits: AgentToolkit[] = [{
-    name: 'guarded',
-    description: 'guarded toolkit',
-    tools: [reviewedTool(blockedTool, {
-          request: () => ({
-            type: 'block',
-            reason: 'blocked by policy',
-          }),
-    })],
-  }];
-
-  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
-    models: {} as AgentModels,
-    messages: [],
-  });
-  const result = await runToolkitToolCall(resources, [
-    { name: 'blocked_tool', args: { path: 'a.txt' } },
-    { name: 'blocked_tool', args: { path: 'b.txt' } },
-  ]);
-
-  const toolMessages = readToolMessages(result.messages);
-  assert.equal(toolMessages.length, 2);
-  assert.match(toolMessages[0]?.tool_call_id ?? '', /^pending_action:/);
-  assert.match(toolMessages[1]?.tool_call_id ?? '', /^pending_action:/);
-  assert.notEqual(toolMessages[0]?.tool_call_id, toolMessages[1]?.tool_call_id);
-  const cancelledResults = toolMessages.map((message) => JSON.parse(String(message.content)) as {
-    cancelled?: boolean;
-    retryable?: boolean;
-    guidance?: string;
-  });
-  assert.deepEqual(cancelledResults.map((item) => item.cancelled), [true, true]);
-  assert.deepEqual(cancelledResults.map((item) => item.retryable), [false, false]);
-  assert.match(cancelledResults[0]?.guidance ?? '', /blocked by policy/);
-
-  const reviewedMessage = result.messages.find((message): message is AIMessage =>
-    AIMessage.isInstance(message)
-    && (message.tool_calls?.length ?? 0) === 2);
-  assert.deepEqual(
-    reviewedMessage?.tool_calls?.map((toolCall) => toolCall.id),
-    toolMessages.map((message) => message.tool_call_id),
-  );
-});
-
 test('global review policy full_access bypasses toolkit review prompts', async () => {
   let callCount = 0;
   let reviewCount = 0;

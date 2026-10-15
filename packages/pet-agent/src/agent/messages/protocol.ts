@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import { readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
 
 export type ToolProtocolSafeResult = {
@@ -58,26 +58,4 @@ export function makeToolProtocolSafe(
 
 export function toolProtocolSafeMessages(messages: readonly BaseMessage[]) {
   return makeToolProtocolSafe(messages).messages;
-}
-
-/**
- * Copy an AI message with its tool calls replaced.
- *
- * A message from a streamed turn also carries the provider's calls as
- * `tool_call` content blocks (and raw `additional_kwargs.tool_calls`), and
- * LangChain merges those blocks back into `tool_calls` when it rebuilds the
- * message. Setting `tool_calls` alone would then leave every rewritten call
- * next to its original ID, so the provider's copies are dropped here and the
- * replacement calls stand alone.
- */
-export function withToolCalls(message: AIMessage, toolCalls: ToolCall[]) {
-  const { tool_calls: _providerCalls, ...additionalKwargs } = message.additional_kwargs ?? {};
-  return new AIMessage({
-    ...message,
-    content: Array.isArray(message.content)
-      ? message.content.filter((block) => !['tool_call', 'tool_call_chunk'].includes((block as { type?: string }).type ?? ''))
-      : message.content,
-    additional_kwargs: additionalKwargs,
-    tool_calls: toolCalls,
-  });
 }

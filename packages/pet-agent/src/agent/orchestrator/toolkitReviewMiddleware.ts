@@ -1,7 +1,5 @@
-import { createHash } from 'node:crypto';
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES, getConfig } from '@langchain/langgraph';
-import { withToolCalls } from '../messages';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -185,46 +183,9 @@ function isToolkitReviewBlock(value: unknown): value is { type: 'block'; reason:
   );
 }
 
-function stableStringify(value: unknown): string {
-  if (!value || typeof value !== 'object') {
-    return JSON.stringify(value) ?? String(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  }
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(',')}}`;
-}
-
-function stableToolCallHash(toolCall: ToolCall) {
-  return createHash('sha256')
-    .update(stableStringify({ name: toolCall.name, args: toolCall.args }))
-    .digest('hex')
-    .slice(0, 12);
-}
-
 function readToolCallId(toolCall: ToolCall) {
   const id = toolCall.id;
   return typeof id === 'string' && id.trim() ? id.trim() : 'pending_action';
-}
-
-function materializeToolCallId(toolCall: ToolCall, messageIndex: number, toolCallIndex: number): ToolCall {
-  const explicitId = typeof toolCall.id === 'string' && toolCall.id.trim()
-    ? toolCall.id.trim()
-    : null;
-  const actionId = explicitId
-    ?? `pending_action:${messageIndex}:${toolCallIndex}:${stableToolCallHash(toolCall)}`;
-  return toolCall.id === actionId ? toolCall : { ...toolCall, id: actionId };
-}
-
-function materializeToolCallIds(
-  toolCalls: ToolCall[],
-  messageIndex: number,
-): ToolCall[] {
-  return toolCalls.map((toolCall, index) => materializeToolCallId(toolCall, messageIndex, index));
 }
 
 function replaceMessageInState(
@@ -416,11 +377,10 @@ type PreparedToolkitReviews = {
   cancellation: ToolkitReviewCancellation | null;
 };
 
-type MaterializedToolCallMessage = {
+type ReviewedToolCallMessage = {
   message: AIMessage;
   messageIndex: number;
   toolCalls: ToolCall[];
-  replacedMessage: boolean;
 };
 
 type ToolkitReviewResults = Omit<ReviewInterruptTransition, 'type'> & {
@@ -617,26 +577,6 @@ function readLatestAIMessage(messages: BaseMessage[]): {
   return null;
 }
 
-function materializeAIMessageToolCalls(params: {
-  aiMessage: AIMessage;
-  aiMessageIndex: number;
-}): MaterializedToolCallMessage {
-  const toolCalls = materializeToolCallIds(
-    params.aiMessage.tool_calls ?? [],
-    params.aiMessageIndex,
-  );
-  const replacedMessage = toolCalls.some((toolCall, index) =>
-    toolCall !== params.aiMessage.tool_calls?.[index]);
-  return {
-    message: replacedMessage
-      ? withToolCalls(params.aiMessage, toolCalls)
-      : params.aiMessage,
-    messageIndex: params.aiMessageIndex,
-    toolCalls,
-    replacedMessage,
-  };
-}
-
 function toReviewInterruptReview(review: PreparedToolkitReview): ReviewInterruptReview {
   return {
     toolCall: review.toolCall,
@@ -740,20 +680,19 @@ async function prepareToolkitReviews(params: {
 async function resolveHumanToolkitReviews(params: {
   reviews: ReviewInterruptReview[];
   messages: BaseMessage[];
-  reviewedMessage: MaterializedToolCallMessage;
+  reviewedMessage: ReviewedToolCallMessage;
 }): Promise<ReviewInterruptTransition> {
   return new ReviewInterrupt({
     reviews: params.reviews,
     messages: params.messages,
     aiMessage: params.reviewedMessage.message,
     aiMessageIndex: params.reviewedMessage.messageIndex,
-    actionWasMaterialized: params.reviewedMessage.replacedMessage,
   }).run();
 }
 
 async function reviewToolkitToolCalls(params: {
   messages: BaseMessage[];
-  reviewedMessage: MaterializedToolCallMessage;
+  reviewedMessage: ReviewedToolCallMessage;
   bindingsByToolName: Map<string, ToolkitReviewBinding>;
   ctx: ToolkitReviewRuntimeContext;
   approvedReviewIds: Set<string>;
@@ -773,7 +712,7 @@ async function reviewToolkitToolCalls(params: {
   }
 
   if (prepared.reviews.length === 0) {
-    return buildAllowedToolkitReviewResult(params.messages, params.reviewedMessage);
+    return buildAllowedToolkitReviewResult();
   }
 
   const hasPendingResume = hasPendingReviewInterruptResume();
@@ -811,7 +750,7 @@ async function reviewToolkitToolCalls(params: {
       resolution: policyResolution,
       reviews: prepared.reviews,
     });
-    return buildAllowedToolkitReviewResult(params.messages, params.reviewedMessage);
+    return buildAllowedToolkitReviewResult();
   }
 
   if (!runtimeCanCollectHumanReview(params.ctx)) {
@@ -868,30 +807,18 @@ async function selectUnresolvedReviews(params: {
   return unresolved;
 }
 
-function buildAllowedToolkitReviewResult(
-  messages: BaseMessage[],
-  reviewedMessage: MaterializedToolCallMessage,
-): ToolkitReviewResults {
+function buildAllowedToolkitReviewResult(): ToolkitReviewResults {
   return {
     type: 'allow',
     authorizations: [],
     approvedReviewIds: [],
-    stateUpdate: reviewedMessage.replacedMessage
-      ? {
-          messages: replaceMessageInState(
-            messages,
-            reviewedMessage.messageIndex,
-            reviewedMessage.message,
-            [],
-          ),
-        }
-      : {},
+    stateUpdate: {},
   };
 }
 
 function buildPolicyCancellationResult(params: {
   messages: BaseMessage[];
-  reviewedMessage: MaterializedToolCallMessage;
+  reviewedMessage: ReviewedToolCallMessage;
   cancellation: ToolkitReviewCancellation;
 }): ToolkitReviewResults {
   const toolMessages: ToolMessage[] = [];
@@ -945,10 +872,11 @@ export function createToolkitReviewMiddleware(
         if (!latestAIMessage?.message.tool_calls?.length) {
           return undefined;
         }
-        const reviewedMessage = materializeAIMessageToolCalls({
-          aiMessage: latestAIMessage.message,
-          aiMessageIndex: latestAIMessage.index,
-        });
+        const reviewedMessage = {
+          message: latestAIMessage.message,
+          messageIndex: latestAIMessage.index,
+          toolCalls: latestAIMessage.message.tool_calls,
+        };
         const reviewResults = await reviewToolkitToolCalls({
           messages,
           reviewedMessage,

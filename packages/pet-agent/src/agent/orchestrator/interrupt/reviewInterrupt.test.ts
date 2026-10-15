@@ -68,7 +68,6 @@ function createReviewInterrupt() {
     messages: [aiMessage],
     aiMessage,
     aiMessageIndex: 0,
-    actionWasMaterialized: false,
   });
 }
 

@@ -12,6 +12,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createAgent, createMiddleware } from 'langchain';
 
 import {
+  assignToolCallIds,
   invokeOrchestratorModel,
   toolProtocolMiddleware,
 } from './modelInvocation';
@@ -134,4 +135,37 @@ test('Agent invocation applies after earlier middleware without mutating state',
   assert.equal(result.messages.includes(call), true);
   assert.equal(result.messages.includes(delivery), true);
   assert.equal(result.messages.includes(invocationInput), false);
+});
+
+test('tool call IDs are settled once, keeping provider IDs that are already unique', () => {
+  const unique = new AIMessage({ content: '', tool_calls: [{ id: 'call-A', name: 'read', args: {} }] });
+  assert.equal(assignToolCallIds(unique, []), unique);
+
+  const history = [new AIMessage({ content: '', tool_calls: [{ id: 'functions.read:0', name: 'read', args: {} }] })];
+  const repeated = new AIMessage({ content: '', tool_calls: [
+    { id: 'functions.read:0', name: 'read', args: { path: 'a' } },
+    { id: '', name: 'read', args: { path: 'b' } },
+    { id: 'call-B', name: 'read', args: { path: 'c' } },
+    { id: 'call-B', name: 'read', args: { path: 'd' } },
+  ] });
+  const ids = assignToolCallIds(repeated, history).tool_calls!.map((call) => call.id!);
+  assert.equal(new Set([...ids, 'functions.read:0']).size, 5);
+  assert.equal(ids[2], 'call-B');
+});
+
+test('a streamed response keeps one copy of each call after its ID is settled', () => {
+  const call = { id: 'functions.plan_request:0', name: 'plan_request', args: { goal: 'x' } };
+  const streamed = new AIMessage({
+    content: [{ type: 'reasoning', reasoning: 'think' }, { type: 'tool_call', ...call }],
+    tool_calls: [call],
+    additional_kwargs: { tool_calls: [{ id: call.id, type: 'function', function: { name: call.name, arguments: '{"goal":"x"}' } }] },
+    response_metadata: { output_version: 'v1' },
+  });
+  const settled = assignToolCallIds(streamed, [new AIMessage({ content: '', tool_calls: [call] })]);
+  const rebuilt = new AIMessage({ ...settled });
+  assert.equal(rebuilt.tool_calls?.length, 1);
+  assert.notEqual(rebuilt.tool_calls![0].id, call.id);
+  assert.deepEqual((rebuilt.content as Array<{ type: string; id?: string }>).map((block) => [block.type, block.id]),
+    [['reasoning', undefined], ['tool_call', rebuilt.tool_calls![0].id]]);
+  assert.equal((rebuilt.additional_kwargs.tool_calls as Array<{ id: string }>)[0].id, rebuilt.tool_calls![0].id);
 });

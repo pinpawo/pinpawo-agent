@@ -108,7 +108,7 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_ca
     const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
       configurable: { thread_id: `recover-${name}`, registry },
     });
-    const feedback = supervisor.inputs.flat().find((m) => ToolMessage.isInstance(m) && m.tool_call_id === (name === 'delegate_capability' ? identity('call', result.runId, 'bad') : 'bad'));
+    const feedback = supervisor.inputs.flat().find((m) => ToolMessage.isInstance(m) && m.tool_call_id === 'bad');
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
     assert.equal(feedback.name, name);
@@ -181,7 +181,7 @@ test('copied internal handoff parameters are corrected before a single Superviso
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
     configurable: { thread_id: 'copied-handoff', registry },
   });
-  const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'copied-history'));
+  const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'copied-history');
   assert.ok(ToolMessage.isInstance(feedback));
   assert.equal(feedback.status, 'error');
   const executions = readCapabilityExecutions(result.messages);
@@ -212,7 +212,7 @@ test('briefing is prepared at delegation time while the plan retains its objecti
     configurable: { thread_id: 'required-briefing', registry },
   });
   for (const id of ['overridden', 'blank', 'legacy']) {
-    const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, id));
+    const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === id);
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
   }
@@ -254,7 +254,7 @@ test('a follow-up run plans fresh work after a rejected delegation instead of as
   // plan_request retired the previous run's plan, so Entry shows no plan at all.
   const followUpEntryInput = supervisor.inputs[supervisorCallsBefore].at(-1)!.text;
   assert.doesNotMatch(followUpEntryInput, /Inspect the repository/);
-  const rejected = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'premature'));
+  const rejected = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'premature');
   assert.ok(ToolMessage.isInstance(rejected));
   assert.match(rejected.text, /There is no planned task to execute/);
   // The cleared snapshot gives the recovered plan this run's request as its goal.

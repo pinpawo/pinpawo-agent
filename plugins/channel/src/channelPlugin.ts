@@ -7,7 +7,7 @@ import { allocatePetSessionId, readPetInvocationContext } from 'pinpawo/host-run
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelParticipantId } from './channelParticipants';
 import {
-  ChannelAccessError, ChannelNotFoundError, ChannelService, channelMessageSchema, channelPageSchema,
+  ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelPageSchema,
   memberRefSchema, type ChannelMessage, type ChannelSessionBinding,
 } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';
@@ -101,8 +101,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const studio = host();
     const service = channelService();
     const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
-    const request = channelDispatchInput(message, original);
     const members = new Map((await service.members(message.channelId)).map(member => [member.participantId, member]));
+    const request = channelDispatchInput(message, original, participantId => members.get(participantId)?.label);
     const deliveries = await Promise.all(message.mentions
       .map(async ({ participantId }): Promise<ChannelDelivery> => {
         const target = members.get(participantId);
@@ -204,11 +204,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       if (options.httpRoute === false) return;
       removeHttp = studio.hooks.contribute<StudioHttpRoutesHook>(options.httpRoute?.pluginName ?? 'http', 'routes', (routes) => {
         // Any Studio client may call; membership decides what it can see. The caller is the human member `human:<clientId>`.
-        const register = (method: string, route: string, handle: (request: StudioHttpRouteRequest, actor: MemberRef) => ReturnType<StudioHttpRoute['handle']>) => routes.register({
+        // The local Host token (studio scope) may also manage members of any Channel.
+        const register = (method: string, route: string, handle: (request: StudioHttpRouteRequest, actor: MemberRef, access: ChannelManageAccess) => ReturnType<StudioHttpRoute['handle']>) => routes.register({
           method, path: route, authorization: 'client', handle: async (request) => {
             try {
               if (!request.principal) throw new ChannelAccessError('Channel routes require a Studio client.');
-              return await handle(request, { kind: 'human', id: request.principal.clientId });
+              return await handle(request, { kind: 'human', id: request.principal.clientId }, { studio: request.principal.scope === 'studio' });
             }
             catch (error) {
               const status = error instanceof z.ZodError ? 400
@@ -226,26 +227,27 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         const withChannel = z.object({ channelId: z.string().min(1) }).passthrough();
         const viewer = (actor: MemberRef) => channelParticipantId(actor.kind, actor.id);
         const remove = [
-          register('GET', '/channels', async ({ url }, actor) => ({ kind: 'json', body: {
-            ...await service.listChannels(actor, page(url)), viewerParticipantId: viewer(actor),
+          register('GET', '/channels', async ({ url }, actor, access) => ({ kind: 'json', body: {
+            ...await service.listChannels(actor, page(url), { ...access, all: url.searchParams.get('all') === 'true' }),
+            viewerParticipantId: viewer(actor),
           } })),
           register('GET', '/channels/context', async ({ url }, actor) => ({ kind: 'json', body: {
             ...await service.readContext(actor, channelOf(url), page(url)), viewerParticipantId: viewer(actor),
           } })),
-          register('GET', '/channels/members', async ({ url }, actor) => ({ kind: 'json', body: { members: await service.listMembers(actor, channelOf(url)) } })),
+          register('GET', '/channels/members', async ({ url }, actor, access) => ({ kind: 'json', body: { members: await service.listMembers(actor, channelOf(url), access) } })),
           register('GET', '/channels/sessions', async ({ url }, actor) => ({ kind: 'json', body: { sessions: await service.listSessions(actor, channelOf(url)) } })),
           register('POST', '/channels', async ({ readJson }, actor) => ({ kind: 'json', status: 201, body: await service.createChannel(actor, await readJson()) })),
           register('POST', '/channels/update', async ({ readJson }, actor) => {
             const { channelId, ...patch } = withChannel.parse(await readJson());
             return { kind: 'json', body: await service.updateChannel(actor, channelId, patch) };
           }),
-          register('POST', '/channels/members', async ({ readJson }, actor) => {
+          register('POST', '/channels/members', async ({ readJson }, actor, access) => {
             const { channelId, ...member } = withChannel.parse(await readJson());
-            return { kind: 'json', status: 201, body: await service.addMember(actor, channelId, member) };
+            return { kind: 'json', status: 201, body: await service.addMember(actor, channelId, member, access) };
           }),
-          register('POST', '/channels/members/remove', async ({ readJson }, actor) => {
+          register('POST', '/channels/members/remove', async ({ readJson }, actor, access) => {
             const { channelId, ...member } = withChannel.parse(await readJson());
-            await service.removeMember(actor, channelId, member);
+            await service.removeMember(actor, channelId, member, access);
             return { kind: 'json', body: { removed: true } };
           }),
           register('POST', '/channels/messages', async ({ readJson }, actor) => {

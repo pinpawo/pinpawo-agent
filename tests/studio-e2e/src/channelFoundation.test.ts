@@ -78,7 +78,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     assert.deepEqual(deliveries.map(delivery => [delivery.participantId, delivery.state]), [['pet:reviewer', 'accepted']]);
     assert.deepEqual(dispatched.map(item => [item.session, item.scope]), [[{ id: deliveries[0]!.sessionId, create: true }, { namespace: 'channel', id: channelId }]]);
     const input = readChannelTestInput(dispatched[0]!.request);
-    assert.deepEqual([input.author, input.replyTo?.messageId], [{ participantId: 'human:local', kind: 'human' }, plain.messageId]);
+    assert.deepEqual([input.author, input.replyTo?.messageId], [{ participantId: 'human:local', kind: 'human', label: 'Local' }, plain.messageId]);
     const context = await (await get(`/channels/context?channelId=${channelId}&limit=1`)).json() as {
       channel: { description: string }; members: unknown[]; messages: unknown[]; hasMore: boolean; viewerParticipantId: string;
     };
@@ -120,20 +120,28 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
       body: JSON.stringify({ channelId, body: 'Thanks' }) })).json() as ChannelMessage;
     assert.deepEqual(fromGuest.author, { kind: 'human', id: 'guest' });
     for (const route of ['/pets', '/events', '/clients']) assert.equal((await fetch(base + route, { headers: asGuest })).status, 403, route);
+    const guestAll = await (await fetch(base + '/channels?all=true', { headers: asGuest })).json() as { channels: Array<{ channelId: string }> };
+    assert.deepEqual(guestAll.channels.map(item => item.channelId), [channelId], 'all is for the local token only');
     await post('/clients/revoke', { clientId: 'guest' });
     assert.equal((await fetch(base + '/channels', { headers: asGuest })).status, 401);
 
-    // A Channel the operator never joined is invisible and closed to it.
+    // A Channel the local client never joined is closed to its messages; the local token may still manage its members.
     const other = (await channel.service.createChannel({ kind: 'human', id: 'someone-else' }, { title: 'Private', pets: ['reviewer'] })).channel.channelId;
     const listing = await (await get('/channels')).json() as { channels: Array<{ channelId: string }>; viewerParticipantId: string };
     assert.deepEqual(listing.channels.map(item => item.channelId), [channelId]);
-    for (const route of ['context', 'members', 'sessions']) assert.equal((await get(`/channels/${route}?channelId=${other}`)).status, 403, route);
+    const everything = await (await get('/channels?all=true')).json() as { channels: Array<{ channelId: string }> };
+    assert.deepEqual(everything.channels.map(item => item.channelId), [channelId, other]);
+    for (const route of ['context', 'sessions']) assert.equal((await get(`/channels/${route}?channelId=${other}`)).status, 403, route);
     for (const [route, body] of [
       ['/channels/messages', { body: 'let me in', mentions: [{ participantId: 'pet:reviewer' }] }],
       ['/channels/update', { title: 'Taken' }],
-      ['/channels/members', { kind: 'human', id: 'local' }],
-      ['/channels/members/remove', { kind: 'human', id: 'someone-else' }],
     ] as const) assert.equal((await post(route, { channelId: other, ...body })).status, 403, route);
+    assert.equal((await get(`/channels/members?channelId=${other}`)).status, 200);
+    assert.equal((await post('/channels/members/remove', { channelId: other, kind: 'human', id: 'someone-else' })).status, 409,
+      'the last human member stays');
+    assert.equal((await post('/channels/members', { channelId: other, kind: 'human', id: 'local' })).status, 201);
+    assert.equal((await post('/channels/members/remove', { channelId: other, kind: 'human', id: 'someone-else' })).status, 200);
+    assert.equal((await get(`/channels/context?channelId=${other}`)).status, 200, 'joined, so it reads');
     assert.equal((await get('/channels/context?channelId=missing')).status, 404);
     assert.equal(dispatched.length, 1);
 
@@ -238,7 +246,7 @@ test('a Pet message is its Channel session public reply, written once, handed of
     assert.deepEqual((await petMessages()).map(message => [message.author, message.externalRef, message.body, message.mentions]),
       [[{ kind: 'pet', id: 'one' }, 'reply-1', handoff, [{ participantId: 'pet:two', label: 'Two' }]]]);
     const input = readChannelTestInput(dispatched[1]!.request);
-    assert.deepEqual([input.author, input.messageId], [{ participantId: 'pet:one', kind: 'pet' }, (await petMessages())[0]!.messageId]);
+    assert.deepEqual([input.author, input.messageId], [{ participantId: 'pet:one', kind: 'pet', label: 'One' }, (await petMessages())[0]!.messageId]);
     assert.deepEqual(dispatched[1]!.session, { id: (await channel.service.getSession(id, 'two'))!.sessionId, create: true });
     await waitFor(() => events.some(event => event.type === 'channel.delivery' && event.payload.participantId === 'pet:two'));
     assert.equal(events.find(event => event.type === 'channel.delivery' && event.payload.participantId === 'pet:two')!.payload.state, 'accepted');

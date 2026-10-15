@@ -171,8 +171,8 @@ test('capability handoff reaches Channel only through the selected final root re
       const stored = (await channel.service.getMessage(id, input.messageId))!;
       assert.equal(input.body, stored.body);
       assert.deepEqual(input.author, petId === 'acceptance-a'
-        ? { participantId: 'human:local', kind: 'human' }
-        : { participantId: 'pet:acceptance-a', kind: 'pet' });
+        ? { participantId: 'human:local', kind: 'human', label: 'local' }
+        : { participantId: 'pet:acceptance-a', kind: 'pet', label: 'A' });
     }
   } finally {
     release(); await Promise.all(hosts.map(host => host.close())); await studio?.shutdown();

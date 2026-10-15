@@ -14,11 +14,21 @@ function fenced(input: Record<string, unknown>): string {
   return `${fence}json\n${text}\n${fence}`;
 }
 
-/** Built only from stored messages whose authors were assigned by Channel / Host. */
-export function channelDispatchInput(message: ChannelMessageRow, original?: ChannelMessageRow): string {
-  const author = (entry: ChannelMessageRow) => ({
-    participantId: channelParticipantId(entry.author.kind, entry.author.id), kind: entry.author.kind,
-  });
+/**
+ * Built only from stored messages whose authors were assigned by Channel / Host.
+ * The participantId is the author's identity; the label, when the author is
+ * still a member, is only how to call them.
+ */
+export function channelDispatchInput(
+  message: ChannelMessageRow,
+  original?: ChannelMessageRow,
+  labelOf: (participantId: string) => string | undefined = () => undefined,
+): string {
+  const author = (entry: ChannelMessageRow) => {
+    const participantId = channelParticipantId(entry.author.kind, entry.author.id);
+    const label = labelOf(participantId);
+    return { participantId, kind: entry.author.kind, ...(label === undefined ? {} : { label }) };
+  };
   return fenced({
     type: 'channel_message', version: 1,
     channelId: message.channelId, messageId: message.messageId,

@@ -1,67 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { Schedule, ScheduleEvent, ScheduleReceipt, ScheduleStatus, ScheduleStore } from './store/scheduleStore';
 
-export type ScheduleStatus = 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled';
-
-/** Host's receipt for the run a schedule started; sessionId is set for a Channel run. */
-export type ScheduleReceipt = { invocationId: string; sessionId?: string };
-
-export type Schedule = {
-  scheduleId: string;
-  petId: string;
-  /** Run the Pet in this Channel instead of a bare dispatch. */
-  channelId?: string;
-  request: string;
-  runAt: string;
-  status: ScheduleStatus;
-  note?: string;
-  receipt?: ScheduleReceipt;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ScheduleEvent = {
-  sequence: number;
-  scheduleId: string;
-  eventType: 'created' | 'claimed' | 'dispatched' | 'failed' | 'cancelled' | 'recovered';
-  status: ScheduleStatus;
-  note?: string;
-  occurredAt: string;
-};
+export type { Schedule, ScheduleEvent, ScheduleReceipt, ScheduleStatus } from './store/scheduleStore';
 
 export type ScheduleMutation = {
   schedule: Schedule;
   event: ScheduleEvent;
 };
-
-type ScheduleRow = {
-  schedule_id: string;
-  pet_id: string;
-  channel_id: string | null;
-  request: string;
-  run_at: string;
-  status: string;
-  note: string | null;
-  invocation_id: string | null;
-  session_id: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type EventRow = {
-  sequence: number;
-  schedule_id: string;
-  event_type: ScheduleEvent['eventType'];
-  status: ScheduleStatus;
-  note: string | null;
-  occurred_at: string;
-};
-
-const STATUSES = new Set<ScheduleStatus>([
-  'scheduled', 'dispatching', 'dispatched', 'failed', 'cancelled',
-]);
 
 function nonEmpty(value: string, label: string): string {
   const normalized = value.trim();
@@ -75,104 +20,15 @@ function parseDate(value: string, label: string): string {
   return new Date(timestamp).toISOString();
 }
 
-function scheduleFromRow(row: ScheduleRow): Schedule {
-  if (!STATUSES.has(row.status as ScheduleStatus)) {
-    throw new Error(`Scheduler database contains unsupported status "${row.status}".`);
-  }
-  return {
-    scheduleId: row.schedule_id,
-    petId: row.pet_id,
-    ...(row.channel_id === null ? {} : { channelId: row.channel_id }),
-    request: row.request,
-    runAt: row.run_at,
-    status: row.status as ScheduleStatus,
-    ...(row.note === null ? {} : { note: row.note }),
-    ...(row.invocation_id === null ? {} : {
-      receipt: { invocationId: row.invocation_id, ...(row.session_id === null ? {} : { sessionId: row.session_id }) },
-    }),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
+/**
+ * Schedule rules over a ScheduleStore: allowed transitions, claiming due
+ * schedules, and recovery of runs interrupted by a restart. Notifications are
+ * best effort after commit.
+ */
 export class SchedulerService {
-  private readonly database: DatabaseSync;
   private readonly listeners = new Set<(mutation: ScheduleMutation) => void>();
-  private initialized = false;
-  private closed = false;
 
-  constructor(databasePath = ':memory:') {
-    if (databasePath !== ':memory:' && !path.isAbsolute(databasePath)) {
-      throw new Error('Scheduler databasePath must be absolute or :memory:.');
-    }
-    if (databasePath !== ':memory:') {
-      const directory = path.dirname(databasePath);
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-      chmodSync(directory, 0o700);
-    }
-    this.database = new DatabaseSync(databasePath, {
-      enableForeignKeyConstraints: true,
-      timeout: 5_000,
-    });
-  }
-
-  async init(): Promise<void> {
-    if (this.closed) throw new Error('Scheduler service is closed.');
-    if (this.initialized) return;
-    const existingSchema = this.database.prepare(
-      "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'schedules'",
-    ).get() as { sql: string | null } | undefined;
-    if (existingSchema?.sql?.includes("'completed'")) this.migrateCompletedStatus();
-    this.database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = FULL;
-      PRAGMA busy_timeout = 5000;
-      PRAGMA trusted_schema = OFF;
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS schedules (
-        schedule_id TEXT PRIMARY KEY,
-        pet_id TEXT NOT NULL,
-        channel_id TEXT,
-        request TEXT NOT NULL,
-        run_at TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','dispatched','failed','cancelled')),
-        note TEXT,
-        invocation_id TEXT,
-        session_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS schedule_events (
-        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-        schedule_id TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        note TEXT,
-        occurred_at TEXT NOT NULL,
-        FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id) ON DELETE RESTRICT
-      );
-      CREATE INDEX IF NOT EXISTS schedules_due ON schedules(status, run_at);
-      COMMIT;
-    `);
-    // Schedules stored before Channel delivery existed have no channel.
-    const columns = this.database.prepare('PRAGMA table_info(schedules)').all() as { name: string }[];
-    if (!columns.some(({ name }) => name === 'channel_id')) {
-      this.database.exec('ALTER TABLE schedules ADD COLUMN channel_id TEXT;');
-    }
-    // Nor did they keep the Host's receipt.
-    if (!columns.some(({ name }) => name === 'invocation_id')) {
-      this.database.exec('ALTER TABLE schedules ADD COLUMN invocation_id TEXT; ALTER TABLE schedules ADD COLUMN session_id TEXT;');
-    }
-    this.initialized = true;
-    for (const mutation of this.recoverInterrupted()) this.publish(mutation);
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.listeners.clear();
-    this.closed = true;
-    this.database.close();
-  }
+  constructor(readonly store: ScheduleStore) {}
 
   subscribe(listener: (mutation: ScheduleMutation) => void): () => void {
     this.listeners.add(listener);
@@ -180,28 +36,22 @@ export class SchedulerService {
   }
 
   async create(input: { petId: string; channelId?: string; request: string; runAt: string }): Promise<Schedule> {
-    this.assertReady();
     const now = new Date().toISOString();
-    const scheduleId = randomUUID();
-    const petId = nonEmpty(input.petId, 'petId');
-    const channelId = input.channelId === undefined ? null : nonEmpty(input.channelId, 'channelId');
-    const request = nonEmpty(input.request, 'request');
-    const runAt = parseDate(input.runAt, 'runAt');
-    let event: ScheduleEvent;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      this.database.prepare(`
-        INSERT INTO schedules(schedule_id, pet_id, channel_id, request, run_at, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?)
-      `).run(scheduleId, petId, channelId, request, runAt, now, now);
-      event = this.insertEvent(scheduleId, 'created', 'scheduled', undefined, now);
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
-    }
-    const schedule = await this.get(scheduleId) as Schedule;
-    this.publish({ schedule, event: event! });
+    const schedule: Schedule = {
+      scheduleId: randomUUID(),
+      petId: nonEmpty(input.petId, 'petId'),
+      ...(input.channelId === undefined ? {} : { channelId: nonEmpty(input.channelId, 'channelId') }),
+      request: nonEmpty(input.request, 'request'),
+      runAt: parseDate(input.runAt, 'runAt'),
+      status: 'scheduled',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const event = await this.store.transaction(async (store) => {
+      await store.insertSchedule(schedule);
+      return store.appendEvent({ scheduleId: schedule.scheduleId, eventType: 'created', status: 'scheduled', occurredAt: now });
+    });
+    this.publish({ schedule, event });
     return schedule;
   }
 
@@ -209,35 +59,24 @@ export class SchedulerService {
     return this.transition(scheduleId, ['scheduled'], 'cancelled', 'cancelled');
   }
 
+  /**
+   * Claim the earliest due schedule. Another Studio on the same database may
+   * claim it first; then the next one is tried.
+   */
   async claimDue(now = new Date()): Promise<Schedule | null> {
-    this.assertReady();
-    let event: ScheduleEvent;
-    let scheduleId: string | undefined;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      const row = this.database.prepare(`
-        SELECT * FROM schedules
-        WHERE status = 'scheduled' AND run_at <= ?
-        ORDER BY run_at, created_at LIMIT 1
-      `).get(now.toISOString()) as ScheduleRow | undefined;
-      if (!row) {
-        this.database.exec('COMMIT;');
-        return null;
-      }
+    for (;;) {
+      const [due] = await this.store.listSchedules({ status: 'scheduled', dueBy: now.toISOString(), limit: 1 });
+      if (!due) return null;
       const occurredAt = new Date().toISOString();
-      scheduleId = row.schedule_id;
-      this.database.prepare(
-        "UPDATE schedules SET status = 'dispatching', updated_at = ? WHERE schedule_id = ?",
-      ).run(occurredAt, scheduleId);
-      event = this.insertEvent(scheduleId, 'claimed', 'dispatching', undefined, occurredAt);
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
+      const claimed = await this.store.transaction(async (store) => {
+        if (!(await store.transition(due.scheduleId, { from: 'scheduled', status: 'dispatching', updatedAt: occurredAt }))) return null;
+        return store.appendEvent({ scheduleId: due.scheduleId, eventType: 'claimed', status: 'dispatching', occurredAt });
+      });
+      if (!claimed) continue;
+      const schedule = (await this.store.getSchedule(due.scheduleId))!;
+      this.publish({ schedule, event: claimed });
+      return schedule;
     }
-    const schedule = await this.get(scheduleId) as Schedule;
-    this.publish({ schedule, event: event! });
-    return schedule;
   }
 
   async markDispatched(scheduleId: string, receipt?: ScheduleReceipt): Promise<Schedule> {
@@ -249,66 +88,36 @@ export class SchedulerService {
   }
 
   async get(scheduleId: string): Promise<Schedule | null> {
-    this.assertReady();
-    const row = this.database.prepare('SELECT * FROM schedules WHERE schedule_id = ?')
-      .get(nonEmpty(scheduleId, 'scheduleId')) as ScheduleRow | undefined;
-    return row ? scheduleFromRow(row) : null;
+    return (await this.store.getSchedule(nonEmpty(scheduleId, 'scheduleId'))) ?? null;
   }
 
   async snapshot(): Promise<{ schedules: Schedule[]; lastEventSequence: number }> {
-    this.assertReady();
-    const rows = this.database.prepare('SELECT * FROM schedules ORDER BY run_at, created_at')
-      .all() as ScheduleRow[];
-    const cursor = this.database.prepare(
-      'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM schedule_events',
-    ).get() as { sequence: number };
-    return { schedules: rows.map(scheduleFromRow), lastEventSequence: cursor.sequence };
+    const [schedules, lastEventSequence] = await Promise.all([this.store.listSchedules(), this.store.lastEventSequence()]);
+    return { schedules, lastEventSequence };
   }
 
   async events(after = 0, limit = 200): Promise<ScheduleEvent[]> {
-    this.assertReady();
     if (!Number.isSafeInteger(after) || after < 0) throw new Error('Scheduler cursor is invalid.');
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
       throw new Error('Scheduler event limit must be from 1 to 1000.');
     }
-    const rows = this.database.prepare(`
-      SELECT sequence, schedule_id, event_type, status, note, occurred_at
-      FROM schedule_events WHERE sequence > ? ORDER BY sequence LIMIT ?
-    `).all(after, limit) as EventRow[];
-    return rows.map((row) => ({
-      sequence: row.sequence,
-      scheduleId: row.schedule_id,
-      eventType: row.event_type,
-      status: row.status,
-      ...(row.note === null ? {} : { note: row.note }),
-      occurredAt: row.occurred_at,
-    }));
+    return this.store.readEvents(after, limit);
   }
 
-  private recoverInterrupted(): ScheduleMutation[] {
-    const rows = this.database.prepare("SELECT schedule_id FROM schedules WHERE status = 'dispatching'")
-      .all() as Array<{ schedule_id: string }>;
-    if (rows.length === 0) return [];
-    const events: ScheduleEvent[] = [];
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      for (const row of rows) {
-        const now = new Date().toISOString();
-        const note = 'dispatch outcome unknown after restart';
-        this.database.prepare(
-          "UPDATE schedules SET status = 'failed', note = ?, updated_at = ? WHERE schedule_id = ?",
-        ).run(note, now, row.schedule_id);
-        events.push(this.insertEvent(row.schedule_id, 'recovered', 'failed', note, now));
-      }
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
+  /**
+   * A schedule left dispatching by a stopped Studio may or may not have run;
+   * it is marked failed rather than run twice.
+   */
+  async recoverInterrupted(): Promise<void> {
+    const note = 'dispatch outcome unknown after restart';
+    for (const schedule of await this.store.listSchedules({ status: 'dispatching' })) {
+      const occurredAt = new Date().toISOString();
+      const event = await this.store.transaction(async (store) => {
+        if (!(await store.transition(schedule.scheduleId, { from: 'dispatching', status: 'failed', note, updatedAt: occurredAt }))) return null;
+        return store.appendEvent({ scheduleId: schedule.scheduleId, eventType: 'recovered', status: 'failed', note, occurredAt });
+      });
+      if (event) this.publish({ schedule: (await this.store.getSchedule(schedule.scheduleId))!, event });
     }
-    return events.map((event) => ({
-      schedule: this.readSchedule(event.scheduleId)!,
-      event,
-    }));
   }
 
   private async transition(
@@ -319,59 +128,25 @@ export class SchedulerService {
     note?: string,
     receipt?: ScheduleReceipt,
   ): Promise<Schedule> {
-    this.assertReady();
     const id = nonEmpty(scheduleId, 'scheduleId');
-    const current = await this.get(id);
+    const current = await this.store.getSchedule(id);
     if (!current) throw new Error(`Scheduler schedule "${id}" does not exist.`);
     if (!allowed.includes(current.status)) {
       throw new Error(`Scheduler schedule "${id}" is ${current.status}.`);
     }
-    const now = new Date().toISOString();
-    let event: ScheduleEvent;
-    this.database.exec('BEGIN IMMEDIATE;');
-    try {
-      const result = this.database.prepare(`
-        UPDATE schedules SET status = ?, note = ?, updated_at = ?,
-          invocation_id = COALESCE(?, invocation_id), session_id = COALESCE(?, session_id)
-        WHERE schedule_id = ? AND status = ?
-      `).run(status, note ?? null, now, receipt?.invocationId ?? null, receipt?.sessionId ?? null, id, current.status);
-      if (result.changes !== 1) throw new Error(`Scheduler schedule "${id}" changed concurrently.`);
-      event = this.insertEvent(id, eventType, status, note, now);
-      this.database.exec('COMMIT;');
-    } catch (error) {
-      this.database.exec('ROLLBACK;');
-      throw error;
-    }
-    const schedule = await this.get(id) as Schedule;
-    this.publish({ schedule, event: event! });
+    const occurredAt = new Date().toISOString();
+    const event = await this.store.transaction(async (store) => {
+      const changed = await store.transition(id, {
+        from: current.status, status, updatedAt: occurredAt,
+        ...(note === undefined ? {} : { note }),
+        ...(receipt === undefined ? {} : { receipt }),
+      });
+      if (!changed) throw new Error(`Scheduler schedule "${id}" changed concurrently.`);
+      return store.appendEvent({ scheduleId: id, eventType, status, ...(note === undefined ? {} : { note }), occurredAt });
+    });
+    const schedule = (await this.store.getSchedule(id))!;
+    this.publish({ schedule, event });
     return schedule;
-  }
-
-  private insertEvent(
-    scheduleId: string,
-    eventType: ScheduleEvent['eventType'],
-    status: ScheduleStatus,
-    note: string | undefined,
-    occurredAt: string,
-  ): ScheduleEvent {
-    const result = this.database.prepare(`
-      INSERT INTO schedule_events(schedule_id, event_type, status, note, occurred_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(scheduleId, eventType, status, note ?? null, occurredAt);
-    return {
-      sequence: Number(result.lastInsertRowid),
-      scheduleId,
-      eventType,
-      status,
-      ...(note === undefined ? {} : { note }),
-      occurredAt,
-    };
-  }
-
-  private readSchedule(scheduleId: string): Schedule | null {
-    const row = this.database.prepare('SELECT * FROM schedules WHERE schedule_id = ?')
-      .get(scheduleId) as ScheduleRow | undefined;
-    return row ? scheduleFromRow(row) : null;
   }
 
   private publish(mutation: ScheduleMutation): void {
@@ -385,60 +160,5 @@ export class SchedulerService {
         );
       }
     }
-  }
-
-  /** Rename the unreleased v0 admission status without discarding local schedules. */
-  private migrateCompletedStatus(): void {
-    this.database.exec('PRAGMA foreign_keys = OFF;');
-    try {
-      this.database.exec(`
-        BEGIN IMMEDIATE;
-        ALTER TABLE schedule_events RENAME TO schedule_events_v0;
-        ALTER TABLE schedules RENAME TO schedules_v0;
-        CREATE TABLE schedules (
-          schedule_id TEXT PRIMARY KEY,
-          pet_id TEXT NOT NULL,
-          request TEXT NOT NULL,
-          run_at TEXT NOT NULL,
-          status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','dispatched','failed','cancelled')),
-          note TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-        CREATE TABLE schedule_events (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-          schedule_id TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          status TEXT NOT NULL,
-          note TEXT,
-          occurred_at TEXT NOT NULL,
-          FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id) ON DELETE RESTRICT
-        );
-        INSERT INTO schedules
-        SELECT schedule_id, pet_id, request, run_at,
-          CASE status WHEN 'completed' THEN 'dispatched' ELSE status END,
-          note, created_at, updated_at
-        FROM schedules_v0;
-        INSERT INTO schedule_events
-        SELECT sequence, schedule_id,
-          CASE event_type WHEN 'completed' THEN 'dispatched' ELSE event_type END,
-          CASE status WHEN 'completed' THEN 'dispatched' ELSE status END,
-          note, occurred_at
-        FROM schedule_events_v0;
-        DROP TABLE schedule_events_v0;
-        DROP TABLE schedules_v0;
-        CREATE INDEX schedules_due ON schedules(status, run_at);
-        COMMIT;
-      `);
-    } catch (error) {
-      if (this.database.isTransaction) this.database.exec('ROLLBACK;');
-      throw error;
-    } finally {
-      this.database.exec('PRAGMA foreign_keys = ON;');
-    }
-  }
-
-  private assertReady(): void {
-    if (!this.initialized || this.closed) throw new Error('Scheduler service is not active.');
   }
 }

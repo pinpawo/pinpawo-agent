@@ -143,6 +143,8 @@ download missing packages at startup.
 `@pinpawo-plugin/channel` owns Channels, their members, message history and fixed
 Channel/Pet sessions. Its data lives in the Studio database (`storage`);
 Channels stored by earlier versions in `channels.sqlite` or `channels-v2.sqlite` are not migrated or shown.
+`@pinpawo-plugin/scheduler` also keeps its schedules in the Studio database and no longer takes a
+`databasePath` option; schedules in an earlier `scheduler.sqlite` are not migrated.
 Its [current design](../design/studio/channel-addressing-and-execution.md) specifies
 unified message addressing, Reply defaults, server-assigned source envelopes and limits.
 Default PET.md and Capability templates contain the runtime protocol; existing

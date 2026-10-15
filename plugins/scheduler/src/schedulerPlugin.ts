@@ -1,12 +1,13 @@
-import path from 'node:path';
 import type { StudioDispatchQueue, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
 import { SchedulerService, type Schedule, type ScheduleReceipt } from './schedulerService';
+import type { ScheduleStore } from './store/scheduleStore';
+import { KyselyScheduleStore, schedulerMigrations, type SchedulerDatabase } from './store/kysely';
 
 export type CreateSchedulerPluginOptions = {
-  service?: SchedulerService;
-  databasePath?: string;
+  /** Defaults to the Scheduler tables in the Studio database. */
+  store?: ScheduleStore;
   pollIntervalMs?: number;
   /** Optional recurring read-only audit of resident Pet dispatch queues. */
   dispatchQueueAudit?: false | {
@@ -18,7 +19,10 @@ export type CreateSchedulerPluginOptions = {
   channel?: { pluginName?: string };
 };
 
-export type SchedulerPlugin = StudioPlugin & { service: SchedulerService };
+export type SchedulerPlugin = StudioPlugin & {
+  /** Available once the Plugin has started. */
+  service: SchedulerService;
+};
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -50,8 +54,11 @@ function normalizeDispatchQueueAudit(
 }
 
 export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}): SchedulerPlugin {
-  const ownsService = !options.service;
-  const service = options.service ?? new SchedulerService(options.databasePath);
+  let current: SchedulerService | undefined;
+  function schedulerService(): SchedulerService {
+    if (!current) throw new Error('Scheduler Plugin is not started.');
+    return current;
+  }
   const pollIntervalMs = options.pollIntervalMs ?? 250;
   if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10) {
     throw new Error('Scheduler pollIntervalMs must be an integer of at least 10.');
@@ -88,6 +95,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   const poll = async () => {
     if (polling || !context || !activated) return;
     polling = (async () => {
+      const service = schedulerService();
       while (context) {
         const schedule = await service.claimDue();
         if (!schedule) break;
@@ -133,11 +141,16 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   return {
     name: 'scheduler',
     toolkits: [],
-    service,
+    get service() { return schedulerService(); },
     start: async (pluginContext) => {
       if (context) throw new Error('Scheduler Plugin is already started.');
       context = pluginContext;
       try {
+        const store = options.store ?? new KyselyScheduleStore(
+          await pluginContext.storage.open<SchedulerDatabase>(schedulerMigrations(pluginContext.storage.dialect)),
+        );
+        const service = new SchedulerService(store);
+        current = service;
         unsubscribeMutations = service.subscribe(({ schedule, event }) => {
           const type = event.eventType === 'dispatched'
             ? 'schedule.fired'
@@ -156,7 +169,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
           });
           if (event.eventType === 'created') requestPoll();
         });
-        await service.init();
+        await service.recoverInterrupted();
         unsubscribeActivation = pluginContext.subscribe((event) => {
           if (event.source !== 'studio' || event.type !== 'plugins.activated') return;
           activated = true;
@@ -278,7 +291,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         unregisterRoutes = undefined;
         removeChannelInputs?.();
         removeChannelInputs = undefined;
-        if (ownsService) await service.close().catch(() => undefined);
+        current = undefined;
         throw error;
       }
     },
@@ -300,22 +313,16 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
       unregisterRoutes = undefined;
       removeChannelInputs?.();
       removeChannelInputs = undefined;
-      if (ownsService) await service.close();
+      current = undefined;
     },
   };
 }
 
-export function createStudioPlugin(
-  value: Record<string, unknown> | undefined,
-  environment: { workdir: string },
-): SchedulerPlugin {
+export function createStudioPlugin(value: Record<string, unknown> | undefined): SchedulerPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'pollIntervalMs', 'dispatchQueueAudit', 'httpRoute', 'channel']);
+  const allowed = new Set(['pollIntervalMs', 'dispatchQueueAudit', 'httpRoute', 'channel']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Scheduler Plugin option "${unknown}" is not supported.`);
-  if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
-    throw new Error('Scheduler Plugin option "databasePath" must be a string.');
-  }
   if (options.pollIntervalMs !== undefined && typeof options.pollIntervalMs !== 'number') {
     throw new Error('Scheduler Plugin option "pollIntervalMs" must be a number.');
   }
@@ -348,13 +355,7 @@ export function createStudioPlugin(
       || ('pluginName' in channel && typeof channel.pluginName !== 'string'))) {
     throw new Error('Scheduler Plugin option "channel" must be an object with an optional pluginName.');
   }
-  const databasePath = typeof options.databasePath === 'string'
-    ? (path.isAbsolute(options.databasePath)
-      ? options.databasePath
-      : path.resolve(environment.workdir, options.databasePath))
-    : path.join(environment.workdir, '.pinpawo', 'studio', 'scheduler.sqlite');
   return createSchedulerPlugin({
-    databasePath,
     ...(typeof options.pollIntervalMs === 'number' ? { pollIntervalMs: options.pollIntervalMs } : {}),
     ...(dispatchQueueAudit === false
       ? { dispatchQueueAudit: false as const }

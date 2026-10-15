@@ -1,5 +1,5 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { setAgentMessageMetadata } from '../../messages';
+import { setAgentMessageMetadata, withToolCalls } from '../../messages';
 import { identity, type SupervisorControlContext } from './controlContext';
 import { capabilityDetailsWorkRecord } from './detailsTool';
 
@@ -17,12 +17,12 @@ export function supervisorWorkMessages(
   dispatching = false,
 ) {
   return messages.map((message, index) => {
-    const copy = AIMessage.isInstance(message) ? new AIMessage({ ...message })
+    let copy = AIMessage.isInstance(message) ? new AIMessage({ ...message })
       : ToolMessage.isInstance(message) ? capabilityDetailsWorkRecord(new ToolMessage({ ...message })) : message;
     const dispatch = dispatching && index === messages.length - 1
       && AIMessage.isInstance(copy) && Boolean(copy.tool_calls?.length);
     // Root history spans runs; native ToolNode requires globally distinct call IDs.
-    if (dispatch) copy.tool_calls = copy.tool_calls!.map(call => ({ ...call, id: identity('call', context.runId, call.id!) }));
+    if (dispatch) copy = withToolCalls(copy as AIMessage, (copy as AIMessage).tool_calls!.map(call => ({ ...call, id: identity('call', context.runId, call.id!) })));
     copy.id = identity('supervisor-message', context.runId, message.id ?? (ToolMessage.isInstance(message) ? message.tool_call_id : String(index)));
     return setAgentMessageMetadata(copy, { lane: dispatch ? undefined : 'supervisor',
       runId: context.runId, taskId: context.taskId, ...(dispatch ? { source: 'supervisor' } : {}) });

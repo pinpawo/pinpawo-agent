@@ -11,6 +11,7 @@ import {
   queryAgentMessages,
   stampAgentMessageCreatedAt,
   setAgentMessageMetadata,
+  withToolCalls,
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
@@ -247,9 +248,9 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }
     // Scope provider call IDs to this model turn; history may reuse them across runs or retries.
     // Some providers omit the ID entirely, so the position stands in for it.
-    const committed = new AIMessage({ ...response, tool_calls: toolCalls?.map((call, index) => ({
+    const committed = withToolCalls(response, (toolCalls ?? []).map((call, index) => ({
       ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id || `index:${index}`),
-    })) });
+    })));
     return {
       messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],
     };

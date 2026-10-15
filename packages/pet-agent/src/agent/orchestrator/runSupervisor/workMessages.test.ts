@@ -233,3 +233,14 @@ test('final publication preserves structured model content and usage without a p
   assert.equal(queryAgentMessages(result.messages).main().select().messages[0], message);
   assert.equal(queryAgentMessages(result.messages).supervisor(context().runId).select().messages.length, 0);
 });
+
+test('dispatch rewrites a streamed call without leaving the provider ID behind', () => {
+  const call = { name: 'delegate_capability', args: { briefing: 'Execute the current objective.' }, id: 'call-A', type: 'tool_call' as const };
+  const streamed = new AIMessage({
+    id: 'request:call-A', content: [{ type: 'reasoning', reasoning: 'think' }, { ...call }], tool_calls: [call],
+    response_metadata: { output_version: 'v1' },
+  });
+  const [dispatch] = supervisorWorkMessages(context(), [streamed], true) as AIMessage[];
+  const rebuilt = new AIMessage({ ...dispatch });
+  assert.deepEqual(rebuilt.tool_calls?.map((item) => item.id), [identity('call', 'r1', 'call-A')]);
+});

@@ -123,3 +123,41 @@ test('a finished process frees its slot without an OS call', async () => {
   assert.equal(drained.process.status, 'exited');
   assert.equal(drained.process.exitCode, 0);
 });
+
+test('replay expires with its process and never revives an expired handle', async () => {
+  const { executor } = recordingExecutor();
+  const registry = new ProcessRegistry(executor);
+  const handle = fakeHandle(9003);
+  handle.stdout = 'retained';
+  const record = registry.register({ handle, sessionId: OWNER, command: 'fake', cwd: '/tmp' });
+  handle.finish(0);
+  await registry.wait(record.processId, OWNER, 1);
+  assert.equal((await registry.readPage(record.processId, OWNER, { offset: 1, limit: 3 })).stdout, 'eta');
+  const originalNow = Date.now;
+  const expired = originalNow() + 5 * 60_000 + 1;
+  Date.now = () => expired;
+  try {
+    await assert.rejects(registry.readPage(record.processId, OWNER, { offset: 0, limit: 10 }), /No such process/);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('incremental pending buffers are capped and disclose discarded characters', async () => {
+  const { executor } = recordingExecutor();
+  const registry = new ProcessRegistry(executor);
+  const handle = fakeHandle(9004);
+  let listener: (stream: 'stdout' | 'stderr', chunk: string) => void = () => {};
+  handle.onOutput = (next) => { listener = next; return () => {}; };
+  const record = registry.register({ handle, sessionId: OWNER, command: 'fake', cwd: '/tmp' });
+  const cap = 4 * 1024 * 1024;
+  listener('stdout', 'a'.repeat(cap + 100));
+  listener('stderr', 'b'.repeat(cap + 200));
+  const output = await registry.drain(record.processId, OWNER);
+  assert.equal(output.stdout.length, cap);
+  assert.equal(output.stderr.length, cap);
+  assert.equal(output.omittedStdoutChars, 100);
+  assert.equal(output.omittedStderrChars, 200);
+  assert.deepEqual(await registry.drain(record.processId, OWNER), { process: output.process, stdout: '', stderr: '' });
+  handle.finish(0);
+});

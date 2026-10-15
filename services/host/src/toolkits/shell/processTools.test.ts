@@ -259,3 +259,43 @@ test('the process tool inventory is static', () => {
     LIST_PROCESSES_TOOL_NAME,
   ]);
 });
+
+test('truncated background output can be replayed in bounded non-consuming pages', { skip: isWindows }, async (t) => {
+  const { startProcess, waitTool, shell } = setup();
+  t.after(() => shell.dispose());
+  const marker = 'MIDDLE_DIAGNOSTIC_6789';
+  const script = `process.stdout.write('A'.repeat(15000)+'${marker}'+'B'.repeat(15000));process.stderr.write('E'.repeat(15000)+'${marker}'+'F'.repeat(15000));`;
+  const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
+  const processId = processIdFrom(String(await startProcess.invoke({ command }, call())));
+  const first = String(await waitTool.invoke({ processId, waitSeconds: 5 }, call()));
+  assert.match(first, /truncated/);
+  assert.equal(first.includes(marker), false);
+  assert.match(first, /outputOffset/);
+  const [page, concurrentPage] = await Promise.all([0, 1].map(() =>
+    waitTool.invoke({ processId, outputOffset: 14995, outputLimit: 80 }, call()).then(String)));
+  assert.equal(page, concurrentPage);
+  assert.equal(page.split(marker).length - 1, 2, 'both streams retain the middle');
+  assert.match(page, /stdoutChars=30022/);
+  const next = String(await waitTool.invoke({ processId, waitSeconds: 1 }, call()));
+  assert.match(next, /no new output/);
+  assert.equal(next.includes(marker), false);
+  assert.match(String(await waitTool.invoke({ processId, outputOffset: 0 }, call('another-session'))), /different session/);
+});
+
+test('history replay does not consume pending incremental output', { skip: isWindows }, async (t) => {
+  const { shell } = setup();
+  t.after(() => shell.dispose());
+  const started = await shell.exec('thread-1', {
+    command: { argv: [process.execPath, '-e', "setTimeout(()=>process.stdout.write('retained-middle'),30)"] },
+    cwd: process.cwd(), waitMs: 0, onTimeout: 'yield', maxOutputChars: 4096,
+  });
+  assert.equal(started.status, 'yielded');
+  if (started.status !== 'yielded') return;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const page = await shell.read('thread-1', started.process.processId, { offset: 0, limit: 100 });
+  assert.equal(page.stdout, 'retained-middle');
+  const incremental = await shell.read('thread-1', started.process.processId);
+  assert.equal(incremental.stdout, 'retained-middle');
+  assert.equal((await shell.read('thread-1', started.process.processId)).stdout, '');
+  await assert.rejects(shell.read('thread-1', started.process.processId, { offset: -1, limit: 100 }), RangeError);
+});

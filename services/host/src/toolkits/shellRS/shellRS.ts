@@ -89,7 +89,15 @@ export type ShellExecResult =
    */
   | Readonly<{ status: 'yielded'; process: ShellProcessSnapshot; stdout: string; stderr: string }>;
 
+/** Absolute UTF-16 code-unit offsets in the retained capture; reads never consume it. */
+export type ShellOutputRange = Readonly<{ offset: number; limit: number }>;
+export const SHELL_CAPTURE_LIMIT_CHARS = 4 * 1024 * 1024;
+export const SHELL_OUTPUT_PAGE_LIMIT_CHARS = 20_000;
+
 export type ShellProcessOutput = Readonly<{
+  capture?: Readonly<{ offset: number; limit: number; stdoutChars: number; stderrChars: number }>;
+  omittedStdoutChars?: number;
+  omittedStderrChars?: number;
   process: ShellProcessSnapshot;
   /** Output produced since the previous read of this process. */
   stdout: string;
@@ -133,7 +141,7 @@ export type ShellRS = ToolkitRS & {
     timeoutMs: number,
   ): Promise<ShellProcessOutput>;
   /** Take the output produced since the previous read without waiting. */
-  read(agentSessionId: string, processId: string): Promise<ShellProcessOutput>;
+  read(agentSessionId: string, processId: string, range?: ShellOutputRange): Promise<ShellProcessOutput>;
   terminate(agentSessionId: string, processId: string): Promise<ShellProcessSnapshot>;
   list(agentSessionId: string): Promise<readonly ShellProcessSnapshot[]>;
 };

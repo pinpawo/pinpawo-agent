@@ -9,6 +9,7 @@ import {
   type ShellExecRequest,
   type ShellExecResult,
   type ShellProcessOutput,
+  type ShellOutputRange,
   type ShellProcessSnapshot,
   type ShellRS,
   type ShellRSErrorCode,
@@ -126,8 +127,11 @@ export class ShellRSClient implements ShellRS {
     return await this.transport.call('wait', { agentSessionId, processId, timeoutMs }) as ShellProcessOutput;
   }
 
-  async read(agentSessionId: string, processId: string): Promise<ShellProcessOutput> {
-    return await this.transport.call('read', { agentSessionId, processId }) as ShellProcessOutput;
+  async read(agentSessionId: string, processId: string, range?: ShellOutputRange): Promise<ShellProcessOutput> {
+    // A separate wire method makes old services reject replay instead of draining output.
+    return await this.transport.call(range ? 'readPage' : 'read', {
+      agentSessionId, processId, ...(range ? { range } : {}),
+    }) as ShellProcessOutput;
   }
 
   async terminate(agentSessionId: string, processId: string): Promise<ShellProcessSnapshot> {

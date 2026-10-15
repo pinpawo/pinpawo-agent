@@ -10,6 +10,8 @@ import {
   type ShellExecRequest,
   type ShellExecResult,
   type ShellProcessOutput,
+  type ShellOutputRange,
+  SHELL_CAPTURE_LIMIT_CHARS,
   type ShellProcessSnapshot,
   type ShellRS,
 } from './shellRS';
@@ -134,7 +136,7 @@ export class PosixShellRS implements ShellRS {
       command,
       cwd: request.cwd,
       timeoutMs: request.waitMs,
-      maxOutputChars: request.maxOutputChars,
+      maxOutputChars: Math.min(request.maxOutputChars, SHELL_CAPTURE_LIMIT_CHARS),
       ...(env ? { env } : {}),
       signal,
       yieldOnTimeout: request.onTimeout === 'yield',
@@ -197,9 +199,11 @@ export class PosixShellRS implements ShellRS {
     return { ...result, process: snapshot(result.process) };
   }
 
-  async read(agentSessionId: string, processId: string): Promise<ShellProcessOutput> {
+  async read(agentSessionId: string, processId: string, range?: ShellOutputRange): Promise<ShellProcessOutput> {
     this.ensureSession(agentSessionId);
-    const result = await this.registry.drain(processId, agentSessionId);
+    const result = range
+      ? await this.registry.readPage(processId, agentSessionId, range)
+      : await this.registry.drain(processId, agentSessionId);
     return { ...result, process: snapshot(result.process) };
   }
 

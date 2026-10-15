@@ -116,6 +116,15 @@ export function createShellRSServiceHandler(
             readString(input.processId, 'processId'),
             readNumber(input.timeoutMs, 'timeoutMs'),
           );
+        case 'readPage': {
+          const range = readArgs(input.range);
+          const offset = readNumber(range.offset, 'range.offset');
+          const limit = readNumber(range.limit, 'range.limit');
+          if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20_000) {
+            invalid('Output range requires a nonnegative integer offset and limit 1..20000.');
+          }
+          return await rs.read(sessionId, readString(input.processId, 'processId'), { offset, limit });
+        }
         case 'read':
           return await rs.read(sessionId, readString(input.processId, 'processId'));
         case 'terminate':

@@ -22,14 +22,14 @@ const exec = {
   maxOutputChars: 4096,
 };
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, handler = createShellRSServiceHandler(new PosixShellRS())) {
   const root = await mkdtemp(join(tmpdir(), 'pp-rs-'));
   const paths = resolveRSServicePaths(root);
   const token = await ensureToken(paths);
   const service = await startRSService({
     endpoint: paths.endpoint,
     token,
-    handlers: [createShellRSServiceHandler(new PosixShellRS())],
+    handlers: [handler],
     log: () => {},
   });
   t.after(async () => {
@@ -255,4 +255,44 @@ test('short and managed tools keep their semantics across the RS service', { ski
   assert.equal(timeout.termination, 'confirmed');
   assert.equal(timeout.stdout, 'partial');
   assert.equal((await next.list('tool-session')).filter((item) => item.status === 'running').length, 0);
+});
+
+test('output replay crosses the service boundary without draining incremental output', { skip: isWindows }, async (t) => {
+  const { host } = await setup(t);
+  const shell = host();
+  const started = await shell.exec('replay-owner', {
+    ...exec, waitMs: 0, onTimeout: 'yield',
+    command: { argv: [process.execPath, '-e', "setTimeout(()=>process.stdout.write('ABCDEFGHIJ'),30)"] },
+  });
+  assert.equal(started.status, 'yielded');
+  if (started.status !== 'yielded') return;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const page = await shell.read('replay-owner', started.process.processId, { offset: 3, limit: 4 });
+  assert.equal(page.stdout, 'DEFG');
+  assert.deepEqual(page.capture, { offset: 3, limit: 4, stdoutChars: 10, stderrChars: 0 });
+  assert.equal((await shell.read('replay-owner', started.process.processId)).stdout, 'ABCDEFGHIJ');
+  assert.equal((await shell.read('replay-owner', started.process.processId)).stdout, '');
+  await assert.rejects(shell.read('other-owner', started.process.processId, { offset: 0, limit: 4 }));
+  await assert.rejects(shell.read('replay-owner', started.process.processId, { offset: 0, limit: 20001 }));
+});
+
+test('a service without replay support rejects pages without consuming output', { skip: isWindows }, async (t) => {
+  const current = createShellRSServiceHandler(new PosixShellRS());
+  const { host } = await setup(t, {
+    ...current,
+    async call(method, args, context) {
+      if (method === 'readPage') throw new Error('Unsupported method: readPage');
+      return await current.call(method, args, context);
+    },
+  });
+  const shell = host();
+  const started = await shell.exec('old-service-owner', {
+    ...exec, waitMs: 0, onTimeout: 'yield',
+    command: { argv: [process.execPath, '-e', "setTimeout(()=>process.stdout.write('not-consumed'),30)"] },
+  });
+  assert.equal(started.status, 'yielded');
+  if (started.status !== 'yielded') return;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await assert.rejects(shell.read('old-service-owner', started.process.processId, { offset: 0, limit: 10 }), /Unsupported method/);
+  assert.equal((await shell.read('old-service-owner', started.process.processId)).stdout, 'not-consumed');
 });

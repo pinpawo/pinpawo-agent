@@ -146,3 +146,15 @@ test('unconfirmed timeout groups remain eligible for service shutdown cleanup', 
   await shell.dispose();
   assert.deepEqual(signalled, [12345]);
 });
+
+test('capture is bounded even when a caller requests more than the retained limit', { skip: isWindows }, async (t) => {
+  const shell = new PosixShellRS();
+  t.after(() => shell.dispose());
+  const cap = 4 * 1024 * 1024;
+  const result = await shell.exec('bounded-capture', {
+    command: { argv: [process.execPath, '-e', `process.stdout.write('x'.repeat(${cap + 1000}))`] },
+    cwd: process.cwd(), waitMs: 5000, onTimeout: 'terminate', maxOutputChars: cap * 2,
+  });
+  assert.equal(result.status, 'exited');
+  assert.equal('stdout' in result ? result.stdout.length : -1, cap);
+});

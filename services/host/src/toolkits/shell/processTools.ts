@@ -5,6 +5,7 @@ import { readRecord, readString } from '../operationMetadata';
 import { requireAgentSession } from '../executionContext';
 import type { ShellProcessSnapshot, ShellRS } from '../shellRS/shellRS';
 import { truncateShellOutput } from './shellTools';
+import { SHELL_CAPTURE_LIMIT_CHARS, SHELL_OUTPUT_PAGE_LIMIT_CHARS } from '../shellRS/shellRS';
 
 /**
  * Tools for managed tasks explicitly launched by `start_process`.
@@ -46,22 +47,35 @@ function formatProcessError(err: unknown) {
 export function createProcessTools(shell: ShellRS): StructuredTool[] {
   const waitProcessTool = tool(
     async (
-      { processId, waitSeconds }: { processId: string; waitSeconds?: number },
+      { processId, waitSeconds, outputOffset, outputLimit }: {
+        processId: string; waitSeconds?: number; outputOffset?: number; outputLimit?: number;
+      },
       runtime: ToolRuntime,
     ) => {
       try {
         const sessionId = requireAgentSession(runtime);
+        if (outputLimit !== undefined && outputOffset === undefined) {
+          throw new Error('outputLimit requires outputOffset.');
+        }
         const seconds = Math.min(
           Math.max(1, Math.floor(waitSeconds ?? DEFAULT_WAIT_SECONDS)),
           MAX_WAIT_SECONDS,
         );
-        const result = await shell.wait(sessionId, processId, seconds * 1000);
+        const result = outputOffset === undefined
+          ? await shell.wait(sessionId, processId, seconds * 1000)
+          : await shell.read(sessionId, processId, { offset: outputOffset, limit: outputLimit ?? SHELL_OUTPUT_PAGE_LIMIT_CHARS });
         const header = `Process ${processId} is ${describeStatus(result.process)}.`;
         const hint = result.process.status === 'running'
           ? `\nCall ${WAIT_PROCESS_TOOL_NAME} again to keep waiting,`
             + ` or ${TERMINATE_PROCESS_TOOL_NAME} to stop it.`
           : '';
-        return `${header}${hint}\n${renderOutput(result.stdout, result.stderr)}`;
+        const capture = result.capture;
+        const replay = capture
+          ? `\nCaptured output page: offset=${capture.offset}, limit=${capture.limit}, stdoutChars=${capture.stdoutChars}, stderrChars=${capture.stderrChars}.`
+          : `\nTo reread retained output, call wait_process with outputOffset (absolute character offset) and outputLimit (max 20000).`;
+        const omitted = (result.omittedStdoutChars || result.omittedStderrChars)
+          ? `\nIncremental buffer overflow: omitted stdout=${result.omittedStdoutChars ?? 0}, stderr=${result.omittedStderrChars ?? 0} characters.` : '';
+        return `${header}${hint}${replay}${omitted}\n${renderOutput(result.stdout, result.stderr)}`;
       } catch (err) {
         return formatProcessError(err);
       }
@@ -70,9 +84,14 @@ export function createProcessTools(shell: ShellRS): StructuredTool[] {
       name: WAIT_PROCESS_TOOL_NAME,
       description: '等待一个后台进程并读取自上次查看以来的新增输出。'
         + 'start_process 启动任务后，用它继续跟进；进程未结束时会在等待若干秒后返回当前进度，可重复调用。'
-        + '每次只返回新增输出，不会重复历史内容。',
+        + '默认只返回新增输出。传 outputOffset 可立即分页回读保留的历史输出，不等待、不消耗新增输出；offset 对 stdout/stderr 分别按字符计数。'
+        + `每流最多保留前 ${SHELL_CAPTURE_LIMIT_CHARS} 字符，退出后保留最多5分钟，RS关闭时清除；达到上限后的内容不能回读。`,
       schema: z.object({
         processId: z.string().min(1).describe('start_process 返回的进程 id'),
+        outputOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+          .describe('绝对字符偏移；提供时立即回读保留输出，不等待或消耗新增输出'),
+        outputLimit: z.number().int().min(1).max(SHELL_OUTPUT_PAGE_LIMIT_CHARS).optional()
+          .describe('回读每流最多字符数，默认20000；与 outputOffset 一起使用'),
         waitSeconds: z.number().int().positive().max(MAX_WAIT_SECONDS).optional()
           .describe(`最多等待多少秒后返回当前进度，默认 ${DEFAULT_WAIT_SECONDS.toString()}`),
       }),
@@ -93,6 +112,7 @@ export function createProcessTools(shell: ShellRS): StructuredTool[] {
       description: '终止一个后台进程及其子进程。确认不再需要该命令继续运行时使用。',
       schema: z.object({
         processId: z.string().min(1).describe('start_process 返回的进程 id'),
+
       }),
     },
   );

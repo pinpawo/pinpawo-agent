@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
-import { ShellRSError } from './shellRS';
+import { ShellRSError, SHELL_CAPTURE_LIMIT_CHARS, SHELL_OUTPUT_PAGE_LIMIT_CHARS, type ShellOutputRange } from './shellRS';
 
 /**
  * The process handles of every ShellRS logical session in one RS instance.
@@ -41,6 +41,8 @@ export type DrainResult = {
   /** Output produced since the previous drain. */
   stdout: string;
   stderr: string;
+  omittedStdoutChars?: number;
+  omittedStderrChars?: number;
 };
 
 /**
@@ -70,6 +72,8 @@ type Entry = {
   /** Output not yet drained by the owner. */
   pendingStdout: string;
   pendingStderr: string;
+  omittedStdoutChars: number;
+  omittedStderrChars: number;
   unsubscribe: () => void;
   /**
    * Serializes drain, terminate and exit bookkeeping for one process.
@@ -170,12 +174,17 @@ export class ProcessRegistry {
       // unless the caller has already shown it.
       pendingStdout: params.outputAlreadyDelivered ? '' : params.handle.stdout,
       pendingStderr: params.outputAlreadyDelivered ? '' : params.handle.stderr,
+      omittedStdoutChars: 0,
+      omittedStderrChars: 0,
       unsubscribe: () => undefined,
       lock: Promise.resolve(),
     };
     entry.unsubscribe = params.handle.onOutput((stream, chunk) => {
-      if (stream === 'stdout') entry.pendingStdout += chunk;
-      else entry.pendingStderr += chunk;
+      const key = stream === 'stdout' ? 'pendingStdout' : 'pendingStderr';
+      const omittedKey = stream === 'stdout' ? 'omittedStdoutChars' : 'omittedStderrChars';
+      const available = Math.max(0, SHELL_CAPTURE_LIMIT_CHARS - entry[key].length);
+      entry[key] += chunk.slice(0, available);
+      entry[omittedKey] += Math.max(0, chunk.length - available);
     });
     this.entries.set(processId, entry);
 
@@ -246,7 +255,32 @@ export class ProcessRegistry {
       const stderr = entry.pendingStderr;
       entry.pendingStdout = '';
       entry.pendingStderr = '';
-      return { process: { ...entry.record }, stdout, stderr };
+      const omitted = {
+        ...(entry.omittedStdoutChars ? { omittedStdoutChars: entry.omittedStdoutChars } : {}),
+        ...(entry.omittedStderrChars ? { omittedStderrChars: entry.omittedStderrChars } : {}),
+      };
+      entry.omittedStdoutChars = entry.omittedStderrChars = 0;
+      return { process: { ...entry.record }, stdout, stderr, ...omitted };
+    });
+  }
+
+  /** Replay the bounded capture without advancing the incremental read cursor. */
+  async readPage(processId: string, sessionId: string, range: ShellOutputRange) {
+    if (!Number.isSafeInteger(range.offset) || range.offset < 0
+      || !Number.isSafeInteger(range.limit) || range.limit < 1 || range.limit > SHELL_OUTPUT_PAGE_LIMIT_CHARS) {
+      throw new RangeError('Output range requires a nonnegative integer offset and limit 1..20000.');
+    }
+    this.reapExpired();
+    const entry = this.require(processId, sessionId);
+    return await this.withLock(entry, () => {
+      const stdout = entry.handle.stdout;
+      const stderr = entry.handle.stderr;
+      return {
+        process: { ...entry.record },
+        stdout: stdout.slice(range.offset, range.offset + range.limit),
+        stderr: stderr.slice(range.offset, range.offset + range.limit),
+        capture: { ...range, stdoutChars: stdout.length, stderrChars: stderr.length },
+      };
     });
   }
 

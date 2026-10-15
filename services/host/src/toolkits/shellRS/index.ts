@@ -7,6 +7,7 @@ export {
   type ShellExecRequest,
   type ShellExecResult,
   type ShellProcessOutput,
+  type ShellOutputRange,
   type ShellProcessSnapshot,
   type ShellRS,
 } from './shellRS';

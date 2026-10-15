@@ -37,6 +37,7 @@ test('Notice persists configured Studio event facts without participating in dis
     }],
     httpRoute: false,
   });
+  assert.throws(() => notice.service, /has not started/);
   const studio = await createStudio({
     studioId: 'notice-test',
     entryPetId: 'worker',

@@ -23,12 +23,16 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
-  "dependencies": { "@pinpawo/studio": "^0.1.0" },
+  "dependencies": {
+    "@pinpawo/studio": "^0.1.0",
+    "kysely": "^0.29.6"
+  },
   "peerDependencies": { "@pinpawo-plugin/studio-http": "^0.1.0" },
   "peerDependenciesMeta": {
     "@pinpawo-plugin/studio-http": { "optional": true }
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@pinpawo-plugin/studio-http": "^0.1.0",
     "@types/node": "^24.0.0",
     "tsup": "^8.5.1",

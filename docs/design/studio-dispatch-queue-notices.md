@@ -52,6 +52,10 @@ Notice delivery is selected independently:
 }
 ```
 
+Notices are stored in the Studio database (table `notices`, migration `0001_notices`, behind
+`NoticeStore` in `plugins/notice/src/store/`); the Plugin takes no `databasePath`, and
+notices in an earlier `notice.sqlite` are not migrated.
+
 Channel does not own this audit policy. Acknowledgement, escalation, deduplication
 and external notification adapters require explicit Notice capabilities; none are implied.
 See [Automation Plugins](studio/automation-plugins.md) for scheduling and event boundaries.

@@ -171,8 +171,8 @@ importing or interpreting extension contracts. The HTTP Plugin exposes a
 `routes` hook; Channel, Scheduler, Trigger, Notice, and Project Files can
 contribute their own routes. Each Plugin retains ownership of its stored data:
 Plugins on `StudioPluginContext.storage` own their tables and migration history
-in the shared Studio database; Notice still uses its own SQLite file under
-`.pinpawo/studio/`.
+in the shared Studio database. No Plugin keeps its own SQLite file under
+`.pinpawo/studio/` any more.
 
 ## Retired Kanban workdirs
 

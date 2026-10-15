@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-type Author = { participantId: string; kind: 'human' | 'pet' };
+type Author = { participantId: string; kind: 'human' | 'pet'; label?: string };
 export type ChannelTestInput = {
   type: 'channel_message'; version: 1; channelId: string; messageId: string;
   author: Author; body: string;

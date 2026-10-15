@@ -385,16 +385,29 @@ test('Entry routing accepts a tool call whose provider omitted the id', async ()
   assert.deepEqual(requests, ['截图所有页面']);
 });
 
-test('Entry routing fails on multiple calls without a repair turn, identical ones included', async () => {
+test('Entry routing collapses a repeated identical call into one handoff', async () => {
+  const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
+  const { graph, seen, requests } = routingScript([new AIMessage({
+    content: '', tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+  })]);
+  const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
+  assert.equal(seen.length, 1);
+  assert.deepEqual(requests, ['截图所有页面']);
+  const routed = output.messages.filter((message) => AIMessage.isInstance(message) && message.tool_calls?.length);
+  assert.equal(routed.length, 1);
+  assert.equal((routed[0] as AIMessage).tool_calls?.length, 1);
+});
+
+test('Entry routing fails on distinct calls without a repair turn', async () => {
   const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
   for (const tool_calls of [
-    [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+    [{ ...call, id: 'a' }, { ...call, id: 'b', args: { goal: '只截首页' } }],
     [{ id: 'a', name: 'continue', args: {} }, { ...call, id: 'b' }],
   ]) {
     const { graph, seen, requests } = routingScript([new AIMessage({ content: '', tool_calls })]);
     await assert.rejects(
       graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig()),
-      /requires one tool call, got 2/,
+      /requires one tool call, got 2 distinct/,
     );
     assert.equal(seen.length, 1);
     assert.deepEqual(requests, []);

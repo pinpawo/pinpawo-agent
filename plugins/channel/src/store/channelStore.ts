@@ -60,6 +60,12 @@ export interface ChannelStore {
   createChannel(row: ChannelRow): Promise<void>;
   updateChannel(channelId: string, patch: { title?: string; description?: string | null; updatedAt: string }): Promise<void>;
   getChannel(channelId: string): Promise<ChannelRow | undefined>;
+  /**
+   * Inside a transaction, holds the Channel's row lock until it ends, so
+   * membership changes to one Channel run one at a time. False when the
+   * Channel does not exist.
+   */
+  lockChannel(channelId: string): Promise<boolean>;
   /** Pages in creation order. With `member`, only Channels where it is current. */
   listChannels(filter: { member?: MemberRef }, page: Page): Promise<PageOf<ChannelRow>>;
   /** Current and former members. */

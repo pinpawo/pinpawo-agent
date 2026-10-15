@@ -204,6 +204,7 @@ export class ChannelService {
     const member = memberRefSchema.parse(value);
     await this.requireJoinable(member);
     const result = await this.store.transaction(async (store) => {
+      await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireManagerIn(store, channelId, actor, access);
       const existing = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
       if (existing && !existing.leftAt) return { row: existing, joined: false };
@@ -218,6 +219,8 @@ export class ChannelService {
   async removeMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<void> {
     const member = memberRefSchema.parse(value);
     const left = await this.store.transaction(async (store) => {
+      // Two removals counting the same humans must not both pass the last-human check.
+      await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireManagerIn(store, channelId, actor, access);
       const current = (await store.listMembers(channel.channelId)).filter(item => !item.leftAt);
       const existing = current.find(item => item.kind === member.kind && item.id === member.id);

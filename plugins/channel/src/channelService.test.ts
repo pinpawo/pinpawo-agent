@@ -219,3 +219,52 @@ for (const [backend, config] of backends) {
     await assert.rejects(service.reserveSession(other, 'executor', () => binding.sessionId));
   }));
 }
+
+// PGlite above has one session, so it cannot show races between connections.
+// With PINPAWO_TEST_POSTGRES_URL (a server where the user may create
+// databases), this runs on a fresh database with a real connection pool.
+const postgresUrl = process.env.PINPAWO_TEST_POSTGRES_URL;
+test('postgres server: concurrent removals cannot remove every human', { skip: !postgresUrl && 'PINPAWO_TEST_POSTGRES_URL is not set' }, async () => {
+  const { default: pg } = await import('pg');
+  const database = `channel_test_${process.pid}_${Date.now()}`;
+  const admin = new pg.Client({ connectionString: postgresUrl });
+  await admin.connect();
+  await admin.query(`create database ${database}`);
+  const url = new URL(postgresUrl!);
+  url.pathname = '/' + database;
+  const storage = createStudioStorage({ kind: 'postgres', pool: new pg.Pool({ connectionString: url.href, max: 4 }) });
+  try {
+    const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
+    const service = new ChannelService({ store, pets, humans });
+    const { channelId } = (await service.createChannel(owner, { title: 'Race', pets: ['executor'] })).channel;
+    await service.addMember(owner, channelId, guest);
+    // Hold each removal after it reads the members until the other has read
+    // them too (or is blocked from reading), so both decide on the same count.
+    let arrived = 0;
+    let release!: () => void;
+    const bothRead = new Promise<void>((resolve) => { release = resolve; });
+    const racing: ChannelStore = Object.create(store, {
+      transaction: { value: <T>(work: (inner: ChannelStore) => Promise<T>) => store.transaction(inner => work(Object.create(inner, {
+        listMembers: { value: async (id: string) => {
+          const rows = await inner.listMembers(id);
+          if (++arrived === 2) release();
+          await Promise.race([bothRead, new Promise(resolve => setTimeout(resolve, 500))]);
+          return rows;
+        } },
+      }))) },
+    });
+    const racer = new ChannelService({ store: racing, pets, humans });
+    const results = await Promise.allSettled([
+      racer.removeMember(owner, channelId, owner, { studio: true }),
+      racer.removeMember(owner, channelId, guest, { studio: true }),
+    ]);
+    assert.deepEqual(results.map(result => result.status).sort(), ['fulfilled', 'rejected']);
+    assert.ok((results.find(result => result.status === 'rejected') as PromiseRejectedResult).reason instanceof ChannelLastHumanError);
+    const left = (await store.listMembers(channelId)).filter(member => !member.leftAt);
+    assert.equal(left.filter(member => member.kind === 'human').length, 1);
+  } finally {
+    await storage.close();
+    await admin.query(`drop database if exists ${database}`);
+    await admin.end();
+  }
+});

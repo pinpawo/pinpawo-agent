@@ -67,6 +67,13 @@ export class KyselyChannelStore implements ChannelStore {
     return record ? channelRow(record) : undefined;
   }
 
+  async lockChannel(channelId: string): Promise<boolean> {
+    // A no-op write takes the row lock on Postgres; SQLite has one writer anyway.
+    const result = await this.db.updateTable('channels').set(eb => ({ updated_at: eb.ref('updated_at') }))
+      .where('channel_id', '=', channelId).executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
+  }
+
   async listChannels(filter: { member?: MemberRef }, page: Page): Promise<PageOf<ChannelRow>> {
     let query = this.db.selectFrom('channels').selectAll('channels')
       .where('channels.seq', '>', page.after).orderBy('channels.seq').limit(page.limit + 1);

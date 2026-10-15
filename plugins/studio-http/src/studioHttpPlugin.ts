@@ -21,6 +21,8 @@ import {
 import { readWireAuthToken } from 'pinpawo/wire';
 import { parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
 
+import { createJwtVerifier, looksLikeJwt, type StudioHttpJwtIssuer, type StudioHttpJwtOptions } from './jwtIssuers';
+
 const LOOPBACK_HOST = '127.0.0.1' as const;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
@@ -96,6 +98,11 @@ export type CreateStudioHttpPluginOptions = {
   authToken: string;
   /** The Studio client the local Host token acts as. Defaults to `local`. */
   localClientId?: string;
+  /**
+   * Accept JWTs issued by other systems. Each verified token is a client
+   * (`<clientPrefix>.<sub>`, `client` scope), registered on first use.
+   */
+  jwt?: StudioHttpJwtOptions;
   /** Exact HTTP(S) origins allowed to call the Plugin from a browser. */
   allowedOrigins?: readonly string[];
   name?: string;
@@ -394,6 +401,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     'Studio HTTP Plugin heartbeatIntervalMs',
   );
   const localClientId = options.localClientId ?? DEFAULT_LOCAL_CLIENT_ID;
+  const verifyJwt = options.jwt === undefined ? undefined : createJwtVerifier(options.jwt);
 
   let context: StudioHttpPluginContext | undefined;
   let server: Server | undefined;
@@ -423,7 +431,15 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   async function authenticate(token: string | null): Promise<StudioHttpPrincipal | undefined> {
     if (!token) return undefined;
     if (safeTokenEqual(token, options.authToken)) return { clientId: localClientId, scope: 'studio' };
-    const client = await context?.clients?.authenticate(token);
+    const clients = context?.clients;
+    if (verifyJwt && clients && looksLikeJwt(token)) {
+      const identity = await verifyJwt(token);
+      if (!identity) return undefined;
+      // First use registers the client; a locally revoked client stays refused.
+      const client = (await clients.get(identity.clientId)) ?? await clients.ensure(identity);
+      return client.revokedAt ? undefined : { clientId: client.clientId, scope: 'client' };
+    }
+    const client = await clients?.authenticate(token);
     return client ? { clientId: client.clientId, scope: 'client' } : undefined;
   }
 
@@ -800,6 +816,7 @@ function readInstalledHttpOptions(
     'maxBodyBytes',
     'maxEventClients',
     'heartbeatIntervalMs',
+    'jwt',
   ]);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Studio HTTP Plugin option "${unknown}" is not supported.`);
@@ -819,8 +836,10 @@ function readInstalledHttpOptions(
   ) {
     throw new Error('Studio HTTP Plugin option "allowedOrigins" must be a string array.');
   }
+  const jwt = options.jwt === undefined ? undefined : readInstalledJwt(options.jwt);
   return {
     port: (options.port as number | undefined) ?? 3211,
+    ...(jwt ? { jwt } : {}),
     ...(options.allowedOrigins
       ? { allowedOrigins: options.allowedOrigins as string[] }
       : {}),
@@ -833,6 +852,29 @@ function readInstalledHttpOptions(
       ? { heartbeatIntervalMs: options.heartbeatIntervalMs }
       : {}),
   };
+}
+
+function readInstalledJwt(value: unknown): StudioHttpJwtOptions {
+  const issuerKeys = new Set(['issuer', 'audience', 'jwksUrl', 'publicKey', 'clientPrefix', 'algorithms']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => key !== 'issuers')
+    || !Array.isArray((value as { issuers?: unknown }).issuers)) {
+    throw new Error('Studio HTTP Plugin option "jwt" must be an object with an "issuers" array.');
+  }
+  const issuers = (value as { issuers: unknown[] }).issuers.map((input, index) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error(`Studio HTTP Plugin jwt.issuers[${index.toString()}] must be an object.`);
+    }
+    const issuer = input as Record<string, unknown>;
+    const unknown = Object.keys(issuer).find((key) => !issuerKeys.has(key));
+    if (unknown) throw new Error(`Studio HTTP Plugin jwt.issuers[${index.toString()}] option "${unknown}" is not supported.`);
+    if (issuer.algorithms !== undefined
+      && (!Array.isArray(issuer.algorithms) || issuer.algorithms.some((algorithm) => typeof algorithm !== 'string'))) {
+      throw new Error(`Studio HTTP Plugin jwt.issuers[${index.toString()}].algorithms must be a string array.`);
+    }
+    return issuer as StudioHttpJwtIssuer;
+  });
+  return { issuers };
 }
 
 /** Installed-package entry used by the standalone Studio Plugin resolver. */

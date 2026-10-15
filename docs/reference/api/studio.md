@@ -141,6 +141,13 @@ take the local Host token:
 
 The CLI equivalents are `pinpawo-studio clients list|add|add-key|revoke`.
 
+With the `jwt` option, a JWT from a configured issuer is also accepted as the
+Bearer token. A valid token (signature, `iss`, `aud`, `nbf`, required `exp` and
+`sub`) is the client `<clientPrefix>.<sub>` with `client` scope, registered on
+first use with the `name` claim (or `sub`) as its label. Revoking that client
+with `POST /clients/revoke` refuses its later tokens. See the
+[HTTP Plugin design](../../design/studio/http-plugin.md#外部-jwt) for the options.
+
 ## Host lifecycle
 
 `StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls

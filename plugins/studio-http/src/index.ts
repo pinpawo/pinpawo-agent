@@ -14,3 +14,4 @@ export type {
   StudioHttpPluginAddress,
   StudioHttpPrincipal,
 } from './studioHttpPlugin';
+export type { StudioHttpJwtIssuer, StudioHttpJwtOptions } from './jwtIssuers';

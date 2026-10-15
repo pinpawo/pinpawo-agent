@@ -84,8 +84,9 @@ try {
   await page.getByLabel('Studio bearer token').fill(first.token);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
-  assert.equal(await page.getByRole('button', { name: 'channel', exact: true }).getAttribute('class'), 'active', 'Channel is the default page');
-  assert.deepEqual(await page.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').allTextContents(), ['channel', 'scheduler', 'notice', 'trigger', 'knowledge']);
+  assert.equal(await page.getByRole('button', { name: 'Channel', exact: true }).getAttribute('aria-current'), 'page', 'Channel is the default page');
+  assert.deepEqual(await page.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))),
+    ['Channel', 'Scheduler', 'Notice', 'Trigger', 'Knowledge']);
   await page.getByRole('heading', { name: channel.title, exact: true }).waitFor();
   const input = page.getByLabel('Message', { exact: true });
   await input.waitFor();
@@ -158,7 +159,7 @@ try {
         }
       }
       await page.evaluate(() => window.scrollTo(0, 0));
-      await page.mouse.move(700, 135);
+      await page.locator('.channel-conversation-head').hover(); // Not a scroll container: the wheel moves the document.
       await page.mouse.wheel(0, 900);
       if (height < 640) await until(() => page.evaluate(() => scrollY > 0), 'document wheel');
       await page.waitForTimeout(250);
@@ -200,8 +201,8 @@ try {
   await fits();
   await page.screenshot({ path: resolve(screenshots, '01-desktop-long-code.png'), fullPage: true });
   const readingPosition = await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop);
-  await page.getByRole('button', { name: 'knowledge', exact: true }).click();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Knowledge', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   assert.equal(await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop), readingPosition, 'global navigation preserves an older reading position');
   const sessionViewer = page.getByRole('dialog', { name: /session/ });
   await message(output.messageId).getByRole('button', { name: 'View Analyst session', exact: true }).click();
@@ -270,9 +271,9 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   const historyBeforeDispatch = (await context()).messages.length;
-  for (const name of ['scheduler', 'notice', 'trigger', 'knowledge']) {
+  for (const name of ['Scheduler', 'Notice', 'Trigger', 'Knowledge']) {
     await page.getByRole('button', { name, exact: true }).click();
-    assert.equal(await page.getByRole('button', { name: 'kanban', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Kanban', exact: true }).count(), 0);
   }
   await page.getByRole('button', { name: '+ DISPATCH', exact: true }).click();
   const direct = page.getByRole('dialog', { name: 'Dispatch to Pet', exact: true });
@@ -287,7 +288,7 @@ try {
   assert.equal(await direct.getByText('Check the Pet session for its reply and verify the requested outcome.', { exact: true }).count(), 1);
   assert.equal((await context()).messages.length, historyBeforeDispatch, 'standalone dispatch cannot publish into Channel');
   await direct.getByRole('button', { name: 'Close dispatch', exact: true }).click();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   let rejectedWrites = 0;
   await page.route(first.url + '/channels/messages', route => {
     rejectedWrites++;
@@ -317,7 +318,7 @@ try {
   await message(output.messageId).waitFor();
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
   await page.keyboard.type('Host A draft must not cross hosts.');
-  await page.getByRole('button', { name: 'CONNECTION', exact: true }).click();
+  await page.getByRole('button', { name: 'Connection', exact: true }).click();
   await page.getByLabel('Studio HTTP URL').fill(second.url);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.getByText('No Channels yet.', { exact: true }).waitFor();
@@ -333,7 +334,7 @@ try {
   await page.route(second.url + '/channels**', route => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"fixture plugin unavailable"}' }));
   await page.reload();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   await page.getByText('Channel Plugin unavailable', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '+ New Channel', exact: true }).isDisabled(), true);
   await page.screenshot({ path: resolve(screenshots, '05-plugin-unavailable.png'), fullPage: true });

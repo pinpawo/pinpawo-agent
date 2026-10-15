@@ -10,8 +10,17 @@ import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, typ
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
 import { appendChannelDeliveries, type ChannelDelivery } from './channelData';
+import { Bell, BookOpen, CalendarClock, MessagesSquare, Plug, Zap, type LucideIcon } from 'lucide-react';
+import logoMark from '../../../assets/brand/pinpawo-primary-white.svg';
 
 type Page = 'channel' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
+const pageItems: { page: Page; label: string; Icon: LucideIcon }[] = [
+  { page: 'channel', label: 'Channel', Icon: MessagesSquare },
+  { page: 'scheduler', label: 'Scheduler', Icon: CalendarClock },
+  { page: 'notice', label: 'Notice', Icon: Bell },
+  { page: 'trigger', label: 'Trigger', Icon: Zap },
+  { page: 'knowledge', label: 'Knowledge', Icon: BookOpen },
+];
 type ConnectionState = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Schedule = {
@@ -511,24 +520,20 @@ export function App() {
 
   return (
     <main className={'shell' + (page === 'channel' ? ' channel-shell' : '')}>
-      <header>
-        <div className="brand">◎ PINPAWO <span>/ STUDIO CONSOLE</span></div>
-        <div className="connection">
-          <button className="connection-settings" onClick={() => {
-            setConnectionUrlDraft(baseUrl);
-            setConnectionTokenDraft(token);
-            setConnectionModalOpen(true);
-          }} type="button">CONNECTION</button>
-          <span className={`connection-state ${connectionState}`} role="status">
-            <i />{connectionState}{identity && connectionState === 'connected' ? ` · ${identity.clientId}` : ''}
-          </span>
-        </div>
-      </header>
-      <nav aria-label="Studio pages">
-        {(clientMode ? ['channel'] as const : ['channel', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
-          <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
-        ))}
-      </nav>
+      <aside className="rail">
+        <div className="rail-brand" title="PinPawo Studio Console"><img src={logoMark} alt="PinPawo" width={24} height={24} /></div>
+        <nav aria-label="Studio pages">
+          {pageItems.filter(item => !clientMode || item.page === 'channel').map(({ page: item, label, Icon }) => (
+            <button className={'rail-item' + (page === item ? ' active' : '')} aria-current={page === item ? 'page' : undefined}
+              aria-label={label} data-tip={label} key={item} onClick={() => setPage(item)} type="button"><Icon size={19} strokeWidth={1.75} aria-hidden /></button>
+          ))}
+        </nav>
+        <button className={`rail-item rail-connection ${connectionState}`} aria-label="Connection" data-tip={'Connection · ' + connectionState} onClick={() => {
+          setConnectionUrlDraft(baseUrl);
+          setConnectionTokenDraft(token);
+          setConnectionModalOpen(true);
+        }} type="button"><Plug size={18} strokeWidth={1.75} aria-hidden /><i aria-hidden /></button>
+      </aside>
       <section className={'content' + (page === 'channel' ? ' channel-content' : '')}>
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
@@ -653,7 +658,12 @@ export function App() {
           </div>
         </form>
       </div>}
-      <footer>{notice}</footer>
+      <footer>
+        <span className={`connection-state ${connectionState}`} role="status">
+          <i />{connectionState}{identity && connectionState === 'connected' ? ` · ${identity.clientId}` : ''}
+        </span>
+        <span className="footer-notice">{notice}</span>
+      </footer>
     </main>
   );
 }

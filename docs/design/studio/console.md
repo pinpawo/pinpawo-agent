@@ -17,6 +17,7 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 
 ## Channel 布局与交互
 
+页面导航是最左侧 56px 图标栏（移动端 48px）：顶部是 PinPawo 标志（`assets/brand` 白色 24px 版），每个页面一个图标，悬停或聚焦显示名称；底部是连接按钮，带状态点。连接状态文字在底部状态栏。
 左侧 232px 列表、中间独立滚动消息与固定 composer、右侧可折叠 320px 成员与详情面板。
 新建 Channel 填标题、可选说明，并显式勾选加入的 Pet；面板里可增删成员（Pet 或人的 id）。
 输入框用 Tiptap（Mention 扩展）：键入 `@` 在光标处弹出当前成员列表，选中后成为行内 mention，

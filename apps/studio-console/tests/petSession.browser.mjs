@@ -66,7 +66,7 @@ try {
   await page.getByLabel('Studio bearer token').fill(ready.token);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
   await page.getByLabel('Channel title').fill('Session reading');
   await page.getByRole('checkbox', { name: 'Alpha', exact: true }).check();

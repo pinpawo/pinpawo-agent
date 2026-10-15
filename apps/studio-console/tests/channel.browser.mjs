@@ -77,7 +77,7 @@ try {
   await page.getByLabel('Studio bearer token').fill(ready.token);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   const create = async (title, petNames) => {
     await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Create Channel' });
@@ -191,7 +191,7 @@ try {
   const beforeReconnect = (await publicMessages()).map(item => item.messageId);
   await page.reload();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
   await page.getByText('Human author reply stays public.').waitFor();
   assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect, 'page reload creates no dispatch');
   host.kill('SIGTERM');
@@ -272,6 +272,10 @@ try {
   await alphaQueue.locator('li').getByText('Participant loop', { exact: true }).waitFor();
   assert.ok(!/working|busy|queued/.test((await page.locator('.channel-composer').innerText()).toLowerCase()), 'composer has no pre-send busy hints');
   await page.screenshot({ path: resolve(screenshotDir, '03-channel-global-queue.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Scheduler', exact: true }).hover();
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: resolve(screenshotDir, '07-page-rail-tooltip.png'), clip: { x: 0, y: 0, width: 420, height: 320 } });
+  await page.mouse.move(700, 500);
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: 'Show Channel details', exact: true }).click();
   await page.getByRole('dialog', { name: 'Channel details', exact: true }).waitFor();
@@ -288,7 +292,7 @@ try {
   await bob.getByLabel('Studio bearer token').fill(bobKey);
   await bob.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await bob.locator('.connection-state.connected').getByText('bob', { exact: false }).waitFor();
-  assert.deepEqual(await bob.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').allTextContents(), ['channel']);
+  assert.deepEqual(await bob.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))), ['Channel']);
   await bob.getByRole('heading', { name: 'Participant loop', exact: true }).waitFor();
   assert.equal(await bob.getByRole('button', { name: 'Separate investigation', exact: false }).count(), 0, 'a client lists only its own Channels');
   assert.equal(await bob.getByRole('button', { name: 'View session', exact: true }).count(), 0, 'Pet sessions stay with the local token');

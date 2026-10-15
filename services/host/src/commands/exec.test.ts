@@ -272,3 +272,30 @@ test('exec shuts the Host down and keeps the trajectory once the run ends', asyn
   const lines = readFileSync(join(dir, 'logs', 'trajectory.jsonl'), 'utf8').trim().split('\n');
   assert.equal(lines.length, 2);
 });
+
+test('exec persists its terminal result before waiting for Host shutdown', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-exec-shutdown-'));
+  const outputPath = join(dir, 'result.json');
+  let resultAtShutdown = '';
+  const host = createFakeHost((message, fake) => {
+    if (answerSessionNew(message, fake)) return;
+    if (message.type !== 'chat_request') return;
+    fake.emit(runEvent({ type: 'error', requestId: message.requestId, message: 'request deadline' }));
+  });
+  host.stdin.on('finish', () => {
+    resultAtShutdown = readFileSync(outputPath, 'utf8');
+    host.exit();
+  });
+  const previousExitCode = process.exitCode;
+  const previousWrite = process.stderr.write;
+  process.stderr.write = (() => true) as typeof process.stderr.write;
+  try {
+    await runExec({ instruction: 'x', outputPath }, () => host);
+  } finally {
+    process.stderr.write = previousWrite;
+    process.exitCode = previousExitCode;
+  }
+  assert.ok(resultAtShutdown.trim(), 'terminal result must survive shutdown interruption');
+  assert.equal(JSON.parse(resultAtShutdown).status, 'failed');
+  assert.equal(JSON.parse(resultAtShutdown).error, 'request deadline');
+});

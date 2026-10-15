@@ -13,6 +13,7 @@ import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import {
   parseStudioDispatchRequest,
+  StudioClientError,
   type StudioEvent,
   type StudioPlugin,
   type StudioPluginContext,
@@ -33,9 +34,23 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/pet-sessions/snapshot',
   '/pet-sessions/events',
   '/pet-sessions/review',
+  '/clients',
+  '/clients/revoke',
+  '/clients/keys',
 ]);
+const DEFAULT_LOCAL_CLIENT_ID = 'local';
 
-type StudioHttpEnvironment = { Bindings: HttpBindings };
+/**
+ * Who sent an authenticated request. The local Host token is the client with
+ * `studio` scope (the global Studio API); every other client key has `client`
+ * scope and reaches only routes registered for clients.
+ */
+export type StudioHttpPrincipal = {
+  readonly clientId: string;
+  readonly scope: 'studio' | 'client';
+};
+
+type StudioHttpEnvironment = { Bindings: HttpBindings; Variables: { principal?: StudioHttpPrincipal } };
 type StudioHttpContext = Context<StudioHttpEnvironment>;
 
 export type StudioHttpRouteRequest = {
@@ -44,6 +59,8 @@ export type StudioHttpRouteRequest = {
   /** Exact request text for route-owned signature verification. */
   readText: () => Promise<string>;
   readJson: () => Promise<unknown>;
+  /** The authenticated client; absent only on routes with `authorization: 'route'`. */
+  readonly principal?: StudioHttpPrincipal;
 };
 
 export type StudioHttpRouteResult =
@@ -53,8 +70,11 @@ export type StudioHttpRouteResult =
 export type StudioHttpRoute = {
   method: string;
   path: string;
-  /** Defaults to Studio Bearer auth. Route-owned auth is validated by handle(). */
-  authorization?: 'studio' | 'route';
+  /**
+   * `studio` (the default): only the local Host token. `client`: any active
+   * Studio client. `route`: no Studio auth; handle() validates the request.
+   */
+  authorization?: 'studio' | 'client' | 'route';
   handle: (
     request: StudioHttpRouteRequest,
   ) => StudioHttpRouteResult | Promise<StudioHttpRouteResult>;
@@ -72,8 +92,10 @@ export type StudioHttpPluginAddress = {
 export type CreateStudioHttpPluginOptions = {
   /** `0` asks the OS for an ephemeral port. */
   port: number;
-  /** Bearer token used by both dispatch and SSE requests. */
+  /** The local Host token. It authenticates as the local client, with `studio` scope. */
   authToken: string;
+  /** The Studio client the local Host token acts as. Defaults to `local`. */
+  localClientId?: string;
   /** Exact HTTP(S) origins allowed to call the Plugin from a browser. */
   allowedOrigins?: readonly string[];
   name?: string;
@@ -90,7 +112,7 @@ export type CreateStudioHttpPluginOptions = {
 export type StudioHttpPluginContext = Pick<
   StudioPluginContext,
   'dispatch' | 'listPets' | 'subscribe' | 'hooks'
-> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions'>>;
+> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions' | 'clients'>>;
 
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
@@ -249,8 +271,9 @@ function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
   }
   if (route.authorization !== undefined
     && route.authorization !== 'studio'
+    && route.authorization !== 'client'
     && route.authorization !== 'route') {
-    throw new Error('Studio HTTP route authorization must be studio or route.');
+    throw new Error('Studio HTTP route authorization must be studio, client or route.');
   }
   return {
     ...route,
@@ -370,6 +393,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     DEFAULT_HEARTBEAT_INTERVAL_MS,
     'Studio HTTP Plugin heartbeatIntervalMs',
   );
+  const localClientId = options.localClientId ?? DEFAULT_LOCAL_CLIENT_ID;
 
   let context: StudioHttpPluginContext | undefined;
   let server: Server | undefined;
@@ -395,6 +419,13 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       };
     },
   };
+
+  async function authenticate(token: string | null): Promise<StudioHttpPrincipal | undefined> {
+    if (!token) return undefined;
+    if (safeTokenEqual(token, options.authToken)) return { clientId: localClientId, scope: 'studio' };
+    const client = await context?.clients?.authenticate(token);
+    return client ? { clientId: client.clientId, scope: 'client' } : undefined;
+  }
 
   async function broadcastChunk(chunk: string): Promise<void> {
     await Promise.all([...eventClients].map(async (client) => {
@@ -447,11 +478,16 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         await next();
         return;
       }
-      const providedToken = readBearerToken(requestContext.req.header('authorization'));
-      if (!providedToken || !safeTokenEqual(providedToken, options.authToken)) {
+      const principal = await authenticate(readBearerToken(requestContext.req.header('authorization')));
+      if (!principal) {
         requestContext.header('WWW-Authenticate', 'Bearer');
         return requestContext.json({ error: 'Unauthorized.' }, 401);
       }
+      // Built-in routes are the global Studio API; only client routes are open to other clients.
+      if (principal.scope !== 'studio' && route?.authorization !== 'client') {
+        return requestContext.json({ error: 'This client may not use this route.' }, 403);
+      }
+      requestContext.set('principal', principal);
       await next();
     });
     app.use('*', bodyLimit({
@@ -609,6 +645,42 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     });
     app.all('/pet-sessions/review', (requestContext) => methodNotAllowed(requestContext, ['POST']));
 
+    // Client management. Keys are returned only when created.
+    const clients = () => {
+      if (!context?.clients) throw new HttpRequestError(503, 'Studio clients are unavailable.');
+      return context.clients;
+    };
+    const clientRequest = async <T>(work: () => Promise<T>): Promise<T> => {
+      try {
+        return await work();
+      } catch (error) {
+        if (!(error instanceof StudioClientError)) throw error;
+        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404 }[error.code], error.message);
+      }
+    };
+    const readClientId = (body: unknown): unknown => (body as { clientId?: unknown } | null)?.clientId;
+    app.get('/clients', async (requestContext) => requestContext.json({
+      clients: await clients().list(),
+      localClientId,
+    }));
+    app.post('/clients', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { clientId?: unknown; label?: unknown } | null;
+      return requestContext.json(await clientRequest(() => clients().create({ clientId: body?.clientId, label: body?.label })), 201);
+    });
+    app.post('/clients/revoke', async (requestContext) => {
+      const clientId = readClientId(await readJsonBody(requestContext));
+      if (clientId === localClientId) throw new HttpRequestError(400, 'The local client cannot be revoked.');
+      return requestContext.json({ client: await clientRequest(() => clients().revoke(clientId)) });
+    });
+    app.post('/clients/keys', async (requestContext) => {
+      const clientId = readClientId(await readJsonBody(requestContext));
+      if (clientId === localClientId) throw new HttpRequestError(400, 'The local client uses the Host token, not keys.');
+      return requestContext.json(await clientRequest(() => clients().addKey(clientId)), 201);
+    });
+    app.all('/clients', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
+    app.all('/clients/revoke', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+    app.all('/clients/keys', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+
     app.all('*', async (requestContext) => {
       const route = routes.get(`${requestContext.req.method} ${requestContext.req.path}`);
       if (route) {
@@ -626,6 +698,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
             body ??= (text ??= requestContext.req.text()).then(parseJsonText);
             return body;
           },
+          ...(route.authorization === 'route' ? {} : { principal: requestContext.get('principal') }),
         });
         const status = readRouteStatus(result.status);
         if (result.kind === 'json') return jsonResponse(requestContext, status, result.body);
@@ -663,6 +736,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     start: async (pluginContext) => {
       if (started || stopped) throw new Error('Studio HTTP Plugin can only be started once.');
       started = true;
+      // The local Host token is an ordinary client, so it can be a Channel member like any other.
+      await pluginContext.clients?.ensure({ clientId: localClientId, label: 'Local' });
       context = pluginContext;
       const app = createApp();
       const nextServer = createServer(getRequestListener(app.fetch));

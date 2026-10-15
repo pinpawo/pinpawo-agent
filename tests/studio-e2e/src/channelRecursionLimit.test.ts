@@ -10,6 +10,9 @@ import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpaw
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 
+/** The local Host token's Studio client, as a Channel member. */
+const me = { kind: 'human' as const, id: 'local' };
+
 async function waitFor(done: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 1000; i++) { if (await done()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   throw new Error('Timed out waiting for the dispatch to end.');
@@ -46,11 +49,11 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
   });
   try {
-    const id = (await channel.service.createChannel(channel.operator, { title: 'Goal', pets: ['one'] })).channel.channelId;
+    const id = (await channel.service.createChannel(me, { title: 'Goal', pets: ['one'] })).channel.channelId;
     const completed: string[] = [];
     studio.subscribe(event => { if (event.type === 'dispatch.completed') completed.push((event.payload as { invocationId: string }).invocationId); });
-    const { deliveries } = await channel.sendMessage(id, { body: 'Inspect.', mentions: [{ participantId: 'pet:one' }] });
-    const published = async () => (await channel.service.readContext(channel.operator, id)).messages.filter(message => message.author.kind === 'pet');
+    const { deliveries } = await channel.sendMessage(id, { body: 'Inspect.', mentions: [{ participantId: 'pet:one' }] }, me);
+    const published = async () => (await channel.service.readContext(me, id)).messages.filter(message => message.author.kind === 'pet');
     await waitFor(async () => (await published()).length > 0 && completed.length > 0);
     assert.deepEqual(completed, [deliveries[0]!.invocationId]);
     // Only the notice is public; the announced plan_request call stays in Agent Session.

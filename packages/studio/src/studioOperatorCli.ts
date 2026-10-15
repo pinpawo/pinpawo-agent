@@ -12,6 +12,10 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
   pinpawo-studio channels add-member <channelId> --member <participantId>
   pinpawo-studio channels remove-member <channelId> --member <participantId>
   pinpawo-studio channels sessions <channelId>
+  pinpawo-studio clients list
+  pinpawo-studio clients add <clientId> --label <name>
+  pinpawo-studio clients add-key <clientId>
+  pinpawo-studio clients revoke <clientId>
   pinpawo-studio pets
   pinpawo-studio queues
   pinpawo-studio snapshot <petId> [--full]
@@ -22,7 +26,8 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
 Connection options (before or after the command):
   --studio-url <origin>  Studio HTTP (default: http://127.0.0.1:3211)
   --agent-url <origin>   Pet Agent Session HTTP (default: http://127.0.0.1:3212)
-  --token-file <path>   Bearer file (default: ~/.pinpawo/local-server-token)
+  --token-file <path>   Bearer file: the local Host token, or a client key
+                        (default: ~/.pinpawo/local-server-token)
 
 Output is JSON; events emits live SSE data as JSON lines for 1–60 seconds
 (default: 30). Pagination is one page, limit 1–200 (default: 50); use nextAfter
@@ -31,11 +36,14 @@ not completion. No request is retried automatically. Read actual state before
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
 Each --pet joins the new Channel with you; no other Pet joins implicitly.
+A client key reaches only channels commands, as the member human:<clientId>;
+everything else needs the local Host token. clients add and add-key print the
+new key once; only its hash is stored. Revoking a client stops all its keys.
 `;
 
-const COMMANDS = new Set(['channels', 'pets', 'queues', 'snapshot', 'events', 'dispatch', 'send']);
+const COMMANDS = new Set(['channels', 'clients', 'pets', 'queues', 'snapshot', 'events', 'dispatch', 'send']);
 const CONNECTION_OPTIONS = new Set(['--studio-url', '--agent-url', '--token-file']);
-type OperatorCommand = 'channels' | 'pets' | 'queues' | 'snapshot' | 'events' | 'dispatch' | 'send';
+type OperatorCommand = 'channels' | 'clients' | 'pets' | 'queues' | 'snapshot' | 'events' | 'dispatch' | 'send';
 export type StudioOperatorOptions = {
   help: boolean;
   command: OperatorCommand;
@@ -51,6 +59,7 @@ export type StudioOperatorOptions = {
   replyTo?: string;
   title?: string;
   description?: string;
+  label?: string;
   pets: string[];
   member?: { kind: 'human' | 'pet'; id: string };
   idempotencyKey?: string;
@@ -78,7 +87,14 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     return { help: true, command, studioUrl: '', agentUrl: '', tokenFile: '', mentions: [], pets: [], seconds: 30, full: false };
   }
   const allowed = new Set(CONNECTION_OPTIONS);
-  const action = command === 'channels' ? args[start + 1] : undefined;
+  const hasAction = command === 'channels' || command === 'clients';
+  const action = hasAction ? args[start + 1] : undefined;
+  if (command === 'clients') {
+    if (!CLIENT_ACTIONS.includes(action ?? '')) {
+      throw new Error(`Expected clients ${CLIENT_ACTIONS.slice(0, -1).join(', ')}, or ${CLIENT_ACTIONS.at(-1)}.`);
+    }
+    if (action === 'add') allowed.add('--label');
+  }
   if (command === 'channels') {
     if (!CHANNEL_ACTIONS.includes(action ?? '')) {
       throw new Error(`Expected channels ${CHANNEL_ACTIONS.slice(0, -1).join(', ')}, or ${CHANNEL_ACTIONS.at(-1)}.`);
@@ -103,7 +119,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   const pets: string[] = [];
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
-    if (index === start || (command === 'channels' && index === start + 1)) continue;
+    if (index === start || (hasAction && index === start + 1)) continue;
     const argument = args[index];
     if (!argument.startsWith('-')) { positional.push(argument); continue; }
     if (!allowed.has(argument)) throw new Error(`Unknown option for ${command}: ${argument}`);
@@ -118,10 +134,13 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     else values.set(argument, value);
   }
   const needsId = !['pets', 'queues'].includes(command)
-    && !(command === 'channels' && ['list', 'create'].includes(action!));
+    && !(command === 'channels' && ['list', 'create'].includes(action!))
+    && !(command === 'clients' && action === 'list');
   if (positional.length !== (needsId ? 1 : 0) || positional.some(value => !value.trim())) {
-    throw new Error(needsId ? `Expected one ${command === 'channels' ? 'Channel' : 'Pet'} id.` : 'Unexpected positional argument.');
+    const noun = command === 'channels' ? 'Channel' : command === 'clients' ? 'client' : 'Pet';
+    throw new Error(needsId ? `Expected one ${noun} id.` : 'Unexpected positional argument.');
   }
+  if (command === 'clients' && action === 'add' && !values.has('--label')) throw new Error('--label is required.');
   if ((command === 'dispatch' || command === 'send' || (command === 'channels' && action === 'send')) && !values.has('--file')) {
     throw new Error('--file is required (use - for stdin).');
   }
@@ -146,11 +165,13 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
     title: values.get('--title'), description: values.get('--description'), pets: [...new Set(pets)],
+    label: values.get('--label'),
     ...(values.has('--member') ? { member: memberRef(values.get('--member')!) } : {}),
   };
 }
 
 const CHANNEL_ACTIONS = ['list', 'create', 'read', 'send', 'members', 'add-member', 'remove-member', 'sessions'];
+const CLIENT_ACTIONS = ['list', 'add', 'add-key', 'revoke'];
 
 /** A participantId names one member: its kind and its URI-encoded id. */
 function memberRef(participantId: string): { kind: 'human' | 'pet'; id: string } {
@@ -189,6 +210,10 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
       members: '/channels/members', 'add-member': '/channels/members', 'remove-member': '/channels/members/remove',
       sessions: '/channels/sessions',
     }[action!]!;
+  } else if (command === 'clients') {
+    route = { list: '/clients', add: '/clients', 'add-key': '/clients/keys', revoke: '/clients/revoke' }[action!]!;
+    if (action === 'add') body = { clientId: id, label: options.label };
+    else if (action !== 'list') body = { clientId: id };
   } else if (['snapshot', 'events', 'send'].includes(command)) {
     base = options.agentUrl;
     route = `/agent-session/pets/${encodeURIComponent(id!)}/${command === 'send' ? 'messages' : command}`;

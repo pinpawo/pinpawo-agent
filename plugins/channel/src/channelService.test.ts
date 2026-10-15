@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createStudioStorage, type StudioStorageConfig } from '@pinpawo/studio';
+import {
+  KyselyClientStore, StudioClients, clientMigrations, createStudioStorage, type ClientDatabase, type StudioStorageConfig,
+} from '@pinpawo/studio';
 import { createPglitePool } from '../../../tests/support/pglitePool';
 import { ChannelAccessError, ChannelNotFoundError, ChannelService } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';
@@ -10,6 +12,9 @@ const owner: MemberRef = { kind: 'human', id: 'owner' };
 const guest: MemberRef = { kind: 'human', id: 'guest' };
 const executor: MemberRef = { kind: 'pet', id: 'executor' };
 const pets = () => [{ petId: 'executor', name: 'Executor' }, { petId: 'reviewer', name: 'Reviewer' }];
+/** Studio clients as Channel sees them: `retired` is revoked. */
+const clients = new Map([['owner', 'owner'], ['guest', 'guest'], ['retired', 'Retired']]);
+const humans = async (id: string) => clients.has(id) ? { label: clients.get(id)!, active: id !== 'retired' } : undefined;
 
 const backends: Array<[string, () => StudioStorageConfig]> = [
   ['sqlite', () => ({ kind: 'sqlite', path: ':memory:' })],
@@ -22,7 +27,7 @@ for (const [backend, config] of backends) {
     const storage = createStudioStorage(config());
     try {
       const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-      await run(new ChannelService({ store: wrap(store), pets }), store);
+      await run(new ChannelService({ store: wrap(store), pets, humans }), store);
     } finally { await storage.close(); }
   }
 
@@ -55,6 +60,8 @@ for (const [backend, config] of backends) {
     await assert.rejects(service.addMember(guest, channelId, guest), ChannelAccessError);
     await assert.rejects(service.readContext(owner, 'missing'), ChannelNotFoundError);
     await assert.rejects(service.addMember(owner, channelId, { kind: 'pet', id: 'ghost' }), /Unknown Pet/);
+    await assert.rejects(service.addMember(owner, channelId, { kind: 'human', id: 'stranger' }), /Unknown Studio client/);
+    await assert.rejects(service.addMember(owner, channelId, { kind: 'human', id: 'retired' }), /Unknown Studio client/);
 
     const events: string[] = [];
     service.subscribe(event => events.push(event.type));
@@ -68,6 +75,11 @@ for (const [backend, config] of backends) {
     assert.deepEqual((await service.listMembers(owner, channelId)).map(member => member.participantId), ['human:owner', 'pet:executor']);
     await service.addMember(owner, channelId, guest);
     assert.equal((await service.readContext(guest, channelId)).messages.length, 1);
+    // A human's label is the Studio client's current label.
+    clients.set('guest', 'Guest');
+    try {
+      assert.deepEqual((await service.listMembers(owner, channelId)).map(member => member.label), ['owner', 'Executor', 'Guest']);
+    } finally { clients.set('guest', 'guest'); }
     assert.deepEqual(events, ['channel.member.joined', 'channel.message.created', 'channel.member.left', 'channel.member.joined']);
   }));
 
@@ -140,6 +152,29 @@ for (const [backend, config] of backends) {
       assert.deepEqual(await Promise.all(seen), [true]);
       assert.deepEqual(await service.getMessage(channelId, message.messageId), message);
     }, failing);
+  });
+
+  test(`${backend}: human labels come from Studio clients in the same database without blocking Channel transactions`, async () => {
+    const storage = createStudioStorage(config());
+    try {
+      const clientDb = await storage.open<ClientDatabase>('studio', clientMigrations);
+      const clients = new StudioClients(async () => new KyselyClientStore(clientDb));
+      await clients.ensure({ clientId: 'owner', label: 'Owner' });
+      await clients.create({ clientId: 'guest', label: 'Guest' });
+      const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
+      const service = new ChannelService({ store, pets, humans: async (id) => {
+        const client = await clients.get(id);
+        return client && { label: client.label, active: !client.revokedAt };
+      } });
+      const { channel, members } = await service.createChannel(owner, { title: 'A', pets: ['executor'] });
+      assert.deepEqual(members.map(member => member.label), ['Owner', 'Executor']);
+      assert.equal((await service.addMember(owner, channel.channelId, guest)).label, 'Guest');
+      const { message } = await service.postMessage(owner, channel.channelId, { body: 'Hi [@g](participant:human:guest)' });
+      assert.deepEqual(message.mentions, [{ participantId: 'human:guest', label: 'Guest' }]);
+      await clients.revoke('guest');
+      await service.removeMember(owner, channel.channelId, guest);
+      await assert.rejects(service.addMember(owner, channel.channelId, guest), /Unknown Studio client/);
+    } finally { await storage.close(); }
   });
 
   test(`${backend}: a session reservation is made once per (Channel, Pet), unique per Pet session, and normalizes Channel ids`, () => withService(async (service) => {

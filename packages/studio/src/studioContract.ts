@@ -26,6 +26,7 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 
 import type { StudioPetRegistration } from './types';
 import type { StudioPluginStorage } from './storage/studioStorage';
+import type { StudioClients } from './clients/studioClients';
 import type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
@@ -111,6 +112,11 @@ export type StudioPluginContext = {
    * Studio closes it after every Plugin has stopped.
    */
   storage: StudioPluginStorage;
+  /**
+   * Who may connect to this Studio. Studio keeps the identities; the HTTP
+   * Plugin authenticates requests with them and other Plugins read labels.
+   */
+  clients: StudioClients;
 };
 
 type PetSessionPort = import('pinpawo/host-runtime').PetSessionPort;

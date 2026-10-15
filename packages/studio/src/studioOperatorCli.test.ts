@@ -25,6 +25,8 @@ test('operator parser accepts connection flags on either side and rejects incomp
     ['events', 'p', '--seconds', '0'], ['events', 'p', '--seconds', '61'],
     ['pets', '--studio-url', 'https://user:secret@example.com'],
     ['pets', '--agent-url', 'http://localhost/path'],
+    ['clients'], ['clients', 'show'], ['clients', 'list', 'a'], ['clients', 'add', 'a'], ['clients', 'add', '--label', 'A'],
+    ['clients', 'revoke'], ['clients', 'add-key', 'a', '--label', 'A'],
   ]) assert.throws(() => parseStudioOperatorArgs(args));
   for (const args of [[], ['start'], ['init'], ['tmux'], ['console']]) {
     assert.equal(parseStudioOperatorArgs(args), null);
@@ -104,6 +106,14 @@ test('operator commands send the existing wire protocol without retries or start
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/channels/members', { channelId: 'c', kind: 'human', id: 'a b' }]);
   await run(['channels', 'remove-member', 'c', '--member', 'pet:reviewer']);
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/channels/members/remove', { channelId: 'c', kind: 'pet', id: 'reviewer' }]);
+  await run(['clients', 'list']);
+  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url], ['GET', '/clients']);
+  await run(['clients', 'add', 'alice', '--label', 'Alice']);
+  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/clients', { clientId: 'alice', label: 'Alice' }]);
+  await run(['clients', 'add-key', 'alice']);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/clients/keys', { clientId: 'alice' }]);
+  await run(['clients', 'revoke', 'alice']);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/clients/revoke', { clientId: 'alice' }]);
   await run(['dispatch', 'executor', '--file', join(dir, 'body.md'), '--idempotency-key', 'stable-key']);
   assert.equal(seen.at(-1)?.body?.idempotencyKey, 'stable-key');
   assert.equal(seen.at(-1)?.body?.petId, 'executor');

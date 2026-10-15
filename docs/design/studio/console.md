@@ -39,6 +39,8 @@ Reply 预选、改选/清除与全局队列按 Channel 设计处理。投递结�
 每个 Host/credential 只有一个 SSE 连接；刷新与 POST 不重建它。
 先建立观察再允许提交，订阅后刷新领域 snapshot/history；瞬时失败有限退避重连，
 鉴权失败要求更正凭证。token 保存在浏览器 session，不写入 URL。
+Console 用本机 Host token 连接（它要用 `/events`、`/pets` 和 Pet session），在 Channel 里是 `human:local`。
+只有 Channel 路由的客户 key 目前不能用 Console。添加 human 成员时填的是已登记的 Studio 客户 id。
 
 SSE 是 live-only，断线后重读各领域自己的持久事实，不用事件流重建历史。
 Channel 完整读取消息分页和 session 绑定。completed 不代表业务验收。

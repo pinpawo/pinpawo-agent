@@ -269,6 +269,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     plugins: [plugin],
   });
   assert.deepEqual(pluginContextKeys, [
+    'clients',
     'dispatch',
     'hooks',
     'listDispatchQueues',

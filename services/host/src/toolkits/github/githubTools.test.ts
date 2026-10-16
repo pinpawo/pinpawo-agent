@@ -168,7 +168,9 @@ esac
 `, 'utf-8');
   const boundedOverview = String(await ghPrViewTool.invoke({ cwd: workdir, pr: '12' }));
   assert.equal(boundedOverview.startsWith('x'.repeat(30_000)), true);
-  assert.match(boundedOverview, /\[truncated 1 chars\]$/);
+  const overviewFile = /\[truncated 1 chars; full output: (.+\.txt)\]$/.exec(boundedOverview)?.[1];
+  assert.ok(overviewFile, 'the marker names the full output file');
+  rmSync(overviewFile, { force: true });
 
   writeFileSync(fakeGh, `#!/bin/sh
 case "$*" in

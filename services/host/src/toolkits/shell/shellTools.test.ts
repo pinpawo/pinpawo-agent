@@ -193,14 +193,17 @@ test('runShellTool separates stderr and reports exit codes', async () => {
   );
 });
 
-test('runShellTool truncates stdout larger than the old 64KB buffer limit', async () => {
+test('runShellTool truncates stdout larger than the old 64KB buffer limit', async (t) => {
   const output = String(await runShellTool.invoke({
     command: 'node -e "process.stdout.write(\'x\'.repeat(70 * 1024))"',
   }, inSession));
 
   assert.doesNotMatch(output, /ENOBUFS/);
   assert.match(output, /^x+/);
-  assert.match(output, /\[\.\.\. truncated \d+ chars \.\.\.\]/);
+  const fullPath = /\[\.\.\. truncated \d+ chars; full output: (\S+\.txt) \.\.\.\]/.exec(output)?.[1];
+  assert.ok(fullPath, 'the marker names the full output file');
+  t.after(() => rmSync(fullPath, { force: true }));
+  assert.equal(readFileSync(fullPath, 'utf8').length, 70 * 1024);
 });
 
 test('a short-command timeout preserves prior side effects without retrying', async (t) => {
@@ -219,10 +222,14 @@ test('a short-command timeout preserves prior side effects without retrying', as
   assert.deepEqual(await shell.list('thread-shell'), []);
 });
 
-test('truncateShellOutput keeps head and tail with a marker', () => {
+test('truncateShellOutput keeps head and tail and saves the full output', (t) => {
   const long = 'a'.repeat(50) + 'b'.repeat(50);
   const truncated = truncateShellOutput(long, 40);
-  assert.match(truncated, /^a+\n\[\.\.\. truncated 60 chars \.\.\.\]\nb+$/);
+  const marker = /^a+\n\[\.\.\. truncated 60 chars; full output: (.+\.txt) \.\.\.\]\nb+$/.exec(truncated);
+  assert.ok(marker, truncated);
+  const fullPath = marker[1]!;
+  t.after(() => rmSync(fullPath, { force: true }));
+  assert.equal(readFileSync(fullPath, 'utf8'), long);
   assert.equal(truncateShellOutput('short', 40), 'short');
 });
 

@@ -8,19 +8,20 @@ import { fullOutputNote, saveFullToolOutput } from './toolOutputFile';
 test('saveFullToolOutput writes a private file with the full text', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-tool-output-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const path = saveFullToolOutput('full text', dir);
-  assert.ok(path);
+  const saved = saveFullToolOutput('full text', dir);
+  assert.ok('path' in saved);
+  const { path } = saved;
   assert.ok(path.startsWith(dir));
   assert.equal(readFileSync(path, 'utf8'), 'full text');
   if (process.platform !== 'win32') assert.equal(statSync(path).mode & 0o777, 0o600);
 });
 
-test('fullOutputNote is empty when the file cannot be written', (t) => {
+test('fullOutputNote says why the file could not be written', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-tool-output-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const blocker = join(dir, 'not-a-dir');
   writeFileSync(blocker, '');
-  assert.equal(fullOutputNote('x', blocker), '');
+  assert.match(fullOutputNote('x', blocker), /^; full output not saved \((EEXIST|ENOTDIR)\), omitted part is lost$/);
 });
 
 test('the first write prunes files older than a week', (t) => {

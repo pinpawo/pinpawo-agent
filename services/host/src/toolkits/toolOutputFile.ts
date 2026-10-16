@@ -26,26 +26,35 @@ function pruneOldFiles(dir: string, now: number) {
 }
 
 /**
- * Write the full output and return its path. Returns undefined when the file
- * cannot be written; the caller still returns its truncated result.
+ * Write the full output. On failure (disk full, no permission) it reports
+ * why, removes any partial file, and the caller still returns its truncated
+ * result.
  */
-export function saveFullToolOutput(output: string, dir = TOOL_OUTPUT_DIR): string | undefined {
+export function saveFullToolOutput(
+  output: string,
+  dir = TOOL_OUTPUT_DIR,
+): { path: string } | { error: string } {
+  let path: string | undefined;
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!prunedDirs.has(dir)) {
       prunedDirs.add(dir);
       pruneOldFiles(dir, Date.now());
     }
-    const path = join(dir, `${randomUUID()}.txt`);
+    path = join(dir, `${randomUUID()}.txt`);
     writeFileSync(path, output, { encoding: 'utf-8', mode: 0o600 });
-    return path;
-  } catch {
-    return undefined;
+    return { path };
+  } catch (error) {
+    if (path) rmSync(path, { force: true });
+    const code = (error as NodeJS.ErrnoException).code;
+    return { error: code ?? (error instanceof Error ? error.message : String(error)) };
   }
 }
 
 /** The note a truncation marker carries about where the full output went. */
 export function fullOutputNote(output: string, dir?: string) {
-  const path = saveFullToolOutput(output, dir);
-  return path ? `; full output: ${path}` : '';
+  const saved = saveFullToolOutput(output, dir);
+  return 'path' in saved
+    ? `; full output: ${saved.path}`
+    : `; full output not saved (${saved.error}), omitted part is lost`;
 }

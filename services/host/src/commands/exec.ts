@@ -14,6 +14,7 @@ import type { Readable, Writable } from 'node:stream';
 import {
   parseAgentServerMessage,
   type AgentClientMessage,
+  type AgentErrorDiagnostics,
   type AgentRuntimeEvent,
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
@@ -41,6 +42,7 @@ export type ExecResult = {
   status: ExecStatus;
   reply: string;
   error?: string;
+  errorDiagnostics?: AgentErrorDiagnostics;
   /** Kind of the pending interrupt when the run stopped waiting on one. */
   pendingInterruptKind?: string;
   /**
@@ -165,7 +167,8 @@ export function runExecSession(
           finish({ status: timedOut ? 'timeout' : 'interrupted', reply: '', error: event.message });
           return;
         case 'error':
-          finish({ status: timedOut ? 'timeout' : 'failed', reply: '', error: event.message });
+          finish({ status: timedOut ? 'timeout' : 'failed', reply: '', error: event.message,
+            ...(event.diagnostics ? { errorDiagnostics: event.diagnostics } : {}) });
           return;
         default:
           return;

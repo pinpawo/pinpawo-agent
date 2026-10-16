@@ -45,7 +45,10 @@ export function saveFullToolOutput(
     writeFileSync(path, output, { encoding: 'utf-8', mode: 0o600 });
     return { path };
   } catch (error) {
-    if (path) rmSync(path, { force: true });
+    // Cleanup is best-effort: it must not replace the original write failure.
+    if (path) {
+      try { rmSync(path, { force: true }); } catch { /* retain the write error */ }
+    }
     const code = (error as NodeJS.ErrnoException).code;
     return { error: code ?? (error instanceof Error ? error.message : String(error)) };
   }

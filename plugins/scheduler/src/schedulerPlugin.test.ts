@@ -76,6 +76,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
   });
   await plugin.start({
     dispatch: async () => ({ petId: 'worker', invocationId: 'unused' }),
+    allocateSessionId: () => 'unused',
     notify: (event) => { events.push(event); },
     subscribe: () => () => undefined,
     listPets: () => [{ petId: 'worker', name: 'Worker' }],

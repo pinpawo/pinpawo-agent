@@ -1,9 +1,8 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { allocatePetSessionId, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelParticipantId } from './channelParticipants';
 import {
@@ -14,7 +13,7 @@ import type { ChannelStore, MemberRef } from './store/channelStore';
 import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
 function requireChannelInvocation() {
-  const invocation = readPetInvocationContext();
+  const invocation = readStudioInvocation();
   if (!invocation || invocation.scope?.namespace !== 'channel') {
     throw new Error('Channel tools require a Host-admitted Channel invocation.');
   }
@@ -86,7 +85,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   /** Run a Pet in its session for this Channel. */
   async function dispatchPet(channelId: string, petId: string, request: string, idempotencyKey?: string): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
-    const binding = await service.reserveSession(channelId, petId, () => allocatePetSessionId(petId));
+    const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
     const receipt = await host().dispatch({
       petId, request,
       ...(idempotencyKey ? { idempotencyKey } : {}),

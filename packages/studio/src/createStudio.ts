@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { allocatePetSessionId } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -193,6 +194,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {
     return {
       dispatch: (request) => dispatch(request, plugin.name),
+      allocateSessionId: allocatePetSessionId,
       notify: (event: StudioEventInput) => notify({
         ...event,
         source: plugin.name,

@@ -36,7 +36,6 @@
     "@pinpawo/studio": "^0.1.0",
     "kysely": "^0.29.6",
     "mdast-util-from-markdown": "2.0.3",
-    "pinpawo": "^0.2.1",
     "zod": "^3.22.0"
   },
   "peerDependencies": {

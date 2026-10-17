@@ -33,8 +33,8 @@ export type {
   StudioStorageConfig,
   StudioStorageDialect,
 } from './storage/studioStorage';
-export { parseStudioDispatchRequest } from './studioInvocation';
-export type { StudioWireDispatchRequest } from './studioInvocation';
+export { parseStudioDispatchRequest, readStudioInvocation } from './studioInvocation';
+export type { StudioInvocation, StudioWireDispatchRequest } from './studioInvocation';
 
 export {
   resolveStudio,

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
 import { atomicWriteFile } from '../atomicFile';
@@ -52,16 +52,33 @@ export function createEmptyTuiSessionState(): TuiSessionState {
   };
 }
 
+/**
+ * Only a missing file starts empty without notice. A file that cannot be read
+ * whole (bad JSON, another version, dropped records) is copied aside before
+ * the empty or partial state can be saved over it.
+ */
 export function loadTuiSessionState(
   filePath: string,
 ): TuiSessionState {
+  let raw: string;
   try {
-    if (!existsSync(filePath)) return createEmptyTuiSessionState();
-    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
-    return parseTuiSessionState(parsed);
-  } catch {
-    return createEmptyTuiSessionState();
+    raw = readFileSync(filePath, 'utf-8');
+  } catch (error) {
+    if (isMissingFile(error)) return createEmptyTuiSessionState();
+    throw error;
   }
+  let parsed: ParsedTuiSessionState;
+  try {
+    parsed = parseTuiSessionState(JSON.parse(raw) as unknown);
+  } catch {
+    parsed = { state: createEmptyTuiSessionState(), complete: false };
+  }
+  if (!parsed.complete) {
+    const backupPath = `${filePath}.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    copyFileSync(filePath, backupPath);
+    console.warn(`[chat-host] TUI session registry ${filePath} was not fully readable; kept the original at ${backupPath}`);
+  }
+  return parsed.state;
 }
 
 export function saveTuiSessionState(
@@ -243,33 +260,47 @@ export function setTuiSessionPendingDispatch(
   return next;
 }
 
-function parseTuiSessionState(value: unknown): TuiSessionState {
+type ParsedTuiSessionState = {
+  state: TuiSessionState;
+  /** False when anything in the file was not understood and was left out. */
+  complete: boolean;
+};
+
+function parseTuiSessionState(value: unknown): ParsedTuiSessionState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return createEmptyTuiSessionState();
+    return { state: createEmptyTuiSessionState(), complete: false };
   }
   const record = value as Record<string, unknown>;
-  if (record.version !== 4) return createEmptyTuiSessionState();
+  if (record.version !== 4) return { state: createEmptyTuiSessionState(), complete: false };
 
   const state = createEmptyTuiSessionState();
+  let complete = true;
   const activeSessionIds = readRecord(record.activeSessionIds);
   const sessions = readRecord(record.sessions);
+  if ((record.activeSessionIds !== undefined && !activeSessionIds)
+    || (record.sessions !== undefined && !sessions)) {
+    complete = false;
+  }
   for (const [petId, sessionId] of Object.entries(activeSessionIds ?? {})) {
     if (typeof sessionId === 'string' && sessionId) {
       state.activeSessionIds[petId] = sessionId;
+    } else {
+      complete = false;
     }
   }
   for (const [sessionId, rawSession] of Object.entries(sessions ?? {})) {
     const parsed = parseSessionRecord(sessionId, rawSession);
-    if (parsed) {
-      state.sessions[parsed.id] = parsed;
-    }
+    if (parsed) state.sessions[parsed.id] = parsed;
+    // A dropped pendingDispatch loses the dispatch identity just as a dropped record would.
+    const droppedPendingDispatch = readRecord(rawSession)?.pendingDispatch !== undefined && !parsed?.pendingDispatch;
+    if (!parsed || droppedPendingDispatch) complete = false;
   }
   for (const [petId, activeId] of Object.entries(state.activeSessionIds)) {
     if (!state.sessions[activeId] || state.sessions[activeId]?.petId !== petId) {
       delete state.activeSessionIds[petId];
     }
   }
-  return state;
+  return { state, complete };
 }
 
 function parseSessionRecord(id: string, value: unknown): TuiSessionRecord | null {
@@ -364,4 +395,8 @@ function readNonNegativeInteger(value: unknown) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function isMissingFile(error: unknown) {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
 }

@@ -277,18 +277,23 @@ function parseTuiSessionState(value: unknown): ParsedTuiSessionState {
   let complete = true;
   const activeSessionIds = readRecord(record.activeSessionIds);
   const sessions = readRecord(record.sessions);
+  if ((record.activeSessionIds !== undefined && !activeSessionIds)
+    || (record.sessions !== undefined && !sessions)) {
+    complete = false;
+  }
   for (const [petId, sessionId] of Object.entries(activeSessionIds ?? {})) {
     if (typeof sessionId === 'string' && sessionId) {
       state.activeSessionIds[petId] = sessionId;
+    } else {
+      complete = false;
     }
   }
   for (const [sessionId, rawSession] of Object.entries(sessions ?? {})) {
     const parsed = parseSessionRecord(sessionId, rawSession);
-    if (parsed) {
-      state.sessions[parsed.id] = parsed;
-    } else {
-      complete = false;
-    }
+    if (parsed) state.sessions[parsed.id] = parsed;
+    // A dropped pendingDispatch loses the dispatch identity just as a dropped record would.
+    const droppedPendingDispatch = readRecord(rawSession)?.pendingDispatch !== undefined && !parsed?.pendingDispatch;
+    if (!parsed || droppedPendingDispatch) complete = false;
   }
   for (const [petId, activeId] of Object.entries(state.activeSessionIds)) {
     if (!state.sessions[activeId] || state.sessions[activeId]?.petId !== petId) {

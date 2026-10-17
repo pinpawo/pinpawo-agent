@@ -197,6 +197,32 @@ test('tui session registry persists a suspended dispatch across restart and summ
   const reloaded = loadTuiSessionState(filePath).sessions[session.id];
   assert.ok(reloaded, 'a malformed suspension does not drop the session');
   assert.equal(reloaded.pendingDispatch, undefined);
+  assert.deepEqual(await readBackups(dir), [JSON.stringify(raw)], 'the dropped suspension stays in the backup');
+});
+
+test('tui session registry keeps a backup through load and save when a container or field is discarded', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
+  const filePath = path.join(dir, 'tui-sessions.json');
+  const seed = loadTuiSessionState(filePath);
+  const session = ensureActiveTuiSession(seed, 'pet-a', 'test-profile');
+  const cases = [
+    { version: 4, activeSessionIds: { 'pet-a': session.id }, sessions: [session] },
+    { version: 4, activeSessionIds: [session.id], sessions: { [session.id]: session } },
+    { version: 4, activeSessionIds: { 'pet-a': 7 }, sessions: { [session.id]: session } },
+    { version: 4, activeSessionIds: { 'pet-a': session.id }, sessions: { [session.id]: {
+      ...session,
+      pendingDispatch: { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'x', scope: 'channel' },
+    } } },
+  ];
+  for (const persisted of cases) {
+    const original = JSON.stringify(persisted);
+    await writeFile(filePath, original, 'utf8');
+    const state = loadTuiSessionState(filePath);
+    ensureActiveTuiSession(state, 'pet-a', 'test-profile');
+    saveTuiSessionState(state, filePath);
+    assert.deepEqual(await readBackups(dir), [original]);
+    await clearBackups(dir);
+  }
 });
 
 async function readBackups(dir: string) {

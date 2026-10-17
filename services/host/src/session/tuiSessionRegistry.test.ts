@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -58,14 +58,29 @@ test('tui session registry rejects unversioned and unsupported persisted state',
     { version: 5, activeSessionIds: {}, sessions: {} },
   ];
 
-  for (const persisted of unsupportedStates) {
-    await writeFile(filePath, JSON.stringify(persisted), 'utf8');
+  for (const persisted of [...unsupportedStates.map(state => JSON.stringify(state)), '{"version": 4,', 'null']) {
+    await writeFile(filePath, persisted, 'utf8');
     assert.deepEqual(loadTuiSessionState(filePath), {
       version: 4,
       activeSessionIds: {},
       sessions: {},
     });
+    assert.deepEqual(await readBackups(tmp), [persisted], 'the original bytes are kept before anything saves over them');
+    await clearBackups(tmp);
   }
+});
+
+test('tui session registry keeps a valid or missing file without a backup and fails on read errors', async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
+  const filePath = path.join(tmp, 'tui-sessions.json');
+  const state = loadTuiSessionState(filePath);
+  ensureActiveTuiSession(state, 'pet-a', 'test-profile');
+  saveTuiSessionState(state, filePath);
+  assert.deepEqual(loadTuiSessionState(filePath), state);
+  assert.deepEqual(await readBackups(tmp), []);
+  const directory = path.join(tmp, 'is-a-directory.json');
+  await mkdir(directory);
+  assert.throws(() => loadTuiSessionState(directory), /EISDIR/);
 });
 
 test('tui session registry drops malformed current records', async () => {
@@ -108,6 +123,8 @@ test('tui session registry drops malformed current records', async () => {
       activeSessionIds: {},
       sessions: {},
     });
+    assert.equal((await readBackups(tmp)).length, 1, 'a dropped record keeps the original file');
+    await clearBackups(tmp);
   }
 });
 
@@ -181,3 +198,14 @@ test('tui session registry persists a suspended dispatch across restart and summ
   assert.ok(reloaded, 'a malformed suspension does not drop the session');
   assert.equal(reloaded.pendingDispatch, undefined);
 });
+
+async function readBackups(dir: string) {
+  const names = (await readdir(dir)).filter(name => name.includes('.unreadable-'));
+  return Promise.all(names.map(name => readFile(path.join(dir, name), 'utf8')));
+}
+
+async function clearBackups(dir: string) {
+  for (const name of (await readdir(dir)).filter(name => name.includes('.unreadable-'))) {
+    await rm(path.join(dir, name));
+  }
+}

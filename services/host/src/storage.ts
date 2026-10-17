@@ -39,17 +39,49 @@ export type StoredConfig = {
   capability_dirs?: string[];
 };
 
+/**
+ * A missing config reads as empty. One that cannot be read or is not a JSON
+ * object also reads as empty, so commands still run, but it is never saved
+ * over: the user's model, workdir and capability settings stay on disk.
+ */
 export function loadStoredConfig(): StoredConfig {
-  try {
-    const raw = readFileSync(CONFIG_PATH, 'utf-8');
-    return JSON.parse(raw) as StoredConfig;
-  } catch {
-    return {};
+  const read = readStoredConfigFile();
+  if ('config' in read) return read.config;
+  if (!warnedUnreadableConfig) {
+    warnedUnreadableConfig = true;
+    console.warn(`[pinpawo] ignoring ${CONFIG_PATH}: ${read.reason}`);
   }
+  return {};
 }
 
 export function saveStoredConfig(config: StoredConfig) {
+  const read = readStoredConfigFile();
+  if ('reason' in read) {
+    throw new Error(`Refusing to overwrite ${CONFIG_PATH}: ${read.reason}. Fix or remove the file, then retry.`);
+  }
   atomicWriteFile(CONFIG_PATH, JSON.stringify(config, null, 2));
+}
+
+let warnedUnreadableConfig = false;
+
+function readStoredConfigFile(): { config: StoredConfig } | { reason: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(CONFIG_PATH, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { config: {} };
+    return { reason: `cannot be read (${(error as NodeJS.ErrnoException).code ?? 'unknown error'})` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { reason: 'is not valid JSON' };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { reason: 'is not a JSON object' };
+  }
+  return { config: parsed as StoredConfig };
 }
 
 export function configPath() {

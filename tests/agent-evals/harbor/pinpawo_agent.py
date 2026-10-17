@@ -13,6 +13,7 @@ instruction once. exec.json, trajectory.jsonl and the console log land in the
 trial's agent log directory.
 """
 
+import asyncio
 import json
 import shlex
 from pathlib import Path
@@ -33,6 +34,21 @@ _LOAD_NODE = 'export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; '
 # Host crash). Every other status (waiting on a review, timeout) is a real
 # outcome for the verifier to judge, so it must not fail the trial.
 _EXEC_FAILED = 1
+# Process group of the running `pinpawo exec` and its Host. Harbor cancels an
+# agent by stopping its local `docker exec` client, which leaves the processes
+# inside the container running; the group id lets the adapter stop exactly
+# them. The RS service runs detached in its own group, so background processes
+# the agent started for the task (a VM, a server) are left alone.
+_PGID_FILE = "/tmp/pinpawo-exec.pgid"
+# Graceful signal first, then SIGKILL; the run is already past its deadline.
+_STOP_RUN = f"""
+f={_PGID_FILE}; [ -s "$f" ] || exit 0; g=$(cat "$f")
+kill -TERM -- "-$g" 2>/dev/null || exit 0
+for _ in $(seq 50); do kill -0 -- "-$g" 2>/dev/null || exit 0; sleep 0.1; done
+kill -KILL -- "-$g" 2>/dev/null
+for _ in $(seq 20); do kill -0 -- "-$g" 2>/dev/null || exit 0; sleep 0.1; done
+echo "pinpawo exec group $g is still running" >&2; exit 1
+"""
 
 
 class PinpawoOptions(InstalledAgentOptions):
@@ -119,16 +135,33 @@ class PinpawoAgent(BaseInstalledAgent):
         approval = self.options.approval if self.options else "auto"
         # No --workdir: the Host works in the container's working directory,
         # which is where the task expects changes.
-        command = (
-            _LOAD_NODE
-            + "set +e; "
-            + f"pinpawo exec {shlex.quote(instruction)} --approval {shlex.quote(approval)} "
+        run = (
+            f"pinpawo exec {shlex.quote(instruction)} --approval {shlex.quote(approval)} "
             + "--trajectory /logs/agent/trajectory.jsonl --output /logs/agent/exec.json "
             + "2>&1 | tee /logs/agent/pinpawo.txt; "
-            + "code=${PIPESTATUS[0]}; "
+            + "exit ${PIPESTATUS[0]}"
+        )
+        # `set -m` starts the subshell as the leader of its own process group,
+        # so its pid is the group id `_STOP_RUN` signals.
+        command = (
+            _LOAD_NODE
+            + "set +e; set -m; "
+            + f"( {run} ) & echo $! > {_PGID_FILE}; wait $!; code=$?; "
             + f'[ "$code" = {_EXEC_FAILED} ] && exit 1; exit 0'
         )
-        await self.exec_as_agent(environment, command)
+        try:
+            await self.exec_as_agent(environment, command)
+        except asyncio.CancelledError:
+            # Harbor's agent timeout. Stop the run before the verifier starts,
+            # so nothing the agent does after the deadline reaches the score.
+            await self._stop_run(environment)
+            raise
+
+    async def _stop_run(self, environment: BaseEnvironment) -> None:
+        try:
+            await self.exec_as_agent(environment, _STOP_RUN, timeout_sec=30)
+        except Exception as error:
+            self.logger.warning(f"Could not confirm pinpawo exec stopped: {error}")
 
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:

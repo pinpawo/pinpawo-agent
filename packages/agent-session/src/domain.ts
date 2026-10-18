@@ -72,6 +72,13 @@ export type AgentTimelineEntry =
   | AgentMessageEntry
   | AgentOperationEntry;
 
+/** Largest `timelineLimit` a snapshot or resume may ask for. */
+export const AGENT_TIMELINE_LIMIT_MAX = 500;
+
+export type AgentTimelineWindow = {
+  omitted: number;
+};
+
 export type AgentSessionMessageInput = {
   resultReferences?: AgentResultReference[];
   id?: string;
@@ -161,6 +168,12 @@ export type AgentSession = {
   kind: 'chat';
   actor?: AgentActorView;
   timeline: AgentTimelineEntry[];
+  /**
+   * Present when `timeline` is the newest part of the session only. `omitted`
+   * entries come before it; ask again with a larger `timelineLimit`, or none,
+   * to read them.
+   */
+  timelineWindow?: AgentTimelineWindow;
   activeRun: AgentRunView | null;
   pendingInterrupt: PendingInterruptProjection | null;
   /** Ephemeral delegation plan, separate from the durable conversation timeline. */

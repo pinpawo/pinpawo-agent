@@ -13,6 +13,7 @@ import {
   type AgentRuntimeView,
   type AgentSession,
   type AgentSessionSummary,
+  type AgentTimelineWindow,
 } from './domain';
 import type { PendingInterruptProjection } from './review';
 import type {
@@ -80,6 +81,10 @@ function parseAgentSession(value: unknown): AgentSession | null {
     return parsed ? [parsed] : [];
   });
   if (timeline.length !== value.timeline.length) return null;
+  const timelineWindow = value.timelineWindow === undefined
+    ? undefined
+    : parseAgentTimelineWindow(value.timelineWindow);
+  if (timelineWindow === null) return null;
   const activeRun = value.activeRun === null ? null : parseAgentRun(value.activeRun);
   if (value.activeRun !== null && !activeRun) return null;
   const pendingInterrupt = value.pendingInterrupt === null
@@ -112,6 +117,7 @@ function parseAgentSession(value: unknown): AgentSession | null {
     sessionId: value.sessionId,
     kind: value.kind,
     timeline,
+    ...(timelineWindow ? { timelineWindow } : {}),
     activeRun,
     pendingInterrupt,
     ...(currentPlan !== undefined ? { currentPlan } : {}),
@@ -120,6 +126,13 @@ function parseAgentSession(value: unknown): AgentSession | null {
     ...(isAgentTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
   };
+}
+
+function parseAgentTimelineWindow(value: unknown): AgentTimelineWindow | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'omitted')) return null;
+  return typeof value.omitted === 'number' && Number.isSafeInteger(value.omitted) && value.omitted > 0
+    ? { omitted: value.omitted }
+    : null;
 }
 
 function parseAgentRuntime(value: unknown): AgentRuntimeView | null {

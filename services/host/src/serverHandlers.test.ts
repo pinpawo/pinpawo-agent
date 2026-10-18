@@ -9,7 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { HostGraphService } from './agent/agentGraphService';
 import { ActiveRunRegister } from './agent/activeRunRegister';
@@ -188,6 +188,60 @@ test('session.compact is a v2 session command and returns the authoritative snap
       assert.equal(stale.operation, 'compact');
       assert.match(stale.message, /active session/);
     }
+  } finally {
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('a snapshot may carry only the newest timeline entries', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-timeline-window-'));
+  const sent: HostServerMessage[] = [];
+  const messages = Array.from({ length: 5 }, (_, index) => (index % 2
+    ? new AIMessage({ id: `m-${index}`, content: `reply ${index}` })
+    : new HumanMessage({ id: `m-${index}`, content: `ask ${index}` })));
+  const graphService = {
+    readThreadState: async () => ({ messages, pendingInterrupt: null, currentPlan: null }),
+  } as unknown as HostGraphService;
+  const handlers = createChatHostHandlers({
+    petId: 'pet-a',
+    runtimeConfig: buildHostRuntimeConfig(workdir),
+    ...createTestModelServerDeps(),
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    chatGraphService: graphService,
+    loadContext: loadTestContext,
+  });
+  const ids = (entries: Array<{ id: string }>) => entries.map((entry) => entry.id);
+  const take = (requestId: string) => sent.find((message) => 'requestId' in message && message.requestId === requestId);
+
+  try {
+    const peer = createPeer(sent);
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, { type: 'session.snapshot.get', requestId: 'whole' });
+    const whole = take('whole');
+    assert.equal(whole?.type, 'session.snapshot.result');
+    if (whole?.type !== 'session.snapshot.result') return;
+    assert.deepEqual(ids(whole.snapshot.session.timeline), ['m-0', 'm-1', 'm-2', 'm-3', 'm-4']);
+    assert.equal(whole.snapshot.session.timelineWindow, undefined);
+
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+      type: 'session.snapshot.get', requestId: 'window', timelineLimit: 2,
+    });
+    const window = take('window');
+    assert.equal(window?.type, 'session.snapshot.result');
+    if (window?.type !== 'session.snapshot.result') return;
+    assert.deepEqual(ids(window.snapshot.session.timeline), ['m-3', 'm-4']);
+    assert.deepEqual(window.snapshot.session.timelineWindow, { omitted: 3 });
+
+    // Reading further back is the same request with a larger limit.
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+      type: 'session.snapshot.get', requestId: 'wider', timelineLimit: 4,
+    });
+    const wider = take('wider');
+    assert.equal(wider?.type, 'session.snapshot.result');
+    if (wider?.type !== 'session.snapshot.result') return;
+    assert.deepEqual(ids(wider.snapshot.session.timeline), ['m-1', 'm-2', 'm-3', 'm-4']);
+    assert.deepEqual(wider.snapshot.session.timelineWindow, { omitted: 1 });
   } finally {
     handlers.close();
     rmSync(workdir, { recursive: true, force: true });

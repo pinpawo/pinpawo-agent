@@ -13,10 +13,11 @@ import type {
   AgentOperationPhase,
   AgentRuntimeEvent,
 } from './events';
-import type {
-  AgentInputModality,
-  AgentModelProfileSummary,
-  AgentSessionSummary,
+import {
+  AGENT_TIMELINE_LIMIT_MAX,
+  type AgentInputModality,
+  type AgentModelProfileSummary,
+  type AgentSessionSummary,
 } from './domain';
 import type {
   AgentSessionSnapshot,
@@ -75,6 +76,8 @@ export type RuntimeConfigUpdateMessage = {
 export type SessionSnapshotGetMessage = {
   type: 'session.snapshot.get';
   requestId: string;
+  /** Return only the newest entries; omitted, the whole timeline. */
+  timelineLimit?: number;
 };
 
 export type SessionListMessage = {
@@ -91,6 +94,8 @@ export type SessionResumeMessage = {
   type: 'session.resume';
   requestId: string;
   sessionId: string;
+  /** Return only the newest entries; omitted, the whole timeline. */
+  timelineLimit?: number;
 };
 
 /** TUI v2-only explicit request to summarize older checkpointed context. */
@@ -245,6 +250,16 @@ function readJsonRecord(raw: unknown): Record<string, unknown> | null {
 function readString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' ? value : null;
+}
+
+/** `undefined` when absent, `null` when present but not 1..AGENT_TIMELINE_LIMIT_MAX. */
+function readTimelineLimit(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value)
+    && value >= 1 && value <= AGENT_TIMELINE_LIMIT_MAX
+    ? value
+    : null;
 }
 
 function readOptionalString(record: Record<string, unknown>, key: string) {
@@ -670,20 +685,27 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
   if (!record) return null;
   const type = readString(record, 'type');
   if (type === 'ping') return { type: 'ping' };
-  if (
-    type === 'session.snapshot.get'
-    || type === 'session.list'
-    || type === 'session.new'
-  ) {
+  if (type === 'session.list' || type === 'session.new') {
     if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
     const requestId = readString(record, 'requestId');
     return requestId ? { type, requestId } : null;
   }
+  if (type === 'session.snapshot.get') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'timelineLimit'])) return null;
+    const requestId = readString(record, 'requestId');
+    const timelineLimit = readTimelineLimit(record, 'timelineLimit');
+    return requestId && timelineLimit !== null
+      ? { type, requestId, ...(timelineLimit !== undefined ? { timelineLimit } : {}) }
+      : null;
+  }
   if (type === 'session.resume') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId', 'timelineLimit'])) return null;
     const requestId = readString(record, 'requestId');
     const sessionId = readString(record, 'sessionId');
-    return requestId && sessionId ? { type, requestId, sessionId } : null;
+    const timelineLimit = readTimelineLimit(record, 'timelineLimit');
+    return requestId && sessionId && timelineLimit !== null
+      ? { type, requestId, sessionId, ...(timelineLimit !== undefined ? { timelineLimit } : {}) }
+      : null;
   }
   if (type === 'model.list') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;

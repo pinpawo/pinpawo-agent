@@ -240,7 +240,7 @@ export function createChatHostHandlers(
     });
   };
 
-  const loadSnapshot = async (peer?: ServerPeer) => {
+  const loadSnapshot = async (peer?: ServerPeer, timelineLimit?: number) => {
     const requestDeps = runtimeDeps.get();
     const checkpoint = await readCheckpointAtRun(
       () => tuiSessions.readActiveCheckpointPoint(requestDeps),
@@ -261,6 +261,7 @@ export function createChatHostHandlers(
       pendingInterrupt,
       activeRun,
       currentPlan: checkpoint.currentPlan,
+      timelineLimit,
     });
   };
 
@@ -532,7 +533,7 @@ export function createChatHostHandlers(
   // invocation owners until graph output settles. That brief settlement window
   // still counts as an active run here, so a session switch cannot race the
   // old thread's final checkpoint write.
-  const resumeSession = (sessionId: string) => sessionAdmission.transact(async () => {
+  const resumeSession = (sessionId: string, timelineLimit?: number) => sessionAdmission.transact(async () => {
     const requestDeps = runtimeDeps.get();
     const result = await tuiSessions.resumeSession(requestDeps, sessionId);
     const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
@@ -551,6 +552,7 @@ export function createChatHostHandlers(
         sessionTokenUsage: result.sessionTokenUsage,
         pendingInterrupt,
         currentPlan: result.currentPlan,
+        timelineLimit,
       }),
     };
   }, () => {
@@ -745,7 +747,7 @@ export function createChatHostHandlers(
       async () => ({
         type: 'session.snapshot.result',
         requestId: message.requestId,
-        snapshot: await loadSnapshot(client),
+        snapshot: await loadSnapshot(client, message.timelineLimit),
       }),
     ),
     onSessionList: (client, message) => runSessionCommand(
@@ -783,7 +785,7 @@ export function createChatHostHandlers(
           return {
             type: 'session.resume.result',
             requestId: message.requestId,
-            ...await resumeSession(message.sessionId),
+            ...await resumeSession(message.sessionId, message.timelineLimit),
           };
         },
       ),

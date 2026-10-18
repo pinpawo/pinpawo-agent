@@ -3,7 +3,28 @@ import type {
   AgentOperationPhase,
   AgentOperationRaw,
 } from './events';
-import type { AgentOperationEntry } from './domain';
+import type {
+  AgentOperationEntry,
+  AgentTimelineEntry,
+  AgentTimelineWindow,
+} from './domain';
+
+/**
+ * The newest `limit` entries, reaching back to `keepFrom` when that index is
+ * older, so a window never starts inside the run that is still open. A reader
+ * wanting older entries asks again with a larger limit, or none.
+ */
+export function windowAgentTimeline(
+  timeline: readonly AgentTimelineEntry[],
+  limit: number,
+  keepFrom = timeline.length,
+): { timeline: AgentTimelineEntry[]; timelineWindow?: AgentTimelineWindow } {
+  const start = Math.max(0, Math.min(timeline.length - limit, keepFrom));
+  return start > 0
+    ? { timeline: timeline.slice(start), timelineWindow: { omitted: start } }
+    : { timeline: [...timeline] };
+}
+
 
 export function agentOperationKey(event: AgentOperationEvent) {
   return event.operation.id

@@ -136,6 +136,7 @@ export function applySessionSnapshot(
     // Snapshots replace the whole ordered projection. Live-only operation and
     // subagent entries are intentionally dropped when checkpoint data omits them.
     timeline: incoming.timeline.map(cloneTimelineEntry),
+    ...(incoming.timelineWindow ? { timelineWindow: { ...incoming.timelineWindow } } : {}),
     activeRun: incoming.activeRun
       ? normalizeSnapshotRun(incoming.activeRun, session.activeRun, context)
       : null,

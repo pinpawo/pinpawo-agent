@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AGENT_LOCAL_ATTACHMENT_LIMIT,
+  AGENT_TIMELINE_LIMIT_MAX,
   createAgentSessionSnapshot,
   parseAgentClientMessage,
   parseAgentServerMessage,
@@ -223,6 +224,48 @@ test('session compaction protocol is correlated and snapshot-backed', () => {
     compacted: true,
     snapshot,
   });
+});
+
+test('a snapshot or resume may ask for the newest timeline entries only', () => {
+  assert.deepEqual(parseAgentClientMessage({ type: 'session.snapshot.get', requestId: 'snap-1' }), {
+    type: 'session.snapshot.get',
+    requestId: 'snap-1',
+  });
+  assert.deepEqual(parseAgentClientMessage({ type: 'session.snapshot.get', requestId: 'snap-1', timelineLimit: 100 }), {
+    type: 'session.snapshot.get',
+    requestId: 'snap-1',
+    timelineLimit: 100,
+  });
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'session.resume', requestId: 'resume-1', sessionId: 'session-1', timelineLimit: 1,
+  }), { type: 'session.resume', requestId: 'resume-1', sessionId: 'session-1', timelineLimit: 1 });
+  for (const timelineLimit of [0, -1, 1.5, AGENT_TIMELINE_LIMIT_MAX + 1, '10', null]) {
+    assert.equal(parseAgentClientMessage({ type: 'session.snapshot.get', requestId: 'snap-1', timelineLimit }), null);
+    assert.equal(parseAgentClientMessage({
+      type: 'session.resume', requestId: 'resume-1', sessionId: 'session-1', timelineLimit,
+    }), null);
+  }
+
+  const windowed = createAgentSessionSnapshot({
+    sessionId: 'session-1',
+    kind: 'chat',
+    timeline: [{ id: 'm-3', type: 'message', role: 'user', text: 'latest', status: 'completed' }],
+    timelineWindow: { omitted: 2 },
+    activeRun: null,
+    pendingInterrupt: null,
+  });
+  assert.deepEqual(parseAgentServerMessage({ type: 'session.snapshot.result', requestId: 'snap-1', snapshot: windowed }), {
+    type: 'session.snapshot.result',
+    requestId: 'snap-1',
+    snapshot: windowed,
+  });
+  for (const timelineWindow of [{ omitted: 0 }, { omitted: -1 }, { omitted: 2, extra: true }, {}]) {
+    assert.equal(parseAgentServerMessage({
+      type: 'session.snapshot.result',
+      requestId: 'snap-1',
+      snapshot: { ...windowed, session: { ...windowed.session, timelineWindow } },
+    }), null);
+  }
 });
 
 test('model protocol accepts correlated selection messages and sanitized profile lists', () => {

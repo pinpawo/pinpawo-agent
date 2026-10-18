@@ -41,7 +41,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
       seen.push(`policy:${message.toolAuthorizationMode}`);
     },
     onSessionSnapshotGet: (_peer, message) => {
-      seen.push(`snapshot:${message.requestId}`);
+      seen.push(`snapshot:${message.requestId}:${message.timelineLimit ?? ''}`);
     },
     onSessionList: (_peer, message) => {
       seen.push(`sessions:${message.requestId}`);
@@ -116,6 +116,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
     requestId: 'snapshot-1',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
+    type: 'session.snapshot.get',
+    requestId: 'snapshot-2',
+    timelineLimit: 100,
+  }), handlers);
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.list',
     requestId: 'sessions-1',
   }), handlers);
@@ -182,7 +187,8 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'new',
       'policy:auto_authorization',
       'policy:full_access',
-      'snapshot:snapshot-1',
+      'snapshot:snapshot-1:',
+      'snapshot:snapshot-2:100',
       'sessions:sessions-1',
       'session-new:new-1',
       'compact:compact-1:chat:one',

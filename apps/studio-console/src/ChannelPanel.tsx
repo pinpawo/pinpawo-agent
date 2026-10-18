@@ -135,6 +135,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
 
   const selectChannel = (id: string) => {
     if (submitting.current) return;
+    // The loader only reruns when the selection changes, so the open Channel keeps its view.
+    if (id === selected) { setNavigationOpen(false); return; }
     setSelected(id); setContext(null); setMessages([]); setSessions([]);
     setReply(undefined); setBody(''); setError(''); setMemberError(''); setJoiningHuman('');
     setHighlightedMessage(''); setNavigationOpen(false);

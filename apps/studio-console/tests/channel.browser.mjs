@@ -194,6 +194,9 @@ try {
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
   await page.getByText('Human author reply stays public.').waitFor();
   assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect, 'page reload creates no dispatch');
+  await page.locator('.channel-list button').filter({ hasText: 'Customer records' }).click();
+  assert.equal(await page.getByText('Human author reply stays public.').isVisible(), true, 'clicking the open Channel keeps its messages');
+  assert.equal(await page.getByText('Start a Channel').count(), 0);
   host.kill('SIGTERM');
   await page.locator('.connection-state.reconnecting').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);

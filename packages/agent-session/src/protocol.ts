@@ -13,10 +13,12 @@ import type {
   AgentOperationPhase,
   AgentRuntimeEvent,
 } from './events';
-import type {
-  AgentInputModality,
-  AgentModelProfileSummary,
-  AgentSessionSummary,
+import {
+  AGENT_TIMELINE_LIMIT_MAX,
+  type AgentInputModality,
+  type AgentModelProfileSummary,
+  type AgentSessionSummary,
+  type AgentTimelineEntry,
 } from './domain';
 import type {
   AgentSessionSnapshot,
@@ -24,8 +26,10 @@ import type {
 } from './snapshot';
 import { isJsonValue } from './snapshot';
 import {
+  isTimelineEntryCount,
   parseAgentSessionSnapshot,
   parseAgentSessionSummary,
+  parseAgentTimelineEntry,
 } from './parser';
 import {
   isAgentToolCallStatus,
@@ -75,6 +79,8 @@ export type RuntimeConfigUpdateMessage = {
 export type SessionSnapshotGetMessage = {
   type: 'session.snapshot.get';
   requestId: string;
+  /** Return only the newest entries; omitted, the whole timeline. */
+  timelineLimit?: number;
 };
 
 export type SessionListMessage = {
@@ -91,6 +97,17 @@ export type SessionResumeMessage = {
   type: 'session.resume';
   requestId: string;
   sessionId: string;
+  /** Return only the newest entries; omitted, the whole timeline. */
+  timelineLimit?: number;
+};
+
+/** Read the timeline entries just before `before`, an entry id the reader holds. */
+export type SessionTimelinePageMessage = {
+  type: 'session.timeline.page';
+  requestId: string;
+  sessionId: string;
+  before: string;
+  limit: number;
 };
 
 /** TUI v2-only explicit request to summarize older checkpointed context. */
@@ -123,6 +140,7 @@ export type AgentClientMessage =
   | SessionListMessage
   | SessionNewMessage
   | SessionResumeMessage
+  | SessionTimelinePageMessage
   | SessionCompactMessage
   | ModelListMessage
   | ModelSelectMessage
@@ -179,11 +197,22 @@ export type AgentSessionServerMessage =
       snapshot: AgentSessionSnapshot;
     }
   | {
+      type: 'session.timeline.page.result';
+      requestId: string;
+      sessionId: string;
+      /** Oldest first, ending just before the requested entry. */
+      entries: AgentTimelineEntry[];
+      /** Entries still before `entries`. */
+      omitted: number;
+    }
+  | {
       type: 'session.error';
       requestId: string;
-      operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact';
+      operation: AgentSessionOperation;
       message: string;
     };
+
+export type AgentSessionOperation = 'snapshot' | 'list' | 'new' | 'resume' | 'compact' | 'timeline';
 
 export type AgentModelServerMessage =
   | {
@@ -245,6 +274,16 @@ function readJsonRecord(raw: unknown): Record<string, unknown> | null {
 function readString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' ? value : null;
+}
+
+/** `undefined` when absent, `null` when present but not 1..AGENT_TIMELINE_LIMIT_MAX. */
+function readTimelineLimit(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value)
+    && value >= 1 && value <= AGENT_TIMELINE_LIMIT_MAX
+    ? value
+    : null;
 }
 
 function readOptionalString(record: Record<string, unknown>, key: string) {
@@ -670,20 +709,37 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
   if (!record) return null;
   const type = readString(record, 'type');
   if (type === 'ping') return { type: 'ping' };
-  if (
-    type === 'session.snapshot.get'
-    || type === 'session.list'
-    || type === 'session.new'
-  ) {
+  if (type === 'session.list' || type === 'session.new') {
     if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
     const requestId = readString(record, 'requestId');
     return requestId ? { type, requestId } : null;
   }
+  if (type === 'session.snapshot.get') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'timelineLimit'])) return null;
+    const requestId = readString(record, 'requestId');
+    const timelineLimit = readTimelineLimit(record, 'timelineLimit');
+    return requestId && timelineLimit !== null
+      ? { type, requestId, ...(timelineLimit !== undefined ? { timelineLimit } : {}) }
+      : null;
+  }
   if (type === 'session.resume') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId', 'timelineLimit'])) return null;
     const requestId = readString(record, 'requestId');
     const sessionId = readString(record, 'sessionId');
-    return requestId && sessionId ? { type, requestId, sessionId } : null;
+    const timelineLimit = readTimelineLimit(record, 'timelineLimit');
+    return requestId && sessionId && timelineLimit !== null
+      ? { type, requestId, sessionId, ...(timelineLimit !== undefined ? { timelineLimit } : {}) }
+      : null;
+  }
+  if (type === 'session.timeline.page') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId', 'before', 'limit'])) return null;
+    const requestId = readString(record, 'requestId');
+    const sessionId = readString(record, 'sessionId');
+    const before = readString(record, 'before');
+    const limit = readTimelineLimit(record, 'limit');
+    return requestId && sessionId && before && limit
+      ? { type, requestId, sessionId, before, limit }
+      : null;
   }
   if (type === 'model.list') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
@@ -814,6 +870,18 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       ? { type, requestId, compacted: record.compacted, snapshot }
       : null;
   }
+  if (type === 'session.timeline.page.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId', 'entries', 'omitted'])) return null;
+    const sessionId = readString(record, 'sessionId');
+    if (!sessionId || !Array.isArray(record.entries) || !isTimelineEntryCount(record.omitted)) return null;
+    const entries = record.entries.flatMap((value) => {
+      const entry = parseAgentTimelineEntry(value);
+      return entry ? [entry] : [];
+    });
+    return entries.length === record.entries.length
+      ? { type, requestId, sessionId, entries, omitted: record.omitted }
+      : null;
+  }
   if (type === 'session.error') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'operation', 'message'])) return null;
     const operation = readString(record, 'operation');
@@ -825,6 +893,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
         && operation !== 'new'
         && operation !== 'resume'
         && operation !== 'compact'
+        && operation !== 'timeline'
       )
       || message === null
     ) {

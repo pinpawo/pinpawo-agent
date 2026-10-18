@@ -542,7 +542,8 @@ export class TuiSessionController {
       return;
     }
 
-    if (message.type === 'pong') return;
+    // The TUI reads whole snapshots and never asks for older timeline pages.
+    if (message.type === 'pong' || message.type === 'session.timeline.page.result') return;
     assertNever(message);
   }
 

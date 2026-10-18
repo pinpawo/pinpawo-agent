@@ -19,6 +19,7 @@ function createHandlers(
     onNewSession: () => undefined,
     onRuntimeConfigUpdate: () => undefined,
     onSessionSnapshotGet: () => undefined,
+    onSessionTimelinePage: () => undefined,
     onSessionList: () => undefined,
     onSessionNew: () => undefined,
     onSessionResume: () => undefined,

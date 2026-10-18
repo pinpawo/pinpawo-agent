@@ -7,7 +7,7 @@ import type {
   AgentSessionSnapshot,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
-import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
+import { createAgentSessionSnapshot, windowAgentTimeline } from '@pinpawo/agent-session';
 import type { PendingInterruptSnapshot } from '../agent/serverChatHandler';
 import type { RuntimeProjectionDeps } from '../serverTypes';
 import type { TuiCheckpointMessage } from '../session/serverTuiSessions';
@@ -30,10 +30,23 @@ export function buildHostSessionSnapshot(params: {
   /** Live local transport state; never inferred from checkpoint plan data. */
   activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
+  /** Only the newest entries; omitted, the whole timeline. */
+  timelineLimit?: number;
 }): AgentSessionSnapshot {
   const pendingInterrupt = params.pendingInterrupt?.pendingInterrupt ?? null;
+  const runOpen = Boolean(pendingInterrupt || params.activeRun);
   // A call without a result is still open only while its run is live or paused.
-  const timeline = timelineFromCheckpointMessages(params.messages, Boolean(pendingInterrupt || params.activeRun));
+  const fullTimeline = timelineFromCheckpointMessages(params.messages, runOpen);
+  // An open run starts at the latest user message; a window never cuts into it.
+  let runStart = runOpen ? fullTimeline.length - 1 : -1;
+  while (runStart >= 0) {
+    const entry = fullTimeline[runStart]!;
+    if (entry.type === 'message' && entry.role === 'user') break;
+    runStart -= 1;
+  }
+  const { timeline, timelineWindow } = params.timelineLimit === undefined
+    ? { timeline: fullTimeline, timelineWindow: undefined }
+    : windowAgentTimeline(fullTimeline, params.timelineLimit, runStart < 0 ? fullTimeline.length : runStart);
   const runtime = buildHostRuntimeView(
     params.deps,
     params.modelProfileId,
@@ -51,6 +64,7 @@ export function buildHostSessionSnapshot(params: {
     sessionId: params.sessionId,
     kind: params.kind,
     timeline,
+    ...(timelineWindow ? { timelineWindow } : {}),
     activeRun: params.activeRun ?? null,
     pendingInterrupt,
     ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AGENT_LOCAL_ATTACHMENT_LIMIT,
+  AGENT_TIMELINE_LIMIT_MAX,
   createAgentSessionSnapshot,
   parseAgentClientMessage,
   parseAgentServerMessage,
@@ -223,6 +224,71 @@ test('session compaction protocol is correlated and snapshot-backed', () => {
     compacted: true,
     snapshot,
   });
+});
+
+test('a snapshot or resume may ask for the newest timeline entries only', () => {
+  assert.deepEqual(parseAgentClientMessage({ type: 'session.snapshot.get', requestId: 'snap-1' }), {
+    type: 'session.snapshot.get',
+    requestId: 'snap-1',
+  });
+  assert.deepEqual(parseAgentClientMessage({ type: 'session.snapshot.get', requestId: 'snap-1', timelineLimit: 100 }), {
+    type: 'session.snapshot.get',
+    requestId: 'snap-1',
+    timelineLimit: 100,
+  });
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'session.resume', requestId: 'resume-1', sessionId: 'session-1', timelineLimit: 1,
+  }), { type: 'session.resume', requestId: 'resume-1', sessionId: 'session-1', timelineLimit: 1 });
+  for (const timelineLimit of [0, -1, 1.5, AGENT_TIMELINE_LIMIT_MAX + 1, '10', null]) {
+    assert.equal(parseAgentClientMessage({ type: 'session.snapshot.get', requestId: 'snap-1', timelineLimit }), null);
+    assert.equal(parseAgentClientMessage({
+      type: 'session.resume', requestId: 'resume-1', sessionId: 'session-1', timelineLimit,
+    }), null);
+  }
+
+  const windowed = createAgentSessionSnapshot({
+    sessionId: 'session-1',
+    kind: 'chat',
+    timeline: [{ id: 'm-3', type: 'message', role: 'user', text: 'latest', status: 'completed' }],
+    timelineWindow: { omitted: 2 },
+    activeRun: null,
+    pendingInterrupt: null,
+  });
+  assert.deepEqual(parseAgentServerMessage({ type: 'session.snapshot.result', requestId: 'snap-1', snapshot: windowed }), {
+    type: 'session.snapshot.result',
+    requestId: 'snap-1',
+    snapshot: windowed,
+  });
+  for (const timelineWindow of [{ omitted: 0 }, { omitted: -1 }, { omitted: 2, extra: true }, {}]) {
+    assert.equal(parseAgentServerMessage({
+      type: 'session.snapshot.result',
+      requestId: 'snap-1',
+      snapshot: { ...windowed, session: { ...windowed.session, timelineWindow } },
+    }), null);
+  }
+});
+
+test('timeline pages are correlated, bounded and carry what remains before them', () => {
+  const request = { type: 'session.timeline.page', requestId: 'page-1', sessionId: 'session-1', before: 'm-3', limit: 50 };
+  assert.deepEqual(parseAgentClientMessage(request), request);
+  assert.equal(parseAgentClientMessage({ ...request, limit: undefined }), null);
+  assert.equal(parseAgentClientMessage({ ...request, limit: AGENT_TIMELINE_LIMIT_MAX + 1 }), null);
+  assert.equal(parseAgentClientMessage({ ...request, before: '' }), null);
+  assert.equal(parseAgentClientMessage({ ...request, extra: true }), null);
+
+  const result = {
+    type: 'session.timeline.page.result',
+    requestId: 'page-1',
+    sessionId: 'session-1',
+    entries: [{ id: 'm-2', type: 'message', role: 'assistant', text: 'earlier', status: 'completed' }],
+    omitted: 1,
+  };
+  assert.deepEqual(parseAgentServerMessage(result), result);
+  assert.equal(parseAgentServerMessage({ ...result, omitted: -1 }), null);
+  assert.equal(parseAgentServerMessage({ ...result, entries: [{ id: 'bad' }] }), null);
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'session.error', requestId: 'page-1', operation: 'timeline', message: 'timeline entry not found',
+  }), { type: 'session.error', requestId: 'page-1', operation: 'timeline', message: 'timeline entry not found' });
 });
 
 test('model protocol accepts correlated selection messages and sanitized profile lists', () => {

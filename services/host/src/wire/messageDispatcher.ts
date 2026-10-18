@@ -14,6 +14,7 @@ import {
   type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
+  type SessionTimelinePageMessage,
 } from './protocol';
 import { sendAgentSessionPeerEvent, type ServerPeer } from './peer';
 import type { ServerWireHandlers } from './framing';
@@ -38,6 +39,10 @@ export type AgentSessionPeerHandlers = {
   onSessionSnapshotGet: (
     peer: ServerPeer,
     message: SessionSnapshotGetMessage,
+  ) => MaybePromise<void>;
+  onSessionTimelinePage: (
+    peer: ServerPeer,
+    message: SessionTimelinePageMessage,
   ) => MaybePromise<void>;
   onSessionList: (peer: ServerPeer, message: SessionListMessage) => MaybePromise<void>;
   /** Optional so pre-v2 host embeddings can retain their existing handlers. */
@@ -118,6 +123,8 @@ function sendMalformedClientMessageError(peer: ServerPeer, data: Buffer | string
           ? 'resume'
           : envelope.type === 'session.compact'
             ? 'compact'
+          : envelope.type === 'session.timeline.page'
+            ? 'timeline'
           : null;
   if (sessionOperation) {
     peer.send({
@@ -182,6 +189,8 @@ export function dispatchAgentSessionMessage(
       return dispatchOptional(peer, msg, handlers.onRuntimeConfigUpdate, 'handleRuntimeConfigUpdate', logError, logWarn);
     } else if (msg.type === 'session.snapshot.get') {
       return dispatchOptional(peer, msg, handlers.onSessionSnapshotGet, 'handleSessionSnapshotGet', logError, logWarn);
+    } else if (msg.type === 'session.timeline.page') {
+      return dispatchOptional(peer, msg, handlers.onSessionTimelinePage, 'handleSessionTimelinePage', logError, logWarn);
     } else if (msg.type === 'session.list') {
       return dispatchOptional(peer, msg, handlers.onSessionList, 'handleSessionList', logError, logWarn);
     } else if (msg.type === 'session.new') {

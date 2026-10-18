@@ -22,6 +22,7 @@ export type {
   SessionNewMessage,
   SessionResumeMessage,
   SessionSnapshotGetMessage,
+  SessionTimelinePageMessage,
 } from '@pinpawo/agent-session';
 export type {
   AgentClientMessage as HostClientMessage,
@@ -49,6 +50,7 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'session.new.result': true,
   'session.resume.result': true,
   'session.compact.result': true,
+  'session.timeline.page.result': true,
   'session.error': true,
   'model.list.result': true,
   'model.select.result': true,

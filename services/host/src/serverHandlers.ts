@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
+import { pageAgentTimeline, type AgentSessionOperation } from '@pinpawo/agent-session';
 import type { AgentLlmConfig } from './config/agentConfig';
 import { HostGraphService } from './agent/agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
@@ -217,7 +218,7 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot = async (sessionId: string) => {
+  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
@@ -237,10 +238,11 @@ export function createChatHostHandlers(
       pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
       activeRun: activeRuns.read(checkpoint.sessionId),
       currentPlan: checkpoint.currentPlan,
+      timelineLimit,
     });
   };
 
-  const loadSnapshot = async (peer?: ServerPeer) => {
+  const loadSnapshot = async (peer?: ServerPeer, timelineLimit?: number) => {
     const requestDeps = runtimeDeps.get();
     const checkpoint = await readCheckpointAtRun(
       () => tuiSessions.readActiveCheckpointPoint(requestDeps),
@@ -261,6 +263,7 @@ export function createChatHostHandlers(
       pendingInterrupt,
       activeRun,
       currentPlan: checkpoint.currentPlan,
+      timelineLimit,
     });
   };
 
@@ -532,7 +535,7 @@ export function createChatHostHandlers(
   // invocation owners until graph output settles. That brief settlement window
   // still counts as an active run here, so a session switch cannot race the
   // old thread's final checkpoint write.
-  const resumeSession = (sessionId: string) => sessionAdmission.transact(async () => {
+  const resumeSession = (sessionId: string, timelineLimit?: number) => sessionAdmission.transact(async () => {
     const requestDeps = runtimeDeps.get();
     const result = await tuiSessions.resumeSession(requestDeps, sessionId);
     const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
@@ -551,6 +554,7 @@ export function createChatHostHandlers(
         sessionTokenUsage: result.sessionTokenUsage,
         pendingInterrupt,
         currentPlan: result.currentPlan,
+        timelineLimit,
       }),
     };
   }, () => {
@@ -595,7 +599,7 @@ export function createChatHostHandlers(
   const respondToSessionRequest = async (
     peer: ServerPeer,
     requestId: string,
-    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
+    operation: AgentSessionOperation,
     load: () => Promise<HostSessionServerMessage>,
   ) => {
     try {
@@ -745,8 +749,28 @@ export function createChatHostHandlers(
       async () => ({
         type: 'session.snapshot.result',
         requestId: message.requestId,
-        snapshot: await loadSnapshot(client),
+        snapshot: await loadSnapshot(client, message.timelineLimit),
       }),
+    ),
+    /**
+     * Older timeline entries for a reader holding a windowed snapshot. Like a
+     * snapshot it is an observation: it is not queued or refused mid-run.
+     */
+    onSessionTimelinePage: (client, message) => respondToSessionRequest(
+      client,
+      message.requestId,
+      'timeline',
+      async () => {
+        const { session } = await readSessionSnapshot(message.sessionId);
+        const page = pageAgentTimeline(session.timeline, message.before, message.limit);
+        if (!page) throw new Error('timeline entry not found; read a new snapshot');
+        return {
+          type: 'session.timeline.page.result',
+          requestId: message.requestId,
+          sessionId: session.sessionId,
+          ...page,
+        };
+      },
     ),
     onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
@@ -783,7 +807,7 @@ export function createChatHostHandlers(
           return {
             type: 'session.resume.result',
             requestId: message.requestId,
-            ...await resumeSession(message.sessionId),
+            ...await resumeSession(message.sessionId, message.timelineLimit),
           };
         },
       ),

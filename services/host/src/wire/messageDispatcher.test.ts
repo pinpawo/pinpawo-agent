@@ -41,7 +41,10 @@ test('local server dispatcher routes typed client messages and pong', async () =
       seen.push(`policy:${message.toolAuthorizationMode}`);
     },
     onSessionSnapshotGet: (_peer, message) => {
-      seen.push(`snapshot:${message.requestId}`);
+      seen.push(`snapshot:${message.requestId}:${message.timelineLimit ?? ''}`);
+    },
+    onSessionTimelinePage: (_peer, message) => {
+      seen.push(`timeline:${message.requestId}:${message.before}:${message.limit}`);
     },
     onSessionList: (_peer, message) => {
       seen.push(`sessions:${message.requestId}`);
@@ -116,6 +119,18 @@ test('local server dispatcher routes typed client messages and pong', async () =
     requestId: 'snapshot-1',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
+    type: 'session.snapshot.get',
+    requestId: 'snapshot-2',
+    timelineLimit: 100,
+  }), handlers);
+  dispatchAgentSessionMessage(peer, JSON.stringify({
+    type: 'session.timeline.page',
+    requestId: 'timeline-1',
+    sessionId: 'chat:one',
+    before: 'm-3',
+    limit: 50,
+  }), handlers);
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'session.list',
     requestId: 'sessions-1',
   }), handlers);
@@ -144,6 +159,12 @@ test('local server dispatcher routes typed client messages and pong', async () =
     requestId: 'resume-invalid',
   }), handlers);
   dispatchAgentSessionMessage(peer, JSON.stringify({
+    type: 'session.timeline.page',
+    requestId: 'timeline-invalid',
+    sessionId: 'chat:one',
+    before: 'm-3',
+  }), handlers);
+  dispatchAgentSessionMessage(peer, JSON.stringify({
     type: 'runtime_config.update',
     requestId: 'policy-invalid',
     toolAuthorizationMode: 'custom',
@@ -169,6 +190,12 @@ test('local server dispatcher routes typed client messages and pong', async () =
         message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
       },
       {
+        type: 'session.error',
+        requestId: 'timeline-invalid',
+        operation: 'timeline',
+        message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
+      },
+      {
         type: 'runtime_config.error',
         requestId: 'policy-invalid',
         message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
@@ -182,7 +209,9 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'new',
       'policy:auto_authorization',
       'policy:full_access',
-      'snapshot:snapshot-1',
+      'snapshot:snapshot-1:',
+      'snapshot:snapshot-2:100',
+      'timeline:timeline-1:m-3:50',
       'sessions:sessions-1',
       'session-new:new-1',
       'compact:compact-1:chat:one',
@@ -191,6 +220,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
     assert.deepEqual(warnings, [
       '[wire] ignored malformed client message type=chat_request requestId=chat-old',
       '[wire] ignored malformed client message type=session.resume requestId=resume-invalid',
+      '[wire] ignored malformed client message type=session.timeline.page requestId=timeline-invalid',
       '[wire] ignored malformed client message type=runtime_config.update requestId=policy-invalid',
       '[wire] ignored malformed client message type=unknown requestId=unknown',
     ]);

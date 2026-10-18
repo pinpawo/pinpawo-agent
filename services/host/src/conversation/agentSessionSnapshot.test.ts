@@ -181,3 +181,27 @@ test('buildHostSessionSnapshot keeps only the live run\'s unanswered tool calls 
   const later = [...current, { role: 'user' as const, text: 'Next.', runId: 'run-2' }];
   assert.deepEqual(statuses(later, live), ['interrupted', 'interrupted']);
 });
+
+test('buildHostSessionSnapshot windows the timeline without cutting into an open run', () => {
+  const deps = { petId: 'pet-a', ...createTestModelServerDeps(), runtimeConfig: { workdir: '/tmp/work',
+    stateRoot: '/tmp/work/.pinpawo' } } as unknown as ServerDeps;
+  const messages: TuiCheckpointMessage[] = [
+    { id: 'u-1', role: 'user', text: 'First.' },
+    { id: 'a-1', role: 'assistant', text: 'Done.' },
+    { id: 'u-2', role: 'user', text: 'Second.', runId: 'run-2' },
+    { id: 'a-2', role: 'assistant', text: '', runId: 'run-2',
+      toolCalls: [{ id: 'call', name: 'delegate_capability', args: {}, status: 'running' }] },
+    { id: 'a-3', role: 'assistant', text: 'Working.', runId: 'run-2' },
+  ];
+  const window = (activeRun: Parameters<typeof buildHostSessionSnapshot>[0]['activeRun']) => {
+    const { session } = buildHostSessionSnapshot({
+      sessionId: 'chat:pet-a', kind: 'chat', messages, deps, activeRun, timelineLimit: 1,
+    });
+    assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify({ version: 5, session }))));
+    return [session.timeline.map(entry => entry.id), session.timelineWindow];
+  };
+  assert.deepEqual(window(null), [['a-3'], { omitted: 4 }]);
+  // A live run reaches back to the user message that started it.
+  assert.deepEqual(window({ requestId: 'r', state: 'running', activity: 'using_tool', startedAt: 1 }),
+    [['u-2', 'a-2', 'a-3'], { omitted: 2 }]);
+});

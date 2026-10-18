@@ -55,6 +55,10 @@ dispatch (Pet, invocation, session, scope) they run in, and get `undefined` outs
 cannot construct a Pet, inspect a runtime, or participate in Agent Session conversation, and needs
 no import from `pinpawo/host-runtime`.
 
+Every published `StudioEvent` carries an `eventId` that Studio assigns at `notify()`, along with
+`source` and `occurredAt`; subscribers can use it to tell two events apart even when they share a
+millisecond.
+
 ## Global dispatch observation
 
 The Studio HTTP Plugin exposes `GET /dispatch/queues` under the existing Studio

@@ -404,6 +404,7 @@ test('HTTP Plugin projects live Studio events over SSE and releases the subscrip
   await readStreamUntil(reader, (text) => text.includes(': connected'));
 
   const event: StudioEvent = {
+    eventId: 'event-1',
     type: 'task.done',
     source: 'example-work',
     payload: { taskId: 'task-1' },

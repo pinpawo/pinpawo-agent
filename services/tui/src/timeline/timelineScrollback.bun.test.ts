@@ -634,6 +634,31 @@ test('an authoritative session boundary allows identical text in the new session
   }
 });
 
+test('a session shown from its newest entries says once that earlier ones exist', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const first = userMessage('latest question', 'user-9');
+    timeline.render({ ...session([first]), timelineWindow: { omitted: 8 } });
+    const output = setup.externalOutput.take().flatMap((commit) => commit.rows).join('\n');
+    assert.match(output, /8 earlier entries · PageUp for the full transcript/);
+    assert.ok(output.indexOf('8 earlier entries') < output.indexOf('latest question'));
+
+    timeline.render({ ...session([first, assistantMessage('answer', 'completed')]), timelineWindow: { omitted: 8 } });
+    const later = setup.externalOutput.take().flatMap((commit) => commit.rows).join('\n');
+    assert.doesNotMatch(later, /earlier entr/);
+
+    // A whole session says nothing.
+    const whole = new TimelineScrollback(setup.renderer);
+    whole.render(session([userMessage('hello', 'user-1')], undefined, 'session-2'));
+    assert.doesNotMatch(setup.externalOutput.take().flatMap((commit) => commit.rows).join('\n'), /earlier entr/);
+    whole.destroy();
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 async function createTimelineRenderer(width: number) {
   const setup = await createTestRenderer({
     width,

@@ -82,6 +82,9 @@ export function formatTranscriptPagerText(session: AgentSession) {
       ? [`Actor: ${actor}`]
       : []),
     `Entries: ${session.timeline.length}`,
+    ...(session.timelineWindow
+      ? [`Missing: ${session.timelineWindow.omitted} earlier entries could not be read`]
+      : []),
     'Browse: ↑↓ · PageUp/PageDown · g/G · q to return',
     '',
     '────────────────────────────────────────',

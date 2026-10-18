@@ -71,6 +71,7 @@ export type {
 
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 5_000;
+const DEFAULT_TIMELINE_LIMIT = 100;
 const DEFAULT_SESSION_COMMAND_TIMEOUT_MS = 5_000;
 const DEFAULT_SESSION_COMPACT_TIMEOUT_MS = 120_000;
 
@@ -94,6 +95,7 @@ export class TuiSessionController {
       ?? DEFAULT_SESSION_COMMAND_TIMEOUT_MS;
     const setTimer = options.setTimer ?? setTimeout;
     const clearTimer = options.clearTimer ?? clearTimeout;
+    const timelineLimit = options.timelineLimit ?? DEFAULT_TIMELINE_LIMIT;
     this.transport = new SessionTransportCoordinator({
       connectionFactory: options.connectionFactory,
       requestIdFactory: this.requestIdFactory,
@@ -104,6 +106,7 @@ export class TuiSessionController {
       snapshotTimeoutMs: options.snapshotTimeoutMs === undefined
         ? DEFAULT_SNAPSHOT_TIMEOUT_MS
         : options.snapshotTimeoutMs,
+      timelineLimit,
       setTimer,
       clearTimer,
       onConnection: (connection, detail) => {
@@ -111,6 +114,16 @@ export class TuiSessionController {
       },
       onSnapshot: (snapshot, reason) => {
         const liveSession = this.state.session;
+        if (
+          (reason === 'completion' || reason === 'manual')
+          && !isAnchoredWindow(liveSession, snapshot.session)
+        ) {
+          // Reconciling a window against live entries needs a shared entry to
+          // line them up; without one (a single run longer than the window,
+          // whose live ids are not yet the checkpoint's), read it all.
+          this.transport.requestCompletionSnapshot({ whole: true });
+          return;
+        }
         const session = reconcileSessionSnapshot(
           liveSession,
           snapshot,
@@ -151,6 +164,7 @@ export class TuiSessionController {
         ));
       },
       timeoutMs: sessionCommandTimeoutMs,
+      timelineLimit,
       compactTimeoutMs: options.sessionCompactTimeoutMs
         ?? DEFAULT_SESSION_COMPACT_TIMEOUT_MS,
       setTimer,
@@ -232,6 +246,19 @@ export class TuiSessionController {
     }
     this.transport.requestManualSnapshot();
     return { ok: true };
+  }
+
+  /**
+   * The session with its whole timeline, for a reader such as the transcript
+   * pager. The live session holds only a window of a long one; the earlier
+   * entries are read once and not kept. Falls back to the live session, whose
+   * `timelineWindow` still says what is missing.
+   */
+  async readTranscriptSession(): Promise<AgentSession> {
+    const live = this.state.session;
+    if (!live.timelineWindow) return live;
+    const whole = await this.transport.readWholeSnapshot();
+    return whole ? withEarlierTimeline(live, whole.session) : live;
   }
 
   private submitChatWithTransition(
@@ -656,4 +683,22 @@ function createPendingSession(): AgentSession {
 
 function assertNever(value: never): never {
   throw new Error(`unhandled agent server message: ${String(value)}`);
+}
+
+/** Entries `whole` has before the first entry `live` holds, then `live`'s own. */
+export function withEarlierTimeline(live: AgentSession, whole: AgentSession): AgentSession {
+  if (whole.sessionId !== live.sessionId) return live;
+  const first = live.timeline[0];
+  const held = first ? whole.timeline.findIndex((entry) => entry.id === first.id) : whole.timeline.length;
+  if (held < 0) return live;
+  const session = { ...live, timeline: [...whole.timeline.slice(0, held), ...live.timeline] };
+  delete session.timelineWindow;
+  return session;
+}
+
+/** Whether a windowed snapshot starts at an entry the live session holds. */
+function isAnchoredWindow(live: AgentSession, incoming: AgentSession) {
+  if (!incoming.timelineWindow || live.sessionId !== incoming.sessionId || live.timeline.length === 0) return true;
+  const first = incoming.timeline[0];
+  return Boolean(first && live.timeline.some((entry) => entry.id === first.id));
 }

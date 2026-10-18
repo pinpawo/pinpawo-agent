@@ -69,6 +69,8 @@ export type SessionCommandCoordinatorOptions = {
   getUnavailableReason: () => string | null;
   getSessionId: () => string;
   onSnapshot: (snapshot: AgentSessionSnapshot) => void;
+  /** Newest timeline entries a resumed session's snapshot carries. */
+  timelineLimit: number;
   timeoutMs: number;
   compactTimeoutMs: number;
   setTimer: (callback: () => void, delayMs: number) => TimerHandle;
@@ -140,6 +142,7 @@ export class SessionCommandCoordinator {
         type: 'session.resume',
         requestId,
         sessionId: normalizedSessionId,
+        timelineLimit: this.options.timelineLimit,
       });
     });
   }

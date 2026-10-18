@@ -15,11 +15,26 @@ test('bounds cyclic and deep causes and ignores unsafe metadata', () => {
   assert.deepEqual(describeAgentError(error), { chain: [{ name: 'Error' }] });
   let deep: Error = new Error('last');
   for (let i = 0; i < 10; i += 1) deep = new Error('outer', { cause: deep });
-  assert.equal(describeAgentError(deep).chain.length, 4);
+  assert.deepEqual(describeAgentError(deep), { chain: [{ name: 'Error' }] });
+  let named: Error = Object.assign(new Error('root'), { name: 'SocketError', code: 'UND_ERR_SOCKET' });
+  for (const name of ['AbortError', 'FetchError', 'HttpError', 'RetryError']) {
+    named = Object.assign(new Error('outer', { cause: named }), { name });
+  }
+  assert.deepEqual(describeAgentError(named).chain.map((item) => item.name), ['RetryError', 'HttpError', 'FetchError', 'SocketError']);
   assert.deepEqual(describeAgentError('private failure'), { chain: [{ name: 'Error' }] });
 });
 
 test('a throwing metadata getter cannot replace the failure being reported', () => {
   const error = Object.defineProperty(new Error('original'), 'cause', { get() { throw new Error('getter'); } });
   assert.deepEqual(describeAgentError(error), { chain: [{ name: 'Error' }] });
+});
+
+test('wrappers that repeat their cause collapse so the root stays visible', () => {
+  let error: Error = Object.assign(new Error('Request timed out.'), { name: 'TimeoutError' });
+  for (let i = 0; i < 5; i += 1) error = Object.assign(new Error('Request timed out.', { cause: error }), { name: 'TimeoutError' });
+  assert.deepEqual(describeAgentError(error), { chain: [{ name: 'TimeoutError' }] });
+  const root = Object.assign(new Error('socket'), { name: 'SocketError', code: 'UND_ERR_SOCKET' });
+  let wrapped: Error = root;
+  for (let i = 0; i < 6; i += 1) wrapped = Object.assign(new Error('terminated', { cause: wrapped }), { name: 'TypeError' });
+  assert.deepEqual(describeAgentError(wrapped), { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET' }] });
 });

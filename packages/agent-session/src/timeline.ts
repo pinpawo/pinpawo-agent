@@ -11,7 +11,8 @@ import type {
 
 /**
  * The newest `limit` entries, reaching back to `keepFrom` when that index is
- * older, so a window never starts inside the run that is still open.
+ * older, so a window never starts inside the run that is still open. A reader
+ * wanting older entries asks again with a larger limit, or none.
  */
 export function windowAgentTimeline(
   timeline: readonly AgentTimelineEntry[],
@@ -24,22 +25,6 @@ export function windowAgentTimeline(
     : { timeline: [...timeline] };
 }
 
-/**
- * Up to `limit` entries just before the entry `before`, oldest first, and how
- * many remain before those. `null` when `before` is no longer in the timeline,
- * for example after compaction rewrote it; the reader starts again from a
- * snapshot.
- */
-export function pageAgentTimeline(
-  timeline: readonly AgentTimelineEntry[],
-  before: string,
-  limit: number,
-): { entries: AgentTimelineEntry[]; omitted: number } | null {
-  const end = timeline.findIndex((entry) => entry.id === before);
-  if (end < 0) return null;
-  const start = Math.max(0, end - limit);
-  return { entries: timeline.slice(start, end), omitted: start };
-}
 
 export function agentOperationKey(event: AgentOperationEvent) {
   return event.operation.id

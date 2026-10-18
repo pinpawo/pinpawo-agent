@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  pageAgentTimeline,
   windowAgentTimeline,
   type AgentTimelineEntry,
 } from './index';
@@ -30,13 +29,4 @@ test('a timeline window reaches back to keep an open run whole', () => {
   // A run that already fits changes nothing.
   assert.deepEqual(ids(windowAgentTimeline(entries(10), 2, 9).timeline), ['m-8', 'm-9']);
   assert.deepEqual(windowAgentTimeline(entries(10), 2, 0), { timeline: entries(10) });
-});
-
-test('a timeline page ends just before its cursor', () => {
-  const timeline = entries(10);
-  assert.deepEqual(pageAgentTimeline(timeline, 'm-7', 3), { entries: timeline.slice(4, 7), omitted: 4 });
-  assert.deepEqual(pageAgentTimeline(timeline, 'm-2', 3), { entries: timeline.slice(0, 2), omitted: 0 });
-  assert.deepEqual(pageAgentTimeline(timeline, 'm-0', 3), { entries: [], omitted: 0 });
-  // Compaction can rewrite the entry a reader still holds.
-  assert.equal(pageAgentTimeline(timeline, 'gone', 3), null);
 });

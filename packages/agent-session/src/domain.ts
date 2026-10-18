@@ -72,7 +72,7 @@ export type AgentTimelineEntry =
   | AgentMessageEntry
   | AgentOperationEntry;
 
-/** Largest number of timeline entries one snapshot or page request may ask for. */
+/** Largest `timelineLimit` a snapshot or resume may ask for. */
 export const AGENT_TIMELINE_LIMIT_MAX = 500;
 
 export type AgentTimelineWindow = {
@@ -170,7 +170,8 @@ export type AgentSession = {
   timeline: AgentTimelineEntry[];
   /**
    * Present when `timeline` is the newest part of the session only. `omitted`
-   * entries come before it; read them with `session.timeline.page`.
+   * entries come before it; ask again with a larger `timelineLimit`, or none,
+   * to read them.
    */
   timelineWindow?: AgentTimelineWindow;
   activeRun: AgentRunView | null;

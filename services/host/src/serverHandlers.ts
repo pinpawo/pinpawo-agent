@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
-import { pageAgentTimeline, type AgentSessionOperation } from '@pinpawo/agent-session';
 import type { AgentLlmConfig } from './config/agentConfig';
 import { HostGraphService } from './agent/agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
@@ -218,7 +217,7 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number) => {
+  const readSessionSnapshot = async (sessionId: string) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
@@ -238,7 +237,6 @@ export function createChatHostHandlers(
       pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
       activeRun: activeRuns.read(checkpoint.sessionId),
       currentPlan: checkpoint.currentPlan,
-      timelineLimit,
     });
   };
 
@@ -599,7 +597,7 @@ export function createChatHostHandlers(
   const respondToSessionRequest = async (
     peer: ServerPeer,
     requestId: string,
-    operation: AgentSessionOperation,
+    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
     load: () => Promise<HostSessionServerMessage>,
   ) => {
     try {
@@ -751,26 +749,6 @@ export function createChatHostHandlers(
         requestId: message.requestId,
         snapshot: await loadSnapshot(client, message.timelineLimit),
       }),
-    ),
-    /**
-     * Older timeline entries for a reader holding a windowed snapshot. Like a
-     * snapshot it is an observation: it is not queued or refused mid-run.
-     */
-    onSessionTimelinePage: (client, message) => respondToSessionRequest(
-      client,
-      message.requestId,
-      'timeline',
-      async () => {
-        const { session } = await readSessionSnapshot(message.sessionId);
-        const page = pageAgentTimeline(session.timeline, message.before, message.limit);
-        if (!page) throw new Error('timeline entry not found; read a new snapshot');
-        return {
-          type: 'session.timeline.page.result',
-          requestId: message.requestId,
-          sessionId: session.sessionId,
-          ...page,
-        };
-      },
     ),
     onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(

@@ -268,29 +268,6 @@ test('a snapshot or resume may ask for the newest timeline entries only', () => 
   }
 });
 
-test('timeline pages are correlated, bounded and carry what remains before them', () => {
-  const request = { type: 'session.timeline.page', requestId: 'page-1', sessionId: 'session-1', before: 'm-3', limit: 50 };
-  assert.deepEqual(parseAgentClientMessage(request), request);
-  assert.equal(parseAgentClientMessage({ ...request, limit: undefined }), null);
-  assert.equal(parseAgentClientMessage({ ...request, limit: AGENT_TIMELINE_LIMIT_MAX + 1 }), null);
-  assert.equal(parseAgentClientMessage({ ...request, before: '' }), null);
-  assert.equal(parseAgentClientMessage({ ...request, extra: true }), null);
-
-  const result = {
-    type: 'session.timeline.page.result',
-    requestId: 'page-1',
-    sessionId: 'session-1',
-    entries: [{ id: 'm-2', type: 'message', role: 'assistant', text: 'earlier', status: 'completed' }],
-    omitted: 1,
-  };
-  assert.deepEqual(parseAgentServerMessage(result), result);
-  assert.equal(parseAgentServerMessage({ ...result, omitted: -1 }), null);
-  assert.equal(parseAgentServerMessage({ ...result, entries: [{ id: 'bad' }] }), null);
-  assert.deepEqual(parseAgentServerMessage({
-    type: 'session.error', requestId: 'page-1', operation: 'timeline', message: 'timeline entry not found',
-  }), { type: 'session.error', requestId: 'page-1', operation: 'timeline', message: 'timeline entry not found' });
-});
-
 test('model protocol accepts correlated selection messages and sanitized profile lists', () => {
   assert.deepEqual(parseAgentClientMessage({
     type: 'model.list',

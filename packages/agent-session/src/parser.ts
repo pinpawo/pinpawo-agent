@@ -128,13 +128,9 @@ function parseAgentSession(value: unknown): AgentSession | null {
   };
 }
 
-export function isTimelineEntryCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
 function parseAgentTimelineWindow(value: unknown): AgentTimelineWindow | null {
   if (!isRecord(value) || Object.keys(value).some((key) => key !== 'omitted')) return null;
-  return isTimelineEntryCount(value.omitted) && value.omitted > 0
+  return typeof value.omitted === 'number' && Number.isSafeInteger(value.omitted) && value.omitted > 0
     ? { omitted: value.omitted }
     : null;
 }
@@ -278,7 +274,7 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
   };
 }
 
-export function parseAgentTimelineEntry(
+function parseAgentTimelineEntry(
   value: unknown,
 ): AgentSession['timeline'][number] | null {
   if (!isRecord(value) || typeof value.id !== 'string') {

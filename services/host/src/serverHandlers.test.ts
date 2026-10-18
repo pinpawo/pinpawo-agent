@@ -194,8 +194,8 @@ test('session.compact is a v2 session command and returns the authoritative snap
   }
 });
 
-test('a snapshot may carry the newest timeline entries and pages read the older ones', async () => {
-  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-timeline-page-'));
+test('a snapshot may carry only the newest timeline entries', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-timeline-window-'));
   const sent: HostServerMessage[] = [];
   const messages = Array.from({ length: 5 }, (_, index) => (index % 2
     ? new AIMessage({ id: `m-${index}`, content: `reply ${index}` })
@@ -233,32 +233,15 @@ test('a snapshot may carry the newest timeline entries and pages read the older 
     assert.deepEqual(ids(window.snapshot.session.timeline), ['m-3', 'm-4']);
     assert.deepEqual(window.snapshot.session.timelineWindow, { omitted: 3 });
 
-    const sessionId = window.snapshot.session.sessionId;
-    await handlers.peerHandlers.onSessionTimelinePage(peer, {
-      type: 'session.timeline.page', requestId: 'page-1', sessionId, before: 'm-3', limit: 2,
+    // Reading further back is the same request with a larger limit.
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+      type: 'session.snapshot.get', requestId: 'wider', timelineLimit: 4,
     });
-    assert.deepEqual(take('page-1'), {
-      type: 'session.timeline.page.result',
-      requestId: 'page-1',
-      sessionId,
-      entries: whole.snapshot.session.timeline.slice(1, 3),
-      omitted: 1,
-    });
-
-    await handlers.peerHandlers.onSessionTimelinePage(peer, {
-      type: 'session.timeline.page', requestId: 'page-gone', sessionId, before: 'compacted-away', limit: 2,
-    });
-    const gone = take('page-gone');
-    assert.equal(gone?.type, 'session.error');
-    if (gone?.type === 'session.error') {
-      assert.equal(gone.operation, 'timeline');
-      assert.match(gone.message, /read a new snapshot/);
-    }
-
-    await handlers.peerHandlers.onSessionTimelinePage(peer, {
-      type: 'session.timeline.page', requestId: 'page-unknown', sessionId: 'no-such-session', before: 'm-3', limit: 2,
-    });
-    assert.equal(take('page-unknown')?.type, 'session.error');
+    const wider = take('wider');
+    assert.equal(wider?.type, 'session.snapshot.result');
+    if (wider?.type !== 'session.snapshot.result') return;
+    assert.deepEqual(ids(wider.snapshot.session.timeline), ['m-1', 'm-2', 'm-3', 'm-4']);
+    assert.deepEqual(wider.snapshot.session.timelineWindow, { omitted: 1 });
   } finally {
     handlers.close();
     rmSync(workdir, { recursive: true, force: true });

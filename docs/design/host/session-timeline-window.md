@@ -1,6 +1,6 @@
 # Agent Session timeline 窗口
 
-状态：第一步（协议 + Host）已合并（#985）；第二步（TUI）实现中。
+状态：第一步（协议 + Host，#985）和第二步（TUI，#986）已合并；第三步（PetSessionView 和 studio-http）实现中。
 
 ## 问题
 
@@ -31,12 +31,15 @@ timeline 是 Host 从 LangGraph checkpoint 实时投影出来的视图，本身�
 
 ## 步骤（每步一个 PR）
 
-1. agent-session 协议和 Host 实现（本步）。
-2. TUI（本步）：
+1. agent-session 协议和 Host 实现。
+2. TUI：
    - 启动、重连、对账、`/refresh` 和 resume 都带 `timelineLimit`（默认 100）。
    - `applySessionSnapshot` 收到窗口快照时，从窗口的第一条开始替换，本地在它之前已有的条目保留；本地缺的条数仍以本地的 `timelineWindow` 为准。窗口的第一条在本地找不到（不同 session，或本地是空的）时，直接按窗口原样使用。
    - 每轮结束的对账需要一条共有的条目来对齐。窗口和本地没有任何共有条目时（单个 run 超过窗口长度，而本轮的 live id 还没换成 checkpoint id），改为读一次全量快照，不硬对齐。
    - scrollback 首次渲染窗口时，在顶部写一行“N earlier entries · PageUp for the full transcript”。
    - PageUp transcript 和 `/export` 会读一次全量快照，把本地没有的前段补上后展示；读到的全量不保留在内存里。Host 无法响应时退回本地内容，并在头部注明缺了多少条。
-3. PetSessionView 和 studio-http：`/pet-sessions/snapshot`、`/pet-sessions/events` 传入 limit；界面加“加载更早”按钮。
+3. PetSessionView 和 studio-http（本步）：
+   - `/pet-sessions/snapshot` 和 `/pet-sessions/events` 接受可选的 `timelineLimit` 查询参数（正整数，否则 400），经 `PetSessionPort.snapshot/observe` 传给 Host；上限由 Host 校验。
+   - Console 默认带 100。SSE 每次（重新）连接发来的窗口快照按 TUI 同样的方式拼接，已加载的更早条目保留。
+   - 有省略时，记录顶部显示“Load earlier entries”按钮：用“已有条数 + 100”的 limit 再拉一次快照，超过 500 时不带 limit 拿全量；加载后保持滚动位置。
 4. Channel：`/channels/context` 加 `before` 游标并只读最近一页，事件携带 sequence，用于 `after` 增量拉取。

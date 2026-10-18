@@ -17,7 +17,9 @@ import {
   choosePetSessionReviewOption,
   currentPetSessionReview,
   observePetSession,
+  petSessionEarlierLimit,
   petSessionQuery,
+  PET_SESSION_TIMELINE_LIMIT,
   petSessionToolCallDetail,
   petSessionToolCallTitle,
   readPetSessionReviewOutcome,
@@ -216,17 +218,32 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
     };
   }, []);
 
-  const refreshSnapshot = async () => {
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const refreshSnapshot = async (timelineLimit: number | null = PET_SESSION_TIMELINE_LIMIT) => {
     try {
-      const response = await fetch(`${url}/pet-sessions/snapshot?${petSessionQuery(target)}`, {
+      const response = await fetch(`${url}/pet-sessions/snapshot?${petSessionQuery(target, timelineLimit)}`, {
         headers: { Authorization: `Bearer ${token}` }, signal: lifetime.current?.signal,
       });
       const value = await response.json().catch(() => null) as { snapshot?: AgentSessionSnapshot; error?: string } | null;
       if (!response.ok || !value?.snapshot) throw new Error(value?.error ?? `Snapshot failed (${response.status}).`);
-      setSession(readPetSessionSnapshot(value.snapshot, target));
+      const snapshot = value.snapshot;
+      setSession(current => readPetSessionSnapshot(snapshot, target, current));
     } catch (error) {
       if (!lifetime.current?.signal.aborted) setProblem(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  // Older entries are read again with a larger window; the reader keeps its place.
+  const loadEarlier = async () => {
+    if (!session || loadingEarlier) return;
+    const element = scroller.current;
+    const fromBottom = element ? element.scrollHeight - element.scrollTop : 0;
+    setLoadingEarlier(true);
+    await refreshSnapshot(petSessionEarlierLimit(session));
+    setLoadingEarlier(false);
+    requestAnimationFrame(() => {
+      if (element) element.scrollTop = element.scrollHeight - fromBottom;
+    });
   };
 
   useEffect(() => {
@@ -341,6 +358,9 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
           const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
           follow.current = latest; setAtLatest(latest);
         }}>
+        {session?.timelineWindow && <button className="pet-session-earlier" type="button" disabled={loadingEarlier}
+          onClick={() => { void loadEarlier(); }}>
+          {loadingEarlier ? 'Loading earlier entries…' : `Load earlier entries (${session.timelineWindow.omitted} more)`}</button>}
         {session ? <PetSessionTranscript session={session} petName={identity.name} />
           : connection === 'loading' ? <div className="compact-empty">Loading session…</div> : null}
         {session && <p className="pet-session-footnote">Saved history and results come from the session checkpoint. Live tool input and output appear only while observed and are not kept after a reconnect.</p>}

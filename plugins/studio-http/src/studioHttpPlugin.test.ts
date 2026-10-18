@@ -442,15 +442,18 @@ test('HTTP Plugin rejects invalid security and resource options eagerly', () => 
 function sessionHarness() {
   const harness = createContext();
   const reviews: unknown[] = [];
+  const reads: unknown[] = [];
   const listeners = new Set<(message: unknown) => void>();
   const snapshot = { version: 5, session: { sessionId: 'pet:0000000b', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null } };
   const notFound = (sessionId: string) => Object.assign(new Error(`no ${sessionId}`), { code: 'session_not_found' });
   harness.context.petSessions = {
-    snapshot: async (_petId, sessionId) => {
+    snapshot: async (_petId, sessionId, options) => {
+      reads.push(['snapshot', options]);
       if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
       return snapshot as never;
     },
-    observe: async (_petId, sessionId, listener) => {
+    observe: async (_petId, sessionId, listener, options) => {
+      reads.push(['observe', options]);
       if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
       listener({ type: 'session.snapshot.result', requestId: 'first', snapshot } as never);
       const forward = (message: unknown) => listener(message as never);
@@ -467,7 +470,7 @@ function sessionHarness() {
       reviews.push({ petId, sessionId, request });
     },
   };
-  return { harness, reviews, listeners, publish: (message: unknown) => { for (const listener of listeners) listener(message); } };
+  return { harness, reviews, reads, listeners, publish: (message: unknown) => { for (const listener of listeners) listener(message); } };
 }
 
 test('HTTP Plugin reads and follows one exact Pet session', async (t) => {
@@ -503,6 +506,30 @@ test('HTTP Plugin reads and follows one exact Pet session', async (t) => {
   await reader.cancel().catch(() => undefined);
   for (let attempt = 0; attempt < 100 && listeners.size; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(listeners.size, 0);
+});
+
+test('HTTP Plugin passes a session read\'s timeline limit to the Host', async (t) => {
+  const { harness, reads } = sessionHarness();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+  const headers = { Authorization: `Bearer ${AUTH_TOKEN}` };
+  const base = '?petId=pet&sessionId=pet%3A0000000b';
+
+  assert.equal((await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}`), { headers })).status, 200);
+  assert.equal((await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}&timelineLimit=100`), { headers })).status, 200);
+  for (const bad of ['0', '-1', '1.5', 'ten', '']) {
+    const refused: Response = await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}&timelineLimit=${bad}`), { headers });
+    assert.equal(refused.status, 400, bad);
+  }
+  const abort = new AbortController();
+  const stream = await fetch(pluginUrl(address.port, `/pet-sessions/events${base}&timelineLimit=50`), { headers, signal: abort.signal });
+  assert.equal(stream.status, 200);
+  abort.abort();
+  await stream.body?.cancel().catch(() => undefined);
+  assert.deepEqual(reads, [['snapshot', {}], ['snapshot', { timelineLimit: 100 }], ['observe', { timelineLimit: 50 }]]);
 });
 
 test('HTTP Plugin accepts only a review answer for an exact Pet session', async (t) => {

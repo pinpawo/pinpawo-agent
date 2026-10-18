@@ -210,6 +210,15 @@ function readSessionTarget(context: StudioHttpContext): { petId: string; session
   return { petId, sessionId };
 }
 
+/** `timelineLimit`: only the newest timeline entries; absent, the whole timeline. */
+function readSessionReadOptions(context: StudioHttpContext): { timelineLimit?: number } {
+  const raw = context.req.query('timelineLimit');
+  if (raw === undefined) return {};
+  const timelineLimit = /^[1-9]\d*$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isSafeInteger(timelineLimit)) throw new HttpRequestError(400, 'timelineLimit must be a positive integer.');
+  return { timelineLimit };
+}
+
 /** Only a review answer is accepted; any other Agent Session command is refused. */
 function parseSessionReviewBody(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -593,8 +602,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       const petSessions = context?.petSessions;
       if (!petSessions) throw new HttpRequestError(503, 'Session observation is unavailable.');
       const { petId, sessionId } = readSessionTarget(requestContext);
+      const options = readSessionReadOptions(requestContext);
       try {
-        return requestContext.json({ petId, snapshot: await petSessions.snapshot(petId, sessionId) });
+        return requestContext.json({ petId, snapshot: await petSessions.snapshot(petId, sessionId, options) });
       } catch (error) {
         throw readSessionAccessError(error);
       }
@@ -605,6 +615,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       const petSessions = context?.petSessions;
       if (!petSessions) throw new HttpRequestError(503, 'Session observation is unavailable.');
       const { petId, sessionId } = readSessionTarget(requestContext);
+      const options = readSessionReadOptions(requestContext);
       if (eventClients.size + sessionObservers >= maxEventClients) {
         return requestContext.json({ error: 'Too many event clients.' }, 503);
       }
@@ -618,7 +629,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           const chunk = `event: agent.session\ndata: ${JSON.stringify(message)}\n\n`;
           if (write) write(chunk);
           else pending.push(chunk);
-        });
+        }, options);
       } catch (error) {
         throw readSessionAccessError(error);
       }

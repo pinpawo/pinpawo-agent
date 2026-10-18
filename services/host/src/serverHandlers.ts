@@ -45,7 +45,7 @@ export type ServerHandlers = {
    * for a session this Pet does not own; it never falls back to the active
    * session and never creates one.
    */
-  readSessionSnapshot: (sessionId: string) => Promise<AgentSessionSnapshot>;
+  readSessionSnapshot: (sessionId: string, timelineLimit?: number) => Promise<AgentSessionSnapshot>;
   /**
    * Answer the current human review of one exact session, in that session's
    * own thread. Admission, validation and dispatch continuation are the same
@@ -217,7 +217,7 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot = async (sessionId: string) => {
+  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
@@ -237,6 +237,7 @@ export function createChatHostHandlers(
       pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
       activeRun: activeRuns.read(checkpoint.sessionId),
       currentPlan: checkpoint.currentPlan,
+      timelineLimit,
     });
   };
 

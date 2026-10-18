@@ -1,4 +1,4 @@
-import type { PetInvocationScope } from 'pinpawo/host-runtime';
+import { readPetInvocationContext, type PetInvocationScope } from 'pinpawo/host-runtime';
 import { isJsonObject, isJsonValue, type JsonObject } from '@pinpawo/agent-contracts';
 
 export type StudioDispatchRequest = {
@@ -25,6 +25,29 @@ export type StudioDispatchReceipt = {
   invocationId: string;
   metadata?: JsonObject;
 };
+
+/** The dispatch a Plugin's tool is running in, as Studio admitted it. */
+export type StudioInvocation = {
+  petId: string;
+  invocationId: string;
+  sessionId?: string;
+  scope?: PetInvocationScope;
+};
+
+/**
+ * Read from inside a Plugin Toolkit's tool: the admitted dispatch this call
+ * belongs to, or undefined outside one. Tool arguments can never supply it.
+ */
+export function readStudioInvocation(): StudioInvocation | undefined {
+  const context = readPetInvocationContext();
+  if (!context) return undefined;
+  return {
+    petId: context.petId,
+    invocationId: context.dispatchId,
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+    ...(context.scope ? { scope: context.scope } : {}),
+  };
+}
 
 function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
   const allowed = new Set(keys);

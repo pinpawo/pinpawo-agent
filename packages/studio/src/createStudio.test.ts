@@ -249,12 +249,14 @@ test('listPets exposes only Studio registration metadata', async () => {
 
 test('Plugin receives dispatch/event/hook context without a Pet runtime reference', async () => {
   let pluginContextKeys: string[] = [];
+  let allocated: string[] = [];
   const receivedEvents: Array<[string, string]> = [];
   const plugin: StudioPlugin = {
     name: 'scheduler',
     toolkits: [],
     start: async (context) => {
       pluginContextKeys = Object.keys(context).sort();
+      allocated = [context.allocateSessionId('worker'), context.allocateSessionId('worker')];
       context.subscribe((event) => {
         receivedEvents.push([event.type, event.source]);
       });
@@ -269,6 +271,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     plugins: [plugin],
   });
   assert.deepEqual(pluginContextKeys, [
+    'allocateSessionId',
     'clients',
     'dispatch',
     'hooks',
@@ -279,6 +282,9 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'storage',
     'subscribe',
   ]);
+  // A reserved name only: each call is a new id for that Pet.
+  assert.match(allocated[0]!, /^worker:/);
+  assert.notEqual(allocated[0], allocated[1]);
   await new Promise((resolve) => setTimeout(resolve, 0));
   // Activation is announced once, after every Plugin has started.
   assert.deepEqual(receivedEvents, [

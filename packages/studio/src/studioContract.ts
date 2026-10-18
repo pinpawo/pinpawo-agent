@@ -90,6 +90,11 @@ export type StudioPluginHooks = {
 export type StudioPluginContext = {
   /** 单向派活。Promise 只覆盖 Studio/Pet 的接纳，不代表 Agent 执行完成。 */
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
+  /**
+   * A new session id for `dispatch({ session: { id, create: true } })`.
+   * It only reserves the name: nothing is created or selected until dispatch.
+   */
+  allocateSessionId: (petId: string) => string;
   notify: (event: StudioEventInput) => void;
   /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;

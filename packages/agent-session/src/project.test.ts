@@ -842,3 +842,40 @@ test('live events land on the snapshot entry that holds the same checkpoint mess
   assert.equal(toolCalls?.type === 'message' ? toolCalls.toolCalls?.[0]?.status : undefined, 'completed');
   assert.equal(reply?.type === 'message' ? reply.text : undefined, 'done');
 });
+
+test('a windowed snapshot replaces only the tail the reader already holds', () => {
+  const entry = (id: string, text = id): AgentTimelineEntry => ({
+    id, type: 'message', role: 'assistant', text, status: 'completed',
+  });
+  const snapshot = (timeline: AgentTimelineEntry[], omitted: number, sessionId = 'chat:pet') => ({
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
+    session: { ...createDomainSession(), sessionId, timeline, timelineWindow: { omitted } },
+  });
+  const ids = (session: AgentSession) => session.timeline.map((item) => item.id);
+  const whole = { ...createDomainSession(), timeline: ['a', 'b', 'c', 'd'].map((id) => entry(id)) };
+
+  // Entries before the window stay; the window replaces from its first entry on.
+  const spliced = applySessionSnapshot(whole, snapshot([entry('c', 'c2'), entry('e')], 2));
+  assert.deepEqual(ids(spliced), ['a', 'b', 'c', 'e']);
+  assert.equal(spliced.timeline[2]?.type === 'message' ? spliced.timeline[2].text : '', 'c2');
+  assert.equal(spliced.timelineWindow, undefined, 'the reader holds the whole session');
+
+  // A reader that started from a window still lacks what it lacked.
+  const partial = { ...whole, timeline: whole.timeline.slice(2), timelineWindow: { omitted: 2 } };
+  const next = applySessionSnapshot(partial, snapshot([entry('d'), entry('e')], 3));
+  assert.deepEqual(ids(next), ['c', 'd', 'e']);
+  assert.deepEqual(next.timelineWindow, { omitted: 2 });
+
+  // A window with nothing in common, or from another session, is taken as it is.
+  for (const [timeline, sessionId] of [[[entry('x')], 'chat:pet'], [[entry('c')], 'chat:other']] as const) {
+    const taken = applySessionSnapshot(whole, snapshot([...timeline], 9, sessionId));
+    assert.deepEqual(ids(taken), timeline.map((item) => item.id));
+    assert.deepEqual(taken.timelineWindow, { omitted: 9 });
+  }
+
+  // A whole snapshot still replaces everything.
+  assert.deepEqual(ids(applySessionSnapshot(whole, {
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
+    session: { ...createDomainSession(), timeline: [entry('z')] },
+  })), ['z']);
+});

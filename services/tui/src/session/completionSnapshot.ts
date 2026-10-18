@@ -18,7 +18,9 @@ export function reconcileCompletionSnapshot(
   });
   if (
     live.activeRun
-    || hasCanonicalOperationEntries(applied.timeline)
+    // The snapshot's own entries: a windowed one keeps the live entries
+    // before it, operations included.
+    || hasCanonicalOperationEntries(snapshot.session.timeline)
   ) {
     return live.activeRun
       ? mergeCompletionSnapshotMetadata(live, applied)

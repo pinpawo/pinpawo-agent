@@ -76,6 +76,7 @@ export function formatTranscriptMarkdown(
     `- Kind: ${session.kind}`,
     ...(session.actor?.label ? [`- Actor: ${actor}`] : []),
     `- Exported: ${exportedAt.toISOString()}`,
+    ...(session.timelineWindow ? [`- Missing: ${session.timelineWindow.omitted} earlier entries could not be read`] : []),
     '',
     '## Messages',
     '',

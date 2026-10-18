@@ -65,6 +65,7 @@ export class TimelineScrollback {
   private welcomeRendered = false;
   private sessionId: string | null = null;
   private committedFingerprints: string[] = [];
+  private omittedNoticeWritten = false;
   private reconciliationCache: TimelineReconciliationCache = {
     prefixLength: 0,
     tailEntry: null,
@@ -114,6 +115,7 @@ export class TimelineScrollback {
     this.welcomeRendered = false;
     this.sessionId = null;
     this.committedFingerprints = [];
+    this.omittedNoticeWritten = false;
     this.reconciliationCache = {
       prefixLength: 0,
       tailEntry: null,
@@ -127,6 +129,7 @@ export class TimelineScrollback {
       this.destroyTimelineSurface();
       this.sessionId = session.sessionId;
       this.committedFingerprints = [];
+      this.omittedNoticeWritten = false;
       this.reconciliationCache = {
         prefixLength: 0,
         tailEntry: null,
@@ -135,6 +138,17 @@ export class TimelineScrollback {
         this.writeSessionSeparator(session.sessionId);
       }
     }
+    // A session shown from its newest entries says once, above them, that
+    // earlier ones exist and where to read them.
+    if (
+      session.timelineWindow
+      && !this.omittedNoticeWritten
+      && this.committedFingerprints.length === 0
+      && session.timeline.length > 0
+    ) {
+      this.writeOmittedNotice(session.timelineWindow.omitted);
+    }
+    if (session.timeline.length > 0) this.omittedNoticeWritten = true;
 
     const reconciliation = reconcileTimelinePrefix(
       session.timeline,
@@ -329,6 +343,30 @@ export class TimelineScrollback {
       this.destroyTimelineSurface();
       throw error;
     }
+  }
+
+  private writeOmittedNotice(omitted: number) {
+    const line = `── ${omitted} earlier ${omitted === 1 ? 'entry' : 'entries'} · PageUp for the full transcript ──`;
+    this.renderer.writeToScrollback((context) => {
+      const root = new BoxRenderable(context.renderContext, {
+        id: 'timeline-omitted',
+        width: context.width,
+        height: 1,
+        flexDirection: 'column',
+      });
+      root.add(new TextRenderable(context.renderContext, {
+        id: 'timeline-omitted:0',
+        width: '100%',
+        height: 1,
+        content: line,
+        fg: '#8a8a8a',
+      }));
+      return {
+        root,
+        width: context.width,
+        height: 1,
+      };
+    });
   }
 
   private writeSessionSeparator(sessionId: string) {

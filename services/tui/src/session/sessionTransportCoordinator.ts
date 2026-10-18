@@ -29,6 +29,11 @@ export type SessionTransportCoordinatorOptions = {
    * start into a kill/restart loop.
    */
   snapshotTimeoutMs: number | null;
+  /**
+   * Newest timeline entries each synchronizing snapshot carries. The session
+   * keeps what it already holds before them; a whole read is explicit.
+   */
+  timelineLimit: number;
   setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer: (timer: TimerHandle) => void;
   onConnection: (
@@ -46,6 +51,8 @@ export type SessionTransportCoordinatorOptions = {
 export class SessionTransportCoordinator {
   private readonly connection: AgentHostConnection;
   private readonly snapshotRequests = new Map<string, SessionSnapshotReason>();
+  /** Whole snapshots read for a caller; never applied to the session. */
+  private readonly wholeSnapshotReads = new Map<string, (snapshot: AgentSessionSnapshot | null) => void>();
   private started = false;
   private reconnectAttempt = 0;
   private reconnectTimer: TimerHandle | null = null;
@@ -84,8 +91,9 @@ export class SessionTransportCoordinator {
     return this.connection.isConnected();
   }
 
-  requestCompletionSnapshot() {
-    this.requestSnapshot('completion');
+  /** `whole` asks for the entire timeline instead of the newest entries. */
+  requestCompletionSnapshot(options: { whole?: boolean } = {}) {
+    this.requestSnapshot('completion', options.whole);
   }
 
   requestManualSnapshot() {
@@ -100,9 +108,37 @@ export class SessionTransportCoordinator {
     }
   }
 
+  /**
+   * Read the session's whole timeline once, for a reader such as the
+   * transcript pager. `null` when the Host cannot answer.
+   */
+  readWholeSnapshot(): Promise<AgentSessionSnapshot | null> {
+    const requestId = this.options.requestIdFactory();
+    if (!this.connection.isConnected()) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      let timer: TimerHandle | null = null;
+      this.wholeSnapshotReads.set(requestId, (snapshot) => {
+        if (timer) this.options.clearTimer(timer);
+        this.wholeSnapshotReads.delete(requestId);
+        resolve(snapshot);
+      });
+      if (!this.connection.send({ type: 'session.snapshot.get', requestId })) {
+        this.wholeSnapshotReads.get(requestId)?.(null);
+        return;
+      }
+      if (this.options.snapshotTimeoutMs !== null) {
+        timer = this.options.setTimer(
+          () => this.wholeSnapshotReads.get(requestId)?.(null),
+          this.options.snapshotTimeoutMs,
+        );
+      }
+    });
+  }
+
   clearSnapshotRequests() {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
+    for (const finish of [...this.wholeSnapshotReads.values()]) finish(null);
   }
 
   private handleOpen() {
@@ -121,6 +157,13 @@ export class SessionTransportCoordinator {
   }
 
   private handleMessage(message: AgentServerMessage) {
+    const wholeRead = (message.type === 'session.snapshot.result' || message.type === 'session.error')
+      ? this.wholeSnapshotReads.get(message.requestId)
+      : undefined;
+    if (wholeRead) {
+      wholeRead(message.type === 'session.snapshot.result' ? message.snapshot : null);
+      return;
+    }
     if (message.type === 'session.snapshot.result') {
       const reason = this.snapshotRequests.get(message.requestId);
       if (!reason) return;
@@ -167,7 +210,7 @@ export class SessionTransportCoordinator {
     this.options.onConnection('error', error.message);
   }
 
-  private requestSnapshot(reason: SessionSnapshotReason) {
+  private requestSnapshot(reason: SessionSnapshotReason, whole = false) {
     if (!this.connection.isConnected()) {
       if (!isCompletionSnapshotReason(reason)) {
         this.scheduleReconnect();
@@ -176,7 +219,11 @@ export class SessionTransportCoordinator {
     }
     const requestId = this.options.requestIdFactory();
     this.snapshotRequests.set(requestId, reason);
-    if (!this.connection.send({ type: 'session.snapshot.get', requestId })) {
+    if (!this.connection.send({
+      type: 'session.snapshot.get',
+      requestId,
+      ...(whole ? {} : { timelineLimit: this.options.timelineLimit }),
+    })) {
       this.snapshotRequests.delete(requestId);
       if (!isCompletionSnapshotReason(reason)) {
         this.scheduleReconnect();

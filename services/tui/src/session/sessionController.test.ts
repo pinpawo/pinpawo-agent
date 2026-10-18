@@ -35,6 +35,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   assert.deepEqual(connection.sent, [{
     type: 'session.snapshot.get',
     requestId: 'snapshot-1',
+    timelineLimit: 100,
   }]);
   connection.receive({
     type: 'session.snapshot.result',
@@ -104,6 +105,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'snapshot-2',
+    timelineLimit: 100,
   });
 
   connection.receive({
@@ -168,6 +170,7 @@ test('manual refresh requests a snapshot without waiting for the active run', ()
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'refresh',
+    timelineLimit: 100,
   });
   connection.receive({
     type: 'session.snapshot.result',
@@ -630,6 +633,7 @@ test('starting a new session applies the authoritative snapshot and ignores an o
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'completion',
+    timelineLimit: 100,
   });
 
   const started = controller.startNewSession();
@@ -996,6 +1000,7 @@ test('TuiSessionController lists resumable sessions and applies the selected sna
     type: 'session.resume',
     requestId: 'resume',
     sessionId: 'chat:two',
+    timelineLimit: 100,
   });
   const snapshot = createAgentSessionSnapshot({
     sessionId: 'chat:two',
@@ -1050,6 +1055,7 @@ test('resuming clears an older completion snapshot request', async () => {
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'completion',
+    timelineLimit: 100,
   });
 
   const resumePromise = controller.resumeSession('chat:two');
@@ -1256,5 +1262,132 @@ test('review cancellation completes; the next explicit chat can carry attachment
   assert.deepEqual(controller.submitChat('Continue with these constraints.', attachments), { ok: true, requestId: 'fresh' });
   assert.deepEqual(connection.sent.at(-1), { type: 'chat_request', requestId: 'fresh',
     message: 'Continue with these constraints.', attachments });
+  controller.stop();
+});
+
+test('a long session keeps its newest entries and reads the whole timeline only for the transcript', async () => {
+  const requestIds = ['startup', 'manual', 'whole'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    now: () => 1_000,
+    snapshotTimeoutMs: 60_000,
+    timelineLimit: 2,
+  });
+  const entry = (id: string, text = id) => ({
+    id, type: 'message' as const, role: 'assistant' as const, text, status: 'completed' as const,
+  });
+  const result = (requestId: string, timeline: ReturnType<typeof entry>[], omitted?: number) => ({
+    type: 'session.snapshot.result' as const,
+    requestId,
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:long',
+      kind: 'chat',
+      timeline,
+      ...(omitted ? { timelineWindow: { omitted } } : {}),
+      activeRun: null,
+      pendingInterrupt: null,
+    }),
+  });
+  const ids = (timeline: Array<{ id: string }>) => timeline.map((item) => item.id);
+
+  controller.start();
+  connection.open();
+  assert.deepEqual(connection.sent.at(-1), { type: 'session.snapshot.get', requestId: 'startup', timelineLimit: 2 });
+  connection.receive(result('startup', [entry('c'), entry('d')], 2));
+  assert.deepEqual(ids(controller.getState().session.timeline), ['c', 'd']);
+  assert.deepEqual(controller.getState().session.timelineWindow, { omitted: 2 });
+
+  // A later window keeps what the session already holds before it.
+  assert.deepEqual(controller.refreshSession(), { ok: true });
+  connection.receive(result('manual', [entry('d', 'd2'), entry('e')], 3));
+  assert.deepEqual(ids(controller.getState().session.timeline), ['c', 'd', 'e']);
+  assert.deepEqual(controller.getState().session.timelineWindow, { omitted: 2 });
+
+  // The transcript reads the whole timeline once, without keeping it.
+  const transcript = controller.readTranscriptSession();
+  assert.deepEqual(connection.sent.at(-1), { type: 'session.snapshot.get', requestId: 'whole' });
+  connection.receive(result('whole', ['a', 'b', 'c', 'd', 'e'].map((id) => entry(id))));
+  const whole = await transcript;
+  assert.deepEqual(ids(whole.timeline), ['a', 'b', 'c', 'd', 'e']);
+  assert.equal(whole.timelineWindow, undefined);
+  assert.equal(whole.timeline[3]?.type === 'message' ? whole.timeline[3].text : '', 'd2', 'live entries win');
+  assert.deepEqual(ids(controller.getState().session.timeline), ['c', 'd', 'e']);
+  controller.stop();
+});
+
+test('a transcript read falls back to the live session when the Host cannot answer', async () => {
+  let connection!: FakeConnection;
+  const requestIds = ['startup', 'whole'];
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    snapshotTimeoutMs: 60_000,
+  });
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'startup',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:long',
+      kind: 'chat',
+      timeline: [{ id: 'z', type: 'message', role: 'user', text: 'z', status: 'completed' }],
+      timelineWindow: { omitted: 7 },
+      activeRun: null,
+      pendingInterrupt: null,
+    }),
+  });
+  const transcript = controller.readTranscriptSession();
+  connection.receive({ type: 'session.error', requestId: 'whole', operation: 'snapshot', message: 'boom' });
+  assert.deepEqual((await transcript).timelineWindow, { omitted: 7 });
+  assert.equal(controller.getState().connection, 'ready', 'a failed transcript read is not a sync failure');
+  controller.stop();
+});
+
+test('a refresh window that shares no entry with the live session is read whole instead', () => {
+  const requestIds = ['startup', 'manual', 'whole'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    snapshotTimeoutMs: 60_000,
+    timelineLimit: 2,
+  });
+  const entry = (id: string) => ({ id, type: 'message' as const, role: 'assistant' as const, text: id, status: 'completed' as const });
+  const result = (requestId: string, ids: string[], omitted?: number) => ({
+    type: 'session.snapshot.result' as const,
+    requestId,
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:long',
+      kind: 'chat',
+      timeline: ids.map(entry),
+      ...(omitted ? { timelineWindow: { omitted } } : {}),
+      activeRun: null,
+      pendingInterrupt: null,
+    }),
+  });
+
+  controller.start();
+  connection.open();
+  connection.receive(result('startup', ['c', 'd'], 2));
+  controller.refreshSession();
+  connection.receive(result('manual', ['x', 'y'], 6));
+  // Not lined up: the live entries stay and the whole timeline is read.
+  assert.deepEqual(controller.getState().session.timeline.map((item) => item.id), ['c', 'd']);
+  assert.deepEqual(connection.sent.at(-1), { type: 'session.snapshot.get', requestId: 'whole' });
+  connection.receive(result('whole', ['a', 'b', 'c', 'd', 'x', 'y']));
+  assert.deepEqual(controller.getState().session.timeline.map((item) => item.id), ['a', 'b', 'c', 'd', 'x', 'y']);
+  assert.equal(controller.getState().session.timelineWindow, undefined);
   controller.stop();
 });

@@ -220,6 +220,7 @@ test('authoritative completion snapshot closes a review rejected by the server',
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'completion',
+    timelineLimit: 100,
   });
 
   connection.receive({

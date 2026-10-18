@@ -20,6 +20,7 @@ test('session transport owns snapshot correlation and forwards application messa
     requestIdFactory: () => requestIds.shift() ?? 'unexpected',
     reconnectDelaysMs: [10],
     snapshotTimeoutMs: 1_000,
+    timelineLimit: 100,
     setTimer: setTimeout,
     clearTimer: clearTimeout,
     onConnection: (state, detail) => {
@@ -39,6 +40,7 @@ test('session transport owns snapshot correlation and forwards application messa
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'startup',
+    timelineLimit: 100,
   });
   connection.receive(snapshot('startup'));
   assert.deepEqual(snapshots, ['startup']);
@@ -78,6 +80,7 @@ test('session transport consumes snapshot errors but forwards command errors', (
     requestIdFactory: () => 'startup',
     reconnectDelaysMs: [10],
     snapshotTimeoutMs: 1_000,
+    timelineLimit: 100,
     setTimer: setTimeout,
     clearTimer: clearTimeout,
     onConnection: (state, detail) => {
@@ -122,6 +125,7 @@ test('session transport downgrades invalidated completion snapshots to metadata-
     requestIdFactory: () => requestIds.shift() ?? 'unexpected',
     reconnectDelaysMs: [10],
     snapshotTimeoutMs: 1_000,
+    timelineLimit: 100,
     setTimer: setTimeout,
     clearTimer: clearTimeout,
     onConnection: () => undefined,
@@ -169,6 +173,7 @@ test('a null snapshot timeout keeps a slow Host connected', () => {
     requestIdFactory: () => 'startup',
     reconnectDelaysMs: [10],
     snapshotTimeoutMs: null,
+    timelineLimit: 100,
     setTimer: (callback) => {
       timers.push(callback);
       return 0 as unknown as ReturnType<typeof setTimeout>;
@@ -187,6 +192,7 @@ test('a null snapshot timeout keeps a slow Host connected', () => {
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'startup',
+    timelineLimit: 100,
   });
   // Embedded stdio disconnects the Host on teardown, so a synchronization
   // timeout would restart a cold Host instead of re-dialing one.

@@ -86,6 +86,8 @@ export type TuiSessionControllerOptions = {
   reconnectDelaysMs?: readonly number[];
   /** `null` disables the timeout; see `SessionTransportCoordinatorOptions`. */
   snapshotTimeoutMs?: number | null;
+  /** Newest timeline entries a synchronizing snapshot carries; defaults to 100. */
+  timelineLimit?: number;
   sessionCommandTimeoutMs?: number;
   /** Manual compaction includes a model call and therefore needs a longer timeout. */
   sessionCompactTimeoutMs?: number;

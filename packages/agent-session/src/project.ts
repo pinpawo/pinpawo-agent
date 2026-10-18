@@ -133,10 +133,11 @@ export function applySessionSnapshot(
     sessionId: incoming.sessionId,
     kind: incoming.kind,
     ...(actor ? { actor } : {}),
-    // Snapshots replace the whole ordered projection. Live-only operation and
-    // subagent entries are intentionally dropped when checkpoint data omits them.
-    timeline: incoming.timeline.map(cloneTimelineEntry),
-    ...(incoming.timelineWindow ? { timelineWindow: { ...incoming.timelineWindow } } : {}),
+    // Snapshots replace the ordered projection they cover. Live-only operation
+    // and subagent entries are intentionally dropped when checkpoint data omits
+    // them. A windowed snapshot covers only its tail: entries the reader already
+    // holds before the window's first entry stay.
+    ...spliceSnapshotTimeline(session, incoming),
     activeRun: incoming.activeRun
       ? normalizeSnapshotRun(incoming.activeRun, session.activeRun, context)
       : null,
@@ -155,6 +156,25 @@ export function applySessionSnapshot(
       : preserveSessionTokenUsage && session.sessionTokenUsage
         ? { sessionTokenUsage: session.sessionTokenUsage }
         : {}),
+  };
+}
+
+function spliceSnapshotTimeline(
+  session: AgentSession,
+  incoming: AgentSession,
+): Pick<AgentSession, 'timeline' | 'timelineWindow'> {
+  const window = incoming.timeline.map(cloneTimelineEntry);
+  if (!incoming.timelineWindow) return { timeline: window };
+  const first = window[0];
+  const held = session.sessionId === incoming.sessionId && first
+    ? session.timeline.findIndex((entry) => entry.id === first.id)
+    : -1;
+  if (held < 0) return { timeline: window, timelineWindow: { ...incoming.timelineWindow } };
+  // What the reader already held runs on to the window, so it still lacks only
+  // what it lacked before.
+  return {
+    timeline: [...session.timeline.slice(0, held), ...window],
+    ...(session.timelineWindow ? { timelineWindow: { ...session.timelineWindow } } : {}),
   };
 }
 

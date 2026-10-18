@@ -1805,10 +1805,10 @@ function exportCurrentTranscript(requestedPath?: string) {
   }
   localNotice = 'exporting transcript…';
   refreshStatus();
-  void exportSessionTranscript({
-    session,
+  void controller.readTranscriptSession().then((transcript) => exportSessionTranscript({
+    session: transcript,
     requestedPath,
-  }).then(({ filePath }) => {
+  })).then(({ filePath }) => {
     localNotice = `exported: ${filePath}`;
     refreshStatus();
   }).catch((error: unknown) => {
@@ -1893,17 +1893,20 @@ function openTranscriptPager() {
   refreshCommandOverlay();
   terminalHandoffOpen = true;
   composer.blur();
-  localNotice = 'transcript pager active';
+  localNotice = session.timelineWindow ? 'loading transcript…' : 'transcript pager active';
   refreshStatus();
 
-  const operation = () => pageSessionTranscript({
-    session,
-    cwd: process.cwd(),
-    ...(smoke.transcript
-      ? { env: { ...process.env, PAGER: 'cat' } }
-      : {}),
-  });
-  void withRendererSuspended(renderer, operation).then(() => {
+  // A long session holds only its newest entries; the pager reads them all.
+  void controller.readTranscriptSession().then((transcript) => {
+    localNotice = 'transcript pager active';
+    return withRendererSuspended(renderer, () => pageSessionTranscript({
+      session: transcript,
+      cwd: process.cwd(),
+      ...(smoke.transcript
+        ? { env: { ...process.env, PAGER: 'cat' } }
+        : {}),
+    }));
+  }).then(() => {
     localNotice = 'transcript closed';
   }).catch((error: unknown) => {
     localNotice = `transcript pager failed: ${errorMessage(error)}`;

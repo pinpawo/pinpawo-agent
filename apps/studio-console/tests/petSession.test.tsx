@@ -10,6 +10,7 @@ import {
 } from '@pinpawo/agent-session';
 import {
   applyPetSessionMessage,
+  applyPetSessionRead,
   choosePetSessionReviewOption,
   observePetSession,
   petSessionEarlierLimit,
@@ -87,6 +88,26 @@ test('a reader starts from the newest entries and reads further back with a larg
   state = applyPetSessionMessage(state, snapshotMessage(session({ timeline: entries(3, 4), timelineWindow: { omitted: 8 } })), target, 2);
   assert.deepEqual(state?.timeline.map(entry => entry.id), ['e0', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6']);
   assert.equal(state?.timelineWindow?.omitted, 4);
+});
+
+test('an earlier-history read that returns late does not undo what was observed meanwhile', () => {
+  const entries = (count: number, from = 0) => Array.from({ length: count }, (_, index) => ({
+    id: `e${from + index}`, type: 'message' as const, role: 'assistant' as const, text: `entry ${from + index}`, status: 'completed' as const,
+  }));
+  let state = applyPetSessionMessage(null, snapshotMessage(session({ timeline: entries(100, 900), timelineWindow: { omitted: 900 } })), target, 1);
+  // "Load earlier" is sent; a run starts and streams while the response is delayed.
+  const missed: AgentServerMessage[] = [
+    { type: 'event', requestId: 'r', event: { type: 'run.started', requestId: 'r', initiator: 'client' } },
+    { type: 'event', requestId: 'r', event: { type: 'message.delta', requestId: 'r', messageId: 'live', role: 'assistant', text: 'live' } },
+  ];
+  for (const message of missed) state = applyPetSessionMessage(state, message, target, 2);
+  const earlier = createAgentSessionSnapshot(session({ timeline: entries(200, 800), timelineWindow: { omitted: 800 } }));
+  state = applyPetSessionRead(state, earlier, missed, target, 3);
+  assert.equal(state?.timeline.length, 201);
+  assert.equal(state?.timeline[0]?.id, 'e800');
+  assert.equal(state?.timeline.at(-1)?.type === 'message' && state.timeline.at(-1)?.text, 'live');
+  assert.equal(state?.activeRun?.requestId, 'r');
+  assert.equal(state?.timelineWindow?.omitted, 800);
 });
 
 test('review answers follow the server options: defer collects, immediate sends, input is required', () => {

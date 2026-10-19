@@ -81,6 +81,24 @@ export function readPetSessionSnapshot(
   return applySessionSnapshot(current ?? emptySession(target.sessionId), snapshot, { observedAt });
 }
 
+/**
+ * Apply a snapshot read beside the observation, then replay the observed
+ * messages that arrived while it was read: the response may predate them, and
+ * must not roll the reader back. The Host's own observe does the same.
+ */
+export function applyPetSessionRead(
+  current: AgentSession | null,
+  snapshot: AgentSessionSnapshot,
+  missed: readonly AgentServerMessage[],
+  target: PetSessionTarget,
+  observedAt = Date.now(),
+): AgentSession | null {
+  return missed.reduce<AgentSession | null>(
+    (session, message) => applyPetSessionMessage(session, message, target, observedAt),
+    readPetSessionSnapshot(snapshot, target, current, observedAt),
+  );
+}
+
 /** Follow one session; the first message after every connection is its snapshot. */
 export function observePetSession(options: {
   url: string;

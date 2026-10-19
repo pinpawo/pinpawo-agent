@@ -14,6 +14,7 @@ import { ChannelCopy } from './ChannelConversation';
 import { channelPetIdentity, type ChannelPet } from './channelData';
 import {
   applyPetSessionMessage,
+  applyPetSessionRead,
   choosePetSessionReviewOption,
   currentPetSessionReview,
   observePetSession,
@@ -23,7 +24,6 @@ import {
   petSessionToolCallDetail,
   petSessionToolCallTitle,
   readPetSessionReviewOutcome,
-  readPetSessionSnapshot,
   type PetSessionReviewBody,
   type PetSessionReviewDraft,
   type PetSessionTarget,
@@ -201,6 +201,8 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
   const [submission, setSubmission] = useState<PetSessionSubmission | null>(null);
   const submissionRef = useRef<PetSessionSubmission | null>(null);
   const lifetime = useRef<AbortController | null>(null);
+  // Observed messages each in-flight snapshot read must replay over its response.
+  const reads = useRef(new Set<AgentServerMessage[]>());
   const identity = channelPetIdentity(target.petId, pets, petsReady);
   const updateSubmission = (next: PetSessionSubmission | null) => { submissionRef.current = next; setSubmission(next); };
 
@@ -220,6 +222,8 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
 
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const refreshSnapshot = async (timelineLimit: number | null = PET_SESSION_TIMELINE_LIMIT) => {
+    const missed: AgentServerMessage[] = [];
+    reads.current.add(missed);
     try {
       const response = await fetch(`${url}/pet-sessions/snapshot?${petSessionQuery(target, timelineLimit)}`, {
         headers: { Authorization: `Bearer ${token}` }, signal: lifetime.current?.signal,
@@ -227,9 +231,11 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
       const value = await response.json().catch(() => null) as { snapshot?: AgentSessionSnapshot; error?: string } | null;
       if (!response.ok || !value?.snapshot) throw new Error(value?.error ?? `Snapshot failed (${response.status}).`);
       const snapshot = value.snapshot;
-      setSession(current => readPetSessionSnapshot(snapshot, target, current));
+      setSession(current => applyPetSessionRead(current, snapshot, missed, target));
     } catch (error) {
       if (!lifetime.current?.signal.aborted) setProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      reads.current.delete(missed);
     }
   };
 
@@ -260,6 +266,7 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
       onMessage: (message: AgentServerMessage) => {
         if (message.type === 'session.snapshot.result') { setConnection('live'); setProblem(''); }
         setSession(current => applyPetSessionMessage(current, message, target));
+        for (const missed of reads.current) missed.push(message);
         const pending = submissionRef.current;
         if (pending && (pending.phase === 'sending' || pending.phase === 'waiting')) {
           const outcome = readPetSessionReviewOutcome(message, pending.requestId);

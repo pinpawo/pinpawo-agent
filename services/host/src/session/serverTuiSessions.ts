@@ -421,17 +421,25 @@ export class ServerTuiSessionService {
       throw new Error('session not found');
     }
     const checkpoint = await this.readSessionCheckpointPoint(deps, candidate);
+    const previousActiveId = this.state.activeSessionIds[deps.petId];
+    const previous = this.state.sessions[sessionId];
     const session = resumeTuiSession(this.state, deps.petId, sessionId);
     if (!session) {
       throw new Error('session not found');
     }
-    this.save();
     updateTuiSessionSummary(
       this.state,
       session.id,
       summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
     );
-    this.save();
+    // One write for both the active switch and the summary; a failed write leaves neither.
+    try { this.save(); }
+    catch (error) {
+      if (previous) this.state.sessions[sessionId] = previous;
+      if (previousActiveId === undefined) delete this.state.activeSessionIds[deps.petId];
+      else this.state.activeSessionIds[deps.petId] = previousActiveId;
+      throw error;
+    }
     return {
       session: {
         ...(this.state.sessions[session.id] ?? session),

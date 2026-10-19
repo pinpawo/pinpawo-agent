@@ -28,7 +28,7 @@ import {
   buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
 } from './config/llmConfig';
-import { loadStoredConfig, saveStoredConfig } from './storage';
+import { loadStoredConfig } from './storage';
 import {
   createHostBaselineCapabilities,
 } from './hostCapabilityCatalog';

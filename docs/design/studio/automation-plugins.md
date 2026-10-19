@@ -1,7 +1,7 @@
 # Studio Automation Plugins
 
 > 状态：当前实现边界
-> 更新：2026-10-05
+> 更新：2026-10-19
 
 Scheduler 与 Trigger 是两个可选 Studio Plugin。Scheduler 表达时间条件；Trigger
 表达“满足某个事件源条件时，向哪个 Pet 派发什么请求”。二者只通过
@@ -120,6 +120,28 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 `studio_event` delivery 的 idempotency key 是 `studio:<source>:<type>:<id>`：payload 带
 `sequence`（如 Scheduler 的持久序号）时用它，重启后同一事件仍去重；否则用 Studio 在
 `notify()` 时分配的 `eventId`，同一毫秒的两个不同事件各派发一次。
+
+### 目标 Pet
+
+规则用 `target` 指定“发给谁”：
+
+- `{ kind: 'pet', petId }`：固定目标。旧的顶层 `petId` 是它的简写，仍然接受，解析时折叠成这个形式；
+- `{ kind: 'event_payload', path, allowedPetIds? }`：从 Trigger envelope 的点路径（如 `payload.assigneeId`）
+  读出 petId。路径必须解析为非空字符串，且必须是已注册的 Pet；配置了 `allowedPetIds` 时还必须在名单里，
+  否则这次 delivery 记为 `failed`。名单在启动时校验，名单里的未知 Pet 会让启动失败。
+
+事件生产方只提供事实，选择目标的始终是规则本身。
+
+### 重新投递
+
+`POST /triggers/control` 接受 `{ action, deliveryId }`，两种动作都用 delivery 保存的目标与渲染后的 request，
+而不重新渲染：
+
+- `retry`：只对 `failed` 的 delivery 生效，把同一条 delivery 转回 `dispatching` 再派发一次；
+- `redeliver`：只对 `accepted` 的 delivery 生效，新建一条 delivery（idempotency key 加
+  `:redelivery:<id>` 后缀）再派发，原回执不变。接纳不代表执行完成，所以这一步需要操作者显式发起。
+
+规则已被删除、目标 Pet 不再注册、或目标已不在当前规则的允许范围内时，两种动作都返回 409，不派发。
 
 Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”，
 `channelId` 负责“结果落在哪个 Channel”。

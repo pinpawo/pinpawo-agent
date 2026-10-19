@@ -218,17 +218,17 @@ test('approval shares fixed footer rows dynamically between content and options'
   assert.match(compactNext?.title ?? '', /details 5-8\/8/);
 });
 
-test('approval dialog is centered within its temporary footer surface', () => {
-  assert.deepEqual(calculateApprovalDialogLayout(128, 18), {
-    width: 112,
+test('approval dialog spans the full width of its temporary footer surface', () => {
+  assert.deepEqual(calculateApprovalDialogLayout(185, 18), {
+    width: 185,
     height: 16,
-    left: 8,
+    left: 0,
     top: 1,
   });
   assert.deepEqual(calculateApprovalDialogLayout(34, 9), {
-    width: 32,
+    width: 34,
     height: 7,
-    left: 1,
+    left: 0,
     top: 1,
   });
 });

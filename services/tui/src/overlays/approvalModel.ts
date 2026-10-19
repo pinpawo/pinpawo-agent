@@ -84,7 +84,6 @@ export type ApprovalViewModel = {
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
 const MAX_REVIEW_CONTENT_LINES = 500;
 export const APPROVAL_FOOTER_ROWS = 18;
-const APPROVAL_DIALOG_MAX_WIDTH = 112;
 const APPROVAL_DIALOG_MAX_ROWS = 16;
 const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
@@ -104,10 +103,10 @@ export type ApprovalDialogLayout = {
 };
 
 /**
- * Keep the review interaction visibly separate from the composer while
- * retaining split-footer scrollback above it. The dialog is centered within
- * the temporarily expanded footer rather than pretending to be a transcript
- * entry.
+ * The dialog spans the full terminal width, like the composer it temporarily
+ * replaces and the transcript above it, so long commands wrap as late as
+ * they can. Vertically it gets the expanded footer minus a spare row above
+ * and below; the view then shrinks it to its content against the bottom.
  */
 export function calculateApprovalDialogLayout(
   availableWidth: number,
@@ -115,11 +114,6 @@ export function calculateApprovalDialogLayout(
 ): ApprovalDialogLayout {
   const width = Math.max(1, Math.floor(availableWidth));
   const height = Math.max(1, Math.floor(availableHeight));
-  const horizontalInset = width >= 72 ? 6 : width >= 48 ? 4 : 1;
-  const dialogWidth = Math.max(
-    1,
-    Math.min(APPROVAL_DIALOG_MAX_WIDTH, width - horizontalInset * 2),
-  );
   const dialogHeight = Math.max(
     1,
     Math.min(
@@ -128,9 +122,9 @@ export function calculateApprovalDialogLayout(
     ),
   );
   return {
-    width: dialogWidth,
+    width,
     height: dialogHeight,
-    left: Math.max(0, Math.floor((width - dialogWidth) / 2)),
+    left: 0,
     top: Math.max(0, Math.floor((height - dialogHeight) / 2)),
   };
 }

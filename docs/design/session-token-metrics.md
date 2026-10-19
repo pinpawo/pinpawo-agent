@@ -89,7 +89,11 @@ Usage attached to a native pause is applied before the run closes. On abort,
 Host publishes the settled ledger before the terminal interruption event;
 new turns/resumes clear the previous call's rate while preserving totals.
 Malformed counters/cache coverage or corrupt ledger records are rejected;
-they cannot turn into complete zero-usage snapshots.
+they cannot turn into complete zero-usage snapshots. Accounting never blocks
+the agent: an unreadable `usage.json` reads as absent (the session loads, and
+the next run re-imports the transcript baseline as incomplete and replaces the
+file), and the usage callback does not raise, so a failed ledger write (for
+example a full disk) leaves that call unknown instead of failing the model call.
 
 These are **known usage totals, not a provider billing statement**. Provider/SDK
 internal HTTP retries without their own model callbacks or usage cannot be

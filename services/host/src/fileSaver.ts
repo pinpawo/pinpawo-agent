@@ -951,7 +951,14 @@ export class FileSaver extends BaseCheckpointSaver {
   readSessionUsage(threadId: string): SessionUsageLedger | null {
     const path = join(this.threadDir(threadId), 'usage.json');
     if (!existsSync(path)) return null;
-    return parseSessionUsageLedger(JSON.parse(readFileSync(path, 'utf8')));
+    try {
+      return parseSessionUsageLedger(JSON.parse(readFileSync(path, 'utf8')));
+    } catch {
+      // Accounting must never block loading a session. An unreadable ledger is
+      // treated as absent: the next run imports retained transcript usage as an
+      // incomplete baseline and overwrites this file.
+      return null;
+    }
   }
 
   async putSessionUsageCall(threadId: string, id: string, call: UsageCall, baseline?: TokenUsageSnapshot): Promise<void> {

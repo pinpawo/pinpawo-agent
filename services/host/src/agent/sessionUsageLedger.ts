@@ -134,12 +134,28 @@ export function createSessionUsageTracker(options: {
   const now = options.now ?? (() => performance.now());
   const streaming = new Map<string, StreamSample>();
   const runningUsage = new Map<string, Record<string, unknown>>();
+  // Accounting is best-effort: a failed ledger write (for example a full disk)
+  // must not fail the model call it observes. Until a later write for the same
+  // call succeeds, that call counts as unknown in the published summary.
+  const unrecorded = new Set<string>();
   const publish = () => {
-    const ledger = store.readSessionUsage(threadId);
-    if (ledger) options.onUsage?.(summarizeSessionUsage(ledger));
+    let ledger: SessionUsageLedger | null = null;
+    try { ledger = store.readSessionUsage(threadId); } catch { /* reported as unknown below */ }
+    // A call whose start was recorded already counts as unknown in the ledger.
+    const missing = [...unrecorded].filter(id => !ledger || !Object.hasOwn(ledger.calls, id)).length;
+    if (!ledger && !missing) return;
+    const summary = ledger ? summarizeSessionUsage(ledger) : { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    options.onUsage?.(missing
+      ? { ...summary, incomplete: true, unknownCalls: (summary.unknownCalls ?? 0) + missing }
+      : summary);
   };
   const put = async (id: string, call: UsageCall) => {
-    await store.putSessionUsageCall(threadId, id, call, options.baseline);
+    try {
+      await store.putSessionUsageCall(threadId, id, call, options.baseline);
+      unrecorded.delete(id);
+    } catch {
+      unrecorded.add(id);
+    }
     publish();
   };
   const start = (id: string) => put(id, { pending: true });
@@ -157,7 +173,7 @@ export function createSessionUsageTracker(options: {
   const callbacks: Pick<BaseCallbackHandler,
     'handleLLMStart' | 'handleChatModelStart' | 'handleLLMNewToken' | 'handleLLMEnd' | 'handleLLMError' | 'handleChatModelStreamEvent'>
     & { name: string; raiseError: boolean; awaitHandlers: boolean } = {
-    name: 'session-usage', raiseError: true, awaitHandlers: true,
+    name: 'session-usage', raiseError: false, awaitHandlers: true,
     handleLLMStart: (_llm, _prompts, id) => start(id),
     handleChatModelStart: (_llm, _messages, id) => start(id),
     handleLLMNewToken: (token, _indices, id, _parent, _tags, fields) => {

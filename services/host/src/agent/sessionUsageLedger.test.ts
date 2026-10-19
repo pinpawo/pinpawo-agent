@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage } from '@langchain/core/messages';
@@ -230,6 +231,43 @@ test('invalid persisted ledger shapes are rejected instead of becoming complete 
   for (const value of [null, { version: 1, calls: [] }, { version: 1, calls: { model: null } },
     { version: 1, calls: { model: { usage: { inputTokens: -1, outputTokens: 0, totalTokens: 0 } } } },
     { version: 1, revision: -1, calls: {} }]) assert.throws(() => parseSessionUsageLedger(value));
+});
+
+test('a corrupt usage file reads as absent so the session still loads and the next write replaces it', async t => {
+  const { store, path } = fixture(t);
+  await store.putSessionUsageCall('s', 'first', { usage: usage() });
+  const file = readdirSync(dirname(path), { recursive: true, encoding: 'utf8' })
+    .find(entry => entry.endsWith('usage.json'))!;
+  writeFileSync(join(dirname(path), file), '{ not json');
+  assert.equal(store.readSessionUsage('s'), null);
+  await store.putSessionUsageCall('s', 'next', { usage: usage(10, 5) }, { ...usage(), incomplete: true });
+  const total = summarizeSessionUsage(new FileSaver(path).readSessionUsage('s')!);
+  assert.equal(total.totalTokens, 135);
+  assert.equal(total.incomplete, true);
+});
+
+test('a failed ledger write never fails the model call and keeps the published total incomplete', async t => {
+  const { store } = fixture(t);
+  let failWrites = true;
+  const flaky = {
+    readSessionUsage: (id: string) => store.readSessionUsage(id),
+    putSessionUsageCall: async (...args: Parameters<FileSaver['putSessionUsageCall']>) => {
+      if (failWrites) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      await store.putSessionUsageCall(...args);
+    },
+  };
+  const published: { incomplete?: boolean; unknownCalls?: number; totalTokens: number }[] = [];
+  const { callbacks } = createSessionUsageTracker({ store: flaky, threadId: 's', onUsage: u => published.push(u) });
+  assert.equal(callbacks.raiseError, false);
+  await callbacks.handleChatModelStart!({} as never, [], 'lost');
+  await callbacks.handleLLMEnd!(result() as never, 'lost');
+  assert.deepEqual(published.at(-1), { inputTokens: 0, outputTokens: 0, totalTokens: 0, incomplete: true, unknownCalls: 1 });
+  failWrites = false;
+  await callbacks.handleChatModelStart!({} as never, [], 'kept');
+  await callbacks.handleLLMEnd!(result(10, 5) as never, 'kept');
+  assert.equal(published.at(-1)!.totalTokens, 15);
+  assert.equal(published.at(-1)!.incomplete, true);
+  assert.equal(published.at(-1)!.unknownCalls, 1);
 });
 
 test('reasoning details retained only in raw response metadata still suppress a text-only rate', async t => {

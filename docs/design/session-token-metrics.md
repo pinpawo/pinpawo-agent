@@ -35,7 +35,8 @@ and final completion do not count tokens again. TUI and Console use
 
 - Cache: sum(cache reads) / sum(input for calls reporting cache reads).
   Missing fields remain unknown, including providers that never report zero.
-  `*` means only part of the session input has known cache coverage. Writes
+  `*` means some input has unknown cache coverage, including unreported calls
+  whose input size is itself unavailable. Writes
   are input consumption but never hits. Cached input is already a subset of
   normalized input and is never added to total again.
 - Raw Anthropic usage excludes cache read/write from `input_tokens`; add those

@@ -54,6 +54,7 @@ test('Studio dispatches request-only input and returns no thread or continuation
   assert.equal('status' in receipt, false);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(events, [{
+    eventId: (events[0] as { eventId: string }).eventId,
     type: 'dispatch.accepted',
     source: 'studio',
     occurredAt: (events[0] as { occurredAt: string }).occurredAt,

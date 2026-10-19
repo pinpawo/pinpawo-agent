@@ -103,8 +103,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     review: async (petId, sessionId, request) => petSessionPort(petId).review(sessionId, request),
   };
 
-  function notify(event: StudioEvent): void {
-    eventBus.publish(event);
+  function notify(event: Omit<StudioEvent, 'eventId'> & { eventId?: string }): void {
+    eventBus.publish({ ...event, eventId: event.eventId ?? randomUUID() });
   }
 
   for (const pet of petsById.values()) {

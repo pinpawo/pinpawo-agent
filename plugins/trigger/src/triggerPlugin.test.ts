@@ -123,6 +123,48 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
   assert.doesNotMatch(requests[0]!, /must not be appended/);
 });
 
+test('Trigger keys event deliveries by event identity, not by the millisecond', async (t) => {
+  const requests: string[] = [];
+  const plugin = createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'notice-relay',
+      petId: 'wiki',
+      request: { template: 'Read {{payload.noticeId}}', context: ['payload.noticeId'] },
+      source: { kind: 'studio_event', eventSource: 'notice', type: 'notice.created' },
+    }],
+  });
+  const studio = await createStudio({
+    studioId: 'trigger-event-identity',
+    entryPetId: 'wiki',
+    pets: [{
+      registration: { petId: 'wiki', name: 'Wiki' },
+      dispatch: {
+        getQueueSnapshot: () => ({
+          state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+        }),
+        onQueueChange: () => () => undefined,
+        onDispatchLifecycle: () => () => undefined,
+        dispatch: async (input) => { requests.push(input.request); },
+      },
+    }],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  const occurredAt = '2026-10-18T00:00:00.000Z';
+  studio.notify({ source: 'notice', type: 'notice.created', payload: { noticeId: 'n-1' }, occurredAt });
+  studio.notify({ source: 'notice', type: 'notice.created', payload: { noticeId: 'n-2' }, occurredAt });
+  // The same event delivered again (same eventId) is a replay and dedupes.
+  studio.notify({ eventId: 'replayed', source: 'notice', type: 'notice.created', payload: { noticeId: 'n-3' }, occurredAt });
+  studio.notify({ eventId: 'replayed', source: 'notice', type: 'notice.created', payload: { noticeId: 'n-3' }, occurredAt });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests.map((request) => request.match(/n-\d/)?.[0]), ['n-1', 'n-2', 'n-3']);
+  assert.equal((await plugin.service.snapshot()).deliveries.length, 3);
+});
+
 test('Trigger resolves an explicit event payload target and records a retryable failed delivery', async (t) => {
   let attempts = 0;
   const plugin = createTriggerPlugin({

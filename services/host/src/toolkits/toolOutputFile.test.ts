@@ -3,7 +3,24 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { fullOutputNote, saveFullToolOutput } from './toolOutputFile';
+
+test('cleanup failure preserves the original output-write error', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-output-errors-'));
+  const remove = fs.rmSync;
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    remove(dir, { recursive: true, force: true });
+  });
+  t.mock.method(fs, 'writeFileSync', () => { throw Object.assign(new Error('write failed'), { code: 'ENOSPC' }); });
+  t.mock.method(fs, 'rmSync', () => { throw Object.assign(new Error('cleanup failed'), { code: 'EPERM' }); });
+  syncBuiltinESMExports();
+  assert.deepEqual(saveFullToolOutput('captured output', dir), { error: 'ENOSPC' });
+  assert.match(fullOutputNote('captured output', dir), /not saved \(ENOSPC\), omitted part is lost/);
+});
 
 test('saveFullToolOutput writes a private file with the full text', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-tool-output-'));

@@ -12,6 +12,32 @@ import {
 } from '@pinpawo/agent-session';
 import { runExec, runExecSession, type ExecHostProcess } from './exec';
 
+test('exec preserves bounded error causes through the wire parser', async () => {
+  const diagnostics = { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET' }] };
+  const host = createFakeHost((message, fake) => {
+    if (answerSessionNew(message, fake)) return;
+    if (message.type === 'chat_request') fake.emit(runEvent({
+      type: 'error', requestId: message.requestId, message: 'terminated', diagnostics,
+    }));
+  });
+  const result = await runExecSession(host, { instruction: 'inspect' });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error, 'terminated');
+  assert.deepEqual(result.errorDiagnostics, diagnostics);
+});
+
+test('malformed optional diagnostics do not hide the original terminal error', async () => {
+  const host = createFakeHost((message, fake) => {
+    if (answerSessionNew(message, fake)) return;
+    if (message.type === 'chat_request') fake.emit({ type: 'event', requestId: message.requestId,
+      event: { type: 'error', requestId: message.requestId, message: 'failure', diagnostics: { chain: 'invalid' } },
+    } as unknown as AgentServerMessage);
+  });
+  const result = await runExecSession(host, { instruction: 'inspect' });
+  assert.equal(result.error, 'failure');
+  assert.equal(result.errorDiagnostics, undefined);
+});
+
 type FakeHost = ExecHostProcess & {
   received: AgentClientMessage[];
   emit: (message: AgentServerMessage) => void;

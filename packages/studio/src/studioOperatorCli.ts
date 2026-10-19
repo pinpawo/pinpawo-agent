@@ -6,7 +6,7 @@ import { join } from 'node:path';
 export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host is started):
   pinpawo-studio channels list [--after N] [--limit N]
   pinpawo-studio channels create --title <text> [--description <text>] [--pet <petId>]...
-  pinpawo-studio channels read <channelId> [--after N] [--limit N]
+  pinpawo-studio channels read <channelId> [--before N | --after N] [--limit N]
   pinpawo-studio channels send <channelId> --file <markdown|-> [--mention <participantId>] [--reply-to <messageId>]
   pinpawo-studio channels members <channelId>
   pinpawo-studio channels add-member <channelId> --member <participantId>
@@ -31,7 +31,8 @@ Connection options (before or after the command):
 
 Output is JSON; events emits live SSE data as JSON lines for 1–60 seconds
 (default: 30). Pagination is one page, limit 1–200 (default: 50); use nextAfter
-while hasMore. Channel sends return a saved message and per-target deliveries,
+while hasMore. channels read starts from the newest messages; --before nextBefore
+reads further back while hasEarlier, --after nextAfter reads newer ones. Channel sends return a saved message and per-target deliveries,
 not completion. No request is retried automatically. Read actual state before
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
@@ -53,6 +54,7 @@ export type StudioOperatorOptions = {
   agentUrl: string;
   tokenFile: string;
   after?: number;
+  before?: number;
   limit?: number;
   file?: string;
   mentions: string[];
@@ -102,6 +104,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     if (['list', 'read'].includes(action!)) {
       allowed.add('--after'); allowed.add('--limit');
     }
+    if (action === 'read') allowed.add('--before');
     if (action === 'send') {
       allowed.add('--file'); allowed.add('--mention'); allowed.add('--reply-to');
     }
@@ -160,7 +163,8 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     studioUrl: origin(values.get('--studio-url') ?? 'http://127.0.0.1:3211', '--studio-url'),
     agentUrl: origin(values.get('--agent-url') ?? 'http://127.0.0.1:3212', '--agent-url'),
     tokenFile: values.get('--token-file') ?? join(homedir(), '.pinpawo/local-server-token'),
-    after: integer('--after', 0, Number.MAX_SAFE_INTEGER), limit: integer('--limit', 1, 200),
+    after: integer('--after', 0, Number.MAX_SAFE_INTEGER), before: integer('--before', 1, Number.MAX_SAFE_INTEGER),
+    limit: integer('--limit', 1, 200),
     seconds: integer('--seconds', 1, 60, 30)!, full: values.has('--full'),
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
@@ -220,6 +224,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   } else route = command === 'queues' ? '/dispatch/queues' : `/${command}`;
   const url = new URL(route, base);
   if (options.after !== undefined) url.searchParams.set('after', String(options.after));
+  if (options.before !== undefined) url.searchParams.set('before', String(options.before));
   if (options.limit !== undefined) url.searchParams.set('limit', String(options.limit));
   if (command === 'channels' && id && ['read', 'members', 'sessions'].includes(action!)) url.searchParams.set('channelId', id);
   if (action === 'create') {

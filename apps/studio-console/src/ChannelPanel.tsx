@@ -7,7 +7,8 @@ import { PetSessionView } from './PetSessionView';
 import type { PetSessionTarget } from './petSession';
 import {
   appendChannelDeliveries, channelJoinablePets, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
-  channelPetSession, channelReplyRecipientId, readChannelContext, readChannelPages,
+  channelPetSession, channelReplyRecipientId, channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages,
+  readChannelContext, readChannelLater, readChannelPages, type ChannelWindow,
   type ChannelContext, type ChannelDelivery, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
 } from './channelData';
 
@@ -23,7 +24,7 @@ type Props = {
   /** Pet replies the Host could not save into a Channel. */
   failures?: { channelId: string; petId?: string; error: string }[];
 };
-type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore'>;
+type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
 
 export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], failures = [], clientMode = false }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
@@ -49,6 +50,11 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [reply, setReply] = useState<ChannelMessage | undefined>();
   const [localVersion, setLocalVersion] = useState(0);
   const [sessionView, setSessionView] = useState<PetSessionTarget | null>(null);
+  const [held, setHeld] = useState<ChannelWindow | null>(null);
+  const heldRef = useRef<ChannelWindow | null>(null);
+  const windows = useRef(0);
+  const updateHeld = (next: ChannelWindow | null) => { heldRef.current = next; setHeld(next); };
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const submitting = useRef(false);
   const composer = useRef<ChannelMessageInputHandle>(null);
   const composerForm = useRef<HTMLFormElement>(null);
@@ -116,28 +122,58 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     return () => abort.abort();
   }, [connected, refreshVersion, localVersion, read]);
 
+  // Opening a Channel reads its newest page; every later refresh reads only what came after the newest message held.
   useEffect(() => {
     if (!connected || !selected) return;
     const abort = new AbortController();
     setLoading(true);
     const request = (path: string) => read(path, abort.signal);
+    const holding = heldRef.current?.channelId === selected ? heldRef.current : null;
     void Promise.all([
-      readChannelContext(request, selected),
+      holding ? readChannelLater(request, selected, holding.nextAfter) : readChannelContext(request, selected),
       request(`/channels/sessions?channelId=${encodeURIComponent(selected)}`) as Promise<{ sessions: ChannelSession[] }>,
     ]).then(([next, bindings]) => {
       if (abort.signal.aborted) return;
+      // An older page may have landed meanwhile: move only the newer edge of the window this read was for.
+      const nextWindow = holding ? channelWindowAfterLater(heldRef.current, holding, next.nextAfter)
+        : { channelId: selected, window: ++windows.current, nextAfter: next.nextAfter, nextBefore: next.nextBefore, hasEarlier: next.hasEarlier };
+      if (!nextWindow) return;
       setContext({ channel: next.channel, members: next.members, viewerParticipantId: next.viewerParticipantId });
-      setMessages(next.messages); setSessions(Array.isArray(bindings.sessions) ? bindings.sessions : []);
+      setMessages(current => holding ? mergeChannelMessages(current, next.messages) : next.messages);
+      updateHeld(nextWindow);
+      setSessions(Array.isArray(bindings.sessions) ? bindings.sessions : []);
     }).catch(reason => { if (!abort.signal.aborted) setError(String(reason)); })
       .finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
   }, [selected, connected, refreshVersion, localVersion, read]);
 
+  // Older messages are read one page at a time; the reader keeps its place.
+  const loadEarlier = async () => {
+    const holding = heldRef.current;
+    if (!holding?.hasEarlier || loadingEarlier) return;
+    const element = timeline.current;
+    const fromBottom = element ? element.scrollHeight - element.scrollTop : 0;
+    setLoadingEarlier(true);
+    try {
+      const page = await readChannelContext(path => read(path), holding.channelId, holding.nextBefore);
+      // A page read for a window that was since reopened or refreshed would leave a gap: drop it.
+      const nextWindow = channelWindowAfterEarlier(heldRef.current, holding, page);
+      if (!nextWindow) return;
+      setMessages(messages => mergeChannelMessages(page.messages, messages));
+      updateHeld(nextWindow);
+      requestAnimationFrame(() => { if (element) element.scrollTop = element.scrollHeight - fromBottom; });
+    } catch (reason) {
+      if (!lifetime.current.signal.aborted) setError(String(reason));
+    } finally {
+      if (!lifetime.current.signal.aborted) setLoadingEarlier(false);
+    }
+  };
+
   const selectChannel = (id: string) => {
     if (submitting.current) return;
     // The loader only reruns when the selection changes, so the open Channel keeps its view.
     if (id === selected) { setNavigationOpen(false); return; }
-    setSelected(id); setContext(null); setMessages([]); setSessions([]);
+    setSelected(id); setContext(null); setMessages([]); setSessions([]); updateHeld(null);
     setReply(undefined); setBody(''); setError(''); setMemberError(''); setJoiningHuman('');
     setHighlightedMessage(''); setNavigationOpen(false);
     followLatest.current = true; setAtLatest(true);
@@ -166,7 +202,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
         title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}), pets: createPets,
       }) as { channel: ChannelRow; members: ChannelMember[] };
       setChannels(current => [...current, value.channel]); setSelected(value.channel.channelId);
-      setContext(null); setMessages([]); setSessions([]); setReply(undefined); setBody('');
+      setContext(null); setMessages([]); setSessions([]); updateHeld(null); setReply(undefined); setBody('');
       followLatest.current = true; focusComposer.current = true; setAtLatest(true);
       setHighlightedMessage(''); setNavigationOpen(false);
       setCreating(false); setTitle(''); setDescription(''); setCreatePets([]);
@@ -259,6 +295,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
                 if (!viewerPosition.current) { followLatest.current = latest; setAtLatest(latest); }
               }}>
+              {held?.hasEarlier && <button className="channel-earlier" type="button" disabled={loadingEarlier || !connected}
+                onClick={() => { void loadEarlier(); }}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
               <ChannelTimeline messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage}
                 members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)}
                 sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
@@ -357,7 +395,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           {memberError && <p className="channel-record-error" role="alert">{memberError}</p>}
         </section>}
         {messages.length > 0 && !clientMode && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
-        <button className="channel-refresh" type="button" disabled={!connected || pending} onClick={refresh}>↻ Refresh persisted history</button>
+        <button className="channel-refresh" type="button" disabled={!connected || pending}
+          onClick={() => { updateHeld(null); refresh(); }}>↻ Refresh persisted history</button>
       </div>
     </aside>
     {sessionView && <PetSessionView url={url} token={token} target={sessionView} pets={pets} petsReady={petsReady}

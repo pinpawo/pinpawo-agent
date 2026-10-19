@@ -80,10 +80,11 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     const input = readChannelTestInput(dispatched[0]!.request);
     assert.deepEqual([input.author, input.replyTo?.messageId], [{ participantId: 'human:local', kind: 'human', label: 'Local' }, plain.messageId]);
     const context = await (await get(`/channels/context?channelId=${channelId}&limit=1`)).json() as {
-      channel: { description: string }; members: unknown[]; messages: unknown[]; hasMore: boolean; viewerParticipantId: string;
+      channel: { description: string }; members: unknown[]; messages: unknown[]; hasMore: boolean; hasEarlier: boolean; viewerParticipantId: string;
     };
-    assert.deepEqual([context.channel.description, context.members.length, context.messages.length, context.hasMore, context.viewerParticipantId],
-      ['Ship 1.0', 2, 1, true, 'human:local']);
+    // The newest page: nothing after it, the earlier message before it.
+    assert.deepEqual([context.channel.description, context.members.length, context.messages.length, context.hasMore, context.hasEarlier, context.viewerParticipantId],
+      ['Ship 1.0', 2, 1, false, true, 'human:local']);
     assert.deepEqual((await (await get(`/channels/sessions?channelId=${channelId}`)).json() as { sessions: unknown[] }).sessions,
       [{ channelId, petId: 'reviewer', sessionId: deliveries[0]!.sessionId, registered: true }]);
     assert.equal((await (await post('/channels/update', { channelId, title: 'Release 1.0' })).json() as { title: string }).title, 'Release 1.0');

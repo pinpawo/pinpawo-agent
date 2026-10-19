@@ -125,7 +125,8 @@ may precede or follow operator commands; `--file -` reads stdin. Repeat
 reference. `channels --help` lists the operator command contract.
 
 Output is JSON, with bounded live SSE observations emitted as JSON lines.
-Reads return one page and preserve `nextAfter`/`hasMore`.
+Reads return one page and preserve `nextAfter`/`hasMore`; `channels read`
+starts from the newest messages and also returns `nextBefore`/`hasEarlier`.
 Commands do not retry. Dispatch accepts an optional `--idempotency-key`, scoped
 by the Host's process-local admission contract; Channel sends create a new
 message each time. Saved/accepted/completed does not establish acceptance.

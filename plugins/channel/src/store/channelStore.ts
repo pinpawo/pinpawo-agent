@@ -47,6 +47,20 @@ export type ChannelSessionRow = {
 
 export type Page = { after: number; limit: number };
 export type PageOf<T> = { items: T[]; nextAfter: number; hasMore: boolean };
+/** Forward from `after`, or back from `before` (absent: from the newest message). */
+export type MessageRange = { after: number; limit: number } | { before?: number; limit: number };
+/**
+ * Messages in sequence order, whichever way they were read. `nextAfter` reads
+ * on toward newer messages while `hasMore`; `nextBefore` reads back toward
+ * older ones while `hasEarlier`.
+ */
+export type MessagePage = {
+  items: ChannelMessageRow[];
+  nextAfter: number;
+  hasMore: boolean;
+  nextBefore: number;
+  hasEarlier: boolean;
+};
 
 /**
  * Channel persistence. Data operations only: no permission checks, no writes
@@ -74,7 +88,7 @@ export interface ChannelStore {
   /** With an externalRef the author already recorded, returns that earlier row unchanged. */
   appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
   getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
-  readMessages(channelId: string, page: Page): Promise<PageOf<ChannelMessageRow>>;
+  readMessages(channelId: string, range: MessageRange): Promise<MessagePage>;
   getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined>;
   /** Returns the existing reservation for (channel, pet) if there is one. */
   reserveSession(row: ChannelSessionRow): Promise<ChannelSessionRow>;

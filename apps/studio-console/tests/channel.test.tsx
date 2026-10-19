@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   appendChannelDeliveries, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
-  readChannelContext, readChannelPages, type ChannelMember, type ChannelMessage,
+  channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
 import { ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
@@ -47,19 +47,45 @@ test('history loading follows every cursor and fails on a nonadvancing page', as
   await assert.rejects(readChannelPages(async () => ({ channels: [], nextAfter: 0, hasMore: true }), '/channels', 'channels'), /advance/);
 });
 
-test('context reads every message page and keeps the latest members', async () => {
+test('context opens on the newest page, reads back one page at a time, and reads on from the newest message held', async () => {
   const channel = { channelId: 'a b', title: 'T', createdBy: { kind: 'human', id: 'studio-operator' }, createdAt: 'now', updatedAt: 'now' };
+  const page = (sequences: number[], rest: object) => ({
+    channel, members, viewerParticipantId: 'human:studio-operator', hasMore: false, hasEarlier: false,
+    messages: sequences.map(sequence => ({ ...message, messageId: `m${sequence}`, sequence })),
+    nextAfter: sequences.at(-1) ?? 0, nextBefore: sequences[0] ?? 1, ...rest,
+  });
   const paths: string[] = [];
-  const context = await readChannelContext(async path => {
+  const newest = await readChannelContext(async path => { paths.push(path); return page([5, 6], { hasEarlier: true }); }, 'a b');
+  const earlier = await readChannelContext(async path => { paths.push(path); return page([3, 4], {}); }, 'a b', newest.nextBefore);
+  assert.deepEqual(paths, ['/channels/context?channelId=a%20b&limit=100', '/channels/context?channelId=a%20b&before=5&limit=100']);
+  assert.equal(newest.hasEarlier, true);
+
+  paths.length = 0;
+  const later = await readChannelLater(async path => {
     paths.push(path);
-    return paths.length === 1
-      ? { channel, members: members.slice(0, 1), messages: [message], nextAfter: 2, hasMore: true, viewerParticipantId: 'human:studio-operator' }
-      : { channel, members, messages: [{ ...message, messageId: 'n', sequence: 3 }], nextAfter: 3, hasMore: false, viewerParticipantId: 'human:studio-operator' };
-  }, 'a b');
-  assert.deepEqual(paths, ['/channels/context?channelId=a%20b&after=0&limit=200', '/channels/context?channelId=a%20b&after=2&limit=200']);
-  assert.deepEqual(context.messages.map(item => item.messageId), ['m', 'n']);
-  assert.equal(context.members.length, 2);
+    return paths.length === 1 ? page([7], { hasMore: true, members: members.slice(0, 1) }) : page([8], {});
+  }, 'a b', newest.nextAfter);
+  assert.deepEqual(paths, ['/channels/context?channelId=a%20b&after=6&limit=200', '/channels/context?channelId=a%20b&after=7&limit=200']);
+  assert.equal(later.members.length, 2, 'members come from the last page read');
+  const merged = mergeChannelMessages(mergeChannelMessages(earlier.messages, newest.messages), [...later.messages, newest.messages[1]!]);
+  assert.deepEqual(merged.map(item => item.sequence), [3, 4, 5, 6, 7, 8]);
   await assert.rejects(readChannelContext(async () => ({ messages: [], nextAfter: 0, hasMore: false }), 'a'), /Invalid Channel context/);
+});
+
+test('a late read moves only its own edge of the window it was read for', () => {
+  const held = { channelId: 'a', window: 1, nextAfter: 300, nextBefore: 201, hasEarlier: true };
+  // An older page landed while a newer read was in flight: the newer read keeps the older edge.
+  const afterEarlier = channelWindowAfterEarlier(held, held, { nextBefore: 101, hasEarlier: true })!;
+  assert.deepEqual(channelWindowAfterLater(afterEarlier, held, 400), { ...held, nextAfter: 400, nextBefore: 101 });
+  // A newer read landed while an older page was in flight: the older page keeps the newer edge.
+  const afterLater = channelWindowAfterLater(held, held, 400)!;
+  assert.deepEqual(channelWindowAfterEarlier(afterLater, held, { nextBefore: 101, hasEarlier: false }),
+    { ...held, nextAfter: 400, nextBefore: 101, hasEarlier: false });
+  // The newest page was read afresh (refresh, reopen) or the Channel closed: a read for the old window is dropped.
+  const reopened = { ...held, window: 2, nextAfter: 400, nextBefore: 301 };
+  assert.equal(channelWindowAfterEarlier(reopened, held, { nextBefore: 101, hasEarlier: true }), undefined);
+  assert.equal(channelWindowAfterEarlier(null, held, { nextBefore: 101, hasEarlier: true }), undefined);
+  assert.equal(channelWindowAfterLater(reopened, held, 500), undefined);
 });
 
 test('timeline renders the stored body and safe references; every message offers reply', () => {

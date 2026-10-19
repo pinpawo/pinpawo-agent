@@ -306,8 +306,70 @@ try {
   await apiPost('/channels/messages', { channelId: loopId, body: 'Local reply for Bob.' });
   await bob.getByText('Local reply for Bob.', { exact: true }).waitFor({ timeout: 10000 });
   await bob.screenshot({ path: resolve(screenshotDir, '05-channel-client.png'), fullPage: true });
+  // A long Channel opens on its newest page, reads back on request and takes new messages without reloading.
+  const { channel: long } = await apiPost('/channels', { title: 'Long history', pets: [] });
+  for (let index = 0; index < 105; index += 1) await apiPost('/channels/messages', { channelId: long.channelId, body: `History ${index}` });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('navigation', { name: 'Channel navigation' }).getByRole('button', { name: /Long history/ }).click();
+  await page.getByText('History 104', { exact: true }).waitFor();
+  const shown = () => page.locator('.channel-message').count();
+  assert.equal(await shown(), 100, 'only the newest page is read');
+  const contextReads = [];
+  page.on('request', request => { if (request.url().includes('/channels/context')) contextReads.push(new URL(request.url()).search); });
+  await page.getByRole('button', { name: 'Load earlier messages', exact: true }).click();
+  await page.getByText('History 0', { exact: true }).waitFor();
+  assert.equal(await shown(), 105);
+  assert.equal(await page.getByRole('button', { name: 'Load earlier messages', exact: true }).count(), 0);
+  await apiPost('/channels/messages', { channelId: long.channelId, body: 'History 105' });
+  await page.getByText('History 105', { exact: true }).waitFor();
+  assert.equal(await shown(), 106);
+  assert.ok(contextReads.length >= 2 && contextReads.slice(1).every(search => /[?&]after=\d+/.test(search) && !search.includes('after=0')),
+    `a new message reads only what follows the newest held: ${contextReads.join(' ')}`);
+  // Reads overlap: hold one kind of Channel read until released.
+  const hold = async param => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const matches = target => target.pathname === '/channels/context' && target.searchParams.has(param);
+    const held = [];
+    const handler = async route => { held.push(route.request().url()); await gate; await route.continue(); };
+    await page.route(matches, handler);
+    return { held, release: async () => { release(); await waitFor(async () => true, 'release'); await page.unroute(matches, handler); } };
+  };
+  const loadEarlierButton = page.getByRole('button', { name: 'Load earlier messages', exact: true });
+  const refreshHistory = async () => {
+    const button = page.getByRole('button', { name: '↻ Refresh persisted history', exact: true });
+    if (!(await button.isVisible())) await page.getByRole('button', { name: 'Show Channel details', exact: true }).click();
+    await button.click();
+  };
+  // A newer read that lands after an older page keeps the older edge it does not own.
+  await refreshHistory();
+  await waitFor(async () => (await shown()) === 100, 'newest page after refresh');
+  const laterRead = await hold('after');
+  await apiPost('/channels/messages', { channelId: long.channelId, body: 'History 106' });
+  await waitFor(async () => laterRead.held.length > 0, 'incremental read in flight');
+  await loadEarlierButton.click();
+  await page.getByText('History 0', { exact: true }).waitFor();
+  await laterRead.release();
+  await page.getByText('History 106', { exact: true }).waitFor();
+  assert.equal(await shown(), 107);
+  assert.equal(await loadEarlierButton.count(), 0, 'a late newer read does not bring back an older edge already passed');
+  // An older page read for a window that was refreshed meanwhile is dropped rather than leaving a gap.
+  await refreshHistory();
+  await waitFor(async () => (await shown()) === 100, 'newest page after second refresh');
+  const earlierRead = await hold('before');
+  await loadEarlierButton.click();
+  await waitFor(async () => earlierRead.held.length > 0, 'older page in flight');
+  for (const index of [107, 108, 109]) await apiPost('/channels/messages', { channelId: long.channelId, body: `History ${index}` });
+  await page.getByText('History 109', { exact: true }).waitFor();
+  await refreshHistory();
+  await waitFor(async () => (await page.locator('.channel-message').first().innerText()).includes('History 10'), 'third window opens at History 10');
+  await earlierRead.release();
+  await page.waitForTimeout(300);
+  assert.equal(await shown(), 100, 'the stale older page is not merged');
+  await loadEarlierButton.click();
+  await page.getByText('History 0', { exact: true }).waitFor();
+  assert.equal(await shown(), 110, 'nothing is missing between the pages');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

@@ -375,6 +375,10 @@ export class ServerChatHandler {
       // interruption. The caller decides how that failure is surfaced.
       const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
       const settled = await this.graphService.settleAbortedRun(setup);
+      const usage = this.graphService.readSessionTokenUsage?.(setup);
+      if (usage && !invocation.isSuperseded()) {
+        this.publishRuntimeEvent(peer, { type: 'usage.updated', requestId, usage });
+      }
       if (settled) {
         const pendingInterrupt = projectPendingInterrupt(settled);
         this.inflightRequests.finish(peer, inflight, 'interrupted');

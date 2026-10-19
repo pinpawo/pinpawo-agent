@@ -119,6 +119,12 @@ export function applySessionSnapshot(
   options: AgentSessionSnapshotApplyOptions = {},
 ): AgentSession {
   const incoming = snapshot.session;
+  const incomingUsage = incoming.sessionTokenUsage;
+  const currentRevision = session.sessionTokenUsage?.usageRevision;
+  const sessionTokenUsage = incoming.sessionId === session.sessionId && incomingUsage
+    && incomingUsage.usageEpoch === session.sessionTokenUsage?.usageEpoch
+    && currentRevision !== undefined && (incomingUsage.usageRevision ?? -1) < currentRevision
+    ? session.sessionTokenUsage : incomingUsage;
   const context = options.observedAt === undefined
     ? undefined
     : { observedAt: options.observedAt };
@@ -151,8 +157,8 @@ export function applySessionSnapshot(
       : options.preserveOmittedTokenUsage && session.tokenUsage
         ? { tokenUsage: session.tokenUsage }
         : {}),
-    ...(incoming.sessionTokenUsage
-      ? { sessionTokenUsage: incoming.sessionTokenUsage }
+    ...(sessionTokenUsage
+      ? { sessionTokenUsage }
       : preserveSessionTokenUsage && session.sessionTokenUsage
         ? { sessionTokenUsage: session.sessionTokenUsage }
         : {}),
@@ -220,6 +226,8 @@ function reduceRuntimeEvent(
         requestId: event.requestId,
         text: event.message?.trim() || 'Run interrupted.',
       }], undefined, context);
+    case 'usage.updated':
+      return ownsRun(session, event.requestId) ? applyTokenUsage(session, event.usage, true) : session;
     case 'message.delta':
       return appendAssistantDelta(session, event.requestId, event.messageId, event.text, message, context);
     case 'message.completed':
@@ -364,6 +372,7 @@ function completeAssistantMessage(
   if (!ownsActiveRun && !recoveredFromTimeline) return session;
   if (recoveredFromTimeline && hasLocalInterruptReleaseNotice(session, requestId)) return session;
   const id = message?.id ?? messageId;
+  const alreadyCompleted = findMessageEntry(session.timeline, id)?.status === 'completed';
   const text = completedText.trim() || findMessageEntry(session.timeline, id)?.text.trim() || '...';
   const withMessage = finalizeAssistantMessage(session, requestId, id, text, message, context);
   if (ownsActiveRun) {
@@ -375,7 +384,7 @@ function completeAssistantMessage(
       settleStreamingMessages: false,
     });
   }
-  return usage ? applyTokenUsage(withMessage, usage) : withMessage;
+  return usage && (usage.scope === 'session' || !alreadyCompleted) ? applyTokenUsage(withMessage, usage) : withMessage;
 }
 
 function applyOperationEvent(
@@ -543,7 +552,7 @@ function applyInterruptRequest(
 ) {
   if (!ownsRun(session, event.requestId)) return session;
   return {
-    ...session,
+    ...(event.usage ? applyTokenUsage(session, event.usage, true) : session),
     activeRun: null,
     pendingInterrupt: event.pendingInterrupt,
   };
@@ -605,7 +614,7 @@ function acceptInterruptResume(
     return session;
   }
   return {
-    ...session,
+    ...omitRunTokenUsage(session),
     activeRun: {
       requestId: input.requestId,
       state: 'running',
@@ -675,7 +684,11 @@ function finalizeRunMessages(timeline: AgentTimelineEntry[], requestId: string) 
       : entry);
 }
 
-function applyTokenUsage(session: AgentSession, usage: TokenUsageSnapshot) {
+function applyTokenUsage(session: AgentSession, usage: TokenUsageSnapshot, allowEpochChange = false) {
+  const sameEpoch = usage.usageEpoch === session.sessionTokenUsage?.usageEpoch;
+  if (!sameEpoch && session.sessionTokenUsage?.usageEpoch && !allowEpochChange) return session;
+  const revision = session.sessionTokenUsage?.usageRevision;
+  if (sameEpoch && revision !== undefined && (usage.usageRevision === undefined || usage.usageRevision < revision)) return session;
   const contextWindow = usage.scope !== 'run'
     && usage.contextWindow === undefined
     && session.runtime?.contextWindow !== undefined
@@ -711,6 +724,15 @@ function accumulateSessionTokenUsage(
     inputTokens: (current?.inputTokens ?? 0) + usage.inputTokens,
     outputTokens: (current?.outputTokens ?? 0) + usage.outputTokens,
     totalTokens: (current?.totalTokens ?? 0) + usage.totalTokens,
+    ...((current?.cachedInputTokens !== undefined || usage.cachedInputTokens !== undefined) ? {
+      cachedInputTokens: (current?.cachedInputTokens ?? 0) + (usage.cachedInputTokens ?? 0),
+      cacheEligibleInputTokens: (current?.cacheEligibleInputTokens ?? 0) + (usage.cacheEligibleInputTokens ?? 0),
+    } : {}),
+    ...(current?.incomplete || usage.incomplete ? { incomplete: true } : {}),
+    ...(usage.outputTokensPerSecond !== undefined ? {
+      outputTokensPerSecond: usage.outputTokensPerSecond,
+      ...(usage.outputRateSource ? { outputRateSource: usage.outputRateSource } : {}),
+    } : {}),
     ...(latestInputTokens !== undefined ? { latestInputTokens } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(usage.updatedAt !== undefined ? { updatedAt: usage.updatedAt } : {}),
@@ -722,7 +744,9 @@ function accumulateSessionTokenUsage(
 function omitRunTokenUsage(session: AgentSession): AgentSession {
   const { tokenUsage: _tokenUsage, ...withoutUsage } = session;
   void _tokenUsage;
-  return withoutUsage;
+  if (!session.sessionTokenUsage) return withoutUsage;
+  const { outputTokensPerSecond: _rate, outputRateSource: _rateSource, ...sessionUsage } = session.sessionTokenUsage;
+  return { ...withoutUsage, sessionTokenUsage: sessionUsage };
 }
 
 function omitAllTokenUsage(session: AgentSession): AgentSession {

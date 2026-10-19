@@ -400,3 +400,6 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
   .channel-message-actions { position: static; justify-content: flex-start; margin-top: 4px; padding: 0; border: 0; background: transparent; box-shadow: none; opacity: 1; }
   .channel-member-actions > .channel-member-remove { opacity: 1; }
 }
+
+.pet-session-usage { flex: none; padding: 8px 20px; color: #a2b5b4; border-bottom: 1px solid #334246; font-size: 11px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .pet-session-usage { padding-inline: 12px; } }

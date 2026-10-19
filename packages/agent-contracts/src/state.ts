@@ -12,6 +12,19 @@ export type TokenUsageSnapshot = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Cache reads are a subset of input; absence means unavailable. */
+  cachedInputTokens?: number;
+  cacheEligibleInputTokens?: number;
+  /** Known usage only: failed/unreported attempts and legacy history may be missing. */
+  incomplete?: boolean;
+  unknownCalls?: number;
+  /** Monotonic revision of the persisted absolute session ledger. */
+  usageRevision?: number;
+  /** Distinguishes a rebuilt transient ledger from an earlier Host lifetime. */
+  usageEpoch?: string;
+  /** Final provider output / (model end - first stream output), excluding TTFT. */
+  outputTokensPerSecond?: number;
+  outputRateSource?: 'stream' | 'final';
   latestInputTokens?: number;
   contextWindow?: number;
   updatedAt?: string;
@@ -43,23 +56,44 @@ function readFiniteNumber(record: Record<string, unknown>, key: string): number 
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function isTokenCount(value: number | undefined): value is number {
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0;
+}
+
 export function parseTokenUsageSnapshot(value: unknown): TokenUsageSnapshot | null {
   if (!isJsonObject(value)) return null;
   const inputTokens = readFiniteNumber(value, 'inputTokens');
   const outputTokens = readFiniteNumber(value, 'outputTokens');
   const totalTokens = readFiniteNumber(value, 'totalTokens');
-  if (inputTokens === undefined || outputTokens === undefined || totalTokens === undefined) {
-    return null;
+  if (!isTokenCount(inputTokens) || !isTokenCount(outputTokens) || !isTokenCount(totalTokens)) return null;
+  const optionalCounts: Record<string, number> = {};
+  for (const key of ['cachedInputTokens', 'cacheEligibleInputTokens', 'unknownCalls', 'usageRevision']) {
+    if (value[key] === undefined) continue;
+    const count = readFiniteNumber(value, key);
+    if (count === undefined || !Number.isSafeInteger(count) || count < 0) return null;
+    optionalCounts[key] = count;
   }
+  const cached = optionalCounts.cachedInputTokens;
+  const eligible = optionalCounts.cacheEligibleInputTokens;
+  if ((eligible !== undefined && eligible > inputTokens)
+    || (cached !== undefined && (cached > inputTokens || (eligible !== undefined && cached > eligible)))) return null;
+  const speed = readFiniteNumber(value, 'outputTokensPerSecond');
+  if (value.outputTokensPerSecond !== undefined && (speed === undefined || speed < 0)) return null;
+  if (value.usageEpoch !== undefined && (typeof value.usageEpoch !== 'string' || !value.usageEpoch.trim())) return null;
   const latestInputTokens = readFiniteNumber(value, 'latestInputTokens');
   const contextWindow = readFiniteNumber(value, 'contextWindow');
   const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : undefined;
   const source = value.source === 'provider' ? value.source : undefined;
   const scope = value.scope === 'run' || value.scope === 'session' ? value.scope : undefined;
   return {
-    inputTokens,
-    outputTokens,
-    totalTokens,
+    inputTokens: inputTokens,
+    outputTokens: outputTokens,
+    totalTokens: totalTokens,
+    ...optionalCounts,
+    ...(speed !== undefined ? { outputTokensPerSecond: speed } : {}),
+    ...(typeof value.usageEpoch === 'string' ? { usageEpoch: value.usageEpoch } : {}),
+    ...(value.outputRateSource === 'stream' || value.outputRateSource === 'final' ? { outputRateSource: value.outputRateSource } : {}),
+    ...(value.incomplete === true ? { incomplete: true } : {}),
     ...(latestInputTokens !== undefined ? { latestInputTokens } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(updatedAt !== undefined ? { updatedAt } : {}),

@@ -569,6 +569,10 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       text,
     };
   }
+  if (type === 'usage.updated') {
+    const usage = parseAgentTokenUsageSnapshot(record.usage);
+    return usage?.scope === 'session' ? { type, requestId, usage: { ...usage, scope: 'session' } } : null;
+  }
   if (type === 'message.completed') {
     const role = readString(record, 'role');
     const text = readString(record, 'text');

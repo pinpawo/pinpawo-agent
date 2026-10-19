@@ -94,6 +94,7 @@ export function readTuiCheckpointTokenUsage(
         ...(latestInputTokens !== null
           ? { latestInputTokens }
           : {}),
+        incomplete: true,
         source: 'provider',
         scope: 'session',
       }

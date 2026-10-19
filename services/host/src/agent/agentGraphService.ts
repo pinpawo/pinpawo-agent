@@ -1,8 +1,13 @@
+import { createSessionUsageTracker, createTransientSessionUsageStore, summarizeSessionUsage, type SessionUsageStore } from './sessionUsageLedger';
+import { readTuiCheckpointTokenUsage } from '../conversation/transcriptProjection';
+import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
   buildAgentRunnableConfig,
   readPendingInterrupt,
+  readLatestProviderInputTokens,
+  mainConversationMessages,
   settleAbortedRun,
   type OrchestratorGraph,
   type OrchestratorStateType,
@@ -60,6 +65,7 @@ export type InterruptResume = {
 
 export type HostGraphThreadState = {
   messages: BaseMessage[];
+  sessionTokenUsage?: TokenUsageSnapshot & { scope: 'session' };
   /**
    * The interrupt this thread is waiting on, of any kind, decoded by the
    * Runtime. The Host forwards it without reading `payload.kind`.
@@ -117,6 +123,23 @@ function buildResumeCommand(resume: InterruptResume) {
 }
 
 export class HostGraphService {
+  private readonly transientUsageStores = new WeakMap<object, SessionUsageStore>();
+
+  private usageStore(setup: AgentChannelSetup): SessionUsageStore | undefined {
+    const checkpoint = setup.graphConfig.checkpoint;
+    if (!checkpoint) return undefined;
+    const candidate = checkpoint as unknown as Partial<SessionUsageStore>;
+    if (typeof candidate.readSessionUsage === 'function' && typeof candidate.putSessionUsageCall === 'function') {
+      return candidate as SessionUsageStore;
+    }
+    let store = this.transientUsageStores.get(checkpoint);
+    if (!store) {
+      store = createTransientSessionUsageStore();
+      this.transientUsageStores.set(checkpoint, store);
+    }
+    return store;
+  }
+
   /**
    * Root streamEvents(v3) consumption. Raw protocol events carry every scope's
    * messages/tools/custom/values with namespaces; consumers adapt them via
@@ -125,6 +148,7 @@ export class HostGraphService {
   async streamEvents(
     setup: AgentChannelSetup,
     resume?: InterruptResume,
+    onUsage?: (usage: TokenUsageSnapshot) => void,
   ): Promise<HostGraphEventStream> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
@@ -134,6 +158,12 @@ export class HostGraphService {
         interface: setup.interfaceContext?.kind ?? 'headless',
       },
     });
+    const store = this.usageStore(setup);
+    const threadId = setup.input.threadId;
+    const tracker = typeof store?.readSessionUsage === 'function' && threadId
+      ? createSessionUsageTracker({ store, threadId, onUsage,
+          baseline: store.readSessionUsage(threadId) ? undefined : await this.readLegacyUsageBaseline(setup),
+        }) : null;
     return await graph.streamEvents(
       (resume === undefined
         ? buildOrchestratorRunInput(setup.input.messages, setup.input)
@@ -141,9 +171,15 @@ export class HostGraphService {
       {
         version: 'v3',
         ...buildAgentGraphRunConfig(setup),
-        ...(callbacks ? { callbacks } : {}),
+        callbacks: [...(callbacks ?? []), ...(tracker ? [tracker.callbacks] : [])],
       },
     ) as HostGraphEventStream;
+  }
+
+  private async readLegacyUsageBaseline(setup: AgentChannelSetup) {
+    const messages = readSnapshotMessages(await this.getRawState(setup));
+    const usage = readTuiCheckpointTokenUsage(messages);
+    return messages.length ? { ...(usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 }), incomplete: true } : undefined;
   }
 
   private async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
@@ -163,10 +199,19 @@ export class HostGraphService {
     });
   }
 
+  readSessionTokenUsage(setup: AgentChannelSetup): (TokenUsageSnapshot & { scope: 'session' }) | undefined {
+    const ledger = setup.input.threadId && this.usageStore(setup)?.readSessionUsage(setup.input.threadId);
+    return ledger ? { ...summarizeSessionUsage(ledger), scope: 'session' } : undefined;
+  }
+
   async readThreadState(setup: AgentChannelSetup): Promise<HostGraphThreadState> {
     const snapshot = await this.getRawState(setup);
     const values = readSnapshotValues(snapshot);
+    const usage = this.readSessionTokenUsage(setup);
     return {
+      ...(usage ? { sessionTokenUsage: { ...usage,
+        latestInputTokens: readLatestProviderInputTokens(mainConversationMessages(readSnapshotMessages(snapshot))) ?? undefined,
+        scope: 'session' as const } } : {}),
       messages: readSnapshotMessages(snapshot),
       pendingInterrupt: readPendingInterrupt(snapshot),
       acceptsResume: acceptsResume(snapshot),

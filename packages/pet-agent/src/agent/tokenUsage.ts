@@ -18,6 +18,9 @@ export type ProviderTokenUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cachedInputTokens?: number;
+  cacheEligibleInputTokens?: number;
+  incomplete?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -26,7 +29,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readNumber(record: Record<string, unknown>, key: string): number | undefined {
   const value = record[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function readRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
@@ -43,11 +46,14 @@ function normalizeProviderUsage(value: unknown): ProviderTokenUsage | null {
     return null;
   }
 
-  const topLevelCacheInput = (
+  const isRawAnthropic = readNumber(value, 'input_tokens') !== undefined
+    && !readRecord(value, 'input_token_details')
+    && (readNumber(value, 'cache_creation_input_tokens') !== undefined || readNumber(value, 'cache_read_input_tokens') !== undefined);
+  const topLevelCacheInput = isRawAnthropic ? (
     readNumber(value, 'cache_creation_input_tokens') ?? 0
   ) + (
     readNumber(value, 'cache_read_input_tokens') ?? 0
-  );
+  ) : 0;
   const inputTokens = readNumber(value, 'input_tokens')
     ?? readNumber(value, 'inputTokens')
     ?? readNumber(value, 'prompt_tokens')
@@ -63,35 +69,65 @@ function normalizeProviderUsage(value: unknown): ProviderTokenUsage | null {
     return null;
   }
 
+  const details = readRecord(value, 'input_token_details')
+    ?? readRecord(value, 'prompt_tokens_details')
+    ?? readRecord(value, 'input_tokens_details');
+  const reportedCachedInputTokens = readNumber(value, 'cachedInputTokens')
+    ?? (details ? readNumber(details, 'cache_read') ?? readNumber(details, 'cached_tokens') : undefined)
+    ?? readNumber(value, 'cache_read_input_tokens')
+    ?? readNumber(value, 'prompt_cache_hit_tokens');
   const normalizedInputTokens = positiveOrZero((inputTokens ?? 0) + topLevelCacheInput);
+  const cacheEligibleInputTokens = readNumber(value, 'cacheEligibleInputTokens') ?? normalizedInputTokens;
+  const cachedInputTokens = inputTokens !== undefined && reportedCachedInputTokens !== undefined
+    && reportedCachedInputTokens <= cacheEligibleInputTokens && cacheEligibleInputTokens <= normalizedInputTokens
+    ? reportedCachedInputTokens : undefined;
   const normalizedOutputTokens = positiveOrZero(outputTokens ?? 0);
   return {
+    ...(cachedInputTokens !== undefined ? {
+      cachedInputTokens: Math.min(normalizedInputTokens, positiveOrZero(cachedInputTokens)),
+      cacheEligibleInputTokens,
+    } : {}),
+    ...(inputTokens === undefined || outputTokens === undefined || value.incomplete === true ? { incomplete: true } : {}),
     inputTokens: normalizedInputTokens,
     outputTokens: normalizedOutputTokens,
     totalTokens: positiveOrZero(totalTokens ?? normalizedInputTokens + normalizedOutputTokens),
   };
 }
 
+function usageCandidates(message: unknown): Record<string, unknown>[] {
+  if (!isRecord(message)) return [];
+  const response = readRecord(message, 'response_metadata') ?? readRecord(message, 'responseMetadata');
+  return [readRecord(message, 'usage_metadata'), readRecord(message, 'usageMetadata'),
+    response && readRecord(response, 'usage_metadata'), response && readRecord(response, 'usageMetadata'),
+    response && readRecord(response, 'tokenUsage'), response && readRecord(response, 'usage'), response]
+    .filter((value): value is Record<string, unknown> => value !== null);
+}
+
+function knownCount(value: Record<string, unknown>, keys: string[]) {
+  return keys.some(key => readNumber(value, key) !== undefined);
+}
+const INPUT_KEYS = ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens'];
+const OUTPUT_KEYS = ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens'];
+
 function readUsageFromMessage(message: unknown): ProviderTokenUsage | null {
-  if (!isRecord(message)) {
-    return null;
-  }
-
-  const responseMetadata = readRecord(message, 'response_metadata')
-    ?? readRecord(message, 'responseMetadata');
-
-  // `usage_metadata` is LangChain's normalized location. Some provider
-  // adapters, however, expose usage only in response metadata (notably as
-  // `tokenUsage` or `usage`). Accept those provider-reported values too: the
-  // compaction watermark must not silently become undecidable just because an
-  // adapter chose the older response-metadata shape.
-  return normalizeProviderUsage(readRecord(message, 'usage_metadata'))
-    ?? normalizeProviderUsage(readRecord(message, 'usageMetadata'))
-    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'usage_metadata'))
-    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'usageMetadata'))
-    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'tokenUsage'))
-    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'usage'))
-    ?? normalizeProviderUsage(responseMetadata);
+  const observations = usageCandidates(message).flatMap(raw => {
+    const usage = normalizeProviderUsage(raw);
+    return usage ? [{ raw, usage }] : [];
+  });
+  const first = observations[0];
+  if (!first) return null;
+  // Prefer normalized metadata, but a partial normalized report must not hide
+  // a compatible complete provider report retained in response metadata.
+  const complete = first.usage.incomplete && first.raw.incomplete !== true
+    ? observations.find(next => !next.usage.incomplete
+      && (!knownCount(first.raw, INPUT_KEYS) || next.usage.inputTokens === first.usage.inputTokens)
+      && (!knownCount(first.raw, OUTPUT_KEYS) || next.usage.outputTokens === first.usage.outputTokens)) : undefined;
+  const preferred = complete?.usage ?? first.usage;
+  if (preferred.cachedInputTokens !== undefined) return preferred;
+  const cache = observations.find(next => next.usage.cachedInputTokens !== undefined
+    && next.usage.inputTokens === preferred.inputTokens)?.usage;
+  return cache ? { ...preferred, cachedInputTokens: cache.cachedInputTokens,
+    cacheEligibleInputTokens: cache.cacheEligibleInputTokens } : preferred;
 }
 
 export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | null {
@@ -101,10 +137,12 @@ export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | nu
 export function readLatestProviderInputTokens(messages: Iterable<unknown>): number | null {
   const items = Array.isArray(messages) ? messages : [...messages];
   for (let index = items.length - 1; index >= 0; index -= 1) {
-    const usage = readMessageTokenUsage(items[index]);
-    if (usage) {
-      return usage.inputTokens;
-    }
+    const candidates = usageCandidates(items[index]);
+    const input = candidates.find(raw => knownCount(raw, INPUT_KEYS));
+    if (input) return normalizeProviderUsage(input)?.inputTokens ?? null;
+    // A newer usage report without input makes the latest context unknown;
+    // never substitute zero or reuse an older call's input size.
+    if (candidates.some(raw => normalizeProviderUsage(raw))) return null;
   }
   return null;
 }
@@ -175,9 +213,14 @@ function addProviderUsage(
   next: ProviderTokenUsage,
 ): ProviderTokenUsage {
   return {
+    ...(current?.incomplete || next.incomplete ? { incomplete: true } : {}),
     inputTokens: (current?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (current?.outputTokens ?? 0) + next.outputTokens,
     totalTokens: (current?.totalTokens ?? 0) + next.totalTokens,
+    ...((current?.cachedInputTokens !== undefined || next.cachedInputTokens !== undefined) ? {
+      cachedInputTokens: (current?.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0),
+      cacheEligibleInputTokens: (current?.cacheEligibleInputTokens ?? 0) + (next.cacheEligibleInputTokens ?? 0),
+    } : {}),
   };
 }
 
@@ -206,6 +249,7 @@ export function createTokenUsageSnapshot(
     return null;
   }
   return {
+    ...usage,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     totalTokens: usage.totalTokens,

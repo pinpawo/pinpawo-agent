@@ -62,6 +62,28 @@ export function buildCompletionsMessagesWithReasoning(
   });
 }
 
+/** DeepSeek's cache hit field is not retained by the OpenAI adapter. */
+export function normalizeCompletionsCacheUsage<T>(response: T): T {
+  if (!response || typeof response !== 'object') return response;
+  const record = response as Record<string, unknown>;
+  const usage = record.usage as Record<string, unknown> | undefined;
+  if (!usage || typeof usage.prompt_cache_hit_tokens !== 'number' || !Number.isFinite(usage.prompt_cache_hit_tokens)) return response;
+  const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+  return { ...response, usage: { ...usage, prompt_tokens_details: {
+    ...details, cached_tokens: details?.cached_tokens ?? usage.prompt_cache_hit_tokens,
+  } } };
+}
+
+async function normalizeCompletionsResponse(result: Promise<unknown>) {
+  const response = await result;
+  if (response && typeof response === 'object' && Symbol.asyncIterator in response) {
+    return (async function* () {
+      for await (const chunk of response as AsyncIterable<unknown>) yield normalizeCompletionsCacheUsage(chunk);
+    })();
+  }
+  return normalizeCompletionsCacheUsage(response);
+}
+
 export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
   override _generate(
     messages: BaseMessage[],
@@ -90,12 +112,12 @@ export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   override completionWithRetry(request: any, requestOptions?: any): any {
     const source: BaseMessage[] | undefined = requestOptions?.[SOURCE_MESSAGES];
-    if (!source) return super.completionWithRetry(request, requestOptions);
+    if (!source) return normalizeCompletionsResponse(super.completionWithRetry(request, requestOptions));
     const { [SOURCE_MESSAGES]: _source, ...rest } = requestOptions;
-    return super.completionWithRetry(
+    return normalizeCompletionsResponse(super.completionWithRetry(
       { ...request, messages: buildCompletionsMessagesWithReasoning(source, this.model) },
       rest,
-    );
+    ));
   }
 }
 

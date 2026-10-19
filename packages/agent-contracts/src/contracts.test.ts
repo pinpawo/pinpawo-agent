@@ -124,3 +124,13 @@ test('invocation is independent of chat or studio transport envelopes', () => {
     input: { kind: 'chat', text: 'not a core input' },
   }), null);
 });
+
+test('usage counters and cache coverage reject corrupt snapshots', () => {
+  const base = { inputTokens: 100, outputTokens: 20, totalTokens: 120 };
+  for (const invalid of [
+    { inputTokens: -1 }, { totalTokens: 0.5 }, { usageRevision: Infinity }, { usageRevision: -1 },
+    { usageRevision: Number.MAX_SAFE_INTEGER + 1 }, { cachedInputTokens: 101 },
+    { cachedInputTokens: 50, cacheEligibleInputTokens: 40 }, { cacheEligibleInputTokens: 101 },
+    { unknownCalls: '1' }, { outputTokensPerSecond: -1 }, { usageEpoch: '' },
+  ]) assert.equal(parseTokenUsageSnapshot({ ...base, ...invalid }), null);
+});

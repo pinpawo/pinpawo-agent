@@ -5,6 +5,7 @@ import type { AgentMessageToolCall, AgentPlan, AgentResultReference, AgentToolCa
 import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
+  | { type: 'usage.updated'; requestId: string; usage: TokenUsageSnapshot & { scope: 'session' } }
   | AgentRunStartedEvent
   | AgentRunInterruptedEvent
   | AgentAssistantMessageEvent

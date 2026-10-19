@@ -159,6 +159,7 @@ test('readTuiCheckpointTokenUsage aggregates every provider call but tracks main
     inputTokens: 125,
     outputTokens: 55,
     totalTokens: 180,
+    incomplete: true,
     latestInputTokens: 15,
     source: 'provider',
     scope: 'session',

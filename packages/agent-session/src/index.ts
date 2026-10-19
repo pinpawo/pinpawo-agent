@@ -9,3 +9,5 @@ export * from './reviewDecision';
 export * from './snapshot';
 export * from './timeline';
 export * from './validation';
+
+export * from './usageDisplay';

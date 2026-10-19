@@ -357,9 +357,14 @@ export async function runAgentSessionTurn(
     });
   };
   emitCurrentPlan(initialThreadState.currentPlan ?? null);
+  let latestSessionUsage: TokenUsageSnapshot | undefined;
   let run: HostGraphEventStream | null = null;
   try {
-    run = await graphService.streamEvents(setup, resume);
+    run = await graphService.streamEvents(setup, resume, usage => {
+      if (!isCurrent()) return;
+      latestSessionUsage = usage;
+      emitEvent({ type: 'usage.updated', requestId, usage: { ...usage, scope: 'session' } });
+    });
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {
@@ -455,7 +460,7 @@ export async function runAgentSessionTurn(
             emitInterruptRequested({
               pendingInterrupt,
               requestId,
-              usage: readRunTokenUsage({
+              usage: latestSessionUsage ?? readRunTokenUsage({
                 initialMessages: initialThreadState.messages,
                 finalMessages,
                 contextWindow,
@@ -512,7 +517,7 @@ export async function runAgentSessionTurn(
     return { status: 'interrupted' };
   }
 
-  const finalUsage = readRunTokenUsage({
+  const finalUsage = finalThreadState.sessionTokenUsage ?? latestSessionUsage ?? readRunTokenUsage({
     initialMessages: initialThreadState.messages,
     finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
     contextWindow,

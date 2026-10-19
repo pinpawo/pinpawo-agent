@@ -14,6 +14,12 @@ import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkit
 import type { AgentChannelSetup } from '../../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../../services/host/src/agent/agentGraphService';
 
+function fixtureReply(text: string) {
+  return new AIMessage({ content: text, usage_metadata: {
+    input_tokens: 100, output_tokens: 20, total_tokens: 120, input_token_details: { cache_read: 50 },
+  } });
+}
+
 // Real Host, storage and HTTP paths; only the graph's response is deterministic.
 const root = process.env.CHANNEL_HOST_TEST_ROOT ?? await mkdtemp(join(tmpdir(), 'channel-console-browser-'));
 const token = 'console-browser-test-only';
@@ -40,18 +46,18 @@ for (const petId of ['alpha', 'beta']) {
     await new Promise(resolve => setTimeout(resolve, last === 'queue-hold' ? 5000 : 300));
     const invocation = readPetInvocationContext()!;
     if (invocation.scope?.namespace !== 'channel') {
-      return { messages: [new AIMessage('Standalone deterministic reply. Inspect this Pet session for the result.')] };
+      return { messages: [fixtureReply('Standalone deterministic reply. Inspect this Pet session for the result.')] };
     }
-    if (command === 'handoff' || last === 'handoff [@Alpha](participant:pet:alpha)') return { messages: [new AIMessage('[@Beta](participant:pet:beta) Please inspect this delivery.')] };
+    if (command === 'handoff' || last === 'handoff [@Alpha](participant:pet:alpha)') return { messages: [fixtureReply('[@Beta](participant:pet:beta) Please inspect this delivery.')] };
     if (last === '[@Beta](participant:pet:beta) Please inspect this delivery.') {
-      return { messages: [new AIMessage('[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.')] };
+      return { messages: [fixtureReply('[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.')] };
     }
     if (last === '[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.') {
-      return { messages: [new AIMessage('[@Me](participant:human:local) Result delivered.')] };
+      return { messages: [fixtureReply('[@Me](participant:human:local) Result delivered.')] };
     }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string) as { messages: Array<{ author: { kind: string } }> };
     const prior = snapshot.messages.filter(entry => entry.author.kind === 'pet');
-    return { messages: [new AIMessage(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nInput source: ${input?.author.participantId}. Message: ${input?.messageId}. Referenced message: ${input?.replyTo?.messageId ?? 'none'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the Channel title, members and messages. Remaining work: user acceptance.`)] };
+    return { messages: [fixtureReply(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nInput source: ${input?.author.participantId}. Message: ${input?.messageId}. Referenced message: ${input?.replyTo?.messageId ?? 'none'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the Channel title, members and messages. Remaining work: user acceptance.`)] };
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
   hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,

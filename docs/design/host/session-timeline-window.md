@@ -1,6 +1,6 @@
 # Agent Session timeline 窗口
 
-状态：前三步已合并（#985 协议 + Host、#986 TUI、#987 PetSessionView 和 studio-http）；第四步（Channel）实现中。
+状态：四步都已合并（#985 协议 + Host、#986 TUI、#987 PetSessionView 和 studio-http、#988 Channel）。
 
 ## 问题
 
@@ -42,7 +42,7 @@ timeline 是 Host 从 LangGraph checkpoint 实时投影出来的视图，本身�
    - `/pet-sessions/snapshot` 和 `/pet-sessions/events` 接受可选的 `timelineLimit` 查询参数（正整数，否则 400），经 `PetSessionPort.snapshot/observe` 传给 Host；上限由 Host 校验。
    - Console 默认带 100。SSE 每次（重新）连接发来的窗口快照按 TUI 同样的方式拼接，已加载的更早条目保留。
    - 有省略时，记录顶部显示“Load earlier entries”按钮：用“已有条数 + 100”的 limit 再拉一次快照，超过 500 时不带 limit 拿全量；加载后保持滚动位置。
-4. Channel（本步）：
+4. Channel：
    - `/channels/context` 和 `channel_read_context` 默认返回最近的一页；`before=nextBefore` 往前读（`hasEarlier`），`after=nextAfter` 往后读（`hasMore`）。两种方向返回的消息都按 sequence 升序，`after` 和 `before` 不能同时给。
    - Console 打开 Channel 时只读最近 100 条，顶部有“Load earlier messages”按钮，每次往前读一页。之后的刷新（Channel 事件、发送后、client key 的轮询）只用 `after=` 已有的最新 sequence 读增量，按 sequence 合并去重。“Refresh persisted history”按钮仍然重新读最近一页。
    - `channel.message.created` 事件本来就带完整消息（含 sequence），事件格式不变；Console 收到事件后按 `after` 拉增量，client key 没有事件流，也走同一条路径。

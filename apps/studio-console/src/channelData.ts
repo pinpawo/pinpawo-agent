@@ -185,6 +185,25 @@ export async function readChannelLater(read: (path: string) => Promise<unknown>,
   return { ...latest!, messages };
 }
 
+/**
+ * How far the open Channel's messages reach. `window` is new each time the
+ * newest page is read afresh; a read started for an earlier window is stale.
+ */
+export type ChannelWindow = { channelId: string; window: number; nextAfter: number; nextBefore: number; hasEarlier: boolean };
+
+/** After reading newer messages: only the newer edge moves. Undefined when the read is stale and must be dropped. */
+export function channelWindowAfterLater(current: ChannelWindow | null, readFor: ChannelWindow, nextAfter: number): ChannelWindow | undefined {
+  if (!current || current.window !== readFor.window) return undefined;
+  return { ...current, nextAfter: Math.max(current.nextAfter, nextAfter) };
+}
+
+/** After reading an older page: only the older edge moves. Undefined when the read is stale and must be dropped. */
+export function channelWindowAfterEarlier(current: ChannelWindow | null, readFor: ChannelWindow,
+  page: Pick<ChannelContext, 'nextBefore' | 'hasEarlier'>): ChannelWindow | undefined {
+  if (!current || current.window !== readFor.window) return undefined;
+  return { ...current, nextBefore: page.nextBefore, hasEarlier: page.hasEarlier };
+}
+
 /** One ordered timeline; a message read twice is kept once. */
 export function mergeChannelMessages(current: ChannelMessage[], next: ChannelMessage[]): ChannelMessage[] {
   const bySequence = new Map([...current, ...next].map(message => [message.sequence, message]));

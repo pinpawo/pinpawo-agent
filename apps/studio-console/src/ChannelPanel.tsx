@@ -7,7 +7,8 @@ import { PetSessionView } from './PetSessionView';
 import type { PetSessionTarget } from './petSession';
 import {
   appendChannelDeliveries, channelJoinablePets, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
-  channelPetSession, channelReplyRecipientId, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages,
+  channelPetSession, channelReplyRecipientId, channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages,
+  readChannelContext, readChannelLater, readChannelPages, type ChannelWindow,
   type ChannelContext, type ChannelDelivery, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
 } from './channelData';
 
@@ -24,8 +25,6 @@ type Props = {
   failures?: { channelId: string; petId?: string; error: string }[];
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
-/** How far back and forward the open Channel's messages reach. */
-type HeldMessages = { channelId: string; nextAfter: number; nextBefore: number; hasEarlier: boolean };
 
 export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], failures = [], clientMode = false }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
@@ -51,9 +50,10 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [reply, setReply] = useState<ChannelMessage | undefined>();
   const [localVersion, setLocalVersion] = useState(0);
   const [sessionView, setSessionView] = useState<PetSessionTarget | null>(null);
-  const [held, setHeld] = useState<HeldMessages | null>(null);
-  const heldRef = useRef<HeldMessages | null>(null);
-  const updateHeld = (next: HeldMessages | null) => { heldRef.current = next; setHeld(next); };
+  const [held, setHeld] = useState<ChannelWindow | null>(null);
+  const heldRef = useRef<ChannelWindow | null>(null);
+  const windows = useRef(0);
+  const updateHeld = (next: ChannelWindow | null) => { heldRef.current = next; setHeld(next); };
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const submitting = useRef(false);
   const composer = useRef<ChannelMessageInputHandle>(null);
@@ -134,10 +134,13 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       request(`/channels/sessions?channelId=${encodeURIComponent(selected)}`) as Promise<{ sessions: ChannelSession[] }>,
     ]).then(([next, bindings]) => {
       if (abort.signal.aborted) return;
+      // An older page may have landed meanwhile: move only the newer edge of the window this read was for.
+      const nextWindow = holding ? channelWindowAfterLater(heldRef.current, holding, next.nextAfter)
+        : { channelId: selected, window: ++windows.current, nextAfter: next.nextAfter, nextBefore: next.nextBefore, hasEarlier: next.hasEarlier };
+      if (!nextWindow) return;
       setContext({ channel: next.channel, members: next.members, viewerParticipantId: next.viewerParticipantId });
       setMessages(current => holding ? mergeChannelMessages(current, next.messages) : next.messages);
-      updateHeld(holding ? { ...holding, nextAfter: next.nextAfter }
-        : { channelId: selected, nextAfter: next.nextAfter, nextBefore: next.nextBefore, hasEarlier: next.hasEarlier });
+      updateHeld(nextWindow);
       setSessions(Array.isArray(bindings.sessions) ? bindings.sessions : []);
     }).catch(reason => { if (!abort.signal.aborted) setError(String(reason)); })
       .finally(() => { if (!abort.signal.aborted) setLoading(false); });
@@ -153,10 +156,11 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     setLoadingEarlier(true);
     try {
       const page = await readChannelContext(path => read(path), holding.channelId, holding.nextBefore);
-      const current = heldRef.current;
-      if (current?.channelId !== holding.channelId) return;
+      // A page read for a window that was since reopened or refreshed would leave a gap: drop it.
+      const nextWindow = channelWindowAfterEarlier(heldRef.current, holding, page);
+      if (!nextWindow) return;
       setMessages(messages => mergeChannelMessages(page.messages, messages));
-      updateHeld({ ...current, nextBefore: page.nextBefore, hasEarlier: page.hasEarlier });
+      updateHeld(nextWindow);
       requestAnimationFrame(() => { if (element) element.scrollTop = element.scrollHeight - fromBottom; });
     } catch (reason) {
       if (!lifetime.current.signal.aborted) setError(String(reason));

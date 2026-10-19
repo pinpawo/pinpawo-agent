@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   appendChannelDeliveries, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
-  mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
+  channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
 import { ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
@@ -70,6 +70,22 @@ test('context opens on the newest page, reads back one page at a time, and reads
   const merged = mergeChannelMessages(mergeChannelMessages(earlier.messages, newest.messages), [...later.messages, newest.messages[1]!]);
   assert.deepEqual(merged.map(item => item.sequence), [3, 4, 5, 6, 7, 8]);
   await assert.rejects(readChannelContext(async () => ({ messages: [], nextAfter: 0, hasMore: false }), 'a'), /Invalid Channel context/);
+});
+
+test('a late read moves only its own edge of the window it was read for', () => {
+  const held = { channelId: 'a', window: 1, nextAfter: 300, nextBefore: 201, hasEarlier: true };
+  // An older page landed while a newer read was in flight: the newer read keeps the older edge.
+  const afterEarlier = channelWindowAfterEarlier(held, held, { nextBefore: 101, hasEarlier: true })!;
+  assert.deepEqual(channelWindowAfterLater(afterEarlier, held, 400), { ...held, nextAfter: 400, nextBefore: 101 });
+  // A newer read landed while an older page was in flight: the older page keeps the newer edge.
+  const afterLater = channelWindowAfterLater(held, held, 400)!;
+  assert.deepEqual(channelWindowAfterEarlier(afterLater, held, { nextBefore: 101, hasEarlier: false }),
+    { ...held, nextAfter: 400, nextBefore: 101, hasEarlier: false });
+  // The newest page was read afresh (refresh, reopen) or the Channel closed: a read for the old window is dropped.
+  const reopened = { ...held, window: 2, nextAfter: 400, nextBefore: 301 };
+  assert.equal(channelWindowAfterEarlier(reopened, held, { nextBefore: 101, hasEarlier: true }), undefined);
+  assert.equal(channelWindowAfterEarlier(null, held, { nextBefore: 101, hasEarlier: true }), undefined);
+  assert.equal(channelWindowAfterLater(reopened, held, 500), undefined);
 });
 
 test('timeline renders the stored body and safe references; every message offers reply', () => {

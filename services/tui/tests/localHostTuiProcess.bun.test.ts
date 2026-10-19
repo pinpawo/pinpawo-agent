@@ -678,7 +678,7 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'while {!$review_body_ready || !$review_footer_ready} {',
       '  expect {',
       `    -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_SPEC.view.body)} { set review_body_ready 1 }`,
-      '    -exact "PgUp/PgDn details" { set review_footer_ready 1 }',
+      '    -exact "Enter confirm" { set review_footer_ready 1 }',
       '    timeout { exit 142 }',
       '    eof { exit 143 }',
       '  }',

@@ -18,7 +18,9 @@ export type ReviewContentLine = {
 };
 
 /**
- * Renders one `ReviewView` variant into tone-tagged terminal lines.
+ * Renders the content of one `ReviewView` variant into tone-tagged terminal
+ * lines. The view's `title` is not part of the content: the approval dialog
+ * shows it as a fixed heading that stays put while the content pages.
  *
  * Every variant declared by the review contract gets a real rendering here:
  * `plain` wraps verbatim, `markdown` gets lightweight structural emphasis, and
@@ -43,12 +45,10 @@ function renderView(
   if (view.kind === 'diff') {
     return renderDiffView(view, width, maxCharacters);
   }
-  const header = renderHeader(view.title, width);
   const body = clampCharacters(view.body, maxCharacters);
-  const bodyLines = view.kind === 'markdown'
+  return view.kind === 'markdown'
     ? renderMarkdownBody(body, width)
     : wrapTone(body, width, 'default');
-  return [...header, ...bodyLines];
 }
 
 function renderDiffView(
@@ -57,7 +57,6 @@ function renderDiffView(
   maxCharacters: number,
 ): ReviewContentLine[] {
   const meta = [
-    ...renderHeader(view.title, width),
     ...(view.summary ? wrapTone(view.summary, width, 'default') : []),
     ...(view.target
       ? [line(truncateTerminalLine(`Target: ${view.target}`, width), 'muted')]
@@ -129,12 +128,6 @@ function renderMarkdownBody(body: string, width: number): ReviewContentLine[] {
     result.push(...wrapTone(text, width, 'default'));
   }
   return result;
-}
-
-function renderHeader(title: string | undefined, width: number) {
-  return title?.trim()
-    ? wrapTone(title.trim(), width, 'heading')
-    : [];
 }
 
 function wrapTone(

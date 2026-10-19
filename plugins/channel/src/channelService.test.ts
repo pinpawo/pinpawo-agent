@@ -147,6 +147,37 @@ for (const [backend, config] of backends) {
     assert.equal((await service.readContext(owner, channelId)).messages.length, 3);
   }));
 
+  test(`${backend}: a reader starts from the newest page, reads back with before and on with after`, () => withService(async (service) => {
+    const a = (await service.createChannel(owner, { title: 'A', pets: [] })).channel.channelId;
+    const b = (await service.createChannel(owner, { title: 'B', pets: [] })).channel.channelId;
+    const empty = await service.readContext(owner, a);
+    assert.deepEqual([empty.messages, empty.nextAfter, empty.hasMore, empty.hasEarlier], [[], 0, false, false]);
+    const posted = [];
+    for (let index = 0; index < 5; index += 1) {
+      posted.push((await service.postMessage(owner, a, { body: `m${index}` })).message);
+      // Another Channel's messages share the sequence and must not leak into this one's cursors.
+      await service.postMessage(owner, b, { body: `other ${index}` });
+    }
+    const bodies = (page: { messages: Array<{ body: string }> }) => page.messages.map(message => message.body);
+    const newest = await service.readContext(owner, a, { limit: 2 });
+    assert.deepEqual(bodies(newest), ['m3', 'm4']);
+    assert.deepEqual([newest.hasMore, newest.hasEarlier, newest.nextAfter, newest.nextBefore],
+      [false, true, posted[4]!.sequence, posted[3]!.sequence]);
+    const earlier = await service.readContext(owner, a, { before: newest.nextBefore, limit: 2 });
+    assert.deepEqual([bodies(earlier), earlier.hasEarlier, earlier.hasMore], [['m1', 'm2'], true, true]);
+    const oldest = await service.readContext(owner, a, { before: earlier.nextBefore, limit: 2 });
+    assert.deepEqual([bodies(oldest), oldest.hasEarlier], [['m0'], false]);
+    // A reader holding the newest page asks only for what came after it.
+    const later = (await service.postMessage(owner, a, { body: 'm5' })).message;
+    const next = await service.readContext(owner, a, { after: newest.nextAfter });
+    assert.deepEqual([bodies(next), next.hasMore, next.hasEarlier, next.nextAfter], [['m5'], false, true, later.sequence]);
+    const none = await service.readContext(owner, a, { after: next.nextAfter });
+    assert.deepEqual([none.messages, none.nextAfter, none.hasMore], [[], later.sequence, false]);
+    for (const page of [{ after: 1, before: 9 }, { before: 0 }, { before: 1.5 }]) {
+      await assert.rejects(service.readContext(owner, a, page), JSON.stringify(page));
+    }
+  }));
+
   test(`${backend}: commit precedes notification; a failed write rolls back and emits nothing; observer failures do not undo it`, async () => {
     let failNext = false;
     // Fails after the row is written, inside the transaction, so only a rollback can remove it.

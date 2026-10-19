@@ -1,6 +1,6 @@
 import type { Kysely, Selectable } from 'kysely';
 import type {
-  ChannelMemberRow, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef, Page, PageOf,
+  ChannelMemberRow, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef, MessagePage, MessageRange, Page, PageOf,
 } from '../channelStore';
 import type { ChannelDatabase } from './schema';
 
@@ -122,11 +122,28 @@ export class KyselyChannelStore implements ChannelStore {
     return record ? messageRow(record) : undefined;
   }
 
-  async readMessages(channelId: string, page: Page): Promise<PageOf<ChannelMessageRow>> {
-    const records = await this.db.selectFrom('channel_messages').selectAll()
-      .where('channel_id', '=', channelId).where('sequence', '>', page.after)
-      .orderBy('sequence').limit(page.limit + 1).execute();
-    return paged(records, page, record => record.sequence, messageRow);
+  async readMessages(channelId: string, range: MessageRange): Promise<MessagePage> {
+    const history = this.db.selectFrom('channel_messages').selectAll().where('channel_id', '=', channelId);
+    // Read one past the limit in the direction asked; ask once about the other side.
+    const beyond = async (op: '<' | '>', sequence: number) => !!await this.db.selectFrom('channel_messages').select('sequence')
+      .where('channel_id', '=', channelId).where('sequence', op, sequence).limit(1).executeTakeFirst();
+    if ('after' in range) {
+      const records = await history.where('sequence', '>', range.after).orderBy('sequence').limit(range.limit + 1).execute();
+      const items = records.slice(0, range.limit);
+      const nextBefore = items[0]?.sequence ?? range.after + 1;
+      return {
+        items: items.map(messageRow), nextAfter: items.at(-1)?.sequence ?? range.after, hasMore: records.length > range.limit,
+        nextBefore, hasEarlier: await beyond('<', nextBefore),
+      };
+    }
+    const records = await (range.before === undefined ? history : history.where('sequence', '<', range.before))
+      .orderBy('sequence', 'desc').limit(range.limit + 1).execute();
+    const items = records.slice(0, range.limit).reverse();
+    const nextAfter = items.at(-1)?.sequence ?? (range.before ?? 1) - 1;
+    return {
+      items: items.map(messageRow), nextAfter, hasMore: await beyond('>', nextAfter),
+      nextBefore: items[0]?.sequence ?? range.before ?? 1, hasEarlier: records.length > range.limit,
+    };
   }
 
   async getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined> {

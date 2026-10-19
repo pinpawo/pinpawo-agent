@@ -14,8 +14,10 @@ export type ChannelMessage = {
 export type ChannelMember = { participantId: string; kind: ChannelMemberKind | string; id: string; label: string; joinedAt?: string };
 export type ChannelContext = {
   channel: ChannelRow; members: ChannelMember[]; messages: ChannelMessage[];
-  nextAfter: number; hasMore: boolean; viewerParticipantId?: string;
+  nextAfter: number; hasMore: boolean; nextBefore: number; hasEarlier: boolean; viewerParticipantId?: string;
 };
+/** Messages a Channel view reads at a time. */
+export const CHANNEL_PAGE_LIMIT = 100;
 /** The session a Pet uses in this Channel. */
 export type ChannelSession = { channelId: string; petId: string; sessionId: string; registered: boolean };
 /** What happened to one addressed member, from a send response or a `channel.delivery` event. Not stored by the Host. */
@@ -141,11 +143,11 @@ export function appendChannelDeliveries(current: ChannelDelivery[], next: Channe
   return [...current.filter(item => !keys.has(key(item))), ...next].slice(-200);
 }
 
-/** Load every ordered page; reject a broken cursor rather than hiding recent results. */
+/** Load every ordered page after `from`; reject a broken cursor rather than hiding recent results. */
 export async function readChannelPages<T>(read: (path: string) => Promise<unknown>, path: string, key: string,
-  onPage?: (page: Record<string, unknown>) => void): Promise<T[]> {
+  onPage?: (page: Record<string, unknown>) => void, from = 0): Promise<T[]> {
   const entries: T[] = [];
-  let after = 0;
+  let after = from;
   for (;;) {
     const page = await read(`${path}${path.includes('?') ? '&' : '?'}after=${after}&limit=200`) as Record<string, unknown>;
     const values = page[key];
@@ -160,11 +162,31 @@ export async function readChannelPages<T>(read: (path: string) => Promise<unknow
   }
 }
 
-/** The Channel, its current members and every message, taking members from the last page read. */
-export async function readChannelContext(read: (path: string) => Promise<unknown>, channelId: string): Promise<ChannelContext> {
+function channelContextPage(value: unknown): ChannelContext {
+  const page = value as ChannelContext | null;
+  if (!page?.channel || !Array.isArray(page.members) || !Array.isArray(page.messages)
+    || typeof page.hasEarlier !== 'boolean' || !Number.isSafeInteger(page.nextBefore)) {
+    throw new Error('Invalid Channel context response.');
+  }
+  return page;
+}
+
+/** The Channel, its current members and its newest messages; `before` reads the page older than that message instead. */
+export async function readChannelContext(read: (path: string) => Promise<unknown>, channelId: string, before?: number): Promise<ChannelContext> {
+  return channelContextPage(await read(`/channels/context?channelId=${encodeURIComponent(channelId)}`
+    + `${before === undefined ? '' : `&before=${before}`}&limit=${CHANNEL_PAGE_LIMIT}`));
+}
+
+/** Every message after `after`, with members from the last page read: what a view holding the Channel up to `after` lacks. */
+export async function readChannelLater(read: (path: string) => Promise<unknown>, channelId: string, after: number): Promise<ChannelContext> {
   let latest: ChannelContext | undefined;
   const messages = await readChannelPages<ChannelMessage>(read, `/channels/context?channelId=${encodeURIComponent(channelId)}`, 'messages',
-    page => { latest = page as ChannelContext; });
-  if (!latest?.channel || !Array.isArray(latest.members)) throw new Error('Invalid Channel context response.');
-  return { ...latest, messages };
+    page => { latest = channelContextPage(page); }, after);
+  return { ...latest!, messages };
+}
+
+/** One ordered timeline; a message read twice is kept once. */
+export function mergeChannelMessages(current: ChannelMessage[], next: ChannelMessage[]): ChannelMessage[] {
+  const bySequence = new Map([...current, ...next].map(message => [message.sequence, message]));
+  return [...bySequence.values()].sort((a, b) => a.sequence - b.sequence);
 }

@@ -306,8 +306,27 @@ try {
   await apiPost('/channels/messages', { channelId: loopId, body: 'Local reply for Bob.' });
   await bob.getByText('Local reply for Bob.', { exact: true }).waitFor({ timeout: 10000 });
   await bob.screenshot({ path: resolve(screenshotDir, '05-channel-client.png'), fullPage: true });
+  // A long Channel opens on its newest page, reads back on request and takes new messages without reloading.
+  const { channel: long } = await apiPost('/channels', { title: 'Long history', pets: [] });
+  for (let index = 0; index < 105; index += 1) await apiPost('/channels/messages', { channelId: long.channelId, body: `History ${index}` });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('navigation', { name: 'Channel navigation' }).getByRole('button', { name: /Long history/ }).click();
+  await page.getByText('History 104', { exact: true }).waitFor();
+  const shown = () => page.locator('.channel-message').count();
+  assert.equal(await shown(), 100, 'only the newest page is read');
+  const contextReads = [];
+  page.on('request', request => { if (request.url().includes('/channels/context')) contextReads.push(new URL(request.url()).search); });
+  await page.getByRole('button', { name: 'Load earlier messages', exact: true }).click();
+  await page.getByText('History 0', { exact: true }).waitFor();
+  assert.equal(await shown(), 105);
+  assert.equal(await page.getByRole('button', { name: 'Load earlier messages', exact: true }).count(), 0);
+  await apiPost('/channels/messages', { channelId: long.channelId, body: 'History 105' });
+  await page.getByText('History 105', { exact: true }).waitFor();
+  assert.equal(await shown(), 106);
+  assert.ok(contextReads.length >= 2 && contextReads.slice(1).every(search => /[?&]after=\d+/.test(search) && !search.includes('after=0')),
+    `a new message reads only what follows the newest held: ${contextReads.join(' ')}`);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'newest page first, load earlier, incremental new messages'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

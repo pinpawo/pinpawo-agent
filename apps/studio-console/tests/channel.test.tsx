@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   appendChannelDeliveries, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
-  readChannelContext, readChannelPages, type ChannelMember, type ChannelMessage,
+  mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
 import { ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
@@ -47,18 +47,28 @@ test('history loading follows every cursor and fails on a nonadvancing page', as
   await assert.rejects(readChannelPages(async () => ({ channels: [], nextAfter: 0, hasMore: true }), '/channels', 'channels'), /advance/);
 });
 
-test('context reads every message page and keeps the latest members', async () => {
+test('context opens on the newest page, reads back one page at a time, and reads on from the newest message held', async () => {
   const channel = { channelId: 'a b', title: 'T', createdBy: { kind: 'human', id: 'studio-operator' }, createdAt: 'now', updatedAt: 'now' };
+  const page = (sequences: number[], rest: object) => ({
+    channel, members, viewerParticipantId: 'human:studio-operator', hasMore: false, hasEarlier: false,
+    messages: sequences.map(sequence => ({ ...message, messageId: `m${sequence}`, sequence })),
+    nextAfter: sequences.at(-1) ?? 0, nextBefore: sequences[0] ?? 1, ...rest,
+  });
   const paths: string[] = [];
-  const context = await readChannelContext(async path => {
+  const newest = await readChannelContext(async path => { paths.push(path); return page([5, 6], { hasEarlier: true }); }, 'a b');
+  const earlier = await readChannelContext(async path => { paths.push(path); return page([3, 4], {}); }, 'a b', newest.nextBefore);
+  assert.deepEqual(paths, ['/channels/context?channelId=a%20b&limit=100', '/channels/context?channelId=a%20b&before=5&limit=100']);
+  assert.equal(newest.hasEarlier, true);
+
+  paths.length = 0;
+  const later = await readChannelLater(async path => {
     paths.push(path);
-    return paths.length === 1
-      ? { channel, members: members.slice(0, 1), messages: [message], nextAfter: 2, hasMore: true, viewerParticipantId: 'human:studio-operator' }
-      : { channel, members, messages: [{ ...message, messageId: 'n', sequence: 3 }], nextAfter: 3, hasMore: false, viewerParticipantId: 'human:studio-operator' };
-  }, 'a b');
-  assert.deepEqual(paths, ['/channels/context?channelId=a%20b&after=0&limit=200', '/channels/context?channelId=a%20b&after=2&limit=200']);
-  assert.deepEqual(context.messages.map(item => item.messageId), ['m', 'n']);
-  assert.equal(context.members.length, 2);
+    return paths.length === 1 ? page([7], { hasMore: true, members: members.slice(0, 1) }) : page([8], {});
+  }, 'a b', newest.nextAfter);
+  assert.deepEqual(paths, ['/channels/context?channelId=a%20b&after=6&limit=200', '/channels/context?channelId=a%20b&after=7&limit=200']);
+  assert.equal(later.members.length, 2, 'members come from the last page read');
+  const merged = mergeChannelMessages(mergeChannelMessages(earlier.messages, newest.messages), [...later.messages, newest.messages[1]!]);
+  assert.deepEqual(merged.map(item => item.sequence), [3, 4, 5, 6, 7, 8]);
   await assert.rejects(readChannelContext(async () => ({ messages: [], nextAfter: 0, hasMore: false }), 'a'), /Invalid Channel context/);
 });
 

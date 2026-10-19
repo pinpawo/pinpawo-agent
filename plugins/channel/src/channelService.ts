@@ -32,6 +32,12 @@ export const channelPageSchema = z.object({
   after: z.number().int().nonnegative().safe().default(0),
   limit: z.number().int().min(1).max(200).default(50),
 }).strict();
+/** A page of a Channel's messages: the newest by default, newer than `after`, or older than `before`. */
+export const channelMessagePageSchema = z.object({
+  after: z.number().int().nonnegative().safe().optional(),
+  before: z.number().int().positive().safe().optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+}).strict();
 
 export type ChannelMessage = ChannelMessageRow;
 export type ChannelSessionBinding = ChannelSessionRow;
@@ -190,9 +196,13 @@ export class ChannelService {
   }
 
   async readContext(actor: MemberRef, channelId: string, page: unknown = {}) {
-    const value = channelPageSchema.parse(page);
+    const { after, before, limit } = channelMessagePageSchema.parse(page);
+    if (after !== undefined && before !== undefined) {
+      throw new z.ZodError([{ code: 'custom', path: ['before'], message: 'Read after or before a message, not both.' }]);
+    }
     const channel = await this.requireMember(channelId, actor);
-    const { items, ...rest } = await this.store.readMessages(channel.channelId, value);
+    const range = after !== undefined ? { after, limit } : { ...(before !== undefined ? { before } : {}), limit };
+    const { items, ...rest } = await this.store.readMessages(channel.channelId, range);
     return { channel, members: await this.members(channel.channelId), messages: items, ...rest };
   }
 

@@ -176,9 +176,15 @@ export type AgentErrorCode =
   // additional input belongs in dispatch, which queues behind the gate.
   | 'interaction_busy';
 
+/** Bounded error classification only; excludes messages, stacks and request data. */
+export type AgentErrorDiagnostics = {
+  chain: { name: string; code?: string; status?: number }[];
+};
+
 export type AgentErrorEvent = {
   type: 'error';
   requestId: string;
   message: string;
   code?: AgentErrorCode;
+  diagnostics?: AgentErrorDiagnostics;
 };

@@ -147,7 +147,7 @@ interface ChannelStore {
   upsertMember(row: ChannelMemberRow): void;
   appendMessage(row: ChannelMessageRow): ChannelMessageRow;     // 带 external_ref 时幂等
   getMessage(channelId: string, messageId: string): ChannelMessageRow | undefined;
-  readMessages(channelId: string, page: Page): PageOf<ChannelMessageRow>;
+  readMessages(channelId: string, range: MessageRange): MessagePage; // 默认最近一页；after 往后、before 往前
   getSession(channelId: string, petId: string): ChannelSessionRow | undefined;
   reserveSession(row: ChannelSessionRow): ChannelSessionRow;
   confirmSession(row: ChannelSessionRow): void;

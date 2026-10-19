@@ -42,7 +42,7 @@ const server = createServer((request, response) => {
     '/me': { clientId: 'local', scope: 'studio' }, '/pets': { pets: [{ petId: 'analyst', name: 'Analyst' }] }, '/scheduler': { schedules: [] }, '/notices': { notices: [] },
     '/triggers': { triggers: [], deliveries: [] }, '/knowledge': { documents: [] }, '/scheduler/events': { events: [] }, '/triggers/events': { events: [] },
     '/channels': { channels: [channel], nextAfter: 1, hasMore: false }, '/dispatch/queues': { queues: [] },
-    '/channels/context': { channel, members, messages, viewerParticipantId: 'human:owner', nextAfter: messages.at(-1).sequence, hasMore: false },
+    '/channels/context': { channel, members, messages, viewerParticipantId: 'human:owner', nextAfter: messages.at(-1).sequence, hasMore: false, nextBefore: messages[0].sequence, hasEarlier: false },
     '/channels/sessions': { sessions: [] },
   };
   response.writeHead(path in values ? 200 : 404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(values[path] ?? { error: 'Unknown fixture route' }));

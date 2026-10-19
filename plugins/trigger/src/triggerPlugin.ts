@@ -488,9 +488,11 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
               || !matchesStudioEvent(definition.source, event)) continue;
             const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
               ? event.payload as Record<string, unknown> : undefined;
+            // A producer's persisted sequence survives restarts; otherwise the Studio-assigned
+            // eventId keeps same-millisecond events apart while one event still dedupes.
             const suffix = typeof payload?.sequence === 'number' || typeof payload?.sequence === 'string'
               ? String(payload.sequence)
-              : event.occurredAt;
+              : event.eventId;
             await dispatchDelivery(definition, `studio:${event.source}:${event.type}:${suffix}`, { kind: 'studio_event', event });
           }
         });

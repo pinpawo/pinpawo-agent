@@ -50,6 +50,8 @@ export type {
  * 按自己认识的 type 过滤即可。
  */
 export type StudioEvent = {
+  /** Studio 在发布时为每个 event 分配的唯一 id;同一个 event 交给多个订阅者时不变。 */
+  eventId: string;
   type: string;
   /** 发布该 event 的插件名，或 `studio` 这一 core producer。 */
   source: string;
@@ -59,8 +61,8 @@ export type StudioEvent = {
   occurredAt: string;
 };
 
-/** 插件发布 event 时只填自己知道的部分;source / occurredAt 由 studio 补齐。 */
-export type StudioEventInput = Omit<StudioEvent, 'source' | 'occurredAt'>;
+/** 插件发布 event 时只填自己知道的部分;eventId / source / occurredAt 由 studio 补齐。 */
+export type StudioEventInput = Omit<StudioEvent, 'eventId' | 'source' | 'occurredAt'>;
 
 export type StudioEventHandler = (event: StudioEvent) => void | Promise<void>;
 
@@ -198,7 +200,8 @@ export type Studio = {
    */
   entryPetId: string;
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
-  notify: (event: StudioEvent) => void;
+  /** eventId 省略时由 studio 分配。 */
+  notify: (event: Omit<StudioEvent, 'eventId'> & { eventId?: string }) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];
   shutdown: () => Promise<void>;

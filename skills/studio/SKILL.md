@@ -35,7 +35,9 @@ A Channel is a conversation among its members (humans and Pets); it has a title
 and optional description, not a goal. Only current members can read it, speak or
 be addressed, and only listed `--pet`s join a new Channel with you. Read the
 description, members and relevant history before acting. Reads return one page;
-continue with `nextAfter` while `hasMore`. The Channel holds only members' public
+`channels read` starts from the newest messages, reads back with
+`--before <nextBefore>` while `hasEarlier`, and on with `--after <nextAfter>`
+while `hasMore`. The Channel holds only members' public
 messages: a Pet's message is its final reply without tool calls; its tool calls,
 progress and reviews stay in its Agent Session, which `channels sessions` locates
 for each Pet. Check artifacts and public replies for acceptance evidence.

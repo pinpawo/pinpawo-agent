@@ -117,6 +117,9 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 `studio_event` binding 没有独立 durable queue：它响应一次已经发生的 Studio event。事件源
 自身需要 durability/replay 时，应由其 owning Plugin 提供；Trigger 不复制其他领域、GitHub
 或其他领域的事实源。
+`studio_event` delivery 的 idempotency key 是 `studio:<source>:<type>:<id>`：payload 带
+`sequence`（如 Scheduler 的持久序号）时用它，重启后同一事件仍去重；否则用 Studio 在
+`notify()` 时分配的 `eventId`，同一毫秒的两个不同事件各派发一次。
 
 Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”，
 `channelId` 负责“结果落在哪个 Channel”。

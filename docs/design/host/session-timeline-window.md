@@ -1,6 +1,6 @@
 # Agent Session timeline 窗口
 
-状态：第一步（协议 + Host，#985）和第二步（TUI，#986）已合并；第三步（PetSessionView 和 studio-http）实现中。
+状态：四步都已合并（#985 协议 + Host、#986 TUI、#987 PetSessionView 和 studio-http、#988 Channel）。
 
 ## 问题
 
@@ -38,8 +38,12 @@ timeline 是 Host 从 LangGraph checkpoint 实时投影出来的视图，本身�
    - 每轮结束的对账需要一条共有的条目来对齐。窗口和本地没有任何共有条目时（单个 run 超过窗口长度，而本轮的 live id 还没换成 checkpoint id），改为读一次全量快照，不硬对齐。
    - scrollback 首次渲染窗口时，在顶部写一行“N earlier entries · PageUp for the full transcript”。
    - PageUp transcript 和 `/export` 会读一次全量快照，把本地没有的前段补上后展示；读到的全量不保留在内存里。Host 无法响应时退回本地内容，并在头部注明缺了多少条。
-3. PetSessionView 和 studio-http（本步）：
+3. PetSessionView 和 studio-http：
    - `/pet-sessions/snapshot` 和 `/pet-sessions/events` 接受可选的 `timelineLimit` 查询参数（正整数，否则 400），经 `PetSessionPort.snapshot/observe` 传给 Host；上限由 Host 校验。
    - Console 默认带 100。SSE 每次（重新）连接发来的窗口快照按 TUI 同样的方式拼接，已加载的更早条目保留。
    - 有省略时，记录顶部显示“Load earlier entries”按钮：用“已有条数 + 100”的 limit 再拉一次快照，超过 500 时不带 limit 拿全量；加载后保持滚动位置。
-4. Channel：`/channels/context` 加 `before` 游标并只读最近一页，事件携带 sequence，用于 `after` 增量拉取。
+4. Channel：
+   - `/channels/context` 和 `channel_read_context` 默认返回最近的一页；`before=nextBefore` 往前读（`hasEarlier`），`after=nextAfter` 往后读（`hasMore`）。两种方向返回的消息都按 sequence 升序，`after` 和 `before` 不能同时给。
+   - Console 打开 Channel 时只读最近 100 条，顶部有“Load earlier messages”按钮，每次往前读一页。之后的刷新（Channel 事件、发送后、client key 的轮询）只用 `after=` 已有的最新 sequence 读增量，按 sequence 合并去重。“Refresh persisted history”按钮仍然重新读最近一页。
+   - `channel.message.created` 事件本来就带完整消息（含 sequence），事件格式不变；Console 收到事件后按 `after` 拉增量，client key 没有事件流，也走同一条路径。
+   - CLI `channels read` 增加 `--before`。

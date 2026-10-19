@@ -44,6 +44,7 @@ import {
 } from './agentRunFailure';
 import { sendAgentSessionPeerEvent, type ServerPeer } from '../wire/peer';
 import { ThreadInvocationCoordinator } from '../threadInvocationCoordinator';
+import { describeAgentError } from './errorDiagnostics';
 
 type InflightRequest = InflightOperationRun;
 
@@ -450,6 +451,7 @@ export class ServerChatHandler {
             : failure.kind === 'fatal'
               ? describeFatalAgentRunFailure(failure)
               : message,
+          diagnostics: describeAgentError(err),
           ...(failure.kind === 'fatal' ? { code: 'agent_unavailable' } : {}),
         });
       }

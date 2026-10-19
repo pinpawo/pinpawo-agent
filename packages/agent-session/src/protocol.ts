@@ -9,6 +9,7 @@ import { parsePendingInterruptProjection } from './review';
 import { parseResultReferences } from './resultReferences';
 import type {
   AgentErrorCode,
+  AgentErrorDiagnostics,
   AgentOperationRaw,
   AgentOperationPhase,
   AgentRuntimeEvent,
@@ -651,6 +652,7 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');
     const code = type === 'error' ? readAgentErrorCode(record) : null;
+    const diagnostics = type === 'error' ? readErrorDiagnostics(record.diagnostics) : undefined;
     return message == null
       ? null
       : {
@@ -658,9 +660,26 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
           requestId,
           message,
           ...(code ? { code } : {}),
+          ...(diagnostics ? { diagnostics } : {}),
         };
   }
   return null;
+}
+
+function readErrorDiagnostics(value: unknown): AgentErrorDiagnostics | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const chain = (value as Record<string, unknown>).chain;
+  if (!Array.isArray(chain) || chain.length < 1 || chain.length > 4) return undefined;
+  const result: AgentErrorDiagnostics['chain'] = [];
+  for (const item of chain) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const { name, code, status } = item as Record<string, unknown>;
+    if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name)) return undefined;
+    if (code !== undefined && (typeof code !== 'string' || !/^[A-Za-z0-9_]{1,64}$/.test(code))) return undefined;
+    if (status !== undefined && (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599)) return undefined;
+    result.push({ name, ...(code !== undefined ? { code } : {}), ...(status !== undefined ? { status } : {}) });
+  }
+  return { chain: result };
 }
 
 function readJsonObject(

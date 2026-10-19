@@ -55,6 +55,10 @@ dispatch (Pet, invocation, session, scope) they run in, and get `undefined` outs
 cannot construct a Pet, inspect a runtime, or participate in Agent Session conversation, and needs
 no import from `pinpawo/host-runtime`.
 
+Every published `StudioEvent` carries an `eventId` that Studio assigns at `notify()`, along with
+`source` and `occurredAt`; subscribers can use it to tell two events apart even when they share a
+millisecond.
+
 ## Global dispatch observation
 
 The Studio HTTP Plugin exposes `GET /dispatch/queues` under the existing Studio
@@ -110,14 +114,18 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. With `all=true`, the local Host token lists every Channel. |
 | `POST /channels` | `title`, optional `description`, required `pets: [...]`; the creator and those Pets are the initial members. `201 { channel, members }`. |
 | `POST /channels/update` | `channelId`, optional `title`, optional `description` (`null` clears it). |
-| `GET /channels/context?channelId=...` | Channel, current members, a page of messages, `viewerParticipantId`. |
+| `GET /channels/context?channelId=...` | Channel, current members, a page of messages (the newest by default; `before` reads older, `after` newer), `viewerParticipantId`. |
 | `GET /channels/members?channelId=...` | Current members. The local Host token may read any Channel's members. |
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
 
-Pagination uses `after` / `limit` and returns `nextAfter` / `hasMore`; schemas and
+Pagination uses `after` / `limit` and returns `nextAfter` / `hasMore`. Channel
+messages are read from the newest page by default; `before=nextBefore` reads the
+page before it while `hasEarlier`, and `after=nextAfter` reads what came later.
+Messages are in sequence order either way, and `after` and `before` cannot be
+combined. Schemas and
 limits are defined by [ChannelService](../../../plugins/channel/src/channelService.ts).
 `mentions: [{participantId}]` and direct Markdown `[@label](participant:pet:reviewer)`
 share one parser and address only current members; request-body author, source and

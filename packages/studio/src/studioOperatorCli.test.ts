@@ -86,6 +86,7 @@ test('operator commands send the existing wire protocol without retries or start
   for (const [args, path] of [
     [['channels', 'list', '--after', '2', '--limit', '3'], '/channels?after=2&limit=3'],
     [['channels', 'read', 'c a'], '/channels/context?channelId=c+a'],
+    [['channels', 'read', 'c', '--before', '9', '--limit', '3'], '/channels/context?before=9&limit=3&channelId=c'],
     [['channels', 'members', 'c'], '/channels/members?channelId=c'],
     [['channels', 'sessions', 'c'], '/channels/sessions?channelId=c'],
     [['pets'], '/pets'], [['queues'], '/dispatch/queues'],

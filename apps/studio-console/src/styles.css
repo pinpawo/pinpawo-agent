@@ -69,6 +69,7 @@ button { color: #bdebed; background: #153438; }
 .channel-timeline-region { position: relative; flex: 1; min-height: 180px; }
 .channel-timeline-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; padding: 8px 6px 20px; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .channel-timeline { min-width: 0; }
+.channel-earlier { display: block; margin: 4px auto 12px; height: 28px; padding: 0 14px; color: #8fa9a3; background: transparent; border-color: #2c3d3f; border-radius: 14px; font-size: 11px; }
 .channel-date { display: flex; align-items: center; gap: 14px; margin: 16px 16px 10px; color: #92a6a1; font-size: 11px; }
 .channel-date::before, .channel-date::after { content: ''; flex: 1; height: 1px; background: #2b393a; }
 .channel-date time { flex: none; }

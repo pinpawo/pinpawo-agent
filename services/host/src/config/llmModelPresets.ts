@@ -25,6 +25,11 @@ export type LlmModelPreset = {
    */
   inputModalities: readonly ModelInputModality[];
   thinkingControl?: LlmThinkingControl;
+  /**
+   * Request token streaming. A non-streaming request must deliver the whole
+   * reply within the LLM timeout, so long generations time out and every retry
+   * starts over; a stream is not cut off while output keeps arriving.
+   */
   requiresStreaming?: boolean;
   aliases: readonly string[];
   officialDocs: readonly string[];
@@ -200,6 +205,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     structuredOutputMethod: 'jsonMode',
     inputModalities: ['text'],
     thinkingControl: 'thinking_type',
+    requiresStreaming: true,
     aliases: [
       'deepseek-v4-pro',
       'deepseek-v4',
@@ -222,6 +228,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     // is only a compatibility alias that routes to this same model.
     inputModalities: ['text', 'image'],
     thinkingControl: 'thinking_type',
+    requiresStreaming: true,
     aliases: [
       'deepseek-v4-flash',
       // Retired model name; requests are served by DeepSeek-V4.1-Flash.

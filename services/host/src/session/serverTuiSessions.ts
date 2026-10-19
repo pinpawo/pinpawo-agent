@@ -332,7 +332,7 @@ export class ServerTuiSessionService {
       modelProfileId: session.modelProfileId,
       requiredInputModalities: readTuiCheckpointInputModalities(state.messages),
       messages: readTuiCheckpointMessages(state.messages),
-      sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
+      sessionTokenUsage: state.sessionTokenUsage ?? readTuiCheckpointTokenUsage(state.messages),
       pendingInterrupt,
       currentPlan: state.currentPlan,
     };

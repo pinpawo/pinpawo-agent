@@ -251,3 +251,39 @@ test('Capability usage contributes to totals without becoming the Root context w
   assert.equal(readLatestProviderInputTokens([supervisor, result]), 10);
   assert.equal(readMessageTokenUsage(result), null);
 });
+
+test('cache reads use known input denominators; writes and reasoning never add twice', () => {
+  const rawAnthropic = readMessageTokenUsage({ response_metadata: { usage: {
+    input_tokens: 10, cache_read_input_tokens: 70, cache_creation_input_tokens: 20, output_tokens: 5,
+  } } });
+  assert.deepEqual(rawAnthropic, { inputTokens: 100, outputTokens: 5, totalTokens: 105, cachedInputTokens: 70, cacheEligibleInputTokens: 100 });
+  const normalized = readMessageTokenUsage({ usage_metadata: {
+    input_tokens: 100, output_tokens: 30, total_tokens: 130,
+    input_token_details: { cache_read: 60, cache_creation: 20 }, output_token_details: { reasoning: 25 },
+  } });
+  assert.deepEqual(normalized, { inputTokens: 100, outputTokens: 30, totalTokens: 130, cachedInputTokens: 60, cacheEligibleInputTokens: 100 });
+  const mixed = readMessagesTokenUsage([
+    { usage_metadata: normalized }, { usage_metadata: { input_tokens: 200, output_tokens: 10 } },
+  ]);
+  assert.equal(mixed?.inputTokens, 300);
+  assert.equal(mixed?.cachedInputTokens, 60);
+  assert.equal(mixed?.cacheEligibleInputTokens, 100);
+  assert.equal(readMessageTokenUsage({ usage_metadata: { input_tokens: 100, output_tokens: 0 } })?.cachedInputTokens, undefined);
+  assert.equal(readMessageTokenUsage({ usage_metadata: { total_tokens: 12 } })?.incomplete, true);
+});
+
+test('partial normalized metadata cannot hide compatible complete usage or known cache reads', () => {
+  const message = { usage_metadata: { output_tokens: 5 }, response_metadata: { usage: {
+    prompt_tokens: 100, completion_tokens: 5, total_tokens: 105, prompt_tokens_details: { cached_tokens: 50 },
+  } } };
+  assert.deepEqual(readMessageTokenUsage(message), { inputTokens: 100, outputTokens: 5, totalTokens: 105,
+    cachedInputTokens: 50, cacheEligibleInputTokens: 100 });
+  assert.equal(readLatestProviderInputTokens([message]), 100);
+  assert.equal(readLatestProviderInputTokens([{ usage_metadata: { input_tokens: 100, output_tokens: 5 } },
+    { usage_metadata: { output_tokens: 5 } }]), null);
+  assert.equal(readLatestProviderInputTokens([{ usage_metadata: { input_tokens: 100 } }]), 100);
+  assert.equal(readMessageTokenUsage({ usage_metadata: { input_tokens: 100, output_tokens: 5 }, response_metadata: {
+    usage: { prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 50 } },
+  } })?.cachedInputTokens, 50);
+  assert.equal(readMessageTokenUsage({ usage_metadata: { inputTokens: 100, outputTokens: 5, cachedInputTokens: 60, cacheEligibleInputTokens: 40 } })?.cachedInputTokens, undefined);
+});

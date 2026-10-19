@@ -108,6 +108,7 @@ try {
   await viewer.getByText('Public delivery from beta.', { exact: false }).first().waitFor();
   assert.equal(await viewer.getByRole('button', { name: 'Approve', exact: true }).count(), 0, 'an answered review is no longer offered');
   assert.deepEqual(writes.slice(writesBeforeReading), ['/pet-sessions/review'], 'the review answer is the only write');
+  await viewer.getByLabel('Session token usage').filter({ hasText: /cache: 50%/ }).waitFor();
   await page.screenshot({ path: resolve(screenshotDir, '02-session-after-review.png') });
   await page.keyboard.press('Escape');
   await viewer.waitFor({ state: 'detached' });

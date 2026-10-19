@@ -37,23 +37,23 @@ test('status model renders connection, model, token usage, context, and compact 
 
   assert.equal(
     formatStatusLine(state),
-    'in/out: 20,000/3,000 · compact: 58% left · …/me/project',
+    'cache: – · out: – tok/s · session: 23,000 · in/out: 20,000/3,000 · compact: 58% left · …/me/project',
   );
   assert.equal(
     formatStatusLine(state, 40),
-    'in/out: 20,000/3,000 · compact: 58% left',
+    'session: 23,000',
   );
   assert.equal(
     formatStatusLine(state, 24),
-    'in/out: 20,000/3,000',
+    'session: 23,000',
   );
   assert.deepEqual(formatStatusLines(state, 80), [
     'connected · policy: ask · Primary coding (gpt-test)',
-    'in/out: 20,000/3,000 · compact: 58% left · …/me/project',
+    'cache: – · out: – tok/s · session: 23,000 · compact: 58% left',
   ]);
   assert.deepEqual(formatStatusLines(state, 32, 'interrupt requested'), [
     'interrupt requested',
-    'in/out: 20,000/3,000',
+    'session: 23,000',
   ]);
 });
 

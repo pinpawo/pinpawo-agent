@@ -1,3 +1,4 @@
+import { formatSessionUsageMetrics } from '@pinpawo/agent-session';
 import type { AgentSession } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
 import {
@@ -26,6 +27,7 @@ export function formatStatusLine(
     : null;
   const full = [
     ...(state.connectionDetail ? [state.connectionDetail] : []),
+    formatSessionUsageMetrics(session),
     usage,
     ...(path ? [path] : []),
   ];
@@ -33,15 +35,20 @@ export function formatStatusLine(
   const withoutPath = full.filter((segment) => segment !== path);
   if (displayWidth(withoutPath) <= width) return withoutPath.join(' · ');
 
-  const compactUsage = formatCompactUsage(session);
   const compact = [
     ...(state.connectionDetail ? [state.connectionDetail] : []),
-    compactUsage,
+    formatSessionUsageMetrics(session),
+    ...usage.split(' · ').slice(1),
   ];
   if (displayWidth(compact) <= width) return compact.join(' · ');
+  const metricsOnly = [
+    ...(state.connectionDetail ? [state.connectionDetail] : []),
+    formatSessionUsageMetrics(session),
+  ];
+  if (displayWidth(metricsOnly) <= width) return metricsOnly.join(' · ');
   if (!state.connectionDetail) {
-    const inputOutput = compactUsage.split(' · ')[0] ?? compactUsage;
-    if (stringWidth(inputOutput) <= width) return inputOutput;
+    const total = formatSessionUsageMetrics(session).split(' · ').at(-1)!;
+    if (stringWidth(total) <= width) return total;
   }
   return truncateTerminalLine(compact.join(' · '), width);
 }
@@ -164,17 +171,6 @@ function compactPath(path: string) {
 
 function formatCount(value: number) {
   return COUNT_FORMATTER.format(Math.max(0, Math.round(value)));
-}
-
-/**
- * Narrow-width usage. Both variants now report the same remaining percentage;
- * only the no-usage case differs, where the wide line can still afford to name
- * the context window.
- */
-function formatCompactUsage(session: AgentSession) {
-  const usage = session.sessionTokenUsage ?? session.tokenUsage;
-  if (!usage) return 'in/out: –/–';
-  return formatUsage(session);
 }
 
 function displayWidth(segments: string[]) {

@@ -1,3 +1,5 @@
+import { parseSessionUsageLedger, updateSessionUsageLedger, type SessionUsageLedger, type UsageCall } from './agent/sessionUsageLedger';
+import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import {
   existsSync,
   mkdirSync,
@@ -944,6 +946,20 @@ export class FileSaver extends BaseCheckpointSaver {
       });
     });
     this.noteThread(threadId);
+  }
+
+  readSessionUsage(threadId: string): SessionUsageLedger | null {
+    const path = join(this.threadDir(threadId), 'usage.json');
+    if (!existsSync(path)) return null;
+    return parseSessionUsageLedger(JSON.parse(readFileSync(path, 'utf8')));
+  }
+
+  async putSessionUsageCall(threadId: string, id: string, call: UsageCall, baseline?: TokenUsageSnapshot): Promise<void> {
+    await this.runStoreExclusive(() => {
+      const previous = this.readSessionUsage(threadId);
+      const ledger = updateSessionUsageLedger(previous, id, call, baseline);
+      if (ledger !== previous) atomicWriteFile(join(this.threadDir(threadId), 'usage.json'), JSON.stringify(ledger));
+    });
   }
 
   async deleteThread(threadId: string): Promise<void> {

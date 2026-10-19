@@ -879,3 +879,87 @@ test('a windowed snapshot replaces only the tail the reader already holds', () =
     session: { ...createDomainSession(), timeline: [entry('z')] },
   })), ['z']);
 });
+
+test('absolute usage events reconcile streaming totals, replay and completion without double counting', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted', requestId: 'req', kind: 'chat', text: 'hello',
+  }, { observedAt: 1 });
+  const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 50,
+    cacheEligibleInputTokens: 100, scope: 'session' as const, outputTokensPerSecond: 10, outputRateSource: 'final' as const };
+  for (let replay = 0; replay < 2; replay++) session = reduceSession(session, { type: 'runtime.event',
+    event: { type: 'usage.updated', requestId: 'req', usage } }, { observedAt: 2 });
+  for (let replay = 0; replay < 2; replay++) session = reduceSession(session, { type: 'runtime.event',
+    event: { type: 'message.completed', requestId: 'req', messageId: 'reply', role: 'assistant', text: 'done', usage } }, { observedAt: 3 });
+  assert.equal(session.sessionTokenUsage?.totalTokens, 120);
+  assert.equal(session.sessionTokenUsage?.cachedInputTokens, 50);
+  assert.equal(session.sessionTokenUsage?.outputTokensPerSecond, 10);
+});
+
+test('late absolute completion from an earlier request cannot roll back a newer ledger revision', () => {
+  let session = reduceSession(createDomainSession(), { type: 'user.accepted', requestId: 'first', kind: 'chat', text: 'hello' }, { observedAt: 1 });
+  const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, scope: 'session' as const, usageRevision: 2 };
+  const completed = { type: 'message.completed' as const, requestId: 'first', messageId: 'reply', role: 'assistant' as const, text: 'done', usage };
+  session = reduceSession(session, { type: 'runtime.event', event: completed }, { observedAt: 2 });
+  session = reduceSession(session, { type: 'user.accepted', requestId: 'second', kind: 'chat', text: 'continue' }, { observedAt: 3 });
+  session = reduceSession(session, { type: 'runtime.event', event: { type: 'usage.updated', requestId: 'second', usage: { ...usage, totalTokens: 240, usageRevision: 4 } } }, { observedAt: 4 });
+  session = reduceSession(session, { type: 'runtime.event', event: completed }, { observedAt: 5 });
+  assert.equal(session.sessionTokenUsage?.totalTokens, 240);
+  assert.equal(session.sessionTokenUsage?.usageRevision, 4);
+});
+
+test('same-session older snapshot preserves the newer usage revision', () => {
+  const old = { ...createDomainSession(), sessionTokenUsage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, scope: 'session' as const, usageRevision: 2 } };
+  const current = { ...old, sessionTokenUsage: { ...old.sessionTokenUsage, totalTokens: 240, usageRevision: 4 } };
+  const recovered = applySessionSnapshot(current, { version: AGENT_SESSION_SNAPSHOT_VERSION, session: old });
+  assert.equal(recovered.sessionTokenUsage?.totalTokens, 240);
+});
+
+test('legacy run usage fallback retains cache coverage and incomplete markers in the session total', () => {
+  let session = reduceSession(createDomainSession(), { type: 'user.accepted', requestId: 'first', kind: 'chat', text: 'hello' }, { observedAt: 1 });
+  session = reduceSession(session, { type: 'runtime.event', event: { type: 'message.completed', requestId: 'first', messageId: 'reply', role: 'assistant', text: 'done',
+    usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 50, cacheEligibleInputTokens: 100, scope: 'run', incomplete: true } } }, { observedAt: 2 });
+  session = reduceSession(session, { type: 'user.accepted', requestId: 'second', kind: 'chat', text: 'continue' }, { observedAt: 3 });
+  session = reduceSession(session, { type: 'runtime.event', event: { type: 'message.completed', requestId: 'second', messageId: 'reply2', role: 'assistant', text: 'done',
+    usage: { inputTokens: 200, outputTokens: 20, totalTokens: 220, scope: 'run' } } }, { observedAt: 4 });
+  assert.equal(session.sessionTokenUsage?.cachedInputTokens, 50);
+  assert.equal(session.sessionTokenUsage?.cacheEligibleInputTokens, 100);
+  assert.equal(session.sessionTokenUsage?.inputTokens, 300);
+  assert.equal(session.sessionTokenUsage?.incomplete, true);
+});
+
+test('rebuilt transient ledger accepts a new epoch without old completions rolling it back', () => {
+  const oldUsage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, scope: 'session' as const, usageRevision: 20, usageEpoch: 'old' };
+  const completed = { type: 'message.completed' as const, requestId: 'old-request', messageId: 'old-reply', role: 'assistant' as const, text: 'done', usage: oldUsage };
+  let session = reduceSession(createDomainSession(), { type: 'user.accepted', requestId: 'old-request', kind: 'chat', text: 'hello' }, { observedAt: 1 });
+  session = reduceSession(session, { type: 'runtime.event', event: completed }, { observedAt: 2 });
+  const freshUsage = { ...oldUsage, usageRevision: 1, usageEpoch: 'new', incomplete: true };
+  session = applySessionSnapshot(session, { version: AGENT_SESSION_SNAPSHOT_VERSION,
+    session: { ...session, sessionTokenUsage: freshUsage } });
+  session = reduceSession(session, { type: 'user.accepted', requestId: 'current', kind: 'chat', text: 'continue' }, { observedAt: 3 });
+  session = reduceSession(session, { type: 'runtime.event', event: { type: 'usage.updated', requestId: 'current',
+    usage: { ...freshUsage, totalTokens: 240, usageRevision: 2 } } }, { observedAt: 4 });
+  session = reduceSession(session, { type: 'runtime.event', event: completed }, { observedAt: 5 });
+  assert.equal(session.sessionTokenUsage?.totalTokens, 240);
+  assert.equal(session.sessionTokenUsage?.usageEpoch, 'new');
+});
+
+test('pause usage is applied once and starting another turn clears only the previous speed', () => {
+  let session = reduceSession(createDomainSession(), { type: 'user.accepted', requestId: 'pause', kind: 'chat', text: 'hello' }, { observedAt: 1 });
+  const event = { type: 'interrupt.requested' as const, requestId: 'pause', pendingInterrupt: { interruptId: 'review', payload: { kind: 'human_review' as const, interactions: [] } },
+    usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, outputTokensPerSecond: 10, outputRateSource: 'final' as const, scope: 'session' as const, usageRevision: 2 } };
+  session = reduceSession(session, { type: 'runtime.event', event }, { observedAt: 2 });
+  session = reduceSession(session, { type: 'runtime.event', event }, { observedAt: 3 });
+  assert.equal(session.sessionTokenUsage?.totalTokens, 120);
+  assert.equal(session.sessionTokenUsage?.outputTokensPerSecond, 10);
+  session = reduceSession(session, { type: 'interrupt.resume.accepted', requestId: 'resume', interruptId: 'review' }, { observedAt: 4 });
+  assert.equal(session.sessionTokenUsage?.totalTokens, 120);
+  assert.equal(session.sessionTokenUsage?.outputTokensPerSecond, undefined);
+});
+
+test('replaying a legacy completed message cannot add the same run usage again', () => {
+  let session = reduceSession(createDomainSession(), { type: 'user.accepted', requestId: 'old', kind: 'chat', text: 'hello' }, { observedAt: 1 });
+  const event = { type: 'message.completed' as const, requestId: 'old', messageId: 'reply', role: 'assistant' as const, text: 'done', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, scope: 'run' as const } };
+  session = reduceSession(session, { type: 'runtime.event', event }, { observedAt: 2 });
+  session = reduceSession(session, { type: 'runtime.event', event }, { observedAt: 3 });
+  assert.equal(session.sessionTokenUsage?.totalTokens, 120);
+});

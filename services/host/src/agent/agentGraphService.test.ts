@@ -264,3 +264,76 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
   assert.ok(restored.messages.some(message => message.text === 'second request'));
   assert.equal(restored.messages.some(message => message.text === 'separate store'), false);
 });
+
+test('usage callbacks persist absolute session totals across turns and checkpoint reload', async t => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { FileSaver } = await import('../fileSaver');
+  const directory = mkdtempSync(join(tmpdir(), 'graph-usage-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, 'checkpoints.json');
+  class UsageModel extends BaseChatModel {
+    _llmType() { return 'local-usage-fixture'; }
+    bindTools() { return this; }
+    async _generate() {
+      const message = new AIMessage({ content: 'done', usage_metadata: {
+        input_tokens: 100, output_tokens: 20, total_tokens: 120, input_token_details: { cache_read: 50 },
+      } });
+      return { generations: [{ message, text: 'done' }] };
+    }
+  }
+  const service = new HostGraphService();
+  const model = new UsageModel({});
+  const input: AgentChannelSetup = {
+    registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
+    graphConfig: { models: { act: model }, checkpoint: new FileSaver(path) },
+    input: { threadId: 'usage-session', messages: [new HumanMessage('hello')] },
+  };
+  const observed: number[] = [];
+  for (let turn = 1; turn <= 2; turn++) {
+    const stream = await service.streamEvents(input, undefined, usage => observed.push(usage.totalTokens));
+    for await (const _event of stream) { /* Drain a real graph with a local model. */ }
+    await stream.output;
+    const state = await service.readThreadState(input);
+    assert.equal(state.sessionTokenUsage?.totalTokens, 120 * turn);
+    assert.equal(state.sessionTokenUsage?.cachedInputTokens, 50 * turn);
+    assert.equal(state.sessionTokenUsage?.outputTokensPerSecond, undefined);
+    input.graphConfig.checkpoint = new FileSaver(path);
+  }
+  assert.deepEqual(observed, [0, 120, 120, 240]);
+});
+
+test('third-party checkpointers keep live accounting and rebuild a clearly incomplete baseline after Host replacement', async () => {
+  class UsageModel extends BaseChatModel {
+    _llmType() { return 'transient-usage-fixture'; }
+    bindTools() { return this; }
+    async _generate() {
+      const message = new AIMessage({ content: 'done', usage_metadata: { input_tokens: 100, output_tokens: 20, total_tokens: 120 } });
+      return { generations: [{ text: 'done', message }] };
+    }
+  }
+  // A partial duck type is not the usage-store interface and must fall back.
+  const checkpoint = Object.assign(new MemorySaver(), { readSessionUsage() { throw new Error('must not be used'); } });
+  const setup: AgentChannelSetup = {
+    registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
+    graphConfig: { models: { act: new UsageModel({}) }, checkpoint },
+    input: { threadId: 'transient-thread', messages: [new HumanMessage('hello')] },
+  };
+  let service = new HostGraphService();
+  let firstEpoch: string | undefined;
+  for (let turn = 1; turn <= 3; turn++) {
+    if (turn === 3) service = new HostGraphService();
+    const observed: number[] = [];
+    const stream = await service.streamEvents(setup, undefined, usage => observed.push(usage.totalTokens));
+    for await (const _event of stream) { /* Local model only. */ }
+    await stream.output;
+    const usage = (await service.readThreadState(setup)).sessionTokenUsage;
+    assert.equal(usage?.totalTokens, turn * 120);
+    assert.equal(usage?.incomplete, true);
+    assert.equal(observed.at(-1), turn * 120);
+    if (turn === 1) firstEpoch = usage?.usageEpoch;
+    if (turn === 2) assert.equal(usage?.usageEpoch, firstEpoch);
+    if (turn === 3) assert.notEqual(usage?.usageEpoch, firstEpoch);
+  }
+});

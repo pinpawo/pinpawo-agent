@@ -9,7 +9,8 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import { buildHostModels } from './agentModels';
-import { buildCompletionsMessagesWithReasoning } from './reasoningPassback';
+import { readMessageTokenUsage } from '@pinpawo/pet-agent';
+import { buildCompletionsMessagesWithReasoning, normalizeCompletionsCacheUsage } from './reasoningPassback';
 
 type RequestBody = { stream?: boolean; messages: Array<Record<string, unknown>> };
 
@@ -26,6 +27,7 @@ async function withFakeProvider(
   const server = createServer(async (req, res) => {
     const body = await readBody(req);
     requests.push(body);
+    const usage = { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_cache_hit_tokens: 60 };
     const delta = {
       role: 'assistant',
       content: '',
@@ -35,14 +37,14 @@ async function withFakeProvider(
     if (body.stream) {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const chunk = { id: 'r1', object: 'chat.completion.chunk', created: 0, model: 'deepseek-v4-pro',
-        choices: [{ index: 0, delta, finish_reason: 'tool_calls' }] };
+        choices: [{ index: 0, delta, finish_reason: 'tool_calls' }], usage };
       res.end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
       return;
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     const { tool_calls, ...message } = delta;
     res.end(JSON.stringify({
-      id: 'r1', object: 'chat.completion', created: 0, model: 'deepseek-v4-pro',
+      id: 'r1', object: 'chat.completion', created: 0, model: 'deepseek-v4-pro', usage,
       choices: [{ index: 0, message: { ...message, tool_calls: tool_calls.map(({ index: _i, ...call }) => call) },
         finish_reason: 'tool_calls' }],
     }));
@@ -98,6 +100,8 @@ for (const streaming of [false, true]) {
         })()
         : await act.invoke(history);
       assert.equal(first.tool_calls?.length, 1);
+      assert.equal(readMessageTokenUsage(first)?.cachedInputTokens, 60);
+      assert.equal(readMessageTokenUsage(first)?.totalTokens, 120);
 
       history.push(first, new ToolMessage({ content: 'sunny', tool_call_id: 'call_1' }));
       await act.invoke(history);
@@ -110,3 +114,15 @@ for (const streaming of [false, true]) {
     });
   });
 }
+
+
+test('DeepSeek cache hits survive the OpenAI adapter boundary without inventing unknown zeros', () => {
+  assert.deepEqual(normalizeCompletionsCacheUsage({ usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 60 } }), {
+    usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 60, prompt_tokens_details: { cached_tokens: 60 } },
+  });
+  const unknown = { usage: { prompt_tokens: 100 } };
+  assert.equal(normalizeCompletionsCacheUsage(unknown), unknown);
+  assert.deepEqual(normalizeCompletionsCacheUsage({ usage: { prompt_cache_hit_tokens: 60, prompt_tokens_details: { cached_tokens: 50 } } }), {
+    usage: { prompt_cache_hit_tokens: 60, prompt_tokens_details: { cached_tokens: 50 } },
+  });
+});

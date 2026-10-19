@@ -1172,6 +1172,7 @@ test('an aborted run with nothing to continue still reports an interruption', as
   const handler = new ServerChatHandler({
     graphService: {
       settleAbortedRun: async () => null,
+      readSessionTokenUsage: () => ({ inputTokens: 100, outputTokens: 20, totalTokens: 120, scope: 'session', usageRevision: 3 }),
     } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -1194,6 +1195,10 @@ test('an aborted run with nothing to continue still reports an interruption', as
   }, { actorId: 'pet-1' } as never);
 
   assert.deepEqual(interruptedRuns(sent), ['req-1']);
+  const events = sent.flatMap(item => (item as { event?: { type: string; usage?: { totalTokens: number } } }).event ?? []);
+  const accounting = events.findIndex(event => event.type === 'usage.updated');
+  assert.ok(accounting >= 0 && accounting < events.findIndex(event => event.type === 'run.interrupted'));
+  assert.equal(events[accounting].usage?.totalTokens, 120);
   assert.equal(
     sent.some((item) => (item as { event?: { type?: string } }).event?.type === 'interrupt.requested'),
     false,

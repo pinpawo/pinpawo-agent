@@ -1,3 +1,4 @@
+import { formatSessionUsageMetrics } from '@pinpawo/agent-session';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -353,6 +354,7 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
         <button type="button" autoFocus onClick={onClose} aria-label="Close session view">Close <span aria-hidden="true">×</span></button>
       </div>
     </header>
+    {session && <div className="pet-session-usage" aria-label="Session token usage" title="Known provider usage; ≥ means incomplete. Cache * covers reporting calls only. Speed uses final output tokens from first streaming output to model end, excluding first-token wait.">{formatSessionUsageMetrics(session)}</div>}
     {connection === 'reconnecting' && <div className="channel-connection-note" role="status">
       Observation interrupted{problem ? ` (${problem})` : ''}. Showing what was received; reviews are disabled until the session reconnects.</div>}
     {connection === 'unavailable' && <div className="channel-record-error" role="alert">

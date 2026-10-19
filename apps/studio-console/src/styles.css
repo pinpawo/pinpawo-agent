@@ -289,6 +289,7 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
 .pet-session-entry.operation em { color: #819594; font-style: normal; font-size: 10px; text-transform: uppercase; }
 .pet-session-entry pre, .pet-session-review pre { max-height: 360px; overflow: auto; padding: 8px; background: #0a1012; font-size: 11px; white-space: pre-wrap; }
 .pet-session-footnote { max-width: 1000px; margin: 16px auto 0; color: #718184; font-size: 11px; }
+.pet-session-earlier { display: block; margin: 0 auto 12px; height: 28px; color: #c4e5df; border-color: #4a7d7b; border-radius: 16px; background: #193234; font-size: 11px; }
 .pet-session-review { flex: none; max-height: 50dvh; overflow: auto; padding: 12px 20px; border-top: 1px solid #3c4f53; background: #132023; }
 .pet-session-review-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
 .pet-session-review-diff .added { color: #87c9aa; }

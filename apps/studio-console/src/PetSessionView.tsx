@@ -14,14 +14,16 @@ import { ChannelCopy } from './ChannelConversation';
 import { channelPetIdentity, type ChannelPet } from './channelData';
 import {
   applyPetSessionMessage,
+  applyPetSessionRead,
   choosePetSessionReviewOption,
   currentPetSessionReview,
   observePetSession,
+  petSessionEarlierLimit,
   petSessionQuery,
+  PET_SESSION_TIMELINE_LIMIT,
   petSessionToolCallDetail,
   petSessionToolCallTitle,
   readPetSessionReviewOutcome,
-  readPetSessionSnapshot,
   type PetSessionReviewBody,
   type PetSessionReviewDraft,
   type PetSessionTarget,
@@ -199,6 +201,8 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
   const [submission, setSubmission] = useState<PetSessionSubmission | null>(null);
   const submissionRef = useRef<PetSessionSubmission | null>(null);
   const lifetime = useRef<AbortController | null>(null);
+  // Observed messages each in-flight snapshot read must replay over its response.
+  const reads = useRef(new Set<AgentServerMessage[]>());
   const identity = channelPetIdentity(target.petId, pets, petsReady);
   const updateSubmission = (next: PetSessionSubmission | null) => { submissionRef.current = next; setSubmission(next); };
 
@@ -216,17 +220,36 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
     };
   }, []);
 
-  const refreshSnapshot = async () => {
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const refreshSnapshot = async (timelineLimit: number | null = PET_SESSION_TIMELINE_LIMIT) => {
+    const missed: AgentServerMessage[] = [];
+    reads.current.add(missed);
     try {
-      const response = await fetch(`${url}/pet-sessions/snapshot?${petSessionQuery(target)}`, {
+      const response = await fetch(`${url}/pet-sessions/snapshot?${petSessionQuery(target, timelineLimit)}`, {
         headers: { Authorization: `Bearer ${token}` }, signal: lifetime.current?.signal,
       });
       const value = await response.json().catch(() => null) as { snapshot?: AgentSessionSnapshot; error?: string } | null;
       if (!response.ok || !value?.snapshot) throw new Error(value?.error ?? `Snapshot failed (${response.status}).`);
-      setSession(readPetSessionSnapshot(value.snapshot, target));
+      const snapshot = value.snapshot;
+      setSession(current => applyPetSessionRead(current, snapshot, missed, target));
     } catch (error) {
       if (!lifetime.current?.signal.aborted) setProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      reads.current.delete(missed);
     }
+  };
+
+  // Older entries are read again with a larger window; the reader keeps its place.
+  const loadEarlier = async () => {
+    if (!session || loadingEarlier) return;
+    const element = scroller.current;
+    const fromBottom = element ? element.scrollHeight - element.scrollTop : 0;
+    setLoadingEarlier(true);
+    await refreshSnapshot(petSessionEarlierLimit(session));
+    setLoadingEarlier(false);
+    requestAnimationFrame(() => {
+      if (element) element.scrollTop = element.scrollHeight - fromBottom;
+    });
   };
 
   useEffect(() => {
@@ -243,6 +266,7 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
       onMessage: (message: AgentServerMessage) => {
         if (message.type === 'session.snapshot.result') { setConnection('live'); setProblem(''); }
         setSession(current => applyPetSessionMessage(current, message, target));
+        for (const missed of reads.current) missed.push(message);
         const pending = submissionRef.current;
         if (pending && (pending.phase === 'sending' || pending.phase === 'waiting')) {
           const outcome = readPetSessionReviewOutcome(message, pending.requestId);
@@ -341,6 +365,9 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
           const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
           follow.current = latest; setAtLatest(latest);
         }}>
+        {session?.timelineWindow && <button className="pet-session-earlier" type="button" disabled={loadingEarlier}
+          onClick={() => { void loadEarlier(); }}>
+          {loadingEarlier ? 'Loading earlier entries…' : `Load earlier entries (${session.timelineWindow.omitted} more)`}</button>}
         {session ? <PetSessionTranscript session={session} petName={identity.name} />
           : connection === 'loading' ? <div className="compact-empty">Loading session…</div> : null}
         {session && <p className="pet-session-footnote">Saved history and results come from the session checkpoint. Live tool input and output appear only while observed and are not kept after a reconnect.</p>}

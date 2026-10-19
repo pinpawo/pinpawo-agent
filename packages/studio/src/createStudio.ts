@@ -98,8 +98,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     return port;
   };
   const petSessions: StudioPetSessions = {
-    snapshot: async (petId, sessionId) => petSessionPort(petId).snapshot(sessionId),
-    observe: async (petId, sessionId, listener) => petSessionPort(petId).observe(sessionId, listener),
+    snapshot: async (petId, sessionId, options) => petSessionPort(petId).snapshot(sessionId, options),
+    observe: async (petId, sessionId, listener, options) => petSessionPort(petId).observe(sessionId, listener, options),
     review: async (petId, sessionId, request) => petSessionPort(petId).review(sessionId, request),
   };
 

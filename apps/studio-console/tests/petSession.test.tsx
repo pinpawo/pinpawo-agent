@@ -10,8 +10,11 @@ import {
 } from '@pinpawo/agent-session';
 import {
   applyPetSessionMessage,
+  applyPetSessionRead,
   choosePetSessionReviewOption,
   observePetSession,
+  petSessionEarlierLimit,
+  petSessionQuery,
   petSessionToolCallDetail,
   petSessionToolCallTitle,
   readPetSessionReviewOutcome,
@@ -69,6 +72,44 @@ test('a session is rebuilt from its snapshot and then follows that session\'s ev
   assert.equal(applyPetSessionMessage(null, { type: 'event', requestId: 'r', event: { type: 'run.started', requestId: 'r', initiator: 'client' } }, target), null);
 });
 
+test('a reader starts from the newest entries and reads further back with a larger limit', () => {
+  assert.equal(petSessionQuery(target), 'petId=worker&sessionId=worker%3A0000000b&timelineLimit=100');
+  assert.equal(petSessionQuery(target, 250), 'petId=worker&sessionId=worker%3A0000000b&timelineLimit=250');
+  assert.equal(petSessionQuery(target, null), 'petId=worker&sessionId=worker%3A0000000b');
+  const entries = (count: number, from = 0) => Array.from({ length: count }, (_, index) => ({
+    id: `e${from + index}`, type: 'message' as const, role: 'assistant' as const, text: `entry ${from + index}`, status: 'completed' as const,
+  }));
+  assert.equal(petSessionEarlierLimit(session({ timeline: entries(100) })), 200);
+  assert.equal(petSessionEarlierLimit(session({ timeline: entries(450) })), null);
+
+  // A reader that loaded earlier entries keeps them when a reconnect sends only the newest ones.
+  let state = applyPetSessionMessage(null, snapshotMessage(session({ timeline: entries(6), timelineWindow: { omitted: 4 } })), target, 1);
+  assert.equal(state?.timelineWindow?.omitted, 4);
+  state = applyPetSessionMessage(state, snapshotMessage(session({ timeline: entries(3, 4), timelineWindow: { omitted: 8 } })), target, 2);
+  assert.deepEqual(state?.timeline.map(entry => entry.id), ['e0', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6']);
+  assert.equal(state?.timelineWindow?.omitted, 4);
+});
+
+test('an earlier-history read that returns late does not undo what was observed meanwhile', () => {
+  const entries = (count: number, from = 0) => Array.from({ length: count }, (_, index) => ({
+    id: `e${from + index}`, type: 'message' as const, role: 'assistant' as const, text: `entry ${from + index}`, status: 'completed' as const,
+  }));
+  let state = applyPetSessionMessage(null, snapshotMessage(session({ timeline: entries(100, 900), timelineWindow: { omitted: 900 } })), target, 1);
+  // "Load earlier" is sent; a run starts and streams while the response is delayed.
+  const missed: AgentServerMessage[] = [
+    { type: 'event', requestId: 'r', event: { type: 'run.started', requestId: 'r', initiator: 'client' } },
+    { type: 'event', requestId: 'r', event: { type: 'message.delta', requestId: 'r', messageId: 'live', role: 'assistant', text: 'live' } },
+  ];
+  for (const message of missed) state = applyPetSessionMessage(state, message, target, 2);
+  const earlier = createAgentSessionSnapshot(session({ timeline: entries(200, 800), timelineWindow: { omitted: 800 } }));
+  state = applyPetSessionRead(state, earlier, missed, target, 3);
+  assert.equal(state?.timeline.length, 201);
+  assert.equal(state?.timeline[0]?.id, 'e800');
+  assert.equal(state?.timeline.at(-1)?.type === 'message' && state.timeline.at(-1)?.text, 'live');
+  assert.equal(state?.activeRun?.requestId, 'r');
+  assert.equal(state?.timelineWindow?.omitted, 800);
+});
+
 test('review answers follow the server options: defer collects, immediate sends, input is required', () => {
   const first = choosePetSessionReviewOption({ target, review, draft: null, optionId: 'approve', requestId: 'req-1' });
   assert.equal(first.kind, 'collect');
@@ -115,7 +156,7 @@ test('an unknown session ends observation with the Host\'s reason instead of ret
     onDisconnected: (error, retrying) => { outcomes.push([error.message, retrying]); },
     onMessage: () => assert.fail('unexpected message'),
   });
-  assert.deepEqual(urls, ['http://host/pet-sessions/events?petId=worker&sessionId=worker%3A0000000b']);
+  assert.deepEqual(urls, ['http://host/pet-sessions/events?petId=worker&sessionId=worker%3A0000000b&timelineLimit=100']);
   assert.deepEqual(outcomes, [['SSE failed (404). Session does not exist for this Pet.', false]]);
 });
 

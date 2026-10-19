@@ -139,9 +139,15 @@ export type PetSessionReviewRequest = {
  * no interactive connection. A session is addressed by id and never falls
  * back to the active one.
  */
+/** How much of a session's timeline a read carries. */
+export type PetSessionReadOptions = {
+  /** Only the newest entries; omitted, the whole timeline. */
+  timelineLimit?: number;
+};
+
 export interface PetSessionPort {
   /** The session's authoritative snapshot. */
-  snapshot(sessionId: string): Promise<AgentSessionSnapshot>;
+  snapshot(sessionId: string, options?: PetSessionReadOptions): Promise<AgentSessionSnapshot>;
   /**
    * Follow one session. The first message is a `session.snapshot.result`;
    * every later one is a message of that session only, in order. Messages
@@ -150,6 +156,7 @@ export interface PetSessionPort {
   observe(
     sessionId: string,
     listener: (message: AgentServerMessage) => void,
+    options?: PetSessionReadOptions,
   ): Promise<() => void>;
   /**
    * Hand a review answer to the Host. Resolves once the Host owns it, not

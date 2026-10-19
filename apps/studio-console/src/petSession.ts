@@ -1,4 +1,5 @@
 import {
+  AGENT_TIMELINE_LIMIT_MAX,
   applySessionSnapshot,
   parseAgentServerMessage,
   prepareReviewDecision,
@@ -30,8 +31,22 @@ export function petSessionToolCallDetail(call: Pick<AgentMessageToolCall, 'name'
   return Object.keys(call.args).length ? { json: JSON.stringify(call.args, null, 2) } : {};
 }
 
-export function petSessionQuery(target: PetSessionTarget): string {
-  return `petId=${encodeURIComponent(target.petId)}&sessionId=${encodeURIComponent(target.sessionId)}`;
+/** Newest timeline entries a session read carries; older ones load on request. */
+export const PET_SESSION_TIMELINE_LIMIT = 100;
+
+/** `timelineLimit` null reads the whole timeline. */
+export function petSessionQuery(target: PetSessionTarget, timelineLimit: number | null = PET_SESSION_TIMELINE_LIMIT): string {
+  return `petId=${encodeURIComponent(target.petId)}&sessionId=${encodeURIComponent(target.sessionId)}`
+    + (timelineLimit === null ? '' : `&timelineLimit=${timelineLimit}`);
+}
+
+/**
+ * The limit that reads one more page before what the reader holds; null, the
+ * whole timeline, once that page would pass the Host's own bound.
+ */
+export function petSessionEarlierLimit(session: AgentSession): number | null {
+  const limit = session.timeline.length + PET_SESSION_TIMELINE_LIMIT;
+  return limit > AGENT_TIMELINE_LIMIT_MAX ? null : limit;
 }
 
 function emptySession(sessionId: string): AgentSession {
@@ -40,8 +55,9 @@ function emptySession(sessionId: string): AgentSession {
 
 /**
  * Fold one message of the observed session into the reader's projection, with
- * the same reducer the TUI uses. A snapshot replaces everything, so every
- * (re)connection starts again from the Host's authoritative state.
+ * the same reducer the TUI uses. A snapshot replaces what it covers, so every
+ * (re)connection starts again from the Host's authoritative state; earlier
+ * entries the reader loaded stay.
  */
 export function applyPetSessionMessage(
   session: AgentSession | null,
@@ -50,14 +66,37 @@ export function applyPetSessionMessage(
   observedAt = Date.now(),
 ): AgentSession | null {
   if (message.type === 'session.snapshot.result') {
-    return applySessionSnapshot(emptySession(target.sessionId), message.snapshot, { observedAt });
+    return readPetSessionSnapshot(message.snapshot, target, session, observedAt);
   }
   if (message.type !== 'event' || !session) return session;
   return reduceSession(session, { type: 'runtime.event', event: message.event }, { observedAt });
 }
 
-export function readPetSessionSnapshot(session: AgentSessionSnapshot, target: PetSessionTarget): AgentSession {
-  return applySessionSnapshot(emptySession(target.sessionId), session, { observedAt: Date.now() });
+export function readPetSessionSnapshot(
+  snapshot: AgentSessionSnapshot,
+  target: PetSessionTarget,
+  current: AgentSession | null = null,
+  observedAt = Date.now(),
+): AgentSession {
+  return applySessionSnapshot(current ?? emptySession(target.sessionId), snapshot, { observedAt });
+}
+
+/**
+ * Apply a snapshot read beside the observation, then replay the observed
+ * messages that arrived while it was read: the response may predate them, and
+ * must not roll the reader back. The Host's own observe does the same.
+ */
+export function applyPetSessionRead(
+  current: AgentSession | null,
+  snapshot: AgentSessionSnapshot,
+  missed: readonly AgentServerMessage[],
+  target: PetSessionTarget,
+  observedAt = Date.now(),
+): AgentSession | null {
+  return missed.reduce<AgentSession | null>(
+    (session, message) => applyPetSessionMessage(session, message, target, observedAt),
+    readPetSessionSnapshot(snapshot, target, current, observedAt),
+  );
 }
 
 /** Follow one session; the first message after every connection is its snapshot. */

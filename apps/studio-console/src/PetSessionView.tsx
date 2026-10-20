@@ -153,6 +153,9 @@ export function PetSessionReview({ review, draft, enabled, submission, onChoose 
     {view.kind === 'diff' && <>{view.target && <p><code>{view.target}</code></p>}{view.summary && <p>{view.summary}</p>}
       <pre className="pet-session-review-diff"><code>{view.patch.split('\n').map((line, index) => <span key={index}
         className={line.startsWith('+') && !line.startsWith('+++') ? 'added' : line.startsWith('-') && !line.startsWith('---') ? 'removed' : undefined}>{line + '\n'}</span>)}</code></pre></>}
+    {view.kind === 'operation' && <>{view.summary && <pre className="pet-session-review-plain">{view.summary}</pre>}
+      {view.target && <p><code>{view.target}</code></p>}
+      {view.details && <pre className="pet-session-review-plain">{JSON.stringify(view.details, null, 2)}</pre>}</>}
     <div className="pet-session-review-options" role="group" aria-label="Review options">
       {interaction.options.map(option => <button type="button" key={option.id} disabled={disabled}
         className={(option.variant ?? 'normal') + (selected === option.id ? ' selected' : '')} title={option.description}

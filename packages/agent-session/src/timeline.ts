@@ -1,3 +1,4 @@
+import type { JsonObject } from '@pinpawo/agent-contracts';
 import type {
   AgentOperationEvent,
   AgentOperationPhase,
@@ -76,8 +77,8 @@ export function agentOperationEntryFromEvent(
 }
 
 function operationDetailsField(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined,
+  previous: JsonObject | undefined,
+  next: JsonObject | undefined,
 ) {
   if (next === undefined) return previous ? { details: previous } : {};
   if (!previous) return { details: next };

@@ -2,6 +2,7 @@ import {
   readHumanReviewPendingInterrupt,
   type HumanReviewPendingInterruptProjection,
   type PendingInterruptProjection,
+  type ReviewOption,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/agent-session';
@@ -48,7 +49,7 @@ export type ApprovalOptionLine = {
   /** Option label, with ` …` when choosing it opens a response input. */
   text: string;
   selected: boolean;
-  variant: 'primary' | 'normal' | 'danger';
+  variant: NonNullable<ReviewOption['variant']>;
 };
 
 export type ApprovalViewModel = {

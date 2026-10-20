@@ -338,20 +338,15 @@ function createDemoSession(
               // A realistic multi-line command: the reviewed content must stay
               // readable even while the response input is focused.
               view: {
-                kind: 'plain',
+                kind: 'operation',
                 title: '执行命令',
-                body: [
-                  'Summary: deploy the release bundle',
-                  '',
-                  '$ npm run build -- --target production \\',
+                summary: [
+                  'npm run build -- --target production \\',
                   '    --sourcemap false \\',
                   '    --out-dir ./dist/release \\',
                   '    --manifest ./dist/release/manifest.json',
-                  '',
-                  'Target: /srv/pinpawo/app',
-                  '',
-                  'Review details remain pageable inside the fixed footer.',
                 ].join('\n'),
+                target: '/srv/pinpawo/app',
               },
               options: [{
                 id: 'approve',

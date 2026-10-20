@@ -1,3 +1,4 @@
+import type { JsonObject } from '@pinpawo/agent-contracts';
 import type { ReviewSpec } from '../types/reviewSpec';
 import type { ToolAuthorizationMatcher } from './authorizationMatchers';
 
@@ -9,7 +10,7 @@ export type ToolkitReviewCapabilities = {
 export type ToolOperationSummary = {
   target?: string;
   summary?: string;
-  details?: Record<string, unknown>;
+  details?: JsonObject;
 };
 
 export type ToolOperationMetadata = {

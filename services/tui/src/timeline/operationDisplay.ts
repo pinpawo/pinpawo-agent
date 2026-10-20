@@ -191,7 +191,7 @@ function operationArgument(entry: AgentOperationEntry) {
   ].filter((part) => part?.trim() !== label));
 }
 
-function formatDetails(details: Record<string, unknown> | undefined) {
+function formatDetails(details: AgentOperationEntry['details']) {
   if (!details) return '';
   return Object.entries(details)
     .flatMap(([key, value]) => {

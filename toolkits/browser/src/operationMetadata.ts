@@ -1,4 +1,5 @@
 import {
+  operationDetails,
   readBoolean,
   readJsonRecord,
   readNumber,
@@ -44,14 +45,14 @@ function browserSnapshotSummary(output: unknown): ToolOperationSummary | null {
       : tree
         ? compactText(tree)
         : undefined,
-    details: {
+    details: operationDetails({
       title,
       url,
       treeLength,
       returnedTreeLength,
       truncated,
       refCount,
-    },
+    }),
   };
 }
 
@@ -63,11 +64,11 @@ function browserExtractInputSummary(input: unknown): ToolOperationSummary | null
   return {
     target: selector,
     summary: selector ? `提取 ${selector}` : '提取页面文本',
-    details: {
+    details: operationDetails({
       selector,
       offset,
       limit,
-    },
+    }),
   };
 }
 
@@ -89,13 +90,13 @@ function browserExtractOutputSummary(output: unknown): ToolOperationSummary | nu
       : text
         ? compactText(text)
         : '提取页面文本',
-    details: {
+    details: operationDetails({
       selector,
       textLength,
       returnedTextLength,
       hasMore,
       nextOffset,
-    },
+    }),
   };
 }
 
@@ -119,10 +120,10 @@ function selectorInputSummary(action: string, input: unknown): ToolOperationSumm
     ? {
         target,
         summary: `${action} ${target}`,
-        details: {
+        details: operationDetails({
           selector,
           ...(ref ? { ref } : {}),
-        },
+        }),
       }
     : null;
 }
@@ -138,12 +139,12 @@ function typeInputSummary(input: unknown): ToolOperationSummary | null {
     ? {
         target,
         summary: `输入到 ${target}`,
-        details: {
+        details: operationDetails({
           selector,
           ...(ref ? { ref } : {}),
           submit,
           textLength: text?.length,
-        },
+        }),
       }
     : null;
 }
@@ -157,11 +158,11 @@ function waitInputSummary(input: unknown): ToolOperationSummary | null {
   return {
     target,
     summary: target ? `等待 ${target}` : '等待页面',
-    details: {
+    details: operationDetails({
       selector,
       ...(ref ? { ref } : {}),
       timeoutMs,
-    },
+    }),
   };
 }
 
@@ -175,7 +176,7 @@ function scrollInputSummary(input: unknown): ToolOperationSummary | null {
   return {
     target,
     summary: `滚动页面 ${deltaY ?? 600}px`,
-    details: { selector, ref, deltaX, deltaY },
+    details: operationDetails({ selector, ref, deltaX, deltaY }),
   };
 }
 

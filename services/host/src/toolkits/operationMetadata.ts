@@ -1,4 +1,5 @@
 import {
+  operationDetails,
   readBoolean,
   readJsonRecord,
   readNumber,
@@ -33,7 +34,7 @@ export function sourceDestinationInputSummary(input: unknown): ToolOperationSumm
   const source = readString(record, 'source');
   const destination = readString(record, 'destination');
   return source || destination
-    ? { target: destination ?? source, details: { source, destination } }
+    ? { target: destination ?? source, details: operationDetails({ source, destination }) }
     : null;
 }
 

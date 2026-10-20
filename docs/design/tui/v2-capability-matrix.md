@@ -68,7 +68,7 @@ The probe covers:
 | review response validation | stale action, stale batch, missing input, disconnect, and send failure cannot submit an invalid response | automated test |
 | review continuation ownership | `taskActiveDelegation` is the sole authority and is not duplicated in the session projection: `/continue <guidance>` is always an explicit command that sends `resume_active`, ordinary chat sends `supersede_active`, and the orchestrator applies either transition to the checkpoint pointer; client-local cancellation history neither grants nor revokes continuation | automated + Bun native + child-process production PTY test |
 | approval input ownership | option navigation yields to a dedicated multiline textarea after free text starts; ordinary characters on a non-input review remain isolated from the composer before primary Enter resumes the production host | automated + child-process production PTY test |
-| approval details paging | long plain/markdown/diff review content remains pageable inside the fixed footer | automated test |
+| approval details paging | long plain/markdown/diff/operation review content remains pageable inside the fixed footer | automated test |
 | approval overlay resize | CJK body/options and multiline input remain bounded in the 9-row split footer | Bun native test |
 | global review policy | snapshot metadata restores the host policy; `/policy` persists a correlated update before changing visible state | automated test + OpenTUI PTY |
 | policy overlay ownership | arrows/Enter/Esc remain isolated from the composer and the overlay stays bounded across resize | automated + Bun native test |

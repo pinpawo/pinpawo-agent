@@ -427,7 +427,7 @@ test('gh_shell reviews only risky calls', async () => {
   for (const args of [['pr', 'merge', '12', '--squash'], ['api', '-X', 'DELETE', 'repos/o/r']]) {
     const review = await reviewOf(args);
     assert.ok(review && 'schemaVersion' in review, `gh ${args.join(' ')} must be reviewed`);
-    assert.equal(review.view.kind === 'plain' ? review.view.title : '', definition(toolkit, 'gh_shell')?.operation?.title);
+    assert.equal(review.view.kind === 'operation' ? review.view.title : '', definition(toolkit, 'gh_shell')?.operation?.title);
   }
 });
 

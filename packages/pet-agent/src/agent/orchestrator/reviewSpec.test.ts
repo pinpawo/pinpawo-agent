@@ -162,6 +162,34 @@ test('review spec guards accept a diff view and reject malformed ones', () => {
   }), false);
 });
 
+test('reviewViewToText flattens an operation view for review prompts', () => {
+  const reviewSpec = samplePendingReview().reviewSpec;
+  const operationView = {
+    kind: 'operation' as const,
+    title: '执行命令',
+    summary: 'npm test',
+    target: '/repo',
+    details: { level: 'write' },
+  };
+
+  const text = reviewViewToText(operationView);
+  assert.match(text, /Summary: npm test/);
+  assert.match(text, /Target: \/repo/);
+  assert.match(text, /"level": "write"/);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    view: operationView,
+  }), true);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    view: { ...operationView, body: 'should not be here' },
+  }), false);
+
+  const appended = appendReviewViewMessage(operationView, '请确认');
+  assert.equal(appended.kind, 'plain');
+  assert.match(appended.kind === 'plain' ? appended.body : '', /npm test[\s\S]*请确认/);
+});
+
 test('reviewViewToText flattens a diff view and appendReviewViewMessage degrades to plain', () => {
   const diffView = {
     kind: 'diff' as const,

@@ -64,32 +64,12 @@ function readOperationSummary(ctx: ToolReviewContext): ToolOperationSummary | nu
   }
 }
 
-function formatDetails(details: Record<string, unknown> | undefined) {
-  if (!details || Object.keys(details).length === 0) {
-    return null;
-  }
-  return truncate(JSON.stringify(details, null, 2));
-}
-
 function formatInput(input: unknown) {
   try {
     return truncate(JSON.stringify(inputToRecord(input), null, 2));
   } catch {
     return truncate(String(input));
   }
-}
-
-function buildReviewBody(ctx: ToolReviewContext, summary: ToolOperationSummary | null) {
-  const details = formatDetails(summary?.details);
-  const lines = [
-    summary?.summary ? `Summary: ${summary.summary}` : null,
-    summary?.target ? `Target: ${summary.target}` : null,
-    details ? `Details:\n${details}` : null,
-  ].filter((line): line is string => Boolean(line));
-
-  return lines.length > 0
-    ? lines.join('\n\n')
-    : `Input:\n${formatInput(ctx.input)}`;
 }
 
 function readPatchDetail(summary: ToolOperationSummary | null): string | null {
@@ -112,10 +92,22 @@ function buildReviewView(
       ...(summary?.summary ? { summary: summary.summary } : {}),
     };
   }
+  const details = summary?.details && Object.keys(summary.details).length > 0
+    ? summary.details
+    : null;
+  if (summary?.summary || summary?.target || details) {
+    return {
+      kind: 'operation',
+      title,
+      ...(summary?.summary ? { summary: summary.summary } : {}),
+      ...(summary?.target ? { target: summary.target } : {}),
+      ...(details ? { details } : {}),
+    };
+  }
   return {
     kind: 'plain',
     title,
-    body: buildReviewBody(ctx, summary),
+    body: `Input:\n${formatInput(ctx.input)}`,
   };
 }
 

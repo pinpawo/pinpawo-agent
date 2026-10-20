@@ -415,6 +415,8 @@ type HostStudioEvent = {
 
 ## 6. Operation Metadata 草案
 
+> 已被 [Tool operation summary 与 block kind](operation-summary.md) 取代：只保留一个纯函数 `summarize`，`details` 改为通用展示 block。下文是旧设计，保留作对照。
+
 operation metadata 只由 Toolkit 中的 `ToolDefinition.operation` 暴露。
 
 ```ts

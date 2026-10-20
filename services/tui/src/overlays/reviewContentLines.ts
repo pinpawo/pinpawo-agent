@@ -45,6 +45,9 @@ function renderView(
   if (view.kind === 'diff') {
     return renderDiffView(view, width, maxCharacters);
   }
+  if (view.kind === 'operation') {
+    return renderOperationView(view, width, maxCharacters);
+  }
   const body = clampCharacters(view.body, maxCharacters);
   return view.kind === 'markdown'
     ? renderMarkdownBody(body, width)
@@ -67,6 +70,35 @@ function renderDiffView(
   return meta.length > 0 && patchLines.length > 0
     ? [...meta, line('', 'default'), ...patchLines]
     : [...meta, ...patchLines];
+}
+
+/**
+ * Lays out a toolkit's operation summary: the summary itself (a shell command,
+ * a commit message) reads as the main content, verbatim; the target and the
+ * structured details follow in muted text.
+ */
+function renderOperationView(
+  view: Extract<ReviewView, { kind: 'operation' }>,
+  width: number,
+  maxCharacters: number,
+): ReviewContentLine[] {
+  const summary = view.summary
+    ? wrapTone(clampCharacters(view.summary, maxCharacters), width, 'default')
+    : [];
+  const target = view.target
+    ? wrapTone(`Target: ${view.target}`, width, 'muted')
+    : [];
+  const details = view.details
+    ? wrapTone(
+        clampCharacters(JSON.stringify(view.details, null, 2), maxCharacters),
+        width,
+        'muted',
+      )
+    : [];
+  const meta = [...target, ...details];
+  return summary.length > 0 && meta.length > 0
+    ? [...summary, line('', 'default'), ...meta]
+    : [...summary, ...meta];
 }
 
 /**

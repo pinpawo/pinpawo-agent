@@ -6,7 +6,21 @@
  *  - This file owns schema-safe readers and common capability-host summaries.
  *  - Tool kind values are still defined by each toolkit/capability provider.
  */
+import type { JsonObject, JsonValue } from '@pinpawo/agent-contracts';
 import type { ToolOperationSummary } from '../types/toolkit';
+
+/**
+ * Builds operation `details` from fields that may be absent. Details cross the
+ * JSON boundary to clients, so absent fields are omitted rather than carried
+ * as `undefined`.
+ */
+export function operationDetails(fields: Record<string, JsonValue | undefined>): JsonObject {
+  const details: JsonObject = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) details[key] = value;
+  }
+  return details;
+}
 
 export function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -74,7 +88,7 @@ export function resultStatusSummary(
     ? {
         target: postId ?? rootDir ?? capabilityId,
         summary: status ? labels[status] ?? status : note,
-        details: {
+        details: operationDetails({
           status,
           postId,
           capabilityId,
@@ -83,7 +97,7 @@ export function resultStatusSummary(
           warningCount: warnings.length,
           fileCount: files.length,
           imageRequested: readBoolean(record, 'imageRequested'),
-        },
+        }),
       }
     : null;
 }

@@ -12,7 +12,19 @@ export const HUMAN_REVIEW_REQUEST_SCHEMA_VERSION = 2 as const;
 export type HumanReviewView =
   | { kind: 'plain'; title?: string; body: string }
   | { kind: 'markdown'; title?: string; body: string }
-  | { kind: 'diff'; title?: string; patch: string; target?: string; summary?: string };
+  | { kind: 'diff'; title?: string; patch: string; target?: string; summary?: string }
+  /**
+   * A tool operation as its toolkit summarized it: what it does (`summary`,
+   * e.g. the shell command), what it acts on (`target`, e.g. the working
+   * directory) and any further structured `details`. Clients lay these out.
+   */
+  | {
+      kind: 'operation';
+      title?: string;
+      summary?: string;
+      target?: string;
+      details?: JsonObject;
+    };
 
 export type HumanReviewOptionInput = {
   kind: 'text';
@@ -53,7 +65,7 @@ export type HumanReviewBatchResponse = {
   responses: HumanReviewResponse[];
 };
 
-function isHumanReviewView(value: unknown): value is HumanReviewView {
+export function isHumanReviewView(value: unknown): value is HumanReviewView {
   if (!isJsonObject(value)) return false;
   const titleIsValid = value.title === undefined || typeof value.title === 'string';
   if (value.kind === 'plain' || value.kind === 'markdown') {
@@ -68,10 +80,17 @@ function isHumanReviewView(value: unknown): value is HumanReviewView {
       && (value.target === undefined || typeof value.target === 'string')
       && (value.summary === undefined || typeof value.summary === 'string');
   }
+  if (value.kind === 'operation') {
+    return hasOnlyKeys(value, ['kind', 'title', 'summary', 'target', 'details'])
+      && titleIsValid
+      && (value.summary === undefined || typeof value.summary === 'string')
+      && (value.target === undefined || typeof value.target === 'string')
+      && (value.details === undefined || (isJsonObject(value.details) && isJsonValue(value.details)));
+  }
   return false;
 }
 
-function isHumanReviewOptionInput(value: unknown): value is HumanReviewOptionInput {
+export function isHumanReviewOptionInput(value: unknown): value is HumanReviewOptionInput {
   return isJsonObject(value)
     && hasOnlyKeys(value, ['kind', 'key', 'label', 'placeholder', 'required', 'multiline'])
     && value.kind === 'text'

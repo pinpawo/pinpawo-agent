@@ -3,8 +3,8 @@ import { delimiter, isAbsolute, resolve, dirname, basename } from 'node:path';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
-  createAbortError, defineCapability, defineInstructionDocument, defineToolkit,
-  readToolExecutionContext, ReviewPolicies, type AgentToolkit,
+  createAbortError, defineCapability, defineInstructionDocument, defineToolkit, operationDetails,
+  readStringArray, readToolExecutionContext, ReviewPolicies, type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { SHELL_RS_REQUIREMENT, type ShellRS } from '../shellRS/shellRS';
 import { readRecord, readString } from '../operationMetadata';
@@ -177,9 +177,9 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
         title: 'OfficeCLI',
         summarizeInput: (input) => {
           const record = readRecord(input);
-          return { target: readString(record, 'cwd'), details: {
-            executable: executablePath() ?? binary ?? 'officecli', command: readString(record, 'command'), args: record?.args,
-          } };
+          return { target: readString(record, 'cwd'), details: operationDetails({
+            executable: executablePath() ?? binary ?? 'officecli', command: readString(record, 'command'), args: Array.isArray(record?.args) ? readStringArray(record, 'args') : undefined,
+          }) };
         },
       },
       review: ReviewPolicies.required({ authorization: 'exact' }),

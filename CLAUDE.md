@@ -39,6 +39,10 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - Tests use `node --test` (no Jest/Vitest). Co-located `*.test.ts` next to source. Host's `test:unit` finds every `src/**/*.test.ts`, so tests in subdirectories do run.
 - `npm` overrides pin `langsmith` and `uuid` repo-wide; don't bump them in a workspace `package.json` without updating the root override.
 
+## Tool operation summaries
+
+Toolkit `summarize` output uses only the generic block kinds in `@pinpawo/agent-contracts`. Adding a block kind follows the fixed process in `docs/design/host/operation-summary.md` §3: one PR updating the contracts type, validation and default text rendering (`operationBlockToText`, whose switch ends in `assertNever`) plus at least one toolkit using it; client-native rendering is optional, and clients fall back to the default text for kinds they do not render.
+
 ## Capability plugins
 
 Chat Capability definitions live in `~/.pinpawo/capabilities/<id>/CAPABILITY.md`; an optional `index.js` may only export the documented lifecycle hook. Definitions are loaded when the Chat Host starts. Studio Pet definitions use their conventional per-Pet directories instead of this global source.

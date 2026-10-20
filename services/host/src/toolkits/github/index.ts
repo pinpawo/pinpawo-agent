@@ -41,8 +41,8 @@ export function createGithubToolkit(deps: ShellToolkitDependencies): AgentToolki
     tools: createGithubToolDefinitions(deps).tools,
     instructions: githubToolkitInstructions.join('\n'),
     reviewGuidance: {
-      allow: 'Comments, reviews, PR/issue creation and edits, and CI reruns are ordinary collaboration; assess the actual target and effect.',
-      ask: 'Merging PRs, deleting repositories, releases or issues, publishing releases, secrets, credentials and access changes, and write API calls require human review.',
+      allow: 'Comments, reviews, labels, PR/issue creation and edits, and CI reruns are ordinary collaboration, including through gh api write requests; judge gh api writes by the actual endpoint and effect.',
+      ask: 'Merging PRs, deleting repositories, branches, releases or issues, publishing releases, and changing secrets, credentials, access or repository settings require human review, whether through gh commands or gh api.',
     },
     requires: shellRequirement,
     availability: shellAvailability(deps.shell),

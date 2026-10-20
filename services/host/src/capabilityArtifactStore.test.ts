@@ -4,16 +4,17 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { resolveWorkspaceSessionRoot } from './config/runtimeConfig';
 import {
   defaultCapabilityArtifactRoot,
   FileCapabilityArtifactStore,
   resolveCapabilityArtifactThreadRoot,
 } from './capabilityArtifactStore';
 
-test('defaultCapabilityArtifactRoot is scoped under the agent workdir', () => {
+test('defaultCapabilityArtifactRoot is scoped under the workdir session root', () => {
   assert.equal(
     defaultCapabilityArtifactRoot('/tmp/pinpawo-workdir'),
-    '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
+    join(resolveWorkspaceSessionRoot('/tmp/pinpawo-workdir'), 'capability-artifacts'),
   );
 });
 

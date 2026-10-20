@@ -13,6 +13,7 @@ function buildTestConfig(root: string): HostRuntimeConfig {
   return {
     workdir: root,
     stateRoot: join(root, 'state'),
+    sessionRoot: join(root, 'sessions'),
     checkpointPath: join(root, 'checkpoints.json'),
     tuiCheckpointPath: join(root, 'tui-checkpoints.json'),
     tuiSessionPath: join(root, 'tui-sessions.json'),

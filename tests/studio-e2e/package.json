@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --import ../support/isolateSessions.mjs --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "devDependencies": {
     "@langchain/core": "^1.2.1",

@@ -98,10 +98,20 @@ Workspace-owned config and runtime state stays under the workspace root:
 ├── studio-curator.md
 ├── studio-wiki/
 ├── studio-run-queue.json
-├── studio-due-runs.json
+└── studio-due-runs.json
+```
+
+Session state of the workspace lives under the user's home instead, one
+directory per workdir (see [Workdir configuration](../../reference/runtime/workdir.md)):
+
+```text
+~/.pinpawo/workspaces/<workspace-id>/
+├── workspace.json
 ├── capability-artifacts/
 ├── checkpoints-capability-v5/
 ├── checkpoints-tui-capability-v5/
+├── checkpoints-studio-capability-v5/
+├── resident-sessions/
 └── tui-sessions-capability-v5.json
 ```
 
@@ -136,6 +146,7 @@ type HostRuntimeConfig = {
   workdir: string;
   workspace?: HostWorkspaceConfig;
   stateRoot: string;
+  sessionRoot: string;
   checkpointPath: string;
   tuiCheckpointPath: string;
   tuiSessionPath: string;

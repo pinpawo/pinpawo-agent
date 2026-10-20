@@ -12,24 +12,37 @@
 ```text
 <workdir>/
 ├── PET.md
-└── .pinpawo/
+└── .pinpawo/                     # 项目配置（stateRoot）
     ├── studio.json
-    ├── pets/
-    ├── capability-artifacts/
-    ├── checkpoints-capability-v5.json
-    ├── checkpoints-tui-capability-v5.json
-    └── tui-sessions-capability-v5.json
+    ├── studio/studio.sqlite
+    └── pets/
+
+~/.pinpawo/workspaces/<workspace-id>/   # 会话（sessionRoot）
+├── workspace.json
+├── capability-artifacts/
+├── checkpoints-capability-v5/
+├── checkpoints-tui-capability-v5/
+├── checkpoints-studio-capability-v5/
+├── resident-sessions/
+└── tui-sessions-capability-v5.json
 ```
 
-`HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取其中的
-`studio.json` 与 `pets/`；Capability artifact、checkpoint 和 session 文件由宿主
-分别管理。shared wiki、due-run store、run identity 与 scheduler policy 都不是当前
+`HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取 workdir 下的
+`studio.json` 与 `pets/`。会话状态（各 Host 的 checkpoint、会话列表和 Capability
+artifact）放在用户 home 下，每个 workdir 一个目录，目录名是由路径派生的 workspace id
+（`local-` 加路径哈希），`workspace.json` 记录它对应的 workdir。按 workdir 分目录，
+是为了让不同项目里同时运行的 Host 不争同一个 checkpoint 写入租约。
+`PINPAWO_WORKSPACES_DIR` 可替换 `~/.pinpawo/workspaces` 这个基础目录。会话状态不迁移：
+workdir 移动或改名后从空会话开始；旧版本留在 `<workdir>/.pinpawo` 的会话文件会在 Host
+启动时提示，可以直接删除。
+
+shared wiki、due-run store、run identity 与 scheduler policy 都不是当前
 Studio 契约的一部分。
 
 单 Pet Chat Host 从 `<workdir>/PET.md` 读取该 Pet 的根文档；Studio 则从每个已配置
 Pet 的目录定位同一个 `PetDocument` 契约。
 
-runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace metadata。
+runtime 还会由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace metadata。
 这是本地派生信息，不代表已有持久化 workspace registry 或按请求切换 workspace 的
 公共协议。
 

@@ -6,7 +6,7 @@
   "description": "Repository-level Agent evals: real-model and scripted evaluations of pet-agent behavior, using Host model profiles and Toolkits.",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
+    "test": "node --import ../support/isolateSessions.mjs --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
     "bench": "node --env-file-if-exists=.env --import tsx/esm src/bench/run-bench.ts",
     "eval:dataset": "node --env-file=.env --import tsx/esm src/dataset.ts",
     "eval:langfuse:sync-datasets": "node --env-file=.env --import tsx/esm src/scripts/sync-langfuse-datasets.ts",

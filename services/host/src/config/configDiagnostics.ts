@@ -24,6 +24,7 @@ export type SetupGuide = {
   configPath: string;
   workdir: string;
   stateRoot: string;
+  sessionRoot: string;
   readyForLocalRun: boolean;
   checks: SetupCheck[];
   nextSteps: string[];
@@ -94,6 +95,7 @@ export function buildSetupGuide(options: {
     configPath: options.configFilePath ?? configPath(),
     workdir: runtimeConfig.workdir,
     stateRoot: runtimeConfig.stateRoot,
+    sessionRoot: runtimeConfig.sessionRoot,
     readyForLocalRun,
     checks,
     nextSteps: buildNextSteps(checks),
@@ -106,7 +108,8 @@ export function formatSetupGuide(guide: SetupGuide): string {
     '',
     `Config file: ${guide.configPath}`,
     `Workdir: ${guide.workdir}`,
-    `Runtime state: ${guide.stateRoot}`,
+    `Project config: ${guide.stateRoot}`,
+    `Sessions: ${guide.sessionRoot}`,
     `Local run: ${guide.readyForLocalRun ? 'ready' : 'blocked'}`,
     '',
     'Checks:',

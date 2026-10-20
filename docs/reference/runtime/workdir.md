@@ -12,26 +12,41 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 ```text
 <workdir>/
 ├── PET.md
-└── .pinpawo/
+└── .pinpawo/                     # project config (stateRoot)
     ├── studio.json
-    ├── pets/
-    ├── capability-artifacts/
-    ├── checkpoints-capability-v5.json
-    ├── checkpoints-tui-capability-v5.json
-    └── tui-sessions-capability-v5.json
+    ├── studio/studio.sqlite
+    └── pets/
+
+~/.pinpawo/workspaces/<workspace-id>/   # sessions (sessionRoot)
+├── workspace.json
+├── capability-artifacts/
+├── checkpoints-capability-v5/
+├── checkpoints-tui-capability-v5/
+├── checkpoints-studio-capability-v5/
+├── resident-sessions/
+└── tui-sessions-capability-v5.json
 ```
 
 `HostRuntimeConfig` derives these paths before runtime assembly. Studio
-uses `studio.json` and `pets/` from that state root. Capability artifacts and
-checkpoint/session files are separate host-owned state. A Studio shared wiki,
-due-run store, run identity, and scheduler policy are not part of the current
-Studio contract.
+uses `studio.json` and `pets/` from the workdir state root. Session state
+(checkpoints of every Host, session registries and capability artifacts) lives
+under the user's home, one directory per workdir named by its derived workspace
+id (`local-` plus a hash of the path); `workspace.json` records the workdir it
+belongs to. One directory per workdir keeps Hosts running in different projects
+from contending for one checkpoint writer lease. `PINPAWO_WORKSPACES_DIR`
+replaces `~/.pinpawo/workspaces` as the base. Session state is not migrated:
+moving or renaming a workdir starts with no sessions, and session files that
+an older version left in `<workdir>/.pinpawo` are reported at Host start and
+can be deleted.
+
+A Studio shared wiki, due-run store, run identity, and scheduler policy are not
+part of the current Studio contract.
 
 The single-Pet Chat Host reads `<workdir>/PET.md` as that Pet's root document.
 Studio resolves the same `PetDocument` contract from each configured Pet's
 directory instead.
 
-The runtime can also expose derived workspace metadata (`id`, `name`, and
+The runtime also exposes derived workspace metadata (`id`, `name`, and
 `rootPath`) from the workdir. This is local metadata; there is no persisted
 workspace registry or per-request workspace selection contract.
 

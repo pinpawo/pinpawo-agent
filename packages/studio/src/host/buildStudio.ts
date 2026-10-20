@@ -231,7 +231,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         toolAuthorizationMode: input.toolAuthorizationMode,
         autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
         sessionStatePath: path.join(
-          input.runtimeConfig.stateRoot,
+          input.runtimeConfig.sessionRoot,
           'resident-sessions',
           `${encodeURIComponent(petConfig.petId)}.json`,
         ),

@@ -18,6 +18,8 @@ import {
   createBrowserCapability,
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
+import { join } from 'node:path';
+import { atomicWriteFile } from './atomicFile';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import {
   createCapabilityCreatorCapability,
@@ -238,10 +240,15 @@ export class HostCapabilityAssembly {
       const legacyStatePaths = findLegacyHostState(this.runtimeConfig);
       if (legacyStatePaths.length > 0) {
         console.warn(
-          `[${this.sourceId}] Capability V2 uses a new conversation checkpoint namespace. `
-          + `Legacy state is preserved but not loaded: ${legacyStatePaths.join(', ')}`,
+          `[${this.sourceId}] Sessions now live in ${this.runtimeConfig.sessionRoot}. `
+          + `Older session state in the workdir is not loaded and can be deleted: ${legacyStatePaths.join(', ')}`,
         );
       }
+      // Names the project of an otherwise opaque per-workdir session directory.
+      atomicWriteFile(
+        join(this.runtimeConfig.sessionRoot, 'workspace.json'),
+        `${JSON.stringify({ workdir: this.runtimeConfig.workdir }, null, 2)}\n`,
+      );
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();

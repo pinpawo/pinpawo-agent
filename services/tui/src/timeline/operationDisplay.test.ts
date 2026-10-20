@@ -8,7 +8,7 @@ import {
   OPERATION_OUTPUT_MAX_LINES,
 } from './operationDisplay';
 
-test('compact operation display uses a target without payload details', () => {
+test('compact operation display shows summary then target without payload details', () => {
   const lines = buildOperationDisplayLines(operation({
     phase: 'completed',
     title: '打开网页',
@@ -23,20 +23,20 @@ test('compact operation display uses a target without payload details', () => {
     raw: { output: 'Example Domain loaded' },
   }), 2_500, 120);
 
-  assert.match(lines[0]!.text, /^打开网页 · https:\/\/example.com/);
+  assert.match(lines[0]!.text, /^打开网页 · 页面：Example Domain · https:\/\/example.com/);
   assert.doesNotMatch(lines[0]!.text, /status 200/);
   assert.match(lines[0]!.text, /（完成）$/);
   assert.equal(lines.length, 1);
 });
 
-test('compact shell activity prefers command over cwd without changing canonical input', () => {
+test('compact shell activity puts the command before the cwd without changing canonical input', () => {
   const command = 'cd "/Users/me/project with spaces" && rg -n "SupervisorDecisionError" src';
   const entry = operation({
     phase: 'completed', target: '/Users/me/project with spaces', summary: command,
     operationSource: { provider: 'toolkit', name: 'local', toolName: 'run_shell' },
     raw: { input: { command }, output: 'evidence' },
   });
-  assert.equal(operationActivityText(entry), 'run_shell · rg -n "SupervisorDecisionError" src');
+  assert.equal(operationActivityText(entry), 'run_shell · rg -n "SupervisorDecisionError" src · /Users/me/project with spaces');
   assert.equal((entry.raw?.input as { command: string }).command, command);
   const line = buildOperationDisplayLines({ ...entry, summary: command.repeat(10) }, 0, 240)[0]!;
   assert.ok(stringWidth(line.text) <= 104);

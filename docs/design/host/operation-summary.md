@@ -1,6 +1,6 @@
 # Tool operation summary 与 block kind
 
-状态：实现中（2026-10-20）。进度见末尾「落地顺序」。
+状态：已实现（2026-10-20），见末尾「落地顺序」。
 取代 [architecture-refactor.md §6](architecture-refactor.md#6-operation-metadata-草案) 里的
 `summarizeInput/summarizeOutput/summarizeError` 与 `details` 设计。
 
@@ -131,7 +131,8 @@ switch (block.kind) {
 
 TUI 和 Console 的原生渲染约定：
 
-- 标题行：取 summary、target、title 中第一个有值的；不按工具名判断。
+- 标题行：`工具 · summary · target`，相同的部分只显示一次；没有 summary 和 target 时只显示工具。不按工具名判断。
+  行太宽时从末尾截断，所以 target 先被截掉；target 是普通路径时先缩成 `…/文件名`。
 - `code`：等宽，保留换行，不重排；language 只是提示。
 - `diff`：按行首 `+`/`-` 着色（unified 和 V4A 通用）；有 path 时显示。
 - `text`：普通文本，可折行；有 label 时作为小标题。
@@ -204,10 +205,9 @@ PR 里附 TUI 审批和时间线的截图。
 每步一个 PR，前一个合并后再开下一个：
 
 1. （已合并，#998）contracts：`OperationSummary`、`OperationBlock`、`isOperationSummary`、`assertNever`、默认文本渲染和测试。
-2. pet-agent + 全部 toolkit：`summarize` 和统一入口，Host tracker 按 callId 复用；审批视图改用 OperationSummary；
+2. （已合并，#1000）pet-agent + 全部 toolkit：`summarize` 和统一入口，Host tracker 按 callId 复用；审批视图改用 OperationSummary；
    删除 `diff` 审批视图、`summarizeOutput`、`summarizeError`、`details`；时间线事件换成新字段。
    原来的 `diff` 审批视图和 apply_patch 时间线补丁有原生着色，为了不倒退，TUI 和 Console 的 `diff` 原生渲染
    随这一步一起落地，同时删除 `OPERATION_PAYLOAD_DETAIL_KEYS`、`isApplyPatchOperation` 等按字段名或工具名的判断；
    其余 kind 走默认文本。
-3. 收尾：删除 TUI 的 `SHELL_TOOL_LABELS`。它按工具名给 shell 类调用加标题前缀，删除前要先约定
-   「summary 不重复 target」，避免标题行出现重复信息。
+3. 收尾：删除 TUI 的 `SHELL_TOOL_LABELS`，标题行改用上面的通用规则（summary 在前，target 在后，重复的只显示一次）。

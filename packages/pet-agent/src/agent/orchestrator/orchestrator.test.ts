@@ -108,7 +108,6 @@ function executionDeliveries(input: RunSupervisorInput | undefined): DelegationD
 
 import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
-import { operationDetails } from '../../utils/operationMetadata';
 
 function plannerMessageContextText(input: RunSupervisorInput | null | undefined) {
   return [...(input?.messages.map(readMessageText) ?? []), ...executionDeliveries(input ?? undefined).map((delivery) => delivery.text)].join('\n');
@@ -1793,16 +1792,13 @@ test('capability Toolkit exposes ToolDefinition operation metadata', () => {
       tool: saveDraftTool,
       operation: {
         title: '保存草稿',
-        summarizeInput: (input) => {
+        summarize: (input) => {
           const value = input && typeof input === 'object'
             ? input as { topic?: unknown; content?: unknown }
             : {};
           return {
             target: typeof value.topic === 'string' ? value.topic : undefined,
             summary: '保存草稿',
-            details: operationDetails({
-              contentLength: typeof value.content === 'string' ? value.content.length : undefined,
-            }),
           };
         },
       },
@@ -1817,15 +1813,12 @@ test('capability Toolkit exposes ToolDefinition operation metadata', () => {
     toolName: 'save_draft',
   });
 
-  const summary = definition?.operation?.summarizeInput?.({
+  const summary = definition?.operation?.summarize?.({
     content: '这是一段待发布的正文',
     topic: '早餐',
   });
   assert.equal(summary?.target, '早餐');
   assert.equal(summary?.summary, '保存草稿');
-  assert.deepEqual(summary?.details, {
-    contentLength: '这是一段待发布的正文'.length,
-  });
   assert.equal(JSON.stringify(summary).includes('这是一段待发布的正文'), false);
 });
 

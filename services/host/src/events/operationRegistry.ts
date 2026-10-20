@@ -2,10 +2,8 @@ import type {
   AgentToolkit,
   SubagentToolOperationMetadata,
   ToolOperationMetadata,
-  ToolOperationSummary,
 } from '@pinpawo/pet-agent';
 
-export type OperationSummary = ToolOperationSummary;
 export type OperationMetadata = ToolOperationMetadata;
 
 export type RegisteredOperationMetadata = OperationMetadata & {

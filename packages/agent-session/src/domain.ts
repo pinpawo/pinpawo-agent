@@ -1,5 +1,5 @@
 import type {
-  JsonObject,
+  ReceivedOperationBlock,
   ToolAuthorizationMode,
   ToolAuthorizationSafetyLevel,
   TokenUsageSnapshot,
@@ -55,7 +55,7 @@ export type AgentOperationEntry = {
   phase: AgentOperationPhase;
   target?: string;
   summary?: string;
-  details?: JsonObject;
+  blocks?: ReceivedOperationBlock[];
   operationSource?: {
     provider: 'toolkit' | 'runtime';
     name: string;

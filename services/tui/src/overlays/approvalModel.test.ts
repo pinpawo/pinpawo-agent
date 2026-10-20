@@ -108,14 +108,18 @@ test('approval diff details page within a bounded CJK footer view', () => {
     interactionId: 'review-diff',
     schemaVersion: 2,
     view: {
-      kind: 'diff',
+      kind: 'operation',
       title: '修改配置',
       summary: '请检查以下变更',
       target: '/tmp/配置.ts',
-      patch: Array.from(
-        { length: 12 },
-        (_, index) => `+ 第 ${index + 1} 行：宽字符内容`,
-      ).join('\n'),
+      blocks: [{
+        kind: 'diff',
+        format: 'unified',
+        text: Array.from(
+          { length: 12 },
+          (_, index) => `+ 第 ${index + 1} 行：宽字符内容`,
+        ).join('\n'),
+      }],
     },
     options: [{
       id: 'approve',
@@ -321,10 +325,10 @@ test('every review view variant renders through its own path', () => {
   const diffState = syncApprovalState(createApprovalState(), waitingReview([{
     ...review('review-diff-tone'),
     view: {
-      kind: 'diff',
+      kind: 'operation',
       title: '应用补丁',
       target: '/srv/app/index.ts',
-      patch: '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n const b = 3;',
+      blocks: [{ kind: 'diff', format: 'unified', text: '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n const b = 3;' }],
     },
   }]));
   if (diffState.phase === 'closed') assert.fail('review unexpectedly closed');
@@ -373,7 +377,7 @@ test('approval options carry selection and variant, with the description apart',
   assert.equal(authorize?.dialogRows, approve?.dialogRows);
 });
 
-test('an operation review shows its summary verbatim, then target and details', () => {
+test('an operation review shows its summary verbatim, then target and blocks', () => {
   const operation: ReviewSpec = {
     ...review('review-operation'),
     view: {
@@ -381,7 +385,10 @@ test('an operation review shows its summary verbatim, then target and details', 
       title: '执行命令',
       summary: 'npm test',
       target: '/srv/app',
-      details: { level: 'write' },
+      blocks: [
+        { kind: 'text', label: '描述', text: '跑全部测试' },
+        { kind: 'table', text: 'a | b' } as never,
+      ],
     },
   };
   const state = syncApprovalState(createApprovalState(), waitingReview([operation]));
@@ -389,10 +396,12 @@ test('an operation review shows its summary verbatim, then target and details', 
   assert.equal(model?.heading, '执行命令');
   assert.deepEqual(model?.bodyLines.slice(0, 3), [
     { text: 'npm test', tone: 'default' },
-    { text: '', tone: 'default' },
     { text: 'Target: /srv/app', tone: 'muted' },
+    { text: '', tone: 'default' },
   ]);
-  assert.match(model?.body ?? '', /"level": "write"/);
+  assert.match(model?.body ?? '', /描述\n跑全部测试/);
+  // A kind this client does not render falls back to its default text.
+  assert.match(model?.body ?? '', /a \| b/);
   assert.doesNotMatch(model?.body ?? '', /Summary/);
 });
 

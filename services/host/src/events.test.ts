@@ -50,8 +50,6 @@ test('normalizes LangGraph tool stream events with toolkit operation metadata', 
       kind: 'files.read_file',
       title: '析文档',
       target: '/tmp/example.md',
-      summary: undefined,
-      details: undefined,
       source: {
         provider: 'toolkit',
         name: 'files',
@@ -115,7 +113,7 @@ test('normalizes tool stream events with event-provided operation metadata first
       input: { command: 'git status' },
       operation: {
         title: 'Capability Shell',
-        summarizeInput: () => ({
+        summarize: () => ({
           target: 'custom-target',
           summary: 'custom summary',
         }),
@@ -184,33 +182,22 @@ test('buildToolOperationEvent uses explicit toolkit metadata', () => {
 });
 
 test('normalizes an incomplete run_shell start without interrupting the run', () => {
-  const warnings: string[] = [];
-  const originalWarn = console.warn;
-  console.warn = (message: unknown) => warnings.push(String(message));
-  let event;
-  try {
-    event = normalizeToolStreamEvent(
-      'req-1',
-      {
-        event: 'on_tool_start',
-        name: 'run_shell',
-        toolCallId: 'call-1',
-        input: {},
-      },
-      localToolOperationRegistry,
-    );
-  } finally {
-    console.warn = originalWarn;
-  }
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'run_shell',
+      toolCallId: 'call-1',
+      input: {},
+    },
+    localToolOperationRegistry,
+  );
 
   assert.equal(event?.phase, 'started');
   assert.equal(event?.operation.title, '执行命令');
   assert.equal(event?.operation.target, undefined);
   assert.equal(event?.operation.summary, undefined);
   assert.deepEqual(event?.raw?.input, {});
-  assert.deepEqual(warnings, [
-    '[agent-stream] omitted input summary for run_shell; input was incomplete or invalid',
-  ]);
 });
 
 test('buildToolOperationEvent uses git toolkit metadata', () => {
@@ -308,7 +295,7 @@ test('browser open review policy offers session authorization', async () => {
   );
 });
 
-test('browser operation metadata summarizes page output', () => {
+test('browser operation metadata summarizes the call, not its output', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
       toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
@@ -333,8 +320,8 @@ test('browser operation metadata summarizes page output', () => {
 
   assert.equal(event.operation.kind, 'browser.browser_open');
   assert.equal(event.operation.title, '打开网页');
-  assert.equal(event.operation.target, 'https://example.com/');
-  assert.equal(event.operation.summary, '页面：Example Domain');
+  assert.equal(event.operation.target, 'https://example.com');
+  assert.equal(event.operation.summary, '打开网页');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
     name: 'browser',
@@ -376,31 +363,6 @@ test('browser operation metadata parses JSON-string inputs for input summaries',
 
   assert.equal(startFromOpen.operation.target, 'https://example.com');
   assert.equal(startFromOpen.operation.summary, '打开网页');
-});
-
-test('tool operation output summaries still receive raw output strings first', () => {
-  const event = normalizeToolStreamEvent(
-    'req-1',
-    {
-      event: 'on_tool_end',
-      name: 'submit_plan',
-      toolCallId: 'call-1',
-      output: '{"taskCount":2}',
-      operation: {
-        title: '提交计划',
-        summarizeOutput: (output: unknown) => {
-          if (typeof output !== 'string') return null;
-          const parsed = JSON.parse(output) as { taskCount?: unknown };
-          return typeof parsed.taskCount === 'number'
-            ? { summary: `已接收 ${parsed.taskCount} 个任务` }
-            : null;
-        },
-      },
-    },
-    createOperationRegistry(),
-  );
-
-  assert.equal(event.operation.summary, '已接收 2 个任务');
 });
 
 test('unwraps a live ToolMessage instance to its content string (no LangChain envelope)', () => {
@@ -506,16 +468,11 @@ test('browser type operation metadata does not expose typed text in display fiel
 
   assert.equal(event.operation.kind, 'browser.browser_type');
   assert.equal(event.operation.target, '#password');
-  assert.equal(event.operation.summary, '输入到 #password');
-  assert.deepEqual(event.operation.details, {
-    selector: '#password',
-    submit: true,
-    textLength: 'super-secret-token'.length,
-  });
+  assert.equal(event.operation.summary, `输入到 #password（${'super-secret-token'.length} 字）并提交`);
   assert.equal(JSON.stringify(event.operation).includes('super-secret-token'), false);
 });
 
-test('browser operation metadata accepts JSON string input and raw string output', () => {
+test('browser operation metadata summarizes JSON string input and leaves output raw', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
       toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
@@ -540,11 +497,8 @@ test('browser operation metadata accepts JSON string input and raw string output
   assert.equal(event.operation.kind, 'browser.browser_wait');
   assert.equal(event.operation.title, '等待页面');
   assert.equal(event.operation.target, '#result');
-  assert.equal(event.operation.summary, '页面稳定，结果已出现');
-  assert.deepEqual(event.operation.details, {
-    selector: '#result',
-    timeoutMs: 5000,
-  });
+  assert.equal(event.operation.summary, '等待 #result（最多 5000ms）');
+  assert.equal(event.raw?.output, '页面稳定，结果已出现');
 });
 
 test('browser operation metadata summarizes failed events without raw payload display', () => {
@@ -568,8 +522,8 @@ test('browser operation metadata summarizes failed events without raw payload di
 
   assert.equal(event.phase, 'failed');
   assert.equal(event.operation.target, 'text=登录');
-  assert.equal(event.operation.summary, 'No active browser page. Use browser_open first.');
-  assert.deepEqual(event.operation.details, { selector: 'text=登录' });
+  assert.equal(event.operation.summary, '点击 text=登录');
+  assert.ok(event.raw?.error instanceof Error);
 });
 
 test('createOperationRegistryForAgentSetup reads operation metadata from setup toolkits', () => {
@@ -618,7 +572,7 @@ test('createOperationRegistryForAgentSetup reads host tool metadata from setup t
           tool: { name: 'describe_pet_profile' } as never,
           operation: {
             title: '读取宠物资料',
-            summarizeInput: (input: unknown) => {
+            summarize: (input: unknown) => {
               const focus = input && typeof input === 'object' && 'focus' in input
                 ? (input as { focus?: unknown }).focus
                 : null;
@@ -654,7 +608,7 @@ test('createOperationRegistryForAgentSetup reads host tool metadata from setup t
   });
 });
 
-test('file tool metadata includes before/after snapshots', (t) => {
+test('file tool metadata shows the content to write without reading the disk', (t) => {
   const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-file-op-meta-'));
   const filePath = resolve(root, 'note.txt');
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -676,24 +630,23 @@ test('file tool metadata includes before/after snapshots', (t) => {
   );
 
   assert.equal(startEvent.operation.target, filePath);
-  assert.equal(startEvent.operation.details?.before, 'alpha\nbeta\n');
+  assert.equal(startEvent.operation.summary, '覆盖写入');
+  assert.deepEqual(startEvent.operation.blocks, [
+    { kind: 'text', label: '写入内容', text: 'alpha\nbeta\ngamma\n' },
+  ]);
 
-  writeFileSync(filePath, 'alpha\nbeta\ngamma\n', 'utf-8');
   const endEvent = normalizeToolStreamEvent(
     'req-1',
     {
       event: 'on_tool_end',
       name: 'write_file',
       toolCallId: 'call-1',
-      output: {
-        ok: true,
-        path: filePath,
-        mode: 'write',
-      },
+      output: { ok: true, path: filePath, mode: 'write' },
     },
     localToolOperationRegistry,
   );
 
-  assert.equal(endEvent.operation.details?.after, 'alpha\nbeta\ngamma\n');
-  assert.equal(endEvent.operation.target, filePath);
+  // The result event carries no summary of its own; the tracker reuses the start's.
+  assert.equal(endEvent.operation.blocks, undefined);
+  assert.equal(endEvent.phase, 'completed');
 });

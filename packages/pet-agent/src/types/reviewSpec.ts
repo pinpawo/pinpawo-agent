@@ -10,6 +10,7 @@ import {
   HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
   hasOnlyKeys,
   isJsonObject,
+  operationSummaryToText,
   readNonEmptyString,
 } from '@pinpawo/agent-contracts';
 import { isReviewSpecValue } from './reviewSpecValidation';
@@ -69,31 +70,18 @@ export function buildReviewSpec(params: BuildReviewSpecParams): ReviewSpec {
 }
 
 /**
- * Returns a human-readable text rendering of a review view, for consumers that
- * only need the textual content (LLM review prompts, reject-message appends).
- * The `diff` variant has no `body`, so it is flattened to its summary + patch.
+ * Returns the default text rendering of a review view, for consumers that only
+ * need text (LLM review prompts, reject-message appends). An operation view
+ * goes through the shared contracts rendering.
  */
 export function reviewViewToText(view: ReviewView): string {
-  if (view.kind === 'diff') {
-    return [
-      view.summary ? `Summary: ${view.summary}` : null,
-      view.target ? `Target: ${view.target}` : null,
-      view.patch,
-    ].filter((line): line is string => Boolean(line)).join('\n\n');
-  }
-  if (view.kind === 'operation') {
-    return [
-      view.summary ? `Summary: ${view.summary}` : null,
-      view.target ? `Target: ${view.target}` : null,
-      view.details ? `Details:\n${JSON.stringify(view.details, null, 2)}` : null,
-    ].filter((line): line is string => Boolean(line)).join('\n\n');
-  }
+  if (view.kind === 'operation') return operationSummaryToText(view);
   return view.body;
 }
 
 /** Appends a trailing message to a review view's textual content. */
 export function appendReviewViewMessage(view: ReviewView, message: string): ReviewView {
-  if (view.kind === 'diff' || view.kind === 'operation') {
+  if (view.kind === 'operation') {
     return {
       kind: 'plain',
       ...(view.title ? { title: view.title } : {}),

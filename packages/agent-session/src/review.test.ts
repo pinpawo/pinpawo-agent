@@ -7,7 +7,7 @@ test('public interrupt parser preserves human reviews and refuses legacy pauses 
   assert.equal(parsePendingInterruptProjection(pause), null);
   const review = { interruptId: 'review', payload: { kind: 'human_review', interactions: [{
     interactionId: 'interaction', schemaVersion: 2,
-    view: { kind: 'diff', patch: '+ change', summary: 'Summary' },
+    view: { kind: 'operation', summary: 'Summary', blocks: [{ kind: 'diff', format: 'unified', text: '+ change' }] },
     options: [{ id: 'allow', label: 'Allow', batchSubmission: 'defer' }],
   }] } };
   assert.deepEqual(parsePendingInterruptProjection(review), review);

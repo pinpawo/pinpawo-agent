@@ -183,7 +183,7 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
   assert.ok(view && view.kind === 'operation');
   assert.equal(view.title, '写文件');
   assert.equal(view.target, filePath);
-  assert.ok(view.details && 'afterPreview' in view.details);
+  assert.deepEqual(view.blocks, [{ kind: 'text', label: '写入内容', text: 'after\n' }]);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
@@ -208,9 +208,10 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
 
   const review = await policy.request(reviewContext('apply_patch', input));
   const view = review && 'schemaVersion' in review ? review.view : null;
-  assert.ok(view && view.kind === 'diff');
+  assert.ok(view && view.kind === 'operation');
   assert.equal(view.title, '应用补丁');
-  assert.match(view.patch, /\*\*\* Update File/);
+  assert.equal(view.blocks?.[0]?.kind, 'diff');
+  assert.match(view.blocks?.[0]?.text ?? '', /\*\*\* Update File/);
   assert.match(view.target ?? '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
@@ -276,12 +277,12 @@ test('bash toolkit reviews local path mutations with presets', () => {
 });
 
 test('file operation metadata preserves model-provided relative paths', () => {
-  const summary = fileOperationMetadata.write_file?.summarizeInput?.({
+  const summary = fileOperationMetadata.write_file?.summarize?.({
     path: 'notes/todo.md',
     content: 'todo',
   });
   assert.equal(summary?.target, 'notes/todo.md');
-  assert.equal(summary?.details?.before, undefined);
+  assert.equal(summary?.summary, '覆盖写入');
 });
 
 test('bash toolkit leaves read-only file tools without review policy', () => {

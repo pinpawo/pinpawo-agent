@@ -1,4 +1,5 @@
 import {
+  isOperationBlock,
   isToolAuthorizationMode,
   isToolAuthorizationSafetyLevel,
   type JsonObject as ContractJsonObject,
@@ -601,8 +602,12 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
     const sourceToolName = source ? readOptionalString(source, 'toolName') : undefined;
     const sourceCallId = source ? readOptionalString(source, 'callId') : undefined;
     const raw = readRawOperationPayload(record);
-    const details = readJsonObject(operation, 'details');
-    if (operation.details !== undefined && !details) return null;
+    const blocks = operation.blocks === undefined
+      ? undefined
+      : Array.isArray(operation.blocks) && operation.blocks.every(isOperationBlock)
+        ? operation.blocks
+        : null;
+    if (blocks === null) return null;
     return {
       type,
       requestId,
@@ -621,7 +626,7 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
         ...(readOptionalString(operation, 'summary') !== undefined
           ? { summary: readOptionalString(operation, 'summary') }
           : {}),
-        ...(details ? { details } : {}),
+        ...(blocks ? { blocks } : {}),
         ...(normalizedProvider && sourceName
           ? {
               source: {
@@ -680,14 +685,6 @@ function readErrorDiagnostics(value: unknown): AgentErrorDiagnostics | undefined
     result.push({ name, ...(code !== undefined ? { code } : {}), ...(status !== undefined ? { status } : {}) });
   }
   return { chain: result };
-}
-
-function readJsonObject(
-  record: Record<string, unknown>,
-  key: string,
-): JsonObject | null {
-  const value = readRecord(record, key);
-  return value && isJsonValue(value) ? value : null;
 }
 
 function readAgentErrorCode(record: Record<string, unknown>): AgentErrorCode | null {

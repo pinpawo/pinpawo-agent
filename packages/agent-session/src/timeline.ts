@@ -1,4 +1,3 @@
-import type { JsonObject } from '@pinpawo/agent-contracts';
 import type {
   AgentOperationEvent,
   AgentOperationPhase,
@@ -63,7 +62,11 @@ export function agentOperationEntryFromEvent(
       : previous?.summary !== undefined
         ? { summary: previous.summary }
         : {}),
-    ...operationDetailsField(previous?.details, operation.details),
+    ...(operation.blocks !== undefined
+      ? { blocks: operation.blocks }
+      : previous?.blocks !== undefined
+        ? { blocks: previous.blocks }
+        : {}),
     ...(operation.source
       ? { operationSource: operation.source }
       : previous?.operationSource
@@ -74,15 +77,6 @@ export function agentOperationEntryFromEvent(
     ...(isTerminalOperationPhase(event.phase) ? { completedAt: observedAt } : {}),
     ...rawField(mergeOperationRaw(previous?.raw, event.raw)),
   };
-}
-
-function operationDetailsField(
-  previous: JsonObject | undefined,
-  next: JsonObject | undefined,
-) {
-  if (next === undefined) return previous ? { details: previous } : {};
-  if (!previous) return { details: next };
-  return { details: { ...previous, ...next } };
 }
 
 function mergeOperationRaw(

@@ -77,13 +77,11 @@ export function readCliArgs(input: unknown): string[] {
   return Array.isArray(args) ? args.filter((arg): arg is string => typeof arg === 'string') : [];
 }
 
-/** Operation summary of a git_shell / gh_shell call: the command and its permission level. */
-export function summarizeCliCall(program: 'git' | 'gh', input: unknown, classify: (args: string[]) => CliVerdict) {
-  const args = readCliArgs(input);
+/** Operation summary of a git_shell / gh_shell call: the command as it will run. */
+export function summarizeCliCall(program: 'git' | 'gh', input: unknown) {
   return {
     target: readString(readRecord(input), 'cwd'),
-    summary: quote([program, ...args]),
-    details: { level: classify(args).level },
+    summary: quote([program, ...readCliArgs(input)]),
   };
 }
 

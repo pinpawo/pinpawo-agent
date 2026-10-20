@@ -46,7 +46,7 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
     kind: 'read_file',
     title: 'Read file',
     phase: 'completed',
-    details: { path: 'README.md' },
+    blocks: [{ kind: 'text', text: 'README.md' }],
     raw: { input: { path: 'README.md' }, output: 'contents' },
   });
   const snapshot = createAgentSessionSnapshot(session);
@@ -75,7 +75,7 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
       ...snapshot.session,
       timeline: [{
         ...snapshot.session.timeline[0],
-        details: { unsupported: 1n },
+        blocks: [{ kind: 'code' }],
       }],
     },
   }), null);

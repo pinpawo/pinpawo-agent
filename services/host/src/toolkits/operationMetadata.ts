@@ -1,11 +1,10 @@
 import {
-  operationDetails,
   readBoolean,
   readJsonRecord,
   readNumber,
   readRecord,
   readString,
-  type ToolOperationSummary,
+  type OperationSummary,
 } from '@pinpawo/pet-agent';
 /**
  * Host toolkit metadata helpers.
@@ -23,23 +22,29 @@ export {
   readString,
 };
 
-export function pathInputSummary(input: unknown): ToolOperationSummary | null {
+export function pathInputSummary(input: unknown): OperationSummary | null {
   const record = readRecord(input);
   const target = readString(record, 'path');
   return target ? { target } : null;
 }
 
-export function sourceDestinationInputSummary(input: unknown): ToolOperationSummary | null {
+export function sourceDestinationInputSummary(input: unknown): OperationSummary | null {
   const record = readRecord(input);
   const source = readString(record, 'source');
   const destination = readString(record, 'destination');
   return source || destination
-    ? { target: destination ?? source, details: operationDetails({ source, destination }) }
+    ? { target: destination ?? source, ...(source && destination ? { summary: `从 ${source}` } : {}) }
     : null;
 }
 
-export function okOutputPathSummary(output: unknown, pathField = 'path'): ToolOperationSummary | null {
-  const record = readJsonRecord(output);
-  const target = readString(record, pathField);
-  return target ? { target } : null;
+/**
+ * A command as the heading line; a multi-line command is also kept whole in a
+ * code block, since the heading folds it to one line.
+ */
+export function commandSummary(command: string, cwd?: string): OperationSummary {
+  return {
+    target: cwd,
+    summary: command,
+    ...(command.includes('\n') ? { blocks: [{ kind: 'code', text: command, language: 'shell' }] } : {}),
+  };
 }

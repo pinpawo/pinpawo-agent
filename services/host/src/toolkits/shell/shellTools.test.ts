@@ -141,7 +141,7 @@ test('normalizeShellAuthorizationInput preserves only model-provided cwd', () =>
 
 test('shell operation metadata preserves the model-provided cwd without classifying command text', () => {
   assert.deepEqual(
-    shellOperationMetadata.run_shell?.summarizeInput?.({
+    shellOperationMetadata.run_shell?.summarize?.({
       command: "printf 'value' > output.txt",
       cwd: '~',
     }),
@@ -151,7 +151,7 @@ test('shell operation metadata preserves the model-provided cwd without classify
     },
   );
   assert.equal(
-    shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' })?.target,
+    shellOperationMetadata.run_shell?.summarize?.({ command: 'pwd' })?.target,
     undefined,
   );
 });
@@ -238,7 +238,7 @@ test('start_process is reviewed with the original command and cwd', async () => 
   const item = definition(toolkit, 'start_process');
   assert.ok(item?.review);
   assert.ok(item.operation);
-  assert.deepEqual(item.operation.summarizeInput?.({ command: ' npm test ', cwd: ' relative ' }), {
+  assert.deepEqual(item.operation.summarize?.({ command: ' npm test ', cwd: ' relative ' }), {
     target: 'relative', summary: 'npm test',
   });
   const context = {

@@ -1,5 +1,5 @@
 import type {
-  JsonObject,
+  ReceivedOperationBlock,
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type { AgentMessageToolCall, AgentPlan, AgentResultReference, AgentToolCallStatus } from './domain';
@@ -127,7 +127,7 @@ export type AgentOperationEvent = {
     title?: string;
     target?: string;
     summary?: string;
-    details?: JsonObject;
+    blocks?: ReceivedOperationBlock[];
     source?: {
       provider: 'toolkit' | 'runtime';
       name: string;
@@ -137,7 +137,7 @@ export type AgentOperationEvent = {
   };
   /**
    * Raw tool-call input/output/error. Transports currently preserve this
-   * transient payload; consumers should prefer operation.summary/details for
+   * transient payload; consumers should prefer operation.summary/blocks for
    * stable display behavior.
    */
   raw?: AgentOperationRaw;

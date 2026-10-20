@@ -2,7 +2,7 @@ import { isBaseMessage } from '@langchain/core/messages';
 import type {
   SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
-import { readContentText, readJsonRecord } from '@pinpawo/pet-agent';
+import { readContentText, readJsonRecord, summarizeToolOperation } from '@pinpawo/pet-agent';
 import type {
   AgentOperationEvent,
   AgentOperationPhase,
@@ -10,7 +10,6 @@ import type {
 import {
   emptyOperationRegistry,
   type OperationRegistry,
-  type OperationSummary,
 } from './operationRegistry';
 
 export type StreamToolsPayload = {
@@ -77,59 +76,6 @@ function readToolPhase(
   return 'updated';
 }
 
-function mergeSummary(
-  current: OperationSummary,
-  next: OperationSummary | null | undefined,
-): OperationSummary {
-  if (!next) return current;
-  return {
-    ...current,
-    ...next,
-    details: current.details || next.details
-      ? {
-          ...current.details,
-          ...next.details,
-        }
-      : undefined,
-  };
-}
-
-function summarizeInput(
-  summarize: ((input: unknown) => OperationSummary | null) | undefined,
-  input: unknown,
-  toolName: string,
-): OperationSummary | null | undefined {
-  // Output/update/terminal events need not repeat the tool's input.
-  if (!summarize || input === undefined) return undefined;
-  try {
-    const record = typeof input === 'string' ? readJsonRecord(input) : null;
-    if (record) {
-      return summarize(record) ?? summarize(input);
-    }
-    return summarize(input);
-  } catch {
-    // Tool lifecycle events may surface before a provider has produced
-    // parseable arguments. Operation metadata is presentation-only and must
-    // never prevent the actual tool validation/error path from reaching the
-    // model or client.
-    console.warn(
-      `[agent-stream] omitted input summary for ${toolName}; input was incomplete or invalid`,
-    );
-    return undefined;
-  }
-}
-
-function summarizeOutput(
-  summarize: ((output: unknown) => OperationSummary | null) | undefined,
-  output: unknown,
-): OperationSummary | null | undefined {
-  if (!summarize) return undefined;
-  const summary = summarize(output);
-  if (summary) return summary;
-  const record = typeof output === 'string' ? readJsonRecord(output) : null;
-  return record ? summarize(record) : summary;
-}
-
 function operationKindFromSource(
   source: NonNullable<SubagentToolOperationMetadata['source']> | undefined,
   fallbackToolName: string,
@@ -164,11 +110,9 @@ export function normalizeToolStreamEvent(
   const output = unwrapToolMessageOutput(
     payload.output !== undefined ? payload.output : payload.data,
   );
-  const summary = [
-    summarizeInput(metadata?.summarizeInput, payload.input, payload.name),
-    summarizeOutput(metadata?.summarizeOutput, output),
-    metadata?.summarizeError?.(payload.error),
-  ].reduce(mergeSummary, {});
+  // Only events carrying the arguments (normally on_tool_start) produce a
+  // summary; the tracker carries it to the call's later events.
+  const summary = summarizeToolOperation(metadata ?? undefined, payload.input);
 
   return {
     type: 'operation',
@@ -178,9 +122,7 @@ export function normalizeToolStreamEvent(
       id: payload.toolCallId,
       kind: operationKindFromSource(metadata?.source, payload.name),
       title: metadata?.title ?? metadata?.titleKey ?? payload.name,
-      target: summary.target,
-      summary: summary.summary,
-      details: summary.details,
+      ...summary,
       source: {
         provider: normalizeOperationSourceProvider(metadata?.source.provider),
         name: metadata?.source.name ?? 'runtime',

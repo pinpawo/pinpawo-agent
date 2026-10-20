@@ -19,12 +19,15 @@ type ActiveTrackedOperation = {
   event: AgentOperationEvent;
 };
 
+type OperationSummaryFields = Pick<AgentOperationEvent['operation'], 'target' | 'summary' | 'blocks'>;
+
 type TerminalPhase = Extract<AgentOperationPhase, 'completed' | 'failed' | 'interrupted'>;
 
 export class ToolOperationTracker {
   private sequence = 0;
   private readonly activeById = new Map<string, ActiveTrackedOperation>();
   private readonly activeIdsByName = new Map<string, string[]>();
+  private readonly summaryById = new Map<string, OperationSummaryFields>();
   private operationRegistry: OperationRegistry;
 
   constructor(
@@ -52,7 +55,7 @@ export class ToolOperationTracker {
       ...payload,
       toolCallId: id,
     }, this.operationRegistry);
-    const event = this.inheritStartedSummary(built, id);
+    const event = this.withCallSummary(built, id);
     this.track(event, payload.name, id);
     return event;
   }
@@ -61,6 +64,7 @@ export class ToolOperationTracker {
     const active = [...this.activeById.values()];
     this.activeById.clear();
     this.activeIdsByName.clear();
+    this.summaryById.clear();
     return active.map((item) => ({
       ...item.event,
       phase,
@@ -73,30 +77,26 @@ export class ToolOperationTracker {
   }
 
   /**
-   * `on_tool_end` / `on_tool_error` recompute the operation summary from the
-   * terminal payload alone, so tools that only describe themselves via
-   * `summarizeInput` (e.g. view_file_chunk, http_fetch) lose their `target` /
-   * `details` on the result event — the history line collapses to just the
-   * title. Backfill those descriptive fields from the still-tracked start/update
-   * event so the completed line keeps showing which file/url was touched.
+   * A toolkit summarizes the call's arguments. The first event that carries
+   * valid arguments fixes the summary for the whole call, and every later
+   * event reuses it, so the result line keeps showing which file or url was
+   * touched. An event without arguments yields no summary and fixes nothing.
    */
-  private inheritStartedSummary(
+  private withCallSummary(
     event: AgentOperationEvent,
     id: string,
   ): AgentOperationEvent {
-    if (event.phase === 'started') return event;
-    const previous = this.activeById.get(id)?.event.operation;
-    if (!previous) return event;
-    const { target, summary, details } = event.operation;
-    return {
-      ...event,
-      operation: {
-        ...event.operation,
-        target: target ?? previous.target,
-        summary: summary ?? previous.summary,
-        details: details ?? previous.details,
-      },
-    };
+    const cached = this.summaryById.get(id);
+    if (cached) return { ...event, operation: { ...event.operation, ...cached } };
+    const { target, summary, blocks } = event.operation;
+    if (target !== undefined || summary !== undefined || blocks !== undefined) {
+      this.summaryById.set(id, {
+        ...(target !== undefined ? { target } : {}),
+        ...(summary !== undefined ? { summary } : {}),
+        ...(blocks !== undefined ? { blocks } : {}),
+      });
+    }
+    return event;
   }
 
   private resolveOperationId(payload: StreamToolsPayload) {
@@ -133,6 +133,7 @@ export class ToolOperationTracker {
       return;
     }
     this.activeById.delete(id);
+    this.summaryById.delete(id);
     const ids = this.activeIdsByName.get(name);
     if (!ids) {
       return;

@@ -1,4 +1,4 @@
-import type { JsonObject } from '@pinpawo/agent-contracts';
+import type { OperationSummary } from '@pinpawo/agent-contracts';
 import type { ReviewSpec } from '../types/reviewSpec';
 import type { ToolAuthorizationMatcher } from './authorizationMatchers';
 
@@ -7,18 +7,15 @@ export type ToolkitReviewCapabilities = {
   sessionAuthorization: boolean;
 };
 
-export type ToolOperationSummary = {
-  target?: string;
-  summary?: string;
-  details?: JsonObject;
-};
-
+/**
+ * How a toolkit presents its tool. `summarize` projects the call's arguments
+ * and must be pure: synchronous, no I/O, same input same result. Callers go
+ * through `summarizeToolOperation`, never call it directly.
+ */
 export type ToolOperationMetadata = {
   title?: string;
   titleKey?: string;
-  summarizeInput?: (input: unknown) => ToolOperationSummary | null;
-  summarizeOutput?: (output: unknown) => ToolOperationSummary | null;
-  summarizeError?: (error: unknown) => ToolOperationSummary | null;
+  summarize?: (input: unknown) => OperationSummary | null;
 };
 
 export type ToolReviewContext = {

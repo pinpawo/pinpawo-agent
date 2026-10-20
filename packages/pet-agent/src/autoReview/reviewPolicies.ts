@@ -1,7 +1,6 @@
 import type {
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
-  ToolOperationSummary,
   ToolReviewBlock,
   ToolReviewContext,
   ToolReviewPolicy,
@@ -17,6 +16,7 @@ import {
   type ReviewOption,
   type ReviewView,
 } from '../types/reviewSpec';
+import { summarizeToolOperation } from '../utils/operationSummary';
 
 export type ReviewUnavailableBehavior = 'block' | 'allow';
 export type AuthorizationMode = 'exact' | 'url_origin';
@@ -56,14 +56,6 @@ function truncate(value: string, limit = DEFAULT_DETAILS_LIMIT) {
     : `${value.slice(0, limit)}\n[truncated ${(value.length - limit).toString()} chars]`;
 }
 
-function readOperationSummary(ctx: ToolReviewContext): ToolOperationSummary | null {
-  try {
-    return ctx.operation?.summarizeInput?.(ctx.input) ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function formatInput(input: unknown) {
   try {
     return truncate(JSON.stringify(inputToRecord(input), null, 2));
@@ -72,38 +64,10 @@ function formatInput(input: unknown) {
   }
 }
 
-function readPatchDetail(summary: ToolOperationSummary | null): string | null {
-  const patch = summary?.details?.patch;
-  return typeof patch === 'string' && patch.trim() ? patch : null;
-}
-
-function buildReviewView(
-  ctx: ToolReviewContext,
-  summary: ToolOperationSummary | null,
-): ReviewView {
+function buildReviewView(ctx: ToolReviewContext): ReviewView {
   const title = buildReviewTitle(ctx);
-  const patch = readPatchDetail(summary);
-  if (patch) {
-    return {
-      kind: 'diff',
-      title,
-      patch,
-      ...(summary?.target ? { target: summary.target } : {}),
-      ...(summary?.summary ? { summary: summary.summary } : {}),
-    };
-  }
-  const details = summary?.details && Object.keys(summary.details).length > 0
-    ? summary.details
-    : null;
-  if (summary?.summary || summary?.target || details) {
-    return {
-      kind: 'operation',
-      title,
-      ...(summary?.summary ? { summary: summary.summary } : {}),
-      ...(summary?.target ? { target: summary.target } : {}),
-      ...(details ? { details } : {}),
-    };
-  }
+  const summary = summarizeToolOperation(ctx.operation, ctx.input);
+  if (summary) return { kind: 'operation', title, ...summary };
   return {
     kind: 'plain',
     title,
@@ -236,9 +200,8 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
           : null;
       }
 
-      const summary = readOperationSummary(ctx);
       return buildReviewSpec({
-        view: buildReviewView(ctx, summary),
+        view: buildReviewView(ctx),
         options: buildStandardReviewOptions({
           authorize: Boolean(ctx.authorizationMatcher && capabilities.sessionAuthorization),
           authorizeDescription: ctx.authorizationMatcher

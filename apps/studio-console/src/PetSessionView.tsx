@@ -1,4 +1,4 @@
-import { formatSessionUsageMetrics } from '@pinpawo/agent-session';
+import { formatSessionUsageMetrics, isKnownOperationBlock, operationBlockToText } from '@pinpawo/agent-session';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,7 @@ import type {
   AgentServerMessage,
   AgentSession,
   AgentSessionSnapshot,
+  ReceivedOperationBlock,
   HumanReviewPendingInterruptProjection,
 } from '@pinpawo/agent-session';
 import { ChannelCopy } from './ChannelConversation';
@@ -89,13 +90,21 @@ function SessionMessage({ entry, petName }: { entry: AgentMessageEntry; petName:
   </article>;
 }
 
+/** Diff blocks are tinted; every other kind uses the shared default text. */
+function OperationBlocks({ blocks }: { blocks: ReceivedOperationBlock[] }) {
+  return <>{blocks.map((block, index) => isKnownOperationBlock(block) && block.kind === 'diff'
+    ? <pre className="pet-session-review-diff" key={index}><code>{block.text.split('\n').map((line, lineIndex) => <span key={lineIndex}
+      className={line.startsWith('+') && !line.startsWith('+++') ? 'added' : line.startsWith('-') && !line.startsWith('---') ? 'removed' : undefined}>{line + '\n'}</span>)}{block.truncated && '…（内容已截断）'}</code></pre>
+    : <pre className="pet-session-review-plain" key={index}>{operationBlockToText(block)}</pre>)}</>;
+}
+
 function SessionOperation({ entry }: { entry: AgentOperationEntry }) {
   const raw = entry.raw;
   return <details className={'pet-session-entry operation ' + entry.phase} data-entry-id={entry.id}>
     <summary><span>{entry.title}</span><em>{entry.phase}</em></summary>
     {entry.summary && <p>{entry.summary}</p>}
     {entry.target && <p><code>{entry.target}</code></p>}
-    {entry.details && Object.keys(entry.details).length > 0 && <pre><code>{json(entry.details)}</code></pre>}
+    {entry.blocks && <OperationBlocks blocks={entry.blocks} />}
     {raw?.input !== undefined && <><strong>Input</strong><pre><code>{json(raw.input)}</code></pre></>}
     {raw?.output !== undefined && <><strong>Output</strong><pre><code>{json(raw.output)}</code></pre></>}
     {raw?.error !== undefined && <><strong>Error</strong><pre><code>{json(raw.error)}</code></pre></>}
@@ -150,12 +159,9 @@ export function PetSessionReview({ review, draft, enabled, submission, onChoose 
       {view.title && <span>{view.title}</span>}</div>
     {view.kind === 'markdown' && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{view.body}</ReactMarkdown></div>}
     {view.kind === 'plain' && <pre className="pet-session-review-plain">{view.body}</pre>}
-    {view.kind === 'diff' && <>{view.target && <p><code>{view.target}</code></p>}{view.summary && <p>{view.summary}</p>}
-      <pre className="pet-session-review-diff"><code>{view.patch.split('\n').map((line, index) => <span key={index}
-        className={line.startsWith('+') && !line.startsWith('+++') ? 'added' : line.startsWith('-') && !line.startsWith('---') ? 'removed' : undefined}>{line + '\n'}</span>)}</code></pre></>}
     {view.kind === 'operation' && <>{view.summary && <pre className="pet-session-review-plain">{view.summary}</pre>}
       {view.target && <p><code>{view.target}</code></p>}
-      {view.details && <pre className="pet-session-review-plain">{JSON.stringify(view.details, null, 2)}</pre>}</>}
+      {view.blocks && <OperationBlocks blocks={view.blocks} />}</>}
     <div className="pet-session-review-options" role="group" aria-label="Review options">
       {interaction.options.map(option => <button type="button" key={option.id} disabled={disabled}
         className={(option.variant ?? 'normal') + (selected === option.id ? ' selected' : '')} title={option.description}

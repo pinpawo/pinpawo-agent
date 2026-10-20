@@ -16,7 +16,7 @@ function review(input: Record<string, unknown> = { path: 'notes.md', content: 'h
     input,
     operation: {
       title: 'Write file',
-      summarizeInput: () => ({
+      summarize: () => ({
         target: '/repo/notes.md',
         summary: 'write',
       }),
@@ -35,7 +35,7 @@ function browserReview() {
     input: { url: 'https://example.com/docs' },
     operation: {
       title: 'Open page',
-      summarizeInput: () => ({
+      summarize: () => ({
         target: 'https://example.com/docs',
         summary: 'Navigate to a public web page',
       }),
@@ -181,7 +181,7 @@ test('auto review preserves a shell command that fits the essential evidence bud
       toolName: 'run_shell',
       operation: {
         title: 'Execute command',
-        summarizeInput: () => ({
+        summarize: () => ({
           target: '/repo',
           summary: command,
         }),
@@ -211,7 +211,7 @@ test('auto review fails closed when an essential command cannot fit the evidence
       toolName: 'run_shell',
       operation: {
         title: 'Execute command',
-        summarizeInput: () => ({
+        summarize: () => ({
           target: '/repo',
           summary: command,
         }),

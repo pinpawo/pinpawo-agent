@@ -137,10 +137,10 @@ test('toolkit registration rejects malformed static contract fields', () => {
       description: 'Operation callbacks must be callable.',
       tools: [{
         tool: alphaTool,
-        operation: { summarizeInput: 1 },
+        operation: { summarize: 1 },
       }],
     } as never),
-    /operation\.summarizeInput must be a function/,
+    /operation\.summarize must be a function/,
   );
 
   for (const [requires, message] of [

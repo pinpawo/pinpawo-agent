@@ -139,64 +139,44 @@ test('review spec projects a presentation-only human interaction boundary', () =
   });
 });
 
-test('review spec guards accept a diff view and reject malformed ones', () => {
-  const reviewSpec = samplePendingReview().reviewSpec;
-  const diffView = {
-    kind: 'diff' as const,
-    title: '应用补丁',
-    summary: 'update',
-    target: 'src/example.ts',
-    patch: '*** Begin Patch\n*** End Patch',
-  };
-
-  assert.equal(isReviewSpecValue({ ...reviewSpec, view: diffView }), true);
-  // diff view without the required patch string is rejected.
-  assert.equal(isReviewSpecValue({
-    ...reviewSpec,
-    view: { kind: 'diff', title: 'x' },
-  }), false);
-  // unknown keys are rejected like the other view variants.
-  assert.equal(isReviewSpecValue({
-    ...reviewSpec,
-    view: { ...diffView, body: 'should not be here' },
-  }), false);
-});
-
-test('reviewViewToText flattens an operation view for review prompts', () => {
+test('review spec guards accept an operation view and reject malformed ones', () => {
   const reviewSpec = samplePendingReview().reviewSpec;
   const operationView = {
     kind: 'operation' as const,
     title: '执行命令',
     summary: 'npm test',
     target: '/repo',
-    details: { level: 'write' },
+    blocks: [{ kind: 'code' as const, text: 'npm test', language: 'shell' }],
   };
 
-  const text = reviewViewToText(operationView);
-  assert.match(text, /Summary: npm test/);
-  assert.match(text, /Target: \/repo/);
-  assert.match(text, /"level": "write"/);
-  assert.equal(isReviewSpecValue({
-    ...reviewSpec,
-    view: operationView,
-  }), true);
+  assert.equal(isReviewSpecValue({ ...reviewSpec, view: operationView }), true);
   assert.equal(isReviewSpecValue({
     ...reviewSpec,
     view: { ...operationView, body: 'should not be here' },
   }), false);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    view: { ...operationView, blocks: [{ kind: 'code' }] },
+  }), false);
+  // The removed diff view is no longer a review kind.
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    view: { kind: 'diff', title: 'x', patch: '-a\n+b' },
+  }), false);
 
-  const appended = appendReviewViewMessage(operationView, '请确认');
-  assert.equal(appended.kind, 'plain');
-  assert.match(appended.kind === 'plain' ? appended.body : '', /npm test[\s\S]*请确认/);
+  const text = reviewViewToText(operationView);
+  assert.match(text, /Summary: npm test/);
+  assert.match(text, /Target: \/repo/);
+  assert.match(text, /```shell\nnpm test\n```/);
 });
 
-test('reviewViewToText flattens a diff view and appendReviewViewMessage degrades to plain', () => {
+test('reviewViewToText renders an operation view through the default text and appendReviewViewMessage degrades to plain', () => {
   const diffView = {
-    kind: 'diff' as const,
+    kind: 'operation' as const,
     title: '应用补丁',
     summary: 'update',
     target: 'src/example.ts',
-    patch: '*** Begin Patch\n*** End Patch',
+    blocks: [{ kind: 'diff' as const, format: 'v4a' as const, text: '*** Begin Patch\n*** End Patch' }],
   };
 
   const text = reviewViewToText(diffView);

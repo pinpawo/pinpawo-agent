@@ -195,8 +195,8 @@ test('git_shell reviews only risky calls', async () => {
     assert.equal(review.view.kind === 'operation' ? review.view.title : '', definition(toolkit, 'git_shell')?.operation?.title);
   }
   assert.deepEqual(
-    definition(toolkit, 'git_shell')?.operation?.summarizeInput?.({ cwd: '/repo', args: ['commit', '-m', 'a b'] }),
-    { target: '/repo', summary: "git commit -m 'a b'", details: { level: 'change' } },
+    definition(toolkit, 'git_shell')?.operation?.summarize?.({ cwd: '/repo', args: ['commit', '-m', 'a b'] }),
+    { target: '/repo', summary: "git commit -m 'a b'" },
   );
 });
 

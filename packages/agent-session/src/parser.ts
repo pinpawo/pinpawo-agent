@@ -1,9 +1,11 @@
 import { parseResultReferences } from './resultReferences';
 import {
   isToolAuthorizationMode,
+  isOperationBlock,
   isToolAuthorizationSafetyLevel,
   parseHumanReviewRequest,
   type HumanReviewRequest,
+  type ReceivedOperationBlock,
 } from '@pinpawo/agent-contracts';
 import {
   AGENT_SESSION_SNAPSHOT_VERSION,
@@ -321,10 +323,8 @@ function parseAgentTimelineEntry(
     }
     const operationSource = parseOperationSource(value.operationSource);
     if (value.operationSource !== undefined && !operationSource) return null;
-    const details = value.details === undefined
-      ? undefined
-      : readJsonObject(value.details);
-    if (value.details !== undefined && !details) return null;
+    const blocks = readOperationBlocks(value.blocks);
+    if (value.blocks !== undefined && !blocks) return null;
     const raw = value.raw === undefined
       ? undefined
       : parseOperationRaw(value.raw);
@@ -339,7 +339,7 @@ function parseAgentTimelineEntry(
       phase: value.phase,
       ...(typeof value.target === 'string' ? { target: value.target } : {}),
       ...(typeof value.summary === 'string' ? { summary: value.summary } : {}),
-      ...(details ? { details } : {}),
+      ...(blocks ? { blocks } : {}),
       ...(operationSource ? { operationSource } : {}),
       ...(isFiniteNumber(value.startedAt) ? { startedAt: value.startedAt } : {}),
       ...(isFiniteNumber(value.updatedAt) ? { updatedAt: value.updatedAt } : {}),
@@ -377,10 +377,8 @@ function parseOperationRaw(value: unknown) {
   };
 }
 
-function readJsonObject(value: unknown): JsonObject | null {
-  return isRecord(value) && isJsonValue(value)
-    ? value
-    : null;
+function readOperationBlocks(value: unknown): ReceivedOperationBlock[] | null {
+  return Array.isArray(value) && value.every(isOperationBlock) ? value : null;
 }
 
 function parseOperationSource(

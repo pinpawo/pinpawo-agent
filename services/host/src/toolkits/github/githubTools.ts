@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { createAbortError, operationDetails, type NamedStructuredTool, type ToolOperationMetadata } from '@pinpawo/pet-agent';
+import { createAbortError, type NamedStructuredTool, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import {
@@ -773,21 +773,18 @@ export function createGithubTools(shell: ShellRS) {
 export const githubOperationMetadata = {
   gh_pr_create: {
     title: '创建 GitHub PR',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'repository') ?? readString(record, 'base') ?? readString(record, 'cwd'),
-        summary: readString(record, 'title'),
-        details: operationDetails({
-          head: readString(record, 'head'),
-          draft: readBoolean(record, 'draft'),
-        }),
+        summary: `${readString(record, 'title') ?? '创建 PR'}${readBoolean(record, 'draft') ? '（草稿）' : ''}`,
+        ...(readString(record, 'body') ? { blocks: [{ kind: 'text', label: '描述', text: readString(record, 'body')! }] } : {}),
       };
     },
   },
   gh_pr_view: {
     title: '查看 GitHub PR',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'pr') ?? readString(record, 'cwd'),
@@ -796,7 +793,7 @@ export const githubOperationMetadata = {
   },
   gh_pr_comments: {
     title: '查看 GitHub PR 评论',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'pr') ?? readString(record, 'cwd'),
@@ -805,7 +802,7 @@ export const githubOperationMetadata = {
   },
   gh_pr_diff: {
     title: '查看 GitHub PR diff',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'pr') ?? readString(record, 'cwd'),
@@ -814,7 +811,7 @@ export const githubOperationMetadata = {
   },
   gh_issue_create: {
     title: '创建 GitHub issue',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'repository') ?? readString(record, 'cwd'),
@@ -824,7 +821,7 @@ export const githubOperationMetadata = {
   },
   gh_issue_list: {
     title: '列出 GitHub issue',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'repository') ?? readString(record, 'cwd'),
@@ -834,7 +831,7 @@ export const githubOperationMetadata = {
   },
   gh_issue_view: {
     title: '查看 GitHub issue',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'issue') ?? readString(record, 'cwd'),
@@ -843,7 +840,7 @@ export const githubOperationMetadata = {
   },
   gh_issue_comments: {
     title: '查看 GitHub issue 评论',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'issue') ?? readString(record, 'cwd'),
@@ -852,7 +849,7 @@ export const githubOperationMetadata = {
   },
   gh_read_content: {
     title: '读取 GitHub 临时内容',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'path'),
@@ -861,7 +858,7 @@ export const githubOperationMetadata = {
   },
   gh_shell: {
     title: '执行 gh 命令',
-    summarizeInput: (input) => summarizeCliCall('gh', input, classifyGhArgs),
+    summarize: (input) => summarizeCliCall('gh', input),
   },
 } satisfies Record<
   ReturnType<typeof createGithubTools>['githubTools'][number]['name'],

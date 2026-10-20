@@ -6,12 +6,9 @@ import type { StructuredTool } from '@langchain/core/tools';
 import {
   defineToolkit,
   GENERAL_CAPABILITY_NAME,
-  operationDetails,
   readBoolean,
   readRecord,
   readString,
-  readStringArray,
-  resultStatusSummary,
   type AgentToolkit,
   type NamedStructuredTool,
   type ToolOperationMetadata,
@@ -61,16 +58,7 @@ function scaffoldInputSummary(input: unknown) {
   return id || rootDir || name
     ? {
         target: rootDir ?? id,
-        summary: name ? `生成 ${name}` : '生成 capability 插件',
-        details: operationDetails({
-          id,
-          rootDir,
-          overwrite: readBoolean(record, 'overwrite'),
-          includePackageJson: readBoolean(record, 'includePackageJson'),
-          includeReadme: readBoolean(record, 'includeReadme'),
-          includeSmokeTest: readBoolean(record, 'includeSmokeTest'),
-          uses: Array.isArray(record?.uses) ? readStringArray(record, 'uses') : undefined,
-        }),
+        summary: `${name ? `生成 ${name}` : '生成 capability 插件'}${readBoolean(record, 'overwrite') ? '（覆盖已有文件）' : ''}`,
       }
     : null;
 }
@@ -95,15 +83,11 @@ const capabilityCreatorResultLabels: Record<string, string> = {
 const capabilityCreatorOperationMetadata = {
   scaffold_capability_plugin: {
     title: '生成 capability 插件',
-    summarizeInput: scaffoldInputSummary,
-    summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
-    summarizeError: () => ({ summary: '生成 capability 插件失败' }),
+    summarize: scaffoldInputSummary,
   },
   validate_capability_plugin: {
     title: '验证 capability 插件',
-    summarizeInput: validateInputSummary,
-    summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
-    summarizeError: () => ({ summary: '验证 capability 插件失败' }),
+    summarize: validateInputSummary,
   },
 } satisfies Record<
   'scaffold_capability_plugin' | 'validate_capability_plugin',

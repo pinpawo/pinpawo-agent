@@ -20,10 +20,10 @@ function reviewContext(overrides: Partial<ToolReviewContext> = {}): ToolReviewCo
     },
     operation: {
       title: '写文件',
-      summarizeInput: () => ({
+      summarize: () => ({
         target: '/repo/notes.md',
-        summary: 'write',
-        details: { createDirs: true },
+        summary: '覆盖写入',
+        blocks: [{ kind: 'text', label: '写入内容', text: 'hello' }, { kind: 'code', text: 'x', language: undefined }],
       }),
     },
     ...overrides,
@@ -51,7 +51,8 @@ test('required review builds ReviewSpec from operation metadata', async () => {
   assert.ok(view && view.kind === 'operation');
   assert.equal(view.title, '写文件');
   assert.equal(view.target, '/repo/notes.md');
-  assert.equal(view.details?.createDirs, true);
+  assert.equal(view.summary, '覆盖写入');
+  assert.deepEqual(view.blocks, [{ kind: 'text', label: '写入内容', text: 'hello' }, { kind: 'code', text: 'x' }]);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'reject', 'respond'],
@@ -166,7 +167,7 @@ test('required review asks for review once configured', async () => {
     input: { command: 'pwd' },
     operation: {
       title: '执行命令',
-      summarizeInput: () => ({ summary: 'pwd' }),
+      summarize: () => ({ summary: 'pwd' }),
     },
   }));
 

@@ -1,7 +1,7 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
-import { readRecord, readString } from '../operationMetadata';
+import { commandSummary, readRecord, readString } from '../operationMetadata';
 import { requireAgentSession } from '../executionContext';
 import { classifyReadOnlyShellCommand, type ReadOnlyShellVerdict } from './readOnlyShell';
 import { ShellRSError, type ShellExecResult, type ShellRS } from '../shellRS/shellRS';
@@ -291,7 +291,7 @@ export function createInspectShellTool(shell: ShellRS) {
 export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   get_current_time: {
     title: '查询时间',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'timezone'),
@@ -300,29 +300,23 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   },
   run_shell: {
     title: '执行命令',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const shellAction = normalizeShellAuthorizationInput(input);
-      return {
-        target: shellAction.cwd ?? undefined,
-        summary: shellAction.command,
-      };
+      return commandSummary(shellAction.command, shellAction.cwd ?? undefined);
     },
   },
   start_process: {
     title: '启动长任务',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const action = normalizeShellAuthorizationInput(input);
-      return { target: action.cwd ?? undefined, summary: action.command };
+      return commandSummary(action.command, action.cwd ?? undefined);
     },
   },
   inspect_shell: {
     title: '只读命令',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const shellAction = normalizeShellAuthorizationInput(input);
-      return {
-        target: shellAction.cwd ?? undefined,
-        summary: shellAction.command,
-      };
+      return commandSummary(shellAction.command, shellAction.cwd ?? undefined);
     },
   },
 };

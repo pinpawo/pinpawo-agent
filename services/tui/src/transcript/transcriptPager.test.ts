@@ -158,7 +158,7 @@ test('pager preserves compacted commands, authorization reasons, and complete ou
   const content = formatTranscriptPagerText(createSession([{
     id: 'auth', type: 'operation', requestId: 'r', operationKey: 'auth',
     kind: 'runtime.authorization', phase: 'completed', title: '自动授权',
-    details: { toolLabels: ['run_shell'], reason: 'Read-only search approved' },
+    summary: 'run_shell', blocks: [{ kind: 'text', label: '原因', text: 'Read-only search approved' }],
   }, {
     id: 'shell', type: 'operation', requestId: 'r', operationKey: 'shell',
     kind: 'tool', phase: 'completed', title: 'run_shell', target: '/Users/me/project',

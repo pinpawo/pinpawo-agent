@@ -202,28 +202,18 @@ export class ServerTuiSessionService {
   }
 
   createNewSession(petId: string) {
-    this.getActiveSession(petId);
-    const next = createTuiSession(
-      this.state,
-      petId,
-      this.defaultModelProfileId,
-    );
-    this.save();
-    return next;
-  }
-
-  async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
     const previous = this.getActiveSession(petId);
     const next = createTuiSession(
       this.state,
       petId,
       this.defaultModelProfileId,
     );
-    if (options.deletePrevious) {
-      await this.checkpointer.deleteThread(previous.threadId);
-      delete this.state.sessions[previous.id];
+    try { this.save(); }
+    catch (error) {
+      delete this.state.sessions[next.id];
+      this.state.activeSessionIds[petId] = previous.id;
+      throw error;
     }
-    this.save();
     return next;
   }
 

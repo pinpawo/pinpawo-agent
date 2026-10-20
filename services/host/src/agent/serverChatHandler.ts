@@ -425,19 +425,18 @@ export class ServerChatHandler {
       this.inflightRequests.clear(peer, inflight);
       hooks.onFailure?.(err);
       console.error('[chat-host] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
-      // Resetting replaces the active session; a targeted turn never does that.
-      const recoveredFromToolProtocolError = !target && isToolProtocolHistoryError(err);
-      if (recoveredFromToolProtocolError) {
+      // A history the provider rejects is switched away from, never deleted: the old
+      // session stays in the session list. A targeted turn never switches sessions.
+      let protocolRecovery: string | null = null;
+      if (!target && isToolProtocolHistoryError(err)) {
         try {
-          await this.tuiSessions.resetSession(deps.petId, {
-            deletePrevious: true,
-          });
-          console.warn(`[chat-host] reset TUI chat session after tool protocol error requestId=${requestId}`);
-        } catch (resetError) {
-          console.warn(
-            '[chat-host] failed to reset TUI chat session after tool protocol error:',
-            resetError instanceof Error ? resetError.message : resetError,
-          );
+          this.tuiSessions.createNewSession(deps.petId);
+          protocolRecovery = '已切换到新会话，原会话保留在会话列表里，可以随时恢复。';
+          console.warn(`[chat-host] started a new TUI chat session after tool protocol error requestId=${requestId}`);
+        } catch (switchError) {
+          const reason = switchError instanceof Error ? switchError.message : String(switchError);
+          protocolRecovery = `未能切换到新会话（${reason}），仍停留在原会话。`;
+          console.warn('[chat-host] failed to start a new TUI chat session after tool protocol error:', reason);
         }
       }
       const failure = classifyAgentRunFailure(err);
@@ -446,8 +445,8 @@ export class ServerChatHandler {
         this.publishRuntimeEvent(peer, {
           type: 'error',
           requestId,
-          message: recoveredFromToolProtocolError
-            ? `${message}\n\n已重置本地 TUI 会话，下一条消息会从新的后端会话继续。`
+          message: protocolRecovery
+            ? `${message}\n\n${protocolRecovery}`
             : failure.kind === 'fatal'
               ? describeFatalAgentRunFailure(failure)
               : message,

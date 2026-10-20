@@ -75,7 +75,10 @@ function readRawMessageToolCalls(message: BaseMessage): unknown[] {
     tool_calls?: unknown;
     additional_kwargs?: { tool_calls?: unknown };
   };
-  if (Array.isArray(record.tool_calls)) {
+  // Mirror the provider serializer: an empty tool_calls list (every call was
+  // malformed JSON, so LangChain moved it to invalid_tool_calls) still sends the
+  // raw additional_kwargs calls, which then need results like any other call.
+  if (Array.isArray(record.tool_calls) && record.tool_calls.length > 0) {
     return record.tool_calls;
   }
   if (Array.isArray(record.additional_kwargs?.tool_calls)) {

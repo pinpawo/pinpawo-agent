@@ -419,7 +419,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 
 | 职责 | 方法 | 归属 |
 |---|---|---|
-| 会话注册表 | `getActiveSession`、`getActiveSessionId`、`getSession`、`getChatThreadId`、`hasActiveSession`、`createNewSession`、`resumeSession`、`resetSession`、`listSessions`、`selectModelProfile`、`adoptInitialThread` | Session |
+| 会话注册表 | `getActiveSession`、`getActiveSessionId`、`getSession`、`getChatThreadId`、`hasActiveSession`、`createNewSession`、`resumeSession`、`listSessions`、`selectModelProfile`、`adoptInitialThread` | Session |
 | 内容投影 | `readSessionCheckpointMessages`、`updateSessionSummaryFromCheckpoint`、`refreshActiveSessionSummary` | Conversation |
 | 执行状态读取 | `readActivePendingInterrupt`、`readActiveCheckpointPoint`、`readSessionCheckpointPoint` | Conversation（投影）/ agent（读取） |
 | **执行装配** | `buildChatSetup`、`createUserMessage` | **agent** |

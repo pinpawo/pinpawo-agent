@@ -889,10 +889,13 @@ export function createToolkitReviewMiddleware(
         const approvalUpdate = approvedReviewIds.size > 0
           ? { toolkitReviewApprovals: mergeApprovedReviewIds(state, approvedReviewIds) }
           : {};
-        return {
+        const update = {
           ...approvalUpdate,
           ...reviewResults.stateUpdate,
         };
+        // LangChain writes back the whole state (messages included) for any
+        // non-undefined hook result, so an empty update must stay undefined.
+        return Object.keys(update).length > 0 ? update : undefined;
       },
       canJumpTo: ['model', 'end'],
     },

@@ -15,7 +15,11 @@
 
 - `CapabilityArtifactRef` 字段名是 `id`，不是 `artifactId`。
 - `PetDispatchPort.dispatch()` 只接纳单向输入，不返回 Agent 执行结果；Artifact 仍通过 store 引用传递。
-- `capability artifact refs` 目前主要以内存状态（`state.sessionCapabilityArtifacts`）+ store ref 的方式在同/跨调用中使用；`ToolMessage.artifact` 仅作临时结构字段，非持久契约。
+- `capability artifact refs` 目前主要以内存状态（`state.sessionCapabilityArtifacts`）+ store ref 的方式在同/跨调用中使用。
+- `ToolMessage.artifact` 不属于产物 store，但也不是临时字段：`delegate_capability` 的结果消息把 typed 执行记录
+  （executed / rejected）放在 `artifact` 里随 checkpoint 持久化，写入和读回都在
+  `packages/pet-agent/src/agent/orchestrator/executionMessages.ts`，恢复、复核和上下文压缩靠它取回执行事实。
+  改它的形状要同时照顾已有 checkpoint。
 - Artifact 引用与 Studio dispatch 是不同边界。Studio receipt 只返回 Pet 与
   invocation identity，不公开 Agent Session thread。
 

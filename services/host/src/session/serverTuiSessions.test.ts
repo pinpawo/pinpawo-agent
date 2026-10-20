@@ -102,6 +102,48 @@ test('ServerTuiSessionService rolls back a model selection when persistence fail
   );
 });
 
+test('ServerTuiSessionService resumes with one save and rolls back when it fails', async () => {
+  const state = createEmptyTuiSessionState();
+  let saves = 0;
+  let failSave = false;
+  const service = new ServerTuiSessionService({
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
+    state,
+    saveState: () => {
+      saves += 1;
+      if (failSave) throw new Error('session store unavailable');
+    },
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const first = service.getActiveSession('pet-a');
+  const second = service.createNewSession('pet-a');
+  const deps = { petId: 'pet-a' } as ServerDeps;
+  service.readSessionCheckpointPoint = async (_deps, session) => ({
+    sessionId: session.id,
+    modelProfileId: session.modelProfileId,
+    requiredInputModalities: [],
+    messages: [{ id: 'm-1', role: 'user', text: 'Resumed title' }],
+    sessionTokenUsage: null,
+    pendingInterrupt: null,
+    currentPlan: null,
+  });
+
+  failSave = true;
+  const before = saves;
+  await assert.rejects(service.resumeSession(deps, first.id), /session store unavailable/);
+  assert.equal(saves - before, 1);
+  assert.equal(state.activeSessionIds['pet-a'], second.id);
+  assert.equal(state.sessions[first.id], first);
+
+  failSave = false;
+  const resumedSaves = saves;
+  const resumed = await service.resumeSession(deps, first.id);
+  assert.equal(saves - resumedSaves, 1);
+  assert.equal(state.activeSessionIds['pet-a'], first.id);
+  assert.equal(resumed.session.id, first.id);
+  assert.equal(state.sessions[first.id]?.title, 'Resumed title');
+});
+
 test('ServerTuiSessionService rolls back image requirements when persistence fails', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-image-ledger-save-'));
   const imagePath = join(root, 'image.png');

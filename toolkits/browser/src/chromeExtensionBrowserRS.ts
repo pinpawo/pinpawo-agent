@@ -313,8 +313,8 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
 
   /**
    * Start listening for the native host. Idempotent; a failure is recorded as
-   * this instance's status instead of failing whoever started it, and the
-   * next call retries.
+   * this instance's status and rethrown, and the next call retries. Callers
+   * that must keep running without a bridge catch it themselves.
    */
   async start(): Promise<void> {
     if (this.started) return;

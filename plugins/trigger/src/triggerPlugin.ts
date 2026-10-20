@@ -46,9 +46,9 @@ export type TriggerDefinition = {
   petId?: string;
   target?: TriggerTarget;
   /**
-   * Deliver through this Channel: the Trigger posts as its own bot author,
-   * addressed to the target Pet, and the run and its reply live in the Channel.
-   * Without it the Pet receives a bare dispatch.
+   * Deliver through this Channel's `inputs.run()`: the target Pet runs the request
+   * in its Channel session and its public reply lands in the Channel. The request
+   * itself is not a Channel message. Without it the Pet receives a bare dispatch.
    */
   channelId?: string;
   request: TriggerRequest;

@@ -13,6 +13,7 @@ import {
   findLegacyHostState,
   resolveDefaultWorkdir,
   resolveUserDir,
+  resolveWorkspaceSessionRoot,
 } from './runtimeConfig';
 
 test('resolveUserDir expands home and resolves relative paths from process cwd', () => {
@@ -22,22 +23,40 @@ test('resolveUserDir expands home and resolves relative paths from process cwd',
   assert.equal(resolveUserDir('/tmp/pinpawo-workdir'), '/tmp/pinpawo-workdir');
 });
 
-test('buildHostRuntimeConfig scopes runtime state under workdir .pinpawo', () => {
+test('buildHostRuntimeConfig keeps project config in the workdir and sessions under the workspaces dir', () => {
   const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-workdir');
+  const sessionRoot = resolveWorkspaceSessionRoot('/tmp/pinpawo-workdir');
 
   assert.deepEqual(runtimeConfig, {
     workdir: '/tmp/pinpawo-workdir',
     stateRoot: '/tmp/pinpawo-workdir/.pinpawo',
-    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-capability-v5.json',
-    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui-capability-v5.json',
-    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions-capability-v5.json',
+    sessionRoot,
+    checkpointPath: join(sessionRoot, 'checkpoints-capability-v5.json'),
+    tuiCheckpointPath: join(sessionRoot, 'checkpoints-tui-capability-v5.json'),
+    tuiSessionPath: join(sessionRoot, 'tui-sessions-capability-v5.json'),
     petsDir: '/tmp/pinpawo-workdir/.pinpawo/pets',
-    capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
+    capabilityArtifactRoot: join(sessionRoot, 'capability-artifacts'),
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);
   assert.equal(
     resolveHostCheckpointPath(runtimeConfig, 'studio'),
-    '/tmp/pinpawo-workdir/.pinpawo/checkpoints-studio-capability-v5.json',
+    join(sessionRoot, 'checkpoints-studio-capability-v5.json'),
+  );
+});
+
+test('resolveWorkspaceSessionRoot gives each workdir its own directory under ~/.pinpawo/workspaces', () => {
+  const id = deriveWorkspaceId('/tmp/pinpawo-workdir');
+  assert.equal(
+    resolveWorkspaceSessionRoot('/tmp/pinpawo-workdir', {}),
+    join(homedir(), '.pinpawo', 'workspaces', id),
+  );
+  assert.equal(
+    resolveWorkspaceSessionRoot('/tmp/pinpawo-workdir', { PINPAWO_WORKSPACES_DIR: '/tmp/sessions' }),
+    join('/tmp/sessions', id),
+  );
+  assert.notEqual(
+    resolveWorkspaceSessionRoot('/tmp/pinpawo-workdir', {}),
+    resolveWorkspaceSessionRoot('/tmp/pinpawo-other', {}),
   );
 });
 
@@ -85,15 +104,22 @@ test('attachWorkspaceConfig honors explicit workspace id and derives readable na
   });
 });
 
-test('findLegacyHostState reports preserved pre-V2 checkpoint and session paths', (t) => {
+test('findLegacyHostState reports session state left in the workdir but not project config', (t) => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-legacy-state-'));
   t.after(() => rmSync(workdir, { recursive: true, force: true }));
   const runtimeConfig = buildHostRuntimeConfig(workdir);
-  mkdirSync(join(runtimeConfig.stateRoot, 'checkpoints'), { recursive: true });
-  writeFileSync(join(runtimeConfig.stateRoot, 'tui-sessions.json'), '{}');
+  assert.deepEqual(findLegacyHostState(runtimeConfig), []);
+  for (const dir of ['checkpoints', 'checkpoints-tui-capability-v4', 'capability-artifacts', 'resident-sessions', 'pets', 'studio']) {
+    mkdirSync(join(runtimeConfig.stateRoot, dir), { recursive: true });
+  }
+  writeFileSync(join(runtimeConfig.stateRoot, 'tui-sessions-capability-v4.json'), '{}');
+  writeFileSync(join(runtimeConfig.stateRoot, 'studio.json'), '{}');
 
   assert.deepEqual(findLegacyHostState(runtimeConfig), [
-    join(runtimeConfig.stateRoot, 'checkpoints'),
-    join(runtimeConfig.stateRoot, 'tui-sessions.json'),
-  ]);
+    'capability-artifacts',
+    'checkpoints',
+    'checkpoints-tui-capability-v4',
+    'resident-sessions',
+    'tui-sessions-capability-v4.json',
+  ].map((name) => join(runtimeConfig.stateRoot, name)));
 });

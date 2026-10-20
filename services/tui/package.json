@@ -29,12 +29,12 @@
     "smoke:host-chat": "bun run src/main.ts --smoke-host-chat",
     "smoke:spike": "bun run src/probes/viewportProbe.ts --smoke",
     "smoke:split": "bun run src/probes/splitFooterProbe.ts --smoke",
-    "test:host": "bun test tests/localHost*.bun.test.ts",
-    "test:process": "bun test tests/localHost*Process*.bun.test.ts",
+    "test:host": "bun test --preload ../../tests/support/isolateSessions.mjs tests/localHost*.bun.test.ts",
+    "test:process": "bun test --preload ../../tests/support/isolateSessions.mjs tests/localHost*Process*.bun.test.ts",
     "test:distribution": "bun test tests/distributionArtifact.bun.test.ts",
-    "test:native": "bun test $(find src tests -name '*.bun.test.ts' | sort)",
+    "test:native": "bun test --preload ../../tests/support/isolateSessions.mjs $(find src tests -name '*.bun.test.ts' | sort)",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' ! -name '*.bun.test.ts' | sort)"
+    "test": "node --import ../../tests/support/isolateSessions.mjs --import tsx/esm --test $(find src -name '*.test.ts' ! -name '*.bun.test.ts' | sort)"
   },
   "dependencies": {
     "@opentui/core": "0.4.5",

@@ -69,6 +69,7 @@ function runtimeConfigFor(workdir: string): HostRuntimeConfig {
   return {
     workdir,
     stateRoot,
+    sessionRoot: join(workdir, 'sessions'),
     checkpointPath: join(stateRoot, 'checkpoints.json'),
     tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
     tuiSessionPath: join(stateRoot, 'tui-sessions.json'),

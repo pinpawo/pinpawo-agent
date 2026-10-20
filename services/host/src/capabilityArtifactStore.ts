@@ -24,9 +24,10 @@ import type {
   CapabilityArtifactWriteInput,
 } from '@pinpawo/pet-agent';
 import { atomicWriteFile } from './atomicFile';
+import { resolveWorkspaceSessionRoot } from './config/runtimeConfig';
 
 export function defaultCapabilityArtifactRoot(workdir = process.cwd()) {
-  return resolve(workdir, '.pinpawo', 'capability-artifacts');
+  return resolve(resolveWorkspaceSessionRoot(workdir), 'capability-artifacts');
 }
 
 export const DEFAULT_CAPABILITY_ARTIFACT_ROOT = defaultCapabilityArtifactRoot();

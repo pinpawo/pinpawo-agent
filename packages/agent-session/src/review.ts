@@ -13,6 +13,7 @@ export type {
   OperationBlock,
   OperationSummary,
   ReceivedOperationBlock,
+  OperationBlockRenderers,
   ReceivedOperationSummary,
 } from '@pinpawo/agent-contracts';
 /** The default rendering clients fall back to for block kinds they do not render. */
@@ -20,6 +21,7 @@ export {
   isKnownOperationBlock,
   operationBlockToText,
   operationSummaryToText,
+  renderOperationBlock,
 } from '@pinpawo/agent-contracts';
 
 export type ReviewSpec = HumanReviewRequest;

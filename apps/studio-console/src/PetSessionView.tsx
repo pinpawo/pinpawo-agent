@@ -1,4 +1,4 @@
-import { formatSessionUsageMetrics, isKnownOperationBlock, operationBlockToText } from '@pinpawo/agent-session';
+import { formatSessionUsageMetrics, renderOperationBlock } from '@pinpawo/agent-session';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -92,10 +92,10 @@ function SessionMessage({ entry, petName }: { entry: AgentMessageEntry; petName:
 
 /** Diff blocks are tinted; every other kind uses the shared default text. */
 function OperationBlocks({ blocks }: { blocks: ReceivedOperationBlock[] }) {
-  return <>{blocks.map((block, index) => isKnownOperationBlock(block) && block.kind === 'diff'
-    ? <pre className="pet-session-review-diff" key={index}><code>{block.text.split('\n').map((line, lineIndex) => <span key={lineIndex}
-      className={line.startsWith('+') && !line.startsWith('+++') ? 'added' : line.startsWith('-') && !line.startsWith('---') ? 'removed' : undefined}>{line + '\n'}</span>)}{block.truncated && '…（内容已截断）'}</code></pre>
-    : <pre className="pet-session-review-plain" key={index}>{operationBlockToText(block)}</pre>)}</>;
+  return <>{blocks.map((block, index) => <React.Fragment key={index}>{renderOperationBlock<React.ReactNode>(block, {
+    diff: (diff) => <pre className="pet-session-review-diff"><code>{diff.text.split('\n').map((line, lineIndex) => <span key={lineIndex}
+      className={line.startsWith('+') && !line.startsWith('+++') ? 'added' : line.startsWith('-') && !line.startsWith('---') ? 'removed' : undefined}>{line + '\n'}</span>)}{diff.truncated && '…（内容已截断）'}</code></pre>,
+  }, (text) => <pre className="pet-session-review-plain">{text}</pre>)}</React.Fragment>)}</>;
 }
 
 function SessionOperation({ entry }: { entry: AgentOperationEntry }) {

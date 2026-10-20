@@ -56,7 +56,18 @@ export function assertNever(value: never): never;
 
 /** 默认渲染：所有终端共用，也是回退路径。 */
 export function operationBlockToText(block: ReceivedOperationBlock): string;
-export function operationSummaryToText(summary: OperationSummary): string;
+export function operationSummaryToText(summary: ReceivedOperationSummary): string;
+
+/** 客户端的原生渲染表：每个 kind 一项，都可选。 */
+export type OperationBlockRenderers<R> = {
+  [K in OperationBlock['kind']]?: (block: Extract<OperationBlock, { kind: K }>) => R;
+};
+/** 客户端唯一的分发入口：有原生渲染就用，否则把默认文本交给 fallback（未知 kind 也走这里）。 */
+export function renderOperationBlock<R>(
+  block: ReceivedOperationBlock,
+  renderers: OperationBlockRenderers<R>,
+  fallback: (text: string, block: ReceivedOperationBlock) => R,
+): R;
 ```
 
 **编写端与接收端分开。** 编写端（toolkit、pet-agent 统一入口）只用封闭的 `OperationBlock`；
@@ -120,13 +131,13 @@ type ToolOperationMetadata = {
   未知 kind → 原样输出 `text`；
 - `truncated` 的 block 末尾都带截断标记，未知 kind 也一样；输出总量受 §2.3 的总上限约束。
 
-**原生渲染是可选增强。** 客户端可以挑部分 kind 做更好的显示，其余走默认文本：
+**原生渲染是可选增强。** 客户端可以挑部分 kind 做更好的显示，其余走默认文本。客户端不自己写
+「先分未知、再分已知、没有就回退」的分支，统一调 contracts 的 `renderOperationBlock`：
 
 ```ts
-switch (block.kind) {
-  case 'diff': return renderColoredDiff(block);
-  default: return renderPlainText(operationBlockToText(block));
-}
+renderOperationBlock(block, {
+  diff: (diff) => renderColoredDiff(diff),   // 只填自己原生渲染的 kind，参数按 kind 自动收窄
+}, (text) => renderPlainText(text));         // 其余 kind（包括未知 kind）都拿到默认文本
 ```
 
 TUI 和 Console 的原生渲染约定：
@@ -183,8 +194,8 @@ export function operationBlockToText(block: ReceivedOperationBlock): string {
 }
 ```
 
-漏写新 kind 的默认文本，`npm run typecheck` 就失败。客户端的 switch 用 `default` 回退到默认文本，
-不要求覆盖所有 kind。
+漏写新 kind 的默认文本，`npm run typecheck` 就失败。客户端通过 `renderOperationBlock` 渲染，
+渲染表里每个 kind 都可选，不要求覆盖所有 kind；新增 kind 后，客户端不改代码也会显示默认文本。
 
 ### 3.4 运行期保障
 

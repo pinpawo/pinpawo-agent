@@ -123,6 +123,31 @@ export function operationBlockToText(block: ReceivedOperationBlock): string {
   }
 }
 
+/**
+ * A client's native renderers: one per kind it chooses to draw itself. Every
+ * entry is optional; a kind without one is shown as its default text.
+ */
+export type OperationBlockRenderers<R> = {
+  [K in OperationBlock['kind']]?: (block: Extract<OperationBlock, { kind: K }>) => R;
+};
+
+/**
+ * The one dispatch every client uses: the client's native renderer when it has
+ * one for a known kind, otherwise `fallback` with the default text, which also
+ * covers kinds newer than this version.
+ */
+export function renderOperationBlock<R>(
+  block: ReceivedOperationBlock,
+  renderers: OperationBlockRenderers<R>,
+  fallback: (text: string, block: ReceivedOperationBlock) => R,
+): R {
+  if (isKnownOperationBlock(block)) {
+    const render = renderers[block.kind] as ((known: OperationBlock) => R) | undefined;
+    if (render) return render(block);
+  }
+  return fallback(operationBlockToText(block), block);
+}
+
 /** The default rendering of a whole summary; see {@link operationBlockToText}. */
 export function operationSummaryToText(summary: ReceivedOperationSummary): string {
   return [

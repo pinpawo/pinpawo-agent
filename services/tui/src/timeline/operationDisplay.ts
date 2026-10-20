@@ -1,5 +1,5 @@
 import stringWidth from 'string-width';
-import { isKnownOperationBlock, operationBlockToText, type AgentOperationEntry } from '@pinpawo/agent-session';
+import { operationBlockToText, renderOperationBlock, type AgentOperationEntry } from '@pinpawo/agent-session';
 import { truncateTerminalLine } from '../text/terminalText';
 
 export type OperationDisplayTone = 'default' | 'muted' | 'added' | 'removed';
@@ -178,9 +178,9 @@ function buildOperationPayloadLines(
 ): OperationDisplayLine[] {
   // Diffs are shown inline: they are what the step changed. Other blocks stay
   // in the transcript detail, keeping the timeline one line per step.
-  return (entry.blocks ?? []).flatMap((block) => (
-    isKnownOperationBlock(block) && block.kind === 'diff' ? buildPatchLines(block.text, block.path ?? entry.target, width, block.truncated === true) : []
-  ));
+  return (entry.blocks ?? []).flatMap((block) => renderOperationBlock<OperationDisplayLine[]>(block, {
+    diff: (diff) => buildPatchLines(diff.text, diff.path ?? entry.target, width, diff.truncated === true),
+  }, () => []));
 }
 
 function buildOperationOutputLines(

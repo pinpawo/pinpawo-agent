@@ -41,7 +41,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 ## Tool operation summaries
 
-Toolkit `summarize` output uses only the generic block kinds in `@pinpawo/agent-contracts`. Adding a block kind follows the fixed process in `docs/design/host/operation-summary.md` §3: one PR updating the contracts type, validation and default text rendering (`operationBlockToText`, whose switch must stay exhaustive) plus at least one toolkit using it; client-native rendering is optional, and clients fall back to the default text for kinds they do not render.
+Toolkit `summarize` output uses only the generic block kinds in `@pinpawo/agent-contracts`. Adding a block kind follows the fixed process in `docs/design/host/operation-summary.md` §3: one PR updating the contracts type, validation and default text rendering (`operationBlockToText`, whose switch must stay exhaustive) plus at least one toolkit using it; clients render blocks only through `renderOperationBlock` with a partial renderer map, so native rendering is optional and any kind without a renderer (including newer ones) falls back to the default text.
 
 ## Capability plugins
 

@@ -42,8 +42,13 @@ test('approval view remains bounded and accepts multiline input after resize', a
   assert.match(initial, /Review 1\/1/);
   assert.match(initial, /是否允许执行/);
   assert.match(initial, /批准/);
-  assert.match(initial, /^ {4}┌/m);
+  assert.match(initial, /^╭/m);
   assert.equal(frameRows(initial).length, 18);
+  // A short review gets a short dialog that sits at the bottom of the footer.
+  assert.match(frameRows(initial).at(-2) ?? '', /^╰.*╯$/);
+  assert.match(initial, /│ 需要确认 +│/);
+  assert.match(initial, /│ │ 是否允许执行/);
+  assert.match(initial, /❯ 批准/);
 
   state = moveApprovalSelection(state, 1);
   view.render(state, 60, setup.renderer.height);

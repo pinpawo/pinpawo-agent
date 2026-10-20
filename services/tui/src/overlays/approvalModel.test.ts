@@ -133,7 +133,8 @@ test('approval diff details page within a bounded CJK footer view', () => {
     ? null
     : buildApprovalViewModel(state, 32);
   assert.ok(first);
-  assert.match(first?.title ?? '', /1-11\//);
+  assert.equal(first?.heading, '修改配置');
+  assert.match(first?.title ?? '', /1-10\/15/);
 
   state = scrollApprovalContent(state, 1, 32);
   const second = state.phase === 'closed'
@@ -172,10 +173,14 @@ test('approval shares fixed footer rows dynamically between content and options'
   const short = shortState.phase === 'closed'
     ? null
     : buildApprovalViewModel(shortState, 80);
-  assert.equal(short?.bodyRows, 2);
+  assert.equal(short?.heading, '写文件');
+  assert.equal(short?.bodyRows, 1);
   assert.equal(short?.optionRows, 4);
   assert.match(short?.body ?? '', /example\.txt/);
+  assert.doesNotMatch(short?.body ?? '', /写文件/);
   assert.match(short?.options ?? '', /拒绝/);
+  // Borders, heading, one content row, gap and four options: no blank tail.
+  assert.equal(short?.dialogRows, 9);
 
   const longReview: ReviewSpec = {
     ...shortReview,
@@ -195,7 +200,7 @@ test('approval shares fixed footer rows dynamically between content and options'
   const long = longState.phase === 'closed'
     ? null
     : buildApprovalViewModel(longState, 80);
-  assert.equal(long?.bodyRows, 9);
+  assert.equal(long?.bodyRows, 8);
   assert.equal(long?.optionRows, 4);
   assert.doesNotMatch(long?.title ?? '', /details/);
 
@@ -204,26 +209,26 @@ test('approval shares fixed footer rows dynamically between content and options'
     : buildApprovalViewModel(longState, 80, 9);
   assert.equal(compact?.bodyRows, 4);
   assert.equal(compact?.optionRows, 2);
-  assert.match(compact?.title ?? '', /details 1-4\/9/);
+  assert.match(compact?.title ?? '', /details 1-4\/8/);
 
   const compactNextState = scrollApprovalContent(longState, 1, 80, 9);
   const compactNext = compactNextState.phase === 'closed'
     ? null
     : buildApprovalViewModel(compactNextState, 80, 9);
-  assert.match(compactNext?.title ?? '', /details 5-8\/9/);
+  assert.match(compactNext?.title ?? '', /details 5-8\/8/);
 });
 
-test('approval dialog is centered within its temporary footer surface', () => {
-  assert.deepEqual(calculateApprovalDialogLayout(128, 18), {
-    width: 112,
+test('approval dialog spans the full width of its temporary footer surface', () => {
+  assert.deepEqual(calculateApprovalDialogLayout(185, 18), {
+    width: 185,
     height: 16,
-    left: 8,
+    left: 0,
     top: 1,
   });
   assert.deepEqual(calculateApprovalDialogLayout(34, 9), {
-    width: 32,
+    width: 34,
     height: 7,
-    left: 1,
+    left: 0,
     top: 1,
   });
 });
@@ -330,6 +335,42 @@ test('every review view variant renders through its own path', () => {
   assert.equal(toneOf('const a = 1;'), 'removed');
   assert.equal(toneOf('@@'), 'heading');
   assert.equal(toneOf('const b = 3;'), 'muted');
+});
+
+test('approval options carry selection and variant, with the description apart', () => {
+  const base = review('review-options');
+  const withDescription: ReviewSpec = {
+    ...base,
+    options: [
+      base.options[0]!,
+      {
+        id: 'authorize',
+        label: '批准并授权',
+        description: '本线程内相同操作不再询问',
+        batchSubmission: 'defer',
+      },
+      ...base.options.slice(1),
+    ],
+  };
+  let state = syncApprovalState(createApprovalState(), waitingReview([withDescription]));
+  const approve = state.phase === 'closed' ? null : buildApprovalViewModel(state, 80);
+  assert.deepEqual(approve?.optionLines.map((line) => [line.text, line.selected, line.variant]), [
+    ['批准', true, 'primary'],
+    ['批准并授权', false, 'normal'],
+    ['回复 …', false, 'normal'],
+    ['拒绝', false, 'danger'],
+  ]);
+  // The row is reserved even while the selected option has no description,
+  // so moving the selection never reflows the dialog.
+  assert.equal(approve?.descriptionRows, 1);
+  assert.equal(approve?.description, '');
+  assert.doesNotMatch(approve?.options ?? '', /不再询问/);
+  assert.doesNotMatch(approve?.bottomTitle ?? '', /PgUp/);
+
+  state = moveApprovalSelection(state, 1);
+  const authorize = state.phase === 'closed' ? null : buildApprovalViewModel(state, 80);
+  assert.equal(authorize?.description, '本线程内相同操作不再询问');
+  assert.equal(authorize?.dialogRows, approve?.dialogRows);
 });
 
 function waitingReview(reviews: ReviewSpec[]): PendingInterruptProjection {

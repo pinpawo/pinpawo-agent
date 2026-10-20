@@ -44,28 +44,56 @@ export type ApprovalKey = {
   shift: boolean;
 };
 
+export type ApprovalOptionLine = {
+  /** Option label, with ` …` when choosing it opens a response input. */
+  text: string;
+  selected: boolean;
+  variant: 'primary' | 'normal' | 'danger';
+};
+
 export type ApprovalViewModel = {
   title: string;
   bottomTitle: string;
+  /** The reviewed view's own title, kept fixed above the paged content. */
+  heading: string | null;
   body: string;
   /** Tone-tagged form of `body`, one entry per rendered row. */
   bodyLines: ReviewContentLine[];
   options: string;
+  /** Structured form of `options`, one entry per rendered row. */
+  optionLines: ApprovalOptionLine[];
+  /** The selected option's description, shown under the option list. */
+  description: string;
   inputVisible: boolean;
   inputPlaceholder: string;
+  headingRows: number;
   bodyRows: number;
+  /** Blank row separating the reviewed content from the decisions. */
+  gapRows: number;
   optionRows: number;
+  descriptionRows: number;
+  inputRows: number;
+  /**
+   * Rows the dialog needs, borders included. Never more than the rows it was
+   * given; short reviews get a short dialog instead of trailing blank rows.
+   */
+  dialogRows: number;
   loadingFrame: number | null;
 };
 
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
 const MAX_REVIEW_CONTENT_LINES = 500;
 export const APPROVAL_FOOTER_ROWS = 18;
-const APPROVAL_DIALOG_MAX_WIDTH = 112;
 const APPROVAL_DIALOG_MAX_ROWS = 16;
-const APPROVAL_CONTENT_ROWS = 13;
 const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
+/** With room to spare, long content never hides the usual four decisions. */
+const APPROVAL_ROOMY_OPTION_ROWS = 4;
+const APPROVAL_INPUT_ROWS = 4;
+/** Rows needed before the heading, gap and description rows are shown. */
+const APPROVAL_ROOMY_INNER_ROWS = 10;
+/** Width of the gutter drawn left of the reviewed content. */
+export const APPROVAL_BODY_GUTTER = 2;
 
 export type ApprovalDialogLayout = {
   width: number;
@@ -75,10 +103,10 @@ export type ApprovalDialogLayout = {
 };
 
 /**
- * Keep the review interaction visibly separate from the composer while
- * retaining split-footer scrollback above it. The dialog is centered within
- * the temporarily expanded footer rather than pretending to be a transcript
- * entry.
+ * The dialog spans the full terminal width, like the composer it temporarily
+ * replaces and the transcript above it, so long commands wrap as late as
+ * they can. Vertically it gets the expanded footer minus a spare row above
+ * and below; the view then shrinks it to its content against the bottom.
  */
 export function calculateApprovalDialogLayout(
   availableWidth: number,
@@ -86,11 +114,6 @@ export function calculateApprovalDialogLayout(
 ): ApprovalDialogLayout {
   const width = Math.max(1, Math.floor(availableWidth));
   const height = Math.max(1, Math.floor(availableHeight));
-  const horizontalInset = width >= 72 ? 6 : width >= 48 ? 4 : 1;
-  const dialogWidth = Math.max(
-    1,
-    Math.min(APPROVAL_DIALOG_MAX_WIDTH, width - horizontalInset * 2),
-  );
   const dialogHeight = Math.max(
     1,
     Math.min(
@@ -99,9 +122,9 @@ export function calculateApprovalDialogLayout(
     ),
   );
   return {
-    width: dialogWidth,
+    width,
     height: dialogHeight,
-    left: Math.max(0, Math.floor((width - dialogWidth) / 2)),
+    left: 0,
     top: Math.max(0, Math.floor((height - dialogHeight) / 2)),
   };
 }
@@ -225,13 +248,13 @@ export function scrollApprovalContent(
   if (!review) return state;
   const lineCount = buildReviewContentLines(
     review,
-    Math.max(1, width - 4),
+    approvalBodyWidth(width),
   ).length;
   const bodyRows = approvalLayoutRows(
     state,
+    review,
     lineCount,
-    review.options.length,
-    approvalContentRows(dialogRows),
+    dialogRows,
   ).bodyRows;
   const maximum = Math.max(0, lineCount - bodyRows);
   return {
@@ -351,53 +374,62 @@ export function buildApprovalViewModel(
   dialogRows = APPROVAL_DIALOG_MAX_ROWS,
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
+  const bodyWidth = approvalBodyWidth(width);
   const review = currentApprovalReview(state);
   const reviewCount = state.pendingInterrupt.payload.interactions.length;
+  const heading = review?.view.title?.trim() || null;
   if (state.phase === 'resolution-sent') {
     const message = state.message ?? 'Submitting review decision…';
-    const rawTitle = width >= 50
-      ? `Review ${state.reviewIndex + 1}/${reviewCount}`
-      : `Review ${state.reviewIndex + 1}/${reviewCount}`;
+    const rawTitle = `Review ${state.reviewIndex + 1}/${reviewCount}`;
+    const text = truncateTerminalLine(message, Math.max(1, innerWidth - 4));
+    const headingRows = heading && dialogRows - 2 >= 2 ? 1 : 0;
     return {
       title: ` ${truncateTerminalLine(rawTitle, innerWidth)} `,
       bottomTitle: state.interruptSent
         ? ' Interrupt requested '
         : ' Esc interrupt · Ctrl+C interrupt ',
-      body: truncateTerminalLine(message, Math.max(1, innerWidth - 4)),
-      bodyLines: [{
-        text: truncateTerminalLine(message, Math.max(1, innerWidth - 4)),
-        tone: 'default',
-      }],
+      heading: headingRows ? truncateTerminalLine(heading ?? '', innerWidth) : null,
+      body: text,
+      bodyLines: [{ text, tone: 'default' }],
       options: '',
+      optionLines: [],
+      description: '',
       inputVisible: false,
       inputPlaceholder: '',
-      bodyRows: approvalContentRows(dialogRows),
+      headingRows,
+      bodyRows: 1,
+      gapRows: 0,
       optionRows: 0,
+      descriptionRows: 0,
+      inputRows: 0,
+      dialogRows: Math.min(Math.max(1, Math.floor(dialogRows)), headingRows + 3),
       loadingFrame: state.submissionFrame,
     };
   }
   const allBodyLines: ReviewContentLine[] = review
-    ? buildReviewContentLines(review, innerWidth)
+    ? buildReviewContentLines(review, bodyWidth)
     : [{ text: 'Review is no longer available.', tone: 'muted' }];
-  const { bodyRows, optionRows } = approvalLayoutRows(
+  const rows = approvalLayoutRows(
     state,
+    review,
     allBodyLines.length,
-    review?.options.length ?? 0,
-    approvalContentRows(dialogRows),
+    dialogRows,
   );
+  const { bodyRows, optionRows } = rows;
   const maxOffset = Math.max(0, allBodyLines.length - bodyRows);
   const offset = Math.min(state.contentOffset, maxOffset);
   const bodyLines = allBodyLines.slice(offset, offset + bodyRows);
   if (state.phase === 'error' && state.message) {
     bodyLines[0] = {
-      text: truncateTerminalLine(`Error: ${state.message}`, innerWidth),
+      text: truncateTerminalLine(`Error: ${state.message}`, bodyWidth),
       tone: 'removed',
     };
   }
-  const contentProgress = allBodyLines.length > bodyRows
+  const overflowing = allBodyLines.length > bodyRows;
+  const contentProgress = overflowing
     ? ` · details ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
     : '';
-  const compactContentProgress = allBodyLines.length > bodyRows
+  const compactContentProgress = overflowing
     ? ` · ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
     : '';
   const rawTitle = width >= 50
@@ -407,54 +439,102 @@ export function buildApprovalViewModel(
     rawTitle,
     Math.max(1, width - 4),
   );
+  const optionLines = buildApprovalOptionLines(
+    state,
+    Math.max(1, innerWidth - 2),
+    optionRows,
+  );
+  const description = rows.descriptionRows
+    ? truncateTerminalLine(
+        selectedApprovalOption(state)?.description ?? '',
+        Math.max(1, innerWidth - 2),
+      )
+    : '';
   return {
     title: ` ${title} `,
-    bottomTitle: approvalHelp(width),
+    bottomTitle: approvalHelp(width, overflowing),
+    heading: rows.headingRows && heading
+      ? truncateTerminalLine(heading, innerWidth)
+      : null,
     body: bodyLines.map((line) => line.text).join('\n'),
     bodyLines,
-    options: formatApprovalOptions(state, innerWidth, optionRows),
+    options: optionLines.length
+      ? optionLines
+        .map((line) => `${line.selected ? '› ' : '  '}${line.text}`)
+        .join('\n')
+      : '  No available decisions',
+    optionLines,
+    description,
     inputVisible: approvalAcceptsTextInput(state),
     inputPlaceholder: selectedApprovalOption(state)?.input?.placeholder
       ?? selectedApprovalOption(state)?.input?.label
       ?? (selectedApprovalOption(state)?.input?.multiline
         ? 'Type a response · Shift+Enter for newline'
         : 'Type a response'),
-    bodyRows,
-    optionRows,
+    ...rows,
+    dialogRows: Math.min(
+      Math.max(1, Math.floor(dialogRows)),
+      2
+        + rows.headingRows
+        + Math.min(bodyRows, allBodyLines.length)
+        + rows.gapRows
+        + optionRows
+        + rows.descriptionRows
+        + rows.inputRows,
+    ),
     loadingFrame: null,
   };
 }
 
+/**
+ * Splits the dialog's inner rows between the fixed heading, the pageable
+ * content, the decisions and the response input. Decorative rows (heading,
+ * gap, description) are dropped first when the terminal is short.
+ */
 function approvalLayoutRows(
   state: ApprovalState,
+  review: ReviewSpec | null,
   bodyLineCount: number,
-  optionCount: number,
-  contentRows: number,
+  dialogRows: number,
 ) {
-  if (approvalAcceptsTextInput(state)) {
-    const optionRows = contentRows >= 8
+  const innerRows = Math.max(1, Math.floor(dialogRows) - 2);
+  const roomy = innerRows >= APPROVAL_ROOMY_INNER_ROWS;
+  const headingRows = review?.view.title?.trim() && innerRows >= 6 ? 1 : 0;
+  const gapRows = roomy ? 1 : 0;
+  const descriptionRows = roomy
+    && review?.options.some((option) => option.description?.trim())
+    ? 1
+    : 0;
+  const textInput = approvalAcceptsTextInput(state);
+  const inputRows = textInput ? APPROVAL_INPUT_ROWS : 0;
+  const contentRows = Math.max(
+    1,
+    innerRows - headingRows - gapRows - descriptionRows - inputRows,
+  );
+  const fixed = { headingRows, gapRows, descriptionRows, inputRows };
+
+  if (textInput) {
+    const optionRows = contentRows >= 4
       ? APPROVAL_TEXT_INPUT_OPTION_ROWS
       : 1;
     // The response textarea takes fixed rows, but the reviewed content must not
     // collapse below what is left: a multi-line shell command stays readable
     // while the operator types a reply.
     return {
+      ...fixed,
       bodyRows: Math.max(
         1,
-        Math.min(
-          Math.max(bodyLineCount, 1),
-          contentRows - 4 - optionRows,
-        ),
+        Math.min(Math.max(bodyLineCount, 1), contentRows - optionRows),
       ),
       optionRows,
     };
   }
 
   const availableBodyLines = Math.max(1, bodyLineCount);
-  const availableOptions = Math.max(1, optionCount);
+  const availableOptions = Math.max(1, review?.options.length ?? 0);
   const reservedOptionRows = Math.min(
     availableOptions,
-    APPROVAL_LONG_CONTENT_OPTION_ROWS,
+    roomy ? APPROVAL_ROOMY_OPTION_ROWS : APPROVAL_LONG_CONTENT_OPTION_ROWS,
     Math.max(1, contentRows - 1),
   );
   const bodyRows = Math.max(1, Math.min(
@@ -465,46 +545,48 @@ function approvalLayoutRows(
     availableOptions,
     contentRows - bodyRows,
   ));
-  return { bodyRows, optionRows };
+  return { ...fixed, bodyRows, optionRows };
 }
 
-function approvalContentRows(dialogRows: number) {
-  return Math.max(1, Math.min(APPROVAL_CONTENT_ROWS, Math.floor(dialogRows) - 3));
+function approvalBodyWidth(width: number) {
+  return Math.max(1, width - 4 - APPROVAL_BODY_GUTTER);
 }
 
-function formatApprovalOptions(
+function buildApprovalOptionLines(
   state: Exclude<ApprovalState, { phase: 'closed' }>,
   width: number,
   rowCount: number,
-) {
+): ApprovalOptionLine[] {
   const review = currentApprovalReview(state);
-  if (!review?.options.length) return '  No available decisions';
+  if (!review?.options.length) return [];
   const start = Math.min(
     Math.max(0, state.selectedIndex - rowCount + 1),
     Math.max(0, review.options.length - rowCount),
   );
   return review.options
     .slice(start, start + rowCount)
-    .map((option, offset) => {
-      const selected = start + offset === state.selectedIndex;
-      const input = option.input ? ' …' : '';
-      const description = option.description ? ` — ${option.description}` : '';
-      return truncateTerminalLine(
-        `${selected ? '› ' : '  '}${option.label}${input}${description}`,
+    .map((option, offset) => ({
+      text: truncateTerminalLine(
+        `${option.label}${option.input ? ' …' : ''}`,
         width,
-      );
-    })
-    .join('\n');
+      ),
+      selected: start + offset === state.selectedIndex,
+      variant: option.variant ?? 'normal',
+    }));
 }
 
-function approvalHelp(width: number) {
-  if (width >= 60) {
-    return ' ↑↓ option · PgUp/PgDn details · Enter · Esc cancel ';
+function approvalHelp(width: number, pageable: boolean) {
+  if (width >= 64) {
+    return pageable
+      ? ' ↑↓ choose · Enter confirm · PgUp/PgDn scroll · Esc cancel '
+      : ' ↑↓ choose · Enter confirm · Esc cancel ';
   }
   if (width >= 36) {
-    return ' ↑↓ option · Pg details · Enter · Esc ';
+    return pageable
+      ? ' ↑↓ · Enter · Pg scroll · Esc '
+      : ' ↑↓ choose · Enter · Esc ';
   }
-  return ' ↑↓ · Pg · Enter · Esc ';
+  return pageable ? ' ↑↓ · Enter · Pg · Esc ' : ' ↑↓ · Enter · Esc ';
 }
 
 function buildReviewContentLines(review: ReviewSpec, width: number) {

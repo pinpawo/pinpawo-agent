@@ -219,7 +219,8 @@ function isProcessAlive(pid: number): boolean {
  * Host reads checkpoint history (no time travel or state history), and every
  * graph step re-serializes state that can be megabytes, so older manifests and
  * their pending writes are removed once a newer ref is published; the objects
- * they alone referenced are reclaimed by the next GC.
+ * they alone referenced are reclaimed by the next GC (Host startup or
+ * deleteThread).
  */
 export class FileSaver extends BaseCheckpointSaver {
   private _loadedThreadCount = 0;
@@ -760,16 +761,31 @@ export class FileSaver extends BaseCheckpointSaver {
   }
 
   /**
-   * Remove every manifest and writes manifest in a namespace except the one for
-   * `latestCheckpointId`. Called only after that checkpoint's ref is published.
+   * Remove the manifests and writes manifests in a namespace that the published
+   * `latestCheckpointId` supersedes. Called only after that ref is published.
+   *
+   * Only older checkpoints are removed. Under LangGraph's async durability only
+   * `put` calls are queued behind each other; `putWrites` for a newer
+   * checkpoint (e.g. its `__interrupt__`) can land before an older `put`
+   * publishes, and those writes must survive until their own checkpoint does.
+   * Like `list()`'s `before`, this relies on checkpoint ids sorting by time.
    */
   private pruneNamespace(threadDir: string, namespaceSegment: string, latestCheckpointId: string) {
     const keep = `${encodePathSegment(latestCheckpointId)}.json`;
     for (const kind of ['manifests', 'writes']) {
       const namespaceDir = join(threadDir, kind, namespaceSegment);
       for (const fileName of safeReadDir(namespaceDir)) {
-        if (fileName.endsWith('.json') && fileName !== keep) {
-          rmSync(join(namespaceDir, fileName), { force: true });
+        if (!fileName.endsWith('.json') || fileName === keep) continue;
+        const path = join(namespaceDir, fileName);
+        let checkpointId: unknown;
+        try {
+          checkpointId = (JSON.parse(readFileSync(path, 'utf-8')) as { checkpointId?: unknown }).checkpointId;
+        } catch {
+          // Unreadable entries are left for inspection rather than guessed at.
+          continue;
+        }
+        if (typeof checkpointId === 'string' && checkpointId < latestCheckpointId) {
+          rmSync(path, { force: true });
         }
       }
     }
@@ -777,7 +793,8 @@ export class FileSaver extends BaseCheckpointSaver {
 
   /**
    * Startup pass that applies the latest-only retention to stores written
-   * before it existed (or left a stale writes manifest behind a late putWrites).
+   * before it existed (or left a stale writes manifest behind a late putWrites
+   * for an already superseded checkpoint).
    * A namespace whose ref is missing or unreadable is left untouched.
    */
   private pruneHistory() {

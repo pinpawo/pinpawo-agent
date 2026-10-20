@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Checkpoint } from '@langchain/langgraph-checkpoint';
+import { Annotation, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { FileSaver } from './fileSaver';
 
 function createTempDir(t: TestContext) {
@@ -472,6 +473,62 @@ test('FileSaver keeps only the latest checkpoint and its writes per namespace', 
   const pendingOneHash = createHash('sha256').update(JSON.stringify('pending-one')).digest('hex');
   assert.equal(objects.has(oneHash), false, 'GC reclaims values only the pruned checkpoint referenced');
   assert.equal(objects.has(pendingOneHash), false, 'GC reclaims writes of the pruned checkpoint');
+});
+
+test('FileSaver keeps pending writes of a newer checkpoint that is not yet published', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const config = { configurable: { thread_id: 'thread-1' } };
+
+  // Async durability queues puts behind each other but not putWrites, so a
+  // newer checkpoint's writes can land before an older checkpoint publishes.
+  const first = await saver.put(config, checkpoint('cp-1', { messages: ['one'] }), { source: 'loop', step: 1, parents: {} });
+  const thirdConfig = { configurable: { thread_id: 'thread-1', checkpoint_ns: '', checkpoint_id: 'cp-3' } };
+  await saver.putWrites(thirdConfig, [['__interrupt__', [{ value: 'approve' }]]], 'task-3');
+  const second = await saver.put(first, checkpoint('cp-2', { messages: ['two'] }), { source: 'loop', step: 2, parents: {} });
+  await saver.put(second, checkpoint('cp-3', { messages: ['three'] }), { source: 'loop', step: 3, parents: {} });
+
+  const latest = await saver.getTuple(config);
+  assert.equal(latest?.checkpoint.id, 'cp-3');
+  assert.deepEqual(latest?.pendingWrites, [['task-3', '__interrupt__', [{ value: 'approve' }]]]);
+  assert.deepEqual(
+    readdirSync(join(root, 'checkpoints', 'threads', 'thread-1', 'manifests', '__root__')),
+    ['cp-3.json'],
+  );
+});
+
+test('FileSaver keeps a LangGraph interrupt when an earlier put publishes late', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const put = saver.put.bind(saver);
+  let delayed = false;
+  saver.put = async (...args) => {
+    if (!delayed) {
+      delayed = true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return put(...args);
+  };
+
+  const State = Annotation.Root({ value: Annotation<string> });
+  const graph = new StateGraph(State)
+    .addNode('ask', (state) => ({ value: `${state.value}:${String(interrupt('approve'))}` }))
+    .addEdge(START, 'ask')
+    .addEdge('ask', END)
+    .compile({ checkpointer: saver });
+  const config = { configurable: { thread_id: 'graph-thread' } };
+
+  await graph.invoke({ value: 'start' }, config);
+  const state = await graph.getState(config);
+  assert.deepEqual(state.tasks.flatMap((task) => task.interrupts.map((item) => item.value)), ['approve']);
+
+  const restored = new StateGraph(State)
+    .addNode('ask', (state) => ({ value: `${state.value}:${String(interrupt('approve'))}` }))
+    .addEdge(START, 'ask')
+    .addEdge('ask', END)
+    .compile({ checkpointer: new FileSaver(join(root, 'checkpoints.json')) });
+  const restoredState = await restored.getState(config);
+  assert.deepEqual(restoredState.tasks.flatMap((task) => task.interrupts.map((item) => item.value)), ['approve']);
 });
 
 test('FileSaver startup maintenance prunes history written before latest-only retention', async (t) => {

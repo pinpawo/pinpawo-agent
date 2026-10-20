@@ -1,6 +1,6 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import type { NamedStructuredTool, ToolOperationMetadata } from '@pinpawo/pet-agent';
-import { createAbortError } from '@pinpawo/pet-agent';
+import { createAbortError, operationDetails } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import {
@@ -302,10 +302,10 @@ export const gitOperationMetadata = {
       const record = readRecord(input);
       return {
         target: readString(record, 'cwd'),
-        details: {
+        details: operationDetails({
           staged: readBoolean(record, 'staged'),
           stat: readBoolean(record, 'stat'),
-        },
+        }),
       };
     },
   },

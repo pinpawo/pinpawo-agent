@@ -108,6 +108,7 @@ function executionDeliveries(input: RunSupervisorInput | undefined): DelegationD
 
 import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
+import { operationDetails } from '../../utils/operationMetadata';
 
 function plannerMessageContextText(input: RunSupervisorInput | null | undefined) {
   return [...(input?.messages.map(readMessageText) ?? []), ...executionDeliveries(input ?? undefined).map((delivery) => delivery.text)].join('\n');
@@ -1799,9 +1800,9 @@ test('capability Toolkit exposes ToolDefinition operation metadata', () => {
           return {
             target: typeof value.topic === 'string' ? value.topic : undefined,
             summary: '保存草稿',
-            details: {
+            details: operationDetails({
               contentLength: typeof value.content === 'string' ? value.content.length : undefined,
-            },
+            }),
           };
         },
       },

@@ -1,4 +1,5 @@
 import type {
+  JsonObject,
   ToolAuthorizationMode,
   ToolAuthorizationSafetyLevel,
   TokenUsageSnapshot,
@@ -54,7 +55,7 @@ export type AgentOperationEntry = {
   phase: AgentOperationPhase;
   target?: string;
   summary?: string;
-  details?: Record<string, unknown>;
+  details?: JsonObject;
   operationSource?: {
     provider: 'toolkit' | 'runtime';
     name: string;

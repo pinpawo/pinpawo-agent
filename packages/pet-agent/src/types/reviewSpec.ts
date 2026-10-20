@@ -1,35 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  HumanReviewOption,
+  HumanReviewOptionInput,
   HumanReviewRequest,
   HumanReviewResponse,
-  JsonObject,
+  HumanReviewView,
 } from '@pinpawo/agent-contracts';
-import { HUMAN_REVIEW_REQUEST_SCHEMA_VERSION } from '@pinpawo/agent-contracts';
+import {
+  HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
+  hasOnlyKeys,
+  isJsonObject,
+  readNonEmptyString,
+} from '@pinpawo/agent-contracts';
 import { isReviewSpecValue } from './reviewSpecValidation';
 
 export { isReviewSpecValue };
 
-export type ReviewView =
-  | { kind: 'plain'; title?: string; body: string }
-  | { kind: 'markdown'; title?: string; body: string }
-  | { kind: 'diff'; title?: string; patch: string; target?: string; summary?: string }
-  | {
-      kind: 'operation';
-      title?: string;
-      summary?: string;
-      target?: string;
-      details?: JsonObject;
-    };
-
-export type ReviewOptionInput =
-  | {
-      kind: 'text';
-      key: 'message';
-      label?: string;
-      placeholder?: string;
-      required?: boolean;
-      multiline?: boolean;
-    };
+/** The public review contract owns these shapes; the runtime adds no fields. */
+export type ReviewView = HumanReviewView;
+export type ReviewOptionInput = HumanReviewOptionInput;
 
 export type ReviewOptionDecision =
   | { type: 'approve' }
@@ -47,12 +36,11 @@ export type ReviewEffect =
       scope: 'thread';
     };
 
-export type ReviewOption = {
-  id: string;
-  label: string;
-  description?: string;
-  variant?: 'primary' | 'normal' | 'danger';
-  input?: ReviewOptionInput;
+/**
+ * A runtime review option: the public option without its client-side batch
+ * hint, plus the decision and effects that stay inside the runtime.
+ */
+export type ReviewOption = Omit<HumanReviewOption, 'batchSubmission'> & {
   decision: ReviewOptionDecision;
   effects?: ReviewEffect[];
 };
@@ -78,21 +66,6 @@ export function buildReviewSpec(params: BuildReviewSpecParams): ReviewSpec {
     view: params.view,
     options: params.options,
   };
-}
-
-function readRecordValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function readNonEmptyString(value: unknown) {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
-  const allowed = new Set(allowedKeys);
-  return Object.keys(record).every((key) => allowed.has(key));
 }
 
 /**
@@ -160,39 +133,36 @@ export type HumanReviewInterrupt =
   | HumanReviewBatchInterruptPayload;
 
 function isPendingReviewActionValue(value: unknown): value is PendingReviewAction {
-  const record = readRecordValue(value);
-  if (!record || !hasOnlyKeys(record, ['actionId', 'toolName', 'args', 'description'])) {
+  if (!isJsonObject(value) || !hasOnlyKeys(value, ['actionId', 'toolName', 'args', 'description'])) {
     return false;
   }
-  return Boolean(readNonEmptyString(record.actionId))
-    && Boolean(readNonEmptyString(record.toolName))
-    && Boolean(readRecordValue(record.args))
-    && (record.description === undefined || typeof record.description === 'string');
+  return Boolean(readNonEmptyString(value.actionId))
+    && Boolean(readNonEmptyString(value.toolName))
+    && isJsonObject(value.args)
+    && (value.description === undefined || typeof value.description === 'string');
 }
 
 export function isHumanReviewInterruptPayload(value: unknown): value is HumanReviewInterruptPayload {
-  const record = readRecordValue(value);
-  if (!record || !hasOnlyKeys(record, ['kind', 'review', 'pendingAction', 'error'])) {
+  if (!isJsonObject(value) || !hasOnlyKeys(value, ['kind', 'review', 'pendingAction', 'error'])) {
     return false;
   }
-  return record.kind === 'review'
-    && isReviewSpecValue(record.review)
-    && (record.pendingAction === undefined || isPendingReviewActionValue(record.pendingAction))
-    && (record.error === undefined || typeof record.error === 'string');
+  return value.kind === 'review'
+    && isReviewSpecValue(value.review)
+    && (value.pendingAction === undefined || isPendingReviewActionValue(value.pendingAction))
+    && (value.error === undefined || typeof value.error === 'string');
 }
 
 export function isHumanReviewBatchInterruptPayload(
   value: unknown,
 ): value is HumanReviewBatchInterruptPayload {
-  const record = readRecordValue(value);
-  if (!record || !hasOnlyKeys(record, ['kind', 'reviews', 'error'])) {
+  if (!isJsonObject(value) || !hasOnlyKeys(value, ['kind', 'reviews', 'error'])) {
     return false;
   }
-  return record.kind === 'review_batch'
-    && Array.isArray(record.reviews)
-    && record.reviews.length > 0
-    && record.reviews.every(isHumanReviewInterruptPayload)
-    && (record.error === undefined || typeof record.error === 'string');
+  return value.kind === 'review_batch'
+    && Array.isArray(value.reviews)
+    && value.reviews.length > 0
+    && value.reviews.every(isHumanReviewInterruptPayload)
+    && (value.error === undefined || typeof value.error === 'string');
 }
 
 export function isHumanReviewInterrupt(value: unknown): value is HumanReviewInterrupt {

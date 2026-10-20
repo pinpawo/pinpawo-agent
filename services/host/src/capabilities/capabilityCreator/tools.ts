@@ -6,8 +6,11 @@ import type { StructuredTool } from '@langchain/core/tools';
 import {
   defineToolkit,
   GENERAL_CAPABILITY_NAME,
+  operationDetails,
+  readBoolean,
   readRecord,
   readString,
+  readStringArray,
   resultStatusSummary,
   type AgentToolkit,
   type NamedStructuredTool,
@@ -59,15 +62,15 @@ function scaffoldInputSummary(input: unknown) {
     ? {
         target: rootDir ?? id,
         summary: name ? `生成 ${name}` : '生成 capability 插件',
-        details: {
+        details: operationDetails({
           id,
           rootDir,
-          overwrite: record?.overwrite,
-          includePackageJson: record?.includePackageJson,
-          includeReadme: record?.includeReadme,
-          includeSmokeTest: record?.includeSmokeTest,
-          uses: record?.uses,
-        },
+          overwrite: readBoolean(record, 'overwrite'),
+          includePackageJson: readBoolean(record, 'includePackageJson'),
+          includeReadme: readBoolean(record, 'includeReadme'),
+          includeSmokeTest: readBoolean(record, 'includeSmokeTest'),
+          uses: Array.isArray(record?.uses) ? readStringArray(record, 'uses') : undefined,
+        }),
       }
     : null;
 }

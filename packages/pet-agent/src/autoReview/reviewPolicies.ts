@@ -1,4 +1,3 @@
-import { isJsonObject, type JsonObject } from '@pinpawo/agent-contracts';
 import type {
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
@@ -73,21 +72,6 @@ function formatInput(input: unknown) {
   }
 }
 
-/**
- * Toolkit summaries are plain records, but the review view crosses a JSON
- * boundary: a JSON round trip drops `undefined` fields, and details JSON
- * cannot encode at all (a cycle, a BigInt) are left out.
- */
-function toJsonDetails(details: Record<string, unknown> | undefined): JsonObject | null {
-  if (!details) return null;
-  try {
-    const parsed: unknown = JSON.parse(JSON.stringify(details));
-    return isJsonObject(parsed) && Object.keys(parsed).length > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 function readPatchDetail(summary: ToolOperationSummary | null): string | null {
   const patch = summary?.details?.patch;
   return typeof patch === 'string' && patch.trim() ? patch : null;
@@ -108,7 +92,9 @@ function buildReviewView(
       ...(summary?.summary ? { summary: summary.summary } : {}),
     };
   }
-  const details = toJsonDetails(summary?.details);
+  const details = summary?.details && Object.keys(summary.details).length > 0
+    ? summary.details
+    : null;
   if (summary?.summary || summary?.target || details) {
     return {
       kind: 'operation',

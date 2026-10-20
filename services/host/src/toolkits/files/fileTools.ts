@@ -1,7 +1,8 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
+import type { JsonValue } from '@pinpawo/agent-contracts';
+import { operationDetails, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { atomicWriteFile } from '../../atomicFile';
 import { tryStat } from './fileSystemUtils';
@@ -259,13 +260,13 @@ export function readTextFileChunk(input: {
 
 function mergeOperationOutputSummary(
   target: string | undefined,
-  details?: Record<string, unknown>,
+  details?: Record<string, JsonValue | undefined>,
 ) {
   if (!target) return null;
   const after = readFileContentPreview(target);
   return {
     target,
-    ...(details ? { details: { ...details, after } } : {}),
+    ...(details ? { details: operationDetails({ ...details, after }) } : {}),
   } satisfies ReturnType<typeof okOutputPathSummary> | null;
 }
 
@@ -814,7 +815,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       const target = readString(record, 'path');
       const startLine = readNumber(record, 'startLine');
       const endLine = readNumber(record, 'endLine');
-      return target ? { target, details: { startLine, endLine } } : null;
+      return target ? { target, details: operationDetails({ startLine, endLine }) } : null;
     },
   },
   stat_path: {
@@ -831,12 +832,12 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       return {
         target,
         summary: readBoolean(record, 'append') ? 'append' : 'write',
-        details: {
+        details: operationDetails({
           append: readBoolean(record, 'append') ?? false,
           createDirs: readBoolean(record, 'createDirs') ?? true,
           before: isAbsolute(target) ? readFileContentPreview(target) : undefined,
           afterPreview: content === undefined ? undefined : truncateForOperationDetails(content),
-        },
+        }),
       };
     },
     summarizeOutput: (output) => {
@@ -865,10 +866,10 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       return {
         target,
         summary: file ? 'update' : undefined,
-        details: {
+        details: operationDetails({
           file,
           patch: truncateForOperationDetails(patch),
-        },
+        }),
       };
     },
     summarizeOutput: (output) => {
@@ -879,10 +880,10 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       if (!target) return null;
       return {
         target,
-        details: {
-          file,
+        details: operationDetails({
+          file: { path: target },
           after: readFileContentPreview(target),
-        },
+        }),
       };
     },
   },
@@ -891,7 +892,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
     summarizeInput: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'path');
-      return target ? { target, details: { schema: readString(record, 'schema') } } : null;
+      return target ? { target, details: operationDetails({ schema: readString(record, 'schema') }) } : null;
     },
     summarizeOutput: (output) => okOutputPathSummary(output),
   },

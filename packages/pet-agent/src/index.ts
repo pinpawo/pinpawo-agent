@@ -333,6 +333,7 @@ export type {
   MessageToolCallInfo,
 } from './utils/messages';
 export {
+  operationDetails,
   readBoolean,
   readJsonRecord,
   readNumber,

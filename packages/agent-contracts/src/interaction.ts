@@ -65,7 +65,7 @@ export type HumanReviewBatchResponse = {
   responses: HumanReviewResponse[];
 };
 
-function isHumanReviewView(value: unknown): value is HumanReviewView {
+export function isHumanReviewView(value: unknown): value is HumanReviewView {
   if (!isJsonObject(value)) return false;
   const titleIsValid = value.title === undefined || typeof value.title === 'string';
   if (value.kind === 'plain' || value.kind === 'markdown') {
@@ -90,7 +90,7 @@ function isHumanReviewView(value: unknown): value is HumanReviewView {
   return false;
 }
 
-function isHumanReviewOptionInput(value: unknown): value is HumanReviewOptionInput {
+export function isHumanReviewOptionInput(value: unknown): value is HumanReviewOptionInput {
   return isJsonObject(value)
     && hasOnlyKeys(value, ['kind', 'key', 'label', 'placeholder', 'required', 'multiline'])
     && value.kind === 'text'

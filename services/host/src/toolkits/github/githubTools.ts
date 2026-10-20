@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { createAbortError, type NamedStructuredTool, type ToolOperationMetadata } from '@pinpawo/pet-agent';
+import { createAbortError, operationDetails, type NamedStructuredTool, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import {
@@ -778,10 +778,10 @@ export const githubOperationMetadata = {
       return {
         target: readString(record, 'repository') ?? readString(record, 'base') ?? readString(record, 'cwd'),
         summary: readString(record, 'title'),
-        details: {
+        details: operationDetails({
           head: readString(record, 'head'),
           draft: readBoolean(record, 'draft'),
-        },
+        }),
       };
     },
   },

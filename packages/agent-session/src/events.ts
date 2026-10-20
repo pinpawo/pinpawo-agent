@@ -1,4 +1,5 @@
 import type {
+  JsonObject,
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type { AgentMessageToolCall, AgentPlan, AgentResultReference, AgentToolCallStatus } from './domain';
@@ -126,7 +127,7 @@ export type AgentOperationEvent = {
     title?: string;
     target?: string;
     summary?: string;
-    details?: Record<string, unknown>;
+    details?: JsonObject;
     source?: {
       provider: 'toolkit' | 'runtime';
       name: string;

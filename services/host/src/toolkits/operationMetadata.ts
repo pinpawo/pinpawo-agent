@@ -38,13 +38,14 @@ export function sourceDestinationInputSummary(input: unknown): OperationSummary 
 }
 
 /**
- * A command as the heading line; a multi-line command is also kept whole in a
- * code block, since the heading folds it to one line.
+ * A command as the heading line, and verbatim in a code block: the heading is
+ * folded to one line, which collapses quoted whitespace and newlines, so a
+ * reviewer must also see exactly what will run.
  */
 export function commandSummary(command: string, cwd?: string): OperationSummary {
   return {
     target: cwd,
     summary: command,
-    ...(command.includes('\n') ? { blocks: [{ kind: 'code', text: command, language: 'shell' }] } : {}),
+    blocks: [{ kind: 'code', text: command, language: 'shell' }],
   };
 }

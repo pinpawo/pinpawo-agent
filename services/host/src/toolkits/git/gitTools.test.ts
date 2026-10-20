@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { AgentToolkit } from '@pinpawo/pet-agent';
+import { summarizeToolOperation, type AgentToolkit } from '@pinpawo/pet-agent';
 import { PosixShellRS } from '../shellRS';
 import type { ShellRS } from '../shellRS/shellRS';
 import { createGitToolkit } from './index';
@@ -196,8 +196,22 @@ test('git_shell reviews only risky calls', async () => {
   }
   assert.deepEqual(
     definition(toolkit, 'git_shell')?.operation?.summarize?.({ cwd: '/repo', args: ['commit', '-m', 'a b'] }),
-    { target: '/repo', summary: "git commit -m 'a b'" },
+    {
+      target: '/repo',
+      summary: "git commit -m 'a b'",
+      blocks: [{ kind: 'code', text: "git commit -m 'a b'", language: 'shell' }],
+    },
   );
+});
+
+test('git_shell approval shows argv verbatim, newlines included', () => {
+  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
+  const summary = summarizeToolOperation(
+    definition(toolkit, 'git_shell')?.operation,
+    { cwd: '/repo', args: ['commit', '-m', 'first\nsecond'] },
+  );
+  assert.equal(summary?.summary, "git commit -m 'first second'", 'the heading is folded to one line');
+  assert.deepEqual(summary?.blocks, [{ kind: 'code', text: "git commit -m 'first\nsecond'", language: 'shell' }]);
 });
 
 test('git_shell runs argv without a shell and fails instead of opening an editor', async () => {

@@ -107,6 +107,24 @@ test('operation display exposes bounded diff blocks with tones', () => {
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
+test('a truncated diff block keeps its marker in the timeline, even past the line budget', () => {
+  for (const count of [3, 200]) {
+    const lines = buildOperationDisplayLines(operation({
+      phase: 'completed',
+      kind: 'local.apply_patch',
+      target: 'src/example.ts',
+      blocks: [{
+        kind: 'diff',
+        format: 'v4a',
+        text: Array.from({ length: count }, (_, index) => `+line ${index}`).join('\n'),
+        truncated: true,
+      }],
+      raw: { output: JSON.stringify({ ok: true }) },
+    }), 0, 80);
+    assert.equal(lines.at(-1)?.text, '  …（内容已截断）', `${count} lines`);
+  }
+});
+
 test('completed tools that return errors still show their diagnostic payload', () => {
   for (const output of ['Error: file not found', JSON.stringify({ status: 'timeout', message: 'Process terminated' }), { ok: false, message: 'Patch failed' }]) {
     const lines = buildOperationDisplayLines(operation({ phase: 'completed', raw: { output } }), 0, 100);

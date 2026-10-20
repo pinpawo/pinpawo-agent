@@ -90,7 +90,7 @@ type ToolOperationMetadata = {
   - 字符串 input 先尝试按 JSON 解析；
   - 捕获 `summarize` 抛出的异常，返回 null；
   - 用 `isOperationSummary` 校验，不合格整体丢弃；
-  - `target`/`summary` 折成单行，只作标题；多行内容（如多行命令）由 toolkit 放进 code block；
+  - `target`/`summary` 折成单行，只作标题。折叠会合并空白和换行，所以命令和 argv 一律由 toolkit 另放一个保留原文的 code block，人工审批看到的就是实际执行的内容；
   - 单个 block 的 `text` 超过单块上限时截断并设 `truncated: true`；所有 block 的 `text`
     合计超过总上限时，超出部分同样截断或丢弃并标记，保证摘要总量有界。
 - **截断只影响展示，不替代审批事实。**

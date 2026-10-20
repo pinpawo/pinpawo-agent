@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { AgentToolkit } from '@pinpawo/pet-agent';
+import { summarizeToolOperation, type AgentToolkit } from '@pinpawo/pet-agent';
 import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
@@ -148,8 +148,13 @@ test('shell operation metadata preserves the model-provided cwd without classify
     {
       target: '~',
       summary: "printf 'value' > output.txt",
+      blocks: [{ kind: 'code', text: "printf 'value' > output.txt", language: 'shell' }],
     },
   );
+  // The heading folds whitespace; the block keeps what will actually run.
+  const quoted = summarizeToolOperation(shellOperationMetadata.run_shell, { command: "printf '%s' 'a  b'" });
+  assert.equal(quoted?.summary, "printf '%s' 'a b'");
+  assert.deepEqual(quoted?.blocks, [{ kind: 'code', text: "printf '%s' 'a  b'", language: 'shell' }]);
   assert.equal(
     shellOperationMetadata.run_shell?.summarize?.({ command: 'pwd' })?.target,
     undefined,
@@ -239,7 +244,7 @@ test('start_process is reviewed with the original command and cwd', async () => 
   assert.ok(item?.review);
   assert.ok(item.operation);
   assert.deepEqual(item.operation.summarize?.({ command: ' npm test ', cwd: ' relative ' }), {
-    target: 'relative', summary: 'npm test',
+    target: 'relative', summary: 'npm test', blocks: [{ kind: 'code', text: 'npm test', language: 'shell' }],
   });
   const context = {
     toolkitName: 'shell', toolName: 'start_process',

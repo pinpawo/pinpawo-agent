@@ -172,7 +172,7 @@ function buildOperationPayloadLines(
   // Diffs are shown inline: they are what the step changed. Other blocks stay
   // in the transcript detail, keeping the timeline one line per step.
   return (entry.blocks ?? []).flatMap((block) => (
-    isKnownOperationBlock(block) && block.kind === 'diff' ? buildPatchLines(block.text, block.path ?? entry.target, width) : []
+    isKnownOperationBlock(block) && block.kind === 'diff' ? buildPatchLines(block.text, block.path ?? entry.target, width, block.truncated === true) : []
   ));
 }
 
@@ -228,6 +228,7 @@ function buildPatchLines(
   patch: string,
   target: string | undefined,
   width: number,
+  truncated = false,
 ) {
   const label = target ? `patch ${target}` : 'patch';
   const lines: OperationDisplayLine[] = [{
@@ -250,7 +251,11 @@ function buildPatchLines(
       }];
     })];
 
-  if (lines.length <= OPERATION_PATCH_MAX_LINES) return lines;
+  // The truncation marker sits outside the line budget so hiding lines never hides it.
+  const marker: OperationDisplayLine[] = truncated
+    ? [{ text: sanitizeLine('  …（内容已截断）', width), tone: 'muted' }]
+    : [];
+  if (lines.length <= OPERATION_PATCH_MAX_LINES) return [...lines, ...marker];
   const visible = lines.slice(0, OPERATION_PATCH_MAX_LINES - 1);
   visible.push({
     text: sanitizeLine(
@@ -259,7 +264,7 @@ function buildPatchLines(
     ),
     tone: 'muted',
   });
-  return visible;
+  return [...visible, ...marker];
 }
 
 function patchLineTone(line: string): OperationDisplayTone {

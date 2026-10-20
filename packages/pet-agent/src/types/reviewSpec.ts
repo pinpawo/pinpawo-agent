@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   HumanReviewRequest,
   HumanReviewResponse,
+  JsonObject,
 } from '@pinpawo/agent-contracts';
 import { HUMAN_REVIEW_REQUEST_SCHEMA_VERSION } from '@pinpawo/agent-contracts';
 import { isReviewSpecValue } from './reviewSpecValidation';
@@ -11,7 +12,14 @@ export { isReviewSpecValue };
 export type ReviewView =
   | { kind: 'plain'; title?: string; body: string }
   | { kind: 'markdown'; title?: string; body: string }
-  | { kind: 'diff'; title?: string; patch: string; target?: string; summary?: string };
+  | { kind: 'diff'; title?: string; patch: string; target?: string; summary?: string }
+  | {
+      kind: 'operation';
+      title?: string;
+      summary?: string;
+      target?: string;
+      details?: JsonObject;
+    };
 
 export type ReviewOptionInput =
   | {
@@ -100,12 +108,19 @@ export function reviewViewToText(view: ReviewView): string {
       view.patch,
     ].filter((line): line is string => Boolean(line)).join('\n\n');
   }
+  if (view.kind === 'operation') {
+    return [
+      view.summary ? `Summary: ${view.summary}` : null,
+      view.target ? `Target: ${view.target}` : null,
+      view.details ? `Details:\n${JSON.stringify(view.details, null, 2)}` : null,
+    ].filter((line): line is string => Boolean(line)).join('\n\n');
+  }
   return view.body;
 }
 
 /** Appends a trailing message to a review view's textual content. */
 export function appendReviewViewMessage(view: ReviewView, message: string): ReviewView {
-  if (view.kind === 'diff') {
+  if (view.kind === 'diff' || view.kind === 'operation') {
     return {
       kind: 'plain',
       ...(view.title ? { title: view.title } : {}),

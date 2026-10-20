@@ -373,6 +373,29 @@ test('approval options carry selection and variant, with the description apart',
   assert.equal(authorize?.dialogRows, approve?.dialogRows);
 });
 
+test('an operation review shows its summary verbatim, then target and details', () => {
+  const operation: ReviewSpec = {
+    ...review('review-operation'),
+    view: {
+      kind: 'operation',
+      title: '执行命令',
+      summary: 'npm test',
+      target: '/srv/app',
+      details: { level: 'write' },
+    },
+  };
+  const state = syncApprovalState(createApprovalState(), waitingReview([operation]));
+  const model = state.phase === 'closed' ? null : buildApprovalViewModel(state, 80);
+  assert.equal(model?.heading, '执行命令');
+  assert.deepEqual(model?.bodyLines.slice(0, 3), [
+    { text: 'npm test', tone: 'default' },
+    { text: '', tone: 'default' },
+    { text: 'Target: /srv/app', tone: 'muted' },
+  ]);
+  assert.match(model?.body ?? '', /"level": "write"/);
+  assert.doesNotMatch(model?.body ?? '', /Summary/);
+});
+
 function waitingReview(reviews: ReviewSpec[]): PendingInterruptProjection {
   return {
     interruptId: 'pendingInterrupt-1',

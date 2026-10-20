@@ -40,6 +40,25 @@ test('human review boundary excludes runtime decisions and effects', () => {
     ...request,
     schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION - 1,
   }), null);
+  const operation = {
+    ...request,
+    view: {
+      kind: 'operation',
+      title: '执行命令',
+      summary: 'npm test',
+      target: '/repo',
+      details: { level: 'write', paths: ['a.ts'] },
+    },
+  } as const;
+  assert.deepEqual(parseHumanReviewRequest(operation), operation);
+  assert.equal(parseHumanReviewRequest({
+    ...operation,
+    view: { ...operation.view, body: 'npm test' },
+  }), null);
+  assert.equal(parseHumanReviewRequest({
+    ...operation,
+    view: { ...operation.view, details: { run: () => undefined } },
+  }), null);
   assert.equal(parseHumanReviewRequest({
     ...request,
     options: [{

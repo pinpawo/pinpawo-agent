@@ -180,10 +180,10 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
     authorizationMatcher,
   });
   const view = review && 'schemaVersion' in review ? review.view : null;
-  assert.ok(view && view.kind === 'plain');
+  assert.ok(view && view.kind === 'operation');
   assert.equal(view.title, '写文件');
-  assert.match(view.body, new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(view.body, /afterPreview/);
+  assert.equal(view.target, filePath);
+  assert.ok(view.details && 'afterPreview' in view.details);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],

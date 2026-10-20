@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createOfficeToolkit, officeEnabled, resolveOfficeExecutable, OFFICE_TOOLKIT_INSTRUCTIONS } from './index';
+import { reviewViewToText } from '@pinpawo/pet-agent';
 import { PosixShellRS } from '../shellRS/posixShellRS';
 import type { ShellRS, ShellExecRequest } from '../shellRS/shellRS';
 
@@ -104,10 +105,9 @@ test('Office execution requires human-review support and shows argv/cwd in revie
     assert.ok(blocked && 'type' in blocked && blocked.type === 'block');
     const review = await definition.review!.request({ ...context, reviewCapabilities: { humanReview: true, sessionAuthorization: true } });
     assert.ok(review && 'schemaVersion' in review);
-    if (review && 'schemaVersion' in review && review.view.kind === 'plain') {
-      assert.match(review.view.body, /Report File.docx/);
-      assert.match(review.view.body, /\/project/);
-    }
+    const text = review && 'schemaVersion' in review ? reviewViewToText(review.view) : '';
+    assert.match(text, /Report File.docx/);
+    assert.match(text, /\/project/);
   } finally { await shell.dispose(); }
 });
 

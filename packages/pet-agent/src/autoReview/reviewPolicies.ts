@@ -1,3 +1,4 @@
+import { isJsonObject, type JsonObject } from '@pinpawo/agent-contracts';
 import type {
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
@@ -64,13 +65,6 @@ function readOperationSummary(ctx: ToolReviewContext): ToolOperationSummary | nu
   }
 }
 
-function formatDetails(details: Record<string, unknown> | undefined) {
-  if (!details || Object.keys(details).length === 0) {
-    return null;
-  }
-  return truncate(JSON.stringify(details, null, 2));
-}
-
 function formatInput(input: unknown) {
   try {
     return truncate(JSON.stringify(inputToRecord(input), null, 2));
@@ -79,17 +73,19 @@ function formatInput(input: unknown) {
   }
 }
 
-function buildReviewBody(ctx: ToolReviewContext, summary: ToolOperationSummary | null) {
-  const details = formatDetails(summary?.details);
-  const lines = [
-    summary?.summary ? `Summary: ${summary.summary}` : null,
-    summary?.target ? `Target: ${summary.target}` : null,
-    details ? `Details:\n${details}` : null,
-  ].filter((line): line is string => Boolean(line));
-
-  return lines.length > 0
-    ? lines.join('\n\n')
-    : `Input:\n${formatInput(ctx.input)}`;
+/**
+ * Toolkit summaries are plain records, but the review view crosses a JSON
+ * boundary: a JSON round trip drops `undefined` fields, and details JSON
+ * cannot encode at all (a cycle, a BigInt) are left out.
+ */
+function toJsonDetails(details: Record<string, unknown> | undefined): JsonObject | null {
+  if (!details) return null;
+  try {
+    const parsed: unknown = JSON.parse(JSON.stringify(details));
+    return isJsonObject(parsed) && Object.keys(parsed).length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function readPatchDetail(summary: ToolOperationSummary | null): string | null {
@@ -112,10 +108,20 @@ function buildReviewView(
       ...(summary?.summary ? { summary: summary.summary } : {}),
     };
   }
+  const details = toJsonDetails(summary?.details);
+  if (summary?.summary || summary?.target || details) {
+    return {
+      kind: 'operation',
+      title,
+      ...(summary?.summary ? { summary: summary.summary } : {}),
+      ...(summary?.target ? { target: summary.target } : {}),
+      ...(details ? { details } : {}),
+    };
+  }
   return {
     kind: 'plain',
     title,
-    body: buildReviewBody(ctx, summary),
+    body: `Input:\n${formatInput(ctx.input)}`,
   };
 }
 

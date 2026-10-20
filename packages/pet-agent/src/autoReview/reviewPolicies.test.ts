@@ -48,10 +48,10 @@ test('required review builds ReviewSpec from operation metadata', async () => {
   const review = await policy.request(reviewContext());
 
   const view = review && 'schemaVersion' in review ? review.view : null;
-  assert.ok(view && view.kind === 'plain');
+  assert.ok(view && view.kind === 'operation');
   assert.equal(view.title, '写文件');
-  assert.match(view.body, /Target: \/repo\/notes\.md/);
-  assert.match(view.body, /createDirs/);
+  assert.equal(view.target, '/repo/notes.md');
+  assert.equal(view.details?.createDirs, true);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'reject', 'respond'],

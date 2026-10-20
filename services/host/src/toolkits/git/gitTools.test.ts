@@ -192,7 +192,7 @@ test('git_shell reviews only risky calls', async () => {
   ]) {
     const review = await reviewOf(args);
     assert.ok(review && 'schemaVersion' in review, `git ${args.join(' ')} must be reviewed`);
-    assert.equal(review.view.kind === 'plain' ? review.view.title : '', definition(toolkit, 'git_shell')?.operation?.title);
+    assert.equal(review.view.kind === 'operation' ? review.view.title : '', definition(toolkit, 'git_shell')?.operation?.title);
   }
   assert.deepEqual(
     definition(toolkit, 'git_shell')?.operation?.summarizeInput?.({ cwd: '/repo', args: ['commit', '-m', 'a b'] }),

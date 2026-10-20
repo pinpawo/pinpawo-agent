@@ -1,3 +1,4 @@
+import { isJsonObject, isJsonValue } from '@pinpawo/agent-contracts';
 import type {
   ReviewEffect,
   ReviewOption,
@@ -37,6 +38,13 @@ function isReviewViewValue(value: unknown): value is ReviewView {
       && hasValidTitle
       && (record.target === undefined || typeof record.target === 'string')
       && (record.summary === undefined || typeof record.summary === 'string');
+  }
+  if (record.kind === 'operation') {
+    return hasOnlyKeys(record, ['kind', 'title', 'summary', 'target', 'details'])
+      && hasValidTitle
+      && (record.summary === undefined || typeof record.summary === 'string')
+      && (record.target === undefined || typeof record.target === 'string')
+      && (record.details === undefined || (isJsonObject(record.details) && isJsonValue(record.details)));
   }
   return false;
 }

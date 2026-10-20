@@ -16,7 +16,7 @@ Toolkit 负责把自己的工具输入投影成可展示的摘要，Host 和客�
 | --- | --- | --- |
 | 源头 | 模型发出的 tool call 参数，schema 由 toolkit 定义 | `summarize` 与参数 schema 放在一起，只是参数的投影（§2.2） |
 | 过程 | tool call 的执行 pipeline：审批、自动审核、执行、事件 | 只通过一个入口计算摘要，按 callId 复用；执行结果用原始输出（§2.3） |
-| 终端 | TUI、Studio Console，以及读文本的模型（自动审核、审批 prompt） | 只按 block kind 渲染，不认识工具（§2.4） |
+| 终端 | TUI、Studio Console，以及读文本的模型（自动审核、审批 prompt） | 默认都走同一个文本渲染；客户端可以对部分 kind 做原生渲染，其余回退到默认文本（§2.4） |
 
 三层共用的类型定义在 contracts（§2.1）。
 
@@ -43,7 +43,14 @@ export type OperationBlock =
 export const OPERATION_BLOCK_KINDS: readonly OperationBlock['kind'][];
 export function isOperationSummary(value: unknown): value is OperationSummary;
 export function assertNever(value: never): never;
+
+/** 默认渲染：所有终端共用，也是回退路径。未知 kind 取 block.text。 */
+export function operationBlockToText(block: OperationBlock): string;
+export function operationSummaryToText(summary: OperationSummary): string;
 ```
+
+校验对已知 kind 严格检查字段；未知 kind 只要求 `kind` 是字符串、`text` 是字符串，
+其余字段原样保留，交给默认渲染降级显示。
 
 ### 2.2 源头：toolkit（`@pinpawo/pet-agent` 的 `ToolOperationMetadata`）
 
@@ -79,9 +86,24 @@ type ToolOperationMetadata = {
 | --- | --- |
 | 审批视图 `HumanReviewView` | `{ kind: 'operation'; title?: string } & OperationSummary`。没有 operation 摘要的审批仍用 plain/markdown。 |
 | 时间线事件 `AgentOperationEvent.operation` | 携带 `target/summary/blocks`；没有 `details`。 |
-| 模型文本（`reviewViewToText`、自动审核 prompt） | code → 带 language 的代码块；diff → diff 代码块；text → label 小标题加正文。 |
 
-TUI 和 Console 的渲染约定：
+**默认文本渲染是统一的 pipeline。** `operationSummaryToText`（contracts）是唯一的默认渲染：
+
+- 模型 prompt（`reviewViewToText`、自动审核）直接用它；
+- TUI、Console 对没有原生渲染的 kind，以及整个不支持的视图，都回退到它；
+- 它对已知 kind 的格式：code → 带 language 的代码块；diff → diff 代码块；text → label 小标题加正文；
+  未知 kind → 原样输出 `text`。
+
+**原生渲染是可选增强。** 客户端可以挑部分 kind 做更好的显示，其余走默认文本：
+
+```ts
+switch (block.kind) {
+  case 'diff': return renderColoredDiff(block);
+  default: return renderPlainText(operationBlockToText(block));
+}
+```
+
+TUI 和 Console 的原生渲染约定：
 
 - 标题行：取 summary、target、title 中第一个有值的；不按工具名判断。
 - `code`：等宽，保留换行，不重排；language 只是提示。
@@ -89,7 +111,7 @@ TUI 和 Console 的渲染约定：
 - `text`：普通文本，可折行；有 label 时作为小标题。
 - `truncated`：block 末尾提示「内容已截断」。
 - 审批展示全部 block；时间线默认只显示标题行，展开或 PageUp 时显示 block。
-- **未知 kind**：把 `text` 当等宽纯文本显示，不拒收。
+- 没有原生渲染的 kind（包括未知 kind）：显示默认文本，不拒收。
 
 ## 3. 新增 block kind 的流程（固定约定）
 
@@ -104,40 +126,30 @@ kind 是 contracts 里的封闭集合。Toolkit 不能自定义 kind；新工具
 2. **它是展示原语，而不是工具语义吗？** 名字和字段描述「怎么显示」，不能描述「是哪个工具的什么数据」（`table` 可以，`git_status` 不行）。
 3. **它的 `text` 降级形态是什么？** 旧客户端只看 `text` 也必须能让人做出审批决定。
 
-### 3.2 一个 PR 改完所有地方
+### 3.2 PR 必须包含的改动
 
-PR 标题：`Operation blocks: add <kind>`。改动清单：
+PR 标题：`Operation blocks: add <kind>`。
 
-| 位置 | 要做的事 |
-| --- | --- |
-| `packages/agent-contracts` | `OperationBlock` 加成员（必须含 `text` 和 `truncated?`）；`OPERATION_BLOCK_KINDS` 加名；`isOperationSummary` 校验新字段 |
-| contracts 测试 | 合法、缺 `text`、多余字段、字段类型错，各一条 |
-| pet-agent 统一入口 | 若新 kind 除 `text` 外还有大字段，补截断规则 |
-| pet-agent 模型文本 | `reviewViewToText` 和自动审核 prompt 的写法 |
-| TUI | 审批（`reviewContentLines`）和时间线（`operationDisplay`）的渲染，加测试 |
-| Studio Console | `PetSessionView` 的渲染 |
-| 至少一个 toolkit | 真正用上它；不加没有使用者的 kind |
-| 本文档 | §2.1 类型、§2.4 终端约定各补一条 |
+| 位置 | 要做的事 | 必须 |
+| --- | --- | --- |
+| `packages/agent-contracts` | `OperationBlock` 加成员（必须含 `text` 和 `truncated?`）；`OPERATION_BLOCK_KINDS` 加名；`isOperationSummary` 校验新字段 | 是 |
+| contracts 默认渲染 | `operationBlockToText` 加这个 kind 的文本格式 | 是 |
+| contracts 测试 | 合法、缺 `text`、多余字段、字段类型错、默认文本，各一条 | 是 |
+| pet-agent 统一入口 | 若新 kind 除 `text` 外还有大字段，补截断规则 | 视情况 |
+| 至少一个 toolkit | 真正用上它；不加没有使用者的 kind | 是 |
+| 本文档 | §2.1 类型、§2.4 默认文本格式各补一条 | 是 |
+| TUI、Studio Console | 原生渲染 | 否，可同 PR 也可以后补；没做之前走默认文本 |
 
 ### 3.3 编译期保障
 
-所有按 kind 分支的代码都写成：
-
-```ts
-switch (block.kind) {
-  case 'code': ...
-  case 'diff': ...
-  case 'text': ...
-  default: return assertNever(block);
-}
-```
-
-漏改任何一处，`npm run typecheck` 就失败。按 kind 分支时不要用 `if` 链或查表，否则编译器发现不了遗漏。
+`operationBlockToText` 是唯一要求覆盖所有已知 kind 的函数，它的 switch 以 `assertNever` 结尾，
+漏写新 kind 的默认文本，`npm run typecheck` 就失败。客户端的 switch 用 `default` 回退到默认文本，
+不要求覆盖所有 kind。
 
 ### 3.4 运行期保障
 
-未知 kind 走 `text` 降级（§2.4），用于 Host 和客户端版本错开时的实时显示。
-这不是旧数据兼容：存储里的旧数据仍按仓库约定不兼容。降级路径在 contracts 和 TUI 各有一条测试。
+未知 kind 由默认渲染取 `text` 显示（§2.4），用于 Host 和客户端版本错开时的实时显示。
+这不是旧数据兼容：存储里的旧数据仍按仓库约定不兼容。降级路径在 contracts 有测试。
 
 ### 3.5 验证
 
@@ -148,9 +160,9 @@ PR 里附 TUI 审批和时间线的截图。
 
 每步一个 PR，前一个合并后再开下一个：
 
-1. contracts：`OperationSummary`、`OperationBlock`、`isOperationSummary`、`assertNever` 和测试。
+1. contracts：`OperationSummary`、`OperationBlock`、`isOperationSummary`、`assertNever`、默认文本渲染和测试。
 2. pet-agent + 全部 toolkit：`summarize` 和统一入口，Host tracker 按 callId 复用；审批视图改用 OperationSummary；
    删除 `diff` 审批视图、`summarizeOutput`、`summarizeError`、`details`；
-   时间线事件换成新字段，TUI 和 Console 先做到能编译（blocks 暂按 `text` 显示）。
-3. 客户端：TUI 和 Console 按 §2.4 渲染；删除 `OPERATION_PAYLOAD_DETAIL_KEYS`、
+   时间线事件换成新字段，TUI 和 Console 先全部走默认文本。
+3. 客户端：TUI 和 Console 对 diff 等 kind 做原生渲染；删除 `OPERATION_PAYLOAD_DETAIL_KEYS`、
    `SHELL_TOOL_LABELS`、`isApplyPatchOperation` 等按字段名或工具名的判断。

@@ -1,7 +1,7 @@
 import type { ToolRuntime } from '@langchain/core/tools';
 import { quote } from 'shell-quote';
 import { z } from 'zod';
-import { readRecord, readString } from '../operationMetadata';
+import { commandSummary, readRecord, readString } from '../operationMetadata';
 import { requireAgentSession } from '../executionContext';
 import type { ShellExecResult, ShellRS } from '../shellRS/shellRS';
 import type { CliVerdict } from './cliLevels';
@@ -77,14 +77,9 @@ export function readCliArgs(input: unknown): string[] {
   return Array.isArray(args) ? args.filter((arg): arg is string => typeof arg === 'string') : [];
 }
 
-/** Operation summary of a git_shell / gh_shell call: the command and its permission level. */
-export function summarizeCliCall(program: 'git' | 'gh', input: unknown, classify: (args: string[]) => CliVerdict) {
-  const args = readCliArgs(input);
-  return {
-    target: readString(readRecord(input), 'cwd'),
-    summary: quote([program, ...args]),
-    details: { level: classify(args).level },
-  };
+/** Operation summary of a git_shell / gh_shell call: the command as it will run. */
+export function summarizeCliCall(program: 'git' | 'gh', input: unknown) {
+  return commandSummary(quote([program, ...readCliArgs(input)]), readString(readRecord(input), 'cwd'));
 }
 
 export const cliArgsSchema = (program: 'git' | 'gh', example: string) => z.array(z.string())

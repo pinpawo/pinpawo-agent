@@ -463,10 +463,7 @@ test('runAgentSessionTurn projects global policy authorization as completed oper
         kind: 'runtime.authorization',
         title: '自动授权',
         summary: 'workspace · write_file',
-        details: {
-          toolLabels: ['workspace · write_file'],
-          reason: 'The write is limited to the workspace.',
-        },
+        blocks: [{ kind: 'text', label: '原因', text: 'The write is limited to the workspace.' }],
         source: {
           provider: 'runtime',
           name: 'global_review_policy',
@@ -481,10 +478,7 @@ test('runAgentSessionTurn projects global policy authorization as completed oper
         kind: 'runtime.authorization',
         title: '按策略授权',
         summary: 'custom · custom_tool',
-        details: {
-          toolLabels: ['custom · custom_tool'],
-          reason: 'The configured policy approved this action.',
-        },
+        blocks: [{ kind: 'text', label: '原因', text: 'The configured policy approved this action.' }],
         source: {
           provider: 'runtime',
           name: 'global_review_policy',

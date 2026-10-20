@@ -1,238 +1,97 @@
 import {
-  operationDetails,
   readBoolean,
   readJsonRecord,
   readNumber,
   readString,
+  type OperationSummary,
   type ToolOperationMetadata,
-  type ToolOperationSummary,
 } from '@pinpawo/pet-agent';
 
-function compactText(value: string, max = 80) {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+function browserOpenInputSummary(input: unknown): OperationSummary | null {
+  const url = readString(readJsonRecord(input), 'url');
+  return url ? { target: url, summary: '打开网页' } : null;
 }
 
-function rawStringOutputSummary(output: unknown): ToolOperationSummary | null {
-  if (typeof output !== 'string') return null;
-  const summary = compactText(output);
-  return summary ? { summary } : null;
+function elementTarget(record: Record<string, unknown> | null) {
+  return readString(record, 'ref') ?? readString(record, 'selector');
 }
 
-function browserErrorSummary(error: unknown): ToolOperationSummary | null {
-  if (error === undefined || error === null) return null;
-  if (error instanceof Error) return { summary: compactText(error.message) || 'browser error' };
-  if (typeof error === 'string') return { summary: compactText(error) || 'browser error' };
-  return { summary: compactText(String(error)) || 'browser error' };
+function selectorInputSummary(action: string, input: unknown): OperationSummary | null {
+  const target = elementTarget(readJsonRecord(input));
+  return target ? { target, summary: `${action} ${target}` } : null;
 }
 
-function browserSnapshotSummary(output: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(output);
-  if (!record) return rawStringOutputSummary(output);
-  const title = readString(record, 'title');
-  const url = readString(record, 'url');
-  const tree = readString(record, 'tree');
-  const treeLength = readNumber(record, 'treeLength') ?? tree?.length;
-  const returnedTreeLength = readNumber(record, 'returnedTreeLength') ?? tree?.length;
-  const truncated = readBoolean(record, 'truncated');
-  const refCount = readNumber(record, 'refCount');
-  if (!title && !url && !tree) return null;
-  return {
-    target: url,
-    summary: title
-      ? `页面：${title}${truncated ? '（快照已截断）' : ''}`
-      : tree
-        ? compactText(tree)
-        : undefined,
-    details: operationDetails({
-      title,
-      url,
-      treeLength,
-      returnedTreeLength,
-      truncated,
-      refCount,
-    }),
-  };
-}
-
-function browserExtractInputSummary(input: unknown): ToolOperationSummary | null {
+function typeInputSummary(input: unknown): OperationSummary | null {
   const record = readJsonRecord(input);
-  const selector = readString(record, 'selector');
-  const offset = readNumber(record, 'offset');
-  const limit = readNumber(record, 'limit');
-  return {
-    target: selector,
-    summary: selector ? `提取 ${selector}` : '提取页面文本',
-    details: operationDetails({
-      selector,
-      offset,
-      limit,
-    }),
-  };
-}
-
-function browserExtractOutputSummary(output: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(output);
-  if (!record) return rawStringOutputSummary(output);
-
-  const text = readString(record, 'text');
-  const textLength = readNumber(record, 'textLength') ?? text?.length;
-  const returnedTextLength = readNumber(record, 'returnedTextLength') ?? text?.length;
-  const hasMore = readBoolean(record, 'hasMore');
-  const nextOffset = readNumber(record, 'nextOffset');
-  const selector = readString(record, 'selector');
-
-  return {
-    target: selector,
-    summary: typeof returnedTextLength === 'number' && typeof textLength === 'number'
-      ? `提取文本 ${returnedTextLength}/${textLength} 字${hasMore ? '（还有更多）' : ''}`
-      : text
-        ? compactText(text)
-        : '提取页面文本',
-    details: operationDetails({
-      selector,
-      textLength,
-      returnedTextLength,
-      hasMore,
-      nextOffset,
-    }),
-  };
-}
-
-function browserOpenInputSummary(input: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(input);
-  const url = readString(record, 'url');
-  return url
-    ? {
-        target: url,
-        summary: '打开网页',
-      }
-    : null;
-}
-
-function selectorInputSummary(action: string, input: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(input);
-  const selector = readString(record, 'selector');
-  const ref = readString(record, 'ref');
-  const target = ref ?? selector;
+  const target = elementTarget(record);
+  // The typed text may be a credential, so only its length is shown.
+  const length = readString(record, 'text')?.length;
   return target
     ? {
         target,
-        summary: `${action} ${target}`,
-        details: operationDetails({
-          selector,
-          ...(ref ? { ref } : {}),
-        }),
+        summary: `输入到 ${target}${length === undefined ? '' : `（${length} 字）`}${readBoolean(record, 'submit') ? '并提交' : ''}`,
       }
     : null;
 }
 
-function typeInputSummary(input: unknown): ToolOperationSummary | null {
+function waitInputSummary(input: unknown): OperationSummary | null {
   const record = readJsonRecord(input);
-  const selector = readString(record, 'selector');
-  const ref = readString(record, 'ref');
-  const text = readString(record, 'text');
-  const submit = readBoolean(record, 'submit');
-  const target = ref ?? selector;
-  return target
-    ? {
-        target,
-        summary: `输入到 ${target}`,
-        details: operationDetails({
-          selector,
-          ...(ref ? { ref } : {}),
-          submit,
-          textLength: text?.length,
-        }),
-      }
-    : null;
-}
-
-function waitInputSummary(input: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(input);
-  const selector = readString(record, 'selector');
-  const ref = readString(record, 'ref');
+  const target = elementTarget(record);
   const timeoutMs = readNumber(record, 'timeoutMs');
-  const target = ref ?? selector;
   return {
     target,
-    summary: target ? `等待 ${target}` : '等待页面',
-    details: operationDetails({
-      selector,
-      ...(ref ? { ref } : {}),
-      timeoutMs,
-    }),
+    summary: `${target ? `等待 ${target}` : '等待页面'}${timeoutMs === undefined ? '' : `（最多 ${timeoutMs}ms）`}`,
   };
 }
 
-function scrollInputSummary(input: unknown): ToolOperationSummary | null {
+function scrollInputSummary(input: unknown): OperationSummary | null {
   const record = readJsonRecord(input);
-  const selector = readString(record, 'selector');
-  const ref = readString(record, 'ref');
-  const deltaX = readNumber(record, 'deltaX');
-  const deltaY = readNumber(record, 'deltaY');
-  const target = ref ?? selector;
   return {
-    target,
-    summary: `滚动页面 ${deltaY ?? 600}px`,
-    details: operationDetails({ selector, ref, deltaX, deltaY }),
+    target: elementTarget(record),
+    summary: `滚动页面 ${readNumber(record, 'deltaY') ?? 600}px`,
   };
+}
+
+function browserExtractInputSummary(input: unknown): OperationSummary | null {
+  const selector = readString(readJsonRecord(input), 'selector');
+  return { target: selector, summary: selector ? `提取 ${selector}` : '提取页面文本' };
 }
 
 export const browserOperationMetadata: Record<string, ToolOperationMetadata> = {
   browser_open: {
     title: '打开网页',
-    summarizeInput: browserOpenInputSummary,
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
+    summarize: browserOpenInputSummary,
   },
   browser_snapshot: {
     title: '查看页面',
-    summarizeInput: () => ({ summary: '查看当前页面' }),
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
+    summarize: () => ({ summary: '查看当前页面' }),
   },
   browser_click: {
     title: '点击页面',
-    summarizeInput: (input) => selectorInputSummary('点击', input),
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
+    summarize: (input) => selectorInputSummary('点击', input),
   },
   browser_type: {
     title: '输入文本',
-    summarizeInput: typeInputSummary,
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
+    summarize: typeInputSummary,
   },
   browser_scroll: {
     title: '滚动页面',
-    summarizeInput: scrollInputSummary,
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
+    summarize: scrollInputSummary,
   },
   browser_wait: {
     title: '等待页面',
-    summarizeInput: waitInputSummary,
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
+    summarize: waitInputSummary,
   },
   browser_extract: {
     title: '提取页面文本',
-    summarizeInput: browserExtractInputSummary,
-    summarizeOutput: browserExtractOutputSummary,
-    summarizeError: browserErrorSummary,
+    summarize: browserExtractInputSummary,
   },
   browser_screenshot: {
     title: '截取页面',
-    summarizeInput: () => ({ summary: '截取当前浏览器视口' }),
-    summarizeOutput: rawStringOutputSummary,
-    summarizeError: browserErrorSummary,
+    summarize: () => ({ summary: '截取当前浏览器视口' }),
   },
   browser_close: {
     title: '关闭浏览器',
-    summarizeInput: () => ({ summary: '关闭当前浏览器会话' }),
-    summarizeOutput: rawStringOutputSummary,
-    summarizeError: browserErrorSummary,
+    summarize: () => ({ summary: '关闭当前浏览器会话' }),
   },
 };

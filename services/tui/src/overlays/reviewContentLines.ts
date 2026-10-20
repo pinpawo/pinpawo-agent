@@ -1,4 +1,9 @@
-import type { ReviewView } from '@pinpawo/agent-session';
+import {
+  isKnownOperationBlock,
+  operationBlockToText,
+  type ReceivedOperationBlock,
+  type ReviewView,
+} from '@pinpawo/agent-session';
 import { truncateTerminalLine, wrapTerminalText } from '../text/terminalText';
 
 /**
@@ -22,10 +27,9 @@ export type ReviewContentLine = {
  * lines. The view's `title` is not part of the content: the approval dialog
  * shows it as a fixed heading that stays put while the content pages.
  *
- * Every variant declared by the review contract gets a real rendering here:
  * `plain` wraps verbatim, `markdown` gets lightweight structural emphasis, and
- * `diff` is parsed into +/- tinted hunks. Toolkits pick the variant; the TUI
- * never inspects tool names to decide how to display a review.
+ * `operation` lays out a toolkit's summary block by block. The TUI never
+ * inspects tool names to decide how to display a review.
  */
 export function buildReviewContentLines(
   view: ReviewView,
@@ -42,9 +46,6 @@ function renderView(
   width: number,
   maxCharacters: number,
 ): ReviewContentLine[] {
-  if (view.kind === 'diff') {
-    return renderDiffView(view, width, maxCharacters);
-  }
   if (view.kind === 'operation') {
     return renderOperationView(view, width, maxCharacters);
   }
@@ -54,51 +55,60 @@ function renderView(
     : wrapTone(body, width, 'default');
 }
 
-function renderDiffView(
-  view: Extract<ReviewView, { kind: 'diff' }>,
-  width: number,
-  maxCharacters: number,
-): ReviewContentLine[] {
-  const meta = [
-    ...(view.summary ? wrapTone(view.summary, width, 'default') : []),
-    ...(view.target
-      ? [line(truncateTerminalLine(`Target: ${view.target}`, width), 'muted')]
-      : []),
-  ];
-  const patch = clampCharacters(view.patch, maxCharacters);
-  const patchLines = renderPatchLines(patch, width);
-  return meta.length > 0 && patchLines.length > 0
-    ? [...meta, line('', 'default'), ...patchLines]
-    : [...meta, ...patchLines];
-}
-
 /**
  * Lays out a toolkit's operation summary: the summary itself (a shell command,
- * a commit message) reads as the main content, verbatim; the target and the
- * structured details follow in muted text.
+ * a commit message) reads as the main content, verbatim, with the target in
+ * muted text right below it; each block follows after a blank line.
  */
 function renderOperationView(
   view: Extract<ReviewView, { kind: 'operation' }>,
   width: number,
   maxCharacters: number,
 ): ReviewContentLine[] {
-  const summary = view.summary
-    ? wrapTone(clampCharacters(view.summary, maxCharacters), width, 'default')
-    : [];
-  const target = view.target
-    ? wrapTone(`Target: ${view.target}`, width, 'muted')
-    : [];
-  const details = view.details
-    ? wrapTone(
-        clampCharacters(JSON.stringify(view.details, null, 2), maxCharacters),
-        width,
-        'muted',
-      )
-    : [];
-  const meta = [...target, ...details];
-  return summary.length > 0 && meta.length > 0
-    ? [...summary, line('', 'default'), ...meta]
-    : [...summary, ...meta];
+  const sections = [
+    [
+      ...(view.summary ? wrapTone(clampCharacters(view.summary, maxCharacters), width, 'default') : []),
+      ...(view.target ? wrapTone(`Target: ${view.target}`, width, 'muted') : []),
+    ],
+    ...(view.blocks ?? []).map((block) => renderOperationBlock(block, view.target, width, maxCharacters)),
+  ].filter((section) => section.length > 0);
+  return sections.flatMap((section, index) => (
+    index === 0 ? section : [line('', 'default'), ...section]
+  ));
+}
+
+/**
+ * Native rendering for the kinds the TUI knows; any other kind (one from a
+ * newer Host) falls back to the shared default text.
+ */
+function renderOperationBlock(
+  block: ReceivedOperationBlock,
+  target: string | undefined,
+  width: number,
+  maxCharacters: number,
+): ReviewContentLine[] {
+  const fallback = () => wrapTone(clampCharacters(operationBlockToText(block), maxCharacters), width, 'default');
+  if (!isKnownOperationBlock(block)) return fallback();
+  const text = clampCharacters(block.text, maxCharacters);
+  const truncated = block.truncated ? [line('…（内容已截断）', 'muted')] : [];
+  switch (block.kind) {
+    case 'diff':
+      return [
+        ...(block.path && block.path !== target ? [line(truncateTerminalLine(block.path, width), 'heading')] : []),
+        ...renderPatchLines(text, width),
+        ...truncated,
+      ];
+    case 'code':
+      return [...wrapTone(text, width, 'default'), ...truncated];
+    case 'text':
+      return [
+        ...(block.label ? [line(truncateTerminalLine(block.label, width), 'heading')] : []),
+        ...wrapTone(text, width, 'default'),
+        ...truncated,
+      ];
+    default:
+      return fallback();
+  }
 }
 
 /**

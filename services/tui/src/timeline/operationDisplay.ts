@@ -1,5 +1,5 @@
 import stringWidth from 'string-width';
-import type { AgentOperationEntry } from '@pinpawo/agent-session';
+import { isKnownOperationBlock, operationBlockToText, type AgentOperationEntry } from '@pinpawo/agent-session';
 import { truncateTerminalLine } from '../text/terminalText';
 
 export type OperationDisplayTone = 'default' | 'muted' | 'added' | 'removed';
@@ -11,14 +11,6 @@ export type OperationDisplayLine = {
 
 export const OPERATION_OUTPUT_MAX_LINES = 6;
 const OPERATION_PATCH_MAX_LINES = 24;
-const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
-  'after',
-  'afterPreview',
-  'before',
-  'files',
-  'patch',
-]);
-
 function asRecord(value: unknown) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -89,7 +81,7 @@ export function buildOperationDetailText(entry: AgentOperationEntry) {
   const sections = [buildOperationHeaderText(operationBody(entry), entry, 0, Infinity)];
   for (const [label, value] of [
     ['输入', entry.raw?.input],
-    ['详情', entry.details],
+    ['详情', entry.blocks?.map(operationBlockToText).join('\n\n')],
     ['输出', entry.raw?.output],
     ['错误', entry.raw?.error],
   ] as const) {
@@ -121,32 +113,16 @@ function buildAuthorizationDisplayLines(
   headerWidth: number,
 ): OperationDisplayLine[] | null {
   if (entry.kind !== 'runtime.authorization') return null;
-  if (entry.phase === 'completed') {
-    return [{ text: buildOperationHeaderText(entry.title, entry, now, headerWidth), tone: 'muted' }];
-  }
-  const toolLabels = readDetailStrings(entry.details?.toolLabels);
-  const reason = readDetailText(entry.details?.reason);
-  return [{
-    text: buildOperationHeaderText(entry.title, entry, now, headerWidth),
-  }, ...(toolLabels.length > 0 ? [{
-    text: sanitizeLine(`  涉及工具：${toolLabels.join(' · ')}`, width),
+  const header = buildOperationHeaderText(entry.title, entry, now, headerWidth);
+  if (entry.phase === 'completed') return [{ text: header, tone: 'muted' }];
+  // An authorization that did not go through keeps its tools and reason visible.
+  return [{ text: header }, ...(entry.summary ? [{
+    text: sanitizeLine(`  涉及工具：${entry.summary}`, width),
     tone: 'muted' as const,
-  }] : []), ...(reason ? [{
-    text: sanitizeLine(`  原因：${reason}`, width),
+  }] : []), ...(entry.blocks ?? []).map((block) => ({
+    text: sanitizeLine(`  ${operationBlockToText(block).replace(/\s+/g, ' ')}`, width),
     tone: 'muted' as const,
-  }] : [])];
-}
-
-function readDetailStrings(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    const text = readDetailText(item);
-    return text ? [text] : [];
-  });
-}
-
-function readDetailText(value: unknown) {
-  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : null;
+  }))];
 }
 
 function operationStatus(entry: AgentOperationEntry, now: number) {
@@ -183,32 +159,21 @@ function operationToolLabel(entry: AgentOperationEntry) {
 
 function operationArgument(entry: AgentOperationEntry) {
   const label = operationToolLabel(entry);
-  const detailText = formatDetails(entry.details);
   return joinUniqueParts([
     entry.target,
     entry.summary,
-    detailText,
   ].filter((part) => part?.trim() !== label));
-}
-
-function formatDetails(details: AgentOperationEntry['details']) {
-  if (!details) return '';
-  return Object.entries(details)
-    .flatMap(([key, value]) => {
-      if (OPERATION_PAYLOAD_DETAIL_KEYS.has(key)) return [];
-      if (value === undefined || value === null || value === '') return [];
-      return [`${key}=${String(value)}`];
-    })
-    .join(' · ');
 }
 
 function buildOperationPayloadLines(
   entry: AgentOperationEntry,
   width: number,
 ): OperationDisplayLine[] {
-  if (!isApplyPatchOperation(entry)) return [];
-  const patch = readApplyPatchPayload(entry);
-  return patch ? buildPatchLines(patch, entry.target, width) : [];
+  // Diffs are shown inline: they are what the step changed. Other blocks stay
+  // in the transcript detail, keeping the timeline one line per step.
+  return (entry.blocks ?? []).flatMap((block) => (
+    isKnownOperationBlock(block) && block.kind === 'diff' ? buildPatchLines(block.text, block.path ?? entry.target, width, block.truncated === true) : []
+  ));
 }
 
 function buildOperationOutputLines(
@@ -263,6 +228,7 @@ function buildPatchLines(
   patch: string,
   target: string | undefined,
   width: number,
+  truncated = false,
 ) {
   const label = target ? `patch ${target}` : 'patch';
   const lines: OperationDisplayLine[] = [{
@@ -285,7 +251,11 @@ function buildPatchLines(
       }];
     })];
 
-  if (lines.length <= OPERATION_PATCH_MAX_LINES) return lines;
+  // The truncation marker sits outside the line budget so hiding lines never hides it.
+  const marker: OperationDisplayLine[] = truncated
+    ? [{ text: sanitizeLine('  …（内容已截断）', width), tone: 'muted' }]
+    : [];
+  if (lines.length <= OPERATION_PATCH_MAX_LINES) return [...lines, ...marker];
   const visible = lines.slice(0, OPERATION_PATCH_MAX_LINES - 1);
   visible.push({
     text: sanitizeLine(
@@ -294,41 +264,13 @@ function buildPatchLines(
     ),
     tone: 'muted',
   });
-  return visible;
+  return [...visible, ...marker];
 }
 
 function patchLineTone(line: string): OperationDisplayTone {
   if (line.startsWith('+')) return 'added';
   if (line.startsWith('-')) return 'removed';
   return 'muted';
-}
-
-function isApplyPatchOperation(entry: AgentOperationEntry) {
-  return entry.operationSource?.toolName === 'apply_patch'
-    || entry.operationSource?.name === 'apply_patch'
-    || entry.kind.endsWith('.apply_patch')
-    || entry.kind === 'apply_patch';
-}
-
-function readApplyPatchPayload(entry: AgentOperationEntry) {
-  const input = entry.raw?.input;
-  if (input && typeof input === 'object' && 'patch' in input) {
-    const patch = (input as { patch?: unknown }).patch;
-    if (typeof patch === 'string') return patch;
-  }
-  if (typeof input === 'string') {
-    try {
-      const parsed = JSON.parse(input) as unknown;
-      if (parsed && typeof parsed === 'object' && 'patch' in parsed) {
-        const patch = (parsed as { patch?: unknown }).patch;
-        if (typeof patch === 'string') return patch;
-      }
-    } catch {
-      if (input.includes('*** Begin Patch')) return input;
-    }
-  }
-  const detailPatch = entry.details?.patch;
-  return typeof detailPatch === 'string' ? detailPatch : undefined;
 }
 
 function stringifyOutput(value: unknown): string {

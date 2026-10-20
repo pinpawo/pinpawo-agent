@@ -5,7 +5,6 @@ import { tool } from '@langchain/core/tools';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import {
-  okOutputPathSummary,
   readRecord,
   readString,
 } from '../operationMetadata';
@@ -235,26 +234,22 @@ export const downloadFileTool = tool(
 export const networkOperationMetadata: Record<string, ToolOperationMetadata> = {
   http_fetch: {
     title: '请求网页',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'url'),
-        details: {
-          method: readHttpMethod(record),
-          hasSensitiveHeaders: hasSensitiveHeaders(record?.headers),
-        },
+        summary: `${readHttpMethod(record)}${hasSensitiveHeaders(record?.headers) ? '（含认证请求头）' : ''}`,
       };
     },
   },
   download_file: {
     title: '下载文件',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'url'),
-        summary: readString(record, 'filename'),
+        summary: readString(record, 'filename') ? `保存为 ${readString(record, 'filename')}` : undefined,
       };
     },
-    summarizeOutput: (output) => okOutputPathSummary(output),
   },
 };

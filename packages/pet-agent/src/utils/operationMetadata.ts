@@ -6,22 +6,6 @@
  *  - This file owns schema-safe readers and common capability-host summaries.
  *  - Tool kind values are still defined by each toolkit/capability provider.
  */
-import type { JsonObject, JsonValue } from '@pinpawo/agent-contracts';
-import type { ToolOperationSummary } from '../types/toolkit';
-
-/**
- * Builds operation `details` from fields that may be absent. Details cross the
- * JSON boundary to clients, so absent fields are omitted rather than carried
- * as `undefined`.
- */
-export function operationDetails(fields: Record<string, JsonValue | undefined>): JsonObject {
-  const details: JsonObject = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) details[key] = value;
-  }
-  return details;
-}
-
 export function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -57,47 +41,4 @@ export function readJsonRecord(value: unknown): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-export function readToolArtifactRecord(output: unknown): Record<string, unknown> | null {
-  if (Array.isArray(output)) {
-    return readRecord(output[1]) ?? readJsonRecord(output[0]);
-  }
-  const record = readRecord(output);
-  if (record && 'artifact' in record) {
-    return readRecord(record.artifact) ?? readJsonRecord(record.artifact);
-  }
-  return readJsonRecord(output);
-}
-
-export function resultStatusSummary(
-  output: unknown,
-  labels: Record<string, string>,
-): ToolOperationSummary | null {
-  const record = readToolArtifactRecord(output);
-  if (!record) return null;
-  const status = readString(record, 'status');
-  const postId = readString(record, 'postId');
-  const capabilityId = readString(record, 'capabilityId');
-  const rootDir = readString(record, 'rootDir');
-  const note = readString(record, 'note');
-  const reason = readString(record, 'reason');
-  const warnings = Array.isArray(record.warnings) ? record.warnings : [];
-  const files = Array.isArray(record.files) ? record.files : [];
-  return status || postId || capabilityId || rootDir || note || reason
-    ? {
-        target: postId ?? rootDir ?? capabilityId,
-        summary: status ? labels[status] ?? status : note,
-        details: operationDetails({
-          status,
-          postId,
-          capabilityId,
-          rootDir,
-          reason,
-          warningCount: warnings.length,
-          fileCount: files.length,
-          imageRequested: readBoolean(record, 'imageRequested'),
-        }),
-      }
-    : null;
 }

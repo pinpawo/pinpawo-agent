@@ -1,6 +1,7 @@
 import type { AutoReviewAction } from '../types';
 import type { StructuredOutputMethod } from '../../utils/structuredOutput';
 import { reviewViewToText } from '../../types/reviewSpec';
+import { summarizeToolOperation } from '../../utils/operationSummary';
 import { promptBlock, xmlTextBlock } from '../../prompts/xml';
 import {
   AUTO_REVIEW_INPUT_PROMPT,
@@ -20,14 +21,6 @@ function clipText(value: string, limit: number) {
     : `${value.slice(0, limit)}\n[truncated ${value.length - limit} chars]`;
 }
 
-function readOperationSummary(item: AutoReviewAction) {
-  try {
-    return item.operation?.summarizeInput?.(item.input) ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /** Preserve executable inputs in full; never authorize a clipped command or hidden payload. */
 function formatAutoReviewItems(items: AutoReviewAction[]) {
   if (items.length > MAX_REVIEW_ACTIONS) return { text: '', complete: false };
@@ -40,7 +33,7 @@ function formatAutoReviewItems(items: AutoReviewAction[]) {
       return { text: '', complete: false };
     }
     if (input === undefined) return { text: '', complete: false };
-    const summary = readOperationSummary(item);
+    const summary = summarizeToolOperation(item.operation, item.input);
     actions.push([
       `Action ${index + 1}: ${item.toolkitName}.${item.toolName}`,
       item.authorization ? `Candidate authorization (not a grant): ${JSON.stringify(item.authorization)}` : null,

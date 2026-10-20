@@ -130,15 +130,15 @@ test('ToolOperationTracker can recover from update-before-start events', () => {
   assert.deepEqual(tracker.finishActive('interrupted'), []);
 });
 
-test('terminal events inherit target/details from the start event when the tool only summarizes input', () => {
-  // view_file_chunk-style: only summarizeInput sets target; on_tool_end has nothing.
+test('terminal events inherit the start event summary', () => {
+  // Only the start event carries the arguments; on_tool_end has nothing to summarize.
   const tracker = new ToolOperationTracker('req-1', createOperationRegistry({
     view_file_chunk: {
       title: '看片段',
       source: { provider: 'toolkit', name: 'bash', toolName: 'view_file_chunk' },
-      summarizeInput: (input) => {
+      summarize: (input) => {
         const path = (input as { path?: string } | undefined)?.path;
-        return path ? { target: path, details: { startLine: 1, endLine: 50 } } : null;
+        return path ? { target: path, blocks: [{ kind: 'text', text: '第 1-50 行' }] } : null;
       },
     },
   }));
@@ -159,36 +159,31 @@ test('terminal events inherit target/details from the start event when the tool 
   });
 
   assert.equal(completed.operation.target, 'README.md');
-  assert.deepEqual(completed.operation.details, { startLine: 1, endLine: 50 });
+  assert.deepEqual(completed.operation.blocks, [{ kind: 'text', text: '第 1-50 行' }]);
 });
 
-test('terminal events keep their own summary fields over inherited ones', () => {
+
+test('the first event with valid input fixes the summary for the call', () => {
   const tracker = new ToolOperationTracker('req-1', createOperationRegistry({
-    browser_open: {
-      title: '打开网页',
-      source: { provider: 'toolkit', name: 'browser', toolName: 'browser_open' },
-      summarizeInput: (input) => {
-        const url = (input as { url?: string } | undefined)?.url;
-        return url ? { target: url, summary: '打开网页' } : null;
+    view_file_chunk: {
+      title: '看片段',
+      source: { provider: 'toolkit', name: 'bash', toolName: 'view_file_chunk' },
+      summarize: (input) => {
+        const path = (input as { path?: string } | undefined)?.path;
+        return path ? { target: path } : null;
       },
-      summarizeOutput: () => ({ summary: '页面：Example' }),
     },
   }));
+  const identity = { name: 'view_file_chunk', toolCallId: 'call-1' };
 
-  tracker.accept({
-    event: 'on_tool_start',
-    name: 'browser_open',
-    toolCallId: 'call-1',
-    input: { url: 'https://example.com' },
-  });
-  const completed = tracker.accept({
-    event: 'on_tool_end',
-    name: 'browser_open',
-    toolCallId: 'call-1',
-    output: '{}',
-  });
+  // A start event without arguments must not pin an empty summary.
+  const started = tracker.accept({ ...identity, event: 'on_tool_start' });
+  assert.equal(started.operation.target, undefined);
 
-  // target inherited from start, summary kept from the terminal payload.
-  assert.equal(completed.operation.target, 'https://example.com');
-  assert.equal(completed.operation.summary, '页面：Example');
+  const updated = tracker.accept({ ...identity, event: 'on_tool_event', input: { path: 'a.md' } });
+  assert.equal(updated.operation.target, 'a.md');
+
+  // Later input does not replace the summary already shown for this call.
+  const completed = tracker.accept({ ...identity, event: 'on_tool_end', input: { path: 'b.md' }, output: 'ok' });
+  assert.equal(completed.operation.target, 'a.md');
 });

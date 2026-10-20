@@ -134,17 +134,13 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         tool: guardedTool,
         operation: {
           title: GUARDED_HOST_REVIEW_TITLE,
-          summarizeInput: (input) => {
+          summarize: (input) => {
             const args = readInputRecord(input);
             return {
               target: typeof args?.path === 'string' ? args.path : undefined,
               summary: 'Write a guarded fixture after human approval.',
             };
           },
-          summarizeOutput: () => ({
-            target: GUARDED_HOST_OUTPUT_NAME,
-            summary: GUARDED_HOST_TOOL_OUTPUT,
-          }),
         },
         review: ReviewPolicies.required(),
       },
@@ -152,7 +148,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         tool: attachmentTool,
         operation: {
           title: ATTACHMENT_REVIEW_TITLE,
-          summarizeInput: (input) => {
+          summarize: (input) => {
             const args = readInputRecord(input);
             return {
               target: typeof args?.path === 'string'
@@ -161,10 +157,6 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
               summary: 'Read the selected local attachment.',
             };
           },
-          summarizeOutput: () => ({
-            target: ATTACHMENT_FILE_NAME,
-            summary: ATTACHMENT_TOOL_OUTPUT,
-          }),
         },
         review: ReviewPolicies.never(),
       },

@@ -10,6 +10,16 @@ import type {
 export type {
   HumanReviewRequest,
   HumanReviewResponse,
+  OperationBlock,
+  OperationSummary,
+  ReceivedOperationBlock,
+  ReceivedOperationSummary,
+} from '@pinpawo/agent-contracts';
+/** The default rendering clients fall back to for block kinds they do not render. */
+export {
+  isKnownOperationBlock,
+  operationBlockToText,
+  operationSummaryToText,
 } from '@pinpawo/agent-contracts';
 
 export type ReviewSpec = HumanReviewRequest;

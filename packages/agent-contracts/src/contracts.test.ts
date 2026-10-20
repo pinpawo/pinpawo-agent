@@ -47,7 +47,7 @@ test('human review boundary excludes runtime decisions and effects', () => {
       title: '执行命令',
       summary: 'npm test',
       target: '/repo',
-      details: { level: 'write', paths: ['a.ts'] },
+      blocks: [{ kind: 'code', text: 'npm test', language: 'shell' }],
     },
   } as const;
   assert.deepEqual(parseHumanReviewRequest(operation), operation);
@@ -57,7 +57,7 @@ test('human review boundary excludes runtime decisions and effects', () => {
   }), null);
   assert.equal(parseHumanReviewRequest({
     ...operation,
-    view: { ...operation.view, details: { run: () => undefined } },
+    view: { ...operation.view, blocks: [{ kind: 'code', text: 'npm test', run: () => undefined }] },
   }), null);
   assert.equal(parseHumanReviewRequest({
     ...request,

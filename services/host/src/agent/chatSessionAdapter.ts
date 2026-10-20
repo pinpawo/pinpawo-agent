@@ -168,14 +168,7 @@ function projectGlobalPolicyAuthorization(
       kind: 'runtime.authorization',
       title: batchSize > 1 ? `${label} · ${batchSize} 项操作` : label,
       ...(toolLabels.length > 0 ? { summary: toolLabels.join(' · ') } : {}),
-      ...((toolLabels.length > 0 || reason)
-        ? {
-            details: {
-              ...(toolLabels.length > 0 ? { toolLabels } : {}),
-              ...(reason ? { reason } : {}),
-            },
-          }
-        : {}),
+      ...(reason ? { blocks: [{ kind: 'text' as const, label: '原因', text: reason }] } : {}),
       source: {
         provider: 'runtime',
         name: 'global_review_policy',

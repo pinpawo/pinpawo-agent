@@ -820,7 +820,7 @@ function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   };
   return {
     ...entry,
-    ...(entry.details ? { details: { ...entry.details } } : {}),
+    ...(entry.blocks ? { blocks: entry.blocks.map((block) => ({ ...block })) } : {}),
     ...(entry.operationSource ? { operationSource: { ...entry.operationSource } } : {}),
     ...(entry.raw ? { raw: { ...entry.raw } } : {}),
   };

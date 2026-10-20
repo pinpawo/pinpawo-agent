@@ -122,13 +122,13 @@ export function createProcessTools(shell: ShellRS): StructuredTool[] {
 export const processOperationMetadata: Record<string, ToolOperationMetadata> = {
   [WAIT_PROCESS_TOOL_NAME]: {
     title: '等待进程',
-    summarizeInput: (input) => ({
+    summarize: (input) => ({
       target: readString(readRecord(input), 'processId'),
     }),
   },
   [TERMINATE_PROCESS_TOOL_NAME]: {
     title: '终止进程',
-    summarizeInput: (input) => ({
+    summarize: (input) => ({
       target: readString(readRecord(input), 'processId'),
     }),
   },

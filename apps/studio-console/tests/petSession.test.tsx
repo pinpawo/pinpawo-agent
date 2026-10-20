@@ -36,7 +36,7 @@ const review: HumanReviewPendingInterruptProjection = {
         ],
       },
       {
-        interactionId: 'second', schemaVersion: 2, view: { kind: 'diff', patch: '+added\n-removed', target: 'b.txt' },
+        interactionId: 'second', schemaVersion: 2, view: { kind: 'operation', target: 'b.txt', blocks: [{ kind: 'diff', text: '+added\n-removed' }] },
         options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
       },
     ],

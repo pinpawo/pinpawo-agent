@@ -236,25 +236,21 @@ test('operation lines reserve space for the timeline status prefix', () => {
   assert.match(lines[0] ?? '', /（完成）$/);
 });
 
-test('timeline formatting exposes apply_patch details without wrapper markers', () => {
+test('timeline formatting exposes diff blocks without wrapper markers', () => {
   assert.equal(
     formatTimelineEntry({
       ...operation,
       kind: 'apply_patch',
       title: 'apply_patch',
       phase: 'completed',
-      raw: {
-        input: {
-          patch: [
+      blocks: [{ kind: 'diff', format: 'unified', text: [
             '*** Begin Patch',
             '*** Update File: src/example.ts',
             '@@',
             '-old',
             '+new',
             '*** End Patch',
-          ].join('\n'),
-        },
-      },
+          ].join('\n') }],
     }),
     [
       '  ✓ apply_patch（完成）',

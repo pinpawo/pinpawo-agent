@@ -1,8 +1,7 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import type { JsonValue } from '@pinpawo/agent-contracts';
-import { operationDetails, type ToolOperationMetadata } from '@pinpawo/pet-agent';
+import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { atomicWriteFile } from '../../atomicFile';
 import { tryStat } from './fileSystemUtils';
@@ -15,10 +14,8 @@ import {
   type PatchChunk,
 } from './applyPatch';
 import {
-  okOutputPathSummary,
   pathInputSummary,
   readBoolean,
-  readJsonRecord,
   readNumber,
   readRecord,
   readString,
@@ -47,27 +44,10 @@ function formatStat(path: string) {
   });
 }
 
-const MAX_FILE_DIFF_PREVIEW_CHARS = 6_000;
 const TEXT_FILE_SAMPLE_BYTES = 8_192;
 export const VIEW_FILE_CHUNK_MAX_BYTES = 50_000;
 // Covers the controlled footer and the blank-line separator before it.
 const VIEW_FILE_CHUNK_FOOTER_RESERVE_BYTES = 1_000;
-
-function truncateForOperationDetails(content: string) {
-  if (content.length <= MAX_FILE_DIFF_PREVIEW_CHARS) {
-    return content;
-  }
-  return `${content.slice(0, MAX_FILE_DIFF_PREVIEW_CHARS)}\n[truncated ${(content.length - MAX_FILE_DIFF_PREVIEW_CHARS).toString()} chars]`;
-}
-
-
-function readFileContentPreview(filePath: string) {
-  try {
-    return truncateForOperationDetails(readFileSync(filePath, 'utf-8'));
-  } catch {
-    return undefined;
-  }
-}
 
 function readFileSample(filePath: string) {
   const fd = openSync(filePath, 'r');
@@ -256,18 +236,6 @@ export function readTextFileChunk(input: {
   endLine?: number;
 }) {
   return formatTextFileChunkResult(readTextFileChunkResult(input));
-}
-
-function mergeOperationOutputSummary(
-  target: string | undefined,
-  details?: Record<string, JsonValue | undefined>,
-) {
-  if (!target) return null;
-  const after = readFileContentPreview(target);
-  return {
-    target,
-    ...(details ? { details: operationDetails({ ...details, after }) } : {}),
-  } satisfies ReturnType<typeof okOutputPathSummary> | null;
 }
 
 function resolveMoveTarget(sourcePath: string, destinationPath: string) {
@@ -803,116 +771,85 @@ export const listDirTool = tool(
   },
 );
 
+function lineRangeText(startLine: number | undefined, endLine: number | undefined) {
+  if (startLine === undefined && endLine === undefined) return undefined;
+  return `第 ${startLine ?? 1}-${endLine ?? '末'} 行`;
+}
+
 export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
   read_file: {
     title: '析文档',
-    summarizeInput: pathInputSummary,
+    summarize: pathInputSummary,
   },
   view_file_chunk: {
     title: '看片段',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'path');
-      const startLine = readNumber(record, 'startLine');
-      const endLine = readNumber(record, 'endLine');
-      return target ? { target, details: operationDetails({ startLine, endLine }) } : null;
+      return target
+        ? { target, summary: lineRangeText(readNumber(record, 'startLine'), readNumber(record, 'endLine')) }
+        : null;
     },
   },
   stat_path: {
     title: '看属性',
-    summarizeInput: pathInputSummary,
+    summarize: pathInputSummary,
   },
   write_file: {
     title: '写文件',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'path');
       const content = readString(record, 'content');
       if (!target) return null;
       return {
         target,
-        summary: readBoolean(record, 'append') ? 'append' : 'write',
-        details: operationDetails({
-          append: readBoolean(record, 'append') ?? false,
-          createDirs: readBoolean(record, 'createDirs') ?? true,
-          before: isAbsolute(target) ? readFileContentPreview(target) : undefined,
-          afterPreview: content === undefined ? undefined : truncateForOperationDetails(content),
-        }),
+        summary: readBoolean(record, 'append') ? '追加写入' : '覆盖写入',
+        ...(content ? { blocks: [{ kind: 'text', label: '写入内容', text: content }] } : {}),
       };
-    },
-    summarizeOutput: (output) => {
-      const record = readJsonRecord(output);
-      return mergeOperationOutputSummary(
-        readString(record, 'path'),
-        { mode: readString(record, 'mode') },
-      );
     },
   },
   apply_patch: {
     title: '应用补丁',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      const patch = readString(record, 'patch');
+    summarize: (input) => {
+      const patch = readString(readRecord(input), 'patch');
       if (!patch) return null;
-      let file: { path: string } | undefined;
       let target: string | undefined;
       try {
-        const update = parsePatch(patch);
-        file = { path: update.path };
-        target = file.path;
+        target = parsePatch(patch).path;
       } catch {
-        // Unparseable patch still gets a raw preview below.
+        // An unparseable patch is still shown as is.
       }
       return {
         target,
-        summary: file ? 'update' : undefined,
-        details: operationDetails({
-          file,
-          patch: truncateForOperationDetails(patch),
-        }),
-      };
-    },
-    summarizeOutput: (output) => {
-      const record = readJsonRecord(output);
-      const file = record?.file;
-      if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
-      const target = 'path' in file && typeof file.path === 'string' ? file.path : undefined;
-      if (!target) return null;
-      return {
-        target,
-        details: operationDetails({
-          file: { path: target },
-          after: readFileContentPreview(target),
-        }),
+        summary: target ? '修改文件' : '应用补丁',
+        blocks: [{ kind: 'diff', format: 'v4a', text: patch, ...(target ? { path: target } : {}) }],
       };
     },
   },
   validate_structured_file: {
     title: '验证结构',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'path');
-      return target ? { target, details: operationDetails({ schema: readString(record, 'schema') }) } : null;
+      const schema = readString(record, 'schema');
+      return target ? { target, ...(schema ? { summary: `按 ${schema} 校验` } : {}) } : null;
     },
-    summarizeOutput: (output) => okOutputPathSummary(output),
   },
   move_path: {
     title: '移动文件',
-    summarizeInput: sourceDestinationInputSummary,
-    summarizeOutput: (output) => okOutputPathSummary(output, 'destination'),
+    summarize: sourceDestinationInputSummary,
   },
   copy_path: {
     title: '复制文件',
-    summarizeInput: sourceDestinationInputSummary,
-    summarizeOutput: (output) => okOutputPathSummary(output, 'destination'),
+    summarize: sourceDestinationInputSummary,
   },
   mkdir_path: {
     title: '建目录',
-    summarizeInput: pathInputSummary,
-    summarizeOutput: (output) => okOutputPathSummary(output),
+    summarize: pathInputSummary,
   },
   list_dir: {
     title: '列目录',
-    summarizeInput: pathInputSummary,
+    summarize: pathInputSummary,
   },
 };

@@ -14,7 +14,7 @@ test('compact operation display uses a target without payload details', () => {
     title: '打开网页',
     target: 'https://example.com',
     summary: '页面：Example Domain',
-    details: { status: 200 },
+    blocks: [{ kind: 'text', text: 'status 200' }],
     operationSource: {
       provider: 'toolkit',
       name: 'browser',
@@ -24,7 +24,7 @@ test('compact operation display uses a target without payload details', () => {
   }), 2_500, 120);
 
   assert.match(lines[0]!.text, /^打开网页 · https:\/\/example.com/);
-  assert.doesNotMatch(lines[0]!.text, /status=200/);
+  assert.doesNotMatch(lines[0]!.text, /status 200/);
   assert.match(lines[0]!.text, /（完成）$/);
   assert.equal(lines.length, 1);
 });
@@ -46,7 +46,8 @@ test('compact shell activity prefers command over cwd without changing canonical
 test('failed authorization keeps its tools and explanation visible', () => {
   const lines = buildOperationDisplayLines(operation({
     kind: 'runtime.authorization', phase: 'failed', title: '授权失败',
-    details: { toolLabels: ['run_shell'], reason: 'Authorization service unavailable' },
+    summary: 'run_shell',
+    blocks: [{ kind: 'text', label: '原因', text: 'Authorization service unavailable' }],
   }), 0, 100);
   assert.ok(lines.some(line => line.text.includes('run_shell')));
   assert.ok(lines.some(line => line.text.includes('Authorization service unavailable')));
@@ -77,22 +78,20 @@ test('operation display bounds output, surfaces errors, and sanitizes controls',
   )));
 });
 
-test('operation display exposes bounded apply_patch lines with tones', () => {
+test('operation display exposes bounded diff blocks with tones', () => {
   const lines = buildOperationDisplayLines(operation({
     phase: 'completed',
     kind: 'local.apply_patch',
     target: 'src/example.ts',
-    raw: {
-      input: {
-        patch: [
+    blocks: [{ kind: 'diff', format: 'unified', text: [
           '*** Begin Patch',
           '*** Update File: src/example.ts',
           '@@',
           '-const value = 1;',
           '+const value = 2;',
           '*** End Patch',
-        ].join('\n'),
-      },
+        ].join('\n') }],
+    raw: {
       output: JSON.stringify({ ok: true, appliedHunks: [1] }),
     },
   }), 3_500, 80);
@@ -108,6 +107,24 @@ test('operation display exposes bounded apply_patch lines with tones', () => {
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
+test('a truncated diff block keeps its marker in the timeline, even past the line budget', () => {
+  for (const count of [3, 200]) {
+    const lines = buildOperationDisplayLines(operation({
+      phase: 'completed',
+      kind: 'local.apply_patch',
+      target: 'src/example.ts',
+      blocks: [{
+        kind: 'diff',
+        format: 'v4a',
+        text: Array.from({ length: count }, (_, index) => `+line ${index}`).join('\n'),
+        truncated: true,
+      }],
+      raw: { output: JSON.stringify({ ok: true }) },
+    }), 0, 80);
+    assert.equal(lines.at(-1)?.text, '  …（内容已截断）', `${count} lines`);
+  }
+});
+
 test('completed tools that return errors still show their diagnostic payload', () => {
   for (const output of ['Error: file not found', JSON.stringify({ status: 'timeout', message: 'Process terminated' }), { ok: false, message: 'Patch failed' }]) {
     const lines = buildOperationDisplayLines(operation({ phase: 'completed', raw: { output } }), 0, 100);
@@ -116,22 +133,20 @@ test('completed tools that return errors still show their diagnostic payload', (
   }
 });
 
-test('operation display exposes raw apply_patch failures after the diff', () => {
+test('operation display exposes raw failures after the diff block', () => {
   const lines = buildOperationDisplayLines(operation({
     phase: 'failed',
     kind: 'local.apply_patch',
     target: 'src/example.ts',
-    raw: {
-      input: {
-        patch: [
+    blocks: [{ kind: 'diff', format: 'unified', text: [
           '*** Begin Patch',
           '*** Update File: src/example.ts',
           '@@',
           '-const value = 1;',
           '+const value = 2;',
           '*** End Patch',
-        ].join('\n'),
-      },
+        ].join('\n') }],
+    raw: {
       output: JSON.stringify({
         ok: false,
         code: 'context_not_found',
@@ -167,10 +182,7 @@ test('operation display renders structured authorization details without raw fie
     title: '自动授权 · 2 项操作',
     phase: 'completed',
     summary: 'shell · which · shell · version',
-    details: {
-      toolLabels: ['shell · which', 'shell · version'],
-      reason: 'Both actions are read-only observations.',
-    },
+    blocks: [{ kind: 'text', label: '原因', text: 'Both actions are read-only observations.' }],
     operationSource: {
       provider: 'runtime',
       name: 'global_review_policy',

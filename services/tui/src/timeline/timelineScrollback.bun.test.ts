@@ -717,7 +717,7 @@ test('quiet operation receipts render tightly with neutral success and visible f
       const entries: AgentTimelineEntry[] = [{
         id: 'auth', type: 'operation', requestId: 'r', operationKey: 'auth',
         kind: 'runtime.authorization', title: '自动授权', phase: 'completed',
-        details: { reason: 'Long explanation stays in the pager' },
+        blocks: [{ kind: 'text', label: '原因', text: 'Long explanation stays in the pager' }],
       }, {
         id: 'shell', type: 'operation', requestId: 'r', operationKey: 'shell',
         kind: 'tool', title: 'run_shell', phase: 'completed',

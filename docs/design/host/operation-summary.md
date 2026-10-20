@@ -1,6 +1,6 @@
 # Tool operation summary 与 block kind
 
-状态：Draft（方向已确认，2026-10-20）。实现分三个 PR 推进，见末尾「落地顺序」。
+状态：实现中（2026-10-20）。进度见末尾「落地顺序」。
 取代 [architecture-refactor.md §6](architecture-refactor.md#6-operation-metadata-草案) 里的
 `summarizeInput/summarizeOutput/summarizeError` 与 `details` 设计。
 
@@ -90,7 +90,7 @@ type ToolOperationMetadata = {
   - 字符串 input 先尝试按 JSON 解析；
   - 捕获 `summarize` 抛出的异常，返回 null；
   - 用 `isOperationSummary` 校验，不合格整体丢弃；
-  - `target`/`summary` 折成单行，只作标题；多行内容（如多行命令）由 toolkit 放进 code block；
+  - `target`/`summary` 折成单行，只作标题。折叠会合并空白和换行，所以命令和 argv 一律由 toolkit 另放一个保留原文的 code block，人工审批看到的就是实际执行的内容；
   - 单个 block 的 `text` 超过单块上限时截断并设 `truncated: true`；所有 block 的 `text`
     合计超过总上限时，超出部分同样截断或丢弃并标记，保证摘要总量有界。
 - **截断只影响展示，不替代审批事实。**
@@ -203,9 +203,11 @@ PR 里附 TUI 审批和时间线的截图。
 
 每步一个 PR，前一个合并后再开下一个：
 
-1. contracts：`OperationSummary`、`OperationBlock`、`isOperationSummary`、`assertNever`、默认文本渲染和测试。
+1. （已合并，#998）contracts：`OperationSummary`、`OperationBlock`、`isOperationSummary`、`assertNever`、默认文本渲染和测试。
 2. pet-agent + 全部 toolkit：`summarize` 和统一入口，Host tracker 按 callId 复用；审批视图改用 OperationSummary；
-   删除 `diff` 审批视图、`summarizeOutput`、`summarizeError`、`details`；
-   时间线事件换成新字段，TUI 和 Console 先全部走默认文本。
-3. 客户端：TUI 和 Console 对 diff 等 kind 做原生渲染；删除 `OPERATION_PAYLOAD_DETAIL_KEYS`、
-   `SHELL_TOOL_LABELS`、`isApplyPatchOperation` 等按字段名或工具名的判断。
+   删除 `diff` 审批视图、`summarizeOutput`、`summarizeError`、`details`；时间线事件换成新字段。
+   原来的 `diff` 审批视图和 apply_patch 时间线补丁有原生着色，为了不倒退，TUI 和 Console 的 `diff` 原生渲染
+   随这一步一起落地，同时删除 `OPERATION_PAYLOAD_DETAIL_KEYS`、`isApplyPatchOperation` 等按字段名或工具名的判断；
+   其余 kind 走默认文本。
+3. 收尾：删除 TUI 的 `SHELL_TOOL_LABELS`。它按工具名给 shell 类调用加标题前缀，删除前要先约定
+   「summary 不重复 target」，避免标题行出现重复信息。

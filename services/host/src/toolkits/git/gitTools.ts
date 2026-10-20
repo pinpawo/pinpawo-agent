@@ -1,6 +1,6 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import type { NamedStructuredTool, ToolOperationMetadata } from '@pinpawo/pet-agent';
-import { createAbortError, operationDetails } from '@pinpawo/pet-agent';
+import { createAbortError } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import {
@@ -294,32 +294,29 @@ export function createGitTools(shell: ShellRS) {
 export const gitOperationMetadata = {
   git_status: {
     title: '查看 git 状态',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
+    summarize: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_diff: {
     title: '查看 git diff',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'cwd'),
-        details: operationDetails({
-          staged: readBoolean(record, 'staged'),
-          stat: readBoolean(record, 'stat'),
-        }),
+        summary: `${readBoolean(record, 'staged') ? '已暂存的改动' : '工作区改动'}${readBoolean(record, 'stat') ? '（仅统计）' : ''}`,
       };
     },
   },
   git_log: {
     title: '查看 git 历史',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
+    summarize: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_branch: {
     title: '查看 git 分支',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
+    summarize: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_show: {
     title: '查看 git 对象',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'revision') ?? readString(record, 'cwd'),
@@ -328,7 +325,7 @@ export const gitOperationMetadata = {
   },
   git_add: {
     title: '暂存 git 文件',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'cwd'),
@@ -340,7 +337,7 @@ export const gitOperationMetadata = {
   },
   git_commit: {
     title: '创建 git commit',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'cwd'),
@@ -350,7 +347,7 @@ export const gitOperationMetadata = {
   },
   git_push: {
     title: '推送 git 分支',
-    summarizeInput: (input) => {
+    summarize: (input) => {
       const record = readRecord(input);
       return {
         target: readString(record, 'remote') ?? 'origin',
@@ -363,7 +360,7 @@ export const gitOperationMetadata = {
   },
   git_shell: {
     title: '执行 git 命令',
-    summarizeInput: (input) => summarizeCliCall('git', input, classifyGitArgs),
+    summarize: (input) => summarizeCliCall('git', input),
   },
 } satisfies Record<
   ReturnType<typeof createGitTools>['gitTools'][number]['name'],

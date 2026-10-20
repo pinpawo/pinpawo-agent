@@ -9,7 +9,6 @@ import { TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS } from '../autoReview/policy';
 export { TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS } from '../autoReview/policy';
 export type {
   ToolkitReviewCapabilities,
-  ToolOperationSummary,
   ToolOperationMetadata,
   ToolReviewContext,
   ToolAuthorizationContext,
@@ -283,18 +282,7 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     }
     if (definition.operation) {
       const owner = `Toolkit "${toolkit.name}" tool "${toolName}" operation`;
-      assertOptionalFunction(
-        `${owner}.summarizeInput`,
-        definition.operation.summarizeInput,
-      );
-      assertOptionalFunction(
-        `${owner}.summarizeOutput`,
-        definition.operation.summarizeOutput,
-      );
-      assertOptionalFunction(
-        `${owner}.summarizeError`,
-        definition.operation.summarizeError,
-      );
+      assertOptionalFunction(`${owner}.summarize`, definition.operation.summarize);
     }
     if (
       definition.review !== undefined

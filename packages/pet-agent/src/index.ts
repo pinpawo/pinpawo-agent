@@ -88,7 +88,6 @@ export type {
   ToolAuthorizationPolicy,
   ToolDefinition,
   ToolOperationMetadata,
-  ToolOperationSummary,
   ToolReviewBlock,
   ToolReviewContext,
   ToolReviewPolicy,
@@ -333,15 +332,18 @@ export type {
   MessageToolCallInfo,
 } from './utils/messages';
 export {
-  operationDetails,
   readBoolean,
   readJsonRecord,
   readNumber,
   readRecord,
   readString,
   readStringArray,
-  resultStatusSummary,
 } from './utils/operationMetadata';
+export {
+  OPERATION_BLOCK_TEXT_LIMIT,
+  summarizeToolOperation,
+} from './utils/operationSummary';
+export type { OperationBlock, OperationSummary } from '@pinpawo/agent-contracts';
 export { runAgent, buildAgentRunnableConfig } from './agent/runAgent';
 export type {
   AgentInvokeInput,

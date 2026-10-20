@@ -108,7 +108,11 @@ Workspace-owned config and runtime state stays under the workspace root:
 The runtime config keeps `.json` checkpoint anchor names, while `FileSaver`
 maps them to extensionless content-addressed directories. The runtime reads only
 the current manifest/object/ref/writes layout and does not scan legacy monolith
-or shard checkpoint files. The `capability-v4` suffix is the explicit checkpoint contract boundary: a
+or shard checkpoint files. Only the latest checkpoint of each thread namespace
+is kept: publishing a new ref removes the older manifests and pending writes of
+that namespace, and Host startup maintenance prunes history left by older
+builds before collecting unreferenced objects. Nothing reads checkpoint history
+(no time travel or state history). The `capability-v4` suffix is the explicit checkpoint contract boundary: a
 contract change (v2: unified `capability:<name>` lanes; v3: required Supervisor
 `runId`; v4: typed delegation execution records) starts a new namespace instead
 of migrating older checkpoints.

@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Checkpoint } from '@langchain/langgraph-checkpoint';
+import { Annotation, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { FileSaver } from './fileSaver';
 
 function createTempDir(t: TestContext) {
@@ -60,13 +61,13 @@ test('FileSaver writes content-addressed checkpoint layout and restores latest t
   const first = await saver.put(config, checkpoint('cp-1', {
     messages: [{ role: 'human', content: 'same channel value' }],
   }), { source: 'loop', step: 1, parents: {} });
+  const cp1Messages = readManifest(root, 'cp-1').channelValueRefs?.messages;
   await saver.put(first, checkpoint('cp-2', {
     messages: [{ role: 'human', content: 'same channel value' }],
   }), { source: 'loop', step: 2, parents: {} });
 
   assert.equal(existsSync(join(root, 'checkpoints', 'objects')), true);
   assert.equal(readFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'refs', '__root__'), 'utf-8'), 'cp-2');
-  const cp1Messages = readManifest(root, 'cp-1').channelValueRefs?.messages;
   const cp2Messages = readManifest(root, 'cp-2').channelValueRefs?.messages;
   assert.equal(cp1Messages?.kind, 'array');
   assert.equal(cp2Messages?.kind, 'array');
@@ -90,11 +91,11 @@ test('FileSaver stores message arrays as per-message objects and shares growing 
   const first = await saver.put(config, checkpoint('cp-1', {
     messages: [firstMessage],
   }), { source: 'loop', step: 1, parents: {} });
+  const cp1Messages = readManifest(root, 'cp-1').channelValueRefs?.messages;
   await saver.put(first, checkpoint('cp-2', {
     messages: [firstMessage, { role: 'ai', content: 'new second message' }],
   }), { source: 'loop', step: 2, parents: {} });
 
-  const cp1Messages = readManifest(root, 'cp-1').channelValueRefs?.messages;
   const cp2Messages = readManifest(root, 'cp-2').channelValueRefs?.messages;
 
   assert.equal(cp1Messages?.kind, 'array');
@@ -419,10 +420,11 @@ test('FileSaver rejects stored checkpoints older than v4', async (t) => {
   );
 });
 
-test('FileSaver lists checkpoint history from manifests', async (t) => {
+test('FileSaver keeps only the latest checkpoint and its writes per namespace', async (t) => {
   const root = createTempDir(t);
   const filePath = join(root, 'checkpoints.json');
   const saver = new FileSaver(filePath);
+  const threadDir = join(root, 'checkpoints', 'threads', 'thread-1');
 
   const config = { configurable: { thread_id: 'thread-1' } };
   const first = await saver.put(config, checkpoint('cp-1', { messages: ['one'] }), {
@@ -430,19 +432,130 @@ test('FileSaver lists checkpoint history from manifests', async (t) => {
     step: 1,
     parents: {},
   });
-  await saver.put(first, checkpoint('cp-2', { messages: ['two'] }), {
+  await saver.putWrites(first, [['messages', 'pending-one']], 'task-1');
+  const subConfig = await saver.put(
+    { configurable: { thread_id: 'thread-1', checkpoint_ns: 'sub' } },
+    checkpoint('sub-1', { messages: ['sub'] }),
+    { source: 'loop', step: 1, parents: {} },
+  );
+  const second = await saver.put(first, checkpoint('cp-2', { messages: ['two'] }), {
     source: 'loop',
     step: 2,
     parents: {},
   });
+  await saver.putWrites(second, [['messages', 'pending-two']], 'task-2');
+
+  assert.deepEqual(readdirSync(join(threadDir, 'manifests', '__root__')), ['cp-2.json']);
+  assert.deepEqual(readdirSync(join(threadDir, 'writes', '__root__')), ['cp-2.json']);
+  assert.deepEqual(readdirSync(join(threadDir, 'manifests', 'sub')), ['sub-1.json']);
 
   const restored = new FileSaver(filePath);
   const ids: string[] = [];
   for await (const tuple of restored.list(config)) {
     ids.push(tuple.checkpoint.id);
   }
+  assert.deepEqual(ids, ['sub-1', 'cp-2']);
+  const latest = await restored.getTuple(config);
+  assert.equal(latest?.checkpoint.id, 'cp-2');
+  assert.deepEqual(latest?.pendingWrites, [['task-2', 'messages', 'pending-two']]);
+  assert.equal(latest?.parentConfig?.configurable?.checkpoint_id, 'cp-1');
+  assert.equal(await restored.getTuple(latest!.parentConfig!), undefined);
+  assert.equal((await restored.getTuple(subConfig))?.checkpoint.id, 'sub-1');
 
-  assert.deepEqual(ids, ['cp-2', 'cp-1']);
+  restored.acquireHostWriterLease('test-host');
+  await restored.runHostStartupMaintenance();
+  restored.releaseHostWriterLease();
+  const objects = new Set<string>();
+  for (const prefix of readdirSync(join(root, 'checkpoints', 'objects'))) {
+    for (const name of readdirSync(join(root, 'checkpoints', 'objects', prefix))) objects.add(`${prefix}${name}`);
+  }
+  const oneHash = createHash('sha256').update(JSON.stringify('one')).digest('hex');
+  const pendingOneHash = createHash('sha256').update(JSON.stringify('pending-one')).digest('hex');
+  assert.equal(objects.has(oneHash), false, 'GC reclaims values only the pruned checkpoint referenced');
+  assert.equal(objects.has(pendingOneHash), false, 'GC reclaims writes of the pruned checkpoint');
+});
+
+test('FileSaver keeps pending writes of a newer checkpoint that is not yet published', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const config = { configurable: { thread_id: 'thread-1' } };
+
+  // Async durability queues puts behind each other but not putWrites, so a
+  // newer checkpoint's writes can land before an older checkpoint publishes.
+  const first = await saver.put(config, checkpoint('cp-1', { messages: ['one'] }), { source: 'loop', step: 1, parents: {} });
+  const thirdConfig = { configurable: { thread_id: 'thread-1', checkpoint_ns: '', checkpoint_id: 'cp-3' } };
+  await saver.putWrites(thirdConfig, [['__interrupt__', [{ value: 'approve' }]]], 'task-3');
+  const second = await saver.put(first, checkpoint('cp-2', { messages: ['two'] }), { source: 'loop', step: 2, parents: {} });
+  await saver.put(second, checkpoint('cp-3', { messages: ['three'] }), { source: 'loop', step: 3, parents: {} });
+
+  const latest = await saver.getTuple(config);
+  assert.equal(latest?.checkpoint.id, 'cp-3');
+  assert.deepEqual(latest?.pendingWrites, [['task-3', '__interrupt__', [{ value: 'approve' }]]]);
+  assert.deepEqual(
+    readdirSync(join(root, 'checkpoints', 'threads', 'thread-1', 'manifests', '__root__')),
+    ['cp-3.json'],
+  );
+});
+
+test('FileSaver keeps a LangGraph interrupt when an earlier put publishes late', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const put = saver.put.bind(saver);
+  let delayed = false;
+  saver.put = async (...args) => {
+    if (!delayed) {
+      delayed = true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return put(...args);
+  };
+
+  const State = Annotation.Root({ value: Annotation<string> });
+  const graph = new StateGraph(State)
+    .addNode('ask', (state) => ({ value: `${state.value}:${String(interrupt('approve'))}` }))
+    .addEdge(START, 'ask')
+    .addEdge('ask', END)
+    .compile({ checkpointer: saver });
+  const config = { configurable: { thread_id: 'graph-thread' } };
+
+  await graph.invoke({ value: 'start' }, config);
+  const state = await graph.getState(config);
+  assert.deepEqual(state.tasks.flatMap((task) => task.interrupts.map((item) => item.value)), ['approve']);
+
+  const restored = new StateGraph(State)
+    .addNode('ask', (state) => ({ value: `${state.value}:${String(interrupt('approve'))}` }))
+    .addEdge(START, 'ask')
+    .addEdge('ask', END)
+    .compile({ checkpointer: new FileSaver(join(root, 'checkpoints.json')) });
+  const restoredState = await restored.getState(config);
+  assert.deepEqual(restoredState.tasks.flatMap((task) => task.interrupts.map((item) => item.value)), ['approve']);
+});
+
+test('FileSaver startup maintenance prunes history written before latest-only retention', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const threadDir = join(root, 'checkpoints', 'threads', 'thread-1');
+  const config = { configurable: { thread_id: 'thread-1' } };
+  const first = await saver.put(config, checkpoint('cp-1', { messages: ['one'] }), {
+    source: 'loop',
+    step: 1,
+    parents: {},
+  });
+  const cp1Manifest = readFileSync(join(threadDir, 'manifests', '__root__', 'cp-1.json'));
+  await saver.put(first, checkpoint('cp-2', { messages: ['two'] }), { source: 'loop', step: 2, parents: {} });
+  // Simulate a pre-retention store: the old manifest and its objects are still there.
+  writeFileSync(join(threadDir, 'manifests', '__root__', 'cp-1.json'), cp1Manifest);
+  writeObject(root, 'one');
+  writeFileSync(join(threadDir, 'refs', '.__root__.123.tmp'), 'cp-1');
+
+  const host = new FileSaver(filePath);
+  host.acquireHostWriterLease('test-host');
+  await host.runHostStartupMaintenance();
+  host.releaseHostWriterLease();
+
+  assert.deepEqual(readdirSync(join(threadDir, 'manifests', '__root__')), ['cp-2.json']);
+  assert.deepEqual((await host.getTuple(config))?.checkpoint.channel_values.messages, ['two']);
 });
 
 test('FileSaver deleteThread removes manifests and garbage collects unreachable objects', async (t) => {

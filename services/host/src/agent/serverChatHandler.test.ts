@@ -67,6 +67,52 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
   assert.equal(isToolProtocolHistoryError(new Error('ordinary model error')), false);
 });
 
+for (const switchFails of [false, true]) {
+  test(`a tool protocol error ${switchFails ? 'that cannot switch' : 'switches to a new session and'} keeps the original session (#680)`, async () => {
+    const sent: unknown[] = [];
+    const created: string[] = [];
+    const handler = new ServerChatHandler({
+      graphService: {} as never,
+      tuiSessions: {
+        getChatThreadId: () => 'thread-x',
+        buildChatSetup: () => ({ graphConfig: {}, input: { messages: [] } }),
+        refreshActiveSessionSummary: async () => undefined,
+        createNewSession: (petId: string) => {
+          if (switchFails) throw new Error('session store unavailable');
+          created.push(petId);
+          return { id: `${petId}:next` };
+        },
+      } as never,
+      inflightRequests: new InflightRequestController({
+        emitOperation: () => undefined,
+        sendControl: () => undefined,
+      }),
+      loadContext: async () => ({} as never),
+      runAgentTurn: async () => {
+        throw new Error("400 An assistant message with 'tool_calls' must be followed by tool messages");
+      },
+    });
+
+    await handler.handleChatRequest(createFakePeer(sent), {
+      type: 'chat_request', requestId: 'request-1', message: 'continue',
+    }, { petId: 'pet-1' } as never);
+
+    const errors = sent.flatMap((item) => {
+      const envelope = item as { type?: string; event?: { type?: string; message?: string } };
+      return envelope.type === 'event' && envelope.event?.type === 'error' ? [envelope.event.message ?? ''] : [];
+    });
+    assert.equal(errors.length, 1);
+    assert.doesNotMatch(errors[0]!, /已重置/);
+    if (switchFails) {
+      assert.deepEqual(created, []);
+      assert.match(errors[0]!, /未能切换到新会话（session store unavailable），仍停留在原会话/);
+    } else {
+      assert.deepEqual(created, ['pet-1']);
+      assert.match(errors[0]!, /原会话保留在会话列表里/);
+    }
+  });
+}
+
 test('local server forwards structured local attachments to the chat session', async () => {
   const peer = createFakePeer();
   let receivedRequest: unknown;

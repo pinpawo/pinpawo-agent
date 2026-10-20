@@ -1152,7 +1152,8 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
     await resident.dispatch.dispatch({ request: 'orphaned', session: { id: sessionId } });
     await waitFor(() => resident.dispatch.getQueueSnapshot().state === 'waiting', 'a reviewed target did not wait');
     await context.sessions.resumeSession(context.runtimeDeps.get(), sessionId);
-    await context.sessions.resetSession(petId, { deletePrevious: true });
+    // No Host path deletes a session any more; drop the record the way an outside edit of the registry would.
+    delete (context.sessions as unknown as { state: { sessions: Record<string, unknown> } }).state.sessions[sessionId];
     await context.coordinator.refreshState();
     await waitFor(() => lifecycle.includes('orphaned:failed'), 'work for a deleted session stayed parked');
     assert.equal(resident.dispatch.getQueueSnapshot().queuedDispatches, 0);

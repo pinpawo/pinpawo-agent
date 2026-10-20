@@ -43,36 +43,27 @@ const testArtifactStore: CapabilityArtifactStore = {
 };
 
 
-test('ServerTuiSessionService creates and resets active sessions', async () => {
+test('ServerTuiSessionService creates sessions without deleting earlier ones', () => {
   const state = createEmptyTuiSessionState();
-  const saved: number[] = [];
-  const deletedThreads: string[] = [];
-  const checkpointer = {
-    deleteThread: async (threadId: string) => {
-      deletedThreads.push(threadId);
-    },
-  } as TuiSessionCheckpointer;
+  let failSave = false;
   const service = new ServerTuiSessionService({
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
     state,
     saveState: () => {
-      saved.push(1);
+      if (failSave) throw new Error('session store unavailable');
     },
-    checkpointer,
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   const first = service.getActiveSession('pet-a');
   const second = service.createNewSession('pet-a');
-  const third = await service.resetSession('pet-a', {
-    deletePrevious: true,
-  });
+  assert.equal(service.getChatThreadId('pet-a'), second.threadId);
+  assert.ok(state.sessions[first.id]);
 
-  assert.equal(service.getChatThreadId('pet-a'), third.threadId);
-  assert.equal(state.sessions[first.id] !== undefined, true);
-  assert.equal(state.sessions[second.id], undefined);
-  assert.deepEqual(deletedThreads, [second.threadId]);
-  assert.equal(saved.length >= 4, true);
+  failSave = true;
+  assert.throws(() => service.createNewSession('pet-a'), /session store unavailable/);
+  assert.equal(state.activeSessionIds['pet-a'], second.id);
+  assert.deepEqual(Object.keys(state.sessions).sort(), [first.id, second.id].sort());
 });
 
 test('ServerTuiSessionService rolls back a model selection when persistence fails', () => {

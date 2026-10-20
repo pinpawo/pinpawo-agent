@@ -60,9 +60,18 @@ test('runAgentSessionTurn does not settle before the underlying graph run output
   const streamEnded = new Promise<void>((resolve) => {
     notifyStreamEnded = resolve;
   });
+  let outputSettled = false;
+  void output.then(() => { outputSettled = true; });
+  const collected: Array<{ threadId: string; outputSettled: boolean }> = [];
   const setup = {
-    graphConfig: {},
-    input: { messages: [] },
+    graphConfig: {
+      checkpoint: {
+        async collectThreadGarbage(threadId: string) {
+          collected.push({ threadId, outputSettled });
+        },
+      },
+    },
+    input: { messages: [], threadId: 'thread-gc' },
   } as unknown as AgentChannelSetup;
   const stream = Object.assign((async function* () {
     yield protocolEvent('values', { messages: [new AIMessage('done')] });
@@ -93,9 +102,11 @@ test('runAgentSessionTurn does not settle before the underlying graph run output
   await streamEnded;
   await Promise.resolve();
   assert.equal(settled, false);
+  assert.deepEqual(collected, [], 'checkpoint GC waits for the graph run to settle');
 
   resolveOutput();
   assert.deepEqual(await run, { status: 'completed', reply: 'done' });
+  assert.deepEqual(collected, [{ threadId: 'thread-gc', outputSettled: true }]);
 });
 
 test('runAgentSessionTurn defers interrupted terminalization until graph output settles', async () => {

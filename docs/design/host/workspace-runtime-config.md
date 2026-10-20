@@ -100,9 +100,9 @@ Workspace-owned config and runtime state stays under the workspace root:
 ├── studio-run-queue.json
 ├── studio-due-runs.json
 ├── capability-artifacts/
-├── checkpoints-capability-v4/
-├── checkpoints-tui-capability-v4/
-└── tui-sessions-capability-v4.json
+├── checkpoints-capability-v5/
+├── checkpoints-tui-capability-v5/
+└── tui-sessions-capability-v5.json
 ```
 
 The runtime config keeps `.json` checkpoint anchor names, while `FileSaver`
@@ -110,11 +110,13 @@ maps them to extensionless content-addressed directories. The runtime reads only
 the current manifest/object/ref/writes layout and does not scan legacy monolith
 or shard checkpoint files. Only the latest checkpoint of each thread namespace
 is kept: publishing a new ref removes the older manifests and pending writes of
-that namespace, and Host startup maintenance prunes history left by older
-builds before collecting unreferenced objects. Nothing reads checkpoint history
-(no time travel or state history). The `capability-v4` suffix is the explicit checkpoint contract boundary: a
+that namespace. Objects live inside each thread directory, so deleting a
+session removes its directory, and garbage collection reads only that thread:
+the Host collects a thread's unreferenced objects when a run on it settles, and
+startup maintenance prunes and collects every thread. Nothing reads checkpoint
+history (no time travel or state history). The `capability-v5` suffix is the explicit checkpoint contract boundary: a
 contract change (v2: unified `capability:<name>` lanes; v3: required Supervisor
-`runId`; v4: typed delegation execution records) starts a new namespace instead
+`runId`; v4: typed delegation execution records; v5: per-thread objects) starts a new namespace instead
 of migrating older checkpoints.
 
 `workspace.json` is optional at first. When present, it can hold display metadata and project background that should be injected into future chat/studio context.

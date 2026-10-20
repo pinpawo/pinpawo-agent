@@ -23,6 +23,7 @@ import type {
   HostGraphService,
   HostGraphThreadState,
 } from './agentGraphService';
+import { collectThreadGarbage } from './agentGraphService';
 import type {
   AgentPlan,
   AgentLocalAttachment,
@@ -505,6 +506,13 @@ export async function runAgentSessionTurn(
     return { status: 'completed', reply };
   } finally {
     await waitForGraphRunSettlement(run);
+    if (run) {
+      // Checkpoints pruned during the run leave their objects behind; reclaim
+      // them now rather than at the next Host start. Never fails the run.
+      await collectThreadGarbage(setup).catch((error: unknown) => {
+        console.warn(`[chat-host] checkpoint garbage collection failed requestId=${requestId}`, error);
+      });
+    }
   }
 
   if (!isCurrent()) {

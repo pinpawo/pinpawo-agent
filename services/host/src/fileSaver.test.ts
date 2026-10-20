@@ -28,8 +28,9 @@ function checkpoint(id: string, values: Record<string, unknown>): Checkpoint {
 }
 
 function countObjectFiles(root: string) {
-  const objectsDir = join(root, 'checkpoints', 'objects');
+  const objectsDir = join(root, 'checkpoints', 'threads', 'thread-1', 'objects');
   let count = 0;
+  if (!existsSync(objectsDir)) return 0;
   for (const prefix of readdirSync(objectsDir)) {
     count += readdirSync(join(objectsDir, prefix)).length;
   }
@@ -46,7 +47,7 @@ function readManifest(root: string, checkpointId: string) {
 function writeObject(root: string, value: unknown) {
   const bytes = Buffer.from(JSON.stringify(value), 'utf-8');
   const hash = createHash('sha256').update(bytes).digest('hex');
-  const dir = join(root, 'checkpoints', 'objects', hash.slice(0, 2));
+  const dir = join(root, 'checkpoints', 'threads', 'thread-1', 'objects', hash.slice(0, 2));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, hash.slice(2)), bytes);
   return hash;
@@ -66,7 +67,7 @@ test('FileSaver writes content-addressed checkpoint layout and restores latest t
     messages: [{ role: 'human', content: 'same channel value' }],
   }), { source: 'loop', step: 2, parents: {} });
 
-  assert.equal(existsSync(join(root, 'checkpoints', 'objects')), true);
+  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects')), true);
   assert.equal(readFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'refs', '__root__'), 'utf-8'), 'cp-2');
   const cp2Messages = readManifest(root, 'cp-2').channelValueRefs?.messages;
   assert.equal(cp1Messages?.kind, 'array');
@@ -373,8 +374,8 @@ test('FileSaver rejects content-addressed manifests without channelValueRefs', (
     () => new FileSaver(filePath),
     /checkpoint manifest uses an unsupported format/,
   );
-  assert.equal(existsSync(join(root, 'checkpoints', 'objects', shellHash.slice(0, 2), shellHash.slice(2))), true);
-  assert.equal(existsSync(join(root, 'checkpoints', 'objects', messagesHash.slice(0, 2), messagesHash.slice(2))), true);
+  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects', shellHash.slice(0, 2), shellHash.slice(2))), true);
+  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects', messagesHash.slice(0, 2), messagesHash.slice(2))), true);
 });
 
 test('FileSaver rejects checkpoints older than v4', async (t) => {
@@ -466,8 +467,8 @@ test('FileSaver keeps only the latest checkpoint and its writes per namespace', 
   await restored.runHostStartupMaintenance();
   restored.releaseHostWriterLease();
   const objects = new Set<string>();
-  for (const prefix of readdirSync(join(root, 'checkpoints', 'objects'))) {
-    for (const name of readdirSync(join(root, 'checkpoints', 'objects', prefix))) objects.add(`${prefix}${name}`);
+  for (const prefix of readdirSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects'))) {
+    for (const name of readdirSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects', prefix))) objects.add(`${prefix}${name}`);
   }
   const oneHash = createHash('sha256').update(JSON.stringify('one')).digest('hex');
   const pendingOneHash = createHash('sha256').update(JSON.stringify('pending-one')).digest('hex');
@@ -575,12 +576,12 @@ test('FileSaver deleteThread removes manifests and garbage collects unreachable 
   assert.equal(await saver.getTuple({ configurable: { thread_id: 'thread-1' } }), undefined);
 });
 
-test('FileSaver GC keeps objects shared by another live thread', async (t) => {
+test('FileSaver keeps each thread self-contained so deleting one leaves the others intact', async (t) => {
   const root = createTempDir(t);
   const filePath = join(root, 'checkpoints.json');
   const saver = new FileSaver(filePath);
 
-  const sharedMessage = { role: 'human', content: 'shared across threads' };
+  const sharedMessage = { role: 'human', content: 'same text in two threads' };
   await saver.put({ configurable: { thread_id: 'thread-1' } }, checkpoint('cp-1', {
     messages: [sharedMessage],
   }), { source: 'loop', step: 1, parents: {} });
@@ -588,15 +589,10 @@ test('FileSaver GC keeps objects shared by another live thread', async (t) => {
     messages: [sharedMessage],
   }), { source: 'loop', step: 1, parents: {} });
 
-  const manifest = readManifest(root, 'cp-1');
-  const sharedHash = manifest.channelValueRefs?.messages?.kind === 'array'
-    ? manifest.channelValueRefs.messages.itemHashes[0]
-    : null;
-  assert.ok(sharedHash);
-
+  assert.equal(existsSync(join(root, 'checkpoints', 'objects')), false, 'there is no store-wide object pool');
   await saver.deleteThread('thread-1');
 
-  assert.equal(existsSync(join(root, 'checkpoints', 'objects', sharedHash.slice(0, 2), sharedHash.slice(2))), true);
+  assert.deepEqual(readdirSync(join(root, 'checkpoints', 'threads')), ['thread-2']);
   const restored = new FileSaver(filePath);
   assert.deepEqual(
     (await restored.getTuple({ configurable: { thread_id: 'thread-2' } }))?.checkpoint.channel_values.messages,
@@ -690,7 +686,7 @@ test('FileSaver bounds long checkpoint path segments without losing logical iden
 });
 
 function snapshotObjectFiles(root: string) {
-  const objectsDir = join(root, 'checkpoints', 'objects');
+  const objectsDir = join(root, 'checkpoints', 'threads', 'thread-1', 'objects');
   const files = new Map<string, string>();
   for (const prefix of readdirSync(objectsDir)) {
     for (const fileName of readdirSync(join(objectsDir, prefix))) {
@@ -770,20 +766,58 @@ test('FileSaver startup GC fails without deleting when a store directory cannot 
   }
 });
 
-test('FileSaver deleteThread GC fails without deleting objects of other threads when a scan fails', async (t) => {
-  const { root, filePath, config } = await seedStoreWithPendingWrite(t);
-  const saver = new FileSaver(filePath);
-  await saver.put({ configurable: { thread_id: 'thread-2' } }, checkpoint('cp-2', {
-    messages: [{ role: 'human', content: 'delete me' }],
-  }), { source: 'loop', step: 1, parents: {} });
-  const before = snapshotObjectFiles(root);
+test('FileSaver readers suspended in deserialization survive a newer checkpoint and thread GC', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const writer = new FileSaver(filePath);
+  const reader = new FileSaver(filePath);
+  const config = { configurable: { thread_id: 'thread-1', checkpoint_ns: '' } };
+  const first = await writer.put(config, checkpoint('cp-1', { messages: ['one'] }), { source: 'loop', step: 1, parents: {} });
+  await writer.putWrites(first, Array.from({ length: 200 }, (_, index) => [`channel-${index}`, `pending-${index}`]), 'task');
 
-  const restore = injectReadDirFailure(t, join(root, 'checkpoints', 'threads', 'thread-1', 'manifests'), 'EIO');
-  await assert.rejects(() => saver.deleteThread('thread-2'), /checkpoint GC could not read directory/);
-  restore();
+  const reading = reader.getTuple(config);
+  const listing = (async () => {
+    const tuples = [];
+    for await (const tuple of reader.list(config)) tuples.push(tuple);
+    return tuples;
+  })();
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+  await writer.put(first, checkpoint('cp-2', { messages: ['two'] }), { source: 'loop', step: 2, parents: {} });
+  await writer.collectThreadGarbage('thread-1');
 
-  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-2')), false);
-  await assertStoreIntact(root, filePath, config, before);
+  const tuple = await reading;
+  assert.equal(tuple?.checkpoint.id, 'cp-1');
+  assert.equal(tuple?.pendingWrites?.length, 200);
+  const listed = await listing;
+  assert.ok(listed.every((item) => item.checkpoint.id === 'cp-1' || item.checkpoint.id === 'cp-2'));
+});
+
+test('FileSaver collectThreadGarbage reclaims objects of pruned checkpoints in that thread only', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const config = { configurable: { thread_id: 'thread-1' } };
+  let previous = await saver.put(config, checkpoint('cp-0', { messages: ['first'] }), { source: 'loop', step: 0, parents: {} });
+  for (let index = 1; index <= 5; index += 1) {
+    previous = await saver.put(previous, checkpoint(`cp-${index}`, { packet: { messages: ['first', `step-${index}`] } }), {
+      source: 'loop',
+      step: index,
+      parents: {},
+    });
+  }
+  await saver.put({ configurable: { thread_id: 'thread-2' } }, checkpoint('cp-0', { messages: ['other'] }), {
+    source: 'loop',
+    step: 0,
+    parents: {},
+  });
+  const otherBefore = readdirSync(join(root, 'checkpoints', 'threads', 'thread-2', 'objects'), { recursive: true });
+  const beforeCollect = countObjectFiles(root);
+
+  await saver.collectThreadGarbage('thread-1');
+
+  assert.ok(countObjectFiles(root) < beforeCollect);
+  assert.equal(countObjectFiles(root), 3, 'shell, metadata and the latest packet remain');
+  assert.deepEqual(readdirSync(join(root, 'checkpoints', 'threads', 'thread-2', 'objects'), { recursive: true }), otherBefore);
+  assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values, { packet: { messages: ['first', 'step-5'] } });
 });
 
 test('FileSaver GC does not remove an object prefix it cannot list', async (t) => {
@@ -794,13 +828,13 @@ test('FileSaver GC does not remove an object prefix it cannot list', async (t) =
   host.acquireHostWriterLease('test-host');
   t.after(() => host.releaseHostWriterLease());
 
-  const restore = injectReadDirFailure(t, join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2)), 'EACCES');
+  const restore = injectReadDirFailure(t, join(root, 'checkpoints', 'threads', 'thread-1', 'objects', orphanHash.slice(0, 2)), 'EACCES');
   await assert.rejects(() => host.runHostStartupMaintenance(), /checkpoint GC could not read directory/);
   restore();
 
   assert.equal(snapshotObjectFiles(root).get(`${orphanHash.slice(0, 2)}/${orphanHash.slice(2)}`), before.get(`${orphanHash.slice(0, 2)}/${orphanHash.slice(2)}`));
   await host.runHostStartupMaintenance();
-  assert.equal(existsSync(join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
+  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
   const tuple = await new FileSaver(filePath).getTuple(config);
   assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
 });
@@ -831,7 +865,7 @@ test('FileSaver startup GC handles a fresh root and ignores stray files in store
   const { root, filePath, config } = await seedStoreWithPendingWrite(t);
   const orphanHash = writeObject(root, { orphan: true });
   writeFileSync(join(root, 'checkpoints', 'threads', '.DS_Store'), '');
-  writeFileSync(join(root, 'checkpoints', 'objects', '.DS_Store'), '');
+  writeFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects', '.DS_Store'), '');
   writeFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'manifests', '.DS_Store'), '');
   writeFileSync(join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '.DS_Store'), '');
   const host = new FileSaver(filePath);
@@ -840,7 +874,7 @@ test('FileSaver startup GC handles a fresh root and ignores stray files in store
 
   await host.runHostStartupMaintenance();
 
-  assert.equal(existsSync(join(root, 'checkpoints', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
+  assert.equal(existsSync(join(root, 'checkpoints', 'threads', 'thread-1', 'objects', orphanHash.slice(0, 2), orphanHash.slice(2))), false);
   const tuple = await new FileSaver(filePath).getTuple(config);
   assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
   assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);

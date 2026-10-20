@@ -28,16 +28,16 @@ test('buildHostRuntimeConfig scopes runtime state under workdir .pinpawo', () =>
   assert.deepEqual(runtimeConfig, {
     workdir: '/tmp/pinpawo-workdir',
     stateRoot: '/tmp/pinpawo-workdir/.pinpawo',
-    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-capability-v4.json',
-    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui-capability-v4.json',
-    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions-capability-v4.json',
+    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-capability-v5.json',
+    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui-capability-v5.json',
+    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions-capability-v5.json',
     petsDir: '/tmp/pinpawo-workdir/.pinpawo/pets',
     capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);
   assert.equal(
     resolveHostCheckpointPath(runtimeConfig, 'studio'),
-    '/tmp/pinpawo-workdir/.pinpawo/checkpoints-studio-capability-v4.json',
+    '/tmp/pinpawo-workdir/.pinpawo/checkpoints-studio-capability-v5.json',
   );
 });
 

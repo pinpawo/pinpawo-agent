@@ -104,8 +104,8 @@ function objectHash(bytes: Uint8Array) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function objectPath(rootDir: string, hash: string) {
-  return join(rootDir, 'objects', hash.slice(0, 2), hash.slice(2));
+function objectPath(threadDir: string, hash: string) {
+  return join(threadDir, 'objects', hash.slice(0, 2), hash.slice(2));
 }
 
 function safeReadDir(path: string) {
@@ -154,8 +154,8 @@ function jsonToBytes(value: unknown): Uint8Array {
   return new Uint8Array(Buffer.from(JSON.stringify(value), 'utf-8'));
 }
 
-function readObject(rootDir: string, hash: string): Uint8Array {
-  return new Uint8Array(readFileSync(objectPath(rootDir, hash)));
+function readObject(threadDir: string, hash: string): Uint8Array {
+  return new Uint8Array(readFileSync(objectPath(threadDir, hash)));
 }
 
 function isChannelValueRef(value: unknown): value is ChannelValueRef {
@@ -202,10 +202,15 @@ function isProcessAlive(pid: number): boolean {
  * Content-addressed checkpoint saver.
  *
  * Disk layout:
- *   <base>/objects/ab/cdef...
+ *   <base>/threads/<threadId>/objects/ab/cdef...
  *   <base>/threads/<threadId>/refs/<namespace>
  *   <base>/threads/<threadId>/manifests/<namespace>/<checkpointId>.json
  *   <base>/threads/<threadId>/writes/<namespace>/<checkpointId>.json
+ *
+ * Each thread is self-contained: its objects are shared only by its own
+ * namespaces (a subagent's input repeats the main history), never across
+ * threads, so deleting a thread is removing its directory and collecting
+ * garbage reads only that thread's manifests.
  *
  * Each logical path segment is URI-encoded while it is short and replaced by
  * a deterministic SHA-256 segment when it is long. The manifests retain the
@@ -219,8 +224,8 @@ function isProcessAlive(pid: number): boolean {
  * Host reads checkpoint history (no time travel or state history), and every
  * graph step re-serializes state that can be megabytes, so older manifests and
  * their pending writes are removed once a newer ref is published; the objects
- * they alone referenced are reclaimed by the next GC (Host startup or
- * deleteThread).
+ * they alone referenced are reclaimed by the thread's next GC (after each run
+ * via `collectThreadGarbage`, and at Host startup).
  */
 export class FileSaver extends BaseCheckpointSaver {
   private _loadedThreadCount = 0;
@@ -348,9 +353,21 @@ export class FileSaver extends BaseCheckpointSaver {
       throw new Error('Checkpoint startup maintenance requires the Host writer lease.');
     }
     await this.runStoreExclusive(() => {
-      this.pruneHistory();
-      this.gcObjects();
+      for (const threadSegment of readSubdirsForGc(join(this.casRootDir, 'threads'))) {
+        const threadDir = join(this.casRootDir, 'threads', threadSegment);
+        this.pruneThreadHistory(threadDir);
+        this.gcThreadObjects(threadDir);
+      }
     });
+  }
+
+  /**
+   * Reclaim objects no longer referenced by the thread's retained checkpoints.
+   * The Host calls this when a run on the thread settles, so pruned
+   * checkpoints do not accumulate objects until the next Host start.
+   */
+  async collectThreadGarbage(threadId: string): Promise<void> {
+    await this.runStoreExclusive(() => this.gcThreadObjects(this.threadDir(threadId)));
   }
 
   /** Release the Host lifetime claim if this FileSaver still owns it. */
@@ -580,9 +597,9 @@ export class FileSaver extends BaseCheckpointSaver {
     }
   }
 
-  private writeObject(bytes: Uint8Array) {
+  private writeObject(threadDir: string, bytes: Uint8Array) {
     const hash = objectHash(bytes);
-    const path = objectPath(this.casRootDir, hash);
+    const path = objectPath(threadDir, hash);
     if (!existsSync(path)) {
       atomicWriteFile(path, bytes);
     }
@@ -655,7 +672,8 @@ export class FileSaver extends BaseCheckpointSaver {
   }
 
   private checkpointTupleBytes(manifest: CheckpointManifest): SerializedCheckpointTuple {
-    const checkpointShell = bytesToJson(readObject(this.casRootDir, manifest.checkpointShellHash));
+    const threadDir = this.threadDir(manifest.threadId);
+    const checkpointShell = bytesToJson(readObject(threadDir, manifest.checkpointShellHash));
     const checkpoint = checkpointShell && typeof checkpointShell === 'object'
       ? { ...(checkpointShell as Record<string, unknown>) }
       : {};
@@ -663,13 +681,13 @@ export class FileSaver extends BaseCheckpointSaver {
     for (const [channel, ref] of Object.entries(manifest.channelValueRefs)) {
       if (!isChannelValueRef(ref)) continue;
       channelValues[channel] = ref.kind === 'array'
-        ? ref.itemHashes.map((hash) => bytesToJson(readObject(this.casRootDir, hash)))
-        : bytesToJson(readObject(this.casRootDir, ref.hash));
+        ? ref.itemHashes.map((hash) => bytesToJson(readObject(threadDir, hash)))
+        : bytesToJson(readObject(threadDir, ref.hash));
     }
     checkpoint.channel_values = channelValues;
     return [
       jsonToBytes(checkpoint),
-      readObject(this.casRootDir, manifest.metadataHash),
+      readObject(threadDir, manifest.metadataHash),
       manifest.parentCheckpointId,
     ];
   }
@@ -683,7 +701,7 @@ export class FileSaver extends BaseCheckpointSaver {
       pendingWrites.push([
         record.taskId,
         record.channel,
-        await this.serde.loadsTyped('json', readObject(this.casRootDir, record.valueHash)),
+        await this.serde.loadsTyped('json', readObject(this.threadDir(threadId), record.valueHash)),
       ]);
     }
     return pendingWrites;
@@ -719,6 +737,7 @@ export class FileSaver extends BaseCheckpointSaver {
     checkpointId: string,
     tuple: SerializedCheckpointTuple,
   ): CheckpointManifest {
+    const threadDir = this.threadDir(threadId);
     const checkpoint = bytesToJson(tuple[0]);
     const checkpointRecord = checkpoint && typeof checkpoint === 'object'
       ? { ...(checkpoint as Record<string, unknown>) }
@@ -730,8 +749,8 @@ export class FileSaver extends BaseCheckpointSaver {
     const channelValueRefs: Record<string, ChannelValueRef> = {};
     for (const [channel, value] of Object.entries(channelValues)) {
       channelValueRefs[channel] = Array.isArray(value)
-        ? { kind: 'array', itemHashes: value.map((item) => this.writeObject(jsonToBytes(item))) }
-        : { kind: 'object', hash: this.writeObject(jsonToBytes(value)) };
+        ? { kind: 'array', itemHashes: value.map((item) => this.writeObject(threadDir, jsonToBytes(item))) }
+        : { kind: 'object', hash: this.writeObject(threadDir, jsonToBytes(value)) };
     }
     checkpointRecord.channel_values = {};
 
@@ -741,8 +760,8 @@ export class FileSaver extends BaseCheckpointSaver {
       namespace,
       checkpointId,
       ...(tuple[2] ? { parentCheckpointId: tuple[2] } : {}),
-      checkpointShellHash: this.writeObject(jsonToBytes(checkpointRecord)),
-      metadataHash: this.writeObject(tuple[1]),
+      checkpointShellHash: this.writeObject(threadDir, jsonToBytes(checkpointRecord)),
+      metadataHash: this.writeObject(threadDir, tuple[1]),
       channelValueRefs,
     };
   }
@@ -797,25 +816,21 @@ export class FileSaver extends BaseCheckpointSaver {
    * for an already superseded checkpoint).
    * A namespace whose ref is missing or unreadable is left untouched.
    */
-  private pruneHistory() {
-    const threadsDir = join(this.casRootDir, 'threads');
-    for (const threadSegment of readSubdirsForGc(threadsDir)) {
-      const threadDir = join(threadsDir, threadSegment);
-      for (const namespaceSegment of readDirForGc(join(threadDir, 'refs'))) {
-        // Leftover atomic-write temp files are dot-prefixed; they are not refs.
-        if (namespaceSegment.startsWith('.')) continue;
-        let latestCheckpointId: string;
-        try {
-          latestCheckpointId = readFileSync(join(threadDir, 'refs', namespaceSegment), 'utf-8').trim();
-        } catch {
-          continue;
-        }
-        if (!latestCheckpointId) continue;
-        if (!existsSync(join(threadDir, 'manifests', namespaceSegment, `${encodePathSegment(latestCheckpointId)}.json`))) {
-          continue;
-        }
-        this.pruneNamespace(threadDir, namespaceSegment, latestCheckpointId);
+  private pruneThreadHistory(threadDir: string) {
+    for (const namespaceSegment of readDirForGc(join(threadDir, 'refs'))) {
+      // Leftover atomic-write temp files are dot-prefixed; they are not refs.
+      if (namespaceSegment.startsWith('.')) continue;
+      let latestCheckpointId: string;
+      try {
+        latestCheckpointId = readFileSync(join(threadDir, 'refs', namespaceSegment), 'utf-8').trim();
+      } catch {
+        continue;
       }
+      if (!latestCheckpointId) continue;
+      if (!existsSync(join(threadDir, 'manifests', namespaceSegment, `${encodePathSegment(latestCheckpointId)}.json`))) {
+        continue;
+      }
+      this.pruneNamespace(threadDir, namespaceSegment, latestCheckpointId);
     }
   }
 
@@ -839,7 +854,7 @@ export class FileSaver extends BaseCheckpointSaver {
       writeManifest.writes[innerKey] = {
         taskId: tuple[0],
         channel: tuple[1],
-        valueHash: this.writeObject(tuple[2]),
+        valueHash: this.writeObject(this.threadDir(threadId), tuple[2]),
       };
     }
     atomicWriteFile(this.writesPath(threadId, normalizedNamespace, checkpointId), JSON.stringify(writeManifest));
@@ -866,7 +881,9 @@ export class FileSaver extends BaseCheckpointSaver {
     // Validate existing manifests, but do not delete objects during constructor
     // startup: constructors cannot await the cross-process writer lock. The
     // owning Host runs startup GC after acquiring its lifetime writer lease.
-    this.collectReachableObjectHashes();
+    for (const threadSegment of readSubdirsForGc(join(this.casRootDir, 'threads'))) {
+      this.collectReachableObjectHashes(join(this.casRootDir, 'threads', threadSegment));
+    }
   }
 
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
@@ -996,7 +1013,7 @@ export class FileSaver extends BaseCheckpointSaver {
           outerWrites[innerKey] = [
             record.taskId,
             record.channel,
-            readObject(this.casRootDir, record.valueHash),
+            readObject(this.threadDir(threadId), record.valueHash),
           ];
         }
 
@@ -1045,61 +1062,55 @@ export class FileSaver extends BaseCheckpointSaver {
       if (this.knownThreads.delete(encodePathSegment(threadId))) {
         this._loadedThreadCount -= 1;
       }
-      // If GC cannot scan the store it throws after the thread is already
-      // removed; its objects stay as orphans for the next successful GC.
-      this.gcObjects();
     });
   }
 
-  private collectReachableObjectHashes() {
+  private collectReachableObjectHashes(threadDir: string) {
     const hashes = new Set<string>();
-    const threadsDir = join(this.casRootDir, 'threads');
-    for (const threadSegment of readSubdirsForGc(threadsDir)) {
-      const threadDir = join(threadsDir, threadSegment);
-      const manifestsDir = join(threadDir, 'manifests');
-      for (const namespaceSegment of readSubdirsForGc(manifestsDir)) {
-        const namespaceDir = join(manifestsDir, namespaceSegment);
-        for (const fileName of readDirForGc(namespaceDir)) {
-          if (!fileName.endsWith('.json')) continue;
-          const manifest = this.readManifest(join(namespaceDir, fileName));
-          hashes.add(manifest.checkpointShellHash);
-          hashes.add(manifest.metadataHash);
-          for (const ref of Object.values(manifest.channelValueRefs)) {
-            if (!isChannelValueRef(ref)) continue;
-            if (ref.kind === 'array') {
-              for (const hash of ref.itemHashes) {
-                hashes.add(hash);
-              }
-            } else {
-              hashes.add(ref.hash);
+    const manifestsDir = join(threadDir, 'manifests');
+    for (const namespaceSegment of readSubdirsForGc(manifestsDir)) {
+      const namespaceDir = join(manifestsDir, namespaceSegment);
+      for (const fileName of readDirForGc(namespaceDir)) {
+        if (!fileName.endsWith('.json')) continue;
+        const manifest = this.readManifest(join(namespaceDir, fileName));
+        hashes.add(manifest.checkpointShellHash);
+        hashes.add(manifest.metadataHash);
+        for (const ref of Object.values(manifest.channelValueRefs)) {
+          if (!isChannelValueRef(ref)) continue;
+          if (ref.kind === 'array') {
+            for (const hash of ref.itemHashes) {
+              hashes.add(hash);
             }
+          } else {
+            hashes.add(ref.hash);
           }
         }
       }
-      const writesDir = join(threadDir, 'writes');
-      for (const namespaceSegment of readSubdirsForGc(writesDir)) {
-        const namespaceDir = join(writesDir, namespaceSegment);
-        for (const fileName of readDirForGc(namespaceDir)) {
-          if (!fileName.endsWith('.json')) continue;
-          const manifest = this.readWritesManifestForGc(join(namespaceDir, fileName));
-          for (const write of Object.values(manifest.writes ?? {})) {
-            hashes.add(write.valueHash);
-          }
+    }
+    const writesDir = join(threadDir, 'writes');
+    for (const namespaceSegment of readSubdirsForGc(writesDir)) {
+      const namespaceDir = join(writesDir, namespaceSegment);
+      for (const fileName of readDirForGc(namespaceDir)) {
+        if (!fileName.endsWith('.json')) continue;
+        const manifest = this.readWritesManifestForGc(join(namespaceDir, fileName));
+        for (const write of Object.values(manifest.writes ?? {})) {
+          hashes.add(write.valueHash);
         }
       }
     }
     return hashes;
   }
 
-  // GC walks every manifest to build the reachable set, then deletes any object
-  // not in it. A scan that cannot read part of the store throws before any
-  // delete (#928): skipping an unreadable directory would leave its references
-  // out of the reachable set. Callers must hold the store-wide filesystem lock so another
-  // process cannot publish an object between the reachability scan and delete.
-  private gcObjects() {
-    const objectsDir = join(this.casRootDir, 'objects');
+  // GC walks every manifest of the thread to build the reachable set, then
+  // deletes any of its objects not in it. A scan that cannot read part of the
+  // thread throws before any delete (#928): skipping an unreadable directory
+  // would leave its references out of the reachable set. Callers must hold the
+  // store-wide filesystem lock so a concurrent write cannot publish an object
+  // between the reachability scan and delete.
+  private gcThreadObjects(threadDir: string) {
+    const objectsDir = join(threadDir, 'objects');
     if (!existsSync(objectsDir)) return;
-    const reachable = this.collectReachableObjectHashes();
+    const reachable = this.collectReachableObjectHashes(threadDir);
     for (const prefix of readSubdirsForGc(objectsDir)) {
       const prefixDir = join(objectsDir, prefix);
       for (const fileName of readDirForGc(prefixDir)) {

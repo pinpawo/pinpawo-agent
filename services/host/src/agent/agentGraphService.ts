@@ -122,6 +122,19 @@ function buildResumeCommand(resume: InterruptResume) {
   });
 }
 
+/**
+ * Reclaim checkpoint objects of the run's thread that pruned checkpoints left
+ * behind. Only a store that supports it (FileSaver) does anything.
+ */
+export async function collectThreadGarbage(setup: AgentChannelSetup): Promise<void> {
+  const store = setup.graphConfig.checkpoint as unknown as {
+    collectThreadGarbage?: (threadId: string) => Promise<void>;
+  } | undefined;
+  const threadId = buildAgentGraphConfigurable(setup)?.thread_id;
+  if (typeof store?.collectThreadGarbage !== 'function' || typeof threadId !== 'string') return;
+  await store.collectThreadGarbage(threadId);
+}
+
 export class HostGraphService {
   private readonly transientUsageStores = new WeakMap<object, SessionUsageStore>();
 

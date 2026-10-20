@@ -692,32 +692,35 @@ export class FileSaver extends BaseCheckpointSaver {
     ];
   }
 
-  private async pendingWritesFor(threadId: string, namespace: string | undefined, checkpointId: string) {
-    const normalizedNamespace = namespace ?? '';
-    const manifest = this.readWritesManifest(this.writesPath(threadId, normalizedNamespace, checkpointId));
-    if (!manifest) return [];
-    const pendingWrites: CheckpointPendingWrite[] = [];
-    for (const record of Object.values(manifest.writes ?? {})) {
-      pendingWrites.push([
-        record.taskId,
-        record.channel,
-        await this.serde.loadsTyped('json', readObject(this.threadDir(threadId), record.valueHash)),
-      ]);
-    }
-    return pendingWrites;
+  private pendingWriteBytesFor(manifest: CheckpointManifest): [string, string, Uint8Array][] {
+    const writes = this.readWritesManifest(this.writesPath(manifest.threadId, manifest.namespace, manifest.checkpointId));
+    const threadDir = this.threadDir(manifest.threadId);
+    return Object.values(writes?.writes ?? {})
+      .map((record) => [record.taskId, record.channel, readObject(threadDir, record.valueHash)]);
   }
 
+  /**
+   * Read every byte a checkpoint tuple needs before the first await. A newer
+   * checkpoint can prune this one and the run-end GC can then delete its
+   * objects while a reader is suspended in deserialization; synchronous reads
+   * cannot interleave with them in this process.
+   */
   private async tupleFromManifest(manifest: CheckpointManifest, config: RunnableConfig): Promise<CheckpointTuple> {
     const [checkpointBytes, metadataBytes, parentCheckpointId] = this.checkpointTupleBytes(manifest);
+    const pendingWriteBytes = this.pendingWriteBytesFor(manifest);
     const checkpoint = await this.serde.loadsTyped('json', checkpointBytes) as Checkpoint;
     if (!isSupportedCheckpointVersion(checkpoint.v)) {
       throw new Error(`checkpoint ${manifest.checkpointId} uses unsupported version ${checkpoint.v}`);
+    }
+    const pendingWrites: CheckpointPendingWrite[] = [];
+    for (const [taskId, channel, bytes] of pendingWriteBytes) {
+      pendingWrites.push([taskId, channel, await this.serde.loadsTyped('json', bytes)]);
     }
     const checkpointTuple: CheckpointTuple = {
       config,
       checkpoint,
       metadata: await this.serde.loadsTyped('json', metadataBytes),
-      pendingWrites: await this.pendingWritesFor(manifest.threadId, manifest.namespace, manifest.checkpointId),
+      pendingWrites,
     };
     if (parentCheckpointId !== undefined) {
       checkpointTuple.parentConfig = {
@@ -934,12 +937,17 @@ export class FileSaver extends BaseCheckpointSaver {
     // time-ordered (sortable UUIDs), the same assumption `before` filtering uses.
     manifests.sort((a, b) => b.checkpointId.localeCompare(a.checkpointId));
     for (const manifest of manifests) {
+      // A checkpoint pruned since the scan (its objects possibly collected) is
+      // no longer part of the history.
+      if (!existsSync(this.manifestPath(manifest.threadId, manifest.namespace, manifest.checkpointId))) continue;
       const [, metadataBytes] = this.checkpointTupleBytes(manifest);
       const metadata = await this.serde.loadsTyped('json', metadataBytes) as CheckpointMetadata;
       const metadataRecord = metadata as Record<string, unknown>;
       if (filter && !Object.entries(filter).every(([key, value]) => metadataRecord[key] === value)) {
         continue;
       }
+      // Checked again: deserializing metadata yields to other work.
+      if (!existsSync(this.manifestPath(manifest.threadId, manifest.namespace, manifest.checkpointId))) continue;
       if (limit !== undefined) {
         if (limit <= 0) break;
         limit -= 1;

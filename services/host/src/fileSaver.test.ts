@@ -766,6 +766,32 @@ test('FileSaver startup GC fails without deleting when a store directory cannot 
   }
 });
 
+test('FileSaver readers suspended in deserialization survive a newer checkpoint and thread GC', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const writer = new FileSaver(filePath);
+  const reader = new FileSaver(filePath);
+  const config = { configurable: { thread_id: 'thread-1', checkpoint_ns: '' } };
+  const first = await writer.put(config, checkpoint('cp-1', { messages: ['one'] }), { source: 'loop', step: 1, parents: {} });
+  await writer.putWrites(first, Array.from({ length: 200 }, (_, index) => [`channel-${index}`, `pending-${index}`]), 'task');
+
+  const reading = reader.getTuple(config);
+  const listing = (async () => {
+    const tuples = [];
+    for await (const tuple of reader.list(config)) tuples.push(tuple);
+    return tuples;
+  })();
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+  await writer.put(first, checkpoint('cp-2', { messages: ['two'] }), { source: 'loop', step: 2, parents: {} });
+  await writer.collectThreadGarbage('thread-1');
+
+  const tuple = await reading;
+  assert.equal(tuple?.checkpoint.id, 'cp-1');
+  assert.equal(tuple?.pendingWrites?.length, 200);
+  const listed = await listing;
+  assert.ok(listed.every((item) => item.checkpoint.id === 'cp-1' || item.checkpoint.id === 'cp-2'));
+});
+
 test('FileSaver collectThreadGarbage reclaims objects of pruned checkpoints in that thread only', async (t) => {
   const root = createTempDir(t);
   const saver = new FileSaver(join(root, 'checkpoints.json'));

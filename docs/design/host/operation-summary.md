@@ -34,23 +34,41 @@ export type OperationSummary = {
   blocks?: OperationBlock[];
 };
 
-/** 每个 block 都带 `text`：它是该 block 的纯文本降级形态。 */
+/**
+ * 编写端：封闭 union。toolkit 只能产出这里列出的 kind。
+ * 每个 block 都带 `text`：它是该 block 的纯文本降级形态。
+ */
 export type OperationBlock =
   | { kind: 'code'; text: string; language?: string; truncated?: true }
-  | { kind: 'diff'; text: string; path?: string; truncated?: true }   // text 为 unified diff
+  /** 补丁原文，按 format 声明的格式解释；不做格式转换。 */
+  | { kind: 'diff'; format: 'unified' | 'v4a'; text: string; path?: string; truncated?: true }
   | { kind: 'text'; text: string; label?: string; truncated?: true };
 
+/** 接收端：可能收到更新版本 Host 发来的、本版本不认识的 kind。 */
+export type UnknownOperationBlock = { kind: string; text: string; truncated?: true } & JsonObject;
+export type ReceivedOperationBlock = OperationBlock | UnknownOperationBlock;
+
 export const OPERATION_BLOCK_KINDS: readonly OperationBlock['kind'][];
+export function isKnownOperationBlock(block: ReceivedOperationBlock): block is OperationBlock;
+/** 接收端守卫：已知 kind 逐字段严格校验；未知 kind 要求 `kind`、`text` 为字符串且其余字段都是 JSON。 */
 export function isOperationSummary(value: unknown): value is OperationSummary;
 export function assertNever(value: never): never;
 
-/** 默认渲染：所有终端共用，也是回退路径。未知 kind 取 block.text。 */
-export function operationBlockToText(block: OperationBlock): string;
+/** 默认渲染：所有终端共用，也是回退路径。 */
+export function operationBlockToText(block: ReceivedOperationBlock): string;
 export function operationSummaryToText(summary: OperationSummary): string;
 ```
 
-校验对已知 kind 严格检查字段；未知 kind 只要求 `kind` 是字符串、`text` 是字符串，
-其余字段原样保留，交给默认渲染降级显示。
+**编写端与接收端分开。** 编写端（toolkit、pet-agent 统一入口）只用封闭的 `OperationBlock`；
+接收端（parser、默认渲染、客户端）的类型是 `ReceivedOperationBlock`。接收端先用
+`isKnownOperationBlock` 分出未知 kind 走 `text` 降级，再对已知 kind 做穷尽检查（§3.3）。
+
+**兼容承诺的范围。** 未知 kind 降级只覆盖「双方都已采用 blocks 协议之后」新增的 kind。
+不认识 blocks 的旧客户端不在承诺内，按仓库约定不兼容。
+
+**diff 的格式。** `apply_patch` 的输入是 V4A，unified diff 来自 git 一类工具；两者都按原文放进
+`text`，用 `format` 标明。默认渲染和客户端都只按行首 `+`/`-` 着色，不解析、不转换，也不为了展示
+去读文件拼出 unified diff。
 
 ### 2.2 源头：toolkit（`@pinpawo/pet-agent` 的 `ToolOperationMetadata`）
 
@@ -72,11 +90,18 @@ type ToolOperationMetadata = {
   - 字符串 input 先尝试按 JSON 解析；
   - 捕获 `summarize` 抛出的异常，返回 null；
   - 用 `isOperationSummary` 校验，不合格整体丢弃；
-  - `target`/`summary` 折成单行；
-  - 单个 block 的 `text` 超过上限时截断并设 `truncated: true`。
-- **按 callId 复用。** Host 的 operation tracker 在一次调用的第一个事件上算出摘要，后续
-  phase 复用，不再逐个事件重算和合并。因为 `summarize` 是纯函数，审批和自动审核各自
-  调用入口得到的结果与时间线一致；不要求跨 pet-agent/Host 传递同一个对象。
+  - `target`/`summary` 折成单行，只作标题；多行内容（如多行命令）由 toolkit 放进 code block；
+  - 单个 block 的 `text` 超过单块上限时截断并设 `truncated: true`；所有 block 的 `text`
+    合计超过总上限时，超出部分同样截断或丢弃并标记，保证摘要总量有界。
+- **截断只影响展示，不替代审批事实。**
+  - 自动审核仍把完整参数作为 `Input facts` 提交，摘要只是帮助理解的附加信息；
+    完整参数超出审核预算时转人工审批，不能凭被截断的摘要自动批准。
+  - 人工审批中被截断的 block 会显示截断标记。
+- **按 callId 复用第一个有效摘要。** 只有拿到完整、有效 input 的事件（通常是 `on_tool_start`）
+  才计算摘要。Host 的 operation tracker 缓存这次调用第一个非空摘要，后续 phase 复用。
+  没有 input、或 input 不完整导致摘要为空的事件不缓存空结果，后面的事件拿到有效 input 时
+  仍会计算并缓存。因为 `summarize` 是纯函数，审批和自动审核各自调用入口得到的结果与时间线
+  一致；不要求跨 pet-agent/Host 传递同一个对象。
 - **执行结果**：时间线用 phase（完成、失败、中断）加工具原始输出表达，pipeline 不再做
   output 摘要。
 
@@ -92,7 +117,8 @@ type ToolOperationMetadata = {
 - 模型 prompt（`reviewViewToText`、自动审核）直接用它；
 - TUI、Console 对没有原生渲染的 kind，以及整个不支持的视图，都回退到它；
 - 它对已知 kind 的格式：code → 带 language 的代码块；diff → diff 代码块；text → label 小标题加正文；
-  未知 kind → 原样输出 `text`。
+  未知 kind → 原样输出 `text`；
+- `truncated` 的 block 末尾都带截断标记，未知 kind 也一样；输出总量受 §2.3 的总上限约束。
 
 **原生渲染是可选增强。** 客户端可以挑部分 kind 做更好的显示，其余走默认文本：
 
@@ -107,7 +133,7 @@ TUI 和 Console 的原生渲染约定：
 
 - 标题行：取 summary、target、title 中第一个有值的；不按工具名判断。
 - `code`：等宽，保留换行，不重排；language 只是提示。
-- `diff`：按 unified diff 渲染，`+`/`-` 着色；有 path 时显示。
+- `diff`：按行首 `+`/`-` 着色（unified 和 V4A 通用）；有 path 时显示。
 - `text`：普通文本，可折行；有 label 时作为小标题。
 - `truncated`：block 末尾提示「内容已截断」。
 - 审批展示全部 block；时间线默认只显示标题行，展开或 PageUp 时显示 block。
@@ -134,7 +160,7 @@ PR 标题：`Operation blocks: add <kind>`。
 | --- | --- | --- |
 | `packages/agent-contracts` | `OperationBlock` 加成员（必须含 `text` 和 `truncated?`）；`OPERATION_BLOCK_KINDS` 加名；`isOperationSummary` 校验新字段 | 是 |
 | contracts 默认渲染 | `operationBlockToText` 加这个 kind 的文本格式 | 是 |
-| contracts 测试 | 合法、缺 `text`、多余字段、字段类型错、默认文本，各一条 | 是 |
+| contracts 测试 | 合法、缺 `text`、多余字段、字段类型错、默认文本、截断标记，各一条 | 是 |
 | pet-agent 统一入口 | 若新 kind 除 `text` 外还有大字段，补截断规则 | 视情况 |
 | 至少一个 toolkit | 真正用上它；不加没有使用者的 kind | 是 |
 | 本文档 | §2.1 类型、§2.4 默认文本格式各补一条 | 是 |
@@ -142,14 +168,31 @@ PR 标题：`Operation blocks: add <kind>`。
 
 ### 3.3 编译期保障
 
-`operationBlockToText` 是唯一要求覆盖所有已知 kind 的函数，它的 switch 以 `assertNever` 结尾，
+`operationBlockToText` 是唯一要求覆盖所有已知 kind 的函数，写法固定为「先分出未知 kind，再穷尽已知 kind」：
+
+```ts
+export function operationBlockToText(block: ReceivedOperationBlock): string {
+  if (!isKnownOperationBlock(block)) return withTruncatedMarker(block.text, block.truncated);
+  switch (block.kind) {
+    case 'code': ...
+    case 'diff': ...
+    case 'text': ...
+    default: return assertNever(block);
+  }
+}
+```
+
 漏写新 kind 的默认文本，`npm run typecheck` 就失败。客户端的 switch 用 `default` 回退到默认文本，
 不要求覆盖所有 kind。
 
 ### 3.4 运行期保障
 
 未知 kind 由默认渲染取 `text` 显示（§2.4），用于 Host 和客户端版本错开时的实时显示。
-这不是旧数据兼容：存储里的旧数据仍按仓库约定不兼容。降级路径在 contracts 有测试。
+这不是旧数据兼容：存储里的旧数据仍按仓库约定不兼容。contracts 的契约测试覆盖：
+
+- 未知 kind 带 `text` 且字段都是 JSON 时通过校验，并按 `text` 降级显示（含截断标记）；
+- 未知 kind 缺 `text` 或含非 JSON 字段时拒收；
+- 已知 kind 的多余字段、错误类型、`diff` 缺 `format` 时拒收。
 
 ### 3.5 验证
 

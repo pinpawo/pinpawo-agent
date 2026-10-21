@@ -1,5 +1,5 @@
 import stringWidth from 'string-width';
-import { isKnownOperationBlock, operationBlockToText, type AgentOperationEntry } from '@pinpawo/agent-session';
+import { operationBlockToText, renderOperationBlock, type AgentOperationEntry } from '@pinpawo/agent-session';
 import { truncateTerminalLine } from '../text/terminalText';
 
 export type OperationDisplayTone = 'default' | 'muted' | 'added' | 'removed';
@@ -39,9 +39,6 @@ export function buildOperationDisplayLines(
   }, ...buildOperationPayloadLines(entry, width), ...buildOperationOutputLines(entry, width)];
 }
 
-/** Tools whose summary is the command itself, shown in full rather than as a path. */
-const SHELL_TOOL_LABELS = ['run_shell', 'inspect_shell', 'start_process', 'git_shell', 'gh_shell'];
-
 function buildOperationHeader(
   entry: AgentOperationEntry,
   now: number,
@@ -51,29 +48,39 @@ function buildOperationHeader(
   const limit = Math.min(width, 104);
   let body = operationActivityText(entry);
   const suffix = `（${operationStatus(entry, now)}）`;
-  const target = entry.target?.trim();
-  if (stringWidth(body + suffix) > limit && target?.includes('/')
-    && !target.includes(' ') && !target.includes('://')
-    && !SHELL_TOOL_LABELS.includes(operationToolLabel(entry))) {
-    body = `${operationToolLabel(entry)} · …/${target.split('/').at(-1)}`;
+  if (stringWidth(body + suffix) > limit && isPlainPath(entry.target?.trim())) {
+    body = operationActivityText(entry, (target) => `…/${target.split('/').at(-1)}`);
   }
   return buildOperationHeaderText(body, entry, now, limit);
 }
 
-/** Compact, factual activity label; full arguments remain in the pager. */
-export function operationActivityText(entry: AgentOperationEntry) {
+function isPlainPath(target: string | undefined): target is string {
+  return Boolean(target?.includes('/') && !target.includes(' ') && !target.includes('://'));
+}
+
+/**
+ * Compact, factual activity label: the tool, then the summary sentence, then
+ * what it acts on. Full arguments remain in the pager.
+ */
+export function operationActivityText(
+  entry: AgentOperationEntry,
+  shortenTarget: (target: string) => string = shortenAbsolutePath,
+) {
   const label = operationToolLabel(entry);
-  const shell = SHELL_TOOL_LABELS.includes(label);
-  let argument = shell ? entry.summary?.trim() || entry.target?.trim() : entry.target?.trim() || entry.summary?.trim();
-  if (argument && shell) {
-    // Shorten only a leading working-directory setup; do not interpret shell
-    // semantics or claim that a compound command is a single action.
-    argument = argument.replace(/^cd\s+(?:'[^']*'|"[^"]*"|[^\s;&|]+)\s*&&\s*/, '');
-  } else if (argument?.startsWith('/') && !argument.includes(' ')) {
-    const segments = argument.split('/').filter(Boolean);
-    if (segments.length > 3) argument = `…/${segments.slice(-3).join('/')}`;
-  }
-  return argument && argument !== label ? `${label} · ${argument.replace(/\s+/g, ' ')}` : label;
+  // Shorten only a leading working-directory setup; do not interpret shell
+  // semantics or claim that a compound command is a single action.
+  const summary = entry.summary?.trim().replace(/^cd\s+(?:'[^']*'|"[^"]*"|[^\s;&|]+)\s*&&\s*/, '');
+  const target = entry.target?.trim();
+  const parts = [summary, target ? shortenTarget(target) : undefined]
+    .map((part) => part?.replace(/\s+/g, ' '))
+    .filter((part, index, all): part is string => Boolean(part) && part !== label && all.indexOf(part) === index);
+  return [label, ...parts].join(' · ');
+}
+
+function shortenAbsolutePath(target: string) {
+  if (!target.startsWith('/') || target.includes(' ')) return target;
+  const segments = target.split('/').filter(Boolean);
+  return segments.length > 3 ? `…/${segments.slice(-3).join('/')}` : target;
 }
 
 /** Full canonical operation detail, used only in the scrollable transcript. */
@@ -171,9 +178,9 @@ function buildOperationPayloadLines(
 ): OperationDisplayLine[] {
   // Diffs are shown inline: they are what the step changed. Other blocks stay
   // in the transcript detail, keeping the timeline one line per step.
-  return (entry.blocks ?? []).flatMap((block) => (
-    isKnownOperationBlock(block) && block.kind === 'diff' ? buildPatchLines(block.text, block.path ?? entry.target, width, block.truncated === true) : []
-  ));
+  return (entry.blocks ?? []).flatMap((block) => renderOperationBlock<OperationDisplayLine[]>(block, {
+    diff: (diff) => buildPatchLines(diff.text, diff.path ?? entry.target, width, diff.truncated === true),
+  }, () => []));
 }
 
 function buildOperationOutputLines(

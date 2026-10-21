@@ -5,6 +5,7 @@ import {
   operationBlockToText,
   isKnownOperationBlock,
   operationSummaryToText,
+  renderOperationBlock,
 } from './index';
 
 test('operation summary checks known block kinds field by field', () => {
@@ -50,4 +51,16 @@ test('default text rendering covers every known kind', () => {
     target: '/repo',
     blocks: [{ kind: 'text', text: 'body' }],
   }), 'Summary: ls\n\nTarget: /repo\n\nbody');
+});
+
+test('renderOperationBlock uses a native renderer when present, else the default text', () => {
+  const renderers = { diff: (block: { path?: string; text: string }) => `native ${block.path}` };
+  const fallback = (text: string) => `fallback ${text}`;
+  assert.equal(renderOperationBlock({ kind: 'diff', format: 'v4a', text: '+a', path: 'a.ts' }, renderers, fallback), 'native a.ts');
+  assert.equal(renderOperationBlock({ kind: 'text', text: 'body', label: 'L' }, renderers, fallback), 'fallback L:\nbody');
+  assert.equal(
+    renderOperationBlock({ kind: 'table', text: 'a | b', truncated: true }, renderers, fallback),
+    'fallback a | b\n…（内容已截断）',
+    'kinds newer than this version fall back too',
+  );
 });

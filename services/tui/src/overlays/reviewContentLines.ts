@@ -1,6 +1,5 @@
 import {
-  isKnownOperationBlock,
-  operationBlockToText,
+  renderOperationBlock,
   type ReceivedOperationBlock,
   type ReviewView,
 } from '@pinpawo/agent-session';
@@ -70,7 +69,7 @@ function renderOperationView(
       ...(view.summary ? wrapTone(clampCharacters(view.summary, maxCharacters), width, 'default') : []),
       ...(view.target ? wrapTone(`Target: ${view.target}`, width, 'muted') : []),
     ],
-    ...(view.blocks ?? []).map((block) => renderOperationBlock(block, view.target, width, maxCharacters)),
+    ...(view.blocks ?? []).map((block) => renderReviewBlock(block, view.target, width, maxCharacters)),
   ].filter((section) => section.length > 0);
   return sections.flatMap((section, index) => (
     index === 0 ? section : [line('', 'default'), ...section]
@@ -81,34 +80,27 @@ function renderOperationView(
  * Native rendering for the kinds the TUI knows; any other kind (one from a
  * newer Host) falls back to the shared default text.
  */
-function renderOperationBlock(
+function renderReviewBlock(
   block: ReceivedOperationBlock,
   target: string | undefined,
   width: number,
   maxCharacters: number,
 ): ReviewContentLine[] {
-  const fallback = () => wrapTone(clampCharacters(operationBlockToText(block), maxCharacters), width, 'default');
-  if (!isKnownOperationBlock(block)) return fallback();
-  const text = clampCharacters(block.text, maxCharacters);
-  const truncated = block.truncated ? [line('…（内容已截断）', 'muted')] : [];
-  switch (block.kind) {
-    case 'diff':
-      return [
-        ...(block.path && block.path !== target ? [line(truncateTerminalLine(block.path, width), 'heading')] : []),
-        ...renderPatchLines(text, width),
-        ...truncated,
-      ];
-    case 'code':
-      return [...wrapTone(text, width, 'default'), ...truncated];
-    case 'text':
-      return [
-        ...(block.label ? [line(truncateTerminalLine(block.label, width), 'heading')] : []),
-        ...wrapTone(text, width, 'default'),
-        ...truncated,
-      ];
-    default:
-      return fallback();
-  }
+  const body = (text: string) => clampCharacters(text, maxCharacters);
+  const truncated = (marked: true | undefined) => (marked ? [line('…（内容已截断）', 'muted')] : []);
+  return renderOperationBlock<ReviewContentLine[]>(block, {
+    diff: (diff) => [
+      ...(diff.path && diff.path !== target ? [line(truncateTerminalLine(diff.path, width), 'heading')] : []),
+      ...renderPatchLines(body(diff.text), width),
+      ...truncated(diff.truncated),
+    ],
+    code: (code) => [...wrapTone(body(code.text), width, 'default'), ...truncated(code.truncated)],
+    text: (text) => [
+      ...(text.label ? [line(truncateTerminalLine(text.label, width), 'heading')] : []),
+      ...wrapTone(body(text.text), width, 'default'),
+      ...truncated(text.truncated),
+    ],
+  }, (text) => wrapTone(body(text), width, 'default'));
 }
 
 /**

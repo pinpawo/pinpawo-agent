@@ -99,6 +99,8 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   用已有的 Pet session 视图（`PetSessionView`，`/pet-sessions/snapshot|events|review`，#925）查看过程并处理审批；
   这属于全局 Studio API，不是 Channel 成员权限。
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
+  没有 @ 的消息只写入 Channel，不派发给任何 Pet，单 Pet 的 Channel 也一样；`replyTo` 不算 @，回复 Pet 的消息不会唤醒它。
+  Channel 没有默认或兜底 Pet。Pet 只在下次被 @ 或被 schedule / trigger 唤醒时，通过 `channel_read_context` 读到这些消息。
   投递结果不落库：发起请求的一方在响应里拿到；同时 Channel 在全局事件总线上发布投递事件（含失败），
   不区分发言者是人还是 Pet。
 - **投递失败是 best-effort 边界。** Pet 的公开消息由订阅写入，没有请求方：它 @ 的对象投递失败时，只有全局事件可见

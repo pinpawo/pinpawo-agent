@@ -123,10 +123,10 @@ export function createContinueTool() {
     });
   }, {
     name: 'continue',
-    description: '继续当前计划中尚未完成的任务。计划没有未完成任务时不要使用，新需求用 plan_request。',
+    description: 'Continue the unfinished tasks in the current plan. Do not use it when the plan has no unfinished tasks; use plan_request for a new request.',
     schema: z.object({
       goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS).optional()
-        .describe('仅当用户在接续时调整了目标或范围才填写：结合原目标和用户这次的话，写出更新后的完整目标。沿用原目标时省略。'),
+        .describe('Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with what the user said this time and write the complete updated goal. Omit it to keep the original goal.'),
     }).strict(),
   });
 }
@@ -145,10 +145,10 @@ export function createPlanRequestTool() {
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
-      description: '为用户当前的目标创建执行计划。',
+      description: 'Create an execution plan for the user\'s current goal.',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
-          .describe('用户当前希望达成的目标。结合对话上下文表达清楚，保留用户的要求，不自行扩展任务范围。'),
+          .describe('The goal the user currently wants to achieve. State it clearly using the conversation context, keep the user\'s requirements, and do not widen the task scope yourself.'),
       }).strict(),
     },
   );

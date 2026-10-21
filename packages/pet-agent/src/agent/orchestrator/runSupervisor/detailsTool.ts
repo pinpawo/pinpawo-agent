@@ -68,7 +68,7 @@ export function createSupervisorCapabilityDetailsTool(params: {
     } });
   }, {
     name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
-    description: '按 manifest 中的完整名称获取 Capability 详情，只做精确匹配，不搜索。返回新文档、已披露名称和未知名称；已披露的文档不重复返回。',
+    description: 'Fetch Capability details by their full names in the manifest; exact match only, no search. Returns new documents, already disclosed names and unknown names; documents already disclosed are not returned again.',
     schema: z.object({ names: z.array(z.string().trim().min(1).max(200)).min(1) }).strict(),
   });
 }

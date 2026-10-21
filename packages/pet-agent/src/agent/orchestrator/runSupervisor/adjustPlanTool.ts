@@ -8,10 +8,10 @@ import { currentSupervisorTask, planGoal, type RunSupervisorState, type Supervis
 import { executionsForPlanItem } from '../executionMessages';
 
 export const adjustPlanSchema = z.object({
-  adjustedGoal: z.string().trim().min(1).max(4_000).optional().describe('执行证据表明验收目标需要校准时填写调整后的目标，作为后续委派和验收依据；不得超出 goal 的授权范围。无需校准时省略，沿用已有的调整后目标。'),
-  reason: z.string().trim().min(1).max(2_000).describe('使原计划无法继续适用的具体执行证据或新用户要求，以及本次必要的最小调整。'),
-  currentTask: z.enum(['keep', 'replace']).describe('keep：保留当前计划项及其验收依据，可修改 objective 但保持 Capability；replace：建立新计划项。每次委派均独立执行。'),
-  tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的剩余工作。已完成事项由运行时保留，不重新提交；keep 时第一项对应保留身份与交付的当前任务。'),
+  adjustedGoal: z.string().trim().min(1).max(4_000).optional().describe('The calibrated goal, filled in when execution evidence shows the acceptance target needs calibration; later delegation and acceptance follow it. It must stay within the authorized scope of goal. Omit it when no calibration is needed; the existing adjusted goal stays.'),
+  reason: z.string().trim().min(1).max(2_000).describe('The concrete execution evidence or new user requirement that makes the original plan no longer fit, and the minimal change needed now.'),
+  currentTask: z.enum(['keep', 'replace']).describe('keep: keep the current plan item and its acceptance basis; the objective may change but the Capability stays. replace: create a new plan item. Every delegation runs independently.'),
+  tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('The remaining work after the adjustment. The runtime keeps completed items, so do not resubmit them; with keep, the first item is the current task, which keeps its identity and deliveries.'),
 }).strict();
 
 export function createAdjustPlanTool(context: SupervisorControlContext) {
@@ -27,7 +27,7 @@ export function createAdjustPlanTool(context: SupervisorControlContext) {
     name: 'adjust_plan',
     schema: adjustPlanSchema,
     verboseParsingErrors: true,
-    description: '调整计划并返回更新后的事实，由你继续决定下一步。',
+    description: 'Adjust the plan and return the updated facts; you then decide the next step.',
   });
 }
 

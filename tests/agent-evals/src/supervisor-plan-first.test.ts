@@ -51,8 +51,8 @@ test('baselines swap exactly the shipped Entry guidance or invocation', () => {
   assert.match(systemOnlyTurn.content as string, /Interpret the user request before submitting the execution plan\./);
   const [previousRole, previousTurn] = withGuidance([role, turn], 'previous');
   const text = JSON.stringify(previousRole.content);
-  assert.equal(text.includes('只执行本 run 计划中的下一项'), false);
-  assert.equal(text.includes('通过 submit_plan 建立计划'), true);
+  assert.equal(text.includes('only executes the next item of this run'), false);
+  assert.equal(text.includes('Create the plan with submit_plan'), true);
   assert.deepEqual(previousTurn.content, systemOnlyTurn.content);
   assert.deepEqual(withGuidance([role, turn], 'current'), [role, turn]);
   assert.throws(() => withGuidance([turn], 'previous'), /update the A\/B baselines/);

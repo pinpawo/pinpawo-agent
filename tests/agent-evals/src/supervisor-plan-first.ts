@@ -161,10 +161,10 @@ export function scorePlanFirst(calls: ReadonlyArray<{ name: string }>, expect: P
 }
 
 // Shipped Entry wording, and the wording each baseline restores.
-const SHIPPED_GUIDANCE = 'delegate_capability 只执行本 run 计划中的下一项，而 Entry 时本 run 的计划为空：需要执行时先用 submit_plan 建立计划，读取工具返回后再自主决定下一步，计划建立后才委派。缺少用户独占的信息、选择或授权时直接询问用户。main messages 只保留以往 run 的委派与交付，不保留它们的规划步骤；新请求即使与以往相似、是对此前提议的确认或要求“同样处理”，也要先为本 run 提交计划。';
+const SHIPPED_GUIDANCE = 'delegate_capability only executes the next item of this run\'s plan, and at Entry this run\'s plan is empty: when execution is needed, first create the plan with submit_plan, read the tool\'s result, then decide the next step yourself; delegate only after the plan exists. When information, a choice or an authorization that only the user can provide is missing, ask the user directly. main messages keep only earlier runs\' delegations and deliveries, not their planning steps; a new request still needs a plan submitted for this run first, even when it resembles earlier ones, confirms an earlier proposal or asks to "do the same".';
 const SHIPPED_INVOCATION = 'This run has no plan yet. Interpret the user request, then call submit_plan before any delegate_capability; delegations in earlier runs followed plans of their own and are not a pattern to repeat. Ask the user directly when only they can supply missing information, a choice or an authorization. Preserve established requirements unless the user requests a change.';
 const PREVIOUS_INVOCATION = 'Interpret the user request before submitting the execution plan. Preserve established requirements unless the user requests a change.';
-const PREVIOUS_GUIDANCE = '通过 submit_plan 建立计划，读取工具返回后自主决定下一步；使用 delegate_capability 明确交接执行，缺少用户独占的信息、选择或授权时直接询问用户。';
+const PREVIOUS_GUIDANCE = 'Create the plan with submit_plan, read the tool\'s result, then decide the next step yourself; hand off execution explicitly with delegate_capability, and ask the user directly when information, a choice or an authorization that only the user can provide is missing.';
 const BASELINES = {
   // Plan-first in the system prompt only; the invocation keeps its earlier wording.
   systemOnly: [[SHIPPED_INVOCATION, PREVIOUS_INVOCATION]],

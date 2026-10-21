@@ -23,7 +23,7 @@ export function createSubmitPlanTool(context: SupervisorControlContext) {
     name: 'submit_plan',
     schema: submitPlanSchema,
     verboseParsingErrors: true,
-    description: '建立计划并返回计划事实，由你继续决定下一步。',
+    description: 'Create the plan and return the plan facts; you then decide the next step.',
   });
 }
 

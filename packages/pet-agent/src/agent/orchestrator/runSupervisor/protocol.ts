@@ -5,7 +5,7 @@ export const MAX_OBJECTIVE_CHARS = 120;
 export const supervisorTaskSchema = z.object({
   capability: z.string().trim().min(1).max(200),
   // Plan items are displayed as a task list; the full instructions belong to the briefing.
-  objective: z.string().trim().min(1).max(MAX_OBJECTIVE_CHARS).describe('本项交付的结果，一句话，像任务标题，尽量不超过 30 字。背景、步骤、约束和交付要求留到委派时写进 briefing。'),
+  objective: z.string().trim().min(1).max(MAX_OBJECTIVE_CHARS).describe('The deliverable of this item in one short sentence, like a task title (ideally under 30 Chinese characters or 15 English words). Background, steps, constraints and delivery requirements go into the briefing when delegating.'),
 }).strict();
 
 /** Only classifies state-changing tools for sequential invocation and message identity. */

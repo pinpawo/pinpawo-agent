@@ -1,6 +1,6 @@
 {
   "name": "@pinpawo-plugin/studio-http",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Loopback HTTP dispatch and live SSE event Plugin for PinPawo Studio",
   "license": "MIT",
   "publishConfig": {
@@ -31,11 +31,11 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
-    "@pinpawo/agent-contracts": "^0.2.1",
-    "@pinpawo/studio": "^0.1.0",
+    "@pinpawo/agent-contracts": "^1.0.0",
+    "@pinpawo/studio": "^1.0.0",
     "hono": "^4.13.3",
     "jose": "^6.2.12",
-    "pinpawo": "^0.2.1"
+    "pinpawo": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

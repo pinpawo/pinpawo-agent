@@ -1,6 +1,6 @@
 {
   "name": "@pinpawo/agent-session",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "description": "Runtime-neutral Agent Session projection and transport contracts",
   "license": "MIT",
   "publishConfig": {
@@ -32,7 +32,7 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@pinpawo/agent-contracts": "^0.2.1"
+    "@pinpawo/agent-contracts": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

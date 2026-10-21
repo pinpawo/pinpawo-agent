@@ -1,6 +1,6 @@
 {
   "name": "pinpawo",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "description": "PinPawo CLI, TUI, and local Host runtime",
   "license": "MIT",
   "publishConfig": {
@@ -64,9 +64,9 @@
     "@langfuse/langchain": "^5.10.0",
     "@langfuse/otel": "^5.10.0",
     "@opentelemetry/sdk-node": "^0.221.0",
-    "@pinpawo-toolkit/browser": "^0.2.1",
-    "@pinpawo/agent-session": "^0.2.1",
-    "@pinpawo/pet-agent": "^0.2.1",
+    "@pinpawo-toolkit/browser": "^1.0.0",
+    "@pinpawo/agent-session": "^1.0.0",
+    "@pinpawo/pet-agent": "^1.0.0",
     "@tavily/core": "^0.7.1",
     "@vscode/ripgrep": "1.18.0",
     "commander": "^12.1.0",

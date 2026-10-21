@@ -1,6 +1,6 @@
 {
   "name": "@pinpawo-plugin/channel",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Member Channels for humans and Pets: messages, addressing and invocation-scoped context",
   "license": "MIT",
   "publishConfig": {
@@ -31,15 +31,15 @@
   },
   "dependencies": {
     "@langchain/core": "^1.2.1",
-    "@pinpawo/agent-session": "^0.2.1",
-    "@pinpawo/pet-agent": "^0.2.1",
-    "@pinpawo/studio": "^0.1.0",
+    "@pinpawo/agent-session": "^1.0.0",
+    "@pinpawo/pet-agent": "^1.0.0",
+    "@pinpawo/studio": "^1.0.0",
     "kysely": "^0.29.6",
     "mdast-util-from-markdown": "2.0.3",
     "zod": "^3.22.0"
   },
   "peerDependencies": {
-    "@pinpawo-plugin/studio-http": "^0.1.0"
+    "@pinpawo-plugin/studio-http": "^1.0.0"
   },
   "peerDependenciesMeta": {
     "@pinpawo-plugin/studio-http": {
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "@pinpawo-plugin/studio-http": "^0.1.0",
+    "@pinpawo-plugin/studio-http": "^1.0.0",
     "@types/node": "^24.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",

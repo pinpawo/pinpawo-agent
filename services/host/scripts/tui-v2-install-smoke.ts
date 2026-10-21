@@ -21,6 +21,7 @@ const workspaceRoot = resolve(hostRoot, '..', '..');
 const agentContractsRoot = resolve(workspaceRoot, 'packages', 'agent-contracts');
 const agentSessionRoot = resolve(workspaceRoot, 'packages', 'agent-session');
 const petAgentRoot = resolve(workspaceRoot, 'packages', 'pet-agent');
+const browserToolkitRoot = resolve(workspaceRoot, 'toolkits', 'browser');
 const tuiRoot = resolve(workspaceRoot, 'services', 'tui');
 const npmCli = process.env.npm_execpath;
 
@@ -64,10 +65,11 @@ try {
     version: '0.0.0',
   }, null, 2)}\n`);
 
-  const [agentContractsTarball, agentSessionTarball, petAgentTarball, hostTarball] = await Promise.all([
+  const [agentContractsTarball, agentSessionTarball, petAgentTarball, browserToolkitTarball, hostTarball] = await Promise.all([
     packWorkspacePackage(agentContractsRoot, artifactDir),
     packWorkspacePackage(agentSessionRoot, artifactDir),
     packWorkspacePackage(petAgentRoot, artifactDir),
+    packWorkspacePackage(browserToolkitRoot, artifactDir),
     packWorkspacePackage(hostRoot, artifactDir),
   ]);
   // Resolve against live registry metadata: with --prefer-offline, a restored
@@ -81,6 +83,7 @@ try {
     agentContractsTarball,
     agentSessionTarball,
     petAgentTarball,
+    browserToolkitTarball,
     hostTarball,
   ], consumerDir, 'install tarballs in an empty project', 600_000);
 

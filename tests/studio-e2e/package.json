@@ -9,16 +9,16 @@
   },
   "devDependencies": {
     "@langchain/core": "^1.2.1",
-    "@pinpawo-plugin/studio-http": "*",
-    "@pinpawo-plugin/notice": "*",
-    "@pinpawo-plugin/project-files": "*",
-    "@pinpawo-plugin/scheduler": "*",
-    "@pinpawo-plugin/trigger": "*",
-    "@pinpawo/pet-agent": "*",
-    "@pinpawo/studio": "*",
+    "@pinpawo-plugin/studio-http": "^1.0.0",
+    "@pinpawo-plugin/notice": "^1.0.0",
+    "@pinpawo-plugin/project-files": "^1.0.0",
+    "@pinpawo-plugin/scheduler": "^1.0.0",
+    "@pinpawo-plugin/trigger": "^1.0.0",
+    "@pinpawo/pet-agent": "^1.0.0",
+    "@pinpawo/studio": "^1.0.0",
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "@pinpawo-plugin/channel": "*"
+    "@pinpawo-plugin/channel": "^1.0.0"
   }
 }

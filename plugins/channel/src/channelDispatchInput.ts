@@ -23,6 +23,8 @@ export function channelDispatchInput(
   message: ChannelMessageRow,
   original?: ChannelMessageRow,
   labelOf: (participantId: string) => string | undefined = () => undefined,
+  /** `routing`: nobody addressed this message; Channel routing chose this Pet. */
+  addressedBy?: 'routing',
 ): string {
   const author = (entry: ChannelMessageRow) => {
     const participantId = channelParticipantId(entry.author.kind, entry.author.id);
@@ -34,6 +36,7 @@ export function channelDispatchInput(
     channelId: message.channelId, messageId: message.messageId,
     author: author(message), body: message.body,
     ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
+    ...(addressedBy ? { addressedBy } : {}),
   });
 }
 

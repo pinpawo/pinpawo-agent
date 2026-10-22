@@ -124,6 +124,24 @@ export type StudioPluginContext = {
    * Plugin authenticates requests with them and other Plugins read labels.
    */
   clients: StudioClients;
+  /**
+   * The Host's model profiles, read only. A Plugin that makes its own model
+   * call (not a Pet run) names a profile instead of keeping its own key.
+   */
+  models: StudioModels;
+};
+
+/** An OpenAI-compatible endpoint from one of the Host's model profiles. */
+export type StudioModelEndpoint = {
+  profileId: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  structuredOutputMethod?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+};
+export type StudioModels = {
+  /** The named profile, or the Host default; throws for an unknown profile or when the Studio has none. */
+  resolve: (profileId?: string) => StudioModelEndpoint;
 };
 
 type PetSessionPort = import('pinpawo/host-runtime').PetSessionPort;

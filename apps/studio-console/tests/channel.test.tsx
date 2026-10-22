@@ -238,3 +238,14 @@ test('message reader shares safe Markdown and member identity rendering with the
   assert.ok(!markup.includes('href="javascript:'));
   assert.ok(!markup.includes('<script>'));
 });
+
+test('routing outcomes show on the unaddressed message: who it went to, or why nobody', () => {
+  const asked = { ...message, messageId: 'asked', author: { kind: 'human' as const, id: 'studio-operator' }, body: 'Who is on #1003?' };
+  const thanks = { ...asked, messageId: 'thanks', body: 'thanks' };
+  const markup = renderToStaticMarkup(<ChannelTimeline messages={[asked, thanks]} pending={false} onReply={() => undefined} members={members}
+    deliveries={[{ channelId: 'a', messageId: 'asked', participantId: 'pet:worker', state: 'accepted', via: 'routing', confidence: 0.86, reason: 'It opened #1003.' }]}
+    routingSkips={[{ channelId: 'a', messageId: 'thanks', reason: 'none', confidence: 0.97 }]} />);
+  assert.ok(markup.includes('Analyst · routed 86%'));
+  assert.ok(markup.includes('title="It opened #1003."'));
+  assert.ok(markup.includes('Not routed: no Pet needed'));
+});

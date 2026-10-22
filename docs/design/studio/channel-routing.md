@@ -1,6 +1,6 @@
 # Channel 路由
 
-> 状态：设计草案，未实现
+> 状态：`llm` 决策器已实现（配置读 `studio.json`）；`jev` 决策器和 Console 设置页未实现
 > 更新：2026-10-22
 
 ## 问题
@@ -90,24 +90,24 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 
 ## 配置
 
-设置走 [Studio Plugin 设置](plugin-settings.md)：Channel 插件声明设置的 schema 和默认值，`studio.json` 的 `options`
-可以给初始值，Console 的 Plugins 页保存到数据库并热更新。
+现在设置写在 `studio.json` 里 Channel 插件的 `options.routing`，启动时读取，改了要重启。
+路由经 eval 证明有用之后，再按 [Studio Plugin 设置](plugin-settings.md) 改成 Console 可编辑、存数据库、热更新。
 
 ```json
 {
-  "routing": {
-    "enabled": false,
-    "decider": {
-      "kind": "llm",
-      "modelProfileId": "deepseek-v4-flash"
-    },
-    "threshold": 0.5,
-    "timeoutMs": 10000,
-    "historyLimit": 20,
-    "pets": {
-      "executor": "执行代码、命令和交付类请求；也负责回答它做过的工作的进度。",
-      "reviewer": "审查代码、PR 和交付结果。",
-      "wiki": "维护项目 Wiki 和文档。"
+  "id": "@pinpawo-plugin/channel",
+  "options": {
+    "routing": {
+      "enabled": true,
+      "decider": { "kind": "llm", "modelProfileId": "deepseek-v4-flash" },
+      "threshold": 0.5,
+      "timeoutMs": 10000,
+      "historyLimit": 20,
+      "pets": {
+        "executor": "执行代码、命令和交付类请求；也负责回答它做过的工作的进度。",
+        "reviewer": "审查代码、PR 和交付结果。",
+        "wiki": "维护项目 Wiki 和文档。"
+      }
     }
   }
 }
@@ -116,9 +116,11 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 `decider` 是按 `kind` 区分的联合：
 
 - `{ "kind": "llm", "modelProfileId": "…" }`：引用 Host 已有的模型配置（与 Pet 的 `modelProfileId` 同一个注册表），
-  不另存 baseUrl 和 key。需要 Studio 向 Plugin 提供只读的模型配置查询（`context.models.resolve(profileId)`，
-  返回 OpenAI 兼容的 baseUrl、model 和 key），这是 Studio 核心要加的一个小接口。
-- `{ "kind": "jev", "baseUrl": "…", "apiKeyEnv": "…", "model": "…" }`：Jev 不在 Host 的模型配置里，单独配置；
+  不另存 baseUrl 和 key；省略 `modelProfileId` 时用 Host 默认配置。Studio 通过 `context.models.resolve(profileId)`
+  向 Plugin 提供只读的模型配置（OpenAI 兼容的 baseUrl、model、key 和结构化输出方式）。配置在 Channel 启动时解析，
+  不存在的 profile 让启动失败。结构化输出按 profile 的 `structuredOutputMethod`：`jsonSchema` 用 `json_schema`，
+  `functionCalling` 用强制的单个函数调用，其余用 `json_object`。
+- `{ "kind": "jev", "baseUrl": "…", "apiKeyEnv": "…", "model": "…" }`（未实现）：Jev 不在 Host 的模型配置里，单独配置；
   key 只写环境变量名。各厂商请求格式在实现时按其文档确定。
 
 其他字段：
@@ -131,10 +133,11 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 
 ## Console
 
-- 路由成功：消息下方显示"已转给 Executor"，悬停显示置信度和原因。
-- 跳过：显示"未分派"，悬停显示原因。
-- 输入框下方的提示按路由是否开启显示："没有 @ 时自动判断交给谁"或现在的"不会唤醒 Pet"。
-- Plugins 页的 Channel 设置里：开关、决策器类型（`llm` 时下拉选模型配置，`jev` 时填 baseUrl/model/环境变量名）、阈值、Pet 说明。
+- 路由成功：消息头部显示"Executor · routed 86%"，悬停显示原因。
+- 跳过：显示"Not routed: …"（无需 Pet / 不确定 / 路由失败），悬停显示细节。
+- 输入框下方的提示："Without an @, no Pet is woken unless Channel routing picks one."
+- 这些都来自全局事件流，所以只有持本机 token 的 Console 能看到；客户 key 的 Console 不显示路由结果。
+- 以后 Plugins 页的 Channel 设置里：开关、决策器类型（`llm` 时下拉选模型配置，`jev` 时填 baseUrl/model/环境变量名）、阈值、Pet 说明。
 
 ## 不做的事
 
@@ -146,15 +149,17 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 ## 待定
 
 - 默认用哪家的 Jev，以及各家请求格式是否一致。实现前用真实调用确认格式和延迟。
-- eval：用一组带标注的 Channel 片段（"谁在处理 X"、闲聊、明确请求、致谢）比较 `jev` 与 `llm` 的准确率、延迟和成本，
-  决定默认 `kind`。
+- eval：`npm run eval:channel-routing -w @pinpawo-tests/agent-evals`（`ROUTING_EVAL_MODEL_PROFILE_ID=<profile>`）跑 14 个带标注的
+  片段（"谁在处理 X"、追问、新请求、回复 Pet、闲聊、致谢、回复人），分别统计误唤醒、漏派、派错和延迟。
+  `jev` 实现后用同一组片段比较，决定默认 `kind`。
 
 ## 涉及的改动
 
 | 位置 | 改动 |
 |------|------|
-| `packages/studio` | Plugin 设置机制（见 [plugin-settings.md](plugin-settings.md)）；`context.models.resolve` |
-| `plugins/channel` | 声明 `routing` 设置；`RouteDecider` 两个实现；消息保存后对符合条件的消息异步路由；`channel_message` 加可选 `addressedBy`；事件字段 |
-| `apps/studio-console` | 显示路由结果和跳过原因；提示文案；Plugins 页表单 |
+| `packages/studio` | `context.models.resolve`（已实现）；Plugin 设置机制（以后，见 [plugin-settings.md](plugin-settings.md)） |
+| `plugins/channel` | `options.routing`；`llm` 决策器；消息保存后对符合条件的消息异步路由；`channel_message` 加可选 `addressedBy`；事件字段（已实现）；`jev` 决策器（以后） |
+| `apps/studio-console` | 显示路由结果和跳过原因、提示文案（已实现）；Plugins 页表单（以后） |
 | 默认 Pet 模板 | PET.md 说明 `addressedBy: 'routing'` 的含义 |
+| eval | `tests/agent-evals/src/channel-routing.eval.ts` |
 | 文档 | `docs/studio/configuration.md` 加设置说明 |

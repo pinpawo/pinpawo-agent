@@ -60,6 +60,10 @@ Capability inventory、Agent Session 与 checkpoint 都不进入 Studio 注册�
 既有工作区需手动对照新版 PET.md / Capability，保留本地约定；设计文档链接不能替代
 Host 实际加载的运行时指令，编辑后重启生效。
 
+人类发的、没有 @ 任何人的 Channel 消息只保存，不唤醒 Pet。把 Channel Plugin 的 `options.routing.enabled`
+设为 `true` 后，会用一次模型调用为这类消息选一个 Pet 或不选（`decider: {kind:'llm', modelProfileId}`，
+引用 Host 的模型配置）。见 [Channel 路由](../../design/studio/channel-routing.md)。
+
 ## 旧 Kanban 工作区迁移
 
 Kanban Plugin、API、工具和默认任务分配／任务完成后 Wiki 自动更新规则已退役。

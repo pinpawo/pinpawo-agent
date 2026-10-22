@@ -9,6 +9,7 @@ import {
   type StudioPetSessions,
   type StudioPlugin,
   type StudioPluginContext,
+  type StudioModels,
 } from './studioContract';
 import type {
   StudioDispatchReceipt,
@@ -28,6 +29,8 @@ export type CreateStudioInput = {
   plugins?: StudioPlugin[];
   /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
   storage?: StudioStorageConfig;
+  /** Model profiles Plugins may call directly. Without them, `models.resolve` throws. */
+  models?: StudioModels;
 };
 
 export type PreparedStudio = {
@@ -75,6 +78,9 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     clientStore.catch(() => { clientStore = undefined; });
     return clientStore;
   });
+  const models: StudioModels = input.models ?? {
+    resolve: () => { throw new Error(`studio "${input.studioId}" has no model profiles.`); },
+  };
   const startedPlugins: StudioPlugin[] = [];
   let activationPromise: Promise<void> | null = null;
   let shutdownPromise: Promise<void> | null = null;
@@ -206,6 +212,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       petSessions,
       hooks: pluginHooks.contextFor(plugin.name),
       clients,
+      models,
       storage: {
         dialect: storage.dialect,
         open: (migrations) => storage.open(plugin.name, migrations),

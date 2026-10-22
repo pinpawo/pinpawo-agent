@@ -278,6 +278,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'hooks',
     'listDispatchQueues',
     'listPets',
+    'models',
     'notify',
     'petSessions',
     'storage',
@@ -518,4 +519,21 @@ test('shutdown rejects new dispatches without owning accepted Pet execution', as
     () => studio.dispatch({ petId: 'worker', request: 'too late' }),
     /already shut down/,
   );
+});
+
+test('Plugins read model profiles through context.models, and a Studio without them refuses', async () => {
+  const endpoint = { profileId: 'small', baseUrl: 'https://models.test/v1', apiKey: 'k', model: 'small-1' };
+  let models: StudioPluginContext['models'] | undefined;
+  const plugin: StudioPlugin = { name: 'reader', toolkits: [], start: (context) => { models = context.models; } };
+  const studio = await createStudio({
+    studioId: 'models', entryPetId: 'worker', pets: [binding('worker')], plugins: [plugin],
+    models: { resolve: (profileId) => ({ ...endpoint, profileId: profileId ?? endpoint.profileId }) },
+  });
+  assert.deepEqual(models?.resolve(), endpoint);
+  assert.equal(models?.resolve('other').profileId, 'other');
+  await studio.shutdown();
+
+  const bare = await createStudio({ studioId: 'bare', entryPetId: 'worker', pets: [binding('worker')], plugins: [plugin] });
+  assert.throws(() => models!.resolve(), /has no model profiles/);
+  await bare.shutdown();
 });

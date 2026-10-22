@@ -9,7 +9,7 @@ import React, {
 import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, type DispatchRecord } from './dispatchActivity';
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
-import { appendChannelDeliveries, type ChannelDelivery } from './channelData';
+import { appendChannelDeliveries, type ChannelDelivery, type ChannelRoutingSkip } from './channelData';
 import { Bell, BookOpen, CalendarClock, MessagesSquare, Plug, Zap, type LucideIcon } from 'lucide-react';
 import logoMark from '../../../assets/brand/pinpawo-primary-white.svg';
 
@@ -134,6 +134,7 @@ export function App() {
   const [channelVersion, setChannelVersion] = useState(0);
   const [channelDeliveries, setChannelDeliveries] = useState<ChannelDelivery[]>([]);
   const [channelFailures, setChannelFailures] = useState<{ channelId: string; petId?: string; error: string }[]>([]);
+  const [routingSkips, setRoutingSkips] = useState<ChannelRoutingSkip[]>([]);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
   const [notices, setNotices] = useState<Resource<Notice[]>>(empty);
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
@@ -250,6 +251,10 @@ export function App() {
           if (event.type === 'channel.delivery' && payload?.channelId && payload.state) {
             setChannelDeliveries(current => appendChannelDeliveries(current, [payload as ChannelDelivery]));
           }
+          const skip = event.payload as Partial<ChannelRoutingSkip> | undefined;
+          if (event.type === 'channel.routing.skipped' && skip?.channelId && skip.messageId && skip.reason) {
+            setRoutingSkips(current => [...current.slice(-199), skip as ChannelRoutingSkip]);
+          }
           if (event.type === 'channel.message_failed' && payload?.channelId && payload.error) {
             const failure = { channelId: payload.channelId, petId: payload.petId, error: payload.error };
             setChannelFailures(current => [...current.slice(-19), failure]);
@@ -323,6 +328,7 @@ export function App() {
       setPets([]);
       setChannelDeliveries([]);
       setChannelFailures([]);
+      setRoutingSkips([]);
       setSchedules(empty());
       setNotices(empty());
       setTriggers(empty());
@@ -538,7 +544,7 @@ export function App() {
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
-            deliveries={channelDeliveries} failures={channelFailures} clientMode={clientMode} />
+            deliveries={channelDeliveries} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>CONNECTION FAILED</strong>

@@ -261,6 +261,18 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       pets,
       plugins,
       storage: resolveStudioStorage(studioConfig.storage, input.configuration.workdir),
+      models: {
+        resolve: (profileId?: string) => {
+          const config = input.modelProfiles.resolve(profileId);
+          return {
+            profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            model: config.model,
+            ...(config.structuredOutputMethod ? { structuredOutputMethod: config.structuredOutputMethod } : {}),
+          };
+        },
+      },
     };
     const prepared = prepareStudio(studioInput);
     studio = prepared.studio;

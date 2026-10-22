@@ -16,7 +16,7 @@
     "test:browser:session": "node tests/petSession.browser.mjs"
   },
   "dependencies": {
-    "@pinpawo/agent-session": "^0.2.1",
+    "@pinpawo/agent-session": "^1.0.0",
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-document": "^3.32.0",
     "@tiptap/extension-hard-break": "^3.32.0",

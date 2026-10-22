@@ -1,6 +1,6 @@
 {
   "name": "@pinpawo-plugin/trigger",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Durable external trigger Plugin for PinPawo Studio",
   "license": "MIT",
   "publishConfig": { "access": "public" },
@@ -24,12 +24,12 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@pinpawo/studio": "^0.1.0",
+    "@pinpawo/studio": "^1.0.0",
     "kysely": "^0.29.6"
   },
   "peerDependencies": {
-    "@pinpawo-plugin/channel": "^0.1.0",
-    "@pinpawo-plugin/studio-http": "^0.1.0"
+    "@pinpawo-plugin/channel": "^1.0.0",
+    "@pinpawo-plugin/studio-http": "^1.0.0"
   },
   "peerDependenciesMeta": {
     "@pinpawo-plugin/channel": { "optional": true },
@@ -37,8 +37,8 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "@pinpawo-plugin/channel": "^0.1.0",
-    "@pinpawo-plugin/studio-http": "^0.1.0",
+    "@pinpawo-plugin/channel": "^1.0.0",
+    "@pinpawo-plugin/studio-http": "^1.0.0",
     "@types/node": "^24.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",

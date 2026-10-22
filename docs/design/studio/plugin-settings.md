@@ -6,7 +6,7 @@
 ## 问题
 
 现在 Plugin 的配置只有 `studio.json` 里的 `plugins[].options`。它在启动时读一次，改了要重启，
-Console 也看不到、改不了。像 [Channel Router](channel-router.md) 的开关、阈值、Pet 说明这类
+Console 也看不到、改不了。像 [Channel 路由](channel-routing.md) 的开关、阈值、Pet 说明这类
 需要运行中调整的值，没有地方放。
 
 ## 方案：Studio 核心提供统一的设置约定
@@ -64,7 +64,7 @@ Console 也看不到、改不了。像 [Channel Router](channel-router.md) 的�
 - **校验失败不保存。** 数据库里的值在 Plugin 升级后不符合新 schema 时，这一份数据库值整份忽略，退回
   defaults ← options，并发布 `studio.plugin_settings.invalid` 事件。不做字段级迁移（与 [Studio 存储](storage.md) 的"不兼容旧数据"一致）。
 
-## 为什么不让 router 自己建表
+## 为什么不让 Channel 自己建表存配置
 
 - 开关和阈值是配置，不是领域数据。[Studio 存储](storage.md) 约定 Store 接口"不存配置"。
 - 每个 Plugin 自己建表，就要各自做 HTTP 路由和 Console 页面。统一机制只做一次，Scheduler、Trigger、Notice 以后也能用。
@@ -76,4 +76,4 @@ Console 也看不到、改不了。像 [Channel Router](channel-router.md) 的�
 | `packages/studio` | `StudioPlugin.settings` 声明、`context.settings`、`studio_plugin_settings` 表和迁移、合并与校验 |
 | `plugins/studio-http` | `GET/PUT /plugins/settings` |
 | `apps/studio-console` | Plugins 页，按 JSON Schema 生成表单 |
-| 首个使用者 | `plugins/channel-router` |
+| 首个使用者 | `plugins/channel` 的路由设置 |

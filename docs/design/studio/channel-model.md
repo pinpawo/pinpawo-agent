@@ -101,7 +101,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
   没有 @ 的消息只写入 Channel，不派发给任何 Pet，单 Pet 的 Channel 也一样；`replyTo` 本身不算 @（Console 的回复会预填原作者的 @，删掉就不会唤醒）。
   Channel 没有默认或兜底 Pet。Pet 只在下次被 @ 或被 schedule / trigger 唤醒时，通过 `channel_read_context` 读到这些消息。
-  可选的 [Channel Router](channel-router.md) Plugin 开启后，为人类的无 @ 消息选一个 Pet 派发（设计草案）；未开启时行为如上。
+  [Channel 路由](channel-routing.md) 开启后，为人类的无 @ 消息选一个 Pet 派发（设计草案）；未开启时行为如上。
   投递结果不落库：发起请求的一方在响应里拿到；同时 Channel 在全局事件总线上发布投递事件（含失败），
   不区分发言者是人还是 Pet。
 - **投递失败是 best-effort 边界。** Pet 的公开消息由订阅写入，没有请求方：它 @ 的对象投递失败时，只有全局事件可见

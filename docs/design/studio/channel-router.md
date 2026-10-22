@@ -83,10 +83,17 @@ Router 决定不派发时，发布 `channel.route.skipped` 事件（含 channelI
 
 ## 配置
 
+设置走 [Studio Plugin 设置](plugin-settings.md)：默认值在 Plugin 里，`studio.json` 的 `options` 可以给初始值，
+Console 的 Plugins 页保存到数据库并热更新。
+
+- `enabled` 默认 `false`。关闭时 Plugin 照常加载但不调用模型，无 @ 消息只存不派发，和没装一样。
+  打开后按下面的规则决策。
+
 ```json
 {
   "id": "@pinpawo-plugin/channel-router",
   "options": {
+    "enabled": true,
     "model": { "kind": "jev", "baseUrl": "https://…", "apiKeyEnv": "PINPAWO_ROUTER_API_KEY", "model": "typesafe/jev-1.13" },
     "pets": {
       "executor": "执行代码、命令和交付类请求；也负责回答它做过的工作的进度。",
@@ -116,7 +123,7 @@ Router 决定不派发时，发布 `channel.route.skipped` 事件（含 channelI
 
 - 路由成功：消息下方显示"已转给 Executor"，悬停显示置信度。
 - 跳过：显示"未分派"，和现在无 @ 的状态一样，悬停显示原因。
-- 输入框下方的提示改为按是否安装 router 显示："没有 @ 时由路由决定交给谁"或现在的"不会唤醒 Pet"。
+- 输入框下方的提示改为按 router 是否开启显示："没有 @ 时由路由决定交给谁"或现在的"不会唤醒 Pet"。
 
 ## 不做的事
 

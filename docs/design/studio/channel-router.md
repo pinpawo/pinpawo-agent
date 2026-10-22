@@ -107,7 +107,8 @@ Router 决定不派发时，发布 `channel.route.skipped` 事件（含 channelI
   type RouteDecider = (input: RouteInput) => Promise<{ needsPet: number; target: string; confidence: number }>;
   ```
 
-  首个实现是 Jev（TypeSafe 原生 API 或 ZenMux 转发，请求格式在实现时按其文档确定）。
+  首个实现是 Jev。TypeSafe 原生 API、ZenMux 和国内云厂商都提供它，配置只写 `baseUrl`、`apiKeyEnv`、`model`，
+  不绑定具体厂商；请求格式在实现时按所选厂商的文档确定。
   之后可以换成 Kev 本地服务，或普通小 LLM 加结构化输出，只改这一层。
 - 决策调用失败或超时（默认 3s）：视为不派发，发布 `channel.route.skipped`（原因 `error`）。消息已经保存，不重试。
 
@@ -126,7 +127,7 @@ Router 决定不派发时，发布 `channel.route.skipped` 事件（含 channelI
 
 ## 待定
 
-- Jev 的接入方式：直连 TypeSafe API 还是经 ZenMux；国内网络能否访问。实现前用真实调用确认格式和延迟。
+- 默认用哪家国内云厂商的 Jev，以及各家请求格式是否一致。实现前用真实调用确认格式和延迟。
 - 是否需要 eval：用一组带标注的 Channel 片段（含"谁在处理 X"、闲聊、明确请求）比较 Jev 与小 LLM 的准确率和成本。
 
 ## 涉及的改动

@@ -6,6 +6,10 @@ import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } fr
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelParticipantId } from './channelParticipants';
 import {
+  channelRoutingOptionsSchema, createChannelRouter, routeInput,
+  type ChannelRouter, type ChannelRoutingOptions, type RouteDecider,
+} from './channelRouting';
+import {
   ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelMessagePageSchema,
   memberRefSchema, type ChannelMessage, type ChannelSessionBinding,
 } from './channelService';
@@ -24,11 +28,19 @@ export type CreateChannelPluginOptions = {
   /** Defaults to the Channel tables in the Studio database. */
   store?: ChannelStore;
   httpRoute?: false | { pluginName?: string };
+  /** Who answers a human's message that addresses nobody. Off by default. */
+  routing?: ChannelRoutingOptions;
+  /** Replaces the configured decider; for embedders and tests. */
+  routeDecider?: RouteDecider;
 };
 /** What happened to one addressed member. Not stored: returned to the poster and published as `channel.delivery`. */
 export type ChannelDelivery = {
   participantId: string;
   state: 'delivered' | 'accepted' | 'failed';
+  /** Set when Channel routing, not a mention, chose this member. */
+  via?: 'routing';
+  confidence?: number;
+  reason?: string;
   invocationId?: string;
   sessionId?: string;
   error?: string;
@@ -77,6 +89,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let unsubscribeHost: (() => void) | undefined;
   let removeHttp: (() => void) | undefined;
   let unexposeInputs: (() => void) | undefined;
+  let router: ChannelRouter | undefined;
   function host(): StudioPluginContext {
     if (!context) throw new Error('Channel Plugin is not started.');
     return context;
@@ -122,8 +135,49 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   }
 
   async function sendMessage(channelId: string, input: unknown, author: MemberRef) {
-    const { message } = await channelService().postMessage(author, channelId, input);
-    return { message, deliveries: await deliver(message) };
+    const { message, created } = await channelService().postMessage(author, channelId, input);
+    const deliveries = await deliver(message);
+    // Routing waits on a model; the poster does not. Its outcome arrives as an event.
+    if (created && router && message.mentions.length === 0) void route(router, message);
+    return { message, deliveries };
+  }
+
+  /** Let routing choose one Pet for a human's message that addressed nobody. */
+  async function route(active: ChannelRouter, message: ChannelMessage): Promise<void> {
+    const studio = host();
+    const skip = (payload: Record<string, unknown>) => studio.notify({
+      type: 'channel.routing.skipped', payload: { channelId: message.channelId, messageId: message.messageId, ...payload },
+    });
+    try {
+      const service = channelService();
+      const members = await service.members(message.channelId);
+      if (!active.applies(message, members)) return;
+      const context = await service.readContext(message.author, message.channelId,
+        active.historyLimit > 0 ? { before: message.sequence, limit: active.historyLimit } : { limit: 1 });
+      const history = active.historyLimit > 0 ? context.messages : [];
+      const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
+      const outcome = await active.decide(routeInput(context.channel, message, original, history, members));
+      if (outcome.kind === 'skip') {
+        const { kind: _kind, ...rest } = outcome;
+        return skip(rest);
+      }
+      const target = members.find(member => member.participantId === outcome.participantId);
+      if (!target || target.kind !== 'pet') return skip({ reason: 'invalid', detail: outcome.participantId });
+      const labels = new Map(members.map(member => [member.participantId, member.label]));
+      const decided = { via: 'routing' as const, confidence: outcome.confidence, ...(outcome.reason ? { reason: outcome.reason } : {}) };
+      let delivery: ChannelDelivery;
+      try {
+        const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
+          channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing'),
+          `channel:${message.channelId}:${message.messageId}:route`);
+        delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
+      } catch (error) {
+        delivery = { participantId: target.participantId, state: 'failed', ...decided, error: error instanceof Error ? error.message : String(error) };
+      }
+      studio.notify({ type: 'channel.delivery', payload: { channelId: message.channelId, messageId: message.messageId, ...delivery } });
+    } catch (error) {
+      skip({ reason: 'error', detail: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   const run: ChannelInputsHook['run'] = async (channelId, petId, request, origin, runOptions = {}) => {
@@ -195,6 +249,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       });
       const service = current;
       context = studio;
+      router = createChannelRouter(options.routing, {
+        ...(options.routeDecider ? { decider: options.routeDecider } : {}),
+        resolveModel: studio.models.resolve,
+      });
       unsubscribeHost = studio.subscribe(async (event) => {
         if (event.source === 'resident-pet' && event.type === 'dispatch.message') await recordPetMessage(event.payload);
       });
@@ -263,6 +321,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       unsubscribeHost?.(); unsubscribeHost = undefined;
       context = undefined;
       current = undefined;
+      router = undefined;
     },
   };
 }
@@ -270,6 +329,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
 export function createStudioPlugin(value: Record<string, unknown> | undefined): ChannelPlugin {
   const options = z.object({
     httpRoute: z.union([z.literal(false), z.object({ pluginName: z.string().min(1).optional() }).strict()]).optional(),
+    routing: channelRoutingOptionsSchema.optional(),
   }).strict().parse(value ?? {});
   return createChannelPlugin(options);
 }

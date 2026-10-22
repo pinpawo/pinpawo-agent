@@ -151,6 +151,22 @@ Default PET.md and Capability templates contain the runtime protocol; existing
 workdirs must compare and update those files manually, preserving local instructions.
 A link to a design document does not replace the instructions loaded by the Host.
 
+A human's message that addresses nobody is stored and wakes no Pet. Setting the Channel
+Plugin option `routing.enabled` to `true` lets one model call choose a single Pet, or
+nobody, for such a message:
+
+```json
+{ "id": "@pinpawo-plugin/channel", "options": { "routing": {
+  "enabled": true,
+  "decider": { "kind": "llm", "modelProfileId": "deepseek-v4-flash" },
+  "pets": { "executor": "Runs code, commands and delivery requests." }
+} } }
+```
+
+`modelProfileId` names a Host model profile (omit it for the Host default); `threshold`
+(default 0.5), `timeoutMs` (default 10000) and `historyLimit` (default 20) are optional.
+See [Channel routing](../design/studio/channel-routing.md).
+
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source
 credentials, template projection, deduplication and endpoints are documented once in

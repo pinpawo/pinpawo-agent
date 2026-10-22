@@ -85,6 +85,7 @@ button { color: #bdebed; background: #153438; }
 .channel-message-head time, .channel-removed { color: #819594; font-size: 10px; }
 .channel-inline-state { margin-left: auto; padding: 1px 8px; color: #86b3ad; border-radius: 10px; background: rgba(111, 196, 154, .08); font-size: 10px; }
 .channel-inline-state.failed { color: #e0968f; background: rgba(223, 122, 115, .1); }
+.channel-inline-state.skipped { color: #9aa3ad; background: rgba(154, 163, 173, .1); }
 .channel-message.grouped { padding-top: 2px; }
 .channel-message.grouped .channel-avatar { height: 0; }
 .channel-message.grouped .channel-message-head { min-height: 0; height: 0; position: relative; }

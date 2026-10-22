@@ -94,6 +94,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
     },
     storage: { dialect: 'sqlite', open: (migrations) => storage.open('scheduler', migrations) },
     clients: new StudioClients(async () => { throw new Error('not used'); }),
+    models: { resolve: () => { throw new Error('not used'); } },
   });
   t.after(() => plugin.stop?.());
 

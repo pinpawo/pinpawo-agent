@@ -5,6 +5,7 @@ export type ChannelTestInput = {
   type: 'channel_message'; version: 1; channelId: string; messageId: string;
   author: Author; body: string;
   replyTo?: { messageId: string; author: Author; body: string };
+  addressedBy?: 'routing';
 };
 export type ChannelTestTask = {
   type: 'channel_task'; version: 1; channelId: string;

@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
 import {
   channelDateKey, channelDeliveryLabel, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
-  channelPetSession, type ChannelDelivery, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession,
+  channelPetSession, channelRoutingSkipLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession,
 } from './channelData';
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
@@ -77,11 +77,12 @@ type TimelineProps = {
   members?: ChannelMember[]; viewerParticipantId?: string; onViewerChange?: (open: boolean) => void;
   /** Deliveries observed by this Console; the Host does not store them. */
   deliveries?: ChannelDelivery[];
+  routingSkips?: ChannelRoutingSkip[];
   sessions?: ChannelSession[]; onViewSession?: (session: ChannelSession) => void;
 };
 
 export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
-  members = [], viewerParticipantId, onViewerChange, deliveries = [], sessions = [], onViewSession }: TimelineProps) {
+  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession }: TimelineProps) {
   const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const byId = new Map(messages.map(item => [item.messageId, item]));
@@ -95,6 +96,7 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
     const original = item.replyTo ? byId.get(item.replyTo) : undefined;
     const avatar = identity.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     const outcomes = deliveries.filter(delivery => delivery.channelId === item.channelId && delivery.messageId === item.messageId);
+    const skipped = routingSkips.filter(skip => skip.channelId === item.channelId && skip.messageId === item.messageId).at(-1);
     const session = item.author.kind === 'pet' ? channelPetSession(item.author.id, sessions) : undefined;
     // Inline @ links already show in the body; only list addressed members the body does not show.
     const inline = channelInlineMentionIds(item.body);
@@ -106,8 +108,10 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
       <div className="channel-message-content">
         <div className="channel-message-head">{!grouped && <><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">Removed Pet</span>}</>}
           <time dateTime={item.occurredAt} title={date.toLocaleString()}>{date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
-          {outcomes.filter(delivery => delivery.participantId).map(delivery => <span key={delivery.participantId} className={'channel-inline-state ' + delivery.state}>
+          {outcomes.filter(delivery => delivery.participantId).map(delivery => <span key={delivery.participantId} className={'channel-inline-state ' + delivery.state}
+            title={delivery.reason}>
             {channelMentionLabel({ participantId: delivery.participantId! }, members, viewerParticipantId)} · {channelDeliveryLabel(delivery)}</span>)}
+          {skipped && <span className="channel-inline-state skipped" title={skipped.detail}>{channelRoutingSkipLabel(skipped)}</span>}
         </div>
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>

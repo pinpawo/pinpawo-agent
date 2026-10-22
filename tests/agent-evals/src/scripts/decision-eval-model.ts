@@ -91,7 +91,7 @@ function inferModelFamily(model: string): string {
     ?? 'unknown';
 }
 
-function readProfile(
+export function readProfile(
   profileId: string,
   env: EvalModelEnvironment,
 ): ModelProfileV1 {

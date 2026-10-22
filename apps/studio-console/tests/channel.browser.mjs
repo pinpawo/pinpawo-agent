@@ -156,7 +156,7 @@ try {
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
   await clearComposer();
   assert.deepEqual(await composerMentions(), []);
-  await page.locator('.channel-composer-hint').getByText('Without an @, the message is saved and wakes no Pet.', { exact: false }).waitFor();
+  await page.locator('.channel-composer-hint').getByText('Without an @, no Pet is woken unless Channel routing picks one.', { exact: false }).waitFor();
   await page.keyboard.type('Saved reply with recipient cleared.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Saved reply with recipient cleared.', { exact: true }).waitFor();

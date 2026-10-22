@@ -9,7 +9,7 @@ import {
   appendChannelDeliveries, channelJoinablePets, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
   channelPetSession, channelReplyRecipientId, channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages,
   readChannelContext, readChannelLater, readChannelPages, type ChannelWindow,
-  type ChannelContext, type ChannelDelivery, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
+  type ChannelContext, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
 } from './channelData';
 
 type Props = {
@@ -21,12 +21,14 @@ type Props = {
   petsReady?: boolean;
   /** Delivery outcomes observed on the Studio event stream. */
   deliveries?: ChannelDelivery[];
+  /** Unaddressed messages Channel routing gave to nobody. */
+  routingSkips?: ChannelRoutingSkip[];
   /** Pet replies the Host could not save into a Channel. */
   failures?: { channelId: string; petId?: string; error: string }[];
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], failures = [], clientMode = false }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], routingSkips = [], failures = [], clientMode = false }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<OpenChannel | null>(null);
@@ -298,7 +300,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               {held?.hasEarlier && <button className="channel-earlier" type="button" disabled={loadingEarlier || !connected}
                 onClick={() => { void loadEarlier(); }}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
               <ChannelTimeline messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage}
-                members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)}
+                members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)} routingSkips={routingSkips}
                 sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
                 onViewerChange={open => {
                   if (open) {
@@ -338,7 +340,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 onSubmit={() => { if (body.trim() && connected && !pending) composerForm.current?.requestSubmit(); }} />
               <div className="channel-composer-controls">
                 <p className="channel-composer-hint"><kbd>@</kbd> mention · <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line
-                  · Without an @, the message is saved and wakes no Pet.</p>
+                  · Without an @, no Pet is woken unless Channel routing picks one.</p>
                 <button className="channel-send" disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
               </div>
             </div>

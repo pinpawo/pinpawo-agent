@@ -24,6 +24,12 @@ export type ChannelSession = { channelId: string; petId: string; sessionId: stri
 export type ChannelDelivery = {
   channelId: string; messageId?: string; participantId?: string;
   state: 'delivered' | 'accepted' | 'failed'; invocationId?: string; sessionId?: string; error?: string;
+  /** Set when Channel routing, not a mention, chose the recipient. */
+  via?: 'routing'; confidence?: number; reason?: string;
+};
+/** Channel routing looked at an unaddressed message and chose nobody. */
+export type ChannelRoutingSkip = {
+  channelId: string; messageId: string; reason: 'none' | 'low_confidence' | 'invalid' | 'error'; confidence?: number; detail?: string;
 };
 export type DispatchQueueEntry = { dispatchId: string; enqueuedAt: string; sessionId?: string; scope?: { namespace: string; id: string } };
 export type DispatchQueue = {
@@ -132,8 +138,18 @@ export function channelQuote(body: string): string {
 
 /** The outcome of one delivery, as shown next to its message. */
 export function channelDeliveryLabel(delivery: ChannelDelivery): string {
+  if (delivery.via === 'routing') {
+    const score = delivery.confidence === undefined ? '' : ` ${Math.round(delivery.confidence * 100)}%`;
+    return delivery.state === 'accepted' ? `routed${score}` : `routing ${delivery.state}`;
+  }
   if (delivery.state === 'accepted') return 'dispatch accepted';
   return delivery.state;
+}
+
+export function channelRoutingSkipLabel(skip: ChannelRoutingSkip): string {
+  if (skip.reason === 'none') return 'Not routed: no Pet needed';
+  if (skip.reason === 'low_confidence') return 'Not routed: unsure who should answer';
+  return 'Not routed: routing failed';
 }
 
 /** Later observations of the same (message, recipient) replace earlier ones. */

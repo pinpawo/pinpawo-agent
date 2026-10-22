@@ -19,6 +19,8 @@ export type {
   StudioPluginContext,
   StudioPluginHookInstaller,
   StudioPluginHooks,
+  StudioModelEndpoint,
+  StudioModels,
 } from './studioContract';
 export { StudioPetUnavailableError } from './studioContract';
 export { createStudioStorage } from './storage/studioStorage';

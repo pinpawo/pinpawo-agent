@@ -7,8 +7,8 @@ import { currentSupervisorTask, requirePlanGoal, updateSupervisorTask, type RunS
 import { executionsForPlanItem } from '../executionMessages';
 
 export const reviewCurrentSchema = z.object({
-  completed: z.boolean().describe('是否验收当前任务的最新交付。false 保留任务供后续补做；工具不触发执行。'),
-  reason: z.string().trim().min(1).max(2_000).describe('验收依据或尚需补齐的工作。'),
+  completed: z.boolean().describe('Whether to accept the current task\'s latest delivery. false keeps the task for further work; the tool does not trigger execution.'),
+  reason: z.string().trim().min(1).max(2_000).describe('The basis for acceptance, or the work still missing.'),
 }).strict();
 
 export function createReviewCurrentTool(context: SupervisorControlContext) {
@@ -24,7 +24,7 @@ export function createReviewCurrentTool(context: SupervisorControlContext) {
     name: 'review_current',
     schema: reviewCurrentSchema,
     verboseParsingErrors: true,
-    description: '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。',
+    description: 'Review the current delivery and record the conclusion. Returns the plan facts and does not trigger execution; you then decide whether to execute, adjust or reply directly.',
   });
 }
 

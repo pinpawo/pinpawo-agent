@@ -7,7 +7,7 @@ import { readMessageText } from '../../../packages/pet-agent/src/agent/orchestra
 import type { AgentModels } from '../../../packages/pet-agent/src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../../packages/pet-agent/src/utils/structuredOutput.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
-import type { PromptEvalJudge } from './prompt-goal-evaluator.ts';
+import { evaluatePromptGoal, type PromptEvalJudge, type PromptGoalAcceptanceCriterion } from './prompt-goal-evaluator.ts';
 
 export type DecisionEvalTarget = 'entry_answer';
 
@@ -51,6 +51,8 @@ type EntryAnswerEvalCase = {
   }[];
   expectedRoutes: readonly string[];
   plan?: RunSupervisorState;
+  /** Set when the user names an output language that differs from the one they write in. */
+  outputLanguage?: string;
 };
 
 const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
@@ -129,11 +131,45 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
     ] },
     expectedRoutes: ['plan_request'],
   },
+  {
+    name: 'explicit-output-language-answer',
+    messages: [{ role: 'user', text: '请用英文回答：TCP 和 UDP 的主要区别是什么？' }],
+    expectedRoutes: ['answer'],
+    outputLanguage: 'English',
+  },
+  {
+    name: 'explicit-output-language-routes',
+    messages: [{ role: 'user', text: '读取仓库文件，修复当前 TypeScript 错误并运行测试。之后请用英文跟我沟通。' }],
+    expectedRoutes: ['plan_request'],
+    outputLanguage: 'English',
+  },
 ];
 
 
 // Bind production definitions so prompt/schema edits are evaluated immediately.
 const entryTools = [createPlanRequestTool(), createContinueTool()];
+
+/** Validate routing arguments against the production tool schema, not a copy of it. */
+function hasValidEntryArgs(call: { name: string; args: unknown }) {
+  const schema = entryTools.find(({ name }) => name === call.name)?.schema as
+    { safeParse(value: unknown): { success: boolean } } | undefined;
+  return schema?.safeParse(call.args).success ?? false;
+}
+
+function userVisibleCriteria(testCase: EntryAnswerEvalCase, route: string, text: string, goal: unknown): PromptGoalAcceptanceCriterion[] {
+  const routed = route === 'plan_request' || route === 'continue';
+  const language = testCase.outputLanguage ?? 'the language of the user\'s latest message';
+  return [
+    ...(routed && text ? [{
+      id: 'handoff_note_announces_only',
+      statement: 'The reply text only tells the user what happens next and its scope; it does not claim the work is done or report results.',
+    }] : []),
+    ...(text || typeof goal === 'string' ? [{
+      id: 'user_visible_language',
+      statement: `The reply text and any goal argument are written in ${language}; text with no natural-language words (numbers, formulas, code) counts as met.`,
+    }] : []),
+  ];
+}
 
 function renderMessages(prompt: RenderedDecisionPrompt) {
   return [
@@ -161,7 +197,7 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
       caseName: testCase.name,
       expectedSummary: testCase.expectedRoutes.join(' | '),
       render,
-      async run(model, _method, config) {
+      async run(model, _method, config, judge) {
         if (!model.bindTools) {
           throw new Error('Entry Answer eval model must support tool binding.');
         }
@@ -192,14 +228,10 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
             comment: `characters=${text.length.toString()}`,
           });
         } else if (observedRoute === 'plan_request') {
-          const planGoal = planCalls[0]?.args?.goal;
-          const validPlanCall = toolCalls.length === 1 && planCalls.length === 1
-            && typeof planGoal === 'string'
-            && planGoal.trim().length > 0
-            && text.length === 0;
+          const validPlanCall = toolCalls.length === 1 && planCalls.length === 1 && hasValidEntryArgs(planCalls[0]);
           scores.push({
             key: 'plan_request_shape',
-            statement: 'Call plan_request exactly once with a non-empty goal and no user-facing text.',
+            statement: 'Call plan_request exactly once with arguments the production schema accepts.',
             evaluator: 'deterministic',
             score: validPlanCall ? 1 : 0,
             comment: `calls=${planCalls.length.toString()}`,
@@ -209,8 +241,22 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
           const hasPendingTask = testCase.plan?.plan.some(task => task.status === 'pending') ?? false;
           scores.push({ key: 'continue_has_pending_task', statement: 'Continue only an existing unfinished plan.',
             evaluator: 'deterministic', score: hasPendingTask ? 1 : 0, comment: `pending=${hasPendingTask}` });
-          scores.push({ key: 'continue_shape', statement: 'Call continue alone with no arguments or reply text.',
-            evaluator: 'deterministic', score: toolCalls.length === 1 && Object.keys(toolCalls[0].args).length === 0 && !text ? 1 : 0, comment: `calls=${toolCalls.length}` });
+          scores.push({ key: 'continue_shape', statement: 'Call continue alone with arguments the production schema accepts.',
+            evaluator: 'deterministic', score: toolCalls.length === 1 && hasValidEntryArgs(toolCalls[0]) ? 1 : 0, comment: `calls=${toolCalls.length}` });
+        }
+        // Shape checks allow a handoff note; whether its content and language are
+        // right is a semantic question for the judge.
+        const criteria = userVisibleCriteria(testCase, observedRoute, text, toolCalls[0]?.args?.goal);
+        if (judge && criteria.length > 0) {
+          const evaluation = await evaluatePromptGoal({
+            judge,
+            contract: 'entry_answer.user_visible_text',
+            objective: 'Keep the user-visible text of an Entry turn truthful and in the language the user expects.',
+            acceptanceCriteria: criteria,
+            evidence: { conversation: testCase.messages },
+            candidateOutput: { text, toolCalls: toolCalls.map((call) => ({ name: call.name, args: call.args })) },
+          });
+          scores.push(...evaluation.scores);
         }
         return {
           output: {

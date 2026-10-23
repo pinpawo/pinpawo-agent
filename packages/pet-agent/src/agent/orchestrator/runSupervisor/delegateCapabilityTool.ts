@@ -12,7 +12,7 @@ import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME } from 
 import { createCapabilityCatalog } from './capabilityCatalog';
 
 export const delegateCapabilitySchema = z.object({
-  briefing: z.string().refine(text => text.trim().length > 0).describe('只为当前计划项准备执行说明。结合用户要求与已返回交付，说明要完成的工作、可复用结论和必要约束；不复制历史交付全文，不展开后续任务。'),
+  briefing: z.string().refine(text => text.trim().length > 0).describe('Execution instructions for the current plan item only. From the user\'s requirements and the deliveries returned so far, state the work to do, reusable conclusions and necessary constraints; do not copy earlier deliveries in full or expand into later tasks.'),
 }).strict();
 
 export type DelegateCapabilityArgs = z.infer<typeof delegateCapabilitySchema>;
@@ -65,7 +65,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     } });
   }, {
     name: DELEGATE_CAPABILITY_TOOL_NAME, schema: delegateCapabilitySchema, verboseParsingErrors: true,
-    description: '为当前计划项准备 briefing 并引用相关的已有交付，交给 Capability 执行。运行时确定任务身份与能力；返回后由你继续判断。',
+    description: 'Prepare a briefing for the current plan item, referring to relevant existing deliveries, and hand it to the Capability to execute. The runtime determines the task identity and the Capability; after it returns, you continue to judge.',
   });
 }
 

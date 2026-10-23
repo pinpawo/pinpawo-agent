@@ -163,8 +163,10 @@ import { TUI_VERSION } from './version';
 import { LoadingCellController } from './visuals/loadingCellController';
 import { buildLoadingCellLine } from './visuals/loadingCells';
 import { buildWelcomeLines } from './welcome/welcomeModel';
+import { resolveTuiLocale, setTuiLocale } from './i18n/locale';
 
 const launchOptions = parseTuiLaunchOptions(process.argv.slice(2));
+setTuiLocale(resolveTuiLocale(process.env));
 /** Shared with the welcome block: grey ground replaces the drawn borders. */
 const COMPOSER_BACKGROUND = '#22272e';
 

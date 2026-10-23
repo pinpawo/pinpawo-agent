@@ -1,6 +1,7 @@
 import type { AgentPlan, AgentPlanItem } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
 import { truncateTerminalLine, wrapTerminalText } from '../text/terminalText';
+import { tuiText } from '../i18n/text';
 
 const MIN_VISIBLE_ITEMS = 4;
 
@@ -26,7 +27,7 @@ export function buildCurrentPlanPanel(
     ?? plan.items.find((item) => item.status === 'pending');
   if (!active) return { content: '', height: 0, mode: 'hidden' };
   const currentStep = plan.items.indexOf(active) + 1;
-  const progress = `第 ${currentStep} 项／共 ${plan.items.length} 项 · ${active.status === 'active' ? '进行中' : '待执行'}`;
+  const progress = tuiText().planProgress(currentStep, plan.items.length, active.status === 'active');
 
   if (options.overlayOpen) {
     return {
@@ -51,7 +52,7 @@ export function buildCurrentPlanPanel(
     ...wrapTerminalText(progress, options.width),
     ...visibleItems.flatMap((item) => formatItemLines(item, options.width)),
     ...(omitted > 0
-      ? wrapTerminalText(`  … 还有 ${omitted} 项`, options.width)
+      ? wrapTerminalText(`  ${tuiText().planMore(omitted)}`, options.width)
       : []),
   ];
   return {

@@ -1,4 +1,4 @@
-import { buildAgentEventEnvelope } from '@pinpawo/agent-session';
+import { agentErrorEvent, agentNoticeMessage, buildAgentEventEnvelope } from '@pinpawo/agent-session';
 import {
   parseHostClientMessage,
   readHostClientMessageEnvelope,
@@ -68,11 +68,10 @@ function rejectUnsupportedMessage(
     );
     return Promise.resolve();
   }
-  sendAgentSessionPeerEvent(peer, {
-    type: 'error',
-    requestId: message.requestId,
-    message: `Message type "${message.type}" is not supported by this Host transport.`,
-  });
+  sendAgentSessionPeerEvent(peer, agentErrorEvent(message.requestId, {
+    code: 'client_message_unsupported',
+    params: { messageType: message.type },
+  }));
   return Promise.resolve();
 }
 
@@ -124,7 +123,7 @@ function sendMalformedClientMessageError(peer: ServerPeer, data: Buffer | string
       type: 'session.error',
       requestId: envelope.requestId,
       operation: sessionOperation,
-      message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
+      ...agentNoticeMessage({ code: 'client_message_invalid' }),
     });
     return;
   }
@@ -132,15 +131,11 @@ function sendMalformedClientMessageError(peer: ServerPeer, data: Buffer | string
     peer.send({
       type: 'runtime_config.error',
       requestId: envelope.requestId,
-      message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
+      ...agentNoticeMessage({ code: 'client_message_invalid' }),
     });
     return;
   }
-  sendAgentSessionPeerEvent(peer, {
-    type: 'error',
-    requestId: envelope.requestId,
-    message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
-  });
+  sendAgentSessionPeerEvent(peer, agentErrorEvent(envelope.requestId, { code: 'client_message_invalid' }));
 }
 
 export function runAgentSessionPeerHandler(
@@ -194,7 +189,7 @@ export function dispatchAgentSessionMessage(
           type: 'session.error',
           requestId: msg.requestId,
           operation: 'compact',
-          message: '当前 host 不支持手动压缩，请升级 host 后重试。',
+          ...agentNoticeMessage({ code: 'session_compaction_unsupported' }),
         });
         return Promise.resolve();
       }
@@ -237,12 +232,7 @@ export function createHostWireHandlers(
   return {
     onMessage: (peer, data) => {
       if (interactive && interactive !== peer && interactive.isConnected()) {
-        peer.send(buildAgentEventEnvelope({
-          type: 'error',
-          requestId: '',
-          message: 'This Agent already has an interactive client.',
-          code: 'interaction_busy',
-        }));
+        peer.send(buildAgentEventEnvelope(agentErrorEvent('', { code: 'interaction_busy' })));
         logWarn('[wire] refused a second interactive client');
         return Promise.resolve();
       }

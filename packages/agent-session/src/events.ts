@@ -3,6 +3,7 @@ import type {
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type { AgentMessageToolCall, AgentPlan, AgentResultReference, AgentToolCallStatus } from './domain';
+import type { AgentErrorCode, AgentNoticeFields, AgentSystemNoticeCode } from './notice';
 import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
@@ -162,20 +163,7 @@ export type AgentSystemNoticeEvent = {
   type: 'system.notice';
   requestId: string;
   message: string;
-};
-
-export type AgentErrorCode =
-  | 'interrupt_closed'
-  | 'interrupt_stale'
-  | 'interrupt_wrong_session'
-  // The agent could not run at all (model quota exhausted, auth rejected).
-  // The invocation terminates; checkpoint state remains authoritative for any
-  // pending interrupt and is reconciled separately.
-  | 'agent_unavailable'
-  // A second interactive client tried to attach. One Host serves one Pet and
-  // its session state is single-valued, so interaction is exclusive;
-  // additional input belongs in dispatch, which queues behind the gate.
-  | 'interaction_busy';
+} & AgentNoticeFields<AgentSystemNoticeCode>;
 
 /** Bounded error classification only; excludes messages, stacks and request data. */
 export type AgentErrorDiagnostics = {
@@ -186,6 +174,5 @@ export type AgentErrorEvent = {
   type: 'error';
   requestId: string;
   message: string;
-  code?: AgentErrorCode;
   diagnostics?: AgentErrorDiagnostics;
-};
+} & AgentNoticeFields<AgentErrorCode>;

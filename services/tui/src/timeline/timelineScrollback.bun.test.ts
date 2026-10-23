@@ -18,6 +18,10 @@ import {
   MAX_SETTLED_ENTRIES_PER_COMMIT,
   TimelineScrollback,
 } from './timelineScrollback';
+import { setTuiLocale } from '../i18n/locale';
+
+// These expectations are written against the Chinese text table.
+setTuiLocale('zh');
 
 test('streaming assistant text remains mutable until completion', async () => {
   const setup = await createTimelineRenderer(20);

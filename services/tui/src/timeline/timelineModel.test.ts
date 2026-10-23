@@ -21,6 +21,10 @@ import {
   timelineFingerprint,
   withToolCallOutcomes,
 } from './timelineScrollback';
+import { setTuiLocale } from '../i18n/locale';
+
+// These expectations are written against the Chinese text table.
+setTuiLocale('zh');
 
 const user: AgentTimelineEntry = {
   id: 'user',

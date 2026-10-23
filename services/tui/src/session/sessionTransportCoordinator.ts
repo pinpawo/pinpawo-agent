@@ -11,6 +11,7 @@ import type {
   TuiConnectionStatus,
 } from './sessionControllerTypes';
 import type { SessionSnapshotReason } from './sessionSnapshot';
+import { hostMessageText } from '../i18n/text';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -185,11 +186,11 @@ export class SessionTransportCoordinator {
       this.snapshotRequests.delete(message.requestId);
       if (!isCompletionSnapshotReason(reason)) {
         this.clearSnapshotTimer();
-        this.options.onConnection('error', message.message);
+        this.options.onConnection('error', hostMessageText(message));
       } else {
         this.options.onConnection(
           'ready',
-          `snapshot refresh failed: ${message.message}`,
+          `snapshot refresh failed: ${hostMessageText(message)}`,
         );
       }
       return;

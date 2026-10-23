@@ -4,11 +4,13 @@ import type { AgentLlmConfig } from './config/agentConfig';
 import { HostGraphService } from './agent/agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildHostSessionSnapshot } from './conversation/agentSessionSnapshot';
-import type {
-  AgentModelProfileSummary,
-  AgentRuntimeEvent,
-  AgentSessionSnapshot,
-  AgentSessionSummary,
+import {
+  agentNoticeMessage,
+  agentNoticeToText,
+  type AgentModelProfileSummary,
+  type AgentRuntimeEvent,
+  type AgentSessionSnapshot,
+  type AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import type {
@@ -109,7 +111,7 @@ type SessionSummarySource = Pick<
 >;
 
 /** Shown whenever a command is refused because a run holds the session. */
-const RUN_IN_FLIGHT_MESSAGE = 'wait for the current response to finish';
+const RUN_IN_FLIGHT_MESSAGE = agentNoticeToText({ code: 'run_in_flight' });
 
 function projectChatSessionSummary(session: SessionSummarySource): AgentSessionSummary {
   return {
@@ -195,7 +197,7 @@ export function createChatHostHandlers(
       type: 'session.error',
       requestId,
       operation,
-      message: RUN_IN_FLIGHT_MESSAGE,
+      ...agentNoticeMessage({ code: 'run_in_flight' }),
     });
   };
   const activeRuns = options.activeRuns ?? new ActiveRunRegister();
@@ -721,7 +723,7 @@ export function createChatHostHandlers(
         client.send({
           type: 'runtime_config.error',
           requestId: message.requestId,
-          message: RUN_IN_FLIGHT_MESSAGE,
+          ...agentNoticeMessage({ code: 'run_in_flight' }),
         });
       },
     ),

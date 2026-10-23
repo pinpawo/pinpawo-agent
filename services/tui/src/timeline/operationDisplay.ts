@@ -1,6 +1,7 @@
 import stringWidth from 'string-width';
 import { operationBlockToText, renderOperationBlock, type AgentOperationEntry } from '@pinpawo/agent-session';
 import { truncateTerminalLine } from '../text/terminalText';
+import { tuiText } from '../i18n/text';
 
 export type OperationDisplayTone = 'default' | 'muted' | 'added' | 'removed';
 
@@ -47,7 +48,7 @@ function buildOperationHeader(
   // Keep tool activity readable even in very wide terminals.
   const limit = Math.min(width, 104);
   let body = operationActivityText(entry);
-  const suffix = `（${operationStatus(entry, now)}）`;
+  const suffix = tuiText().statusSuffix(operationStatus(entry, now));
   if (stringWidth(body + suffix) > limit && isPlainPath(entry.target?.trim())) {
     body = operationActivityText(entry, (target) => `…/${target.split('/').at(-1)}`);
   }
@@ -86,11 +87,12 @@ function shortenAbsolutePath(target: string) {
 /** Full canonical operation detail, used only in the scrollable transcript. */
 export function buildOperationDetailText(entry: AgentOperationEntry) {
   const sections = [buildOperationHeaderText(operationBody(entry), entry, 0, Infinity)];
+  const labels = tuiText().operationSection;
   for (const [label, value] of [
-    ['输入', entry.raw?.input],
-    ['详情', entry.blocks?.map(operationBlockToText).join('\n\n')],
-    ['输出', entry.raw?.output],
-    ['错误', entry.raw?.error],
+    [labels.input, entry.raw?.input],
+    [labels.details, entry.blocks?.map(operationBlockToText).join('\n\n')],
+    [labels.output, entry.raw?.output],
+    [labels.error, entry.raw?.error],
   ] as const) {
     const text = stringifyOutput(value);
     if (text) sections.push(`${label}\n${normalizeMultilineTerminalText(text)}`);
@@ -104,7 +106,7 @@ function buildOperationHeaderText(
   now: number,
   width: number,
 ) {
-  const suffix = `（${operationStatus(entry, now)}）`;
+  const suffix = tuiText().statusSuffix(operationStatus(entry, now));
   const line = `${body}${suffix}`;
   if (stringWidth(line) <= width) return sanitizeLine(line, width);
 
@@ -124,7 +126,7 @@ function buildAuthorizationDisplayLines(
   if (entry.phase === 'completed') return [{ text: header, tone: 'muted' }];
   // An authorization that did not go through keeps its tools and reason visible.
   return [{ text: header }, ...(entry.summary ? [{
-    text: sanitizeLine(`  涉及工具：${entry.summary}`, width),
+    text: sanitizeLine(`  ${tuiText().toolsInvolved(entry.summary)}`, width),
     tone: 'muted' as const,
   }] : []), ...(entry.blocks ?? []).map((block) => ({
     text: sanitizeLine(`  ${operationBlockToText(block).replace(/\s+/g, ' ')}`, width),
@@ -141,13 +143,13 @@ function operationStatus(entry: AgentOperationEntry, now: number) {
     case 'updated':
       // No elapsed time: a tool call is short, and inside a delegation a dozen
       // of them each ticking their own clock is noise rather than progress.
-      return '进行中';
+      return tuiText().outcome.running;
     case 'completed':
-      return '完成';
+      return tuiText().outcome.completed;
     case 'failed':
-      return '失败';
+      return tuiText().outcome.failed;
     case 'interrupted':
-      return '已中断';
+      return tuiText().outcome.interrupted;
   }
 }
 
@@ -260,7 +262,7 @@ function buildPatchLines(
 
   // The truncation marker sits outside the line budget so hiding lines never hides it.
   const marker: OperationDisplayLine[] = truncated
-    ? [{ text: sanitizeLine('  …（内容已截断）', width), tone: 'muted' }]
+    ? [{ text: sanitizeLine(`  ${tuiText().truncated}`, width), tone: 'muted' }]
     : [];
   if (lines.length <= OPERATION_PATCH_MAX_LINES) return [...lines, ...marker];
   const visible = lines.slice(0, OPERATION_PATCH_MAX_LINES - 1);

@@ -4,6 +4,7 @@ import {
   type ReviewView,
 } from '@pinpawo/agent-session';
 import { truncateTerminalLine, wrapTerminalText } from '../text/terminalText';
+import { tuiText } from '../i18n/text';
 
 /**
  * Semantic tone for one rendered review line. The approval view maps these to
@@ -87,7 +88,7 @@ function renderReviewBlock(
   maxCharacters: number,
 ): ReviewContentLine[] {
   const body = (text: string) => clampCharacters(text, maxCharacters);
-  const truncated = (marked: true | undefined) => (marked ? [line('…（内容已截断）', 'muted')] : []);
+  const truncated = (marked: true | undefined) => (marked ? [line(tuiText().truncated, 'muted')] : []);
   return renderOperationBlock<ReviewContentLine[]>(block, {
     diff: (diff) => [
       ...(diff.path && diff.path !== target ? [line(truncateTerminalLine(diff.path, width), 'heading')] : []),

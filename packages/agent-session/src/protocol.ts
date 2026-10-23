@@ -9,12 +9,13 @@ import {
 import { parsePendingInterruptProjection } from './review';
 import { parseResultReferences } from './resultReferences';
 import type {
-  AgentErrorCode,
   AgentErrorDiagnostics,
   AgentOperationRaw,
   AgentOperationPhase,
   AgentRuntimeEvent,
 } from './events';
+import { isAgentErrorNotice, parseAgentNotice } from './notice';
+import type { AgentErrorCode, AgentErrorNotice, AgentNoticeFields } from './notice';
 import {
   AGENT_TIMELINE_LIMIT_MAX,
   type AgentInputModality,
@@ -149,11 +150,11 @@ export type AgentControlServerMessage =
       toolAuthorizationMode: ToolAuthorizationMode;
       autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
     }
-  | {
+  | ({
       type: 'runtime_config.error';
       requestId: string;
       message: string;
-    }
+    } & AgentNoticeFields<AgentErrorCode>)
   | { type: 'interrupting'; requestId: string; message?: string };
 
 export type AgentSessionServerMessage =
@@ -185,12 +186,12 @@ export type AgentSessionServerMessage =
       compacted: boolean;
       snapshot: AgentSessionSnapshot;
     }
-  | {
+  | ({
       type: 'session.error';
       requestId: string;
       operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact';
       message: string;
-    };
+    } & AgentNoticeFields<AgentErrorCode>);
 
 export type AgentModelServerMessage =
   | {
@@ -656,19 +657,30 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
   }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');
-    const code = type === 'error' ? readAgentErrorCode(record) : null;
-    const diagnostics = type === 'error' ? readErrorDiagnostics(record.diagnostics) : undefined;
-    return message == null
-      ? null
-      : {
-          type,
-          requestId,
-          message,
-          ...(code ? { code } : {}),
-          ...(diagnostics ? { diagnostics } : {}),
-        };
+    if (message == null) return null;
+    if (type === 'system.notice') {
+      const notice = parseAgentNotice(record);
+      return { type, requestId, message, ...(notice && !isAgentErrorNotice(notice) ? notice : null) };
+    }
+    const diagnostics = readErrorDiagnostics(record.diagnostics);
+    return {
+      type,
+      requestId,
+      message,
+      ...(diagnostics ? { diagnostics } : {}),
+      ...readErrorNotice(record),
+    };
   }
   return null;
+}
+
+/**
+ * An error's notice. An unknown code or mismatched params leave the message
+ * as its default text.
+ */
+function readErrorNotice(record: Record<string, unknown>): AgentErrorNotice | null {
+  const notice = parseAgentNotice(record);
+  return notice && isAgentErrorNotice(notice) ? notice : null;
 }
 
 function readErrorDiagnostics(value: unknown): AgentErrorDiagnostics | undefined {
@@ -685,19 +697,6 @@ function readErrorDiagnostics(value: unknown): AgentErrorDiagnostics | undefined
     result.push({ name, ...(code !== undefined ? { code } : {}), ...(status !== undefined ? { status } : {}) });
   }
   return { chain: result };
-}
-
-function readAgentErrorCode(record: Record<string, unknown>): AgentErrorCode | null {
-  const code = readOptionalString(record, 'code');
-  if (
-    code === 'interrupt_closed'
-    || code === 'interrupt_stale'
-    || code === 'interrupt_wrong_session'
-    || code === 'agent_unavailable'
-  ) {
-    return code;
-  }
-  return null;
 }
 
 export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null {
@@ -857,7 +856,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       : null;
   }
   if (type === 'session.error') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'operation', 'message'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'operation', 'message', 'code', 'params'])) return null;
     const operation = readString(record, 'operation');
     const message = readString(record, 'message');
     if (
@@ -872,7 +871,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     ) {
       return null;
     }
-    return { type, requestId, operation, message };
+    return { type, requestId, operation, message, ...readErrorNotice(record) };
   }
   if (type === 'model.list.result') {
     if (!hasOnlyKeys(record, [
@@ -981,9 +980,9 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       : null;
   }
   if (type === 'runtime_config.error') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'message'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'code', 'params'])) return null;
     const message = readString(record, 'message');
-    return message !== null ? { type, requestId, message } : null;
+    return message !== null ? { type, requestId, message, ...readErrorNotice(record) } : null;
   }
   if (type === 'event') {
     const eventRecord = readRecord(record, 'event');

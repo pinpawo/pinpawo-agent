@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import {
+  agentErrorEvent,
   buildAgentEventEnvelope,
   parseAgentClientMessage,
   readAgentClientMessageEnvelope,
@@ -90,11 +91,7 @@ function attachConnection(
         if (!message) {
           const envelope = readAgentClientMessageEnvelope(raw);
           if (envelope?.requestId) {
-            peer.send(buildAgentEventEnvelope({
-              type: 'error',
-              requestId: envelope.requestId,
-              message: 'Agent Session client message is invalid or incompatible.',
-            }));
+            peer.send(buildAgentEventEnvelope(agentErrorEvent(envelope.requestId, { code: 'client_message_invalid' })));
           }
           return;
         }

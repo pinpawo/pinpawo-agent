@@ -21,6 +21,7 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { HostGraphService } from './agentGraphService';
 import { runAgentSessionTurn } from './chatSessionAdapter';
+import { AgentNoticeError } from './agentNoticeError';
 import type { StreamToolsPayload } from './agentStreamEvents';
 
 /** The reviews an interrupt.requested event carries, or [] for another kind. */
@@ -488,11 +489,14 @@ test('runAgentSessionTurn projects global policy authorization as completed oper
   );
   assert.deepEqual(
     emittedEvents
-      .filter((event) => event.type === 'system.notice')
-      .map((event) => event.message),
-    [
-      '已授权当前会话中的 run_shell 操作。',
-    ],
+      .filter((event) => event.type === 'system.notice'),
+    [{
+      type: 'system.notice',
+      requestId: 'req-1',
+      message: 'Authorized run_shell for this session.',
+      code: 'tool_authorized_for_session',
+      params: { toolName: 'run_shell' },
+    }],
   );
 });
 
@@ -919,7 +923,7 @@ test('runAgentSessionTurn rejects stale resume with user-facing message', async 
       emitEvent: () => {},
       emitToolEvent: () => {},
     }),
-    /review 已关闭或不存在/,
+    (error: unknown) => error instanceof AgentNoticeError && error.notice.code === 'interrupt_closed',
   );
 });
 
@@ -992,9 +996,9 @@ test('runAgentSessionTurn does not map pending review free text to review respon
   assert.deepEqual(setup.input.messages, []);
   assert.equal(preparedUserMessages, 0);
   assert.equal(emittedEvents[0]?.type, 'system.notice');
-  assert.match(
-    emittedEvents[0]?.type === 'system.notice' ? emittedEvents[0].message : '',
-    /确认面板/,
+  assert.equal(
+    emittedEvents[0]?.type === 'system.notice' ? emittedEvents[0].code : undefined,
+    'review_pending_input_not_sent',
   );
   assert.equal(emittedEvents[1]?.type, 'interrupt.requested');
   assert.deepEqual(

@@ -12,6 +12,7 @@ import {
   operationActivityText,
 } from './operationDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
+import { tuiText } from '../i18n/text';
 
 const OPERATION_LINE_PREFIX_WIDTH = 4;
 export type TimelineDisplayLine = {
@@ -173,7 +174,7 @@ export function formatLiveActivity(
     return formatLiveSession(session, maxCodePoints);
   }
   const elapsed = formatElapsed(run.startedAt, now);
-  const suffix = elapsed && maxCodePoints >= 40 ? ` · 本轮 ${elapsed}` : '';
+  const suffix = elapsed && maxCodePoints >= 40 ? ` · ${tuiText().turnElapsed(elapsed)}` : '';
   const activityWidth = Math.max(
     1,
     Math.floor(maxCodePoints) - stringWidth(suffix),

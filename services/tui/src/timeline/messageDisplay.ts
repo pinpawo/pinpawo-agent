@@ -2,6 +2,7 @@ import type { AgentMessageEntry, AgentMessageToolCall, AgentTimelineEntry } from
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
+import { noticeText, tuiText } from '../i18n/text';
 
 export type MessageDisplayTone =
   | 'assistant'
@@ -30,7 +31,7 @@ export function buildMessageDisplayLines(
 
   switch (entry.role) {
     case 'system':
-      return logicalLines(entry.text).map((line, index) => ({
+      return logicalLines(noticeText(entry.notice, entry.text)).map((line, index) => ({
         text: index === 0
           ? joinLabel('system', line)
           : `       ${line}`,
@@ -91,8 +92,8 @@ export function buildToolCallDisplayLines(entry: AgentMessageEntry): MessageDisp
   return (entry.toolCalls ?? []).flatMap(call => [
     // A call that ended badly is reported on a row of its own after its work,
     // so that row names the step and its outcome; the preview is above.
-    TOOL_CALL_OUTCOME[call.status]
-      ? { text: `▸ ${toolCallLabel(call)}（${TOOL_CALL_OUTCOME[call.status]}）`, tone: call.status === 'failed' ? 'removed' as const : 'system' as const }
+    toolCallOutcome(call.status)
+      ? { text: `▸ ${toolCallLabel(call)}${tuiText().statusSuffix(toolCallOutcome(call.status))}`, tone: call.status === 'failed' ? 'removed' as const : 'system' as const }
       : { text: `▸ ${toolCallTitle(call)}`, tone: 'tool-call' as const },
     ...(call.status === 'failed' ? toolCallErrorLines(call.error) : []),
   ]);
@@ -118,7 +119,7 @@ export function toolCallTitle(call: Pick<AgentMessageToolCall, 'name' | 'args'>)
 export function buildToolCallDetailLines(entry: AgentMessageEntry): MessageDisplayLine[] {
   return (entry.toolCalls ?? []).flatMap(call => [
     {
-      text: `▸ ${toolCallLabel(call)}${TOOL_CALL_OUTCOME[call.status] ? `（${TOOL_CALL_OUTCOME[call.status]}）` : ''}`,
+      text: `▸ ${toolCallLabel(call)}${toolCallOutcome(call.status) ? tuiText().statusSuffix(toolCallOutcome(call.status)) : ''}`,
       tone: 'tool-call' as const,
     },
     ...indent(TOOL_CALL_DETAIL[call.name]?.(call.args) ?? JSON.stringify(call.args, null, 2))
@@ -130,15 +131,9 @@ export function buildToolCallDetailLines(entry: AgentMessageEntry): MessageDispl
 }
 
 function toolCallLabel(call: Pick<AgentMessageToolCall, 'name'>) {
-  return TOOL_CALL_LABEL[call.name] ?? call.name;
+  const labels: Record<string, string> = tuiText().toolCallLabel;
+  return labels[call.name] ?? call.name;
 }
-
-// Labels say what happens from the user's side, never the runtime's own
-// terms (planning requests, capabilities, delegation).
-const TOOL_CALL_LABEL: Record<string, string> = {
-  delegate_capability: '执行目标',
-  plan_request: '确定目标',
-};
 
 const TOOL_CALL_DETAIL: Record<string, (args: Record<string, unknown>) => string | null> = {
   delegate_capability: args => typeof args.briefing === 'string' ? args.briefing : null,
@@ -175,12 +170,10 @@ function indent(text: string, width = 2) {
   return text.split('\n').map(line => `${' '.repeat(width)}${line}`);
 }
 
-const TOOL_CALL_OUTCOME: Record<AgentMessageToolCall['status'], string> = {
-  running: '',
-  completed: '',
-  failed: '失败',
-  interrupted: '已中断',
-};
+/** Only an ended call that did not complete shows its outcome. */
+function toolCallOutcome(status: AgentMessageToolCall['status']) {
+  return status === 'failed' || status === 'interrupted' ? tuiText().outcome[status] : '';
+}
 
 export function subagentDisplayText(text: string) {
   return formatSubagentProtocolMessage(text) ?? text;

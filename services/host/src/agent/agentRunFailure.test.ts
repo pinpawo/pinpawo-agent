@@ -2,9 +2,10 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import {
   classifyAgentRunFailure,
-  describeFatalAgentRunFailure,
+  fatalAgentRunNotice,
   isFatalAgentRunError,
 } from './agentRunFailure';
+import { agentNoticeToText } from '@pinpawo/agent-session';
 
 /**
  * Builds an error shaped the way `@langchain/openai` leaves it after
@@ -136,27 +137,31 @@ describe('classifyAgentRunFailure', () => {
   });
 });
 
-describe('describeFatalAgentRunFailure', () => {
-  it('tells the user when capacity returns and that the run was terminated', () => {
-    const text = describeFatalAgentRunFailure(classifyAgentRunFailure(QUOTA_ERROR));
+describe('fatalAgentRunNotice', () => {
+  it('carries when capacity returns and the provider message', () => {
+    const notice = fatalAgentRunNotice(classifyAgentRunFailure(QUOTA_ERROR));
 
-    assert.match(text, /08-20 23:43:00 UTC/);
-    assert.match(text, /已终止本次运行/);
+    assert.equal(notice.code, 'agent_unavailable');
+    assert.equal(notice.params.cause, 'model_quota');
+    assert.equal(notice.params.retryAt, '08-20 23:43:00 UTC');
+    assert.match(notice.params.detail, /quota will reset/);
+    assert.match(agentNoticeToText(notice), /This run was stopped/);
   });
 
-  it('points at the credentials when authentication was rejected', () => {
-    const text = describeFatalAgentRunFailure(
+  it('names rejected credentials as the cause', () => {
+    const notice = fatalAgentRunNotice(
       classifyAgentRunFailure(modelError({ code: 'MODEL_AUTHENTICATION', message: 'denied' })),
     );
 
-    assert.match(text, /API key/);
+    assert.deepEqual(notice.params, { cause: 'model_authentication', detail: notice.params.detail });
+    assert.match(agentNoticeToText(notice), /API key/);
   });
 
-  it('points at the model name when the model does not exist', () => {
-    const text = describeFatalAgentRunFailure(
+  it('names a missing model as the cause', () => {
+    const notice = fatalAgentRunNotice(
       classifyAgentRunFailure(modelError({ code: 'MODEL_NOT_FOUND', message: 'missing' })),
     );
 
-    assert.match(text, /模型不存在/);
+    assert.equal(notice.params.cause, 'model_not_found');
   });
 });

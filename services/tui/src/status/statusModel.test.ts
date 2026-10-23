@@ -6,6 +6,10 @@ import {
   formatStatusLine,
   formatStatusLines,
 } from './statusModel';
+import { setTuiLocale } from '../i18n/locale';
+
+// These expectations are written against the Chinese text table.
+setTuiLocale('zh');
 
 test('status model renders connection, model, token usage, context, and compact cwd', () => {
   const state: TuiSessionState = {

@@ -1,3 +1,5 @@
+import type { AgentNotice } from '@pinpawo/agent-session';
+
 /**
  * Failure classification for agent runs.
  *
@@ -110,14 +112,21 @@ export function isFatalAgentRunError(value: unknown): boolean {
   return classifyAgentRunFailure(value).kind === 'fatal';
 }
 
-/** User-facing explanation for a terminated run, in the TUI's language. */
-export function describeFatalAgentRunFailure(failure: AgentRunFailure): string {
+/** The notice for a terminated run; clients render it in their own language. */
+export function fatalAgentRunNotice(
+  failure: AgentRunFailure,
+): Extract<AgentNotice, { code: 'agent_unavailable' }> {
   const cause = failure.code === 'MODEL_AUTHENTICATION'
-    ? '模型认证失败，请检查 API key 配置。'
+    ? 'model_authentication'
     : failure.code === 'MODEL_NOT_FOUND'
-      ? '配置的模型不存在，请检查模型名称。'
-      : failure.retryAt
-        ? `模型额度将于 ${failure.retryAt} 恢复。`
-        : '模型额度已耗尽。';
-  return `${failure.message}\n\n${cause}已终止本次运行并关闭待确认的操作，恢复后请重新发起对话。`;
+      ? 'model_not_found'
+      : 'model_quota';
+  return {
+    code: 'agent_unavailable',
+    params: {
+      cause,
+      ...(failure.retryAt ? { retryAt: failure.retryAt } : {}),
+      detail: failure.message,
+    },
+  };
 }

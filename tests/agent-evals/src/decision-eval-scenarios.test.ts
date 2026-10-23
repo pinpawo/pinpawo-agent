@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage } from '@langchain/core/messages';
 import { getDecisionEvalScenarios } from './decision-eval-scenarios.ts';
+import { MAX_PLAN_REQUEST_GOAL_CHARS } from '../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { summarizeDecisionStability } from './decision-stability.ts';
 import { measureDecisionPrompt } from './prompt-preview.ts';
 
@@ -15,7 +16,7 @@ function textModel(output: string) {
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     entryAnswer: getDecisionEvalScenarios('entry_answer').length,
-  }, { entryAnswer: 8 });
+  }, { entryAnswer: 10 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
@@ -98,4 +99,50 @@ test('Entry eval reports continue distinctly and requires an unfinished plan', a
     assert.equal(result.output.route, 'continue');
     assert.equal(result.scores.every(score => score.score === 1), name === 'saved-unfinished-plan-continues');
   }
+});
+
+function routedModel(text: string, name: string, args: Record<string, unknown>) {
+  const response = new AIMessage({ content: text, tool_calls: [{ name, id: name, args }] });
+  return { bindTools: () => ({ invoke: async () => response }) } as never;
+}
+
+function shapeScore(result: { scores: Array<{ key: string; score: number }> }, key: string) {
+  return result.scores.find((score) => score.key === key)?.score;
+}
+
+test('Entry shape checks use the production routing schemas', async () => {
+  const scenario = (name: string) => getDecisionEvalScenarios().find(({ caseName }) => caseName === name)!;
+  const plan = scenario('repository-task-enters-supervisor');
+  const resume = scenario('saved-unfinished-plan-continues');
+  const tooLong = 'x'.repeat(MAX_PLAN_REQUEST_GOAL_CHARS + 1);
+  assert.equal(shapeScore(await plan.run(routedModel('我先交给执行方修复 TypeScript 错误。', 'plan_request', { goal: '修复 TypeScript 错误并运行测试。' })), 'plan_request_shape'), 1);
+  assert.equal(shapeScore(await plan.run(routedModel('', 'plan_request', { goal: tooLong })), 'plan_request_shape'), 0);
+  assert.equal(shapeScore(await plan.run(routedModel('', 'plan_request', { goal: '修复', extra: true })), 'plan_request_shape'), 0);
+  assert.equal(shapeScore(await plan.run(routedModel('', 'plan_request', {})), 'plan_request_shape'), 0);
+  assert.equal(shapeScore(await resume.run(routedModel('接着安排交通。', 'continue', { goal: '安排周末的杭州旅行，含往返交通。' })), 'continue_shape'), 1);
+  assert.equal(shapeScore(await resume.run(routedModel('', 'continue', { goal: tooLong })), 'continue_shape'), 0);
+  assert.equal(shapeScore(await resume.run(routedModel('', 'continue', { scope: 'all' })), 'continue_shape'), 0);
+});
+
+test('Entry eval asks the judge about the handoff note and output language', async () => {
+  const asked: string[][] = [];
+  const judge = {
+    model: {
+      withStructuredOutput: () => ({
+        invoke: async (messages: Array<{ content: unknown }>) => {
+          const ids = (JSON.parse(String(messages[1].content)).acceptanceCriteria as Array<{ id: string }>).map(({ id }) => id);
+          asked.push(ids);
+          return { criteria: Object.fromEntries(ids.map((id) => [id, { met: id !== 'handoff_note_announces_only', reason: 'stub' }])), summary: 'stub' };
+        },
+      }),
+    },
+  } as never;
+  const scenario = getDecisionEvalScenarios().find(({ caseName }) => caseName === 'explicit-output-language-routes')!;
+  const result = await scenario.run(routedModel('All TypeScript errors are fixed and tests pass.', 'plan_request', { goal: 'Fix the TypeScript errors and run the tests.' }), undefined, undefined, judge);
+  assert.deepEqual(asked, [['handoff_note_announces_only', 'user_visible_language']]);
+  assert.equal(shapeScore(result, 'plan_request_shape'), 1);
+  assert.equal(shapeScore(result, 'handoff_note_announces_only'), 0);
+  assert.equal(result.verdict, 'invalid_route');
+  const statement = result.scores.find(({ key }) => key === 'user_visible_language')?.statement;
+  assert.match(statement ?? '', /English/);
 });

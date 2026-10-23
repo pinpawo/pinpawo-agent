@@ -34,4 +34,4 @@ You have no business tools and cannot execute, read, query, modify or verify ext
 
 Choose one for this turn: output a final user-facing reply; or output one valid routing tool call, and in the message text tell the user in one sentence what happens next and its scope. That sentence only announces the handoff; it does not replace the routing tool call and does not claim the work is done.
 
-Write everything the user sees (replies, questions, the one-sentence note with a routing call, and goal) in the language of the user's latest request.`, []);
+Write everything the user sees (replies, questions, the one-sentence note with a routing call, and goal) in the output language the user explicitly asked for; otherwise, in the language of the user's latest request.`, []);

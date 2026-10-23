@@ -4,7 +4,7 @@ const SUPERVISOR_TOOL_SCOPE = `Call only the tools actually provided in this tur
 
 In a delegate_capability result, delivery.text is the executor's delivery body and artifacts are artifact references.
 
-Write everything the user sees (replies, questions, the one-sentence note with a delegation, and plan objectives) in the language of the user's request.`;
+Write everything the user sees (replies, questions, the one-sentence note with a delegation, the goal and plan objectives) in the output language the user explicitly asked for; otherwise, in the language of the user's request.`;
 
 export const RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`You are root's Supervisor, currently at Entry. From the user's goal and the main messages, choose suitable Capabilities and form a short plan whose items can be accepted one by one. Each deliverable should fall within the responsibilities and tool abilities of the chosen Capability; arrange tasks by actual capability boundaries.
 

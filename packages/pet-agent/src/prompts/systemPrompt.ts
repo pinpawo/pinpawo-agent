@@ -18,9 +18,9 @@ export function resolveSystemPromptSections(
     ...(workdir ? [{
       id: 'framework:workdir',
       owner: 'framework',
-      content: `## 执行目录
-当前工作目录：${JSON.stringify(workdir)}
-相对路径默认相对于当前工作目录。`,
+      content: `## Working directory
+Current working directory: ${JSON.stringify(workdir)}
+Relative paths are relative to the current working directory by default.`,
     }] : []),
     ...executionSections,
   ]);

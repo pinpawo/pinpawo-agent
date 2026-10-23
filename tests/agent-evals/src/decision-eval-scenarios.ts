@@ -195,11 +195,10 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
           const planGoal = planCalls[0]?.args?.goal;
           const validPlanCall = toolCalls.length === 1 && planCalls.length === 1
             && typeof planGoal === 'string'
-            && planGoal.trim().length > 0
-            && text.length === 0;
+            && planGoal.trim().length > 0;
           scores.push({
             key: 'plan_request_shape',
-            statement: 'Call plan_request exactly once with a non-empty goal and no user-facing text.',
+            statement: 'Call plan_request exactly once with a non-empty goal; a one-sentence handoff note may accompany it.',
             evaluator: 'deterministic',
             score: validPlanCall ? 1 : 0,
             comment: `calls=${planCalls.length.toString()}`,
@@ -209,8 +208,10 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
           const hasPendingTask = testCase.plan?.plan.some(task => task.status === 'pending') ?? false;
           scores.push({ key: 'continue_has_pending_task', statement: 'Continue only an existing unfinished plan.',
             evaluator: 'deterministic', score: hasPendingTask ? 1 : 0, comment: `pending=${hasPendingTask}` });
-          scores.push({ key: 'continue_shape', statement: 'Call continue alone with no arguments or reply text.',
-            evaluator: 'deterministic', score: toolCalls.length === 1 && Object.keys(toolCalls[0].args).length === 0 && !text ? 1 : 0, comment: `calls=${toolCalls.length}` });
+          const continueArgs = Object.entries(toolCalls[0]?.args ?? {});
+          const validContinueArgs = continueArgs.every(([key, value]) => key === 'goal' && typeof value === 'string' && value.trim().length > 0);
+          scores.push({ key: 'continue_shape', statement: 'Call continue alone, with at most a non-empty goal; a one-sentence handoff note may accompany it.',
+            evaluator: 'deterministic', score: toolCalls.length === 1 && validContinueArgs ? 1 : 0, comment: `calls=${toolCalls.length}` });
         }
         return {
           output: {

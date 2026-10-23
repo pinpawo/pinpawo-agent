@@ -27,6 +27,8 @@ See [Reference](../reference/index.md) for the current public reading path.
   [process runtime](host/process-runtime.md),
   [workspace runtime configuration](host/workspace-runtime-config.md), and
   [app chat UI](host/app-chat-runtime-ui.md)
+- [Session Artifacts](host/session-artifacts.md) — draft：session 显式发布、自己保管的文件，
+  上下文段落、可替换存储（local / COS）与 `artifact://` 引用
 - [Tool operation summary 与 block kind](host/operation-summary.md) — draft：
   toolkit `summarize`、通用展示 block，以及新增 block kind 的固定流程
 - [TUI textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the

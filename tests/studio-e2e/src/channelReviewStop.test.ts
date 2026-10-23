@@ -12,7 +12,7 @@ import { buildOrchestratorRunInput, buildReviewSpec, compileAgentRegistry, creat
   defineInstructionDocument, readPendingInterrupt, type AgentModels } from '@pinpawo/pet-agent';
 import { withScriptedDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio } from '@pinpawo/studio-core';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';

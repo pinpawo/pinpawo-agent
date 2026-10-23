@@ -32,7 +32,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@pinpawo/agent-contracts": "^1.0.0",
-    "@pinpawo/studio": "^1.0.0",
+    "@pinpawo/studio-core": "^1.0.0",
     "hono": "^4.13.3",
     "jose": "^6.2.12",
     "pinpawo": "^1.0.0"

@@ -1,4 +1,4 @@
-import type { StudioDispatchQueue, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioDispatchQueue, StudioPlugin, StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
 import { SchedulerService, type Schedule, type ScheduleReceipt } from './schedulerService';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createStudio, type StudioEvent } from '@pinpawo/studio';
+import { createStudio, type StudioEvent } from '@pinpawo/studio-core';
 import type { PetInvocationScope } from 'pinpawo/host-runtime';
 import { createChannelPlugin, type RouteDecision, type RouteInput } from '@pinpawo-plugin/channel';
 import { readChannelTestInput } from '../../support/channelDispatchInput';

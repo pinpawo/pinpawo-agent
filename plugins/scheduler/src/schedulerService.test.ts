@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStudioStorage, type StudioStorageConfig } from '@pinpawo/studio';
+import { createStudioStorage, type StudioStorageConfig } from '@pinpawo/studio-core';
 import { createPglitePool } from '../../../tests/support/pglitePool';
 import { SchedulerService } from './schedulerService';
 import { KyselyScheduleStore, schedulerMigrations, type SchedulerDatabase } from './store/kysely';

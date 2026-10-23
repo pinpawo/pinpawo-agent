@@ -1,5 +1,5 @@
 /**
- * `@pinpawo/studio` — independent resident Studio Host and its runtime
+ * `@pinpawo/studio-core` — independent resident Studio Host and its runtime
  * contracts. Plugins are selected through explicit Host injection; this
  * package never imports a concrete Plugin implementation.
  */
@@ -90,3 +90,6 @@ export type {
   InitStudioWorkdirOptions,
   InitStudioWorkdirResult,
 } from './studioTemplate';
+
+export { runStudioHostCli, parseStudioHostCliArgs } from './cli';
+export type { StudioHostCliHandlers, ParsedStudioHostCli } from './cli';

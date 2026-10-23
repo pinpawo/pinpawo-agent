@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import type { StudioMigrations } from '@pinpawo/studio';
+import type { StudioMigrations } from '@pinpawo/studio-core';
 
 /** The Notice schema. Data from the earlier notice.sqlite is not carried over. */
 export function noticeMigrations(): StudioMigrations {

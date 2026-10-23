@@ -10,7 +10,7 @@ import {
   clientMigrations,
   createStudioStorage,
   type ClientDatabase,
-} from '@pinpawo/studio';
+} from '@pinpawo/studio-core';
 
 import { createStudioHttpPlugin, type StudioHttpPluginContext, type StudioHttpRoutesHook } from './studioHttpPlugin';
 import { createJwtVerifier } from './jwtIssuers';

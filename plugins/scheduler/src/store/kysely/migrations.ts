@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio';
+import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio-core';
 
 /** The Scheduler schema. Data from the earlier scheduler.sqlite is not carried over. */
 export function schedulerMigrations(dialect: StudioStorageDialect): StudioMigrations {

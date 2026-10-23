@@ -22,7 +22,7 @@
       "@pinpawo-toolkit/browser": [
         "../../toolkits/browser/src/index.ts"
       ],
-      "@pinpawo/studio": [
+      "@pinpawo/studio-core": [
         "../../packages/studio/src/index.ts"
       ],
       "@pinpawo/pet-agent/testing": [

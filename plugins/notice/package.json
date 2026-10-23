@@ -24,7 +24,7 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@pinpawo/studio": "^1.0.0",
+    "@pinpawo/studio-core": "^1.0.0",
     "kysely": "^0.29.6"
   },
   "peerDependencies": { "@pinpawo-plugin/studio-http": "^1.0.0" },

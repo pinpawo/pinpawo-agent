@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { runStudioHostCli } from './cli';
+import { runStudioHostCli } from './index';
 
 try {
   await runStudioHostCli();

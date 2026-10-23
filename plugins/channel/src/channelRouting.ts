@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { StudioModelEndpoint } from '@pinpawo/studio';
+import type { StudioModelEndpoint } from '@pinpawo/studio-core';
 import type { ChannelMember } from './channelService';
 import type { ChannelMessageRow, ChannelRow } from './store/channelStore';
 

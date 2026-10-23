@@ -8,7 +8,7 @@ import { Annotation, Command, END, START, StateGraph, interrupt } from '@langcha
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio } from '@pinpawo/studio-core';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';

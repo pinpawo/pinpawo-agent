@@ -44,8 +44,8 @@ Studio Host 启动时读取一次 `PET.md`，修改后需要重启 Host 才会�
 
 standalone CLI 把 Plugin id 作为已安装 package 名交给 `StudioPluginResolver`，package
 通过 `createStudioPlugin()` 创建 Plugin。Studio core 不扫描或静态 import 具体 Plugin；
-嵌入方仍可替换 resolver。每个已配置 package 必须和 `@pinpawo/studio` 一起预先安装，
-启动过程不会联网下载。Plugin 可以定义 Toolkit，但 Capability 属于 Agent，并只从每个
+嵌入方仍可替换 resolver。安装完整入口 `@pinpawo/studio` 会自动安装六个基础 Plugin；
+其他配置的 Plugin 仍需预先安装。核心包为 `@pinpawo/studio-core`，启动过程不会联网下载。Plugin 可以定义 Toolkit，但 Capability 属于 Agent，并只从每个
 Pet 的约定目录加载。
 
 `storage` 决定 Plugin 数据放在哪里，省略时是 workdir 下的 `.pinpawo/studio/studio.sqlite`。

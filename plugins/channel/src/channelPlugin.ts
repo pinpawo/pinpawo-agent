@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio';
+import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelParticipantId } from './channelParticipants';

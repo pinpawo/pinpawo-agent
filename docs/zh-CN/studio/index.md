@@ -2,11 +2,11 @@
 
 [English](../../studio/index.md)
 
-> **状态：当前契约。** `@pinpawo/studio` 是独立 Studio Host/runtime package；
+> **状态：当前契约。** `@pinpawo/studio-core` 是独立 Studio Host/runtime package；
 > 它通过 host 的公共 `host-runtime` surface 复用本机 Host 装配能力；具体的
 > Pet Agent Session adapter 来自独立的 `wire` surface，不进入 Chat 启动链路。
-> `pinpawo-studio` 可执行入口也直接位于 `packages/studio`；具体 Plugin
-> 仍通过 `StudioPluginResolver` 从外部注入。
+> 完整发行入口 `@pinpawo/studio` 位于 `services/studio`，提供 `pinpawo-studio`
+> 并自动安装六个基础 Plugin；核心仍通过 `StudioPluginResolver` 接收具体 Plugin。
 
 Studio 维护可派发 Pet 的注册表和 Plugin 事件总线。`dispatch()` 在 resident port 接纳输入后
 返回 invocation identity；receipt 不跟踪 Agent execution，也没有 completion/result。

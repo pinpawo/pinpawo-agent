@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import type { ChannelInputsHook } from '@pinpawo-plugin/channel';
 import { TriggerService, type TriggerDeliveryReceipt } from './triggerService';

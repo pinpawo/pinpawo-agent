@@ -6,7 +6,7 @@ import {
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
-import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
+import { agentErrorEvent, type AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { InterruptResumeMessage } from './wire/protocol';
 
 /**
@@ -181,22 +181,12 @@ export async function resolvePendingHumanReviewInterrupt<
   }
 
   if (!matchesPendingHumanReviewInterrupt(route, message.interruptId)) {
-    options.emitEvent({
-      type: 'error',
-      requestId: message.requestId,
-      message: '这个 interrupt 已经过期，请等待当前确认面板刷新后再操作。',
-      code: 'interrupt_stale',
-    });
+    options.emitEvent(agentErrorEvent(message.requestId, { code: 'interrupt_stale' }));
     return;
   }
   const requested = readReviewResumeValue(message.value);
   if (!requested) {
-    options.emitEvent({
-      type: 'error',
-      requestId: message.requestId,
-      message: '这个 review 应答格式无法识别，请重新在确认面板上操作。',
-      code: 'interrupt_stale',
-    });
+    options.emitEvent(agentErrorEvent(message.requestId, { code: 'interrupt_response_invalid' }));
     return;
   }
   let resume: HumanReviewResumeValue;
@@ -212,12 +202,7 @@ export async function resolvePendingHumanReviewInterrupt<
         + `does not match pending interrupt=${route.interruptId} reviews=${route.reviews.map((review) => review.id).join(',')} `
         + (err instanceof Error ? err.message : String(err)),
       );
-      options.emitEvent({
-        type: 'error',
-        requestId: message.requestId,
-        message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
-        code: 'interrupt_stale',
-      });
+      options.emitEvent(agentErrorEvent(message.requestId, { code: 'interrupt_stale' }));
       return;
     }
     if (options.acceptRoute && !(await options.acceptRoute(route, message))) {

@@ -24,11 +24,14 @@ import type {
   HostGraphThreadState,
 } from './agentGraphService';
 import { collectThreadGarbage } from './agentGraphService';
-import type {
-  AgentPlan,
-  AgentLocalAttachment,
-  AgentRuntimeEvent,
+import {
+  agentSystemNoticeEvent,
+  type AgentPlan,
+  type AgentLocalAttachment,
+  type AgentRuntimeEvent,
+  type AgentSystemNotice,
 } from '@pinpawo/agent-session';
+import { AgentNoticeError } from './agentNoticeError';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
@@ -43,8 +46,6 @@ import {
 } from '../conversation/currentPlanProjection';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
-const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
-const PENDING_REVIEW_TEXT_NOTICE = '当前有待确认的 review，请先通过确认面板应答；这条文本没有作为新消息发送。';
 const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮内完成。已保留当前进度，可继续提交下一步让我接着推进。';
 
 export type AgentSessionTurnResult =
@@ -178,7 +179,7 @@ function projectGlobalPolicyAuthorization(
 }
 
 /** Keep human-recorded session authorization as a compact notice. */
-function formatToolAuthorizationNotice(name: string, rawData: unknown): string | null {
+function toolAuthorizationNotice(name: string, rawData: unknown): AgentSystemNotice | null {
   if (name !== 'tool_authorization_recorded') {
     return null;
   }
@@ -189,9 +190,7 @@ function formatToolAuthorizationNotice(name: string, rawData: unknown): string |
   const toolName = typeof data?.toolName === 'string' && data.toolName.trim()
     ? data.toolName
     : null;
-  return toolName
-    ? `已授权当前会话中的 ${toolName} 操作。`
-    : '已授权当前会话中的工具操作。';
+  return { code: 'tool_authorized_for_session', params: toolName ? { toolName } : {} };
 }
 
 function readDelegationOperations(data: unknown): Record<string, SubagentToolOperationMetadata> | null {
@@ -301,11 +300,7 @@ export async function runAgentSessionTurn(
   ) {
     // A review holds a tool call open; ordinary input cannot bypass it.
     if (message.trim() || attachments.length > 0) {
-      emitEvent({
-        type: 'system.notice',
-        requestId,
-        message: PENDING_REVIEW_TEXT_NOTICE,
-      });
+      emitEvent(agentSystemNoticeEvent(requestId, { code: 'review_pending_input_not_sent' }));
     }
     emitInterruptRequested({
       pendingInterrupt: initialThreadState.pendingInterrupt,
@@ -316,7 +311,7 @@ export async function runAgentSessionTurn(
   }
 
   if (isResumeRequest && !initialThreadState.acceptsResume) {
-    throw new Error(STALE_RESUME_MESSAGE);
+    throw new AgentNoticeError({ code: 'interrupt_closed' });
   }
 
   // The reply stays structured all the way down; the LangGraph `Command` is
@@ -415,14 +410,8 @@ export async function runAgentSessionTurn(
             emitEvent(authorization);
             break;
           }
-          const notice = formatToolAuthorizationNotice(chatEvent.name, chatEvent.data);
-          if (notice) {
-            emitEvent({
-              type: 'system.notice',
-              requestId,
-              message: notice,
-            });
-          }
+          const notice = toolAuthorizationNotice(chatEvent.name, chatEvent.data);
+          if (notice) emitEvent(agentSystemNoticeEvent(requestId, notice));
           break;
         }
         case 'tool_calls.message':

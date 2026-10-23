@@ -9,6 +9,8 @@ import type {
   AgentSessionMessageInput,
   AgentTimelineEntry,
 } from './domain';
+import { cloneAgentNotice, readNotice } from './notice';
+import type { AgentNotice } from './notice';
 import type { AgentSessionSnapshot } from './snapshot';
 import { agentOperationEntryFromEvent, agentOperationEntryId } from './timeline';
 
@@ -253,14 +255,17 @@ function reduceRuntimeEvent(
     case 'interrupt.requested':
       return applyInterruptRequest(session, event);
     case 'system.notice':
-      return appendRuntimeSystemMessage(session, event.requestId, event.message, message, context);
-    case 'error':
+      return appendRuntimeSystemMessage(session, event.requestId, event.message, readNotice(event), message, context);
+    case 'error': {
+      const notice = readNotice(event);
       return finishOwnedRun(session, event.requestId, [{
         ...(message ?? {}),
         role: 'system',
         requestId: event.requestId,
         text: message?.text ?? event.message ?? 'internal error',
+        ...(notice ? { notice } : {}),
       }], undefined, context, { preservePendingInterrupt: true });
+    }
   }
 }
 
@@ -307,6 +312,7 @@ function appendRuntimeSystemMessage(
   session: AgentSession,
   requestId: string,
   text: string,
+  notice: AgentNotice | null,
   message: AgentSessionMessageInput | undefined,
   context: AgentSessionReductionContext,
 ) {
@@ -316,6 +322,7 @@ function appendRuntimeSystemMessage(
     role: 'system',
     requestId,
     text: message?.text ?? text,
+    ...(notice ? { notice } : {}),
   }, context);
 }
 
@@ -637,6 +644,7 @@ function appendMessage(
     role: message.role,
     text: message.text,
     ...(message.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(message.notice ? { notice: cloneAgentNotice(message.notice) } : {}),
     status: 'completed',
     ...(message.requestId ? { requestId: message.requestId } : {}),
     ...createdAtField(message.createdAt, context),
@@ -817,6 +825,7 @@ function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   if (entry.type === 'message') return { ...entry,
     ...(entry.resultReferences ? { resultReferences: entry.resultReferences.map(ref => ({ ...ref })) } : {}),
     ...(entry.toolCalls ? { toolCalls: entry.toolCalls.map(call => ({ ...call, args: { ...call.args } })) } : {}),
+    ...(entry.notice ? { notice: cloneAgentNotice(entry.notice) } : {}),
   };
   return {
     ...entry,

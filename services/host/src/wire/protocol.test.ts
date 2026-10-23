@@ -397,7 +397,7 @@ test('parseHostServerMessage keeps review reconciliation error code', () => {
       event: {
         type: 'error',
         requestId: 'req-1',
-        message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+        message: 'This review is closed or no longer exists. Wait for the review panel to refresh before answering.',
         code: 'interrupt_closed',
       },
     })),
@@ -407,7 +407,7 @@ test('parseHostServerMessage keeps review reconciliation error code', () => {
       event: {
         type: 'error',
         requestId: 'req-1',
-        message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+        message: 'This review is closed or no longer exists. Wait for the review panel to refresh before answering.',
         code: 'interrupt_closed',
       },
     },

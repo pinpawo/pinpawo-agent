@@ -4,6 +4,7 @@ import type {
   AgentSessionSnapshot,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
+import { hostMessageText } from '../i18n/text';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -238,7 +239,7 @@ export class SessionCommandCoordinator {
     const pending = this.commands.get(message.requestId);
     if (!pending || pending.operation !== message.operation) return;
     this.clear(pending);
-    pending.reject(new Error(message.message));
+    pending.reject(new Error(hostMessageText(message)));
   }
 
   cancelAll(message: string) {

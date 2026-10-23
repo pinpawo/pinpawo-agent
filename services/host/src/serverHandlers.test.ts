@@ -620,14 +620,14 @@ test('model selection is rejected while the active session is running', async ()
     const refusals = sent.filter((message) => (
       message.type === 'session.error'
       && ['snapshot-running', 'list-running'].includes(message.requestId)
-    )) as Array<{ requestId: string; message: string }>;
+    )) as Array<{ requestId: string; message: string; code?: string }>;
     assert.deepEqual(
       refusals.map((message) => message.requestId).sort(),
       ['list-running'],
       'commands are refused; an observation is not',
     );
     for (const refusal of refusals) {
-      assert.match(refusal.message, /wait for the current response/);
+      assert.equal(refusal.code, 'run_in_flight');
     }
 
     await handlers.peerHandlers.onModelSelect(peer, {

@@ -164,19 +164,22 @@ test('local server dispatcher routes typed client messages and pong', async () =
         event: {
           type: 'error',
           requestId: 'chat-old',
-          message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
+          message: 'The client message is invalid or incompatible with this Host. Upgrade the client and try again.',
+          code: 'client_message_invalid',
         },
       },
       {
         type: 'session.error',
         requestId: 'resume-invalid',
         operation: 'resume',
-        message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
+        message: 'The client message is invalid or incompatible with this Host. Upgrade the client and try again.',
+        code: 'client_message_invalid',
       },
       {
         type: 'runtime_config.error',
         requestId: 'policy-invalid',
-        message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
+        message: 'The client message is invalid or incompatible with this Host. Upgrade the client and try again.',
+        code: 'client_message_invalid',
       },
     ]);
     assert.deepEqual(seen, [
@@ -230,6 +233,8 @@ test('local server dispatcher reports unsupported messages without silently drop
       type: 'error',
       requestId: 'interrupt-1',
       message: 'Message type "run.interrupt" is not supported by this Host transport.',
+      code: 'client_message_unsupported',
+      params: { messageType: 'run.interrupt' },
     },
   }]);
 });

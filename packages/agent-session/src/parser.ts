@@ -1,4 +1,5 @@
 import { parseResultReferences } from './resultReferences';
+import { parseAgentNotice } from './notice';
 import {
   isToolAuthorizationMode,
   isOperationBlock,
@@ -296,6 +297,8 @@ function parseAgentTimelineEntry(
     }
     const toolCalls = value.toolCalls === undefined ? undefined : parseAgentMessageToolCalls(value.toolCalls, true);
     if (toolCalls === null || (toolCalls && value.role !== 'assistant')) return null;
+    // An unreadable notice leaves the message as its default text.
+    const notice = value.role === 'system' && isRecord(value.notice) ? parseAgentNotice(value.notice) : null;
     return {
       id: value.id,
       type: 'message',
@@ -303,6 +306,7 @@ function parseAgentTimelineEntry(
       text: value.text,
       ...(toolCalls ? { toolCalls } : {}),
       ...(value.resultReferences !== undefined ? { resultReferences: parseResultReferences(value.resultReferences) } : {}),
+      ...(notice ? { notice } : {}),
       status: value.status,
       ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),
       ...(typeof value.createdAt === 'string' ? { createdAt: value.createdAt } : {}),

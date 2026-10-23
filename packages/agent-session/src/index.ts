@@ -1,6 +1,7 @@
 export * from './domain';
 export * from './events';
 export * from './localAttachments';
+export * from './notice';
 export * from './parser';
 export * from './project';
 export * from './protocol';

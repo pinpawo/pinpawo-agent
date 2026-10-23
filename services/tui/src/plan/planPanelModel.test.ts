@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCurrentPlanPanel } from './planPanelModel';
+import { setTuiLocale } from '../i18n/locale';
+
+// These expectations are written against the Chinese text table.
+setTuiLocale('zh');
 
 const plan = {
   items: [

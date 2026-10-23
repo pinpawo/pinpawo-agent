@@ -11,6 +11,7 @@ import {
 import { formatTimelineEntry } from '../timeline/timelineModel';
 import { buildOperationDetailText } from '../timeline/operationDisplay';
 import { buildMessageDisplayLines, isToolCallMessageEntry } from '../timeline/messageDisplay';
+import { tuiText } from '../i18n/text';
 
 export type TranscriptPagerSpawn = (
   command: string,
@@ -108,7 +109,7 @@ export function formatTranscriptPagerText(session: AgentSession) {
     );
     if (entry.type === 'message') {
       for (const [index, reference] of (entry.resultReferences ?? []).entries()) {
-        lines.push(sanitizePagerText(`执行结果 ${index + 1} · ${reference.title}`),
+        lines.push(sanitizePagerText(tuiText().resultReference(index + 1, reference.title)),
           sanitizePagerText(reference.text), '', '────────────────────────────────────────', '');
       }
     }

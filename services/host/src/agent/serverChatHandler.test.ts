@@ -98,17 +98,19 @@ for (const switchFails of [false, true]) {
     }, { petId: 'pet-1' } as never);
 
     const errors = sent.flatMap((item) => {
-      const envelope = item as { type?: string; event?: { type?: string; message?: string } };
-      return envelope.type === 'event' && envelope.event?.type === 'error' ? [envelope.event.message ?? ''] : [];
+      const envelope = item as { type?: string; event?: { type?: string; code?: string; params?: unknown } };
+      return envelope.type === 'event' && envelope.event?.type === 'error' ? [envelope.event] : [];
     });
     assert.equal(errors.length, 1);
-    assert.doesNotMatch(errors[0]!, /已重置/);
+    const detail = "400 An assistant message with 'tool_calls' must be followed by tool messages";
     if (switchFails) {
       assert.deepEqual(created, []);
-      assert.match(errors[0]!, /未能切换到新会话（session store unavailable），仍停留在原会话/);
+      assert.equal(errors[0]!.code, 'history_rejected_switch_failed');
+      assert.deepEqual(errors[0]!.params, { detail, reason: 'session store unavailable' });
     } else {
       assert.deepEqual(created, ['pet-1']);
-      assert.match(errors[0]!, /原会话保留在会话列表里/);
+      assert.equal(errors[0]!.code, 'history_rejected_session_switched');
+      assert.deepEqual(errors[0]!.params, { detail });
     }
   });
 }
@@ -414,7 +416,6 @@ test('a review decision resume rejects a stale canonical interactionId before fo
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.equal(event.event?.requestId, 'req-1');
-  assert.match(event.event?.message ?? '', /过期/);
   assert.equal(event.event?.code, 'interrupt_stale');
 });
 
@@ -486,7 +487,6 @@ test('a review decision resume consumes matching canonical review route once', a
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
-  assert.match(event.event?.message ?? '', /已关闭|不存在/);
   assert.equal(event.event?.code, 'interrupt_closed');
 
   await handler.handleInterruptResume(
@@ -775,7 +775,6 @@ test('a review cancel resume resumes pending review with run interruption contro
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
-  assert.match(event.event?.message ?? '', /已关闭|不存在/);
   assert.equal(event.event?.code, 'interrupt_closed');
 });
 
@@ -1019,7 +1018,6 @@ test('a review decision resume rejects canonical review response from a differen
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
-  assert.match(event.event?.message ?? '', /发起该 review 的会话/);
   assert.equal(event.event?.code, 'interrupt_wrong_session');
 });
 

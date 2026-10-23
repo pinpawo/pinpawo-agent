@@ -37,10 +37,16 @@ import {
   type PendingHumanReviewInterruptRoute,
   type HumanReviewResolutionSource,
 } from '../pendingHumanReviewInterrupt';
-import type { AgentRuntimeEvent, PendingInterruptProjection } from '@pinpawo/agent-session';
+import {
+  agentErrorEvent,
+  type AgentErrorNotice,
+  type AgentRuntimeEvent,
+  type PendingInterruptProjection,
+} from '@pinpawo/agent-session';
+import { AgentNoticeError } from './agentNoticeError';
 import {
   classifyAgentRunFailure,
-  describeFatalAgentRunFailure,
+  fatalAgentRunNotice,
 } from './agentRunFailure';
 import { sendAgentSessionPeerEvent, type ServerPeer } from '../wire/peer';
 import { ThreadInvocationCoordinator } from '../threadInvocationCoordinator';
@@ -203,12 +209,7 @@ export class ServerChatHandler {
   }
 
   private sendClosedReviewError(peer: ServerPeer, requestId: string) {
-    sendAgentSessionPeerEvent(peer, {
-      type: 'error',
-      requestId,
-      message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
-      code: 'interrupt_closed',
-    });
+    sendAgentSessionPeerEvent(peer, agentErrorEvent(requestId, { code: 'interrupt_closed' }));
   }
 
   async handleChatRequest(
@@ -427,32 +428,28 @@ export class ServerChatHandler {
       console.error('[chat-host] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       // A history the provider rejects is switched away from, never deleted: the old
       // session stays in the session list. A targeted turn never switches sessions.
-      let protocolRecovery: string | null = null;
+      const detail = err instanceof Error ? err.message : 'internal error';
+      let protocolRecovery: AgentErrorNotice | null = null;
       if (!target && isToolProtocolHistoryError(err)) {
         try {
           this.tuiSessions.createNewSession(deps.petId);
-          protocolRecovery = '已切换到新会话，原会话保留在会话列表里，可以随时恢复。';
+          protocolRecovery = { code: 'history_rejected_session_switched', params: { detail } };
           console.warn(`[chat-host] started a new TUI chat session after tool protocol error requestId=${requestId}`);
         } catch (switchError) {
           const reason = switchError instanceof Error ? switchError.message : String(switchError);
-          protocolRecovery = `未能切换到新会话（${reason}），仍停留在原会话。`;
+          protocolRecovery = { code: 'history_rejected_switch_failed', params: { detail, reason } };
           console.warn('[chat-host] failed to start a new TUI chat session after tool protocol error:', reason);
         }
       }
       const failure = classifyAgentRunFailure(err);
       if (isStillCurrent) {
-        const message = err instanceof Error ? err.message : 'internal error';
-        this.publishRuntimeEvent(peer, {
-          type: 'error',
-          requestId,
-          message: protocolRecovery
-            ? `${message}\n\n${protocolRecovery}`
-            : failure.kind === 'fatal'
-              ? describeFatalAgentRunFailure(failure)
-              : message,
-          diagnostics: describeAgentError(err),
-          ...(failure.kind === 'fatal' ? { code: 'agent_unavailable' } : {}),
-        });
+        const notice = protocolRecovery
+          ?? (failure.kind === 'fatal' ? fatalAgentRunNotice(failure) : null)
+          ?? (err instanceof AgentNoticeError ? err.notice : null);
+        const diagnostics = describeAgentError(err);
+        this.publishRuntimeEvent(peer, notice
+          ? agentErrorEvent(requestId, notice, { diagnostics })
+          : { type: 'error', requestId, message: detail, diagnostics });
       }
       return failure.kind === 'fatal' ? 'fatal_failed' : 'failed';
     };
@@ -595,12 +592,7 @@ export class ServerChatHandler {
         `[chat-host] interrupt.resume rejected: route sessionId=${route.sessionId} `
         + `does not match ${target ? 'target' : 'active'} session=${expectedSessionId}`,
       );
-      sendAgentSessionPeerEvent(peer, {
-        type: 'error',
-        requestId: message.requestId,
-        message: '请回到发起该 review 的会话再操作。',
-        code: 'interrupt_wrong_session',
-      });
+      sendAgentSessionPeerEvent(peer, agentErrorEvent(message.requestId, { code: 'interrupt_wrong_session' }));
       return false;
     }
     return true;

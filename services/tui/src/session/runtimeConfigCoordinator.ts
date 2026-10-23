@@ -4,6 +4,7 @@ import type {
   ToolAuthorizationSafetyLevel,
   ToolAuthorizationMode,
 } from '@pinpawo/agent-session';
+import { hostMessageText } from '../i18n/text';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -94,7 +95,7 @@ export class RuntimeConfigCoordinator {
     if (!pending || pending.requestId !== message.requestId) return;
     this.clear(pending);
     if (message.type === 'runtime_config.error') {
-      pending.reject(new Error(message.message));
+      pending.reject(new Error(hostMessageText(message)));
       return;
     }
     if (message.toolAuthorizationMode !== pending.toolAuthorizationMode) {

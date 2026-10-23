@@ -125,7 +125,8 @@ test('stdio JSONL dispatch matches typed WebSocket behavior and closes one stabl
         event: {
           type: 'error',
           requestId: 'chat-old',
-          message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
+          message: 'The client message is invalid or incompatible with this Host. Upgrade the client and try again.',
+          code: 'client_message_invalid',
         },
       },
     ]);

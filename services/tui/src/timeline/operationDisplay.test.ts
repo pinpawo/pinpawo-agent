@@ -7,6 +7,10 @@ import {
   operationActivityText,
   OPERATION_OUTPUT_MAX_LINES,
 } from './operationDisplay';
+import { setTuiLocale } from '../i18n/locale';
+
+// These expectations are written against the Chinese text table.
+setTuiLocale('zh');
 
 test('compact operation display shows summary then target without payload details', () => {
   const lines = buildOperationDisplayLines(operation({

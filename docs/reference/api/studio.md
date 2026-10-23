@@ -92,7 +92,8 @@ The review route accepts only a human-review answer; it runs through the same
 admission, checkpoint validation and dispatch continuation as a TUI answer, in
 the addressed session's own thread. `202` means the Host took the answer, not
 that it applied: the resumed run's `run.started`, or an `interrupt_closed` /
-`interrupt_stale` / `interrupt_wrong_session` error, arrives on that session's
+`interrupt_stale` / `interrupt_response_invalid` / `interrupt_wrong_session`
+error, arrives on that session's
 event stream under the same `requestId`; a later Host failure is reported there
 as an `error` too. An answer the Host can already refuse gets `409 { error }`
 instead: the review is no longer the session's current one, or the Pet is

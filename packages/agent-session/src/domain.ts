@@ -8,6 +8,7 @@ import type {
   AgentOperationPhase,
   AgentOperationRaw,
 } from './events';
+import type { AgentNotice } from './notice';
 import type { PendingInterruptProjection } from './review';
 
 export const AGENT_SESSION_SNAPSHOT_VERSION = 5 as const;
@@ -39,6 +40,11 @@ export type AgentMessageEntry = {
   /** Assistant only. A message that calls tools may have no text. */
   toolCalls?: AgentMessageToolCall[];
   resultReferences?: AgentResultReference[];
+  /**
+   * System only: the notice this message shows. `text` is its default text;
+   * clients render the notice in their own language when they know its code.
+   */
+  notice?: AgentNotice;
   status: 'streaming' | 'completed';
   requestId?: string;
   createdAt?: string;
@@ -82,6 +88,7 @@ export type AgentTimelineWindow = {
 
 export type AgentSessionMessageInput = {
   resultReferences?: AgentResultReference[];
+  notice?: AgentNotice;
   id?: string;
   role: AgentMessageEntry['role'];
   text: string;

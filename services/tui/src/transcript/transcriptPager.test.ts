@@ -12,6 +12,10 @@ import {
   resolveTranscriptPagerCommand,
   type TranscriptPagerSpawn,
 } from './transcriptPager';
+import { setTuiLocale } from '../i18n/locale';
+
+// These expectations are written against the Chinese text table.
+setTuiLocale('zh');
 
 test('transcript pager resolves PAGER arguments and a platform fallback', () => {
   assert.deepEqual(resolveTranscriptPagerCommand({

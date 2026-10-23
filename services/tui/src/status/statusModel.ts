@@ -10,6 +10,7 @@ import type {
   TuiSessionState,
 } from '../session/sessionController';
 import { truncateTerminalLine } from '../text/terminalText';
+import { tuiText } from '../i18n/text';
 
 const COUNT_FORMATTER = new Intl.NumberFormat('en-US');
 
@@ -120,9 +121,9 @@ export function formatComposerPlaceholder(
     return 'Stopping response…';
   }
   if (run) {
-    return '输入下一条消息… · Esc 中断 · PageUp 详情';
+    return `${tuiText().runningPlaceholder} · ${tuiText().detailsHint}`;
   }
-  return `${COMPOSER_PLACEHOLDER} · PageUp 详情`;
+  return `${COMPOSER_PLACEHOLDER} · ${tuiText().detailsHint}`;
 }
 
 export function formatUsage(session: AgentSession) {

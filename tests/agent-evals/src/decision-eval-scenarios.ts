@@ -166,7 +166,7 @@ function userVisibleCriteria(testCase: EntryAnswerEvalCase, route: string, text:
     }] : []),
     ...(text || typeof goal === 'string' ? [{
       id: 'user_visible_language',
-      statement: `The reply text and any goal argument are written in ${language}.`,
+      statement: `The reply text and any goal argument are written in ${language}; text with no natural-language words (numbers, formulas, code) counts as met.`,
     }] : []),
   ];
 }

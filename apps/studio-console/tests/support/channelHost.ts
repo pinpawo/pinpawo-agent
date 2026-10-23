@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, Command, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio } from '@pinpawo/studio-core';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';

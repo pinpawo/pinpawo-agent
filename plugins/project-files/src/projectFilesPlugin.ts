@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import {
   ProjectFileTooLargeError,

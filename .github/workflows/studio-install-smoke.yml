@@ -10,8 +10,9 @@ on:
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'packages/studio/**'
+      - 'services/studio/**'
       - 'services/host/**'
-      # host bundles the Browser Toolkit; Studio also packs the plugins.
+      # Studio installation resolves its core and Plugins through a fixture registry.
       - 'toolkits/**'
       - 'plugins/**'
       # Tests, docs and unrelated scripts never reach a packed package.
@@ -29,8 +30,9 @@ on:
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'packages/studio/**'
+      - 'services/studio/**'
       - 'services/host/**'
-      # host bundles the Browser Toolkit; Studio also packs the plugins.
+      # Studio installation resolves its core and Plugins through a fixture registry.
       - 'toolkits/**'
       - 'plugins/**'
       # Tests, docs and unrelated scripts never reach a packed package.

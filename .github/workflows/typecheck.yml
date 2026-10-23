@@ -48,6 +48,8 @@ jobs:
         run: |
           npm run typecheck -w @pinpawo/agent-contracts
           npm run typecheck -w @pinpawo/pet-agent
+          npm run typecheck -w @pinpawo/studio-core
+          npm run build -w @pinpawo/studio-core
           npm run typecheck -w @pinpawo/studio
           npm run typecheck -w @pinpawo/agent-session
           npm run typecheck -w @pinpawo/tui

@@ -7,7 +7,7 @@
     "baseUrl": ".",
     "paths": {
       "@pinpawo/pet-agent": ["../../packages/pet-agent/src/index.ts"],
-      "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
+      "@pinpawo/studio-core": ["../../packages/studio/src/index.ts"],
       "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
       "@pinpawo-plugin/channel": ["../../plugins/channel/src/index.ts"],
       "@pinpawo-plugin/notice": ["../../plugins/notice/src/index.ts"],

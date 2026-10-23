@@ -32,8 +32,8 @@
   "dependencies": {
     "@langchain/core": "^1.2.1",
     "@pinpawo/agent-session": "^1.0.0",
-    "@pinpawo/pet-agent": "^1.0.0",
-    "@pinpawo/studio": "^1.0.0",
+    "@pinpawo/pet-agent": "^1.0.1",
+    "@pinpawo/studio-core": "^1.0.0",
     "kysely": "^0.29.6",
     "mdast-util-from-markdown": "2.0.3",
     "zod": "^3.22.0"

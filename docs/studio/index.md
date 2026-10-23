@@ -3,13 +3,14 @@
 [简体中文](../zh-CN/studio/index.md)
 
 > **Status: current contract.** Studio is implemented by
-> [`@pinpawo/studio`](../../packages/studio/src/index.ts), which owns its Host,
+> [`@pinpawo/studio-core`](../../packages/studio/src/index.ts), which owns its Host,
 > runtime assembly, and Plugin composition. It reuses local Host assembly
 > through the public host
 > [`host-runtime`](../../services/host/src/hostRuntime.ts) surface; the
 > Pet Agent Session adapter is a separate `wire` surface.
-> The `pinpawo-studio` executable entry also lives in this package. Concrete
-> Plugins remain externally injected through `StudioPluginResolver`.
+> The complete [`@pinpawo/studio`](../../services/studio/README.md) distribution
+> owns the executable and installs all six foundational Plugins. Core receives
+> concrete Plugins through `StudioPluginResolver`.
 
 Studio is a small dispatch-admission substrate for multiple Pet runtimes. It
 keeps a registry of dispatchable pets and gives plugins an in-process event bus.

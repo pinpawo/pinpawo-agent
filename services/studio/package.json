@@ -1,0 +1,57 @@
+{
+  "name": "@pinpawo/studio",
+  "version": "1.0.0",
+  "description": "Complete PinPawo Studio CLI with all six foundational Plugins",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "pinpawo-studio": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepare": "npm run build",
+    "dev": "tsx src/cliEntry.ts",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ../../tests/support/isolateSessions.mjs --import tsx/esm --test src/*.test.ts",
+    "test:install": "npm run build --prefix ../.. && node --import tsx/esm scripts/install-smoke.ts",
+    "pack:dry": "npm run build && npm pack --dry-run",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@pinpawo/studio-core": "1.0.0",
+    "@pinpawo-plugin/studio-http": "1.0.0",
+    "@pinpawo-plugin/channel": "1.0.0",
+    "@pinpawo-plugin/scheduler": "1.0.0",
+    "@pinpawo-plugin/notice": "1.0.0",
+    "@pinpawo-plugin/project-files": "1.0.0",
+    "@pinpawo-plugin/trigger": "1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "pinpawo": "^1.0.0"
+  }
+}

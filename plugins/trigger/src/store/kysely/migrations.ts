@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio';
+import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio-core';
 
 /** The Trigger schema. Data from the earlier trigger.sqlite is not carried over. */
 export function triggerMigrations(dialect: StudioStorageDialect): StudioMigrations {

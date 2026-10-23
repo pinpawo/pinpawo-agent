@@ -63,7 +63,8 @@ layer. See the accepted
 | Contracts | `packages/agent-contracts/` | Shared request, event, review, and run contracts. |
 | Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and artifact references. |
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
-| Collaboration | `packages/studio/` | Studio Host, dispatch, read-only per-Pet dispatch-queue observation (including admission state), and the standalone process entry. |
+| Collaboration | `packages/studio/` | Studio Host, dispatch, read-only per-Pet dispatch-queue observation (including admission state), and extension contracts (`@pinpawo/studio-core`). |
+| Studio distribution | `services/studio/` | Complete `@pinpawo/studio` CLI and six foundational Plugin dependencies. |
 | Local host | `services/host/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
 | Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/channel/`, including their runtime lifecycles. |

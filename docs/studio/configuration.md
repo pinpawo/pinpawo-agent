@@ -132,13 +132,14 @@ a selected project. The package ships its source template under
 
 ## Plugin assembly
 
-`@pinpawo/studio` declares a `StudioPluginResolver` port but contains no concrete
+`@pinpawo/studio-core` declares a `StudioPluginResolver` port but contains no concrete
 Plugin registry and imports no concrete Plugin. The standalone CLI resolves an
 explicit package name from `plugins[].id` and requires that installed package to
 export `createStudioPlugin(options, environment)`. Embedded callers can replace
 that resolver entirely. Options pass through unchanged for the Plugin to validate.
-Install each configured package beside `@pinpawo/studio`; configuration does not
-download missing packages at startup.
+Installing the complete `@pinpawo/studio` distribution automatically installs
+its six foundational Plugin dependencies. Additional configured Plugins must be
+installed separately; configuration does not download packages at startup.
 
 `@pinpawo-plugin/channel` owns Channels, their members, message history and fixed
 Channel/Pet sessions. Its data lives in the Studio database (`storage`);

@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initStudioWorkdir, type StudioPlugin } from '@pinpawo/studio';
+import { initStudioWorkdir, type StudioPlugin } from '@pinpawo/studio-core';
 
 test('Studio init enables Channel and keeps only an explicit external-request Trigger', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-init-e2e-'));
@@ -32,7 +32,7 @@ test('Studio init enables Channel and keeps only an explicit external-request Tr
 // Assemble the shipped Plugin selection and exercise the surviving public routes.
 test('shipped Plugins support explicit Wiki work and Knowledge without opening historical task storage', async (t) => {
   const { mkdir, rm, writeFile } = await import('node:fs/promises');
-  const { createStudio, resolveStudioHostConfig } = await import('@pinpawo/studio');
+  const { createStudio, resolveStudioHostConfig } = await import('@pinpawo/studio-core');
   const { createStudioHttpPlugin } = await import('@pinpawo-plugin/studio-http');
   const { createStudioPlugin: channelFactory } = await import('@pinpawo-plugin/channel');
   const { createStudioPlugin: noticeFactory } = await import('@pinpawo-plugin/notice');

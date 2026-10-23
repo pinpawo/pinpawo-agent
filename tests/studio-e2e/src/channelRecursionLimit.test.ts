@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio } from '@pinpawo/studio-core';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';

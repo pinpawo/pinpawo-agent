@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio';
+import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio-core';
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';

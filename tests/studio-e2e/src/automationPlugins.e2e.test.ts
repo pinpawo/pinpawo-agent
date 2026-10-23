@@ -6,7 +6,7 @@ import { createSchedulerPlugin } from '@pinpawo-plugin/scheduler';
 import { createNoticePlugin } from '@pinpawo-plugin/notice';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { createTriggerPlugin } from '@pinpawo-plugin/trigger';
-import { createStudio, type StudioPetBinding } from '@pinpawo/studio';
+import { createStudio, type StudioPetBinding } from '@pinpawo/studio-core';
 
 const STUDIO_TOKEN = 'studio-token-with-at-least-16-characters';
 const TRIGGER_SECRET = 'trigger-secret-with-at-least-16-characters';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStudio, type StudioPetBinding } from '@pinpawo/studio';
+import { createStudio, type StudioPetBinding } from '@pinpawo/studio-core';
 import { createNoticePlugin } from './noticePlugin';
 
 const worker: StudioPetBinding = {

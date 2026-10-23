@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio';
+import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio-core';
 
 /** The Channel schema. Data from the earlier Channel model is not carried over. */
 export function channelMigrations(dialect: StudioStorageDialect): StudioMigrations {

@@ -12,7 +12,7 @@ import {
   type StudioEvent,
   type StudioEventHandler,
   type StudioPetRegistration,
-} from '@pinpawo/studio';
+} from '@pinpawo/studio-core';
 
 import {
   createStudioHttpPlugin,

@@ -23,7 +23,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
-  "dependencies": { "@pinpawo/studio": "^1.0.0" },
+  "dependencies": { "@pinpawo/studio-core": "^1.0.0" },
   "peerDependencies": { "@pinpawo-plugin/studio-http": "^1.0.0" },
   "peerDependenciesMeta": {
     "@pinpawo-plugin/studio-http": { "optional": true }

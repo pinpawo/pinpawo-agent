@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio } from '@pinpawo/studio-core';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import {
   buildHostRuntimeConfig, createResidentPetHost, FileSaver,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   KyselyClientStore, StudioClients, clientMigrations, createStudioStorage, type ClientDatabase, type StudioStorageConfig,
-} from '@pinpawo/studio';
+} from '@pinpawo/studio-core';
 import { createPglitePool } from '../../../tests/support/pglitePool';
 import { ChannelAccessError, ChannelLastHumanError, ChannelNotFoundError, ChannelService } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';

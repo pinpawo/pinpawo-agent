@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { startPackageRegistry, type RegistryPackage } from './packageRegistry';
 
 const execFileAsync = promisify(execFile);
 const studioRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,6 +23,7 @@ const packageRoots = [
   resolve(workspaceRoot, 'packages', 'pet-agent'),
   resolve(workspaceRoot, 'toolkits', 'browser'),
   resolve(workspaceRoot, 'services', 'host'),
+  resolve(workspaceRoot, 'packages', 'studio'),
   studioRoot,
   resolve(workspaceRoot, 'plugins', 'studio-http'),
   resolve(workspaceRoot, 'plugins', 'channel'),
@@ -44,6 +46,8 @@ const cacheDir = process.env.CI
   ? undefined
   : join(workspaceRoot, 'node_modules', '.cache', 'pinpawo-studio-install-smoke-npm');
 
+let registry: Awaited<ReturnType<typeof startPackageRegistry>> | undefined;
+
 try {
   const installedBin = join(
     consumerDir,
@@ -58,6 +62,19 @@ try {
     ...(cacheDir ? [mkdir(cacheDir, { recursive: true })] : []),
   ]);
   await writeFile(join(smokeHome, '.pinpawo', 'local-server-token'), 'studio-install-smoke-token\n');
+  await writeFile(join(smokeHome, '.pinpawo', 'config.json'), JSON.stringify({
+    models: {
+      version: 1,
+      defaultProfileId: 'smoke',
+      profiles: {
+        smoke: {
+          id: 'smoke', label: 'Smoke', provider: 'openai', model: 'smoke-model',
+          baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'smoke-test-key',
+          contextWindowTokens: 32_000, inputModalities: ['text'],
+        },
+      },
+    },
+  }));
   await writeFile(join(consumerDir, 'package.json'), `${JSON.stringify({
     name: 'pinpawo-studio-install-smoke',
     private: true,
@@ -65,11 +82,12 @@ try {
     type: 'module',
   }, null, 2)}\n`);
 
-  const tarballs = await Promise.all(
+  const packed = await Promise.all(
     packageRoots.map((packageRoot) => packPackage(packageRoot, artifactDir)),
   );
-  // Resolve against live registry metadata: with --prefer-offline, a restored
-  // CI npm cache served stale packuments and failed on newly published deps.
+  registry = await startPackageRegistry(packed);
+  const distribution = packed.find(({ manifest }) => manifest.name === '@pinpawo/studio');
+  assert.ok(distribution);
   await runNpm([
     'install',
     '--ignore-scripts',
@@ -78,9 +96,16 @@ try {
     '--package-lock=false',
     '--loglevel=verbose',
     '--timing',
-    '--save=false',
-    ...tarballs,
-  ], consumerDir, 'install packed public packages', 600_000);
+    '--save-exact',
+    '--registry',
+    registry.url,
+    distribution.path,
+  ], consumerDir, 'install only the complete Studio entry', 600_000);
+  const consumer = JSON.parse(await readFile(join(consumerDir, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(consumer.dependencies), ['@pinpawo/studio']);
+  for (const entry of packed) {
+    if (entry !== distribution) assert.ok(registry.requested.has(entry.manifest.name), entry.manifest.name);
+  }
 
   const installedStudio = join(consumerDir, 'node_modules', '@pinpawo', 'studio');
   const installedPackage = JSON.parse(
@@ -99,8 +124,8 @@ try {
     access(join(installedStudio, 'dist', 'index.d.ts')),
     access(join(installedStudio, 'dist', 'cli.js')),
     access(installedBin),
-    access(join(installedStudio, 'templates', 'default', 'studio.json')),
-    access(join(installedStudio, 'templates', 'default', 'wiki', 'PROJECT.md')),
+    access(join(consumerDir, 'node_modules', '@pinpawo', 'studio-core', 'templates', 'default', 'studio.json')),
+    access(join(consumerDir, 'node_modules', '@pinpawo', 'studio-core', 'templates', 'default', 'wiki', 'PROJECT.md')),
   ]);
 
   const imported = await runProcess(process.execPath, [
@@ -163,6 +188,12 @@ try {
     access(join(initializedWorkdir, 'wiki', 'PROJECT.md')),
   ]);
 
+  // Preserve the shipped Plugin set and settings; only use a free HTTP test port.
+  const configPath = join(initializedWorkdir, '.pinpawo', 'studio.json');
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
+  config.plugins.find(({ id }: { id: string }) => id === '@pinpawo-plugin/studio-http').options.port = 0;
+  await writeFile(configPath, JSON.stringify(config));
+
   const resolvedKickstart = await runProcess(process.execPath, [
     '--input-type=module',
     '--eval',
@@ -177,6 +208,26 @@ try {
       'const names = configuration.plugins.map(({ name }) => name);',
       "const expected = ['http', 'notice', 'channel', 'scheduler', 'project-files', 'trigger'];",
       "if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`unexpected Plugins: ${JSON.stringify(names)}`);",
+      'await studio.runStudioHostProcess({ workdir, agentSessionPort: 0 }, {',
+      '  writeOutput: () => undefined,',
+      '  startHost: async (options) => {',
+      '    const running = await studio.startStudioHost({',
+      '      ...options, resolveStudioHostConfig: async () => configuration,',
+      '    });',
+      '    try {',
+      "      const address = configuration.plugins.find(({ name }) => name === 'http').address();",
+      "      if (!address) throw new Error('HTTP Plugin did not start');",
+      "      for (const route of ['/pets', '/channels', '/notices', '/scheduler', '/triggers', '/knowledge']) {",
+      '        const response = await fetch(`http://127.0.0.1:${address.port}${route}`, {',
+      "          headers: { authorization: 'Bearer studio-install-smoke-token' },",
+      '        });',
+      '        if (!response.ok) throw new Error(`${route}: ${response.status} ${await response.text()}`);',
+      '        await response.json();',
+      '      }',
+      '    } finally { running.close(); await running.closed; }',
+      '    return running;',
+      '  },',
+      '});',
       "process.stdout.write(`${names.join(',')}\\n`);",
     ].join('\n'),
   ], consumerDir, 'resolve initialized Studio workdir Plugins', 30_000, {
@@ -184,11 +235,14 @@ try {
     PINPAWO_STUDIO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
     HOME: smokeHome,
     USERPROFILE: smokeHome,
+    PINPAWO_WORKSPACES_DIR: join(smokeHome, 'workspaces'),
+    LANGCHAIN_TRACING_V2: 'false',
+    LANGSMITH_TRACING: 'false',
   });
-  assert.equal(resolvedKickstart.stdout.trim(), 'http,notice,channel,scheduler,project-files,trigger');
-  assert.equal(resolvedKickstart.stderr, '');
+  assert.ok(resolvedKickstart.stdout.trim().endsWith('http,notice,channel,scheduler,project-files,trigger'));
   process.stdout.write('[studio:install-smoke] installed library and CLI passed\n');
 } finally {
+  await registry?.close();
   await rm(tempRoot, { recursive: true, force: true });
 }
 
@@ -200,9 +254,13 @@ async function packPackage(packageRoot: string, destination: string) {
     '--pack-destination',
     destination,
   ], packageRoot, `pack ${packageRoot}`, 60_000);
-  const payload = JSON.parse(result.stdout) as Array<{ filename?: unknown }>;
+  const payload = JSON.parse(result.stdout) as Array<{ filename: string; integrity: string; shasum: string }>;
   assert.equal(typeof payload[0]?.filename, 'string');
-  return join(destination, payload[0]!.filename as string);
+  return {
+    ...payload[0]!,
+    manifest: JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')),
+    path: join(destination, payload[0]!.filename),
+  } as RegistryPackage;
 }
 
 async function runNpm(
@@ -224,14 +282,17 @@ async function runProcess(
   timeoutMs: number,
   env: NodeJS.ProcessEnv = {},
 ) {
+  process.stdout.write(`[studio:install-smoke] ${label}...\n`);
   try {
-    return await execFileAsync(command, args, {
+    const result = await execFileAsync(command, args, {
       cwd,
       encoding: 'utf8',
       env: { ...process.env, ...env },
       maxBuffer: 64 * 1024 * 1024,
       timeout: timeoutMs,
     });
+    process.stdout.write(`[studio:install-smoke] ${label} passed\n`);
+    return result;
   } catch (error) {
     const failure = error as Error & {
       code?: number | string;

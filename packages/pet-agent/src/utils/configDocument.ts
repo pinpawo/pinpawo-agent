@@ -3,7 +3,7 @@
  *
  * 职责边界(#561):
  * - **本模块**:JSON 解析、字段校验原语、错误信息格式;
- * - **各自的包**:schema 定义(chat 的在宿主,studio 的在 `@pinpawo/studio`);
+ * - **各自的包**:schema 定义(chat 的在宿主,studio 的在 `@pinpawo/studio-core`);
  * - **各自的宿主**:文件入口 —— 去哪读、读哪个文件。
  *
  * 这样 studio 的 workdir 配置入口可以和 chat 完全不同,但两者的解析行为、

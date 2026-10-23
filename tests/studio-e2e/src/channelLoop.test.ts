@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
-import { createStudio } from '@pinpawo/studio';
+import { createStudio } from '@pinpawo/studio-core';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';

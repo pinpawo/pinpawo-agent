@@ -16,7 +16,7 @@ cross-host ownership rules are recorded in
 | Surface | Primary owner | Use it when |
 |---|---|---|
 | **Resident Pet Host ports** | `pinpawo/host-runtime` | You need a shared resident runtime with one-way dispatch and Agent Session interaction surfaces. |
-| **Studio runtime** | `@pinpawo/studio` | You need multi-Pet one-way dispatch admission or Plugins. |
+| **Studio runtime** | `@pinpawo/studio-core` | You need multi-Pet one-way dispatch admission or Plugins. |
 | **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or Toolkit runtime. |
 | **Local agent host** | `pinpawo` CLI package | You need local configuration, Capability loading, HTTP/WebSocket, or stdio transport. |
 | **Session projection** | `@pinpawo/agent-session` | You are building a client adapter that renders host conversations, runs, and review state; it is not a Studio dispatch protocol. |

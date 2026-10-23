@@ -3,8 +3,8 @@
 ## Project Structure
 
 - `packages/pet-agent/` contains the runtime-independent agent orchestration.
-- `packages/studio/` contains the independent Studio Host/runtime contracts and CLI.
-- `plugins/` contains optional concrete Studio Plugins; Studio must not import them.
+- `packages/studio/` contains the independent Studio Core Host/runtime contracts and CLI composition.
+- `plugins/` contains optional concrete Studio Plugins; Studio Core must not import them; the complete distribution in `services/studio/` carries the six foundational Plugins.
 - `services/host/` contains the local CLI, server, runtime composition, and config.
 - `tests/studio-e2e/` contains cross-package Studio acceptance tests; concrete Plugins must remain independent of each other.
 - `toolkits/` contains concrete Agent Toolkits and Toolkit-owned runtimes; `services/tui/` contains the terminal client.

@@ -17,7 +17,7 @@ import {
   type StudioEvent,
   type StudioPlugin,
   type StudioPluginContext,
-} from '@pinpawo/studio';
+} from '@pinpawo/studio-core';
 import { readWireAuthToken } from 'pinpawo/wire';
 import { parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
 

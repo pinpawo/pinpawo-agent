@@ -26,7 +26,8 @@ PinPawo Agent 将编排、任务权限、工具执行、人工审核和持久状
 
 Host 是机器集成边界：解析配置、启动 Toolkit runtime、暴露 HTTP/WebSocket 或 JSONL stdio，并组装 Capability registry。与机器无关的编排在 `packages/pet-agent/`；本地集成留在 `services/` 与 `toolkits/`。
 
-独立 Studio 进程入口 `pinpawo-studio` 也位于 `packages/studio/`；具体 Plugin 仍通过
+完整 Studio 进程入口 `pinpawo-studio` 位于 `services/studio/`，自动安装六个基础 Plugin；
+核心 `@pinpawo/studio-core` 位于 `packages/studio/`，具体 Plugin 仍通过
 `StudioPluginResolver` 从外部注入，因此 Studio 不依赖具体 Plugin。Plugin 可以定义
 Agent Toolkit，但不注册 Agent Capability。
 

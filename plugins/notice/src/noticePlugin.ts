@@ -1,4 +1,4 @@
-import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { NoticeService, type NoticeLevel } from './noticeService';
 import type { NoticeStore } from './store/noticeStore';

@@ -87,7 +87,7 @@ Use [Studio configuration](docs/studio/configuration.md) for a Studio workdir.
 
 ## CLI
 
-See the [CLI reference](docs/reference/api/cli.md) and [Studio CLI](packages/studio/README.md).
+See the [CLI reference](docs/reference/api/cli.md) and [Studio CLI](services/studio/README.md).
 
 ## Capabilities and Plugins
 
@@ -122,7 +122,7 @@ Follow [AGENTS.md](AGENTS.md). Documentation changes follow
 ## Publishing
 
 Review package contents and release commands in the
-[Host README](services/host/README.md) and [Studio README](packages/studio/README.md).
+[Host README](services/host/README.md) and [Studio README](services/studio/README.md).
 
 ## License
 

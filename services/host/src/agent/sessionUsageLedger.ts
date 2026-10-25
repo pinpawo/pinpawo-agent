@@ -14,6 +14,8 @@ export type SessionUsageLedger = {
   baseline?: TokenUsageSnapshot;
   calls: Record<string, UsageCall>;
   latestCallId?: string;
+  /** The call whose record last carried an output rate: the newest measurement. */
+  latestRateCallId?: string;
   /** Checkpointers without a usage store retain live accounting in memory only. */
   transient?: boolean;
 };
@@ -31,7 +33,8 @@ export function parseSessionUsageLedger(value: unknown): SessionUsageLedger {
   const calls = record(root?.calls);
   if (root?.version !== 1 || !calls
     || (root.revision !== undefined && (!Number.isSafeInteger(root.revision) || Number(root.revision) < 0))
-    || (root.latestCallId !== undefined && (typeof root.latestCallId !== 'string' || !Object.hasOwn(calls, root.latestCallId)))) {
+    || (root.latestCallId !== undefined && (typeof root.latestCallId !== 'string' || !Object.hasOwn(calls, root.latestCallId)))
+    || (root.latestRateCallId !== undefined && (typeof root.latestRateCallId !== 'string' || !Object.hasOwn(calls, root.latestRateCallId)))) {
     throw new Error('Invalid session usage ledger');
   }
   if (root.epoch !== undefined && (typeof root.epoch !== 'string' || !root.epoch.trim())) throw new Error('Invalid session usage epoch');
@@ -53,6 +56,7 @@ export function parseSessionUsageLedger(value: unknown): SessionUsageLedger {
     ...(typeof root.epoch === 'string' ? { epoch: root.epoch } : {}),
     ...(root.revision !== undefined ? { revision: root.revision as number } : {}),
     ...(root.latestCallId !== undefined ? { latestCallId: root.latestCallId as string } : {}),
+    ...(root.latestRateCallId !== undefined ? { latestRateCallId: root.latestRateCallId as string } : {}),
     ...(root.transient === true ? { transient: true } : {}) } as SessionUsageLedger;
 }
 
@@ -67,7 +71,8 @@ export function updateSessionUsageLedger(
   if (completed || (previous && !previous.pending && call.pending)
     || (previous?.pending && call.pending && !call.usage)) return ledger;
   return { ...ledger, epoch: ledger.epoch ?? randomUUID(), calls: { ...ledger.calls, [id]: call },
-    revision: (ledger.revision ?? 0) + 1, latestCallId: id };
+    revision: (ledger.revision ?? 0) + 1, latestCallId: id,
+    ...(call.usage?.outputTokensPerSecond !== undefined ? { latestRateCallId: id } : {}) };
 }
 
 export function createTransientSessionUsageStore(): SessionUsageStore {
@@ -88,7 +93,11 @@ export function summarizeSessionUsage(ledger: SessionUsageLedger): TokenUsageSna
   const total = readMessagesTokenUsage(usages.map(usage => ({ usage_metadata: usage })))
     ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   const unknownCalls = Object.values(ledger.calls).filter(call => !call.usage || call.pending || call.usage.incomplete).length;
-  const latest = ledger.latestCallId ? ledger.calls[ledger.latestCallId]?.usage : usages.at(-1);
+  // Speed is the newest measurement, so calls that start or end without one
+  // (and the gaps between calls) keep showing it. Ledgers written before
+  // `latestRateCallId` existed fall back to the call that last changed.
+  const rateCallId = ledger.latestRateCallId ?? ledger.latestCallId;
+  const latest = rateCallId ? ledger.calls[rateCallId]?.usage : usages.at(-1);
   return { ...total,
     ...(latest?.outputTokensPerSecond !== undefined ? {
       outputTokensPerSecond: latest.outputTokensPerSecond, outputRateSource: latest.outputRateSource,

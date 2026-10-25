@@ -59,6 +59,24 @@ test('native streaming usage replaces intermediate totals and final provider out
   assert.deepEqual(snapshots, [0, 108, 120]);
 });
 
+test('the newest measured speed survives later calls that start or end without one', async t => {
+  const { store, path } = fixture(t);
+  let clock = 0;
+  const observed: Array<number | undefined> = [];
+  const { callbacks } = createSessionUsageTracker({ store, threadId: 's', now: () => clock, onUsage: u => observed.push(u.outputTokensPerSecond) });
+  await callbacks.handleChatModelStart!({} as never, [], 'measured');
+  await callbacks.handleLLMNewToken!('a', { prompt: 0, completion: 0 }, 'measured');
+  clock = 1000;
+  await callbacks.handleLLMNewToken!('b', { prompt: 0, completion: 0 }, 'measured');
+  await callbacks.handleLLMEnd!(result(100, 20), 'measured');
+  // The next call's start and a nonstreaming completion carry no rate.
+  await callbacks.handleChatModelStart!({} as never, [], 'next');
+  assert.equal(observed.at(-1), 20);
+  await callbacks.handleLLMEnd!(result(), 'next');
+  assert.equal(observed.at(-1), 20);
+  assert.equal(summarizeSessionUsage(new FileSaver(path).readSessionUsage('s')!).outputTokensPerSecond, 20);
+});
+
 test('nonstreaming, single buffered chunk, missing usage and interrupted starts keep speed unknown', async t => {
   const { store } = fixture(t);
   const { callbacks } = createSessionUsageTracker({ store, threadId: 's', now: () => 100 });

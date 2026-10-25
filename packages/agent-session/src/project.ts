@@ -749,12 +749,11 @@ function accumulateSessionTokenUsage(
   };
 }
 
+/** The session total, including the newest output speed, outlives each run. */
 function omitRunTokenUsage(session: AgentSession): AgentSession {
   const { tokenUsage: _tokenUsage, ...withoutUsage } = session;
   void _tokenUsage;
-  if (!session.sessionTokenUsage) return withoutUsage;
-  const { outputTokensPerSecond: _rate, outputRateSource: _rateSource, ...sessionUsage } = session.sessionTokenUsage;
-  return { ...withoutUsage, sessionTokenUsage: sessionUsage };
+  return withoutUsage;
 }
 
 function omitAllTokenUsage(session: AgentSession): AgentSession {

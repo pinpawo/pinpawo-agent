@@ -53,12 +53,14 @@ and final completion do not count tokens again. TUI and Console use
   At least two output callbacks and positive elapsed time are required.
   Chunk count is timing evidence only. Native running usage snapshots produce
   `~` live rates; final usage replaces them. With no intermediate provider
-  token counts the live rate remains `–`; final usage can still produce a
+  token counts there is no live rate; final usage can still produce a
   final rate. If reported output includes reasoning tokens but no reasoning
   stream was observed, rate stays unknown to avoid counting hidden reasoning
-  against only the visible-text interval. Buffered/single-chunk and nonstreaming calls remain `–`.
-  The displayed rate belongs to the latest observed call, not a sum of parallel
-  child rates or an end-to-end session throughput.
+  against only the visible-text interval. Buffered/single-chunk and nonstreaming calls produce no rate.
+  The displayed rate is the newest measurement: the latest call whose record
+  carried a rate, not a sum of parallel child rates or an end-to-end session
+  throughput. Calls that start or end without a rate, the gaps between calls
+  and new turns keep showing it; `–` means no call has been measured yet.
 
 ## Persistence and recovery
 
@@ -69,7 +71,8 @@ replaces that record; completion replaces it with final usage. Missing usage,
 errors and crash-surviving pending records mark the total incomplete (`≥`).
 Reported partial usage survives an error. Replayed starts/errors cannot erase
 completed usage, and duplicate final reports are ignored. The ledger records
-which call last changed its state; live and restored speed use that same call.
+which call last changed its state and which call last carried a rate; live
+and restored speed use the latter (older ledgers fall back to the former).
 Alternatives in one model response share usage and are counted once. Thread deletion removes its usage; checkpoint compaction/GC
 leaves usage records intact. Multiple child callbacks serialize ledger writes.
 
@@ -87,7 +90,7 @@ services that bypass HostGraphService retain transcript fallback behavior.
 
 Usage attached to a native pause is applied before the run closes. On abort,
 Host publishes the settled ledger before the terminal interruption event;
-new turns/resumes clear the previous call's rate while preserving totals.
+new turns/resumes keep the totals and the newest rate.
 Malformed counters/cache coverage or corrupt ledger records are rejected;
 they cannot turn into complete zero-usage snapshots. Accounting never blocks
 the agent: an unreadable `usage.json` reads as absent (the session loads, and

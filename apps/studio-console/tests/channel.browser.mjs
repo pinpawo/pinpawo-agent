@@ -75,7 +75,7 @@ try {
   await page.goto('http://127.0.0.1:5199');
   await page.getByLabel('Studio HTTP URL').fill(ready.url);
   await page.getByLabel('Studio bearer token').fill(ready.token);
-  await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
   const create = async (title, petNames) => {
@@ -293,7 +293,7 @@ try {
   await bob.goto('http://127.0.0.1:5199');
   await bob.getByLabel('Studio HTTP URL').fill(ready.url);
   await bob.getByLabel('Studio bearer token').fill(bobKey);
-  await bob.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await bob.getByRole('button', { name: 'Connect', exact: true }).click();
   await bob.locator('.connection-state.connected').getByText('bob', { exact: false }).waitFor();
   assert.deepEqual(await bob.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))), ['Channel']);
   await bob.getByRole('heading', { name: 'Participant loop', exact: true }).waitFor();

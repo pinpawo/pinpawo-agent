@@ -3,14 +3,17 @@
  * LangSmith evaluation: subagent execution behavior.
  *
  * This evaluates the subagent directly with the configured real model and a
- * deterministic mock tool runtime. It checks whether the executor calls the
- * required tools, completes explicit multi-step tasks, and returns a usable
- * final response.
+ * deterministic mock tool runtime. A case passes on outcome checks only:
+ * a deliverable, the right conclusion, the file result, evidence actually
+ * collected, no out-of-scope side effects and no false success. Process
+ * checks (tools the task named, unneeded calls, shell tool choice, reviews)
+ * are reported as metrics and do not fail a case.
  *
  * Optional env vars:
  *   SUBAGENT_EVAL_PROFILE — model profile id; defaults to the configured profile
  *   SUBAGENT_EVAL_CASES — comma-separated case names or ids; defaults to all
  *   SUBAGENT_EVAL_WRITE_LANGFUSE — set to false to run without result storage
+ *   SUBAGENT_EVAL_REPEATS — runs per case; defaults to 3
  *
  * Run:
  *   npm run eval:subagent -w @pinpawo/pet-agent
@@ -23,12 +26,18 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createSubagent } from '../../../packages/pet-agent/src/subagent/createSubagent';
 import { materializeDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/delegation';
+import { CAPABILITY_SUBAGENT_MAX_ITERATIONS } from '../../../packages/pet-agent/src/agent/orchestrator/runtime/constants';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { resolveLangfuseConfig } from './scripts/langfuse-api';
 import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
 import { createLangfuseV4Runtime } from './scripts/langfuse-v4-runtime';
 
-import { buildShellSelectionMockTools, shellToolSelectionExamples, shellToolChoiceEvaluator } from './shell-tool-selection';
+import {
+  buildShellSelectionMockTools,
+  requestedCommandExecutedEvaluator,
+  shellToolChoiceEvaluator,
+  shellToolSelectionExamples,
+} from './shell-tool-selection';
 
 const DATASET_NAME = 'subagent-execution';
 const DATASET_DESCRIPTION = [
@@ -47,8 +56,8 @@ const examples = [
     },
     outputs: {
       expected_has_deliverable: true,
+      expected_evidence: [{ tools: ['view_file_chunk', 'shell'], includes: 'README.md' }],
       expected_tools: ['view_file_chunk'],
-      expected_tool_sequence: ['view_file_chunk'],
       expected_final_terms: ['PinPawo'],
       reason: 'Subagent should actually read the requested file before summarizing.',
     },
@@ -73,9 +82,10 @@ const examples = [
     outputs: {
       expected_has_deliverable: true,
       expected_tools: ['view_file_chunk', 'write_file', 'shell'],
+      // Lint must run after the write for its result to mean anything.
       expected_tool_sequence: ['view_file_chunk', 'write_file', 'shell'],
       expected_file_contains: { path: 'src/demo.ts', text: 'const count = 1' },
-      expected_final_terms: ['lint'],
+      expected_final_any_terms: ['lint', '代码检查'],
       reason: 'Subagent should complete both edit and verification steps before returning.',
     },
   },
@@ -92,9 +102,10 @@ const examples = [
     },
     outputs: {
       expected_has_deliverable: true,
+      expected_evidence: [{ tools: ['web_search'], includes: '' }],
       expected_tools: ['web_search'],
-      expected_tool_sequence: ['web_search'],
-      expected_final_terms: ['DeepSeek'],
+      // Only the search result says these; the task and query do not.
+      expected_final_any_terms: ['response_format', 'vary', 'varies', '因模型', '不同模型', '模型而异', '取决于', 'endpoint'],
       reason: 'Subagent should use the search tool when the task asks for external lookup.',
     },
   },
@@ -108,9 +119,10 @@ const examples = [
     },
     outputs: {
       expected_has_deliverable: true,
+      expected_evidence: [{ tools: ['shell'], includes: 'npm test' }],
       expected_tools: ['shell'],
-      expected_tool_sequence: ['shell'],
-      expected_final_any_terms: ['失败', '未通过', '报错', 'failing', 'exit 1'],
+      expected_final_any_terms: ['失败', '未通过', '没有通过', '没通过', '报错', 'failing', 'failed', 'exit 1'],
+      forbidden_final_terms: ['测试通过', '测试全部通过', 'tests passed', 'all tests pass'],
       reason: 'Subagent should not claim success when the tool output reports a failing command.',
     },
   },
@@ -126,8 +138,11 @@ const examples = [
     },
     outputs: {
       expected_has_deliverable: true,
+      expected_evidence: [{ tools: ['view_file_chunk', 'shell'], includes: 'README.md' }],
       expected_tools: ['view_file_chunk'],
-      forbidden_tools: ['write_file', 'shell'],
+      forbidden_tools: ['write_file'],
+      forbidden_commands: ['npm test'],
+      unneeded_tools: ['shell'],
       expected_final_terms: ['PinPawo'],
       reason: 'Subagent should execute only the latest delegated task, not future work from main context.',
     },
@@ -138,14 +153,19 @@ const examples = [
       task: '完成版本和测试状态核验。',
       prior_progress: '已读取 package.json，版本是 0.2.0；尚未运行测试。',
       gap_note: '只剩下 npm test 没有执行，请完成后交付版本和测试结果。',
+      files: {
+        'package.json': '{\n  "name": "demo",\n  "version": "0.2.0"\n}\n',
+      },
       shell_outputs: {
         'npm test': 'tests passed, exit code 0',
       },
     },
     outputs: {
       expected_has_deliverable: true,
+      expected_evidence: [{ tools: ['shell'], includes: 'npm test' }],
       expected_tools: ['shell'],
-      forbidden_tools: ['view_file_chunk', 'write_file', 'web_search'],
+      forbidden_tools: ['write_file'],
+      unneeded_tools: ['view_file_chunk', 'web_search'],
       expected_final_terms: ['0.2.0'],
       expected_final_any_terms: ['passed', '通过'],
       reason: 'Continuation should preserve completed work and address only the stated gap.',
@@ -159,9 +179,10 @@ const examples = [
     },
     outputs: {
       expected_has_deliverable: true,
-      forbidden_tools: ['view_file_chunk', 'write_file', 'shell', 'web_search'],
+      forbidden_tools: ['write_file'],
+      unneeded_tools: ['view_file_chunk', 'shell', 'web_search'],
       expected_final_terms: ['beta'],
-      reason: 'Subagent should not call tools when the delegated evidence is already sufficient.',
+      reason: 'Subagent should not need tools when the delegated evidence is already sufficient.',
     },
   },
   {
@@ -172,8 +193,9 @@ const examples = [
     },
     outputs: {
       expected_has_deliverable: true,
+      expected_evidence: [{ tools: ['view_file_chunk', 'shell'], includes: 'missing.txt' }],
       expected_tools: ['view_file_chunk'],
-      expected_final_any_terms: ['不存在', '找不到', '未找到', '失败', 'not found'],
+      expected_final_any_terms: ['不存在', '找不到', '未找到', '没有找到', '无法读取', '没有这个文件', '失败', 'not found', 'does not exist', 'no such file'],
       reason: 'Subagent should report the evidence gap instead of inventing file contents.',
     },
   },
@@ -234,16 +256,6 @@ const evalSubject = createDecisionEvalModel({ profileId, role: 'subject' });
 
 function normalizeToolName(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function readFinalText(messages: unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const content = messages[i]?.content;
-    if (typeof content === 'string' && content.trim()) {
-      return content.trim();
-    }
-  }
-  return '';
 }
 
 function buildMockTools(inputs: Record<string, unknown>) {
@@ -314,10 +326,12 @@ function buildMockTools(inputs: Record<string, unknown>) {
           : null,
       ].filter(Boolean).join('\n');
     }
-    if (/\bcat\b/.test(command) && referencedFile) {
-      return files.get(referencedFile) ?? `Error (exit 1): ${referencedFile} not found`;
+    const catPath = /\bcat\s+(?:-\S+\s+)*([^\s|;&>]+)/.exec(command)?.[1];
+    if (catPath) {
+      return files.get(catPath) ?? `Error (exit 1): cat: ${catPath}: No such file or directory`;
     }
-    return `command passed: ${command}`;
+    // Never report success for a command the fixture does not cover.
+    return `Error: the eval fixture has no recorded output for this command: ${command}`;
   }, {
     name: 'shell',
     description: '在终端中执行命令并返回输出。',
@@ -326,7 +340,10 @@ function buildMockTools(inputs: Record<string, unknown>) {
 
   const webSearchTool = tool(async ({ query }) => {
     calls.push({ name: 'web_search', args: { query } });
-    return String(searchResults[query] ?? `搜索结果：${query}\n- mock result 1\n- mock result 2`);
+    // A case configures one topic; any wording of the query finds it.
+    const configured = Object.values(searchResults);
+    const result = searchResults[query] ?? (configured.length === 1 ? configured[0] : undefined);
+    return String(result ?? `搜索结果：${query}\n- mock result 1\n- mock result 2`);
   }, {
     name: 'web_search',
     description: '搜索外部信息并返回摘要结果。',
@@ -336,6 +353,7 @@ function buildMockTools(inputs: Record<string, unknown>) {
   return {
     tools: [viewFileChunkTool, writeFileTool, shellTool, webSearchTool],
     calls,
+    promptSections: [],
     readFile: (path: string) => files.get(path) ?? null,
   };
 }
@@ -357,14 +375,15 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const result = await createSubagent({
     model: evalSubject.model,
     tools: runtime.tools,
-    promptSections: [],
+    promptSections: runtime.promptSections,
     messages,
-    maxIterations: 8,
+    maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
   });
 
   return {
     has_deliverable: result.output !== null,
-    final_text: readFinalText(result.messages),
+    // The delivered text, never a tool result or a guard notice.
+    final_text: result.output?.trim() ?? '',
     called_tools: runtime.calls.map((call) => call.name),
     call_count: runtime.calls.length,
     calls: runtime.calls,
@@ -409,20 +428,51 @@ function requiredToolsEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
-function forbiddenToolsEvaluator({ outputs, referenceOutputs }) {
-  const forbidden = Array.isArray(referenceOutputs?.forbidden_tools)
-    ? referenceOutputs.forbidden_tools.map(normalizeToolName).filter(Boolean)
-    : [];
-  const called = Array.isArray(outputs?.called_tools)
-    ? outputs.called_tools.map(normalizeToolName).filter(Boolean)
-    : [];
-  const unexpected = forbidden.filter((name) => called.includes(name));
+function toolsAvoidedEvaluator(key: string, field: string) {
+  return ({ outputs, referenceOutputs }) => {
+    const avoided = Array.isArray(referenceOutputs?.[field])
+      ? referenceOutputs[field].map(normalizeToolName).filter(Boolean)
+      : [];
+    const called = Array.isArray(outputs?.called_tools)
+      ? outputs.called_tools.map(normalizeToolName).filter(Boolean)
+      : [];
+    const unexpected = avoided.filter((name) => called.includes(name));
+    return {
+      key,
+      score: unexpected.length === 0 ? 1 : 0,
+      comment: unexpected.length === 0
+        ? `None of ${field} were called`
+        : `Called ${field}: ${unexpected.join(', ')}`,
+    };
+  };
+}
+
+const callText = (call) => JSON.stringify(call?.args ?? {});
+
+function forbiddenCommandsEvaluator({ outputs, referenceOutputs }) {
+  const forbidden = Array.isArray(referenceOutputs?.forbidden_commands) ? referenceOutputs.forbidden_commands : [];
+  const calls = Array.isArray(outputs?.calls) ? outputs.calls : [];
+  const ran = forbidden.filter((command) => calls.some((call) => call.name === 'shell' && callText(call).includes(command)));
   return {
-    key: 'forbidden_tools_avoided',
-    score: unexpected.length === 0 ? 1 : 0,
-    comment: unexpected.length === 0
-      ? 'No out-of-scope tools were called'
-      : `Called out-of-scope tools: ${unexpected.join(', ')}`,
+    key: 'forbidden_commands_avoided',
+    score: ran.length === 0 ? 1 : 0,
+    comment: ran.length === 0 ? 'No out-of-scope commands were run' : `Ran out-of-scope commands: ${ran.join(', ')}`,
+  };
+}
+
+/** Evidence counts by what a call touched, whichever listed tool collected it. */
+function evidenceEvaluator({ outputs, referenceOutputs }) {
+  const expected = Array.isArray(referenceOutputs?.expected_evidence) ? referenceOutputs.expected_evidence : [];
+  const calls = Array.isArray(outputs?.calls) ? outputs.calls : [];
+  const missing = expected.filter(({ tools, includes }) => !calls.some((call) => (
+    tools.includes(call.name) && callText(call).includes(includes)
+  )));
+  return {
+    key: 'evidence_collected',
+    score: missing.length === 0 ? 1 : 0,
+    comment: missing.length === 0
+      ? 'Collected the expected evidence'
+      : `Missing evidence: ${missing.map(({ tools, includes }) => `${includes || 'any call'} via ${tools.join('/')}`).join('; ')}`,
   };
 }
 
@@ -497,6 +547,19 @@ function finalAnyTermsEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
+function forbiddenFinalTermsEvaluator({ outputs, referenceOutputs }) {
+  const forbidden = Array.isArray(referenceOutputs?.forbidden_final_terms) ? referenceOutputs.forbidden_final_terms : [];
+  const finalText = typeof outputs?.final_text === 'string' ? outputs.final_text.toLowerCase() : '';
+  const present = forbidden.filter((term) => finalText.includes(term.toLowerCase()));
+  return {
+    key: 'final_forbidden_terms_absent',
+    score: present.length === 0 ? 1 : 0,
+    comment: present.length === 0
+      ? 'Final text makes no forbidden claim'
+      : `Final text contains ${present.join(', ')}: ${outputs?.final_text}`,
+  };
+}
+
 function fileContainsEvaluator({ outputs, referenceOutputs }) {
   const expected = referenceOutputs?.expected_file_contains;
   if (!expected || typeof expected !== 'object') {
@@ -515,29 +578,42 @@ function fileContainsEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
-const evaluators = [
-  shellToolChoiceEvaluator,
+/** Outcome checks decide pass/fail; metrics are reported alongside. */
+const outcomeEvaluators = [
   exactFieldEvaluator('has_deliverable', 'expected_has_deliverable'),
-  requiredToolsEvaluator,
-  forbiddenToolsEvaluator,
-  toolSequenceEvaluator,
   finalTextNonEmptyEvaluator,
   finalTermsEvaluator,
   finalAnyTermsEvaluator,
+  forbiddenFinalTermsEvaluator,
   fileContainsEvaluator,
+  evidenceEvaluator,
+  toolSequenceEvaluator,
+  toolsAvoidedEvaluator('forbidden_tools_avoided', 'forbidden_tools'),
+  forbiddenCommandsEvaluator,
+  requestedCommandExecutedEvaluator,
 ];
 
-const scoreKeys = [
-  'shell_tool_choice',
+const metricEvaluators = [
+  requiredToolsEvaluator,
+  toolsAvoidedEvaluator('unneeded_tools_avoided', 'unneeded_tools'),
+  shellToolChoiceEvaluator,
+];
+
+const outcomeKeys = [
   'has_deliverable_correct',
-  'required_tools_called',
-  'forbidden_tools_avoided',
-  'tool_sequence_correct',
   'final_text_non_empty',
   'final_terms_present',
   'final_any_terms_present',
+  'final_forbidden_terms_absent',
   'file_contains_correct',
+  'evidence_collected',
+  'tool_sequence_correct',
+  'forbidden_tools_avoided',
+  'forbidden_commands_avoided',
+  'requested_command_executed',
 ];
+
+const metricKeys = ['required_tools_called', 'unneeded_tools_avoided', 'shell_tool_choice'];
 
 async function syncDataset(runtime: ReturnType<typeof createLangfuseV4Runtime>) {
   const list = await runtime.client.api.datasets.list();
@@ -565,87 +641,100 @@ async function syncDataset(runtime: ReturnType<typeof createLangfuseV4Runtime>) 
   }
 }
 
+function readRepeats() {
+  const raw = process.env.SUBAGENT_EVAL_REPEATS ?? '3';
+  const repeats = Number(raw);
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error(`Invalid SUBAGENT_EVAL_REPEATS: ${raw}`);
+  return repeats;
+}
+
+function printScoreTotals(label: string, keys: string[], rows) {
+  console.log(label);
+  for (const key of keys) {
+    const scores = rows.flatMap((row) => row.scores.filter((item) => item.key === key));
+    const passed = scores.filter((item) => item.score === 1).length;
+    console.log(`  ${key}: ${passed}/${scores.length}`);
+  }
+}
+
 async function main() {
   const writeLangfuseResults = process.env.SUBAGENT_EVAL_WRITE_LANGFUSE !== 'false';
   const config = writeLangfuseResults ? resolveLangfuseConfig() : null;
   const runtime = config ? createLangfuseV4Runtime(config) : null;
   if (runtime) await syncDataset(runtime);
   const selectedTestCases = selectTestCases();
+  const repeats = readRepeats();
   const runName = process.env.LANGFUSE_RUN_NAME
     ?? `subagent-execution-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running Langfuse subagent eval: ${runName}`);
   console.log(`Dataset: ${DATASET_NAME}`);
   console.log(`Subagent model: ${evalSubject.label}`);
   console.log(`Langfuse: ${config?.baseUrl ?? 'disabled'}`);
-  console.log(`Cases: ${selectedTestCases.length}\n`);
+  console.log(`Cases: ${selectedTestCases.length} x ${repeats} runs\n`);
 
   const rows = [];
   for (const testCase of selectedTestCases) {
-    const started = performance.now();
-    try {
-      const output = await target(testCase.input);
-      const scores = evaluators.map((evaluator) => evaluator({
-        outputs: output,
-        referenceOutputs: testCase.expected,
-      }));
-      const ok = scores.every(({ score }) => score === 1);
-      const durationMs = Math.round(performance.now() - started);
-      if (runtime) {
-        await writeLangfuseEvalResult({
-          runtime,
-          datasetName: DATASET_NAME,
-          runName,
-          traceName: 'subagent-execution-eval',
-          testCase,
-          output,
-          scores,
-          durationMs,
-          metadata: {
-            subjectModelProfileId: evalSubject.metadata.profileId,
-            subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
-          },
-        });
+    for (let repeat = 1; repeat <= repeats; repeat += 1) {
+      const started = performance.now();
+      const metadata = {
+        subjectModelProfileId: evalSubject.metadata.profileId,
+        subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+        repeat,
+      };
+      try {
+        const output = await target(testCase.input);
+        const evaluate = (evaluator) => evaluator({ outputs: output, referenceOutputs: testCase.expected });
+        const outcomes = outcomeEvaluators.map(evaluate);
+        const metrics = metricEvaluators.map(evaluate);
+        const scores = [...outcomes, ...metrics];
+        const ok = outcomes.every(({ score }) => score === 1);
+        const durationMs = Math.round(performance.now() - started);
+        if (runtime) {
+          await writeLangfuseEvalResult({
+            runtime, datasetName: DATASET_NAME, runName, traceName: 'subagent-execution-eval',
+            testCase, output, scores, durationMs, metadata,
+          });
+        }
+        rows.push({ testCase, repeat, output, scores, ok, durationMs });
+        const missedMetrics = metrics.filter(({ score }) => score !== 1).map(({ key }) => key);
+        console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name} #${repeat} (${durationMs}ms, ${output.call_count} calls)`
+          + (missedMetrics.length ? ` metrics missed: ${missedMetrics.join(', ')}` : ''));
+      } catch (error) {
+        const durationMs = Math.round(performance.now() - started);
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        const scores = [{ key: 'run_error', score: 0, comment: message.slice(0, 800) }];
+        if (runtime) {
+          await writeLangfuseEvalResult({
+            runtime, datasetName: DATASET_NAME, runName, traceName: 'subagent-execution-eval',
+            testCase, output: {}, scores, durationMs, error: message, metadata,
+          });
+        }
+        rows.push({ testCase, repeat, output: {}, scores, ok: false, durationMs, error: message });
+        console.log(`[ERROR] ${testCase.name} #${repeat} (${durationMs}ms): ${message}`);
       }
-      rows.push({ testCase, output, scores, ok, durationMs });
-      console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${durationMs}ms)`);
-    } catch (error) {
-      const durationMs = Math.round(performance.now() - started);
-      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      const scores = [{ key: 'run_error', score: 0, comment: message.slice(0, 800) }];
-      if (runtime) {
-        await writeLangfuseEvalResult({
-          runtime,
-          datasetName: DATASET_NAME,
-          runName,
-          traceName: 'subagent-execution-eval',
-          testCase,
-          output: {},
-          scores,
-          durationMs,
-          error: message,
-          metadata: {
-            subjectModelProfileId: evalSubject.metadata.profileId,
-            subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
-          },
-        });
-      }
-      rows.push({ testCase, output: {}, scores, ok: false, durationMs, error: message });
-      console.log(`[ERROR] ${testCase.name} (${durationMs}ms): ${message}`);
     }
   }
 
   console.log('\n=== Evaluation complete ===');
-  console.log(`Cases: ${rows.filter((row) => row.ok).length}/${rows.length} passed`);
-  for (const key of scoreKeys) {
-    const scores = rows.flatMap((row) => row.scores.filter((item) => item.key === key));
-    const passed = scores.filter((item) => item.score === 1).length;
-    console.log(`${key}: ${passed}/${scores.length} passed, ${scores.length - passed} failed.`);
+  console.log(`Runs: ${rows.filter((row) => row.ok).length}/${rows.length} passed`);
+  for (const testCase of selectedTestCases) {
+    const caseRows = rows.filter((row) => row.testCase === testCase);
+    const calls = caseRows.map((row) => row.output.call_count ?? '-').join('/');
+    console.log(`  ${testCase.name}: ${caseRows.filter((row) => row.ok).length}/${caseRows.length} (calls ${calls})`);
+  }
+  printScoreTotals('Outcome checks (decide pass/fail):', outcomeKeys, rows);
+  printScoreTotals('Process metrics (reported only):', metricKeys, rows);
+  const shellRows = rows.flatMap((row) => row.scores.filter((item) => item.key === 'shell_tool_choice' && 'reviews' in item));
+  if (shellRows.length > 0) {
+    const reviews = shellRows.reduce((sum, item) => sum + item.reviews, 0);
+    const refusals = shellRows.reduce((sum, item) => sum + item.refusals, 0);
+    console.log(`  shell selection: ${reviews} production review(s), ${refusals} refusal(s) over ${shellRows.length} runs`);
   }
   for (const row of rows) {
     const failedScores = row.scores.filter((item) => item.score !== 1);
     if (failedScores.length === 0) continue;
-    console.log(`  - ${row.testCase.name}: ${failedScores.map((item) => item.comment).join(' | ')}`);
-    console.log(`    output=${JSON.stringify(row.output)}`);
+    console.log(`  - ${row.testCase.name} #${row.repeat}${row.ok ? ' (metrics only)' : ''}: ${failedScores.map((item) => item.comment).join(' | ')}`);
+    if (!row.ok) console.log(`    output=${JSON.stringify(row.output)}`);
   }
   console.log(runtime ? 'View results in Langfuse.' : 'Langfuse result storage disabled.');
   await runtime?.shutdown();

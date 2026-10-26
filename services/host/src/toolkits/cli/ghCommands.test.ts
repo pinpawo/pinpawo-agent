@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parse } from 'shell-quote';
-import type { CliLevel, CliVerdict } from '../cli/cliLevels';
+import type { CliLevel, CliVerdict } from './cliLevels';
 import { classifyGhArgs } from './ghCommands';
 
 const argv = (command: string) => parse(command) as string[];

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parse } from 'shell-quote';
-import type { CliLevel, CliVerdict } from '../cli/cliLevels';
+import type { CliLevel, CliVerdict } from './cliLevels';
 import { classifyGitArgs } from './gitCommands';
 
 const argv = (command: string) => parse(command) as string[];
@@ -12,7 +12,7 @@ function expectLevel(classify: (args: string[]) => CliVerdict, program: string, 
   }
 }
 
-test('git reads run anywhere without review', () => {
+test('git reads run without review in either shell tool', () => {
   expectLevel(classifyGitArgs, 'git', 'read', [
     'status --short', 'log --oneline -20 -- src', 'diff --stat main...HEAD', 'show HEAD:package.json',
     'blame -L 1,20 src/index.ts', 'rev-parse --abbrev-ref HEAD', 'merge-base main HEAD',
@@ -24,13 +24,14 @@ test('git reads run anywhere without review', () => {
     'stash list', 'stash show -p stash@{0}', 'remote -v', 'remote get-url origin',
     'config --get user.name', 'config --list', 'config get user.email',
     'worktree list', 'reflog', 'reflog show main -n 5', 'submodule status', '--version',
+    'clean -nd', 'clean --dry-run -x',
   ]);
 });
 
 test('everyday git writes are changes that run without review', () => {
   expectLevel(classifyGitArgs, 'git', 'change', [
     'add .', 'commit -m x', 'checkout main', 'checkout -b feat', 'switch -c x', 'restore --staged file',
-    'reset --soft HEAD~1', 'reset HEAD file', 'clean -nd', 'stash', 'stash pop', 'fetch --prune', 'pull',
+    'reset --soft HEAD~1', 'reset HEAD file', 'stash', 'stash pop', 'fetch --prune', 'pull',
     'merge main', 'rebase main', 'cherry-pick abc', 'revert abc', 'push', 'push -u origin HEAD',
     'branch new-branch', 'branch -d old', 'branch -m a b', 'tag v1.0', 'tag -a v1 -m msg',
     'remote add o url', 'config user.name x', 'worktree add ../x', 'rm --cached file', 'gc',

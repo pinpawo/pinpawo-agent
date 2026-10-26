@@ -81,13 +81,12 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   const { createFilesToolkit } = await import('../../../services/host/src/toolkits/files/index');
   const { createShellToolkit } = await import('../../../services/host/src/toolkits/shell/index');
   const { createWebToolkit } = await import('../../../services/host/src/toolkits/web/index');
-  const { createGitToolkit } = await import('../../../services/host/src/toolkits/git/index');
   const { createGithubToolkit } = await import('../../../services/host/src/toolkits/github/index');
   const { PosixShellRS } = await import('../../../services/host/src/toolkits/shellRS/index');
   const shell = new PosixShellRS();
   t.after(() => shell.dispose());
   const toolkits = [
-    createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }),
+    createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGithubToolkit({ shell: shell }),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];
   for (const pet of configuration.resolved.pets) {

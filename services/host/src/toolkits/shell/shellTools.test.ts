@@ -98,6 +98,26 @@ test('shell review policy reviews configured command execution', async () => {
   );
 });
 
+test('run_shell runs plain git/gh reads and everyday writes unreviewed and reviews the rest', async () => {
+  const toolkit = createShellToolkit({ shell: new PosixShellRS() });
+  const policy = definition(toolkit, 'run_shell')?.review;
+  assert.ok(policy);
+  const reviewOf = async (command: string) => await policy.request({
+    toolkitName: 'shell',
+    toolName: 'run_shell',
+    input: { command, cwd: '/repo' },
+    operation: definition(toolkit, 'run_shell')?.operation,
+    reviewCapabilities: { humanReview: true, sessionAuthorization: true },
+  });
+  for (const command of ['git add a.ts && git commit -m fix', 'git push -u origin HEAD', 'gh pr comment 12 --body LGTM']) {
+    assert.equal(await reviewOf(command), null, command);
+  }
+  for (const command of ['git reset --hard HEAD', 'gh pr merge 12 --squash', 'npm test', 'git log | head']) {
+    const review = await reviewOf(command);
+    assert.ok(review && 'schemaVersion' in review, `${command} must be reviewed`);
+  }
+});
+
 test('normalizeShellActionInput preserves explicit cwd and inherits process cwd', () => {
   assert.deepEqual(
     normalizeShellActionInput({ command: ' printf ok ', cwd: '~' }),
@@ -317,7 +337,7 @@ test('inspect_shell forwards unfamiliar inspection commands but never executes b
     'if rm file; then ls; fi', 'ls || rm file', 'ls | rm file']) {
     assert.match(String(await inspect.invoke({ command }, inSession)), /run_shell/);
   }
-  assert.match(String(await inspect.invoke({ command: 'git reset --hard' }, inSession)), /git_shell/);
-  assert.match(String(await inspect.invoke({ command: 'gh pr merge 1 --squash' }, inSession)), /gh_shell/);
+  assert.match(String(await inspect.invoke({ command: 'git reset --hard' }, inSession)), /git 写操作改用 run_shell/);
+  assert.match(String(await inspect.invoke({ command: 'gh pr merge 1 --squash' }, inSession)), /GitHub 写操作改用 run_shell/);
   assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head", control]);
 });

@@ -1,4 +1,4 @@
-import { change, type CliVerdict, READ, risky } from '../cli/cliLevels';
+import { change, type CliVerdict, READ, risky } from './cliLevels';
 
 const GH_READ_ACTIONS: Record<string, ReadonlySet<string> | 'any'> = {
   pr: new Set(['list', 'view', 'diff', 'checks', 'status']),

@@ -10,7 +10,6 @@ import {
   WAIT_PROCESS_TOOL_NAME,
 } from './processTools';
 import { createRunShellTool, createStartProcessTool } from './shellTools';
-import { createGitToolkit } from '../git';
 import { PosixShellRS } from '../shellRS';
 import { createShellToolkit } from './index';
 
@@ -211,18 +210,18 @@ test('another session cannot reach or list a process it did not start', { skip: 
   await shell.dispose();
 });
 
-test('Bash and Git sharing one ShellRS share one logical session per Agent session', { skip: isWindows }, async () => {
+test('Toolkits sharing one ShellRS share one logical session per Agent session', { skip: isWindows }, async () => {
   const shell = new PosixShellRS();
   const bash = createShellToolkit({ shell });
-  const git = createGitToolkit({ shell });
+  const other = createShellToolkit({ shell });
   const started = String(await toolFrom(bash, 'start_process').invoke({
     command: 'sleep 4',
   }, call('thread-shared')));
   const processId = processIdFrom(started);
 
-  // Git's CLI invocations go through the same instance; they add no held
+  // Another Toolkit's commands go through the same instance; they add no held
   // processes and do not disturb Bash's handle.
-  await toolFrom(git, 'git_status').invoke({}, call('thread-shared'));
+  await toolFrom(other, 'inspect_shell').invoke({ command: 'git status' }, call('thread-shared'));
   const listed = await shell.list('thread-shared');
   assert.deepEqual(listed.map((item) => item.processId), [processId]);
   assert.match(
@@ -232,17 +231,17 @@ test('Bash and Git sharing one ShellRS share one logical session per Agent sessi
   await shell.dispose();
 });
 
-test('Bash and Git on separate ShellRS instances are isolated', { skip: isWindows }, async () => {
+test('Toolkits on separate ShellRS instances are isolated', { skip: isWindows }, async () => {
   const bashShell = new PosixShellRS();
   const gitShell = new PosixShellRS();
   const bash = createShellToolkit({ shell: bashShell });
-  const git = createGitToolkit({ shell: gitShell });
+  const git = createShellToolkit({ shell: gitShell });
   const started = String(await toolFrom(bash, 'start_process').invoke({
     command: 'sleep 4',
   }, call('thread-split')));
   processIdFrom(started);
 
-  assert.match(String(await toolFrom(git, 'git_status').invoke({}, call('thread-split'))), /\S/);
+  assert.match(String(await toolFrom(git, 'inspect_shell').invoke({ command: 'git status' }, call('thread-split'))), /\S/);
   assert.equal((await bashShell.list('thread-split')).length, 1);
   assert.equal((await gitShell.list('thread-split')).length, 0);
 

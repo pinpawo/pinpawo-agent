@@ -9,7 +9,6 @@ import {
 } from './inflightOperationRun';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
 import { createFilesToolkit } from './toolkits/files';
-import { createGitToolkit } from './toolkits/git';
 import { createShellToolkit } from './toolkits/shell';
 import { PosixShellRS } from './toolkits/shellRS';
 
@@ -17,8 +16,7 @@ const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createFilesToolkit(),
   createShellToolkit({ shell: sharedShell }),
-  createGitToolkit({ shell: sharedShell }),
-]);
+  ]);
 
 test('inflight operation run emits tool stream events as operations', () => {
   const run = createInflightOperationRun('req-1');

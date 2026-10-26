@@ -42,7 +42,6 @@ import {
 import { resolveHostExecutionConfig, type HostExecutionConfig } from './config/hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
 import { createFilesToolkit } from './toolkits/files';
-import { createGitToolkit } from './toolkits/git';
 import { createGithubToolkit } from './toolkits/github';
 import { createProjectInspectionToolkit } from './toolkits/projectInspection';
 import { createShellToolkit } from './toolkits/shell';
@@ -148,7 +147,7 @@ export class HostCapabilityAssembly {
     const browserSelected = options.includeBrowser
       ?? storedConfig.capabilities?.browser !== false;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
-    // it through one client. Shell, git, github and project-inspection share
+    // it through one client. Shell, github and project-inspection share
     // that client, and so one logical session per Agent session across them.
     // Files and web run in the Host process and need no RS.
     const shell = this.rsInstances.add('shell', new ShellRSClient());
@@ -161,7 +160,6 @@ export class HostCapabilityAssembly {
       createFilesToolkit(),
       createWebToolkit(),
       this.rsInstances.assemble(createShellToolkit, { shell }),
-      this.rsInstances.assemble(createGitToolkit, { shell }),
       this.rsInstances.assemble(createGithubToolkit, { shell }),
       this.rsInstances.assemble(createProjectInspectionToolkit, { shell }),
       createCapabilityCreatorToolkit(),

@@ -13,7 +13,6 @@ import {
 } from './serverOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
 import { createFilesToolkit } from './toolkits/files';
-import { createGitToolkit } from './toolkits/git';
 import { createShellToolkit } from './toolkits/shell';
 import { PosixShellRS } from './toolkits/shellRS';
 import { buildReviewSpec } from '@pinpawo/pet-agent';
@@ -39,8 +38,7 @@ const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createFilesToolkit(),
   createShellToolkit({ shell: sharedShell }),
-  createGitToolkit({ shell: sharedShell }),
-]);
+  ]);
 
 test('emitToolOperationEvent emits one operation for a normal tool event', () => {
   const run = createInflightOperationRun('req-1');

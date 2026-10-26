@@ -6,7 +6,7 @@ import {
   READ,
   risky,
   shortBundle,
-} from '../cli/cliLevels';
+} from './cliLevels';
 
 /**
  * Listing form of `git branch` / `git tag`. Positional names create a ref
@@ -73,6 +73,7 @@ const GIT_READ_FORMS: Record<string, (args: readonly string[]) => boolean> = {
       '--points-at', '--verify', '-v'],
   }),
   stash: (args) => ['list', 'show'].includes(args[0] ?? ''),
+  clean: (args) => hasOption(args, ['--dry-run'], 'n'),
   remote: (args) => args.length === 0
     || args.every((arg) => arg === '-v' || arg === '--verbose')
     || ['show', 'get-url'].includes(args[0]),

@@ -77,7 +77,7 @@ subagent 执行路径运行。V2 没有 optional Toolkit 依赖：声明在 `use
 const inspect = defineCapability({
   name: 'inspect',
   description: '检查代码库并整理证据。',
-  uses: ['files', 'shell', 'git'],
+  uses: ['files', 'shell'],
   instructions: defineInstructionDocument({
     content: '# Inspect\n\n只读取并总结与当前任务相关的内容。',
   }),
@@ -103,7 +103,6 @@ description: "检查代码库并整理证据。"
 uses:
   - files
   - shell
-  - git
 version: 1
 ---
 
@@ -235,14 +234,26 @@ Toolkit 契约的空壳实现。
 | Toolkit | 工具 | 依赖与可用性 | 审核 |
 |---|---|---|---|
 | `files` | `read_file`、`view_file_chunk`、`stat_path`、`list_dir`、`validate_structured_file`、`write_file`、`apply_patch`、`move_path`、`copy_path`、`mkdir_path` | Host 进程内执行，不依赖 RS，始终可用 | 读免审核；写审核（`apply_patch` 改 workdir 内已有文件时自动通过） |
-| `shell` | `inspect_shell`、`run_shell`、`start_process`、`wait_process`、`list_processes`、`terminate_process`、`get_current_time` | ShellRS | `inspect_shell` 免审核加底线黑名单；`run_shell` / `start_process` 审核 |
+| `shell` | `inspect_shell`、`run_shell`、`start_process`、`wait_process`、`list_processes`、`terminate_process`、`get_current_time` | ShellRS | `inspect_shell` 免审核加黑名单；`run_shell` 里单独的 git/gh 查询和日常写操作免审核，其他审核；`start_process` 审核 |
 | `web` | `http_fetch`、`download_file` | Host 进程内执行，不依赖 RS，始终可用 | 审核（`http_fetch` 按 origin 与方法复用授权） |
-| `git` | `git_status`、`git_diff`、`git_log`、`git_branch`、`git_show`、`git_add`、`git_commit`、`git_push`、`git_shell` | ShellRS | 专用工具免审核；`git_shell` 只审核丢数据或改写共享历史的调用 |
-| `github` | `gh_pr_create`、`gh_pr_view`、`gh_pr_comments`、`gh_pr_diff`、`gh_issue_create`、`gh_issue_list`、`gh_issue_view`、`gh_issue_comments`、`gh_read_content`、`gh_shell` | ShellRS | 专用工具免审核；`gh_shell` 只审核合并、删除、发布、secret/权限和写入类 api |
+| `github` | `gh_pr_create`、`gh_issue_create` | ShellRS | 免审核；其他 GitHub 操作经 shell 运行 `gh` |
 | `project-inspection` | 上述各 Toolkit 声明的只读子集 | ShellRS | 全部免审核 |
 
-`project-inspection` 不维护自己的工具清单：files、shell、git、github 在各自模块
-里声明只读子集，它直接组合这些子集，新增的只读工具会自动加入。
+`project-inspection` 不维护自己的工具清单：files、shell 在各自模块里声明只读
+子集，它直接组合这些子集，新增的只读工具会自动加入。git 和 GitHub 的查看经
+`inspect_shell` 运行。
+
+#### 从 `git` 迁移
+
+`git` Toolkit 已删除（2026-10-26），没有别名；`github` 只保留 `gh_pr_create` 和
+`gh_issue_create`。`uses` 中仍写 `git` 的 Capability 在 registry 编译时会被标记
+为不可用，诊断为 `unknown Toolkit "git"`。git 和其他 gh 操作改用 `shell`：查看
+用 `inspect_shell`，写操作用 `run_shell`。
+
+| 旧 `uses` | 新 `uses` |
+|---|---|
+| `git` | `shell` |
+| `git`、`github` | `shell`、`github` |
 
 #### 从 `bash` 迁移
 
@@ -252,12 +263,11 @@ Toolkit 契约的空壳实现。
 | 旧 `uses` | 新 `uses` |
 |---|---|
 | `bash` | `files`、`shell`、`web`，按需取其子集 |
-| `git`，并使用 `gh_*` 工具 | `git`、`github` |
-| `git`，只用本地 git | `git` |
+| `git`，并使用 `gh_*` 工具 | `shell`、`github` |
+| `git`，只用本地 git | `shell` |
 | `project-inspection` | 不变 |
 
-operation kind 随 Toolkit 名改变，例如 `bash.run_shell` 变为 `shell.run_shell`、
-`git.gh_pr_view` 变为 `github.gh_pr_view`。
+operation kind 随 Toolkit 名改变，例如 `bash.run_shell` 变为 `shell.run_shell`。
 
 ## 4. Registry 编译
 

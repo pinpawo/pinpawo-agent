@@ -63,7 +63,7 @@ is not restored from conversation history, and the generic agent runtime does no
 infer a directory from process globals.
 
 Workdir is a path-resolution base, not a filesystem sandbox. The files, shell,
-web, git, github and project-inspection Toolkit bindings resolve supported relative paths and
+web, github and project-inspection Toolkit bindings resolve supported relative paths and
 relative or omitted `cwd` against the execution workdir. Absolute paths remain
 absolute. These bindings do not change the process-wide cwd; independent Hosts
 can therefore keep separate execution scopes in one process. The implementation

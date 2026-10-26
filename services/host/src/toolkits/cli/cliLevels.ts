@@ -1,11 +1,11 @@
 /**
  * Permission levels of argv CLI invocations (git, gh).
  *
- * - `read`: only reads. Runs anywhere without review, `inspect_shell` included.
- * - `change`: an everyday, recoverable write. Runs in `git_shell` / `gh_shell`
- *   without review; `inspect_shell` redirects it there.
+ * - `read`: only reads. Runs without review in `inspect_shell` and `run_shell`.
+ * - `change`: an everyday, recoverable write. Runs in `run_shell` without
+ *   review; `inspect_shell` redirects it there.
  * - `risky`: loses data, rewrites shared history, or affects others or
- *   credentials. Reviewed in `git_shell` / `gh_shell`.
+ *   credentials. Reviewed in `run_shell`.
  *
  * The policy leans permissive: only clearly irreversible or shared-impact forms
  * are `risky`. Unrecognized subcommands and aliases are `risky` too, because

@@ -509,18 +509,18 @@ remain unverified.
 
 The existing `eval:subagent` runner includes eight real-model cases. The
 fixture uses production descriptions and schemas for `inspect_shell`,
-`run_shell`, `start_process`, `git_shell` and `gh_shell`, the production shell,
-git and github toolkit instructions, and the production `inspect_shell`
-admission: a refused call gets the production refusal text, so the model can
-correct itself. No command is executed.
+`run_shell` and `start_process`, the production shell and github toolkit
+instructions, and the production `inspect_shell` admission: a refused call gets
+the production refusal text, so the model can correct itself. No command is
+executed.
 
 A case passes when the requested command ran through a path production would
 execute (alone or as one segment of a chain, flags in any order); a refused
 `inspect_shell` call does not count. Tool choice is a metric that does not fail
-the case: reads (`git status/log/diff`, `gh pr checks`) are cheapest through
-`inspect_shell` or the matching `git_shell` / `gh_shell`, writes (hard reset,
-clean, force push, PR comment) through `git_shell` / `gh_shell`. The metric also
-reports how many production reviews and refusals the calls would cause.
+the case: reads (`git status/log/diff`, `gh pr checks`) run unreviewed through
+`inspect_shell` or a plain `run_shell` call, writes (hard reset, clean, force
+push, PR comment) belong in `run_shell`. The metric also reports how many
+production reviews and refusals the calls would cause.
 
 ```sh
 SUBAGENT_EVAL_WRITE_LANGFUSE=false \

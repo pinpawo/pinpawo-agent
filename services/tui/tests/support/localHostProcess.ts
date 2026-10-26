@@ -17,7 +17,6 @@ import {
   createTestHostToolkitInventory,
 } from '../../../host/src/testing/toolkitInventory';
 import { createFilesToolkit } from '../../../host/src/toolkits/files/index';
-import { createGitToolkit } from '../../../host/src/toolkits/git/index';
 import { createGithubToolkit } from '../../../host/src/toolkits/github/index';
 import { createShellToolkit } from '../../../host/src/toolkits/shell/index';
 import { PosixShellRS } from '../../../host/src/toolkits/shellRS/index';
@@ -50,7 +49,7 @@ const graphService = fixture === 'toolkit'
   ? createProductionToolkitHostGraphService()
   : createPersistentHostGraphService();
 const shell = new PosixShellRS();
-const toolkits = [createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell })];
+const toolkits = [createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGithubToolkit({ shell: shell })];
 const transport = await startHostServer(requestedPort, {
   petId: 'pet-process-restart',
   petName: 'PinPawo',

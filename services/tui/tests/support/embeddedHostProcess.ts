@@ -33,7 +33,6 @@ import {
   createTestHostToolkitInventory,
 } from '../../../host/src/testing/toolkitInventory';
 import { createFilesToolkit } from '../../../host/src/toolkits/files/index';
-import { createGitToolkit } from '../../../host/src/toolkits/git/index';
 import { createGithubToolkit } from '../../../host/src/toolkits/github/index';
 import { createShellToolkit } from '../../../host/src/toolkits/shell/index';
 import { PosixShellRS } from '../../../host/src/toolkits/shellRS/index';
@@ -64,7 +63,7 @@ const handlers = createChatHostHandlers(
       contextWindowTokens: 32_000,
     }),
     toolkitInventory: createTestHostToolkitInventory([
-      createFilesToolkit(), createShellToolkit({ shell: sharedShell }), createWebToolkit(), createGitToolkit({ shell: sharedShell }), createGithubToolkit({ shell: sharedShell }),
+      createFilesToolkit(), createShellToolkit({ shell: sharedShell }), createWebToolkit(), createGithubToolkit({ shell: sharedShell }),
     ]),
     capabilityArtifactStore: new FileCapabilityArtifactStore(
       runtimeConfig.capabilityArtifactRoot,

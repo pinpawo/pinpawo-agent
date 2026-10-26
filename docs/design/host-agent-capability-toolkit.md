@@ -146,12 +146,12 @@ Inventory 合并必须是确定性的：来源和顺序可追溯，重复 Capabi
 
 ## 5. Browser 与 local-machine Toolkit 的归位
 
-Browser、files、shell、web、git、github 都是普通 Toolkit：
+Browser、files、shell、web、github 都是普通 Toolkit：
 
 - Browser backend/driver、bridge、session、ownership 和 live state 属于
   `ChromeExtensionBrowserRS`；Browser Capability 只声明 `uses: ['browser']`。
 - Browser 包分别导出 Capability、Toolkit 工厂、BrowserRS 契约与实现。host 的
-  composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；shell、git、github、
+  composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；shell、github、
   project-inspection 共享 Host 到本机 RS 服务的同一个 ShellRS 连接
   （`ShellRSClient`，见 #853）；files、web 在 Host 进程内执行，不依赖 RS。
 - 当前所谓 `local tools` 不是领域概念。它们是 local-machine / Node Host 提供的

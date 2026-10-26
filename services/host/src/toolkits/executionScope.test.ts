@@ -6,7 +6,6 @@ import test from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { createFilesToolkit } from './files';
-import { createGitToolkit } from './git';
 import { createShellToolkit } from './shell';
 import { PosixShellRS, type ShellRS } from './shellRS';
 
@@ -77,20 +76,6 @@ test('static file and shell tools interpret relative inputs against each call\'s
     String(await toolFrom(toolkitA, 'inspect_shell').invoke({ command: 'pwd' }, call(workdirB, 'a'))).trim(),
     realpathSync(workdirB),
   );
-});
-
-test('git toolkit defaults repository operations to the call workdir', async (t) => {
-  const workdir = mkdtempSync(resolve(tmpdir(), 'pinpawo-git-workdir-'));
-  const shell = new PosixShellRS();
-  t.after(async () => {
-    await shell.dispose();
-    rmSync(workdir, { recursive: true, force: true });
-  });
-  const toolkit = createGitToolkit({ shell });
-
-  const result = String(await toolFrom(toolkit, 'git_status').invoke({}, call(workdir, 'git')));
-  assert.match(result, /not a git repository/i);
-  assert.doesNotMatch(result, /pinpawo-agent/);
 });
 
 test('an invalid path returns a recoverable tool error through the normal path', async (t) => {

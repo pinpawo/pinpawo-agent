@@ -20,7 +20,6 @@ description: "检查代码库并整理证据。"
 uses:
   - files
   - shell
-  - git
 version: 1
 icon: magnifyingglass
 color: blue

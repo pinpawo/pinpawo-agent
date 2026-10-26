@@ -5,7 +5,6 @@ uses:
   - files
   - shell
   - web
-  - git
   - github
   - channel
 version: 1

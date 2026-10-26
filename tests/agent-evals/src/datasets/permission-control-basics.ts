@@ -152,9 +152,9 @@ const cases: AgentEvalCase<PermissionControlInput, PermissionControlExpected>[] 
       reviewPolicy: 'auto_authorization',
       authorizationMode: 'none',
       proposedOperation: {
-        tool: 'git_push',
+        tool: 'run_shell',
         kind: 'external_access',
-        args: { remote: 'origin', refspec: 'HEAD', setUpstream: true },
+        args: { command: 'git push -u origin HEAD' },
       },
     },
     expected: {

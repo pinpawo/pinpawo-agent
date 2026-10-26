@@ -82,7 +82,7 @@ try {
   await page.goto('http://127.0.0.1:5199');
   await page.getByLabel('Studio HTTP URL').fill(first.url);
   await page.getByLabel('Studio bearer token').fill(first.token);
-  await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Channel', exact: true }).getAttribute('aria-current'), 'page', 'Channel is the default page');
   assert.deepEqual(await page.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))),
@@ -275,13 +275,13 @@ try {
     await page.getByRole('button', { name, exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Kanban', exact: true }).count(), 0);
   }
-  await page.getByRole('button', { name: '+ DISPATCH', exact: true }).click();
+  await page.getByRole('button', { name: '+ Dispatch', exact: true }).click();
   const direct = page.getByRole('dialog', { name: 'Dispatch to Pet', exact: true });
   await direct.getByRole('combobox').selectOption('alpha');
-  await direct.getByLabel('MESSAGE', { exact: true }).fill('Standalone dispatch remains available.');
+  await direct.getByLabel('Message', { exact: true }).fill('Standalone dispatch remains available.');
   await direct.locator('form').evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
   await direct.waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: '+ DISPATCH', exact: true }).click();
+  await page.getByRole('button', { name: '+ Dispatch', exact: true }).click();
   await direct.getByText('invocation ended', { exact: true }).waitFor();
   assert.equal(standaloneRequests.length, 1, 'standalone dispatch retains its duplicate guard');
   assert.deepEqual(standaloneRequests[0], { petId: 'alpha', request: 'Standalone dispatch remains available.' });
@@ -320,7 +320,7 @@ try {
   await page.keyboard.type('Host A draft must not cross hosts.');
   await page.getByRole('button', { name: 'Connection', exact: true }).click();
   await page.getByLabel('Studio HTTP URL').fill(second.url);
-  await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.getByText('No Channels yet.', { exact: true }).waitFor();
   assert.equal(await page.locator('.channel-message').count(), 0, 'Host switch clears previous history');
   assert.equal(await page.getByRole('button', { name: 'Cancel reply', exact: true }).count(), 0);

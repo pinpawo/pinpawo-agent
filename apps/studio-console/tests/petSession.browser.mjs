@@ -64,7 +64,7 @@ try {
   await page.goto('http://127.0.0.1:5199');
   await page.getByLabel('Studio HTTP URL').fill(ready.url);
   await page.getByLabel('Studio bearer token').fill(ready.token);
-  await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
   await page.getByRole('button', { name: '+ New Channel', exact: true }).click();

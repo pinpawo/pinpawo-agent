@@ -68,7 +68,7 @@ try {
   await page.goto('http://127.0.0.1:' + port);
   await page.getByLabel('Studio HTTP URL').fill(url);
   await page.getByLabel('Studio bearer token').fill('synthetic-only-token');
-  await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
   const message = page.locator('[data-message-id="long"]');

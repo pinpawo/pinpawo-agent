@@ -78,6 +78,13 @@ SUBAGENT_EVAL_CASES=read-file-and-summarize \
 When Langfuse is unavailable, add `SUBAGENT_EVAL_WRITE_LANGFUSE=false` to run
 the same model behavior checks without result storage.
 
+Each case runs three times by default (`SUBAGENT_EVAL_REPEATS`), with the
+production Capability subagent iteration limit. Only outcome checks decide
+pass/fail: a deliverable, the expected conclusion, the file result, evidence
+collected by any listed tool, no out-of-scope writes or commands, and no false
+success claim. Tools a task named, unneeded calls and shell tool choice are
+reported as process metrics.
+
 The `agent-*` datasets are seed coverage for future runners. They are meant to
 make the expected behavior explicit before each runner is migrated to Langfuse.
 
@@ -500,16 +507,20 @@ remain unverified.
 
 ## Git shell tool selection
 
-The existing `eval:subagent` runner includes eight real-model cases. Reads
-(`git status/log/diff`, `gh pr checks`) may use `inspect_shell` or the matching
-`git_shell` / `gh_shell`, since none of these is reviewed. Writes (hard reset,
-clean, force push, PR comment) must use `git_shell` / `gh_shell`; the first
-three are reviewed there, the PR comment is an everyday write that is not. The fixture uses production descriptions and schemas for
-`inspect_shell`, `run_shell`, `start_process`, `git_shell` and `gh_shell`,
-with deterministic tool outputs. No command is executed, and neither runtime
-admission nor review filters mistakes before scoring. The scorer checks the
-tool and the explicitly requested command, including wrong-tool negative
-controls; preparatory inspection is allowed for write cases.
+The existing `eval:subagent` runner includes eight real-model cases. The
+fixture uses production descriptions and schemas for `inspect_shell`,
+`run_shell`, `start_process`, `git_shell` and `gh_shell`, the production shell,
+git and github toolkit instructions, and the production `inspect_shell`
+admission: a refused call gets the production refusal text, so the model can
+correct itself. No command is executed.
+
+A case passes when the requested command ran through a path production would
+execute (alone or as one segment of a chain, flags in any order); a refused
+`inspect_shell` call does not count. Tool choice is a metric that does not fail
+the case: reads (`git status/log/diff`, `gh pr checks`) are cheapest through
+`inspect_shell` or the matching `git_shell` / `gh_shell`, writes (hard reset,
+clean, force push, PR comment) through `git_shell` / `gh_shell`. The metric also
+reports how many production reviews and refusals the calls would cause.
 
 ```sh
 SUBAGENT_EVAL_WRITE_LANGFUSE=false \
@@ -521,4 +532,3 @@ This needs a configured Host model profile and credentials; set
 `SUBAGENT_EVAL_PROFILE` to select a profile. Real model calls may incur provider
 charges. Disabling Langfuse avoids dataset/trace storage, not the model call.
 The fixture/scorer unit tests run offline and are **not** model eval results.
-These evals measure tool choice, not runtime prevention or approval behavior.

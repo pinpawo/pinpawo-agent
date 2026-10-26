@@ -1,13 +1,17 @@
 import { tool } from '@langchain/core/tools';
-import { createGitTools } from '../../../services/host/src/toolkits/git/gitTools';
-import { createGithubTools } from '../../../services/host/src/toolkits/github/githubTools';
+import { createGitToolkit } from '../../../services/host/src/toolkits/git';
+import { createGitTools, gitShellCallNeedsReview } from '../../../services/host/src/toolkits/git/gitTools';
+import { createGithubToolkit } from '../../../services/host/src/toolkits/github';
+import { createGithubTools, ghShellCallNeedsReview } from '../../../services/host/src/toolkits/github/githubTools';
+import { createShellToolkit } from '../../../services/host/src/toolkits/shell';
+import { classifyReadOnlyShellCommand } from '../../../services/host/src/toolkits/shell/readOnlyShell';
 import { createInspectShellTool, createRunShellTool, createStartProcessTool } from '../../../services/host/src/toolkits/shell/shellTools';
 import type { ShellRS } from '../../../services/host/src/toolkits/shellRS/shellRS';
 
 type ShellCall = { name: string; args: Record<string, unknown> };
 type ExpectedCall = { names: readonly string[]; command: string };
 
-/** Reads may use either unreviewed tool; writes must use the permissioned one. */
+/** Reads are cheapest through either unreviewed tool; writes through the permissioned one. */
 const READ_GIT = ['inspect_shell', 'git_shell'] as const;
 const READ_GH = ['inspect_shell', 'gh_shell'] as const;
 
@@ -31,14 +35,15 @@ export const shellToolSelectionExamples = cases.map(([name, command, expectedToo
   },
   outputs: {
     expected_has_deliverable: true,
-    // Read cases accept more than one tool, so shell_tool_choice owns the check.
-    expected_tools: expectedTools.length === 1 ? [...expectedTools] : [],
     expected_shell_call: { names: expectedTools, command },
-    reason: 'The real model must select the tool for the requested command; execution is mocked.',
+    reason: 'The requested command must run through a path production would execute; the cheapest tool is a metric.',
   },
 }));
 
 const SHELL_TOOLS = ['inspect_shell', 'run_shell', 'start_process'];
+const SEPARATOR = /\s*(?:&&|\|\||;|\|)\s*/;
+/** Output-only git global options that do not change which command runs. */
+const NEUTRAL_TOKENS = new Set(['--no-pager']);
 
 /** The command a call would run, comparable across shell-string and argv tools. */
 export function shellCallCommand(call: ShellCall) {
@@ -48,12 +53,30 @@ export function shellCallCommand(call: ShellCall) {
   return program ? [program, ...args].join(' ') : '';
 }
 
-/** Production tool descriptions/schemas, but no production executor or admission. */
+const commandKey = (command: string) => command.trim().split(/\s+/)
+  .filter((token) => !NEUTRAL_TOKENS.has(token)).sort().join(' ');
+
+/** Whether the call runs `command`, alone or as one segment of a chain, in any flag order. */
+export function callRunsCommand(call: ShellCall, command: string) {
+  const expected = commandKey(command);
+  return shellCallCommand(call).split(SEPARATOR).some((segment) => commandKey(segment) === expected);
+}
+
+/** What production does with the call: refuse it, run it directly, or run it after review. */
+export function productionDisposition(call: ShellCall): 'refused' | 'runs' | 'reviewed' {
+  if (call.name === 'inspect_shell') return classifyReadOnlyShellCommand(shellCallCommand(call)).allowed ? 'runs' : 'refused';
+  if (call.name === 'git_shell') return gitShellCallNeedsReview(call.args) ? 'reviewed' : 'runs';
+  if (call.name === 'gh_shell') return ghShellCallNeedsReview(call.args) ? 'reviewed' : 'runs';
+  return 'reviewed';
+}
+
+const unavailable = new Proxy({} as ShellRS, {
+  get() { throw new Error('Shell selection eval must never access a real executor'); },
+});
+
+/** Production descriptions, schemas, toolkit instructions and inspect_shell admission; execution is mocked. */
 export function buildShellSelectionMockTools(outputs: Record<string, unknown> = {}) {
   const calls: ShellCall[] = [];
-  const unavailable = new Proxy({} as ShellRS, {
-    get() { throw new Error('Shell selection eval must never access a real executor'); },
-  });
   const gitTools = [
     ...createGitTools(unavailable).gitTools.filter((item) => item.name === 'git_shell'),
     ...createGithubTools(unavailable).githubTools.filter((item) => item.name === 'gh_shell'),
@@ -63,12 +86,37 @@ export function buildShellSelectionMockTools(outputs: Record<string, unknown> = 
   const tools = definitions.map((definition) => tool(async (args: Record<string, unknown>) => {
     const call = { name: definition.name, args };
     calls.push(call);
-    return String(outputs[shellCallCommand(call)] ?? 'Controlled fixture: no command was executed.');
+    if (call.name === 'inspect_shell') {
+      // Same refusal text the production tool returns.
+      const verdict = classifyReadOnlyShellCommand(shellCallCommand(call));
+      if (!verdict.allowed) return `Error: inspect_shell 不执行该命令（${verdict.reason}）。${verdict.redirect}`;
+    }
+    const recorded = Object.entries(outputs).find(([command]) => callRunsCommand(call, command));
+    return String(recorded?.[1] ?? 'Controlled fixture: no command was executed.');
   }, { name: definition.name, description: definition.description, schema: definition.schema }));
-  return { tools, calls, readFile: (_path: string) => null };
+  const promptSections = [createShellToolkit({ shell: unavailable }), createGitToolkit({ shell: unavailable }),
+    createGithubToolkit({ shell: unavailable })].map((toolkit) => ({
+    id: `toolkit:${toolkit.name}`,
+    owner: toolkit.name,
+    content: toolkit.instructions as string,
+  }));
+  return { tools, calls, promptSections, readFile: (_path: string) => null };
 }
 
-/** Score the requested command, allowing preparatory inspection on write cases. */
+/** Outcome: the requested command ran through a path production would execute. */
+export function requestedCommandExecutedEvaluator({ outputs, referenceOutputs }: {
+  outputs?: { calls?: ShellCall[] };
+  referenceOutputs?: { expected_shell_call?: ExpectedCall };
+}) {
+  const expected = referenceOutputs?.expected_shell_call;
+  if (!expected) return { key: 'requested_command_executed', score: 1, comment: 'Not a shell selection case' };
+  const calls = outputs?.calls ?? [];
+  const executed = calls.some((call) => callRunsCommand(call, expected.command) && productionDisposition(call) !== 'refused');
+  return { key: 'requested_command_executed', score: executed ? 1 : 0,
+    comment: `Expected ${expected.command} to run; observed ${JSON.stringify(calls)}` };
+}
+
+/** Metric: the requested command used the cheapest tool, and read cases stayed on unreviewed tools. */
 export function shellToolChoiceEvaluator({ outputs, referenceOutputs }: {
   outputs?: { calls?: ShellCall[] };
   referenceOutputs?: { expected_shell_call?: ExpectedCall };
@@ -76,10 +124,13 @@ export function shellToolChoiceEvaluator({ outputs, referenceOutputs }: {
   const expected = referenceOutputs?.expected_shell_call;
   if (!expected) return { key: 'shell_tool_choice', score: 1, comment: 'Not a shell selection case' };
   const calls = outputs?.calls ?? [];
-  const matching = calls.filter((call) => shellCallCommand(call) === expected.command);
+  const matching = calls.filter((call) => callRunsCommand(call, expected.command));
   const readCase = expected.names.includes('inspect_shell');
   const passed = matching.length > 0 && matching.every((call) => expected.names.includes(call.name))
     && (!readCase || calls.every((call) => expected.names.includes(call.name)));
+  const reviews = calls.filter((call) => productionDisposition(call) === 'reviewed').length;
+  const refusals = calls.filter((call) => productionDisposition(call) === 'refused').length;
   return { key: 'shell_tool_choice', score: passed ? 1 : 0,
-    comment: `Expected ${expected.command} via ${expected.names.join(' or ')}; observed ${JSON.stringify(calls)}` };
+    comment: `Expected ${expected.command} via ${expected.names.join(' or ')}; ${reviews} review(s), ${refusals} refusal(s) in production`,
+    reviews, refusals };
 }

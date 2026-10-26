@@ -4089,7 +4089,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   assert.match(secondInputText, /Issue #272 已关闭。/);
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
-    /可选历史 artifacts/,
+    /Optional earlier artifacts/,
   );
 
   // Full execution instructions stay in the briefing; the system may index prior objectives.

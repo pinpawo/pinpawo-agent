@@ -126,7 +126,7 @@ export function createContinueTool() {
     description: 'Continue the unfinished tasks in the current plan. Do not use it when the plan has no unfinished tasks; use plan_request for a new request.',
     schema: z.object({
       goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS).optional()
-        .describe('Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with what the user said this time and write the complete updated goal. Omit it to keep the original goal.'),
+        .describe('Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with what the user said this time and write the complete updated goal, in the output language the user asked for if they named one. Omit it to keep the original goal.'),
     }).strict(),
   });
 }
@@ -148,7 +148,7 @@ export function createPlanRequestTool() {
       description: 'Create an execution plan for the user\'s current goal.',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
-          .describe('The goal the user currently wants to achieve. State it clearly using the conversation context, keep the user\'s requirements, and do not widen the task scope yourself.'),
+          .describe('The goal the user currently wants to achieve. State it clearly using the conversation context, keep the user\'s requirements, and do not widen the task scope yourself. Write it in the output language the user asked for if they named one; otherwise, in the language of their request.'),
       }).strict(),
     },
   );

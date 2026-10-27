@@ -47,6 +47,7 @@ import {
   createTestHostToolkitInventory,
 } from '../../host/src/testing/toolkitInventory';
 import { createFilesToolkit } from '../../host/src/toolkits/files/index';
+import { createGitToolkit } from '../../host/src/toolkits/git/index';
 import { createGithubToolkit } from '../../host/src/toolkits/github/index';
 import { createShellToolkit } from '../../host/src/toolkits/shell/index';
 import { PosixShellRS } from '../../host/src/toolkits/shellRS/index';
@@ -78,7 +79,7 @@ const RECOVERY_MESSAGE = 'Verify the host recovers.';
 const ATTACHMENT_NAME = '资料 with spaces.txt';
 const ATTACHMENT_CONTENT = 'fixture contents must remain unread until a tool inspects this path';
 const shell = new PosixShellRS();
-const REQUIRED_TOOLKITS = [createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGithubToolkit({ shell: shell })];
+const REQUIRED_TOOLKITS = [createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell })];
 
 test('production host handlers drive the v2 host vertical slice', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-host-'));

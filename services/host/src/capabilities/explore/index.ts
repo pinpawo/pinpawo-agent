@@ -9,6 +9,7 @@ const DEFAULT_EXPLORE_TOOLKITS = [
   'files',
   'shell',
   'web',
+  'git',
   'github',
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 ] as const;

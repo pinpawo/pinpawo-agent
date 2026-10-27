@@ -13,7 +13,7 @@ import {
 } from './events/operationRegistry';
 import { createBrowserToolkit, ChromeExtensionBrowserRS } from '@pinpawo-toolkit/browser';
 import { createFilesToolkit } from './toolkits/files';
-import { createGithubToolkit } from './toolkits/github';
+import { createGitToolkit } from './toolkits/git';
 import { createShellToolkit } from './toolkits/shell';
 import { PosixShellRS } from './toolkits/shellRS';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
@@ -26,7 +26,7 @@ const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createFilesToolkit(),
   createShellToolkit({ shell: sharedShell }),
-  createGithubToolkit({ shell: sharedShell }),
+  createGitToolkit({ shell: sharedShell }),
 ]);
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
@@ -200,24 +200,24 @@ test('normalizes an incomplete run_shell start without interrupting the run', ()
   assert.deepEqual(event?.raw?.input, {});
 });
 
-test('buildToolOperationEvent uses github toolkit metadata', () => {
+test('buildToolOperationEvent uses git toolkit metadata', () => {
   const event = buildToolOperationEvent('req-1', {
     event: 'on_tool_start',
-    name: 'gh_issue_create',
+    name: 'git_commit',
     toolCallId: 'call-1',
-    input: { title: 'test: update toolkit boundaries', repository: 'o/r' },
+    input: { message: 'test: update toolkit boundaries', cwd: '/repo' },
   }, localToolOperationRegistry);
 
   assert.equal(event.type, 'operation');
   assert.equal(event.phase, 'started');
-  assert.equal(event.operation.kind, 'github.gh_issue_create');
-  assert.equal(event.operation.title, '创建 GitHub issue');
-  assert.equal(event.operation.target, 'o/r');
+  assert.equal(event.operation.kind, 'git.git_commit');
+  assert.equal(event.operation.title, '创建 git commit');
+  assert.equal(event.operation.target, '/repo');
   assert.equal(event.operation.summary, 'test: update toolkit boundaries');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'github',
-    toolName: 'gh_issue_create',
+    name: 'git',
+    toolName: 'git_commit',
     callId: 'call-1',
   });
 });
@@ -232,13 +232,13 @@ test('files and shell Toolkits expose operation metadata with their definitions'
   assert.equal(definition(shell, 'git_status'), undefined);
 });
 
-test('createGithubToolkit exposes github operation metadata with the toolkit definition', () => {
-  const toolkit = createGithubToolkit({ shell: new PosixShellRS() });
+test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {
+  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
 
-  assert.deepEqual(toolkit.tools.map(({ tool }) => tool.name), ['gh_pr_create', 'gh_issue_create']);
-  assert.equal(definition(toolkit, 'gh_pr_create')?.operation?.title, '创建 GitHub PR');
-  assert.equal(definition(toolkit, 'gh_pr_create')?.review, undefined);
-  assert.equal(definition(toolkit, 'gh_issue_create')?.review, undefined);
+  assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
+  assert.equal(definition(toolkit, 'git_add')?.review, undefined);
+  assert.equal(definition(toolkit, 'git_commit')?.review, undefined);
+  assert.equal(definition(toolkit, 'git_push')?.review, undefined);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {

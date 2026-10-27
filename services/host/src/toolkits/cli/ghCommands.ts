@@ -1,4 +1,3 @@
-import { change, type CliVerdict, hasOption, READ, risky } from './cliLevels';
 
 const GH_READ_ACTIONS: Record<string, ReadonlySet<string> | 'any'> = {
   pr: new Set(['list', 'view', 'diff', 'checks', 'status']),
@@ -17,29 +16,6 @@ const GH_READ_ACTIONS: Record<string, ReadonlySet<string> | 'any'> = {
   search: 'any',
 };
 
-/** Everyday collaboration: comments, reviews, edits, CI reruns, local clones. */
-const GH_CHANGE_ACTIONS: Record<string, ReadonlySet<string>> = {
-  pr: new Set(['create', 'comment', 'review', 'edit', 'ready', 'close', 'reopen', 'checkout',
-    'lock', 'unlock', 'update-branch']),
-  issue: new Set(['create', 'comment', 'edit', 'close', 'reopen', 'pin', 'unpin', 'lock',
-    'unlock', 'develop']),
-  label: new Set(['create', 'edit', 'clone']),
-  run: new Set(['rerun', 'cancel', 'download', 'watch']),
-  workflow: new Set(['run', 'enable', 'disable']),
-  release: new Set(['download']),
-  repo: new Set(['clone', 'fork']),
-  gist: new Set(['create', 'edit', 'clone']),
-};
-
-/** Flags that turn an everyday action into one that loses work or rewrites shared history. */
-const GH_RISKY_FLAGS: Record<string, (args: readonly string[]) => string | undefined> = {
-  // Syncing an existing branch with --force runs `git reset --hard`.
-  'pr checkout': (args) => (hasOption(args, ['--force'], 'f')
-    ? 'gh pr checkout --force 会丢弃本地分支的未提交改动和提交' : undefined),
-  'pr update-branch': (args) => (hasOption(args, ['--rebase'])
-    ? 'gh pr update-branch --rebase 会改写 PR 分支的共享历史' : undefined),
-};
-
 /** `gh api` reads only as a GET without request fields (fields imply POST). */
 function ghApiReadOnly(args: readonly string[]) {
   for (let index = 0; index < args.length; index += 1) {
@@ -53,29 +29,27 @@ function ghApiReadOnly(args: readonly string[]) {
   return true;
 }
 
-/** `args` excludes the leading `gh`. */
-export function classifyGhArgs(args: readonly string[]): CliVerdict {
+/**
+ * Why a gh invocation is not read-only, or undefined when it only reads.
+ * This is an allowlist: anything not listed as a read is not one. `args`
+ * excludes the leading `gh`.
+ */
+export function ghWriteReason(args: readonly string[]): string | undefined {
   const [group, action] = args;
-  if (!group) return risky('缺少 gh 子命令');
-  if (['--version', '--help', 'version', 'help', 'status'].includes(group)) return READ;
+  if (!group) return '缺少 gh 子命令';
+  if (['--version', '--help', 'version', 'help', 'status'].includes(group)) return undefined;
   if (group === 'api') {
     // The endpoint decides the effect, which this check cannot see.
-    return ghApiReadOnly(args.slice(1)) ? READ : risky('gh api 写请求的影响取决于具体接口');
+    return ghApiReadOnly(args.slice(1)) ? undefined : 'gh api 写请求的影响取决于具体接口';
   }
   if (group === 'auth' && args.some((arg) => arg === '--show-token' || arg === '-t')) {
-    return risky('gh auth status --show-token 会输出凭据');
+    return 'gh auth status --show-token 会输出凭据';
   }
   const name = `gh ${[group, action].filter(Boolean).join(' ')}`;
   const reads = GH_READ_ACTIONS[group];
-  if (reads === 'any' || reads?.has(action ?? '')) {
-    // `--web` opens a browser on the Host; `-w` means --web except on `run list`.
-    return args.some((arg) => arg === '--web' || (arg === '-w' && !(group === 'run' && action === 'list')))
-      ? change(`${name} --web 会在 Host 上打开浏览器`)
-      : READ;
-  }
-  const danger = GH_RISKY_FLAGS[`${group} ${action ?? ''}`]?.(args.slice(2));
-  if (danger) return risky(danger);
-  if (GH_CHANGE_ACTIONS[group]?.has(action ?? '')) return change(`${name} 会修改 GitHub 状态`);
-  // Merging, deleting, releasing, secrets, credentials, settings and extensions.
-  return risky(`${name} 影响共享状态、凭据或无法撤销`);
+  if (reads !== 'any' && !reads?.has(action ?? '')) return `${name} 不是只读操作`;
+  // `--web` opens a browser on the Host; `-w` means --web except on `run list`.
+  return args.some((arg) => arg === '--web' || (arg === '-w' && !(group === 'run' && action === 'list')))
+    ? `${name} --web 会在 Host 上打开浏览器`
+    : undefined;
 }

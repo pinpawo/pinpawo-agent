@@ -120,17 +120,16 @@ Toolkit 用原始参数和该上下文在执行时解释目标：local 工具经
   `wait_process` / `list_processes` / `terminate_process` 管理。超时不回滚副作用，
   未确认终止或断连结果未知时不能直接重跑。设计迁移见
   [Process Runtime 草稿](../../design/host/process-runtime.md)。
-- shell、github、project-inspection 共享 Host 的同一个 ShellRS 实例；
-  `gh_pr_create` / `gh_issue_create` 以 argv 经 ShellRS 运行。files 与 web 在 Host
-  进程内执行，不依赖 RS，ShellRS 不可用时仍然可用。
+- shell、git、github、project-inspection 共享 Host 的同一个 ShellRS 实例；git/gh
+  以 argv 经 ShellRS 运行。files 与 web 在 Host 进程内执行，不依赖 RS，ShellRS
+  不可用时仍然可用。
+- 权限按工具划分，见[风险控制原则](../../design/agent-runtime/review.md)。
+  `inspect_shell` 免审批，用黑名单拦不可逆操作和常见写法，git/gh 只放行
+  `toolkits/cli/{gitCommands,ghCommands}.ts` 白名单里的只读形式；`run_shell` /
+  `start_process` 每次审批；`git_add` / `git_commit` / `git_push`、
+  `gh_pr_create` / `gh_issue_create` 的参数结构排除了危险形式，免审批。
 - shell 命令带非交互环境变量（`GIT_EDITOR=false`、`GIT_TERMINAL_PROMPT=0`、
   `GH_PROMPT_DISABLED=1` 等），git/gh 缺少参数时直接失败，不会等编辑器或提示。
-- 审批见[风险控制原则](../../design/agent-runtime/review.md)。`inspect_shell` 免审批，
-  用黑名单拦不可逆操作和常见写法；`run_shell` 里单独的 git/gh 命令按
-  `toolkits/cli/{gitCommands,ghCommands}.ts` 的 read / change / risky 三级（定义在
-  `toolkits/cli/cliLevels.ts`）判定，查询和日常写操作直接执行，丢数据、改写共享
-  历史、合并、删除、发布、凭据与权限，以及无法识别的子命令走审批；其他命令一律
-  审批。
 - 外部命令只经 ShellRS 执行。代码搜索和 JSON 查询没有专用工具（原 `grep_search` /
   `glob_search` / `jq_query` 已删除），由 shell Toolkit 的 `inspect_shell` 运行
   `rg` / `jq`；project-inspection 也包含 `inspect_shell`。

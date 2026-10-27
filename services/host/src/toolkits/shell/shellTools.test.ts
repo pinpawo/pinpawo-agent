@@ -98,22 +98,18 @@ test('shell review policy reviews configured command execution', async () => {
   );
 });
 
-test('run_shell runs plain git/gh reads and everyday writes unreviewed and reviews the rest', async () => {
+test('run_shell reviews every command, git and gh included', async () => {
   const toolkit = createShellToolkit({ shell: new PosixShellRS() });
   const policy = definition(toolkit, 'run_shell')?.review;
   assert.ok(policy);
-  const reviewOf = async (command: string) => await policy.request({
-    toolkitName: 'shell',
-    toolName: 'run_shell',
-    input: { command, cwd: '/repo' },
-    operation: definition(toolkit, 'run_shell')?.operation,
-    reviewCapabilities: { humanReview: true, sessionAuthorization: true },
-  });
-  for (const command of ['git add a.ts && git commit -m fix', 'git push -u origin HEAD', 'gh pr comment 12 --body LGTM']) {
-    assert.equal(await reviewOf(command), null, command);
-  }
-  for (const command of ['git reset --hard HEAD', 'gh pr merge 12 --squash', 'npm test', 'git log | head']) {
-    const review = await reviewOf(command);
+  for (const command of ['git status', 'git push -u origin HEAD', 'gh pr comment 12 --body LGTM', 'npm test']) {
+    const review = await policy.request({
+      toolkitName: 'shell',
+      toolName: 'run_shell',
+      input: { command, cwd: '/repo' },
+      operation: definition(toolkit, 'run_shell')?.operation,
+      reviewCapabilities: { humanReview: true, sessionAuthorization: true },
+    });
     assert.ok(review && 'schemaVersion' in review, `${command} must be reviewed`);
   }
 });

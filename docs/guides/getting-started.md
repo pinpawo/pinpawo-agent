@@ -103,6 +103,7 @@ description: "Inspect a repository and report verified risks."
 uses:
   - files
   - shell
+  - git
   - github
 version: 1
 ---

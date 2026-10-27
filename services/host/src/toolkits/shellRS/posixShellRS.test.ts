@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createFilesToolkit } from '../files';
+import { createGitToolkit } from '../git';
 import { createGithubToolkit } from '../github';
 import { createProjectInspectionToolkit } from '../projectInspection';
 import { createShellToolkit } from '../shell';
@@ -79,6 +80,7 @@ test('ShellRS reports itself unavailable on Windows, and so do the Toolkits buil
 
   for (const toolkit of [
     createShellToolkit({ shell }),
+    createGitToolkit({ shell }),
     createGithubToolkit({ shell }),
     createProjectInspectionToolkit({ shell }),
   ]) {

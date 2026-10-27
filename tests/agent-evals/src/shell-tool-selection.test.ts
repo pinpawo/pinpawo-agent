@@ -31,9 +31,9 @@ test('shell selection fixtures record every call and refuse what production insp
   assert.equal(shellCallCommand(fixture.calls[1]), 'git reset --hard HEAD');
 });
 
-test('shell selection prompt carries the production shell and github toolkit instructions', () => {
+test('shell selection prompt carries the production shell, git and github toolkit instructions', () => {
   const { promptSections } = buildShellSelectionMockTools();
-  assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:github']);
+  assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
   for (const section of promptSections) assert.ok(section.content.trim());
 });
 
@@ -48,8 +48,8 @@ test('production disposition follows admission and review policies', () => {
   assert.equal(productionDisposition(callFor('inspect_shell', 'git status --short')), 'runs');
   assert.equal(productionDisposition(callFor('inspect_shell', 'git clean -fd')), 'refused');
   assert.equal(productionDisposition(callFor('run_shell', 'git clean -fd')), 'reviewed');
-  assert.equal(productionDisposition(callFor('run_shell', 'git status --short')), 'runs');
-  assert.equal(productionDisposition(callFor('run_shell', 'gh pr comment 12 --body LGTM')), 'runs');
+  assert.equal(productionDisposition(callFor('run_shell', 'git status --short')), 'reviewed');
+  assert.equal(productionDisposition(callFor('run_shell', 'gh pr comment 12 --body LGTM')), 'reviewed');
   assert.equal(productionDisposition(callFor('run_shell', 'npm test')), 'reviewed');
   assert.equal(productionDisposition(callFor('start_process', 'git status')), 'reviewed');
 });

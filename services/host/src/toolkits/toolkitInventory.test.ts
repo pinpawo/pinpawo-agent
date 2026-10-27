@@ -8,7 +8,7 @@ import {
   HostToolkitInventoryStore,
   reportUnavailableToolkitAvailability,
 } from './toolkitInventory';
-import { createGithubToolkit } from './github';
+import { createGitToolkit } from './git';
 import { createShellToolkit } from './shell';
 import { PosixShellRS } from './shellRS';
 import { createOperationRegistryForDeps } from '../runtimeOperationRegistry';
@@ -207,16 +207,16 @@ test('operation registry derives only from the effective Host inventory', async 
     sources: [{
       id: 'host',
       kind: 'host_builtin',
-      definitions: [createShellToolkit({ shell }), createGithubToolkit({ shell })],
+      definitions: [createShellToolkit({ shell }), createGitToolkit({ shell })],
     }],
     resolveAvailability: async (definition) => definition.name === 'shell'
       ? { available: true }
-      : { available: false, reason: 'gh unavailable' },
+      : { available: false, reason: 'git unavailable' },
   });
   const registry = createOperationRegistryForDeps({
     toolkitInventory: new HostToolkitInventoryStore(inventory),
   });
 
   assert.equal(registry.resolveToolOperation('run_shell')?.source.name, 'shell');
-  assert.equal(registry.resolveToolOperation('gh_pr_create'), null);
+  assert.equal(registry.resolveToolOperation('git_commit'), null);
 });

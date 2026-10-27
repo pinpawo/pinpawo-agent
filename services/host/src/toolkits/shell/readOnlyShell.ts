@@ -1,7 +1,7 @@
 import { parse } from 'shell-quote';
-import { shortBundle } from '../cli/cliLevels';
-import { classifyGhArgs } from '../cli/ghCommands';
-import { classifyGitArgs } from '../cli/gitCommands';
+import { shortBundle } from '../cli/cliArgs';
+import { ghWriteReason } from '../cli/ghCommands';
+import { gitWriteReason } from '../cli/gitCommands';
 
 /**
  * Admission for `inspect_shell`: a blocklist, not an allowlist.
@@ -24,8 +24,8 @@ type Refusal = { reason: string; redirect: string };
 
 const RUN_SHELL = '需要执行时改用 run_shell，它会走工具审批。';
 const FILE_TOOLS = '写文件改用 apply_patch、write_file 等文件工具；其他写操作改用 run_shell，它会走工具审批。';
-const GIT_TOOLS = 'git 写操作改用 run_shell：日常写操作直接执行，丢弃改动或改写共享历史的操作会走审批。';
-const GH_TOOLS = 'GitHub 写操作改用 run_shell：日常协作直接执行，合并、删除、发布、改权限等操作会走审批。';
+const GIT_TOOLS = 'git 暂存、提交和普通推送改用 git_add、git_commit、git_push；其他 git 写操作改用 run_shell，它会走工具审批。';
+const GH_TOOLS = '创建 PR、issue 改用 gh_pr_create、gh_issue_create；其他 GitHub 写操作改用 run_shell，它会走工具审批。';
 
 const DESTRUCTIVE_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
 const KILL_COMMANDS = new Set(['kill', 'pkill', 'killall']);
@@ -95,12 +95,12 @@ function checkCommand(words: string[], depth: number): Refusal | undefined {
   const write = checkWrite(name, tokens);
   if (write) return write;
   if (name === 'git') {
-    const verdict = classifyGitArgs(tokens);
-    return verdict.level === 'read' ? undefined : { reason: verdict.reason, redirect: GIT_TOOLS };
+    const reason = gitWriteReason(tokens);
+    return reason ? { reason, redirect: GIT_TOOLS } : undefined;
   }
   if (name === 'gh') {
-    const verdict = classifyGhArgs(tokens);
-    return verdict.level === 'read' ? undefined : { reason: verdict.reason, redirect: GH_TOOLS };
+    const reason = ghWriteReason(tokens);
+    return reason ? { reason, redirect: GH_TOOLS } : undefined;
   }
   // One level of indirection that hides the same heads.
   if (name === 'find') {

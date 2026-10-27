@@ -1,16 +1,16 @@
 import { tool } from '@langchain/core/tools';
+import { createGitToolkit } from '../../../services/host/src/toolkits/git';
 import { createGithubToolkit } from '../../../services/host/src/toolkits/github';
 import { createShellToolkit } from '../../../services/host/src/toolkits/shell';
 import { classifyReadOnlyShellCommand } from '../../../services/host/src/toolkits/shell/readOnlyShell';
-import { runShellCommandNeedsReview } from '../../../services/host/src/toolkits/shell/runShellReview';
 import { createInspectShellTool, createRunShellTool, createStartProcessTool } from '../../../services/host/src/toolkits/shell/shellTools';
 import type { ShellRS } from '../../../services/host/src/toolkits/shellRS/shellRS';
 
 type ShellCall = { name: string; args: Record<string, unknown> };
 type ExpectedCall = { names: readonly string[]; command: string };
 
-/** Plain git/gh reads run unreviewed in either shell tool; writes belong in run_shell. */
-const READ = ['inspect_shell', 'run_shell'] as const;
+/** git/gh reads run unreviewed in inspect_shell; these writes have no dedicated tool, so run_shell. */
+const READ = ['inspect_shell'] as const;
 const WRITE = ['run_shell'] as const;
 
 const cases = [
@@ -60,7 +60,6 @@ export function callRunsCommand(call: ShellCall, command: string) {
 /** What production does with the call: refuse it, run it directly, or run it after review. */
 export function productionDisposition(call: ShellCall): 'refused' | 'runs' | 'reviewed' {
   if (call.name === 'inspect_shell') return classifyReadOnlyShellCommand(shellCallCommand(call)).allowed ? 'runs' : 'refused';
-  if (call.name === 'run_shell') return runShellCommandNeedsReview(shellCallCommand(call)) ? 'reviewed' : 'runs';
   return 'reviewed';
 }
 
@@ -84,7 +83,8 @@ export function buildShellSelectionMockTools(outputs: Record<string, unknown> = 
     const recorded = Object.entries(outputs).find(([command]) => callRunsCommand(call, command));
     return String(recorded?.[1] ?? 'Controlled fixture: no command was executed.');
   }, { name: definition.name, description: definition.description, schema: definition.schema }));
-  const promptSections = [createShellToolkit({ shell: unavailable }), createGithubToolkit({ shell: unavailable })]
+  const promptSections = [createShellToolkit({ shell: unavailable }), createGitToolkit({ shell: unavailable }),
+    createGithubToolkit({ shell: unavailable })]
     .map((toolkit) => ({
     id: `toolkit:${toolkit.name}`,
     owner: toolkit.name,

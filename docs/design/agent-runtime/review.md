@@ -62,35 +62,41 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 
 ### 风险控制原则
 
-整体偏宽松。shell 只有两个入口：免审核的 `inspect_shell` 用来查看，`run_shell` /
-`start_process` 用来执行。工具少、分工清楚，模型不必在多个重叠的工具之间选；
-同一个 git/gh 命令不管从哪个入口进来，审核结果都一样。2026-10-26 去掉了 git
-Toolkit 和 `git_shell` / `gh_shell`：它们和 shell 重叠，同一件事有三种走法，
-是否审核取决于模型选了哪个工具。
+整体偏宽松。设计好工具、相信模型按描述选工具。一个调用免审核，只能来自下面两种
+机制，两者都不需要逐条补规则：
+
+- **结构保证**：工具参数本身表达不了危险操作。例如 `git_push` 没有 force 参数，
+  refspec 以 `+` 或 `:` 开头会被 schema 拒绝；`git_add` 只接受显式 pathspec。
+- **只读白名单，认不出就不放行**：`inspect_shell` 只把白名单里的 git/gh 查看形式
+  当作只读，认不出的子命令、别名或全局选项一律拒绝，并提示改用会审核的
+  `run_shell`。漏判的代价是多一次审核，不会变成免审核的写操作。
+
+不在自由格式命令里"先放行日常写操作、再列举危险形式去拦"：git/gh 的参数组合
+列不完，每漏一种就是一条免审核的危险路径（2026-10-27 #1013 review 发现的路径
+checkout、`--` 后的 refspec、`gh pr checkout --force` 都属此类）。所以
+`git_shell` / `gh_shell` 和按命令免审 `run_shell` 的做法都已删除。
 
 1. **`inspect_shell` 免审核，省掉一次审核（auto review 时也省一次模型调用）。**
    用来跑 rg、cat、sed -n、git status/log/diff/show、gh pr view/diff/checks 这类
-   查看命令。模型被信任只放查看命令；黑名单兜底，拒绝时提示改用哪个工具，不追求
-   完整，不是沙箱：
+   查看命令。除 git/gh 的只读白名单外，其余靠黑名单兜底：它是引导，不是保证；
+   拒绝时提示改用哪个工具，不追求完整，不是沙箱。漏掉的情况意味着模型违背描述
+   使用工具，属于"相信模型"接受的风险。
    - 不可逆操作：rm/dd/提权/强制 kill 等，改用 `run_shell`。
    - 常见写法：重定向到文件、`sed -i`、`mv`、`cp`、`tee` 等写文件（改用文件工具或
      `run_shell`）；包管理器的安装、发布和脚本（只放行 ls/view/outdated 这类只读
      子命令）；curl 的写请求和写文件、wget 下载；`make`；运行脚本文件
      （`bash x.sh`、`source`）。
-   - git/gh 写操作，改用 `run_shell`。
+   - git/gh 不在只读白名单里的形式，改用专用写工具或 `run_shell`。
    - 不检查解释器内联代码（`python -c`、`node -e`）和其他动态代码。
-   见 `services/host/src/toolkits/shell/readOnlyShell.ts`。
-2. **`run_shell` 按命令决定是否审核。** 单独的 git/gh 命令（可以先 `cd`，用
-   `&&`、`||`、`;` 串联）沿用原来 git/gh 工具的分级：查询和日常写操作（add、
-   commit、普通 push、评论、review、创建 PR 等）直接执行，丢数据、改写共享历史、
-   合并、删除、发布、凭据与权限，以及无法识别的子命令走审核。其他命令，以及混入
-   管道、重定向、glob、变量或命令替换的命令，一律审核。见
-   `services/host/src/toolkits/shell/runShellReview.ts`，分级在
+   见 `services/host/src/toolkits/shell/readOnlyShell.ts`，git/gh 白名单在
    `services/host/src/toolkits/cli/{gitCommands,ghCommands}.ts`。
-3. **`start_process` 和需要审核的专用工具，放心让 LLM 调用。** 审核就是这类工具
-   的防线，描述里不再额外限制使用时机。
-4. **专用工具只在结构化输入确实有用时保留。** 例如 `gh_pr_create` /
-   `gh_issue_create` 的长正文不必在命令行里转义；它们是日常协作，不审核。
+2. **日常写操作用结构化工具，免审核。** `git_add`、`git_commit`、`git_push`、
+   `gh_pr_create`、`gh_issue_create` 的参数结构排除了危险形式，直接执行。只有
+   高频、且能用结构排除危险形式的操作才值得做成专用工具。
+3. **`run_shell` / `start_process` 每次审核，放心让 LLM 调用。** 审核就是这类工具
+   的防线，描述里不再额外限制使用时机。其他 git/gh 写操作（切换分支、stash、
+   rebase、评论、合并等）都走这里；auto review 结合 shell Toolkit 的
+   `reviewGuidance` 判断可恢复的日常操作和需要人工的操作。
 
 ## Auto review 领域边界
 

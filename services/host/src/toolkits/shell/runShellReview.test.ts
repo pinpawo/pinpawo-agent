@@ -14,7 +14,9 @@ test('risky git/gh forms, other programs and anything the check does not follow 
   for (const command of ['git reset --hard HEAD', 'git clean -fd', 'git push --force origin HEAD', 'gh pr merge 1 --squash',
     'gh api -X DELETE repos/o/r', 'git add . && rm -rf build', 'npm test', 'ls', 'cd /repo',
     'git log | head', 'git diff > out.patch', 'git commit -m "$(cat msg)"', 'git commit -m `x`', 'git add *.ts',
-    'GIT_DIR=x git status', 'git status &', 'git status # note', 'git status\nrm x', 'git my-alias', '', '  ']) {
+    'GIT_DIR=x git status', 'git status &', 'git status # note', 'git status\nrm x', 'git my-alias', '', '  ',
+    'git checkout file', 'git checkout HEAD file', 'git push origin -- :refs/heads/main',
+    'git push origin -- +HEAD:refs/heads/main', 'gh pr checkout 1 --force']) {
     assert.equal(needsReview(command), true, command);
   }
 });

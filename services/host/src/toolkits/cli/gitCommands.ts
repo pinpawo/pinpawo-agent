@@ -103,12 +103,51 @@ const GIT_CHANGE_SUBCOMMANDS = new Set([
   'format-patch', 'archive', 'bundle',
 ]);
 
+/**
+ * `git checkout <x>` cannot tell a branch from a path, and a path checkout
+ * overwrites that file's uncommitted changes. Only forms that cannot name a
+ * path count as switching: no operand (or `-`), or a new branch, detached
+ * HEAD or orphan with at most a start point. Switching to an existing branch
+ * goes through `git switch`.
+ */
+function checkoutOverwrites(args: readonly string[]): boolean {
+  if (args.includes('--') || hasOption(args, ['--force', '--patch', '--ours', '--theirs', '--merge',
+    '--pathspec-from-file', '--overlay', '--no-overlay'], 'fpm')) return true;
+  let creates = false;
+  const operands: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (['-b', '-B', '--orphan'].includes(arg)) {
+      creates = true;
+      index += 1;
+    } else if (/^-[bB]./.test(arg) || arg.startsWith('--orphan=') || arg === '--detach') {
+      creates = true;
+    } else if (arg === '-' || !arg.startsWith('-')) {
+      operands.push(arg);
+    }
+  }
+  return creates ? operands.length > 1 : operands.some((operand) => operand !== '-');
+}
+
+/**
+ * Push refspecs, including those after `--`: `+src:dst` forces and `:dst`
+ * deletes the remote ref.
+ */
+function pushRefspecs(args: readonly string[]) {
+  const end = args.indexOf('--');
+  const options = end === -1 ? args : args.slice(0, end);
+  return [
+    ...options.filter((arg) => !arg.startsWith('-')),
+    ...(end === -1 ? [] : args.slice(end + 1)),
+  ];
+}
+
 /** Forms that discard uncommitted work, delete refs or rewrite shared history. */
 const GIT_RISKY_FORMS: Record<string, (args: readonly string[]) => string | undefined> = {
   reset: (args) => (hasOption(args, ['--hard']) ? 'reset --hard 会丢弃未提交改动' : undefined),
   clean: (args) => (hasOption(args, ['--dry-run'], 'n') ? undefined : 'clean 会删除未跟踪文件'),
-  checkout: (args) => (args.includes('--') || args.includes('.') || hasOption(args, ['--force'], 'f')
-    ? 'checkout 会用其他版本覆盖工作区改动' : undefined),
+  checkout: (args) => (checkoutOverwrites(args)
+    ? 'checkout 可能用其他版本覆盖文件的未提交改动；切换已有分支用 git switch' : undefined),
   switch: (args) => (hasOption(args, ['--force', '--discard-changes'], 'f')
     ? 'switch --discard-changes 会丢弃工作区改动' : undefined),
   restore: (args) => (hasOption(args, ['--staged'], 'S') && !hasOption(args, ['--worktree'], 'W')
@@ -118,7 +157,7 @@ const GIT_RISKY_FORMS: Record<string, (args: readonly string[]) => string | unde
   tag: (args) => (hasOption(args, ['--delete', '--force'], 'df') ? '删除或覆盖标签' : undefined),
   push: (args) => (hasOption(args, ['--force', '--force-with-lease', '--force-if-includes',
     '--delete', '--mirror', '--prune'], 'fd')
-    || beforeDoubleDash(args).some((arg) => /^[+:]/.test(arg))
+    || pushRefspecs(args).some((arg) => /^[+:]/.test(arg))
     ? '强推或删除远端引用会改写共享历史' : undefined),
   rm: (args) => (hasOption(args, ['--force'], 'f') ? 'rm -f 会丢弃文件的本地改动' : undefined),
   reflog: (args) => (['expire', 'delete', 'drop'].includes(args[0] ?? '') ? 'reflog 删除会去掉恢复点' : undefined),

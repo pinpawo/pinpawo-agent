@@ -1,4 +1,4 @@
-import { change, type CliVerdict, READ, risky } from './cliLevels';
+import { change, type CliVerdict, hasOption, READ, risky } from './cliLevels';
 
 const GH_READ_ACTIONS: Record<string, ReadonlySet<string> | 'any'> = {
   pr: new Set(['list', 'view', 'diff', 'checks', 'status']),
@@ -29,6 +29,15 @@ const GH_CHANGE_ACTIONS: Record<string, ReadonlySet<string>> = {
   release: new Set(['download']),
   repo: new Set(['clone', 'fork']),
   gist: new Set(['create', 'edit', 'clone']),
+};
+
+/** Flags that turn an everyday action into one that loses work or rewrites shared history. */
+const GH_RISKY_FLAGS: Record<string, (args: readonly string[]) => string | undefined> = {
+  // Syncing an existing branch with --force runs `git reset --hard`.
+  'pr checkout': (args) => (hasOption(args, ['--force'], 'f')
+    ? 'gh pr checkout --force 会丢弃本地分支的未提交改动和提交' : undefined),
+  'pr update-branch': (args) => (hasOption(args, ['--rebase'])
+    ? 'gh pr update-branch --rebase 会改写 PR 分支的共享历史' : undefined),
 };
 
 /** `gh api` reads only as a GET without request fields (fields imply POST). */
@@ -64,6 +73,8 @@ export function classifyGhArgs(args: readonly string[]): CliVerdict {
       ? change(`${name} --web 会在 Host 上打开浏览器`)
       : READ;
   }
+  const danger = GH_RISKY_FLAGS[`${group} ${action ?? ''}`]?.(args.slice(2));
+  if (danger) return risky(danger);
   if (GH_CHANGE_ACTIONS[group]?.has(action ?? '')) return change(`${name} 会修改 GitHub 状态`);
   // Merging, deleting, releasing, secrets, credentials, settings and extensions.
   return risky(`${name} 影响共享状态、凭据或无法撤销`);

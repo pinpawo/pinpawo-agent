@@ -26,7 +26,8 @@ test('gh reads run anywhere without review', () => {
 test('everyday GitHub collaboration runs without review', () => {
   expectLevel(classifyGhArgs, 'gh', 'change', [
     'pr create', 'pr comment 1 --body x', 'pr review 1 --approve', 'pr edit 1 --add-label x',
-    'pr close 1', 'pr reopen 1', 'pr ready 1', 'pr checkout 1', 'issue create', 'issue comment 1 -b x',
+    'pr close 1', 'pr reopen 1', 'pr ready 1', 'pr checkout 1', 'pr checkout 1 -b local',
+    'pr update-branch 1', 'issue create', 'issue comment 1 -b x',
     'issue close 1', 'label create x', 'run rerun 1', 'run cancel 1', 'workflow run ci.yml',
     'repo clone o/r', 'pr view 1 --web', 'issue list -w',
   ]);
@@ -38,6 +39,7 @@ test('gh operations on shared state, credentials or unknown effects are risky', 
     'release delete v1', 'secret set X', 'variable delete X', 'label delete x', 'issue delete 1',
     'issue transfer 1 o/other', 'run delete 1', 'auth token', 'auth login', 'auth status --show-token',
     'extension install x', 'alias set co "pr checkout"', 'browse',
+    'pr checkout 1 --force', 'pr checkout -f 1', 'pr update-branch 1 --rebase',
     'api -X POST repos/o/r/issues', 'api -XDELETE repos/o/r', 'api --method PATCH repos/o/r',
     'api repos/o/r/issues -f title=x', 'api graphql -F query=@q.graphql', 'api repos/o/r --input body.json',
     '',

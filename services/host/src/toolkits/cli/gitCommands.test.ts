@@ -30,7 +30,9 @@ test('git reads run without review in either shell tool', () => {
 
 test('everyday git writes are changes that run without review', () => {
   expectLevel(classifyGitArgs, 'git', 'change', [
-    'add .', 'commit -m x', 'checkout main', 'checkout -b feat', 'switch -c x', 'restore --staged file',
+    'add .', 'commit -m x', 'checkout', 'checkout -', 'checkout -b feat', 'checkout -b feat origin/main',
+    'checkout -B feat HEAD~1', 'checkout --orphan gh-pages', 'checkout --detach HEAD~1', 'checkout -q -b feat',
+    'switch main', 'switch -c x', 'restore --staged file',
     'reset --soft HEAD~1', 'reset HEAD file', 'stash', 'stash pop', 'fetch --prune', 'pull',
     'merge main', 'rebase main', 'cherry-pick abc', 'revert abc', 'push', 'push -u origin HEAD',
     'branch new-branch', 'branch -d old', 'branch -m a b', 'tag v1.0', 'tag -a v1 -m msg',
@@ -42,10 +44,15 @@ test('everyday git writes are changes that run without review', () => {
 test('git forms that lose work, rewrite shared history or run programs are risky', () => {
   expectLevel(classifyGitArgs, 'git', 'risky', [
     'reset --hard HEAD', 'clean -fd', 'checkout -- file', 'checkout .', 'checkout -f main',
+    // a single operand may be a path, which overwrites its uncommitted changes
+    'checkout file', 'checkout HEAD file', 'checkout main', 'checkout -b feat main file',
+    'checkout --ours file', 'checkout -p', 'checkout --pathspec-from-file=list',
     'switch --discard-changes main', 'restore file', 'restore --staged --worktree file',
     'stash drop', 'stash clear', 'branch -D old', 'branch -f main HEAD~1', 'tag -d v1.0',
     'push --force origin HEAD', 'push -f', 'push --force-with-lease', 'push --delete origin x',
-    'push origin :x', 'push origin +HEAD:main', 'rm -f file', 'reflog expire --all',
+    'push origin :x', 'push origin +HEAD:main',
+    // refspecs after `--` are still refspecs
+    'push origin -- :refs/heads/main', 'push origin -- +HEAD:refs/heads/main', 'rm -f file', 'reflog expire --all',
     'gc --prune=now', 'update-ref -d refs/heads/x', 'worktree remove --force ../x',
     '-c core.pager=sh status', '--exec-path=/tmp log', 'my-alias', 'filter-branch', '',
   ]);

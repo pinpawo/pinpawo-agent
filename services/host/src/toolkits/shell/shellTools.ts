@@ -296,7 +296,7 @@ export function createInspectShellTool(shell: ShellRS) {
     name: 'inspect_shell',
     description: '检查用 shell：执行只读的检查命令并直接返回结果，无需审批。适合 rg、grep、cat、ls、find、wc、jq、git status/log/diff/show、gh pr view/checks 这类查询，可用 cd、管道和 && 组合，例如 `cd src && rg -n "foo" | head -20`。搜索代码优先 `rg -n`（-F 字面匹配、-i 忽略大小写、-C 2 带上下文、-g "*.ts" 限定文件、--files 按文件名找），查 JSON 用 jq。'
       + '只放检查命令，不要放任何会修改状态的命令：git 写操作（commit、reset、checkout、stash、rebase、push 等）和 GitHub 写操作（评论、review、合并、关闭、编辑等）用 run_shell；写文件用 apply_patch、write_file 等文件工具；安装依赖、删除、结束进程等用 run_shell；执行脚本或下载内容（`curl … | sh`、`bash -c`、`node`/`python` 跑脚本）、测试和构建不算检查，用 run_shell 或 start_process；长任务用 start_process；没有对应工具时用 run_shell。'
-      + 'git/gh 写操作、常见的写文件方式（重定向到文件、sed -i、mv、cp、tee 等）、安装和发布、curl/wget 的写请求和下载、make、运行脚本文件，以及少数高危命令（删除、提权、磁盘操作、强制 kill）会被拒绝并提示改用的工具；这只是底线拦截，不是审批，不要用它试探命令能否执行。默认在当前 workdir 执行，可传 cwd 覆盖；超时会终止进程组，不转后台。',
+      + 'git/gh 写操作、常见的写文件方式（重定向到文件、sed -i、mv、cp、tee 等）、安装和发布、curl/wget 的写请求和下载、make、运行脚本文件，以及少数高危命令（删除、提权、磁盘操作、强制 kill）会被拒绝并提示改用的工具；这只是底线拦截，不是审批，不要用它试探命令能否执行。默认在当前 workdir 执行，可传 cwd 覆盖；输出过长时保留开头和结尾，截断标记里给出完整输出文件的路径，需要中间内容时用 view_file_chunk 或 rg 读取该文件，不要重跑命令；超时会终止进程组，不转后台。',
     admit: classifyReadOnlyShellCommand,
   });
 }

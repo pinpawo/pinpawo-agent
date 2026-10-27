@@ -246,7 +246,20 @@ Toolkit 契约的空壳实现。
 
 git 和 GitHub 的查看经 `inspect_shell` 运行 `git` / `gh`；git、github Toolkit 只提供
 参数结构排除了危险形式的写工具，其他 git/gh 写操作经 `run_shell` 并审核
-（2026-10-27 起，原来的查看工具、`git_shell`、`gh_shell` 等已删除）。
+（2026-10-27 起，原来的查看工具、`git_shell`、`gh_shell` 等已删除）。因此
+`uses` 里只有 `git` 或 `github` 的 Capability 只能做这几个写操作，看不了状态、
+diff、PR 或 issue；需要查看或其他 git/gh 操作时必须显式加上 `shell`。Registry
+不会替 Capability 补上 `shell`，`uses` 仍是完整的权限边界。
+
+#### 从 git / github 查看工具迁移
+
+| 原来用到的工具 | 新 `uses` |
+|---|---|
+| `git_status`、`git_diff`、`git_log`、`git_branch`、`git_show` | 加上 `shell`（经 `inspect_shell`） |
+| `git_shell` | 加上 `shell`（经 `inspect_shell` 或 `run_shell`） |
+| `gh_pr_view`、`gh_pr_diff`、`gh_pr_comments`、`gh_issue_list`、`gh_issue_view`、`gh_issue_comments`、`gh_read_content` | 加上 `shell`（经 `inspect_shell`） |
+| `gh_shell` | 加上 `shell`（经 `inspect_shell` 或 `run_shell`） |
+| 只用 `git_add`、`git_commit`、`git_push`、`gh_pr_create`、`gh_issue_create` | 不变 |
 
 #### 从 `bash` 迁移
 
@@ -256,12 +269,11 @@ git 和 GitHub 的查看经 `inspect_shell` 运行 `git` / `gh`；git、github T
 | 旧 `uses` | 新 `uses` |
 |---|---|
 | `bash` | `files`、`shell`、`web`，按需取其子集 |
-| `git`，并使用 `gh_*` 工具 | `git`、`github` |
-| `git`，只用本地 git | `git` |
+| `git`，并使用 `gh_*` 工具 | `git`、`github`，查看和其他操作另加 `shell` |
+| `git`，只用本地 git | `git`，查看和其他操作另加 `shell` |
 | `project-inspection` | 不变 |
 
-operation kind 随 Toolkit 名改变，例如 `bash.run_shell` 变为 `shell.run_shell`、
-`git.gh_pr_view` 变为 `github.gh_pr_view`。
+operation kind 随 Toolkit 名改变，例如 `bash.run_shell` 变为 `shell.run_shell`。
 
 ## 4. Registry 编译
 

@@ -4,7 +4,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { AgentToolkit } from '@pinpawo/pet-agent';
+import { compileAgentRegistry, defineInstructionDocument, type AgentToolkit } from '@pinpawo/pet-agent';
+import { createGithubToolkit } from '../github';
+import { createShellToolkit } from '../shell';
 import { PosixShellRS } from '../shellRS';
 import type { ShellRS } from '../shellRS/shellRS';
 import { createGitToolkit } from './index';
@@ -143,4 +145,29 @@ test('git ended by a signal reports an error, not an empty success', async () =>
     await gitCommit.invoke({ message: 'x' } as never, { context: sessionContext }),
     'Error: git commit was terminated by a signal',
   );
+});
+
+test('git and github alone grant only their write tools; reads need an explicit shell', () => {
+  const shell = new PosixShellRS();
+  const capability = (name: string, uses: string[]) => ({
+    name,
+    description: name,
+    uses,
+    instructions: defineInstructionDocument({ content: `# ${name}` }),
+  });
+  const registry = compileAgentRegistry({
+    toolkits: [createShellToolkit({ shell }), createGitToolkit({ shell }), createGithubToolkit({ shell })],
+    capabilities: [
+      capability('git_only', ['git']),
+      capability('github_only', ['github']),
+      capability('git_with_shell', ['git', 'shell']),
+    ],
+  });
+  const toolNames = (name: string) => registry.capabilities.find((item) => item.capability.name === name)?.toolNames;
+
+  assert.deepEqual(registry.unavailableCapabilities, []);
+  // Old Capabilities still compile, but are never silently widened to shell.
+  assert.deepEqual(toolNames('git_only'), ['git_add', 'git_commit', 'git_push']);
+  assert.deepEqual(toolNames('github_only'), ['gh_pr_create', 'gh_issue_create']);
+  assert.ok(toolNames('git_with_shell')?.includes('inspect_shell'));
 });

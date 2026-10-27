@@ -64,10 +64,12 @@ resolved Host settings through `resolveHostExecutionConfig()` from
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.
 
-`pinpawo-studio init` creates the shipped three-Pet configuration, Capabilities,
-and initial `wiki/PROJECT.md` in the selected workdir without overwriting
-existing files. The package template itself contains no `.pinpawo/` runtime
-directory or generated state.
+`pinpawo-studio init` creates the shipped three-Pet configuration and Capabilities
+in the selected workdir, and an initial `PROJECT.md` in a separate durable Studio
+knowledge directory (`~/.pinpawo/studios/<random-uuid>/wiki/`). The absolute path
+is stored in the Project Files Plugin's `wikiDirectory` option and printed by init.
+Existing files are not overwritten. The package template itself contains no
+`.pinpawo/` runtime directory or generated state.
 
 The default template includes an HTTP Trigger for external requests. Set
 `PINPAWO_STUDIO_TRIGGER_SECRET` before starting the Host, or replace that

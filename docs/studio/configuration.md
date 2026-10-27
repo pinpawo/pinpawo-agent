@@ -26,7 +26,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
     { "id": "@pinpawo-plugin/channel" },
-    { "id": "@pinpawo-plugin/project-files", "options": { "directory": "wiki" } }
+    { "id": "@pinpawo-plugin/project-files", "options": { "wikiDirectory": "/home/user/.pinpawo/studios/example-uuid/wiki" } }
   ]
 }
 ```
@@ -176,11 +176,22 @@ request Trigger requires `PINPAWO_STUDIO_TRIGGER_SECRET`; it does not automatica
 update Wiki on task or dispatch completion. Deliveries live in the Studio database and the
 Plugin no longer takes a `databasePath` option; deliveries in an earlier `trigger.sqlite` are not migrated.
 
-`@pinpawo-plugin/project-files` is an optional, read-only projection of Markdown
-under a workdir-relative directory (default `wiki`). It contributes
+`@pinpawo-plugin/project-files` projects Markdown from a configured Wiki root into
 `GET /knowledge` and `GET /knowledge/document?path=...` through the HTTP route
-hook. It defines no Toolkit, does not write files, and does not make Studio or
-the HTTP Plugin own project knowledge.
+hook. New Studio initialization creates `~/.pinpawo/studios/<random-uuid>/wiki/`
+and records its absolute path as `options.wikiDirectory`; it does not derive identity
+from the project name or worktree. This directory is durable user knowledge and must
+be included in backup and migration. Knowledge and the `project_files` Toolkit use
+the same root. The Toolkit lists and reads documents and writes with an expected digest
+through the existing review policy; a conflict requires re-reading and merging.
+
+For existing configurations, `options.directory` remains a workdir-relative root
+(default `wiki`) for compatibility; it is not silently migrated. To move an existing
+Wiki, copy it to a separate durable directory, verify every file and configure its
+absolute path as `wikiDirectory` (remove `directory` if present), then restart the
+Host and verify Knowledge before considering cleanup. Preserve conflicting or changed
+files and do not silently delete an existing Wiki. Read/write paths remain constrained
+to the configured root; client requests cannot select arbitrary filesystem roots.
 
 Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
 broker. Studio matches Plugin and hook names and owns lifecycle cleanup without

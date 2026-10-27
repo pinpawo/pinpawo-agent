@@ -6,6 +6,7 @@ import {
 import {
   initStudioWorkdir,
   type InitStudioWorkdirOptions,
+  type InitStudioWorkdirResult,
 } from './studioTemplate';
 import {
   launchStudioTmux,
@@ -33,8 +34,9 @@ Options:
   --url <url>            Studio Console URL (default: http://127.0.0.1:5173)
   -h, --help             display help
 
-Init creates the shipped Studio configuration, Pet Capabilities, and initial
-Wiki files in the selected workdir without overwriting existing files.
+Init creates the shipped Studio configuration and Pet Capabilities in the
+selected workdir, and initial Wiki files in a separate Studio data directory.
+It does not overwrite existing files.
 Tmux connects to an existing Host and builds a tiled TUI for its Pets. Console
 starts the separately served Studio Console Web when needed, then opens it in
 the default browser.
@@ -44,10 +46,7 @@ ${STUDIO_OPERATOR_HELP}
 
 export type StudioHostCliHandlers = {
   runHost?: (options: StudioHostProcessOptions) => Promise<void> | void;
-  initWorkdir?: (options: InitStudioWorkdirOptions) => Promise<{
-    workdir: string;
-    files: string[];
-  }>;
+  initWorkdir?: (options: InitStudioWorkdirOptions) => Promise<InitStudioWorkdirResult>;
   launchTmux?: (options: StudioTmuxOptions) => Promise<void> | void;
   openConsole?: (options: StudioConsoleOptions) => Promise<void> | void;
   writeOutput?: (text: string) => void;
@@ -213,7 +212,7 @@ export async function runStudioHostCli(
   if (parsed.command === 'init') {
     const result = await (handlers.initWorkdir ?? initStudioWorkdir)(parsed.options);
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(
-      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\n`,
+      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\nWiki: ${result.wikiDirectory}\n`,
     );
     return;
   }

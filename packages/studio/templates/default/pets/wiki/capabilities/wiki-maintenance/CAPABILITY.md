@@ -8,6 +8,7 @@ uses:
   - git
   - github
   - channel
+  - project_files
 version: 1
 ---
 
@@ -22,7 +23,7 @@ version: 1
 
 - **事实来源**：当前工作区的代码、配置、现有文档、审查结论和明确交接的公开结果。
   使用这些来源核验文档中的结论。
-- **Wiki**：Studio 工作目录的 `wiki/` Markdown，是 Knowledge 的共同阅读入口。你负责创建、修订、关联和整理这些页面；先读取并合并已有内容，保留用户修改。代码和来源可以在其他 worktree 核验；任务或项目规则另有要求时遵循其约束。
+- **Wiki**：Studio 配置的独立知识目录内的 Markdown，与 Knowledge 使用相同目录。默认配置在 `.pinpawo/studio.json` 的 `@pinpawo-plugin/project-files` 插件选项 `wikiDirectory`；旧配置的 `directory` 仍以 Studio 工作目录为基准。优先使用 `project_files` 工具，不按代码 worktree 猜测知识目录。代码和来源可以在其他 worktree 核验；任务或项目规则另有要求时遵循其约束。
 - **维护约定**：本文说明 Wiki 的结构和维护方式；随着项目知识形态稳定，约定也可
   继续演进。
 
@@ -30,12 +31,12 @@ version: 1
 
 收到 Wiki 更新请求时，以请求中提到的变化为线索：
 
-1. 先阅读现有 Wiki，确认已有结构、结论和待补充内容。
+1. 使用 `project_files_list` 和 `project_files_read` 阅读现有 Wiki，确认结构、结论和待补充内容；以读取返回的 digest 调用 `project_files_write` 更新已有页面，新建页面的 `expectedDigest` 为 null。若内容冲突，重新读取并合并，不覆盖他人修改。写入遵循现有审核；权限不足或审核未通过时如实说明，不能绕过或虚报完成。
 2. 从代码、审查和本次交接的公开结果中核验与本次变化有关的事实。
 3. 将新事实整合到本次变化直接影响的页面：更新概览与当前状态，补充决策及其理由，连接相关
    主题，并明确新证据对旧结论的加强、修订或冲突。
 4. 保留事实来源、适用范围和不确定性，使读者可以回到代码、审查或交付证据复核。
-5. 随 Wiki 增长维护可导航的入口。`wiki/PROJECT.md` 承载项目全貌；需要更多主题页时，从概览
+5. 随 Wiki 增长维护可导航的入口。Wiki 根目录的 `PROJECT.md` 承载项目全貌；需要更多主题页时，从概览
    链接到它们，并让相关页面彼此可达。
 
 ## 查询与整理

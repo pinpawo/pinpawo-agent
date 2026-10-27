@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { test } from 'node:test';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initStudioWorkdir, type StudioPlugin } from '@pinpawo/studio-core';
 
-test('Studio init enables Channel and keeps only an explicit external-request Trigger', async () => {
+test('Studio init enables Channel and keeps only an explicit external-request Trigger', async (t) => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-init-e2e-'));
-  await initStudioWorkdir({ workdir });
+  const studioDataRoot = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-data-'));
+  t.after(async () => { await rm(workdir, { recursive: true, force: true }); await rm(studioDataRoot, { recursive: true, force: true }); });
+  await initStudioWorkdir({ workdir, studioDataRoot });
   const config = await readFile(path.join(workdir, '.pinpawo', 'studio.json'), 'utf8');
   const parsed = JSON.parse(config) as {
     plugins: Array<{
@@ -40,7 +42,8 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   const { createStudioPlugin: filesFactory } = await import('@pinpawo-plugin/project-files');
   const { createTriggerPlugin } = await import('@pinpawo-plugin/trigger');
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-retired-workdir-'));
-  await initStudioWorkdir({ workdir });
+  const studioDataRoot = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-data-'));
+  const { wikiDirectory } = await initStudioWorkdir({ workdir, studioDataRoot });
   const historyDir = path.join(workdir, '.pinpawo', 'kanban');
   await mkdir(historyDir, { recursive: true });
   const history = path.join(historyDir, 'tasks.sqlite');
@@ -48,7 +51,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   await writeFile(history, archived);
   const configPath = path.join(workdir, '.pinpawo', 'studio.json');
   const beforeConfig = await readFile(configPath);
-  const beforeWiki = await readFile(path.join(workdir, 'wiki', 'PROJECT.md'));
+  const beforeWiki = await readFile(path.join(wikiDirectory, 'PROJECT.md'));
   const token = 'explicit-wiki-test-token';
   const http = createStudioHttpPlugin({ port: 0, authToken: token });
   const factories = new Map<string, (
@@ -97,7 +100,11 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     const preferred = registry.capabilities.find(({ capability }) => capability.name === pet.defaultCapabilityName);
     assert.ok(preferred, `${pet.petId} retains an executable default Capability`);
     assert.ok(preferred.toolNames.includes('channel_read_context'));
-    if (pet.petId === 'wiki') assert.ok(preferred.toolNames.includes('write_file'));
+    if (pet.petId === 'wiki') {
+      for (const name of ['project_files_list', 'project_files_read', 'project_files_write']) {
+        assert.ok(preferred.toolNames.includes(name), `Wiki Capability binds ${name}`);
+      }
+    }
   }
   const received: Array<{ petId: string; request: string }> = [];
   const studio = await createStudio({
@@ -116,6 +123,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   t.after(async () => {
     await studio.shutdown();
     await rm(workdir, { recursive: true, force: true });
+    await rm(studioDataRoot, { recursive: true, force: true });
   });
   const base = `http://127.0.0.1:${http.address()!.port}`;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -132,6 +140,38 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   const document = await fetch(base + '/knowledge/document?path=PROJECT.md', { headers });
   assert.equal(document.status, 200);
   assert.equal((await document.json() as { document: { content: string } }).document.content, beforeWiki.toString());
+  // Verify the exact Toolkit definitions selected by the Wiki Capability resolve to
+  // the same root exposed by HTTP. Direct invoke here checks storage integration;
+  // review metadata is separately checked; it does not simulate an Agent approval.
+  const projectFiles = toolkits.find(({ name }) => name === 'project_files');
+  assert.ok(projectFiles);
+  const findKnowledgeTool = (name: string) => {
+    const definition = projectFiles.tools.find(({ tool }) => tool.name === name);
+    assert.ok(definition, `${name} is registered`);
+    return definition;
+  };
+  const listTool = findKnowledgeTool('project_files_list');
+  const readTool = findKnowledgeTool('project_files_read');
+  const writeTool = findKnowledgeTool('project_files_write');
+  const initialList = JSON.parse(await listTool.tool.invoke({}) as string);
+  assert.ok(initialList.documents.some(({ path: itemPath }: { path: string }) => itemPath === 'PROJECT.md'));
+  const current = JSON.parse(await readTool.tool.invoke({ path: 'PROJECT.md' }) as string);
+  assert.equal(current.document.content, beforeWiki.toString());
+  assert.match(current.document.digest, /^[a-f0-9]{64}$/);
+  assert.ok(writeTool.review?.authorization?.buildMatcher, 'writes require exact review');
+  assert.equal(writeTool.review?.canAutoApprove, undefined, 'writes are not silently auto-approved');
+  const input = { path: 'smoke.md', content: '# Knowledge from the Wiki Pet\n', expectedDigest: null };
+  const review = await writeTool.review?.request({
+    toolkitName: 'project_files', toolName: 'project_files_write', input,
+    operation: writeTool.operation, reviewCapabilities: { humanReview: true, sessionAuthorization: true },
+  });
+  assert.ok(review && 'schemaVersion' in review && review.view.kind === 'operation');
+  await writeTool.tool.invoke(input);
+  const newDocument = await fetch(base + '/knowledge/document?path=smoke.md', { headers });
+  assert.equal(newDocument.status, 200);
+  assert.equal((await newDocument.json() as { document: { content: string } }).document.content, input.content);
+  assert.equal(await readFile(path.join(wikiDirectory, 'smoke.md'), 'utf8'), input.content);
+  await assert.rejects(readFile(path.join(workdir, 'wiki', 'smoke.md')), /ENOENT/);
   studio.notify({
     source: 'resident-pet', type: 'dispatch.completed',
     occurredAt: new Date().toISOString(),
@@ -146,5 +186,5 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   assert.deepEqual(received, [{ petId: 'wiki', request }]);
   assert.deepEqual(await readFile(history), archived);
   assert.deepEqual(await readFile(configPath), beforeConfig);
-  assert.deepEqual(await readFile(path.join(workdir, 'wiki', 'PROJECT.md')), beforeWiki);
+  assert.deepEqual(await readFile(path.join(wikiDirectory, 'PROJECT.md')), beforeWiki);
 });

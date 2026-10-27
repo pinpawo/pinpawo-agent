@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
+import { createProjectFilesToolkit } from './projectFilesToolkit';
 import {
   ProjectFileTooLargeError,
   ProjectFilesService,
@@ -13,9 +14,9 @@ export type CreateProjectFilesPluginOptions = ProjectFilesServiceOptions & {
 };
 
 /**
- * Project Files only contributes HTTP routes. Narrowing the start parameter
- * keeps that fact in the type: this Plugin cannot reach dispatch, Pets, the
- * event bus, or dispatch queues.
+ * Project Files contributes a scoped Toolkit and, at start, HTTP routes. Its
+ * lifecycle only needs hooks: it cannot reach dispatch, Pets, the event bus,
+ * or dispatch queues.
  */
 export type ProjectFilesPluginContext = Pick<StudioPluginContext, 'hooks'>;
 
@@ -37,7 +38,7 @@ export function createProjectFilesPlugin(
 
   return {
     name: 'project-files',
-    toolkits: [],
+    toolkits: [createProjectFilesToolkit(service)],
     service,
     start: (context) => {
       if (started) throw new Error('Project Files Plugin is already started.');
@@ -95,14 +96,25 @@ export function createProjectFilesPlugin(
 
 function readInstalledOptions(value: Record<string, unknown> | undefined): {
   directory: string;
+  wikiDirectory?: string;
   maxDocuments?: number;
   maxFileBytes?: number;
   httpRoute?: false | { pluginName?: string };
 } {
   const options = value ?? {};
-  const allowed = new Set(['directory', 'maxDocuments', 'maxFileBytes', 'httpRoute']);
+  const allowed = new Set(['directory', 'wikiDirectory', 'maxDocuments', 'maxFileBytes', 'httpRoute']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Project Files Plugin option "${unknown}" is not supported.`);
+  const wikiDirectory = options.wikiDirectory;
+  if (wikiDirectory !== undefined && options.directory !== undefined) {
+    throw new Error('Project Files Plugin directory and wikiDirectory cannot both be configured.');
+  }
+  if (wikiDirectory !== undefined && (
+    typeof wikiDirectory !== 'string' || !wikiDirectory.trim()
+    || wikiDirectory.includes('\0') || !path.isAbsolute(wikiDirectory.trim())
+  )) {
+    throw new Error('Project Files Plugin wikiDirectory must be an absolute path.');
+  }
   const directory = options.directory ?? 'wiki';
   if (typeof directory !== 'string' || !directory.trim() || path.isAbsolute(directory)) {
     throw new Error('Project Files Plugin directory must be a relative path.');
@@ -127,6 +139,7 @@ function readInstalledOptions(value: Record<string, unknown> | undefined): {
   }
   return {
     directory: normalized,
+    ...(typeof wikiDirectory === 'string' ? { wikiDirectory: path.resolve(wikiDirectory.trim()) } : {}),
     ...(typeof options.maxDocuments === 'number' ? { maxDocuments: options.maxDocuments } : {}),
     ...(typeof options.maxFileBytes === 'number' ? { maxFileBytes: options.maxFileBytes } : {}),
     ...(httpRoute === false
@@ -140,9 +153,12 @@ export function createStudioPlugin(
   environment: { workdir: string },
 ): ProjectFilesPlugin {
   const options = readInstalledOptions(value);
+  // Only trusted installation configuration selects a knowledge root; HTTP
+  // clients can request relative Markdown paths within that root, never roots.
+  const rootDir = options.wikiDirectory ?? path.join(environment.workdir, options.directory);
   return createProjectFilesPlugin({
-    rootDir: path.join(environment.workdir, options.directory),
-    boundaryDir: environment.workdir,
+    rootDir,
+    boundaryDir: options.wikiDirectory ?? environment.workdir,
     ...(options.maxDocuments === undefined ? {} : { maxDocuments: options.maxDocuments }),
     ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
     ...(options.httpRoute === undefined ? {} : { httpRoute: options.httpRoute }),

@@ -16,6 +16,8 @@ type Props = {
   url: string; token: string; connected: boolean; refreshVersion: number;
   /** A client key or JWT: no dispatch queues or Pet sessions, which are the local token's. */
   clientMode?: boolean;
+  /** Open the local project's existing Wiki; not available to Channel-only clients. */
+  onOpenKnowledge?: () => void;
   active?: boolean;
   pets: { petId: string; name: string }[];
   petsReady?: boolean;
@@ -28,7 +30,7 @@ type Props = {
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], routingSkips = [], failures = [], clientMode = false }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<OpenChannel | null>(null);
@@ -282,6 +284,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           onClick={() => { setActivityOpen(false); setNavigationOpen(true); }}>☰</button>}
         <div className="channel-heading"><h2>{selectedChannel?.title ?? 'Channel workspace'}</h2>
           <p title={selectedChannel?.description}>{selectedChannel?.description ?? 'A shared conversation between people and Pets.'}</p></div>
+        {onOpenKnowledge && !clientMode && <button className="channel-panel-toggle channel-wiki-link" type="button"
+          aria-label="View project Wiki" onClick={onOpenKnowledge}>Wiki</button>}
         <button className="channel-panel-toggle activity-toggle" type="button" aria-label={activityOpen ? 'Hide Channel details' : 'Show Channel details'}
           aria-expanded={activityOpen} aria-controls="channel-activity-panel" onClick={() => { setNavigationOpen(false); setActivityOpen(value => !value); }}>
           Members <span>{members.length}</span>

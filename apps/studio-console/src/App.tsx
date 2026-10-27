@@ -9,6 +9,7 @@ import React, {
 import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, type DispatchRecord } from './dispatchActivity';
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
+import { KnowledgeDocument } from './KnowledgeDocument';
 import { appendChannelDeliveries, type ChannelDelivery, type ChannelRoutingSkip } from './channelData';
 import { Bell, BookOpen, CalendarClock, MessagesSquare, Plug, Zap, type LucideIcon } from 'lucide-react';
 import logoMark from '../../../assets/brand/pinpawo-primary-white.svg';
@@ -140,6 +141,9 @@ export function App() {
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
   const [knowledge, setKnowledge] = useState<Resource<ProjectDocumentSummary[]>>(empty);
   const [selectedDocument, setSelectedDocument] = useState<ProjectDocument | null>(null);
+  const [knowledgeAnchor, setKnowledgeAnchor] = useState('');
+  const knowledgeRequest = useRef(0);
+  const knowledgeListRequest = useRef(0);
   const [dispatches, setDispatches] = useState<DispatchRecord[]>([]);
   const [schedulerHistory, setSchedulerHistory] = useState<HistoryEvent[]>([]);
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
@@ -180,6 +184,7 @@ export function App() {
         setPetsReady(true);
         return;
       }
+      const listRequest = ++knowledgeListRequest.current;
       const [scheduler, notice, trigger, projectFiles, schedulerEvents, triggerEvents] = await Promise.all([
         read<{ schedules: Schedule[] }>('/scheduler').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ notices: Notice[] }>('/notices').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
@@ -197,12 +202,14 @@ export function App() {
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
       setNotices({ ...notice, value: notice.value?.notices ?? null });
       setTriggers(trigger);
-      setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
-      setSelectedDocument((current) => (
-        current && projectFiles.value?.documents.some(({ path }) => path === current.path)
-          ? current
-          : null
-      ));
+      if (listRequest === knowledgeListRequest.current) {
+        setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
+        setSelectedDocument((current) => (
+          current && projectFiles.value?.documents.some(({ path }) => path === current.path)
+            ? current
+            : null
+        ));
+      }
       setSchedulerHistory(schedulerEvents.value?.events ?? []);
       setTriggerHistory(triggerEvents.value?.events ?? []);
     };
@@ -323,7 +330,14 @@ export function App() {
     }
     const nextToken = connectionTokenDraft.trim();
     observationEpoch.current++;
+    knowledgeRequest.current++;
+    knowledgeListRequest.current++;
     activeHost.current = nextUrl;
+    if (nextUrl !== normalizedUrl || nextToken !== token) {
+      setKnowledge(empty());
+      setSelectedDocument(null);
+      setKnowledgeAnchor('');
+    }
     if (nextUrl !== normalizedUrl) {
       setPets([]);
       setChannelDeliveries([]);
@@ -332,8 +346,6 @@ export function App() {
       setSchedules(empty());
       setNotices(empty());
       setTriggers(empty());
-      setKnowledge(empty());
-      setSelectedDocument(null);
       setSchedulerHistory([]);
       setTriggerHistory([]);
       setDispatchGoal('');
@@ -362,7 +374,13 @@ export function App() {
     return value as T;
   };
 
-  const openDocument = async (documentPath: string) => {
+  const openDocument = async (documentPath: string, anchor = '') => {
+    if (selectedDocument?.path === documentPath && anchor) {
+      knowledgeRequest.current++;
+      setKnowledgeAnchor(anchor);
+      return;
+    }
+    const request = ++knowledgeRequest.current;
     try {
       const response = await fetch(
         `${normalizedUrl}/knowledge/document?path=${encodeURIComponent(documentPath)}`,
@@ -375,16 +393,37 @@ export function App() {
       if (!response.ok || !value?.document) {
         throw new Error(value?.error ?? `Knowledge document failed (${response.status.toString()}).`);
       }
+      if (request !== knowledgeRequest.current || activeHost.current !== normalizedUrl) return;
+      setKnowledgeAnchor(anchor);
       setSelectedDocument(value.document);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      if (request === knowledgeRequest.current && activeHost.current === normalizedUrl)
+        setNotice(error instanceof Error ? error.message : String(error));
     }
   };
 
+  useEffect(() => {
+    if (page !== 'knowledge' || selectedDocument || !knowledge.value?.length) return;
+    const initial = knowledge.value.find(({ path }) => path === 'PROJECT.md') ?? knowledge.value[0];
+    void openDocument(initial.path);
+  }, [page, knowledge.value, selectedDocument]);
+
   const reloadKnowledge = async () => {
+    const epoch = observationEpoch.current;
+    const listRequest = ++knowledgeListRequest.current;
+    const documentRequest = knowledgeRequest.current;
+    const current = () => epoch === observationEpoch.current && listRequest === knowledgeListRequest.current;
     try {
       const response = await fetch(`${normalizedUrl}/knowledge`, { headers });
+      if (!current()) return;
+      if (response.status === 401 || response.status === 403) {
+        knowledgeRequest.current++;
+        setKnowledge({ value: null, unavailable: false, error: 'Knowledge access is no longer available.' });
+        setSelectedDocument(null);
+        return;
+      }
       if (response.status === 404) {
+        if (documentRequest !== knowledgeRequest.current) return;
         setKnowledge({ value: null, unavailable: true });
         setSelectedDocument(null);
         return;
@@ -393,19 +432,25 @@ export function App() {
         documents?: ProjectDocumentSummary[];
         error?: string;
       } | null;
+      if (!current()) return;
       if (!response.ok || !value?.documents) {
         throw new Error(value?.error ?? `Knowledge refresh failed (${response.status.toString()}).`);
       }
       setKnowledge({ value: value.documents, unavailable: false });
-      if (selectedDocument?.path
-        && value.documents.some(({ path }) => path === selectedDocument.path)) {
-        await openDocument(selectedDocument.path);
-      } else {
-        setSelectedDocument(null);
+      // A newer page or anchor selection wins over a slower list refresh.
+      if (documentRequest === knowledgeRequest.current) {
+        if (selectedDocument?.path
+          && value.documents.some(({ path }) => path === selectedDocument.path)) {
+          await openDocument(selectedDocument.path);
+        } else {
+          setSelectedDocument(null);
+          const initial = value.documents.find(({ path }) => path === 'PROJECT.md') ?? value.documents[0];
+          if (initial) await openDocument(initial.path);
+        }
       }
-      setNotice('Knowledge refreshed.');
+      if (current()) setNotice('Knowledge refreshed.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      if (current()) setNotice(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -544,7 +589,8 @@ export function App() {
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
-            deliveries={channelDeliveries} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode} />
+            deliveries={channelDeliveries} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode}
+            onOpenKnowledge={identity?.scope === 'studio' ? () => setPage('knowledge') : undefined} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>Connection failed</strong>
@@ -581,7 +627,7 @@ export function App() {
           <History title="Trigger history" events={triggerHistory} />
         </> : unavailable(triggers, 'Trigger'))}
         {page === 'knowledge' && (knowledge.value ? <>
-          <div className="section-title"><span>Project Markdown</span><span><button className="title-action" onClick={() => { void reloadKnowledge(); }} type="button">Refresh</button><b>{knowledge.value.length}</b></span></div>
+          <div className="section-title"><span>Project Wiki</span><span><button className="title-action" onClick={() => { void reloadKnowledge(); }} type="button">Refresh</button><b>{knowledge.value.length}</b></span></div>
           <div className="knowledge-layout">
             <div className="rows knowledge-files">{knowledge.value.map((document) => (
               <button
@@ -596,8 +642,13 @@ export function App() {
             ))}</div>
             <article className="knowledge-document">
               {selectedDocument
-                ? <><h2>{selectedDocument.path}</h2><pre>{selectedDocument.content}</pre></>
-                : <div className="empty-state"><strong>Select a Markdown document</strong><span>Knowledge remains ordinary project files; this view is read-only.</span></div>}
+                ? <><div className="knowledge-document-path">{selectedDocument.path}</div>
+                  <KnowledgeDocument path={selectedDocument.path} content={selectedDocument.content}
+                    paths={knowledge.value.map(({ path }) => path)} anchor={knowledgeAnchor}
+                    onNavigate={(path, anchor) => { void openDocument(path, anchor); }} /></>
+                : knowledge.value.length === 0
+                  ? <div className="empty-state"><strong>No Wiki pages yet</strong><span>Project Wiki pages will appear here when they are added to the project.</span></div>
+                  : <div className="empty-state"><strong>Select a Wiki page</strong><span>The project Wiki is read-only here.</span></div>}
             </article>
           </div>
         </> : unavailable(knowledge, 'Project Files'))}

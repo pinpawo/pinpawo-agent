@@ -13,7 +13,7 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 | Scheduler | `/scheduler`、`/scheduler/events`；创建一次性计划与取消未触发计划。 |
 | Notice | `/notices`；读取持久通知，不控制运行。 |
 | Trigger | `/triggers`、`/triggers/events`；查看定义、交付历史与外部接收说明。 |
-| Knowledge | Project Files 的 `/knowledge*` 只读 Markdown；显式刷新，不提供编辑或图索引。 |
+| Knowledge | Project Files 的 `/knowledge*` 只读项目 Wiki；默认展示 `PROJECT.md`，渲染 Markdown，支持目录、Wiki 内链接与锚点导航和显式刷新，不提供编辑或图索引。 |
 
 ## Channel 布局与交互
 
@@ -31,6 +31,7 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 
 正文完整显示；宽代码在块内滚动。普通连续笔记可视觉分组，引用保留独立边界。
 每条消息保留稳定 ID，引用只展示一层摘要并定位原文。技术身份放在展开详情和复制操作。
+Channel 标题栏向本地 Studio 身份提供 Wiki 入口，打开相同的项目 Knowledge 页面；Channel-only client 不提供该入口。
 Channel 只显示成员的公开消息；工具调用和运行过程不在 Channel 里显示。
 登记 label 用于显示，同名选择器携带身份，移除作者标明历史身份。
 

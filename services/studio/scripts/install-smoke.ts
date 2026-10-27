@@ -9,7 +9,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { startPackageRegistry, type RegistryPackage } from './packageRegistry';
@@ -172,6 +172,7 @@ try {
       consumerDir,
       'initialize installed Studio workdir',
       30_000,
+      { HOME: smokeHome, USERPROFILE: smokeHome },
     )
     : await runProcess(
       installedBin,
@@ -179,18 +180,27 @@ try {
       consumerDir,
       'initialize installed Studio workdir',
       30_000,
+      { HOME: smokeHome, USERPROFILE: smokeHome },
     );
   assert.match(initialized.stdout, /Initialized Studio workdir/);
   assert.equal(initialized.stderr, '');
   await Promise.all([
     access(join(initializedWorkdir, '.pinpawo', 'studio.json')),
     access(join(initializedWorkdir, '.pinpawo', 'pets', 'executor.json')),
-    access(join(initializedWorkdir, 'wiki', 'PROJECT.md')),
   ]);
 
-  // Preserve the shipped Plugin set and settings; only use a free HTTP test port.
+  // Wiki must be under this smoke's isolated HOME, not the test runner's real home or workdir.
   const configPath = join(initializedWorkdir, '.pinpawo', 'studio.json');
   const config = JSON.parse(await readFile(configPath, 'utf8'));
+  const wikiDirectory = config.plugins.find(({ id }: { id: string }) => id === '@pinpawo-plugin/project-files')?.options?.wikiDirectory;
+  assert.equal(typeof wikiDirectory, 'string');
+  assert.ok(isAbsolute(wikiDirectory));
+  const wikiRelative = relative(join(smokeHome, '.pinpawo', 'studios'), wikiDirectory);
+  assert.ok(wikiRelative && !isAbsolute(wikiRelative) && wikiRelative !== '..' && !wikiRelative.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`));
+  await access(join(wikiDirectory, 'PROJECT.md'));
+  await assert.rejects(access(join(initializedWorkdir, 'wiki', 'PROJECT.md')), /ENOENT/);
+
+  // Preserve the shipped Plugin set and settings; only use a free HTTP test port.
   config.plugins.find(({ id }: { id: string }) => id === '@pinpawo-plugin/studio-http').options.port = 0;
   await writeFile(configPath, JSON.stringify(config));
 

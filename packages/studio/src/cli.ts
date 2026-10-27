@@ -24,6 +24,7 @@ Start an independent resident PinPawo Studio Host.
 
 Options:
   --workdir <directory>  workspace containing .pinpawo/studio.json (start/init)
+  --studio-data-root <directory>  parent for new Studio data (init only)
   --pet-port <port>      already-running resident Pet listener (required for tmux)
   --pet <id>             Pet TUI to include (repeatable; skips HTTP discovery)
   --studio-url <url>     running Studio HTTP origin for Pet discovery (default: 127.0.0.1:3211)
@@ -81,6 +82,7 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
   const command = knownCommand ? args[0] as 'init' | 'start' | 'tmux' | 'console' : 'start';
   const offset = knownCommand ? 1 : 0;
   let workdir: string | undefined;
+  let studioDataRoot: string | undefined;
   let agentSessionPort: number | undefined;
   let sessionName: string | undefined;
   let detached = false;
@@ -97,6 +99,12 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
         throw new Error(`--workdir is not valid for Studio ${command}.`);
       }
       workdir = readOptionValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    if (argument === '--studio-data-root') {
+      if (command !== 'init') throw new Error('--studio-data-root is only valid for Studio init.');
+      studioDataRoot = readOptionValue(args, index, argument);
       index += 1;
       continue;
     }
@@ -155,7 +163,7 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
     return {
       help: false,
       command,
-      options: { workdir: workdir ?? process.cwd() },
+      options: { workdir: workdir ?? process.cwd(), ...(studioDataRoot ? { studioDataRoot } : {}) },
     };
   }
   if (command === 'tmux') {

@@ -69,6 +69,22 @@ function atOrInside(parent: string, candidate: string): boolean {
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
 }
 
+/** Conservatively treat any .git entry at or above the path as a Git worktree boundary. */
+async function hasGitMarkerAtOrAbove(directory: string): Promise<boolean> {
+  let current = directory;
+  for (;;) {
+    try {
+      await lstat(path.join(current, '.git'));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
 async function listFiles(root: string, relative: string): Promise<string[]> {
   const entries = await readdir(path.join(root, relative), { withFileTypes: true });
   const files: string[] = [];
@@ -141,7 +157,14 @@ export async function initStudioWorkdir(
   const workdirReal = await canonicalFuturePath(workdir);
   const dataRootReal = await canonicalFuturePath(dataRoot);
   if (atOrInside(workdirReal, dataRootReal)) {
-    throw new Error('Studio data directory must be outside the project workdir.');
+    // HOME may be selected as a general-purpose workdir; its default .pinpawo
+    // data directory is separate from project code unless HOME is in a Git tree.
+    const defaultHomeData = options.studioDataRoot === undefined
+      && workdirReal === await canonicalFuturePath(homedir())
+      && !await hasGitMarkerAtOrAbove(workdirReal);
+    if (!defaultHomeData) {
+      throw new Error('Studio data directory must be outside the project workdir. Choose another parent with --studio-data-root.');
+    }
   }
   const instanceId = (options.createStudioDataId ?? randomUUID)();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(instanceId)) {

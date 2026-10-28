@@ -40,6 +40,8 @@ export type StudioHostOptions = {
   runtimeConfig?: HostRuntimeConfig;
   /** Trusted composition input, never populated from HTTP/tool requests. */
   credentialSource?: PetCredentialSource;
+  /** Explicit deployment input, outside env inheritance. No key means locked Secrets. */
+  secretsKey?: Uint8Array;
   resolvePlugin?: StudioPluginResolver;
   /** Composition hook for lifecycle tests and embedded hosts. */
   capabilityAssembly?: HostCapabilityAssembly;
@@ -64,6 +66,7 @@ export type StudioHostOptions = {
  */
 export class StudioHost {
   private readonly caps: HostCapabilityAssembly;
+  private readonly secretsKey: Uint8Array | undefined;
   private readonly buildStudioImpl: typeof buildStudio;
   private readonly resolveStudioHostConfigImpl: typeof resolveStudioHostConfig;
   private readonly resolvePlugin: StudioPluginResolver | undefined;
@@ -75,11 +78,22 @@ export class StudioHost {
   private shutdownRequested = false;
 
   constructor(options: StudioHostOptions = {}) {
+    if (options.secretsKey && options.secretsKey.byteLength !== 32) throw new Error('Studio Secret key must contain exactly 32 bytes.');
+    this.secretsKey = options.secretsKey ? Uint8Array.from(options.secretsKey) : undefined;
     const runtimeConfig = options.runtimeConfig ?? buildHostRuntimeConfig();
     this.caps = options.capabilityAssembly ?? new HostCapabilityAssembly({
       runtimeConfig,
       sourceId: 'studio-host',
-      credentialSource: options.credentialSource,
+      credentialSource: options.credentialSource ?? {
+        readBindings: async petId => {
+          if (!this.studio) throw new Error('Studio credential source is not ready.');
+          return this.studio.credentialSource.readBindings(petId);
+        },
+        resolve: async ref => {
+          if (!this.studio) throw new Error('Studio credential source is not ready.');
+          return this.studio.credentialSource.resolve(ref);
+        },
+      },
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
       includeBrowser: false,
@@ -148,6 +162,7 @@ export class StudioHost {
       // definition snapshots.
       this.studio = await this.buildStudioImpl({
         configuration,
+        secretsKey: this.secretsKey,
         modelProfiles: this.caps.getModelProfiles(),
         hostCapabilities: this.caps.getCapabilityCatalog().getSnapshot().capabilities.filter(
           ({ name }) => name === GENERAL_CAPABILITY_NAME,

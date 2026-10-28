@@ -28,6 +28,7 @@ function fakeStudio(onShutdown: () => void): Studio {
     subscribe: () => () => {},
     listPets: () => [],
     pets: {} as Studio['pets'],
+    secrets: {} as Studio['secrets'],
     shutdown: async () => { onShutdown(); },
   };
 }
@@ -100,6 +101,7 @@ function result(studio: Studio): BuildStudioResult {
     plugins: [],
     residentPets: new Map(),
     residentPetInteractions: new Map(),
+    credentialSource: { readBindings: async () => ({}), resolve: async () => { throw Error('unused'); } },
     activatePlugins: async () => undefined,
   };
 }
@@ -330,4 +332,25 @@ test('StudioHost claims writer ownership before resolving executable extensions'
     'caps:init',
   ]);
   await host.shutdown();
+});
+
+
+test('StudioHost copies explicit deployment key bytes into core construction and rejects invalid keys before assembly', async () => {
+  assert.throws(() => new StudioHost({ secretsKey: Buffer.alloc(31) }), /32 bytes/);
+  const supplied = Buffer.alloc(32, 0x6b);
+  let received: Uint8Array | undefined;
+  const host = new StudioHost({
+    secretsKey: supplied,
+    capabilityAssembly: fakeCapabilityAssembly([]),
+    resolveStudioHostConfig: async () => configuration(),
+    buildStudio: async input => {
+      received = input.secretsKey;
+      return result(fakeStudio(() => undefined));
+    },
+  });
+  supplied.fill(0);
+  try {
+    await host.init();
+    assert.deepEqual(received, Uint8Array.from(Buffer.alloc(32, 0x6b)));
+  } finally { await host.shutdown(); }
 });

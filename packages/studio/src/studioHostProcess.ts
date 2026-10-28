@@ -15,6 +15,7 @@ import {
 export type StudioHostProcessOptions = {
   /** Trusted embedding input; the ordinary CLI does not configure credentials. */
   credentialSource?: PetCredentialSource;
+  secretsKey?: Uint8Array;
   workdir?: string;
   resolvePlugin?: StudioPluginResolver;
   agentSessionPort?: number;
@@ -52,6 +53,7 @@ export async function runStudioHostProcess(
     });
   const hostOptions: StartStudioHostOptions = {
     runtimeConfig,
+    ...(options.secretsKey ? { secretsKey: options.secretsKey } : {}),
     ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
     resolvePlugin,
     agentSessionTransport: { authToken },

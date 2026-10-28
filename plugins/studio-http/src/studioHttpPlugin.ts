@@ -15,6 +15,7 @@ import {
   parseStudioDispatchRequest,
   StudioClientError,
   StudioPetError,
+  StudioSecretError,
   type StudioEvent,
   type StudioPlugin,
   type StudioPluginContext,
@@ -40,6 +41,8 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/pet-sessions/snapshot',
   '/pet-sessions/events',
   '/pet-sessions/review',
+  '/secrets',
+  '/pet-credentials',
   '/clients',
   '/clients/revoke',
   '/clients/keys',
@@ -125,7 +128,7 @@ export type CreateStudioHttpPluginOptions = {
 export type StudioHttpPluginContext = Pick<
   StudioPluginContext,
   'dispatch' | 'listPets' | 'subscribe' | 'hooks'
-> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions' | 'clients' | 'pets'>>;
+> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions' | 'clients' | 'pets' | 'secrets'>>;
 
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
@@ -597,6 +600,32 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
     app.all('/pets/rename', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pet-definitions', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+
+    const secrets = () => {
+      if (!context?.secrets) throw new HttpRequestError(503, 'Studio Secrets are unavailable.');
+      return context.secrets;
+    };
+    const secretRequest = async <T,>(run: () => Promise<T>) => {
+      try { return await run(); }
+      catch (error) {
+        if (error instanceof StudioSecretError) {
+          throw new HttpRequestError(error.code === 'invalid' ? 400 : error.code === 'not_found' ? 404 : 503, error.message);
+        }
+        throw new HttpRequestError(503, 'Studio Secret operation failed.');
+      }
+    };
+    app.get('/secrets', async c => c.json({ ...secrets().status(), secrets: await secretRequest(() => secrets().list()) }));
+    app.post('/secrets', async c => {
+      const body = await readJsonBody(c) as { secretId?: unknown; name?: unknown; value?: unknown } | null;
+      return c.json({ secret: await secretRequest(() => secrets().put({ secretId: body?.secretId, name: body?.name, value: body?.value })) });
+    });
+    app.get('/pet-credentials', async c => c.json({ bindings: await secretRequest(() => secrets().bindings(c.req.query('petId'))) }));
+    app.post('/pet-credentials', async c => {
+      const body = await readJsonBody(c) as { petId?: unknown; bindings?: unknown } | null;
+      return c.json({ bindings: await secretRequest(() => secrets().bind({ petId: body?.petId, bindings: body?.bindings })) });
+    });
+    app.all('/secrets', c => methodNotAllowed(c, ['GET', 'POST']));
+    app.all('/pet-credentials', c => methodNotAllowed(c, ['GET', 'POST']));
 
     app.get('/events', (requestContext) => {
       if (eventClients.size >= maxEventClients) {

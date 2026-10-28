@@ -1,6 +1,7 @@
+import { createStudioSecrets, type SecretDatabase } from './secrets/studioSecrets';
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { allocatePetSessionId } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -28,6 +29,8 @@ import { studioCoreMigrations } from './storage/coreMigrations';
 
 export type CreateStudioInput = {
   studioId: string;
+  /** Deployment-supplied key bytes; never read from process.env or stored in the DB. */
+  secretsKey?: Uint8Array;
   /** The definitions this Studio may create Pets from. */
   definitions: StudioPetDefinition[];
   /** Builds one Pet's runtime; Studio calls it for each active Pet and for each Pet it creates. */
@@ -40,6 +43,8 @@ export type CreateStudioInput = {
 };
 
 export type PreparedStudio = {
+  /** Trusted Host only; ordinary Studio/Plugin APIs cannot decrypt. */
+  credentialSource: PetCredentialSource;
   studio: Studio;
   /** Assemble the Studio's active Pets. Idempotent; activatePlugins runs it first. */
   restorePets: () => Promise<void>;
@@ -71,6 +76,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     coreDb.catch(() => { coreDb = undefined; });
     return (await coreDb) as Kysely<DB>;
   };
+  const secrets = createStudioSecrets(() => openCore<SecretDatabase>(), input.secretsKey);
   const clients = new StudioClients(async () => new KyselyClientStore(await openCore<ClientDatabase>()));
   const models: StudioModels = input.models ?? {
     resolve: () => { throw new Error(`studio "${input.studioId}" has no model profiles.`); },
@@ -218,6 +224,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
       listPets,
       pets: registry,
+      secrets: secrets.management,
       listDispatchQueues,
       petSessions,
       hooks: pluginHooks.contextFor(plugin.name),
@@ -305,9 +312,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     subscribe: (handler) => eventBus.subscribe(handler),
     listPets,
     pets: registry,
+    secrets: secrets.management,
     shutdown,
   };
-  return { studio, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, credentialSource: secrets.credentialSource, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

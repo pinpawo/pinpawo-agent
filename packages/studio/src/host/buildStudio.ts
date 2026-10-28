@@ -16,6 +16,7 @@ import {
   type HostExecutionConfig,
   type LocalModelProfileRegistry,
   type PetConfig,
+  type PetCredentialSource,
   type ResidentPetHost,
   type ResidentPetInteraction,
 } from 'pinpawo/host-runtime';
@@ -48,6 +49,7 @@ export type BuildStudioInput = HostExecutionConfig & {
   checkpoint: FileSaver;
   /** Host composition defers Plugin listeners until Agent Session transport is ready. */
   deferPluginActivation?: boolean;
+  secretsKey?: Uint8Array;
 };
 
 export function selectStudioPetCapabilities(input: {
@@ -70,6 +72,7 @@ export type ResolveStudioHostConfigInput = {
 };
 
 export type BuildStudioResult = {
+  credentialSource: PetCredentialSource;
   studio: Studio;
   resolved: ResolvedStudio;
   /** 已装配的插件,按配置顺序。 */
@@ -267,6 +270,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   const prepared = prepareStudio({
     studioId: studioConfig.studioId,
+    secretsKey: input.secretsKey,
     definitions: resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
     assemblePet,
     plugins,
@@ -295,6 +299,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   return {
     studio: prepared.studio,
+    credentialSource: prepared.credentialSource,
     resolved,
     plugins,
     residentPets,

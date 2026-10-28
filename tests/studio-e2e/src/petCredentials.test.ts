@@ -8,7 +8,8 @@ import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messag
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { defineInstructionDocument } from '@pinpawo/pet-agent';
 import type { AgentServerMessage } from '@pinpawo/agent-session';
-import { buildHostRuntimeConfig, createResidentPetHost, FilePetCredentialSource, FileSaver } from '../../../services/host/src/hostRuntime';
+import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from '../../../services/host/src/hostRuntime';
+import { prepareStudio } from '../../../packages/studio/src/createStudio';
 import { HostGraphService, type InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -56,12 +57,15 @@ test('real graph review/resume injects the admitted instance credential only at 
     const root = await mkdtemp(join(tmpdir(), 'pet-credential-graph-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     const secret = `fake-credential-${randomUUID()}`;
-    const sourcePath = join(root, 'private-source.json');
-    await writeFile(sourcePath, JSON.stringify({
-      bindings: { 'credential-pet': { PET_TEST_TOKEN: 'account-ref' } },
-      values: { 'account-ref': secret },
-    }), { mode: 0o600 });
-    const source = new FilePetCredentialSource(sourcePath);
+    const deploymentKey = Buffer.alloc(32, 0x6b);
+    const prepared = prepareStudio({
+      studioId: 'credential-integration', secretsKey: deploymentKey,
+      storage: { kind: 'sqlite', path: join(root, 'studio.sqlite') },
+      definitions: [{ definitionId: 'shared', name: 'Shared' }],
+      assemblePet: async () => ({ dispatch: host.resident.dispatch, sessions: host.sessions, close: () => host.close() }),
+    });
+    t.after(() => prepared.studio.shutdown());
+    const source = prepared.credentialSource;
     const resolvedInstances: string[] = [];
     const paths = resolveRSServicePaths(join(root, 'rs'));
     await mkdir(paths.root, { mode: 0o700 });
@@ -85,6 +89,7 @@ test('real graph review/resume injects the admitted instance credential only at 
     // The command contains no secret literal and emits only a constant success marker.
     // Its separate digest side effect proves the real child received the expected value.
     await writeFile(join(runtimeConfig.workdir, 'use-credential.cjs'), [
+      "if (Object.values(process.env).some(value => value.includes('k'.repeat(32)))) throw Error('deployment key inherited');",
       "const { createHash } = require('node:crypto');",
       "require('node:fs').writeFileSync('credential-digest.txt', createHash('sha256').update(process.env.PET_TEST_TOKEN || '').digest('hex'));",
       "process.stdout.write('credential-used');",
@@ -140,6 +145,9 @@ test('real graph review/resume injects the admitted instance credential only at 
       } as HostGraphService,
     });
     t.after(() => host.close());
+    await prepared.studio.pets.create({ petId: 'credential-pet', definitionId: 'shared', name: 'Credential Pet' });
+    await prepared.studio.secrets.put({ secretId: 'account-ref', name: 'Test account', value: secret });
+    await prepared.studio.secrets.bind({ petId: 'credential-pet', bindings: { PET_TEST_TOKEN: 'account-ref' } });
     const events: AgentServerMessage[] = [];
     host.interaction.subscribe(message => events.push(message));
     const lifecycle: string[] = [];
@@ -165,6 +173,7 @@ test('real graph review/resume injects the admitted instance credential only at 
     const completed = await host.interaction.snapshot();
     for (const value of [events, paused, completed, modelMessages]) {
       assert.equal(JSON.stringify(value).includes(secret), false, 'automatic injection stays out of ordinary projections/model messages');
+      assert.equal(JSON.stringify(value).includes(deploymentKey.toString()), false, 'deployment key stays out of ordinary projections/model messages');
     }
     let checkpointCount = 0;
     for (const threadId of threads) {
@@ -175,4 +184,5 @@ test('real graph review/resume injects the admitted instance credential only at 
     }
     assert.ok(checkpointCount > 0, 'checked real persisted graph checkpoints');
     await assertFilesExclude(dirname(runtimeConfig.checkpointPath), secret);
+    await assertFilesExclude(dirname(runtimeConfig.checkpointPath), deploymentKey.toString());
   });

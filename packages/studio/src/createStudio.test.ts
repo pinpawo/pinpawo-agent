@@ -301,6 +301,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'notify',
     'petSessions',
     'pets',
+    'secrets',
     'storage',
     'subscribe',
   ]);

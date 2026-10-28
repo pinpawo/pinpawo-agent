@@ -39,6 +39,7 @@ function fakeStudio(events: string[]): Studio {
     subscribe: () => () => undefined,
     listPets: () => [],
     pets: {} as Studio['pets'],
+    secrets: {} as Studio['secrets'],
     shutdown: async () => { events.push('studio:shutdown'); },
   };
 }
@@ -70,6 +71,7 @@ test('top-level entry starts only the Pet Agent Session transport and owns shutd
         plugins: [],
         residentPets: new Map(),
     residentPetInteractions: new Map(),
+    credentialSource: { readBindings: async () => ({}), resolve: async () => { throw Error('unused'); } },
         activatePlugins: async () => { events.push('plugins:start'); },
       };
     },
@@ -109,6 +111,7 @@ test('Agent Session startup failure rolls the initialized Host back', async () =
       plugins: [],
       residentPets: new Map(),
     residentPetInteractions: new Map(),
+    credentialSource: { readBindings: async () => ({}), resolve: async () => { throw Error('unused'); } },
       activatePlugins: async () => { events.push('plugins:start'); },
     }),
     startAgentSessionTransport: async () => {
@@ -137,6 +140,7 @@ test('Plugin activation failure closes the ready Agent Session transport and Hos
       plugins: [],
       residentPets: new Map(),
     residentPetInteractions: new Map(),
+    credentialSource: { readBindings: async () => ({}), resolve: async () => { throw Error('unused'); } },
       activatePlugins: async () => {
         events.push('plugins:start');
         throw new Error('plugin failed');

@@ -16,7 +16,7 @@
  * Studio 不解释 event 的内容,也不持有由 event 推导出的状态。事件是
  * "发生了什么"(一次性、单向),不是"当前是什么样"(可查询、有生命周期)。
  * 这个区别决定了 studio 不存由 event 推导出的状态;它自己只存客户身份和 Pet
- * 实例。插件的数据放在 Studio 提供的一个共享数据库里(`storage`),表和迁移
+ * 实例和加密 Secret。插件的数据放在 Studio 提供的一个共享数据库里(`storage`),表和迁移
  * 归各插件所有,studio 只负责打开、迁移与关闭。
  *
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
@@ -27,6 +27,7 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 
 import type { StudioPetRegistration } from './types';
 import type { StudioPets } from './pets/studioPets';
+import type { StudioSecrets } from './secrets/studioSecrets';
 import type { StudioPluginStorage } from './storage/studioStorage';
 import type { StudioClients } from './clients/studioClients';
 import type {
@@ -106,6 +107,8 @@ export type StudioPluginContext = {
   listPets: () => StudioPetRegistration[];
   /** Create and rename Pets, and read their records. */
   pets: StudioPets;
+  /** Metadata and management only; no decrypted values. */
+  secrets: StudioSecrets;
   /**
    * Read current resident dispatch-queue snapshots. This is observation only:
    * Studio neither stores them nor decides how a queue should progress.
@@ -221,5 +224,7 @@ export type Studio = {
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];
   pets: StudioPets;
+  /** Metadata and management only; no decrypted values. */
+  secrets: StudioSecrets;
   shutdown: () => Promise<void>;
 };

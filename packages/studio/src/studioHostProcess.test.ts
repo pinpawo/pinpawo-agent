@@ -22,6 +22,7 @@ function completedHost(): RunningStudioHost {
 test('Studio Host process composes resolver and Agent Session port before starting', async () => {
   const config = runtimeConfig('/resolved/project');
   const credentialSource = { readBindings: async () => ({}), resolve: async () => 'fake-unused' };
+  const secretsKey = Buffer.alloc(32, 0x6b);
   const resolver: StudioPluginResolver = async () => ({
     name: 'test',
     toolkits: [],
@@ -32,6 +33,7 @@ test('Studio Host process composes resolver and Agent Session port before starti
   await runStudioHostProcess({
     workdir: './project',
     credentialSource,
+    secretsKey,
     resolvePlugin: resolver,
     agentSessionPort: 4321,
   }, {
@@ -47,6 +49,7 @@ test('Studio Host process composes resolver and Agent Session port before starti
 
   assert.equal(started?.runtimeConfig, config);
   assert.equal(started?.credentialSource, credentialSource);
+  assert.equal(started?.secretsKey, secretsKey);
   assert.equal(started?.resolvePlugin, resolver);
   assert.equal(started?.agentSessionPort, 4321);
   assert.equal(started?.agentSessionTransport?.authToken, 'test-auth-token');

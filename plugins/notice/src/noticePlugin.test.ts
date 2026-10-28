@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStudio, type StudioPetBinding } from '@pinpawo/studio-core';
-import { createNoticePlugin } from './noticePlugin';
 
-const worker: StudioPetBinding = {
+import { createNoticePlugin } from './noticePlugin';
+import { createStudioWithPets, type LivePet } from '../../../tests/support/livePets';
+
+const worker: LivePet = {
   registration: { petId: 'worker', name: 'Worker' },
   dispatch: {
     getQueueSnapshot: () => ({
@@ -38,9 +39,8 @@ test('Notice persists configured Studio event facts without participating in dis
     httpRoute: false,
   });
   assert.throws(() => notice.service, /has not started/);
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'notice-test',
-    entryPetId: 'worker',
     pets: [worker],
     plugins: [notice],
   });

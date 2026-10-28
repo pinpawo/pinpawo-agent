@@ -54,8 +54,8 @@ export async function loadChatPetConfig(
     // Host having picked one of them.
     log(
       `[host] ${configs.length.toString()} Pets are configured in ${petsDir} `
-      + `(${configs.map((config) => config.petId).join(', ')}). `
-      + `Chat serves one Pet, so it runs the standalone "${DEFAULT_CHAT_PET.petId}" `
+      + `(${configs.map((config) => config.definitionId).join(', ')}). `
+      + `Chat serves one Pet, so it runs the standalone "${DEFAULT_CHAT_PET.definitionId}" `
       + 'instead; use Studio to run those Pets.',
     );
   }
@@ -135,7 +135,7 @@ export class AgentHost {
 
   buildChatHostDeps(): ServerDeps {
     return {
-      petId: this.petConfig.petId,
+      petId: this.petConfig.definitionId,
       petName: this.petConfig.name,
       chatCheckpointer: this.getCheckpointer(),
       modelProfiles: this.getModelProfiles(),

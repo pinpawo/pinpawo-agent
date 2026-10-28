@@ -14,6 +14,7 @@ import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 import {
   parseStudioDispatchRequest,
   StudioClientError,
+  StudioPetError,
   type StudioEvent,
   type StudioPlugin,
   type StudioPluginContext,
@@ -33,6 +34,8 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/dispatch/queues',
   '/events',
   '/pets',
+  '/pets/rename',
+  '/pet-definitions',
   '/me',
   '/pet-sessions/snapshot',
   '/pet-sessions/events',
@@ -122,7 +125,7 @@ export type CreateStudioHttpPluginOptions = {
 export type StudioHttpPluginContext = Pick<
   StudioPluginContext,
   'dispatch' | 'listPets' | 'subscribe' | 'hooks'
-> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions' | 'clients'>>;
+> & Partial<Pick<StudioPluginContext, 'listDispatchQueues' | 'petSessions' | 'clients' | 'pets'>>;
 
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
@@ -566,7 +569,34 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
       return requestContext.json({ pets: context.listPets() });
     });
-    app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+
+    // Pet management.
+    const pets = () => {
+      if (!context?.pets) throw new HttpRequestError(503, 'Studio Pets are unavailable.');
+      return context.pets;
+    };
+    const petRequest = async <T>(work: () => Promise<T>): Promise<T> => {
+      try {
+        return await work();
+      } catch (error) {
+        if (!(error instanceof StudioPetError)) throw error;
+        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404 }[error.code], error.message);
+      }
+    };
+    app.post('/pets', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown; definitionId?: unknown; name?: unknown } | null;
+      return requestContext.json({
+        pet: await petRequest(() => pets().create({ petId: body?.petId, definitionId: body?.definitionId, name: body?.name })),
+      }, 201);
+    });
+    app.post('/pets/rename', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown; name?: unknown } | null;
+      return requestContext.json({ pet: await petRequest(() => pets().rename(body?.petId, body?.name)) });
+    });
+    app.get('/pet-definitions', (requestContext) => requestContext.json({ definitions: pets().definitions() }));
+    app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
+    app.all('/pets/rename', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+    app.all('/pet-definitions', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/events', (requestContext) => {
       if (eventClients.size >= maxEventClients) {

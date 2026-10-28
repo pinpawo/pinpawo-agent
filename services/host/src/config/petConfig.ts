@@ -10,8 +10,13 @@ import {
 import { loadPetDocumentFile } from './petDocument';
 import { isSafePetPathSegment } from '../petId';
 
+/**
+ * 一份 Pet 定义:Pet 怎么工作。Studio 可以用同一份定义创建多个 Pet 实例
+ * (docs/design/studio/pet-instance.md);Chat Host 只运行一个 Pet,以定义 id 作它的身份。
+ */
 export type PetConfig = {
-  petId: string;
+  definitionId: string;
+  /** 定义的默认显示名称。 */
   name: string;
   /** 该 pet 使用的 model profile id;留空则继承 host default profile。 */
   modelProfileId?: string;
@@ -39,19 +44,22 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
       }
     }
 
-    const petId = reader.requiredString('petId');
-    if (!isSafePetPathSegment(petId)) {
-      reader.fail('"petId" must be a safe path segment', 'petId');
+    if (reader.raw.petId !== undefined) {
+      reader.fail('"petId" was renamed to "definitionId"; Pet instances are created in Studio', 'petId');
+    }
+    const definitionId = reader.requiredString('definitionId');
+    if (!isSafePetPathSegment(definitionId)) {
+      reader.fail('"definitionId" must be a safe path segment', 'definitionId');
     }
     if (reader.raw.capabilities !== undefined) {
       reader.fail(
-        '"capabilities" was replaced by the conventional pets/<petId>/capabilities directory',
+        '"capabilities" was replaced by the conventional pets/<definitionId>/capabilities directory',
         'capabilities',
       );
     }
 
     return {
-      petId,
+      definitionId,
       name: reader.requiredString('name'),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
       ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
@@ -68,53 +76,53 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
 
 export const PET_DOCUMENT_FILE_NAME = 'PET.md';
 
-function resolvePetDirectory(dir: string, petId: string): string {
-  if (!isSafePetPathSegment(petId)) {
-    throw new Error(`petId "${petId}" must be a safe path segment`);
+function resolvePetDirectory(dir: string, definitionId: string): string {
+  if (!isSafePetPathSegment(definitionId)) {
+    throw new Error(`definitionId "${definitionId}" must be a safe path segment`);
   }
   const root = path.resolve(dir);
-  const petRoot = path.resolve(root, petId);
+  const petRoot = path.resolve(root, definitionId);
   const relativePetRoot = path.relative(root, petRoot);
   if (
     relativePetRoot === '..'
     || relativePetRoot.startsWith(`..${path.sep}`)
     || path.isAbsolute(relativePetRoot)
   ) {
-    throw new Error(`petId "${petId}" must stay inside the Pet configuration directory`);
+    throw new Error(`definitionId "${definitionId}" must stay inside the Pet configuration directory`);
   }
   return petRoot;
 }
 
-/** Capability collection root derived only from the validated Pet id. */
-export function resolvePetCapabilityDirectory(dir: string, petId: string): string {
-  return path.join(resolvePetDirectory(dir, petId), 'capabilities');
+/** Capability collection root derived only from the validated definition id. */
+export function resolvePetCapabilityDirectory(dir: string, definitionId: string): string {
+  return path.join(resolvePetDirectory(dir, definitionId), 'capabilities');
 }
 
-/** Conventional authored root document for one validated Pet id. */
-export function resolvePetDocumentPath(dir: string, petId: string): string {
-  return path.join(resolvePetDirectory(dir, petId), PET_DOCUMENT_FILE_NAME);
+/** Conventional authored root document for one validated definition id. */
+export function resolvePetDocumentPath(dir: string, definitionId: string): string {
+  return path.join(resolvePetDirectory(dir, definitionId), PET_DOCUMENT_FILE_NAME);
 }
 
 /** PET.md is optional; when present it is one immutable Host configuration snapshot. */
 export async function loadPetDocument(
   dir: string,
-  petId: string,
+  definitionId: string,
 ): Promise<PetDocument | null> {
-  return loadPetDocumentFile(resolvePetDocumentPath(dir, petId));
+  return loadPetDocumentFile(resolvePetDocumentPath(dir, definitionId));
 }
 
 /**
- * 文件入口:pet 配置住在 `<workdir>/.pinpawo/pets/<petId>.json`。
+ * 文件入口:pet 定义住在 `<workdir>/.pinpawo/pets/<definitionId>.json`。
  *
  * schema 与校验归 Studio core，解析机制与报错格式归 `@pinpawo/pet-agent`;
- * 本模块只负责"去哪读、读哪些文件",以及目录级的一致性(petId 不重复)。
+ * 本模块只负责"去哪读、读哪些文件",以及目录级的一致性(definitionId 不重复)。
  */
 
 /**
  * 加载目录里所有 *.json,逐个解析。
  * - 目录不存在或为空 → 返回 []
  * - 单个文件解析失败 → 抛错并附文件路径
- * - 同一 petId 出现两次 → 抛错
+ * - 同一 definitionId 出现两次 → 抛错
  */
 export async function loadPetConfigs(dir: string): Promise<PetConfig[]> {
   let entries: string[];
@@ -126,7 +134,7 @@ export async function loadPetConfigs(dir: string): Promise<PetConfig[]> {
   }
 
   const configs: PetConfig[] = [];
-  const seenPetIds = new Set<string>();
+  const seenDefinitionIds = new Set<string>();
 
   for (const entry of entries.sort()) {
     if (!entry.endsWith('.json')) continue;
@@ -142,10 +150,10 @@ export async function loadPetConfigs(dir: string): Promise<PetConfig[]> {
       source: filePath,
       schema: petConfigSchema,
     });
-    if (seenPetIds.has(config.petId)) {
-      throw new Error(`duplicate pet config petId "${config.petId}" (re-defined in ${filePath})`);
+    if (seenDefinitionIds.has(config.definitionId)) {
+      throw new Error(`duplicate pet definitionId "${config.definitionId}" (re-defined in ${filePath})`);
     }
-    seenPetIds.add(config.petId);
+    seenDefinitionIds.add(config.definitionId);
     configs.push(config);
   }
 

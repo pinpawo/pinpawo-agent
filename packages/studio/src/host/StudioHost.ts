@@ -126,21 +126,22 @@ export class StudioHost {
       });
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();
-      for (const pet of configuration.resolved.pets) {
-        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, pet.petId);
+      for (const { definitionId } of configuration.resolved.definitions) {
+        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, definitionId);
         const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
           rootDir: capabilityDir,
-          sourceId: `studio-pet:${pet.petId}`,
+          sourceId: `studio-pet:${definitionId}`,
         });
         petCapabilities.set(
-          pet.petId,
+          definitionId,
           snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
         );
-        const document = await loadPetDocument(configuration.petsDir, pet.petId);
-        if (document) petDocuments.set(pet.petId, document);
+        const document = await loadPetDocument(configuration.petsDir, definitionId);
+        if (document) petDocuments.set(definitionId, document);
       }
-      // Build the resident Studio now — before any transport starts listening.
-      // Requests only dispatch to this pre-built instance.
+      // Build the resident Studio and its active Pets now — before any
+      // transport starts listening. Pets created later use these same
+      // definition snapshots.
       this.studio = await this.buildStudioImpl({
         configuration,
         modelProfiles: this.caps.getModelProfiles(),
@@ -198,25 +199,13 @@ export class StudioHost {
     await this.activationPromise?.catch(() => undefined);
     const resident = this.studio;
     this.studio = null;
+    // Studio closes its Pets' runtimes after its Plugins stop.
     await resident?.studio.shutdown().catch((error) => {
       console.error(
         '[studio-host] resident Studio shutdown failed:',
         error instanceof Error ? error.message : error,
       );
     });
-    if (resident) {
-      const results = await Promise.allSettled(
-        [...resident.residentPets.values()].map((pet) => pet.close()),
-      );
-      for (const result of results) {
-        if (result.status === 'rejected') {
-          console.error(
-            '[studio-host] resident Pet shutdown failed:',
-            result.reason instanceof Error ? result.reason.message : result.reason,
-          );
-        }
-      }
-    }
     if (this.capsInitialized) {
       this.capsInitialized = false;
       await this.caps.shutdown();
@@ -234,14 +223,15 @@ export class StudioHost {
     return this.studio.studio;
   }
 
-  /** Pet-scoped Agent Session adapters owned by host, not Studio core. */
+  /**
+   * Pet-scoped Agent Session adapters owned by host, not Studio core. The map
+   * is live: Pets created later appear in it.
+   */
   getResidentPetInteractions(): ReadonlyMap<string, ResidentPetInteraction> {
     if (!this.studio) {
       throw new Error('StudioHost.getResidentPetInteractions() called before init()');
     }
-    return new Map(
-      [...this.studio.residentPets].map(([petId, pet]) => [petId, pet.interaction]),
-    );
+    return this.studio.residentPetInteractions;
   }
 
   // ---- Capability supply delegation ----

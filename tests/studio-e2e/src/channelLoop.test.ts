@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -78,7 +79,7 @@ test('one member protocol drives a normal Pet loop, same-session inputs and actu
       } as never,
     }));
   }
-  const studio = await createStudio({ studioId: 'loop', entryPetId: 'alpha', plugins: [channel, http],
+  const studio = await createStudioWithPets({ studioId: 'loop', plugins: [channel, http],
     storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
     pets: hosts.map((host, i) => ({ registration: { petId: ['alpha', 'beta'][i]!, name: 'Same name' }, dispatch: host.resident.dispatch })),
   });

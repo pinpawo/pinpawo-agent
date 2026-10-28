@@ -7,7 +7,7 @@ export type AgentContext = {
   traceUserId?: string;
 };
 
-export function buildAgentContext(petId = DEFAULT_CHAT_PET.petId): AgentContext {
+export function buildAgentContext(petId = DEFAULT_CHAT_PET.definitionId): AgentContext {
   return { pet: { id: petId, name: DEFAULT_CHAT_PET.name } };
 }
 

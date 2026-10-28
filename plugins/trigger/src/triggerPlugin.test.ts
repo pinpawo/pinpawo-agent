@@ -3,13 +3,14 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { createStudio, createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio-core';
+import { createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio-core';
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';
 import { createTriggerPlugin } from './triggerPlugin';
 import { TriggerService } from './triggerService';
 import { KyselyTriggerStore, triggerMigrations, type TriggerDatabase } from './store/kysely';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 /** Trigger rules name their Channel up front, so it exists before the Studio starts. */
 async function seedChannel(t: TestContext, petIds: string[]) {
@@ -45,9 +46,8 @@ test('Trigger projects direct service mutations through Studio events', async (t
       source: { kind: 'http', secret: 'trigger-secret-with-at-least-16-characters' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-test',
-    entryPetId: 'worker',
     pets: [{
       registration: { petId: 'worker', name: 'Worker' },
       dispatch: {
@@ -86,9 +86,8 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
       source: { kind: 'studio_event', eventSource: 'example-work', typePrefix: 'task.' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-event-test',
-    entryPetId: 'wiki',
     pets: [{
       registration: { petId: 'wiki', name: 'Wiki' },
       dispatch: {
@@ -134,9 +133,8 @@ test('Trigger keys event deliveries by event identity, not by the millisecond', 
       source: { kind: 'studio_event', eventSource: 'notice', type: 'notice.created' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-event-identity',
-    entryPetId: 'wiki',
     pets: [{
       registration: { petId: 'wiki', name: 'Wiki' },
       dispatch: {
@@ -176,9 +174,8 @@ test('Trigger resolves an explicit event payload target and records a retryable 
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.assigned' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-dynamic-target',
-    entryPetId: 'executor',
     pets: [{
       registration: { petId: 'executor', name: 'Executor' },
       dispatch: {
@@ -247,9 +244,8 @@ test('a channel-bound Trigger runs its Pet in the Channel without posting there,
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-channel',
-    entryPetId: 'reporter',
     pets: [channelStudioPet('reporter', dispatched)],
     // Trigger starts first: the Channel hook reaches it in either order.
     plugins: [trigger, channel],
@@ -289,9 +285,8 @@ test('a channel-bound Trigger fails its delivery when no Channel Plugin runs', a
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-no-channel',
-    entryPetId: 'reporter',
     pets: [channelStudioPet('reporter', dispatched)],
     plugins: [trigger],
   });
@@ -319,9 +314,8 @@ test('event data in a channel-bound request addresses nobody: it reaches only th
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-channel-addressing',
-    entryPetId: 'reporter',
     pets: [channelStudioPet('reporter', dispatched), channelStudioPet('other', dispatched)],
     plugins: [channel, trigger],
   });
@@ -361,9 +355,8 @@ test('Trigger keeps deliveries in the Studio database and fails the ones a stop 
     }],
   });
   assert.throws(() => plugin.service, /has not started/);
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'trigger-restart',
-    entryPetId: 'worker',
     pets: [channelStudioPet('worker', [])],
     plugins: [plugin],
     storage: { kind: 'sqlite', path: databasePath },

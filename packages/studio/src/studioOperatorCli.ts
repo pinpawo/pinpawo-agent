@@ -16,7 +16,10 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
   pinpawo-studio clients add <clientId> --label <name>
   pinpawo-studio clients add-key <clientId>
   pinpawo-studio clients revoke <clientId>
-  pinpawo-studio pets
+  pinpawo-studio pets list
+  pinpawo-studio pets definitions
+  pinpawo-studio pets create <petId> --definition <definitionId> --name <name>
+  pinpawo-studio pets rename <petId> --name <name>
   pinpawo-studio queues
   pinpawo-studio snapshot <petId> [--full]
   pinpawo-studio events <petId> [--seconds N]
@@ -37,8 +40,12 @@ not completion. No request is retried automatically. Read actual state before
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
 Each --pet joins the new Channel with you; no other Pet joins implicitly.
+A Pet is one instance of a definition: create gives it a fixed petId that work
+is addressed to and a display name that can change; several Pets may share one
+definition. Archiving stops new work, lets a running turn finish and keeps the
+Pet's history.
 A client key reaches channels commands, as the member human:<clientId>, and
-pets; everything else needs the local Host token. clients add and add-key print the
+pets list; everything else needs the local Host token. clients add and add-key print the
 new key once; only its hash is stored. Revoking a client stops all its keys.
 `;
 
@@ -62,6 +69,8 @@ export type StudioOperatorOptions = {
   title?: string;
   description?: string;
   label?: string;
+  definition?: string;
+  name?: string;
   pets: string[];
   member?: { kind: 'human' | 'pet'; id: string };
   idempotencyKey?: string;
@@ -89,13 +98,20 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     return { help: true, command, studioUrl: '', agentUrl: '', tokenFile: '', mentions: [], pets: [], seconds: 30, full: false };
   }
   const allowed = new Set(CONNECTION_OPTIONS);
-  const hasAction = command === 'channels' || command === 'clients';
+  const hasAction = command === 'channels' || command === 'clients' || command === 'pets';
   const action = hasAction ? args[start + 1] : undefined;
   if (command === 'clients') {
     if (!CLIENT_ACTIONS.includes(action ?? '')) {
       throw new Error(`Expected clients ${CLIENT_ACTIONS.slice(0, -1).join(', ')}, or ${CLIENT_ACTIONS.at(-1)}.`);
     }
     if (action === 'add') allowed.add('--label');
+  }
+  if (command === 'pets') {
+    if (!PET_ACTIONS.includes(action ?? '')) {
+      throw new Error(`Expected pets ${PET_ACTIONS.slice(0, -1).join(', ')}, or ${PET_ACTIONS.at(-1)}.`);
+    }
+    if (action === 'create') { allowed.add('--definition'); allowed.add('--name'); }
+    if (action === 'rename') allowed.add('--name');
   }
   if (command === 'channels') {
     if (!CHANNEL_ACTIONS.includes(action ?? '')) {
@@ -136,18 +152,21 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     else if (argument === '--pet') pets.push(value);
     else values.set(argument, value);
   }
-  const needsId = !['pets', 'queues'].includes(command)
+  const needsId = command !== 'queues'
     && !(command === 'channels' && ['list', 'create'].includes(action!))
-    && !(command === 'clients' && action === 'list');
+    && !(command === 'clients' && action === 'list')
+    && !(command === 'pets' && ['list', 'definitions'].includes(action!));
   if (positional.length !== (needsId ? 1 : 0) || positional.some(value => !value.trim())) {
     const noun = command === 'channels' ? 'Channel' : command === 'clients' ? 'client' : 'Pet';
     throw new Error(needsId ? `Expected one ${noun} id.` : 'Unexpected positional argument.');
   }
   if (command === 'clients' && action === 'add' && !values.has('--label')) throw new Error('--label is required.');
+  if (command === 'pets' && action === 'create' && !values.has('--definition')) throw new Error('--definition is required.');
+  if (command === 'pets' && (action === 'create' || action === 'rename') && !values.has('--name')) throw new Error('--name is required.');
   if ((command === 'dispatch' || command === 'send' || (command === 'channels' && action === 'send')) && !values.has('--file')) {
     throw new Error('--file is required (use - for stdin).');
   }
-  if (action === 'create' && !values.has('--title')) throw new Error('--title is required.');
+  if (command === 'channels' && action === 'create' && !values.has('--title')) throw new Error('--title is required.');
   if ((action === 'add-member' || action === 'remove-member') && !values.has('--member')) throw new Error('--member is required.');
   function integer(option: string, min: number, max: number, fallback?: number) {
     if (!values.has(option)) return fallback;
@@ -169,13 +188,14 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
     title: values.get('--title'), description: values.get('--description'), pets: [...new Set(pets)],
-    label: values.get('--label'),
+    label: values.get('--label'), definition: values.get('--definition'), name: values.get('--name'),
     ...(values.has('--member') ? { member: memberRef(values.get('--member')!) } : {}),
   };
 }
 
 const CHANNEL_ACTIONS = ['list', 'create', 'read', 'send', 'members', 'add-member', 'remove-member', 'sessions'];
 const CLIENT_ACTIONS = ['list', 'add', 'add-key', 'revoke'];
+const PET_ACTIONS = ['list', 'definitions', 'create', 'rename'];
 
 /** A participantId names one member: its kind and its URI-encoded id. */
 function memberRef(participantId: string): { kind: 'human' | 'pet'; id: string } {
@@ -218,6 +238,10 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
     route = { list: '/clients', add: '/clients', 'add-key': '/clients/keys', revoke: '/clients/revoke' }[action!]!;
     if (action === 'add') body = { clientId: id, label: options.label };
     else if (action !== 'list') body = { clientId: id };
+  } else if (command === 'pets') {
+    route = { list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename' }[action!]!;
+    if (action === 'create') body = { petId: id, definitionId: options.definition, name: options.name };
+    else if (action === 'rename') body = { petId: id, name: options.name };
   } else if (['snapshot', 'events', 'send'].includes(command)) {
     base = options.agentUrl;
     route = `/agent-session/pets/${encodeURIComponent(id!)}/${command === 'send' ? 'messages' : command}`;
@@ -227,7 +251,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (options.before !== undefined) url.searchParams.set('before', String(options.before));
   if (options.limit !== undefined) url.searchParams.set('limit', String(options.limit));
   if (command === 'channels' && id && ['read', 'members', 'sessions'].includes(action!)) url.searchParams.set('channelId', id);
-  if (action === 'create') {
+  if (command === 'channels' && action === 'create') {
     body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: options.pets };
   } else if (action === 'add-member' || action === 'remove-member') {
     body = { channelId: id, ...options.member };

@@ -12,6 +12,9 @@ import {
   type StudioEvent,
   type StudioEventHandler,
   type StudioPetRegistration,
+  StudioPetError,
+  type StudioPet,
+  type StudioPets,
 } from '@pinpawo/studio-core';
 
 import {
@@ -132,6 +135,7 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
     pets: [{
       petId: 'planner',
       name: 'Planner',
+      definitionId: 'planner',
     }],
   });
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
@@ -145,6 +149,44 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { pets: harness.context.listPets() });
+});
+
+test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', async (t) => {
+  const records: StudioPet[] = [];
+  const calls: unknown[][] = [];
+  const pets: StudioPets = {
+    list: async () => records,
+    get: async (petId) => records.find(pet => pet.petId === petId),
+    definitions: () => [{ definitionId: 'developer', name: 'Developer' }],
+    create: async (input) => {
+      calls.push(['create', input]);
+      if (records.some(pet => pet.petId === input.petId)) throw new StudioPetError('exists', 'exists');
+      const pet = { petId: input.petId as string, definitionId: input.definitionId as string, name: input.name as string, createdAt: 't' };
+      records.push(pet);
+      return pet;
+    },
+    rename: async (petId, name) => { calls.push(['rename', petId, name]); throw new StudioPetError('missing', 'not_found'); },
+  };
+  const harness = createContext();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start({ ...harness.context, pets });
+  t.after(() => plugin.stop());
+  const port = plugin.address()!.port;
+  const send = (path: string, body?: unknown) => fetch(pluginUrl(port, path), {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  const created = await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A' });
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).pet.petId, 'dev-a');
+  assert.equal((await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Again' })).status, 409);
+  assert.equal((await send('/pets/rename', { petId: 'ghost', name: 'X' })).status, 404);
+  assert.deepEqual(calls.map(([action]) => action), ['create', 'create', 'rename']);
+  assert.deepEqual(await (await send('/pet-definitions')).json(), { definitions: [{ definitionId: 'developer', name: 'Developer' }] });
+  // The listing is the live Pets Studio reports, not the management records.
+  assert.deepEqual(await (await send('/pets')).json(), { pets: [] });
 });
 
 test('HTTP Plugin requires bearer auth and an explicitly allowed browser origin', async (t) => {

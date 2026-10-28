@@ -38,14 +38,14 @@ test('Chat Pet resolution falls back to the built-in Pet when none is configured
 test('Chat Pet resolution adopts the configured identity and model profile', async () => {
   await withWorkdir(async (workdir) => {
     writePet(workdir, 'writer', {
-      petId: 'writer',
+      definitionId: 'writer',
       name: '写作助手',
       modelProfileId: 'qwen-max',
       defaultCapabilityName: 'explore',
     });
 
     const petConfig = await loadChatPetConfig(buildHostRuntimeConfig(workdir));
-    assert.equal(petConfig.petId, 'writer');
+    assert.equal(petConfig.definitionId, 'writer');
     assert.equal(petConfig.name, '写作助手');
     assert.equal(petConfig.modelProfileId, 'qwen-max');
     assert.equal(petConfig.defaultCapabilityName, 'explore');
@@ -60,8 +60,8 @@ test('Chat Pet resolution adopts the configured identity and model profile', asy
  */
 test('Chat serves the standalone Pet when the directory holds several', async () => {
   await withWorkdir(async (workdir) => {
-    writePet(workdir, 'writer', { petId: 'writer', name: 'Writer' });
-    writePet(workdir, 'reviewer', { petId: 'reviewer', name: 'Reviewer' });
+    writePet(workdir, 'writer', { definitionId: 'writer', name: 'Writer' });
+    writePet(workdir, 'reviewer', { definitionId: 'reviewer', name: 'Reviewer' });
 
     const logged: string[] = [];
     const petConfig = await loadChatPetConfig(
@@ -69,7 +69,7 @@ test('Chat serves the standalone Pet when the directory holds several', async ()
       (message) => logged.push(message),
     );
 
-    assert.equal(petConfig.petId, DEFAULT_CHAT_PET.petId);
+    assert.equal(petConfig.definitionId, DEFAULT_CHAT_PET.definitionId);
     // The skipped Pets are named, so serving `local-only` beside them does not
     // read as the Host having silently picked one.
     assert.equal(logged.length, 1);
@@ -88,7 +88,7 @@ test('Chat serves the standalone Pet silently when none is configured', async ()
       (message) => logged.push(message),
     );
 
-    assert.equal(petConfig.petId, DEFAULT_CHAT_PET.petId);
+    assert.equal(petConfig.definitionId, DEFAULT_CHAT_PET.definitionId);
     assert.deepEqual(logged, []);
   });
 });

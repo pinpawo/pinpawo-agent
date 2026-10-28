@@ -89,14 +89,8 @@ test('Plugins open the Studio storage under their own name, and Studio closes it
   let db: Kysely<NotesDb> | undefined;
   const studio = await createStudio({
     studioId: 'storage',
-    entryPetId: 'one',
-    pets: [{
-      registration: { petId: 'one', name: 'One' },
-      dispatch: {
-        dispatch: async () => undefined, onQueueChange: () => () => undefined, onDispatchLifecycle: () => () => undefined,
-        getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
-      },
-    }],
+    definitions: [],
+    assemblePet: async () => { throw new Error('This Studio has no Pets.'); },
     plugins: [{
       name: 'notes', toolkits: [],
       start: async (context) => {
@@ -118,7 +112,7 @@ test('Plugins open the Studio storage under their own name, and Studio closes it
 
 test('studio.json storage: SQLite by default under the workdir, Postgres by url or by environment variable', () => {
   const parse = (storage: unknown) => parseConfigDocument({
-    content: JSON.stringify({ studioId: 's', entryPetId: 'a', pets: ['a'], ...(storage === undefined ? {} : { storage }) }),
+    content: JSON.stringify({ studioId: 's', definitions: ['a'], ...(storage === undefined ? {} : { storage }) }),
     source: 'studio.json',
     schema: studioLocalConfigSchema,
   }).storage;

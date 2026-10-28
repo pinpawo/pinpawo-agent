@@ -111,11 +111,11 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   await mkdir(path.join(stateRoot, 'pets'), { recursive: true });
   await writeFile(
     path.join(stateRoot, 'pets', 'planner.json'),
-    JSON.stringify({ petId: 'planner', name: 'Planner' }),
+    JSON.stringify({ definitionId: 'planner', name: 'Planner' }),
   );
   await writeFile(
     path.join(stateRoot, 'studio.json'),
-    JSON.stringify({ studioId: 'demo', entryPetId: 'planner', pets: ['planner'], plugins }),
+    JSON.stringify({ studioId: 'demo', definitions: ['planner'], plugins }),
   );
   return root;
 }
@@ -220,18 +220,17 @@ test('Capability names are scoped per Pet rather than globally across Studio', a
   await Promise.all([
     writeFile(
       path.join(stateRoot, 'pets', 'planner.json'),
-      JSON.stringify({ petId: 'planner', name: 'Planner' }),
+      JSON.stringify({ definitionId: 'planner', name: 'Planner' }),
     ),
     writeFile(
       path.join(stateRoot, 'pets', 'writer.json'),
-      JSON.stringify({ petId: 'writer', name: 'Writer' }),
+      JSON.stringify({ definitionId: 'writer', name: 'Writer' }),
     ),
     writeFile(
       path.join(stateRoot, 'studio.json'),
       JSON.stringify({
         studioId: 'scoped',
-        entryPetId: 'planner',
-        pets: ['planner', 'writer'],
+        definitions: ['planner', 'writer'],
       }),
     ),
   ]);
@@ -253,6 +252,9 @@ test('Capability names are scoped per Pet rather than globally across Studio', a
     ]),
     ...residentBuildResources(root),
   });
+  assert.deepEqual(studio.listPets(), []);
+  await studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
+  await studio.pets.create({ petId: 'writer', definitionId: 'writer', name: 'Writer' });
   assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['planner', 'writer']);
   await studio.shutdown();
 });

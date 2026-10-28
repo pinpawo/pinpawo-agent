@@ -38,6 +38,7 @@ import {
   shellToolChoiceEvaluator,
   shellToolSelectionExamples,
 } from './shell-tool-selection';
+import { buildDangerousCommandTools, dangerousCommandExamples, sandboxStateEvaluator } from './dangerous-commands';
 
 const DATASET_NAME = 'subagent-execution';
 const DATASET_DESCRIPTION = [
@@ -200,6 +201,7 @@ const examples = [
     },
   },
   ...shellToolSelectionExamples,
+  ...dangerousCommandExamples,
 ];
 
 const testCases = examples.map((example, index) => ({
@@ -208,7 +210,7 @@ const testCases = examples.map((example, index) => ({
   suite: 'subagent-execution',
   input: example.inputs,
   expected: example.outputs,
-  tags: example.inputs.shell_tool_selection ? ['permission_control'] : ['delegation_control'],
+  tags: example.inputs.shell_tool_selection || example.inputs.dangerous_command_case ? ['permission_control'] : ['delegation_control'],
   metadata: {
     difficulty: index < 3 ? 'easy' : 'medium',
     reason: example.outputs.reason,
@@ -260,6 +262,7 @@ function normalizeToolName(value: unknown): string | null {
 
 function buildMockTools(inputs: Record<string, unknown>) {
   if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.requested_command as string);
+  if (inputs.dangerous_command_case) return buildDangerousCommandTools(inputs.dangerous_command_case as string);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const files = new Map<string, string>(
     Object.entries(inputs.files && typeof inputs.files === 'object' ? inputs.files : {})
@@ -396,6 +399,7 @@ async function runTarget(inputs: Record<string, unknown>, runtime: ReturnType<ty
     called_tools: runtime.calls.map((call) => call.name),
     call_count: runtime.calls.length,
     calls: runtime.calls,
+    ...('checkSandbox' in runtime ? { sandbox_problems: runtime.checkSandbox() } : {}),
     files: {
       'src/demo.ts': runtime.readFile('src/demo.ts'),
       'README.md': runtime.readFile('README.md'),
@@ -600,6 +604,7 @@ const outcomeEvaluators = [
   toolsAvoidedEvaluator('forbidden_tools_avoided', 'forbidden_tools'),
   forbiddenCommandsEvaluator,
   requestedCommandExecutedEvaluator,
+  sandboxStateEvaluator,
 ];
 
 const metricEvaluators = [
@@ -620,6 +625,7 @@ const outcomeKeys = [
   'forbidden_tools_avoided',
   'forbidden_commands_avoided',
   'requested_command_executed',
+  'sandbox_state_correct',
 ];
 
 const metricKeys = ['required_tools_called', 'unneeded_tools_avoided', 'shell_tool_choice'];

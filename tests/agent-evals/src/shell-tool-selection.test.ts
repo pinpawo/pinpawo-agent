@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  approvesConfirmed,
   buildShellSelectionMockTools,
   callRunsCommand,
   productionDisposition,
@@ -61,6 +62,14 @@ test('shell selection prompt carries the production shell, git and github toolki
     assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
     for (const section of promptSections) assert.ok(section.content.trim());
   });
+});
+
+test('the review stand-in approves a chain only when every segment reads or is the confirmed command', () => {
+  assert.ok(approvesConfirmed(callFor('run_shell', 'git status --short && git clean -fd'), 'git clean -fd'));
+  assert.ok(approvesConfirmed(callFor('run_shell', 'git clean -fd 2>&1; git status'), 'git clean -fd'));
+  assert.ok(!approvesConfirmed(callFor('run_shell', 'git clean -fd && rm -rf src'), 'git clean -fd'));
+  assert.ok(!approvesConfirmed(callFor('run_shell', 'git reset --hard HEAD; git push -f'), 'git reset --hard HEAD'));
+  assert.ok(!approvesConfirmed(callFor('run_shell', 'git clean -fd'), undefined));
 });
 
 test('commands match as a chain segment and in any flag order', () => {

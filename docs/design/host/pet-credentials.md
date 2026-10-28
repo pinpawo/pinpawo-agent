@@ -67,8 +67,12 @@ roots still clear inherited dispatch scope.
 
 Before every ShellRS `exec`, the Host resolves this instance's bindings and sends
 the result only in that request's `env`. The fixed credential variables override
-same-name toolkit request variables. The existing Host base environment remains
-available; instance values are never installed in `process.env`. Shell, git,
+same-name toolkit request variables. Host and RS service global environments
+are still inherited by the existing process execution path; this feature does
+not filter or sandbox them. Integrations must never put per-Pet business tokens
+in either global environment. The configured source must be the single
+authoritative source of those business credentials; instance values are never
+installed in `process.env`. Shell, git,
 GitHub, project inspection and optional Office reuse their existing ShellRS client.
 Other runtimes do not automatically receive credentials.
 

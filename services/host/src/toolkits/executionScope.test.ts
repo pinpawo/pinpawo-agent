@@ -88,7 +88,7 @@ test('git toolkit defaults repository operations to the call workdir', async (t)
   });
   const toolkit = createGitToolkit({ shell });
 
-  const result = String(await toolFrom(toolkit, 'git_status').invoke({}, call(workdir, 'git')));
+  const result = String(await toolFrom(toolkit, 'git_commit').invoke({ message: 'x' }, call(workdir, 'git')));
   assert.match(result, /not a git repository/i);
   assert.doesNotMatch(result, /pinpawo-agent/);
 });

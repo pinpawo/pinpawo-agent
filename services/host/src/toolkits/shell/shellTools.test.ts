@@ -98,6 +98,22 @@ test('shell review policy reviews configured command execution', async () => {
   );
 });
 
+test('run_shell reviews every command, git and gh included', async () => {
+  const toolkit = createShellToolkit({ shell: new PosixShellRS() });
+  const policy = definition(toolkit, 'run_shell')?.review;
+  assert.ok(policy);
+  for (const command of ['git status', 'git push -u origin HEAD', 'gh pr comment 12 --body LGTM', 'npm test']) {
+    const review = await policy.request({
+      toolkitName: 'shell',
+      toolName: 'run_shell',
+      input: { command, cwd: '/repo' },
+      operation: definition(toolkit, 'run_shell')?.operation,
+      reviewCapabilities: { humanReview: true, sessionAuthorization: true },
+    });
+    assert.ok(review && 'schemaVersion' in review, `${command} must be reviewed`);
+  }
+});
+
 test('normalizeShellActionInput preserves explicit cwd and inherits process cwd', () => {
   assert.deepEqual(
     normalizeShellActionInput({ command: ' printf ok ', cwd: '~' }),
@@ -317,7 +333,7 @@ test('inspect_shell forwards unfamiliar inspection commands but never executes b
     'if rm file; then ls; fi', 'ls || rm file', 'ls | rm file']) {
     assert.match(String(await inspect.invoke({ command }, inSession)), /run_shell/);
   }
-  assert.match(String(await inspect.invoke({ command: 'git reset --hard' }, inSession)), /git_shell/);
-  assert.match(String(await inspect.invoke({ command: 'gh pr merge 1 --squash' }, inSession)), /gh_shell/);
+  assert.match(String(await inspect.invoke({ command: 'git reset --hard' }, inSession)), /git 写操作改用 run_shell/);
+  assert.match(String(await inspect.invoke({ command: 'gh pr merge 1 --squash' }, inSession)), /GitHub 写操作改用 run_shell/);
   assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head", control]);
 });

@@ -237,12 +237,29 @@ Toolkit 契约的空壳实现。
 | `files` | `read_file`、`view_file_chunk`、`stat_path`、`list_dir`、`validate_structured_file`、`write_file`、`apply_patch`、`move_path`、`copy_path`、`mkdir_path` | Host 进程内执行，不依赖 RS，始终可用 | 读免审核；写审核（`apply_patch` 改 workdir 内已有文件时自动通过） |
 | `shell` | `inspect_shell`、`run_shell`、`start_process`、`wait_process`、`list_processes`、`terminate_process`、`get_current_time` | ShellRS | `inspect_shell` 免审核加底线黑名单；`run_shell` / `start_process` 审核 |
 | `web` | `http_fetch`、`download_file` | Host 进程内执行，不依赖 RS，始终可用 | 审核（`http_fetch` 按 origin 与方法复用授权） |
-| `git` | `git_status`、`git_diff`、`git_log`、`git_branch`、`git_show`、`git_add`、`git_commit`、`git_push`、`git_shell` | ShellRS | 专用工具免审核；`git_shell` 只审核丢数据或改写共享历史的调用 |
-| `github` | `gh_pr_create`、`gh_pr_view`、`gh_pr_comments`、`gh_pr_diff`、`gh_issue_create`、`gh_issue_list`、`gh_issue_view`、`gh_issue_comments`、`gh_read_content`、`gh_shell` | ShellRS | 专用工具免审核；`gh_shell` 只审核合并、删除、发布、secret/权限和写入类 api |
+| `git` | `git_add`、`git_commit`、`git_push` | ShellRS | 免审核：schema 排除隐式 `git add .`、强推和删除远端引用 |
+| `github` | `gh_pr_create`、`gh_issue_create` | ShellRS | 免审核 |
 | `project-inspection` | 上述各 Toolkit 声明的只读子集 | ShellRS | 全部免审核 |
 
-`project-inspection` 不维护自己的工具清单：files、shell、git、github 在各自模块
-里声明只读子集，它直接组合这些子集，新增的只读工具会自动加入。
+`project-inspection` 不维护自己的工具清单：files、shell 在各自模块里声明只读
+子集，它直接组合这些子集，新增的只读工具会自动加入。
+
+git 和 GitHub 的查看经 `inspect_shell` 运行 `git` / `gh`；git、github Toolkit 只提供
+参数结构排除了危险形式的写工具，其他 git/gh 写操作经 `run_shell` 并审核
+（2026-10-27 起，原来的查看工具、`git_shell`、`gh_shell` 等已删除）。因此
+`uses` 里只有 `git` 或 `github` 的 Capability 只能做这几个写操作，看不了状态、
+diff、PR 或 issue；需要查看或其他 git/gh 操作时必须显式加上 `shell`。Registry
+不会替 Capability 补上 `shell`，`uses` 仍是完整的权限边界。
+
+#### 从 git / github 查看工具迁移
+
+| 原来用到的工具 | 新 `uses` |
+|---|---|
+| `git_status`、`git_diff`、`git_log`、`git_branch`、`git_show` | 加上 `shell`（经 `inspect_shell`） |
+| `git_shell` | 加上 `shell`（经 `inspect_shell` 或 `run_shell`） |
+| `gh_pr_view`、`gh_pr_diff`、`gh_pr_comments`、`gh_issue_list`、`gh_issue_view`、`gh_issue_comments`、`gh_read_content` | 加上 `shell`（经 `inspect_shell`） |
+| `gh_shell` | 加上 `shell`（经 `inspect_shell` 或 `run_shell`） |
+| 只用 `git_add`、`git_commit`、`git_push`、`gh_pr_create`、`gh_issue_create` | 不变 |
 
 #### 从 `bash` 迁移
 
@@ -252,12 +269,11 @@ Toolkit 契约的空壳实现。
 | 旧 `uses` | 新 `uses` |
 |---|---|
 | `bash` | `files`、`shell`、`web`，按需取其子集 |
-| `git`，并使用 `gh_*` 工具 | `git`、`github` |
-| `git`，只用本地 git | `git` |
+| `git`，并使用 `gh_*` 工具 | `git`、`github`，查看和其他操作另加 `shell` |
+| `git`，只用本地 git | `git`，查看和其他操作另加 `shell` |
 | `project-inspection` | 不变 |
 
-operation kind 随 Toolkit 名改变，例如 `bash.run_shell` 变为 `shell.run_shell`、
-`git.gh_pr_view` 变为 `github.gh_pr_view`。
+operation kind 随 Toolkit 名改变，例如 `bash.run_shell` 变为 `shell.run_shell`。
 
 ## 4. Registry 编译
 

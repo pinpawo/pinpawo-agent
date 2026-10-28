@@ -62,23 +62,44 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 
 ### 风险控制原则
 
-整体偏宽松。风险靠工具划分控制，不靠逐条命令设卡：
+整体偏宽松。设计好工具、相信模型按描述选工具。一个调用免审核，只能来自下面两种
+机制，两者都不需要逐条补规则：
 
-1. **用 Toolkit 和工具设计引导 LLM 选对工具。** 工具按权限定位拆分，描述写清
-   "适合做什么、不该放什么、该去哪个工具"。LLM 被信任会按描述选工具。
-2. **定位为需要审核的工具，放心让 LLM 调用。** 审核就是这类工具的防线，描述里
-   不再额外限制 LLM 的使用时机。例如 `run_shell`、`start_process`。
-3. **定位为免审核或少审核的工具，用黑名单兜底。** 黑名单只拦底线，即不可逆、
-   改写共享历史、影响他人或凭据的操作，并提示改用哪个工具；不追求完整，不是沙箱。
-   - `inspect_shell`（免审核）：拦截 rm/dd/提权/强制 kill 等，并把 git/gh 写操作
-     导向 git / github Toolkit。见 `services/host/src/toolkits/shell/readOnlyShell.ts`。
-   - `git_shell` / `gh_shell`（按调用审核）：查询和日常写操作直接执行，只有黑名单
-     命中的高风险形式和无法识别的子命令走审核。见
-     `services/host/src/toolkits/git/gitCommands.ts` 和
-     `services/host/src/toolkits/github/ghCommands.ts`。
-   - 专用工具（`git_add`、`git_commit`、`git_push`、`gh_pr_create`、
-     `gh_issue_create` 等）的危险能力由 schema 排除（例如 `git_push` 不接受 force
-     或删除 refspec），因此不审核。
+- **结构保证**：工具参数本身表达不了危险操作。例如 `git_push` 没有 force 参数，
+  refspec 以 `+` 或 `:` 开头会被 schema 拒绝；`git_add` 只接受显式 pathspec。
+- **只读白名单，认不出就不放行**：`inspect_shell` 只把白名单里的 git/gh 查看形式
+  当作只读，认不出的子命令、别名或全局选项一律拒绝，并提示改用会审核的
+  `run_shell`。漏判的代价是多一次审核，不会变成免审核的写操作。
+
+不在自由格式命令里"先放行日常写操作、再列举危险形式去拦"：git/gh 的参数组合
+列不完，每漏一种就是一条免审核的危险路径（2026-10-27 #1013 review 发现的路径
+checkout、`--` 后的 refspec、`gh pr checkout --force` 都属此类）。所以
+`git_shell` / `gh_shell` 和按命令免审 `run_shell` 的做法都已删除。
+
+1. **`inspect_shell` 免审核，省掉一次审核（auto review 时也省一次模型调用）。**
+   用来跑 rg、cat、sed -n、git status/log/diff/show、gh pr view/diff/checks 这类
+   查看命令。除 git/gh 的只读白名单外，其余靠黑名单兜底：它是引导，不是保证；
+   拒绝时提示改用哪个工具，不追求完整，不是沙箱。漏掉的情况意味着模型违背描述
+   使用工具，属于"相信模型"接受的风险。
+   - 不可逆操作：rm/dd/提权/强制 kill 等，改用 `run_shell`。
+   - 常见写法：重定向到文件、`sed -i`、`mv`、`cp`、`tee` 等写文件（改用文件工具或
+     `run_shell`）；包管理器的安装、发布和脚本（只放行 ls/view/outdated 这类只读
+     子命令）；curl 的写请求和写文件、wget 下载；`make`；运行脚本文件
+     （`bash x.sh`、`source`）。
+   - git/gh 不在只读白名单里的形式，改用专用写工具或 `run_shell`。
+   - 不检查解释器内联代码（`python -c`、`node -e`）和其他动态代码。
+   见 `services/host/src/toolkits/shell/readOnlyShell.ts`，git/gh 白名单在
+   `services/host/src/toolkits/cli/{gitCommands,ghCommands}.ts`。
+2. **日常写操作用结构化工具，免审核。** `git_add`、`git_commit`、`git_push`、
+   `gh_pr_create`、`gh_issue_create` 的参数结构排除了危险形式，直接执行。只有
+   高频、且能用结构排除危险形式的操作才值得做成专用工具。
+3. **`run_shell` / `start_process` 每次审核，放心让 LLM 调用。** 审核就是这类工具
+   的防线，描述里不再额外限制使用时机。其他 git/gh 写操作（切换分支、stash、
+   rebase、评论、合并等）都走这里。auto review 只按通用风险分档判断，丢弃未提交
+   改动、强推、删除远端引用、合并等已在最高档里；shell Toolkit 不再另列 git/gh
+   的 `reviewGuidance` 清单。列清单同样是逐条补规则：列出的形式会不看任务一律
+   判最高分，没列出的反而被低估（#1013 实测：任务明确要求丢弃单个文件的
+   `git restore` 从 1 变成 10，复制 SSH 私钥到 /tmp 从 10 掉到 9）。
 
 ## Auto review 领域边界
 

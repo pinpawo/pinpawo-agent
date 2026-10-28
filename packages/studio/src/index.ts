@@ -97,4 +97,4 @@ export { runStudioHostCli, parseStudioHostCliArgs } from './cli';
 export type { StudioHostCliHandlers, ParsedStudioHostCli } from './cli';
 
 export { StudioSecretError } from './secrets/studioSecrets';
-export type { StudioSecrets, StudioSecretMetadata } from './secrets/studioSecrets';
+export type { StudioSecrets, StudioSecretMetadata, StudioCredentialBinding, StudioCredentialBindingChange } from './secrets/studioSecrets';

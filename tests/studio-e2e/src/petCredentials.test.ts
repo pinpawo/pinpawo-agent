@@ -147,7 +147,7 @@ test('real graph review/resume injects the admitted instance credential only at 
     t.after(() => host.close());
     await prepared.studio.pets.create({ petId: 'credential-pet', definitionId: 'shared', name: 'Credential Pet' });
     await prepared.studio.secrets.put({ secretId: 'account-ref', name: 'Test account', value: secret });
-    await prepared.studio.secrets.bind({ petId: 'credential-pet', bindings: { PET_TEST_TOKEN: 'account-ref' } });
+    await prepared.studio.secrets.compareAndSetBinding({ petId: 'credential-pet', envName: 'PET_TEST_TOKEN', secretId: 'account-ref', expectedSecretId: null });
     const events: AgentServerMessage[] = [];
     host.interaction.subscribe(message => events.push(message));
     const lifecycle: string[] = [];

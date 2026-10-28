@@ -25,7 +25,19 @@ a Secret value affects new commands for all instances bound to it, without chang
 `petId`; existing processes retain their startup environment. Rebinding one instance
 does not affect another. Binding replacement is transactional; an invalid reference
 preserves the prior set. Reads are serialized with local replacements so SQLite's
-shared connection does not expose an intermediate empty set.
+shared connection does not expose an intermediate empty set. This local queue is
+not cross-replica concurrency protection: single-item updates use database CAS.
+
+`compareAndSetBinding` changes only one `(petId, envName)`. Initial binding uses
+conditional INSERT with conflict-do-nothing; replacement and removal use UPDATE /
+DELETE with the expected Secret ID in the WHERE clause, inside a transaction.
+There is no full-map read/overwrite. The database decides the winner across
+processes. Competing replacements of the same old reference yield one success
+and one conflict; different variables preserve one another. CAS compares references,
+not Secret contents: integrations needing conditional replacement of a granted value
+save it under a fresh Secret ID, then CAS the binding. Updating a shared Secret
+value in place intentionally affects all instances still bound to that ID. An absent-to-absent
+conditional no-op only checks the target row and cannot delete a concurrent bind.
 
 An existing Pet with no bindings receives `{}` and keeps its normal tool behavior.
 An unknown Pet, missing Secret, locked source, malformed ciphertext or failed
@@ -81,11 +93,22 @@ GET  /pet-credentials?petId=INSTANCE
      -> {bindings: {SERVICE_TOKEN: SECRET_ID}}
 POST /pet-credentials
      {petId, bindings: {SERVICE_TOKEN: SECRET_ID}} -> {bindings}
+PATCH /pet-credentials
+     {petId, envName, secretId, expectedSecretId}
+     -> {binding: {petId, envName, secretId}}
 ```
 
-`POST /pet-credentials` atomically replaces the complete binding set; `{}` explicitly
-unbinds it. There is no HTTP Secret-value read endpoint. Authorization integrations
-save the granted value, then bind its Secret ID to the trusted instance. They own
+Authorization integrations use `PATCH /pet-credentials` after saving the granted
+value. `expectedSecretId: null` requires an unbound variable; a string must equal
+the current reference. `secretId: null` unbinds under the same condition. All four
+fields are required (400 if omitted/invalid). Success is HTTP 200 with the single
+binding; mismatches return 409 without changing any variable. Missing Pet/Secret
+returns 404. Existing management-token authorization also applies to PATCH.
+
+`POST /pet-credentials` remains an **unconditional** atomic replacement of the full
+set; `{}` clears it. It is only for deliberate whole-set management. A GET/merge/
+POST sequence is not concurrency-safe and must not be used for per-tool provisioning.
+There is no HTTP Secret-value read endpoint. Integrations own
 login/consent/issuance and fixed env names; Studio owns generic persistence. This
 adds no business roles, token issuer semantics or permission tables. Responses and
 errors never echo submitted values; no plaintext credential fields are added to

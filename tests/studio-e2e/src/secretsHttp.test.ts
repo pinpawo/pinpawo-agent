@@ -19,6 +19,9 @@ test('Secret HTTP management is local-only and every successful response contain
     method: body === undefined ? 'GET' : 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+  const patch = (body: unknown, key = token) => fetch(`${base}/pet-credentials`, {
+    method: 'PATCH', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
   const secretValue = 'fake-http-business-credential';
   try {
     const created = await request('/pets', { petId: 'a', definitionId: 'shared', name: 'A' });
@@ -34,6 +37,24 @@ test('Secret HTTP management is local-only and every successful response contain
     const bound = await request('/pet-credentials', { petId: 'a', bindings: { SERVICE_TOKEN: 'account' } });
     assert.equal(bound.status, 200);
     assert.deepEqual(await bound.json(), { bindings: { SERVICE_TOKEN: 'account' } });
+    await request('/secrets', { secretId: 'rotated', name: 'Rotated', value: 'fake-rotated-value' });
+    const change = { petId: 'a', envName: 'SERVICE_TOKEN', secretId: 'rotated', expectedSecretId: 'account' };
+    const other = await patch({ petId: 'a', envName: 'OTHER_TOKEN', secretId: 'account', expectedSecretId: null });
+    assert.equal(other.status, 200);
+    const rotated = await patch(change);
+    assert.equal(rotated.status, 200);
+    assert.deepEqual(await rotated.json(), { binding: { petId: 'a', envName: 'SERVICE_TOKEN', secretId: 'rotated' } });
+    const conflict = await patch(change);
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.text()).includes(secretValue), false);
+    assert.equal((await patch({ ...change, secretId: null })).status, 409);
+    assert.equal((await patch({ ...change, secretId: 'missing', expectedSecretId: 'rotated' })).status, 404);
+    assert.equal((await patch({ petId: 'a', envName: 'SERVICE_TOKEN', secretId: 'account' })).status, 400);
+    assert.equal((await patch({ ...change, expectedSecretId: 'rotated' }, key)).status, 403);
+    assert.deepEqual(await (await request('/pet-credentials?petId=a')).json(), { bindings: { SERVICE_TOKEN: 'rotated', OTHER_TOKEN: 'account' } });
+    assert.equal((await patch({ ...change, secretId: null, expectedSecretId: 'rotated' })).status, 200);
+    assert.equal((await patch({ ...change, secretId: 'account', expectedSecretId: null })).status, 200);
+    assert.equal((await patch({ petId: 'a', envName: 'OTHER_TOKEN', secretId: null, expectedSecretId: 'account' })).status, 200);
     for (const path of ['/secrets', '/pet-credentials?petId=a']) {
       const metadata = await request(path);
       assert.equal(metadata.status, 200);

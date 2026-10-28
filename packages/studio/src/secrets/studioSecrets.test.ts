@@ -63,6 +63,47 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   });
 
+  test(`${backend}: single binding CAS uses conditional SQL and preserves unrelated variables`, async () => {
+    const storage = createStudioStorage(config());
+    try {
+      const db = await storage.open<SecretDatabase>('studio', studioCoreMigrations);
+      await db.insertInto('studio_pets').values({ pet_id: 'a', definition_id: 'shared', name: 'A', created_at: 'now' }).execute();
+      const first = createStudioSecrets(async () => db, key).management;
+      const second = createStudioSecrets(async () => db, key).management;
+      for (const secretId of ['old', 'new', 'other']) await first.put({ secretId, name: secretId, value: `fake-${secretId}` });
+      const change = (envName: string, secretId: string | null, expectedSecretId: string | null) => ({ petId: 'a', envName, secretId, expectedSecretId });
+      // PGlite gives two independent managers DB transactions through its pool;
+      // SQLite multi-process races are exercised in the dedicated test below.
+      const concurrent = backend === 'postgres' ? second : first;
+      const initial = await Promise.allSettled([
+        first.compareAndSetBinding(change('TOKEN', 'old', null)),
+        concurrent.compareAndSetBinding(change('TOKEN', 'other', null)),
+      ]);
+      assert.equal(initial.filter(result => result.status === 'fulfilled').length, 1);
+      const conflict = initial.find(result => result.status === 'rejected');
+      assert.ok(conflict?.status === 'rejected' && conflict.reason instanceof StudioSecretError && conflict.reason.code === 'conflict');
+      const current = (await first.bindings('a')).TOKEN!;
+      await Promise.all([
+        first.compareAndSetBinding(change('LEFT', 'old', null)),
+        concurrent.compareAndSetBinding(change('RIGHT', 'other', null)),
+      ]);
+      assert.deepEqual(await first.bindings('a'), { TOKEN: current, LEFT: 'old', RIGHT: 'other' });
+      const rotations = await Promise.allSettled([
+        first.compareAndSetBinding(change('TOKEN', 'new', current)),
+        concurrent.compareAndSetBinding(change('TOKEN', 'new', current)),
+      ]);
+      assert.equal(rotations.filter(result => result.status === 'fulfilled').length, 1);
+      await assert.rejects(first.compareAndSetBinding(change('TOKEN', null, current)), error => error instanceof StudioSecretError && error.code === 'conflict');
+      assert.deepEqual(await first.compareAndSetBinding(change('TOKEN', null, 'new')), { petId: 'a', envName: 'TOKEN', secretId: null });
+      await assert.rejects(first.compareAndSetBinding(change('LEFT', null, null)), error => error instanceof StudioSecretError && error.code === 'conflict');
+      assert.deepEqual(await first.compareAndSetBinding(change('TOKEN', null, null)), { petId: 'a', envName: 'TOKEN', secretId: null });
+      await assert.rejects(first.compareAndSetBinding(change('LEFT', 'missing', 'old')), /does not exist/);
+      await assert.rejects(first.compareAndSetBinding({ ...change('LEFT', 'new', 'old'), expectedSecretId: undefined }), /Invalid/);
+      await assert.rejects(first.compareAndSetBinding(change('BAD=ENV', 'new', null)), /Invalid/);
+      assert.deepEqual(await first.bindings('a'), { LEFT: 'old', RIGHT: 'other' });
+    } finally { await storage.close(); }
+  });
+
   test(`${backend}: missing/wrong key, tampering and ciphertext row swaps fail without plaintext fallback or error leakage`, async () => {
     const storage = createStudioStorage(config());
     try {

@@ -3,6 +3,9 @@ import type { Kysely } from 'kysely';
 import type { PetCredentialBindings, PetCredentialSource } from 'pinpawo/host-runtime';
 import type { PetDatabase } from '../pets/store/kysely';
 
+export type StudioCredentialBinding = { petId: string; envName: string; secretId: string | null };
+export type StudioCredentialBindingChange = { petId: unknown; envName: unknown; secretId: unknown; expectedSecretId: unknown };
+
 export type StudioSecretMetadata = { secretId: string; name: string; createdAt: string; updatedAt: string };
 /** Management never exposes decrypted values. Only the composing Runtime receives credentialSource. */
 export type StudioSecrets = {
@@ -10,10 +13,12 @@ export type StudioSecrets = {
   list(): Promise<StudioSecretMetadata[]>;
   put(input: { secretId: unknown; name: unknown; value: unknown }): Promise<StudioSecretMetadata>;
   bindings(petId: unknown): Promise<PetCredentialBindings>;
+  compareAndSetBinding(input: StudioCredentialBindingChange): Promise<StudioCredentialBinding>;
+  /** Unconditional full replacement; integrations should use compareAndSetBinding. */
   bind(input: { petId: unknown; bindings: unknown }): Promise<PetCredentialBindings>;
 };
 export class StudioSecretError extends Error {
-  constructor(readonly code: 'invalid' | 'not_found' | 'locked' | 'unavailable', message: string) {
+  constructor(readonly code: 'invalid' | 'not_found' | 'locked' | 'unavailable' | 'conflict', message: string) {
     super(message);
     this.name = 'StudioSecretError';
   }
@@ -87,6 +92,43 @@ export function createStudioSecrets(open: () => Promise<Kysely<SecretDatabase>>,
       return metadata(row);
     }),
     bindings,
+    compareAndSetBinding: input => serialize(async () => {
+      requireKey();
+      const petId = id(input.petId);
+      const envName = input.envName;
+      if (typeof envName !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) throw invalid();
+      const secretId = input.secretId === null ? null : id(input.secretId);
+      const expected = input.expectedSecretId === null ? null : id(input.expectedSecretId);
+      const db = await open();
+      // Validate references outside the write transaction. Foreign keys also guard
+      // against disappearance before DML. Mutating transactions start with DML,
+      // without first holding a SQLite read snapshot.
+      await requirePet(db, petId);
+      if (secretId !== null && !await db.selectFrom('studio_secrets').select('secret_id').where('secret_id', '=', secretId).executeTakeFirst()) {
+        throw new StudioSecretError('not_found', 'Secret does not exist.');
+      }
+      const changed = await db.transaction().execute(async tx => {
+        if (expected === null) {
+          if (secretId === null) {
+            // An absent -> absent operation is a conditional no-op, linearized by
+            // this target-row check. It cannot remove a concurrent new binding.
+            return !await tx.selectFrom('studio_pet_credentials').select('secret_id')
+              .where('pet_id', '=', petId).where('env_name', '=', envName).executeTakeFirst();
+          }
+          const row = await tx.insertInto('studio_pet_credentials').values({ pet_id: petId, env_name: envName, secret_id: secretId })
+            .onConflict(c => c.columns(['pet_id', 'env_name']).doNothing()).returning('secret_id').executeTakeFirst();
+          return !!row;
+        }
+        const row = secretId === null
+          ? await tx.deleteFrom('studio_pet_credentials').where('pet_id', '=', petId).where('env_name', '=', envName)
+            .where('secret_id', '=', expected).returning('secret_id').executeTakeFirst()
+          : await tx.updateTable('studio_pet_credentials').set({ secret_id: secretId }).where('pet_id', '=', petId).where('env_name', '=', envName)
+            .where('secret_id', '=', expected).returning('secret_id').executeTakeFirst();
+        return !!row;
+      });
+      if (!changed) throw new StudioSecretError('conflict', 'Pet credential binding changed; refresh its reference before retrying.');
+      return { petId, envName, secretId };
+    }),
     bind: input => serialize(async () => {
       requireKey();
       const petId = id(input.petId);

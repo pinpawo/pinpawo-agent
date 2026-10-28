@@ -502,7 +502,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     });
     app.use('*', cors({
       origin: (origin) => allowedOrigins.has(origin) ? origin : undefined,
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
       allowHeaders: ['Authorization', 'Content-Type'],
       maxAge: 600,
     }));
@@ -609,7 +609,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       try { return await run(); }
       catch (error) {
         if (error instanceof StudioSecretError) {
-          throw new HttpRequestError(error.code === 'invalid' ? 400 : error.code === 'not_found' ? 404 : 503, error.message);
+          throw new HttpRequestError(error.code === 'invalid' ? 400 : error.code === 'not_found' ? 404 : error.code === 'conflict' ? 409 : 503, error.message);
         }
         throw new HttpRequestError(503, 'Studio Secret operation failed.');
       }
@@ -624,8 +624,14 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       const body = await readJsonBody(c) as { petId?: unknown; bindings?: unknown } | null;
       return c.json({ bindings: await secretRequest(() => secrets().bind({ petId: body?.petId, bindings: body?.bindings })) });
     });
+    app.patch('/pet-credentials', async c => {
+      const body = await readJsonBody(c) as { petId?: unknown; envName?: unknown; secretId?: unknown; expectedSecretId?: unknown } | null;
+      return c.json({ binding: await secretRequest(() => secrets().compareAndSetBinding({
+        petId: body?.petId, envName: body?.envName, secretId: body?.secretId, expectedSecretId: body?.expectedSecretId,
+      })) });
+    });
     app.all('/secrets', c => methodNotAllowed(c, ['GET', 'POST']));
-    app.all('/pet-credentials', c => methodNotAllowed(c, ['GET', 'POST']));
+    app.all('/pet-credentials', c => methodNotAllowed(c, ['GET', 'POST', 'PATCH']));
 
     app.get('/events', (requestContext) => {
       if (eventClients.size >= maxEventClients) {

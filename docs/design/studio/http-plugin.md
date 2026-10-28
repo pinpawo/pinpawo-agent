@@ -106,7 +106,7 @@ route 的 `authorization` 有三种：
 
 认证过的请求在 `StudioHttpRouteRequest.principal` 里带上 `{clientId, scope}`：本机 token 是
 `{clientId: 'local', scope: 'studio'}`，其他客户是 `scope: 'client'`。内置路由（`/dispatch`、
-`/events`、`/me`、`/pets*`、`/pet-definitions`、`/pet-sessions/*`、`/clients*`）是保留路径，贡献方不能覆盖。其中
+`/events`、`/me`、`/pets*`、`/pet-definitions`、`/pet-sessions/*`、`/clients*`、`/secrets`、`/pet-credentials`）是保留路径，贡献方不能覆盖。其中
 `GET /me`（返回 `{clientId, scope}`）和 `GET /pets`（Studio 的 Pet，只含 `petId`、`name`、`definitionId`）对所有客户开放，其余只接受本机
 token。Pet 管理（`POST /pets`、`POST /pets/rename`、`GET /pet-definitions`）
 见 [Pet 实例](pet-instance.md)。client 没有事件流，靠轮询 Channel 路由（Console 也随轮询刷新 Pet 列表）跟进；Console 用 client key 或 JWT 连接时只显示 Channel 页。
@@ -186,3 +186,20 @@ HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。
 - pending-interrupt interaction UI；
 - durable event storage/replay；
 - HTTP Toolkit 或 Agent Capability。
+
+
+### 实例 Secret 管理
+
+`GET/POST /secrets`、`GET/POST/PATCH /pet-credentials` 都只接受现有本机管理 token；
+普通 client 无权读写，贡献路由也不能覆盖这些路径。Secret 读取只给 metadata，绑定读取只给引用，
+没有 Secret 明文读取端点。主密钥与数据库、Runtime 注入边界见[实例凭据](../host/pet-credentials.md)。
+
+业务授权接入先用 `POST /secrets {secretId, name, value}` 保存新引用的加密值，再用
+`PATCH /pet-credentials {petId, envName, secretId, expectedSecretId}` 做单项条件绑定。
+`expectedSecretId: null` 要求该变量未绑定；字符串必须等于当前引用；`secretId: null`
+按同一条件解绑。成功为 `200 {binding: {petId, envName, secretId}}`，预期不匹配为 `409`；
+缺失/非法字段为 `400`，不存在的 Pet/Secret 为 `404`，未配置部署主密钥为 `503`。
+CAS 由数据库的条件写入保证，只改指定变量，不依赖进程内 mutex 保护多副本。
+
+`POST /pet-credentials {petId, bindings}` 保留为有意的全量替换管理操作，无并发预期条件。
+不要用 GET/合并/POST 做某个工具的授权绑定；业务集成应使用单项 PATCH，保留其他工具的并发更新。

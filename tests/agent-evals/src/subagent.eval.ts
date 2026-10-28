@@ -259,7 +259,7 @@ function normalizeToolName(value: unknown): string | null {
 }
 
 function buildMockTools(inputs: Record<string, unknown>) {
-  if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.shell_outputs as Record<string, unknown>);
+  if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.requested_command as string);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const files = new Map<string, string>(
     Object.entries(inputs.files && typeof inputs.files === 'object' ? inputs.files : {})
@@ -360,6 +360,14 @@ function buildMockTools(inputs: Record<string, unknown>) {
 
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
   const runtime = buildMockTools(inputs);
+  try {
+    return await runTarget(inputs, runtime);
+  } finally {
+    await ('dispose' in runtime ? runtime.dispose() : undefined);
+  }
+}
+
+async function runTarget(inputs: Record<string, unknown>, runtime: ReturnType<typeof buildMockTools>) {
   const task = String(inputs.task ?? '');
   const briefing = materializeDelegation({
     userRequest: String(inputs.user_request ?? task),
@@ -378,6 +386,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     promptSections: runtime.promptSections,
     messages,
     maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+    ...('workdir' in runtime ? { runtimeContext: { workdir: runtime.workdir } } : {}),
   });
 
   return {

@@ -1,10 +1,13 @@
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { createGitToolkit } from '../../../services/host/src/toolkits/git';
 import { createGithubToolkit } from '../../../services/host/src/toolkits/github';
-import { createShellToolkit } from '../../../services/host/src/toolkits/shell';
+import { createShellToolDefinitions, createShellToolkit } from '../../../services/host/src/toolkits/shell';
 import { classifyReadOnlyShellCommand } from '../../../services/host/src/toolkits/shell/readOnlyShell';
-import { createInspectShellTool, createRunShellTool, createStartProcessTool } from '../../../services/host/src/toolkits/shell/shellTools';
-import type { ShellRS } from '../../../services/host/src/toolkits/shellRS/shellRS';
+import { PosixShellRS } from '../../../services/host/src/toolkits/shellRS';
 
 type ShellCall = { name: string; args: Record<string, unknown> };
 type ExpectedCall = { names: readonly string[]; command: string };
@@ -24,19 +27,12 @@ const cases = [
   ['gh-pr-comment-run', 'gh pr comment 12 --body LGTM', WRITE, '已确认在 PR 12 下留言 LGTM。'],
 ] as const;
 
-/**
- * Every command the fixture runs reports this. A "nothing ran" reply to the
- * model's own checks (`pwd`, `git status 2>&1`) made it conclude the shell was
- * broken and retry reads in run_shell or skip the requested write.
- */
-const FIXTURE_OUTPUT = 'Command completed successfully (controlled fixture output).';
-
 export const shellToolSelectionExamples = cases.map(([name, command, expectedTools, intent]) => ({
   name,
   inputs: {
     shell_tool_selection: true,
     task: `${intent}请执行 ${command}，然后简要报告结果。`,
-    shell_outputs: { [command]: FIXTURE_OUTPUT },
+    requested_command: command,
   },
   outputs: {
     expected_has_deliverable: true,
@@ -73,34 +69,108 @@ export function productionDisposition(call: ShellCall): 'refused' | 'runs' | 're
   return 'reviewed';
 }
 
-const unavailable = new Proxy({} as ShellRS, {
-  get() { throw new Error('Shell selection eval must never access a real executor'); },
-});
+/** gh has no network here: canned answers for the PR the cases name, an error for anything else. */
+const GH_SHIM = `#!/bin/sh
+case "$1 $2" in
+  "pr checks") printf 'build\\tpass\\t1m12s\\thttps://github.com/acme/demo/actions/runs/101/job/201\\ntest\\tpass\\t2m40s\\thttps://github.com/acme/demo/actions/runs/101/job/202\\n' ;;
+  "pr comment") echo "https://github.com/acme/demo/pull/12#issuecomment-3001" ;;
+  "pr view") printf 'title:\\tAdd cart totals\\nstate:\\tOPEN\\nauthor:\\teval-bot\\nnumber:\\t12\\nurl:\\thttps://github.com/acme/demo/pull/12\\n' ;;
+  "auth status") printf 'github.com\\n  Logged in to github.com account eval-bot (keyring)\\n' ;;
+  "repo view") echo "acme/demo" ;;
+  "--version "*) echo "gh version 2.60.0 (2024-10-10)" ;;
+  *) echo "gh: no data for this command in the eval repository" >&2; exit 1 ;;
+esac
+`;
 
-/** Production shell descriptions, schemas, toolkit instructions and inspect_shell admission; execution is mocked. */
-export function buildShellSelectionMockTools(outputs: Record<string, unknown> = {}) {
+function git(cwd: string, ...args: string[]) {
+  execFileSync('git', ['-c', 'user.name=Eval Bot', '-c', 'user.email=eval@example.com', '-c', 'commit.gpgsign=false', ...args], {
+    cwd,
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+    stdio: 'ignore',
+  });
+}
+
+/**
+ * A throwaway repository the cases' commands really run in: six pushed
+ * commits on main, an unstaged edit, and untracked files. `origin` is a local
+ * bare repository, so pushes stay on this machine.
+ */
+export function createShellSelectionRepo() {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-shell-eval-'));
+  const repo = join(root, 'demo');
+  const bin = join(root, 'bin');
+  git(root, 'init', '-q', '--bare', 'remote.git');
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  git(repo, 'init', '-q', '-b', 'main');
+  git(repo, 'remote', 'add', 'origin', join(root, 'remote.git'));
+  const files = ['README.md', 'src/cart.ts', 'src/price.ts', 'src/tax.ts', 'src/format.ts', 'src/index.ts'];
+  for (const [index, file] of files.entries()) {
+    writeFileSync(join(repo, file), `// ${file}\nexport const step${index} = ${index};\n`);
+    git(repo, 'add', file);
+    git(repo, 'commit', '-q', '-m', `Add ${file}`);
+  }
+  git(repo, 'push', '-q', '-u', 'origin', 'main');
+  writeFileSync(join(repo, 'src/cart.ts'), '// src/cart.ts\nexport const step1 = 1;\nexport const total = 42;\n');
+  writeFileSync(join(repo, 'notes.txt'), 'scratch notes\n');
+  mkdirSync(join(repo, 'tmp'));
+  writeFileSync(join(repo, 'tmp/out.log'), 'log\n');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), GH_SHIM);
+  chmodSync(join(bin, 'gh'), 0o755);
+  return { repo, bin, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** Production review outcome for a call the eval's reviewer rejects. */
+function rejected(name: string, args: Record<string, unknown>) {
+  return JSON.stringify({
+    ok: false, cancelled: true, source: 'human_reject', toolName: name, toolkitName: 'shell',
+    reason: 'tool call rejected by user', input: args, retryable: false,
+    guidance: 'Follow the user rejection and any updated direction. Do not retry this exact tool call unless the user explicitly asks for it.',
+  });
+}
+
+/**
+ * The production shell Toolkit running in a throwaway repository. Reviewed
+ * calls are approved when they only read or run the confirmed command, the
+ * way review settles these cases; anything else is rejected.
+ */
+export function buildShellSelectionMockTools(requestedCommand?: string) {
   const calls: ShellCall[] = [];
-  const definitions = [createInspectShellTool(unavailable), createRunShellTool(unavailable),
-    createStartProcessTool(unavailable)];
-  const tools = definitions.map((definition) => tool(async (args: Record<string, unknown>) => {
-    const call = { name: definition.name, args };
-    calls.push(call);
-    if (call.name === 'inspect_shell') {
-      // Same refusal text the production tool returns.
-      const verdict = classifyReadOnlyShellCommand(shellCallCommand(call));
-      if (!verdict.allowed) return `Error: inspect_shell 不执行该命令（${verdict.reason}）。${verdict.redirect}`;
-    }
-    const recorded = Object.entries(outputs).find(([command]) => callRunsCommand(call, command));
-    return String(recorded?.[1] ?? FIXTURE_OUTPUT);
-  }, { name: definition.name, description: definition.description, schema: definition.schema }));
-  const promptSections = [createShellToolkit({ shell: unavailable }), createGitToolkit({ shell: unavailable }),
-    createGithubToolkit({ shell: unavailable })]
+  const { repo, bin, cleanup } = createShellSelectionRepo();
+  const shell = new PosixShellRS({ commandDir: bin });
+  const config = {
+    context: {
+      executionScope: { threadId: 'shell-eval', taskId: 'task-1', runId: 'run-1', delegationId: 'delegation-1', workdir: repo },
+    },
+  };
+  const approves = (call: ShellCall) => classifyReadOnlyShellCommand(shellCallCommand(call)).allowed
+    || (requestedCommand !== undefined && callRunsCommand(call, requestedCommand));
+  const tools = createShellToolDefinitions({ shell }).tools.map(({ tool: definition, review }) => tool(
+    async (args: Record<string, unknown>) => {
+      const call = { name: definition.name, args };
+      calls.push(call);
+      if (review && !approves(call)) return rejected(definition.name, args);
+      return definition.invoke(args, config);
+    },
+    { name: definition.name, description: definition.description, schema: definition.schema },
+  ));
+  const promptSections = [createShellToolkit({ shell }), createGitToolkit({ shell }), createGithubToolkit({ shell })]
     .map((toolkit) => ({
     id: `toolkit:${toolkit.name}`,
     owner: toolkit.name,
     content: toolkit.instructions as string,
   }));
-  return { tools, calls, promptSections, readFile: (_path: string) => null };
+  return {
+    tools,
+    calls,
+    promptSections,
+    workdir: repo,
+    readFile: (_path: string) => null,
+    dispose: async () => {
+      await shell.dispose();
+      cleanup();
+    },
+  };
 }
 
 /** Outcome: the requested command ran through a path production would execute. */

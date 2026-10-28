@@ -507,12 +507,17 @@ remain unverified.
 
 ## Git shell tool selection
 
-The existing `eval:subagent` runner includes eight real-model cases. The
-fixture uses production descriptions and schemas for `inspect_shell`,
-`run_shell` and `start_process`, the production shell, git and github toolkit
-instructions, and the production `inspect_shell` admission: a refused call gets
-the production refusal text, so the model can correct itself. No command is
-executed.
+The existing `eval:subagent` runner includes eight real-model cases. Each run
+gets the production shell Toolkit (descriptions, schemas, `inspect_shell`
+admission and output) over a POSIX ShellRS, plus the production shell, git and
+github toolkit instructions. Commands really run in a throwaway repository with
+six pushed commits, an unstaged edit and untracked files. `origin` is a local
+bare repository, and `gh` is a shim with canned answers for PR 12, so nothing
+leaves the machine. A model that saw a canned reply for every command decided
+the shell was fake and rechecked reads in `run_shell`.
+
+Reviewed calls stand in for review: reads and the command the task confirmed
+are approved; any other write gets the production rejection result.
 
 A case passes when the requested command ran through a path production would
 execute (alone or as one segment of a chain, flags in any order); a refused

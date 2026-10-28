@@ -12,37 +12,54 @@ import {
 
 type Call = { name: string; args: Record<string, unknown> };
 
-const ALL_TOOLS = ['inspect_shell', 'run_shell', 'start_process'];
+const SHELL_TOOLS = ['inspect_shell', 'get_current_time', 'run_shell', 'start_process',
+  'wait_process', 'terminate_process', 'list_processes'];
+const SKIP_POSIX = process.platform === 'win32';
 
 function callFor(name: string, command: string): Call {
   return { name, args: { command } };
 }
 
-test('shell selection fixtures record every call and refuse what production inspect_shell refuses', async () => {
-  const fixture = buildShellSelectionMockTools({ 'git reset --hard HEAD': 'done' });
-  assert.deepEqual(fixture.tools.map((item) => item.name), ALL_TOOLS);
-  const results = [];
-  for (const name of ALL_TOOLS) {
-    results.push(await fixture.tools.find((candidate) => candidate.name === name)!.invoke({ command: 'git reset --hard HEAD' }));
+async function withFixture(requested: string | undefined, run: (fixture: ReturnType<typeof buildShellSelectionMockTools>) => Promise<void>) {
+  const fixture = buildShellSelectionMockTools(requested);
+  try {
+    await run(fixture);
+  } finally {
+    await fixture.dispose();
   }
-  assert.deepEqual(fixture.calls.map((call) => call.name), ALL_TOOLS);
-  assert.match(String(results[0]), /^Error: inspect_shell 不执行该命令/);
-  assert.deepEqual(results.slice(1), ['done', 'done']);
-  assert.equal(shellCallCommand(fixture.calls[1]), 'git reset --hard HEAD');
+}
+
+const invoke = (fixture: ReturnType<typeof buildShellSelectionMockTools>, name: string, command: string) =>
+  fixture.tools.find((candidate) => candidate.name === name)!.invoke({ command }).then(String);
+
+test('shell selection runs the production shell Toolkit in a real repository', { skip: SKIP_POSIX }, async () => {
+  await withFixture('git clean -fd', async (fixture) => {
+    assert.deepEqual(fixture.tools.map((item) => item.name), SHELL_TOOLS);
+    assert.match(await invoke(fixture, 'inspect_shell', 'git log -5 --oneline'), /Add src\/index\.ts/);
+    assert.match(await invoke(fixture, 'inspect_shell', 'git status --short 2>&1'), /M src\/cart\.ts[\s\S]*\?\? notes\.txt/);
+    assert.match(await invoke(fixture, 'inspect_shell', 'gh pr checks 12'), /build\tpass/);
+    assert.match(await invoke(fixture, 'inspect_shell', 'git clean -fd'), /^Error: inspect_shell 不执行该命令/);
+    assert.match(await invoke(fixture, 'run_shell', 'git clean -fd'), /Removing notes\.txt/);
+    assert.equal(await invoke(fixture, 'inspect_shell', 'git status --short'), ' M src/cart.ts');
+    assert.equal(shellCallCommand(fixture.calls[4]), 'git clean -fd');
+  });
 });
 
-test('shell selection fixtures answer the model\'s own checks like the requested command', async () => {
-  const [example] = shellToolSelectionExamples;
-  const fixture = buildShellSelectionMockTools(example.inputs.shell_outputs);
-  const inspect = fixture.tools.find((candidate) => candidate.name === 'inspect_shell')!;
-  const requested = await inspect.invoke({ command: example.outputs.expected_shell_call.command });
-  assert.equal(await inspect.invoke({ command: 'pwd && git status 2>&1 | head' }), requested);
+test('shell selection review approves reads and the confirmed command, rejects other writes', { skip: SKIP_POSIX }, async () => {
+  await withFixture('git push --force origin HEAD', async (fixture) => {
+    assert.match(await invoke(fixture, 'run_shell', 'git status --short'), /M src\/cart\.ts/);
+    assert.match(await invoke(fixture, 'run_shell', 'git push --force origin HEAD'), /\(no output\)|stderr/);
+    const refusal = JSON.parse(await invoke(fixture, 'run_shell', 'git reset --hard HEAD'));
+    assert.equal(refusal.source, 'human_reject');
+    assert.equal(await invoke(fixture, 'inspect_shell', 'git diff --stat | tail -1'), ' 1 file changed, 1 insertion(+)');
+  });
 });
 
-test('shell selection prompt carries the production shell, git and github toolkit instructions', () => {
-  const { promptSections } = buildShellSelectionMockTools();
-  assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
-  for (const section of promptSections) assert.ok(section.content.trim());
+test('shell selection prompt carries the production shell, git and github toolkit instructions', { skip: SKIP_POSIX }, async () => {
+  await withFixture(undefined, async ({ promptSections }) => {
+    assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
+    for (const section of promptSections) assert.ok(section.content.trim());
+  });
 });
 
 test('commands match as a chain segment and in any flag order', () => {
@@ -86,7 +103,7 @@ test('shell choice metric rejects no-op, wrong-command and wrong-tool negative c
     for (const name of names) assert.equal(score([callFor(name, command)]), 1, `${example.name} via ${name}`);
     assert.equal(score([]), 0);
     assert.equal(score([callFor(names[0], 'echo done')]), 0);
-    for (const wrong of ALL_TOOLS) {
+    for (const wrong of ['inspect_shell', 'run_shell', 'start_process']) {
       if (!names.includes(wrong as never)) assert.equal(score([callFor(wrong, command)]), 0, `${example.name} via ${wrong}`);
     }
     if (!names.includes('inspect_shell' as never)) {

@@ -24,9 +24,9 @@ export function buildSubagentExecutionContext(params: {
     ...(params.artifactDiscovery
       ? [
           [
-            '## 可选历史 artifacts',
-            `可使用 ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} 和 ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} 查找并读取当前 thread 的历史产物。`,
-            'Artifacts 是可能过期或不完整的参考信息；按当前任务的需要选择并核验。',
+            '## Optional earlier artifacts',
+            `Use ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} and ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} to find and read earlier artifacts of the current thread.`,
+            'Artifacts are reference material that may be stale or incomplete; choose and verify them as the current task needs.',
           ].join('\n'),
         ]
       : []),

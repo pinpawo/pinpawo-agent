@@ -172,8 +172,8 @@ test('orchestrator context compaction replaces the prior summary with one cumula
   assert.equal(result.messages.filter(isContextCompactionMessage).length, 1);
   assert.equal(isContextCompactionMessage(result.messages[1]), true);
   assert.match(String(result.messages[1].content), /合并后的压缩摘要/);
-  assert.match(summaryInput, /### 已有压缩摘要[\s\S]*第一次压缩摘要/);
-  assert.doesNotMatch(summaryInput, /### 主线 agent 回复[\s\S]*第一次压缩摘要/);
+  assert.match(summaryInput, /### Existing compaction summary[\s\S]*第一次压缩摘要/);
+  assert.doesNotMatch(summaryInput, /### Main-line agent reply[\s\S]*第一次压缩摘要/);
 });
 
 test('orchestrator context compaction passes the complete old history to the summarizer', async () => {
@@ -350,7 +350,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
   });
 
   assert.equal(result.compacted, true);
-  assert.match(summaryRequest, /主线用户输入/);
+  assert.match(summaryRequest, /Main-line user input/);
   assert.match(summaryRequest, /用户要求：整理素材并生成交付结果/);
   assert.match(summaryRequest, /主线 handoff：素材已经整理完成，输出了 canonical-result\.md/);
   assert.doesNotMatch(summaryRequest, /任务执行记录/);

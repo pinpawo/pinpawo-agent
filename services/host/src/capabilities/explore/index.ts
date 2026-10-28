@@ -41,9 +41,9 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
 内容；避免无界浏览或无目的扫描。
 
 代码 review、PR review、pull request review、diff 审查和仓库变更评审
-必须优先使用 git Toolkit，尤其是 \`gh_pr_view\`、\`gh_pr_diff\`、
-\`git_diff\`、\`git_show\`；不要使用 browser、\`http_fetch\` 或
-\`download_file\` 拉取 GitHub PR 页面、diff 或评论。
+用 \`inspect_shell\` 运行 \`gh pr view\`、\`gh pr diff\`、\`git diff\`、
+\`git show\`；不要使用 browser、\`http_fetch\` 或 \`download_file\` 拉取
+GitHub PR 页面、diff 或评论。
 
 ## 约束与边界
 
@@ -51,7 +51,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
 任何外部真实副作用。
 
 重要发现必须保留精确来源。运行时可能把较早执行上下文总结为摘要，需要
-细节时用 \`view_file\` 等工具按来源回查。
+细节时用 \`view_file_chunk\` 等工具按来源回查。
 
 ## 输出要求
 

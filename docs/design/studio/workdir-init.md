@@ -30,8 +30,14 @@ packages/studio/templates/default/
 ```text
 <workdir>/.pinpawo/studio.json
 <workdir>/.pinpawo/pets/
-<workdir>/wiki/
+~/.pinpawo/studios/<new-uuid>/wiki/
 ```
+
+A fresh random UUID is generated once during initialization; the absolute Wiki directory
+is saved in the Project Files Plugin options as `wikiDirectory`. The Studio workdir
+remains the project/agent workdir. A different worktree can access the same Wiki only
+when explicitly configured to use that same directory; names and repository URLs do not
+implicitly determine identity. The Wiki is durable user knowledge, not a session cache.
 
 The mapping is owned by Studio's initialization API. Template files never
 contain checkpoint data, SQLite databases, resident-session files, or generated
@@ -50,7 +56,9 @@ demo-specific persistence workaround.
 
 ## Safety
 
-- Preflight every destination before copying anything.
+- Preflight project destinations before copying anything; allocate the unique Studio data
+  directory exclusively. On failure, remove only unchanged files created by this init and
+  empty newly created data directories. Preserve any concurrently modified files.
 - Refuse an existing destination; do not merge or overwrite.
 - Copy only declared configuration, Pet Capability documents, and initial Wiki
   Markdown.
@@ -61,5 +69,5 @@ demo-specific persistence workaround.
 
 - This does not define project upgrade or template-merge behavior.
 - It does not start Studio, allocate ports, or install Plugins.
-- It does not make `.pinpawo/` globally shared; it remains scoped to the chosen
-  workdir.
+- It does not make project `.pinpawo/` globally shared or synchronize Wiki across
+  machines; the Wiki directory must be backed up and migrated as user data.

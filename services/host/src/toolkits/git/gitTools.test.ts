@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { summarizeToolOperation, type AgentToolkit } from '@pinpawo/pet-agent';
+import { compileAgentRegistry, defineInstructionDocument, type AgentToolkit } from '@pinpawo/pet-agent';
+import { createGithubToolkit } from '../github';
+import { createShellToolkit } from '../shell';
 import { PosixShellRS } from '../shellRS';
 import type { ShellRS } from '../shellRS/shellRS';
 import { createGitToolkit } from './index';
@@ -18,7 +20,7 @@ const sessionContext = {
 
 /** Tools run through ShellRS on behalf of an Agent session. */
 function sessionTool(name: string) {
-  const found = createGitTools(new PosixShellRS()).gitTools.find((item) => item.name === name);
+  const found = createGitTools(new PosixShellRS()).find((item) => item.name === name);
   assert.ok(found, `missing ${name}`);
   return {
     invoke: (input: Record<string, unknown>, config: Record<string, unknown> = {}) => found.invoke(
@@ -34,10 +36,7 @@ function definition(toolkit: AgentToolkit, toolName: string) {
 
 const gitAddTool = sessionTool('git_add');
 const gitCommitTool = sessionTool('git_commit');
-const gitDiffTool = sessionTool('git_diff');
 const gitPushTool = sessionTool('git_push');
-const gitStatusTool = sessionTool('git_status');
-const gitShellTool = sessionTool('git_shell');
 
 function createRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-git-tools-'));
@@ -47,26 +46,18 @@ function createRepo() {
   return dir;
 }
 
-test('git tools inspect and stage a repository without shell command strings', async () => {
+test('git tools stage and commit without shell command strings or an editor', async () => {
   const repo = createRepo();
-  const file = join(repo, 'README.md');
-  writeFileSync(file, 'hello\n', 'utf-8');
-
-  assert.match(
-    String(await gitStatusTool.invoke({ cwd: repo })),
-    /README\.md/,
-  );
+  writeFileSync(join(repo, 'README.md'), 'hello\n', 'utf-8');
 
   assert.match(
     String(await gitAddTool.invoke({ cwd: repo, pathspecs: ['README.md'] })),
     /\(no output\)/,
   );
-
   assert.match(
-    String(await gitDiffTool.invoke({ cwd: repo, staged: true, stat: true })),
+    execFileSync('git', ['diff', '--cached', '--stat'], { cwd: repo, encoding: 'utf-8' }),
     /README\.md/,
   );
-
   assert.match(
     String(await gitCommitTool.invoke({ cwd: repo, message: 'test: add readme' })),
     /test: add readme/,
@@ -125,116 +116,16 @@ test('git_push performs a normal push without exposing force or delete options',
   assert.equal(existsSync(extMarker), false);
 });
 
-test('createGitToolkit exposes the local git surface', async () => {
+test('createGitToolkit exposes only schema-bounded writes, all unreviewed', () => {
   const toolkit = createGitToolkit({ shell: new PosixShellRS() });
   assert.equal(toolkit.name, 'git');
-  assert.deepEqual(
-    toolkit.tools.map((item) => item.tool.name),
-    ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_show', 'git_add', 'git_commit', 'git_push', 'git_shell'],
-  );
-  assert.equal(definition(toolkit, 'git_diff')?.operation?.title, '查看 git diff');
+  assert.deepEqual(toolkit.tools.map((item) => item.tool.name), ['git_add', 'git_commit', 'git_push']);
   assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
   assert.equal(definition(toolkit, 'git_push')?.operation?.title, '推送 git 分支');
-  // Dedicated tools exclude dangerous forms by schema and run unreviewed.
   for (const name of ['git_add', 'git_commit', 'git_push']) {
     assert.equal(definition(toolkit, name)?.review, undefined, `${name} runs without review`);
   }
-
-  const gitShellPolicy = definition(toolkit, 'git_shell')?.review;
-  assert.ok(gitShellPolicy);
-  const reviewContext = {
-    toolkitName: 'git',
-    toolName: 'git_shell',
-    input: { cwd: '/repo', args: ['reset', '--hard', 'HEAD'] },
-    operation: definition(toolkit, 'git_shell')?.operation,
-    reviewCapabilities: {
-      humanReview: true,
-      sessionAuthorization: true,
-    },
-  };
-  const buildMatcher = gitShellPolicy.authorization?.buildMatcher;
-  assert.ok(buildMatcher);
-  const authorizationMatcher = await buildMatcher(reviewContext);
-  const review = await gitShellPolicy.request({
-    ...reviewContext,
-    authorizationMatcher,
-  });
-  assert.deepEqual(
-    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
-    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
-  );
 });
-
-
-test('git_shell reviews only risky calls', async () => {
-  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
-  const reviewOf = async (args: string[]) => {
-    const found = definition(toolkit, 'git_shell');
-    assert.ok(found?.review);
-    return found.review.request({
-      toolkitName: 'git',
-      toolName: 'git_shell',
-      input: { cwd: '/repo', args },
-      operation: found.operation,
-      reviewCapabilities: { humanReview: true, sessionAuthorization: true },
-    });
-  };
-  assert.equal(await reviewOf(['log', '--oneline', '-5']), null);
-  assert.equal(await reviewOf(['branch', '-a']), null);
-  // Everyday writes lean permissive.
-  assert.equal(await reviewOf(['commit', '-m', 'wip']), null);
-  assert.equal(await reviewOf(['rebase', 'main']), null);
-  for (const args of [
-    ['reset', '--hard', 'HEAD'],
-    ['push', '--force', 'origin', 'HEAD'],
-    ['clean', '-fd'],
-    ['-c', 'core.pager=sh', 'log'],
-  ]) {
-    const review = await reviewOf(args);
-    assert.ok(review && 'schemaVersion' in review, `git ${args.join(' ')} must be reviewed`);
-    assert.equal(review.view.kind === 'operation' ? review.view.title : '', definition(toolkit, 'git_shell')?.operation?.title);
-  }
-  assert.deepEqual(
-    definition(toolkit, 'git_shell')?.operation?.summarize?.({ cwd: '/repo', args: ['commit', '-m', 'a b'] }),
-    {
-      target: '/repo',
-      summary: "git commit -m 'a b'",
-      blocks: [{ kind: 'code', text: "git commit -m 'a b'", language: 'shell' }],
-    },
-  );
-});
-
-test('git_shell approval shows argv verbatim, newlines included', () => {
-  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
-  const summary = summarizeToolOperation(
-    definition(toolkit, 'git_shell')?.operation,
-    { cwd: '/repo', args: ['commit', '-m', 'first\nsecond'] },
-  );
-  assert.equal(summary?.summary, "git commit -m 'first second'", 'the heading is folded to one line');
-  assert.deepEqual(summary?.blocks, [{ kind: 'code', text: "git commit -m 'first\nsecond'", language: 'shell' }]);
-});
-
-test('git_shell runs argv without a shell and fails instead of opening an editor', async () => {
-  const repo = createRepo();
-  writeFileSync(join(repo, 'a.txt'), 'one\n', 'utf-8');
-  execFileSync('git', ['add', 'a.txt'], { cwd: repo });
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: repo, stdio: 'ignore' });
-  writeFileSync(join(repo, 'a.txt'), 'changed\n', 'utf-8');
-
-  assert.match(String(await gitShellTool.invoke({ cwd: repo, args: ['status', '--short'] })), /a\.txt/);
-  assert.match(String(await gitShellTool.invoke({ cwd: repo, args: ['log', '--oneline', '|', 'head'] })), /^Error/);
-  await gitShellTool.invoke({ cwd: repo, args: ['reset', '--hard', 'HEAD'] });
-  assert.equal(readFileSync(join(repo, 'a.txt'), 'utf-8'), 'one\n');
-
-  writeFileSync(join(repo, 'b.txt'), 'b\n', 'utf-8');
-  execFileSync('git', ['add', 'b.txt'], { cwd: repo });
-  const started = Date.now();
-  assert.match(String(await gitShellTool.invoke({ cwd: repo, args: ['commit'] })), /^Error/);
-  assert.ok(Date.now() - started < 10_000, 'editor-requiring commit must fail fast');
-
-  await assert.rejects(() => gitShellTool.invoke({ cwd: repo, args: ['git', 'status'] }), /args 不包含 git/);
-});
-
 
 test('git ended by a signal reports an error, not an empty success', async () => {
   // ShellRS reports a signal-terminated process as exited with no code.
@@ -249,9 +140,34 @@ test('git ended by a signal reports an error, not an empty success', async () =>
     terminate: async () => { throw new Error('unused'); },
     list: async () => [],
   };
-  const gitStatus = createGitTools(shell).gitTools.find((item) => item.name === 'git_status')!;
+  const gitCommit = createGitTools(shell).find((item) => item.name === 'git_commit')!;
   assert.equal(
-    await gitStatus.invoke({} as never, { context: sessionContext }),
-    'Error: git status was terminated by a signal',
+    await gitCommit.invoke({ message: 'x' } as never, { context: sessionContext }),
+    'Error: git commit was terminated by a signal',
   );
+});
+
+test('git and github alone grant only their write tools; reads need an explicit shell', () => {
+  const shell = new PosixShellRS();
+  const capability = (name: string, uses: string[]) => ({
+    name,
+    description: name,
+    uses,
+    instructions: defineInstructionDocument({ content: `# ${name}` }),
+  });
+  const registry = compileAgentRegistry({
+    toolkits: [createShellToolkit({ shell }), createGitToolkit({ shell }), createGithubToolkit({ shell })],
+    capabilities: [
+      capability('git_only', ['git']),
+      capability('github_only', ['github']),
+      capability('git_with_shell', ['git', 'shell']),
+    ],
+  });
+  const toolNames = (name: string) => registry.capabilities.find((item) => item.capability.name === name)?.toolNames;
+
+  assert.deepEqual(registry.unavailableCapabilities, []);
+  // Old Capabilities still compile, but are never silently widened to shell.
+  assert.deepEqual(toolNames('git_only'), ['git_add', 'git_commit', 'git_push']);
+  assert.deepEqual(toolNames('github_only'), ['gh_pr_create', 'gh_issue_create']);
+  assert.ok(toolNames('git_with_shell')?.includes('inspect_shell'));
 });

@@ -942,7 +942,7 @@ test('rebuilt transient ledger accepts a new epoch without old completions rolli
   assert.equal(session.sessionTokenUsage?.usageEpoch, 'new');
 });
 
-test('pause usage is applied once and starting another turn clears only the previous speed', () => {
+test('pause usage is applied once and starting another turn keeps the newest speed', () => {
   let session = reduceSession(createDomainSession(), { type: 'user.accepted', requestId: 'pause', kind: 'chat', text: 'hello' }, { observedAt: 1 });
   const event = { type: 'interrupt.requested' as const, requestId: 'pause', pendingInterrupt: { interruptId: 'review', payload: { kind: 'human_review' as const, interactions: [] } },
     usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, outputTokensPerSecond: 10, outputRateSource: 'final' as const, scope: 'session' as const, usageRevision: 2 } };
@@ -952,7 +952,7 @@ test('pause usage is applied once and starting another turn clears only the prev
   assert.equal(session.sessionTokenUsage?.outputTokensPerSecond, 10);
   session = reduceSession(session, { type: 'interrupt.resume.accepted', requestId: 'resume', interruptId: 'review' }, { observedAt: 4 });
   assert.equal(session.sessionTokenUsage?.totalTokens, 120);
-  assert.equal(session.sessionTokenUsage?.outputTokensPerSecond, undefined);
+  assert.equal(session.sessionTokenUsage?.outputTokensPerSecond, 10);
 });
 
 test('replaying a legacy completed message cannot add the same run usage again', () => {

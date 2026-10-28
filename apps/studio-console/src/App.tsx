@@ -9,6 +9,7 @@ import React, {
 import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, type DispatchRecord } from './dispatchActivity';
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
+import { KnowledgeDocument } from './KnowledgeDocument';
 import { appendChannelDeliveries, type ChannelDelivery, type ChannelRoutingSkip } from './channelData';
 import { Bell, BookOpen, CalendarClock, MessagesSquare, Plug, Zap, type LucideIcon } from 'lucide-react';
 import logoMark from '../../../assets/brand/pinpawo-primary-white.svg';
@@ -140,6 +141,9 @@ export function App() {
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
   const [knowledge, setKnowledge] = useState<Resource<ProjectDocumentSummary[]>>(empty);
   const [selectedDocument, setSelectedDocument] = useState<ProjectDocument | null>(null);
+  const [knowledgeAnchor, setKnowledgeAnchor] = useState('');
+  const knowledgeRequest = useRef(0);
+  const knowledgeListRequest = useRef(0);
   const [dispatches, setDispatches] = useState<DispatchRecord[]>([]);
   const [schedulerHistory, setSchedulerHistory] = useState<HistoryEvent[]>([]);
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
@@ -180,6 +184,7 @@ export function App() {
         setPetsReady(true);
         return;
       }
+      const listRequest = ++knowledgeListRequest.current;
       const [scheduler, notice, trigger, projectFiles, schedulerEvents, triggerEvents] = await Promise.all([
         read<{ schedules: Schedule[] }>('/scheduler').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ notices: Notice[] }>('/notices').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
@@ -197,12 +202,14 @@ export function App() {
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
       setNotices({ ...notice, value: notice.value?.notices ?? null });
       setTriggers(trigger);
-      setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
-      setSelectedDocument((current) => (
-        current && projectFiles.value?.documents.some(({ path }) => path === current.path)
-          ? current
-          : null
-      ));
+      if (listRequest === knowledgeListRequest.current) {
+        setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
+        setSelectedDocument((current) => (
+          current && projectFiles.value?.documents.some(({ path }) => path === current.path)
+            ? current
+            : null
+        ));
+      }
       setSchedulerHistory(schedulerEvents.value?.events ?? []);
       setTriggerHistory(triggerEvents.value?.events ?? []);
     };
@@ -323,7 +330,14 @@ export function App() {
     }
     const nextToken = connectionTokenDraft.trim();
     observationEpoch.current++;
+    knowledgeRequest.current++;
+    knowledgeListRequest.current++;
     activeHost.current = nextUrl;
+    if (nextUrl !== normalizedUrl || nextToken !== token) {
+      setKnowledge(empty());
+      setSelectedDocument(null);
+      setKnowledgeAnchor('');
+    }
     if (nextUrl !== normalizedUrl) {
       setPets([]);
       setChannelDeliveries([]);
@@ -332,8 +346,6 @@ export function App() {
       setSchedules(empty());
       setNotices(empty());
       setTriggers(empty());
-      setKnowledge(empty());
-      setSelectedDocument(null);
       setSchedulerHistory([]);
       setTriggerHistory([]);
       setDispatchGoal('');
@@ -362,7 +374,13 @@ export function App() {
     return value as T;
   };
 
-  const openDocument = async (documentPath: string) => {
+  const openDocument = async (documentPath: string, anchor = '') => {
+    if (selectedDocument?.path === documentPath && anchor) {
+      knowledgeRequest.current++;
+      setKnowledgeAnchor(anchor);
+      return;
+    }
+    const request = ++knowledgeRequest.current;
     try {
       const response = await fetch(
         `${normalizedUrl}/knowledge/document?path=${encodeURIComponent(documentPath)}`,
@@ -375,16 +393,37 @@ export function App() {
       if (!response.ok || !value?.document) {
         throw new Error(value?.error ?? `Knowledge document failed (${response.status.toString()}).`);
       }
+      if (request !== knowledgeRequest.current || activeHost.current !== normalizedUrl) return;
+      setKnowledgeAnchor(anchor);
       setSelectedDocument(value.document);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      if (request === knowledgeRequest.current && activeHost.current === normalizedUrl)
+        setNotice(error instanceof Error ? error.message : String(error));
     }
   };
 
+  useEffect(() => {
+    if (page !== 'knowledge' || selectedDocument || !knowledge.value?.length) return;
+    const initial = knowledge.value.find(({ path }) => path === 'PROJECT.md') ?? knowledge.value[0];
+    void openDocument(initial.path);
+  }, [page, knowledge.value, selectedDocument]);
+
   const reloadKnowledge = async () => {
+    const epoch = observationEpoch.current;
+    const listRequest = ++knowledgeListRequest.current;
+    const documentRequest = knowledgeRequest.current;
+    const current = () => epoch === observationEpoch.current && listRequest === knowledgeListRequest.current;
     try {
       const response = await fetch(`${normalizedUrl}/knowledge`, { headers });
+      if (!current()) return;
+      if (response.status === 401 || response.status === 403) {
+        knowledgeRequest.current++;
+        setKnowledge({ value: null, unavailable: false, error: 'Knowledge access is no longer available.' });
+        setSelectedDocument(null);
+        return;
+      }
       if (response.status === 404) {
+        if (documentRequest !== knowledgeRequest.current) return;
         setKnowledge({ value: null, unavailable: true });
         setSelectedDocument(null);
         return;
@@ -393,19 +432,25 @@ export function App() {
         documents?: ProjectDocumentSummary[];
         error?: string;
       } | null;
+      if (!current()) return;
       if (!response.ok || !value?.documents) {
         throw new Error(value?.error ?? `Knowledge refresh failed (${response.status.toString()}).`);
       }
       setKnowledge({ value: value.documents, unavailable: false });
-      if (selectedDocument?.path
-        && value.documents.some(({ path }) => path === selectedDocument.path)) {
-        await openDocument(selectedDocument.path);
-      } else {
-        setSelectedDocument(null);
+      // A newer page or anchor selection wins over a slower list refresh.
+      if (documentRequest === knowledgeRequest.current) {
+        if (selectedDocument?.path
+          && value.documents.some(({ path }) => path === selectedDocument.path)) {
+          await openDocument(selectedDocument.path);
+        } else {
+          setSelectedDocument(null);
+          const initial = value.documents.find(({ path }) => path === 'PROJECT.md') ?? value.documents[0];
+          if (initial) await openDocument(initial.path);
+        }
       }
-      setNotice('Knowledge refreshed.');
+      if (current()) setNotice('Knowledge refreshed.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      if (current()) setNotice(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -544,25 +589,26 @@ export function App() {
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
-            deliveries={channelDeliveries} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode} />
+            deliveries={channelDeliveries} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode}
+            onOpenKnowledge={identity?.scope === 'studio' ? () => setPage('knowledge') : undefined} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
-          <strong>CONNECTION FAILED</strong>
+          <strong>Connection failed</strong>
           <span>{connectionError}</span>
         </div>}
         {page === 'scheduler' && (schedules.value ? <>
-          <div className="section-title"><span>ONE-SHOT SCHEDULES</span><b>{schedules.value.length}</b></div>
+          <div className="section-title"><span>One-shot schedules</span><b>{schedules.value.length}</b></div>
           <form className="composer scheduler" onSubmit={submitSchedule}>
             <select onChange={(event) => setSchedulePet(event.target.value)} value={schedulePet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
             <input onChange={(event) => setScheduleRequest(event.target.value)} placeholder="Scheduled goal…" value={scheduleRequest} />
             <input onChange={(event) => setScheduleRunAt(event.target.value)} type="datetime-local" value={scheduleRunAt} />
-            <button>SCHEDULE</button>
+            <button>Schedule</button>
           </form>
           <div className="rows">{schedules.value.map((schedule) => <div className="row" key={schedule.scheduleId}><em className={schedule.status}>{schedule.status}</em><time>{new Date(schedule.runAt).toLocaleString()}</time><strong>{schedule.request}</strong><span>{schedule.petId}{schedule.note ? ` · ${schedule.note}` : ''}{schedule.status === 'scheduled' && <button className="inline-action" onClick={() => { void post('/scheduler/control', { action: 'cancel', scheduleId: schedule.scheduleId }).catch((error) => setNotice(String(error))); }} type="button">cancel</button>}</span></div>)}</div>
-          <History title="SCHEDULER HISTORY" events={schedulerHistory} />
+          <History title="Scheduler history" events={schedulerHistory} />
         </> : unavailable(schedules, 'Scheduler'))}
         {page === 'notice' && (notices.value ? <>
-          <div className="section-title"><span>NOTICES</span><b>{notices.value.length}</b></div>
+          <div className="section-title"><span>Notices</span><b>{notices.value.length}</b></div>
           {notices.value.length > 0
             ? <div className="rows">{notices.value.map((item) => <div className="row" key={item.noticeId}>
               <time>{new Date(item.occurredAt).toLocaleString()}</time>
@@ -573,15 +619,15 @@ export function App() {
             : <div className="compact-empty">No notices have been recorded.</div>}
         </> : unavailable(notices, 'Notice'))}
         {page === 'trigger' && (triggers.value ? <>
-          <div className="section-title"><span>TRIGGERS</span><b>{triggers.value.triggers.length}</b></div>
+          <div className="section-title"><span>Triggers</span><b>{triggers.value.triggers.length}</b></div>
           <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{triggerRequestLabel(trigger.request)}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.target.kind === 'pet' ? trigger.target.petId : trigger.target.path}</span></div>)}</div>
           <div className="hint">POST /triggers/invoke · Authorization: Trigger &lt;secret&gt; · body: triggerId, idempotencyKey, payload</div>
-          <div className="section-title"><span>DELIVERIES</span><b>{triggers.value.deliveries.length}</b></div>
+          <div className="section-title"><span>Deliveries</span><b>{triggers.value.deliveries.length}</b></div>
           <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}{delivery.status === 'failed' && <button className="inline-action" disabled={retryingDeliveryId === delivery.deliveryId} onClick={() => retryTriggerDelivery(delivery.deliveryId)} type="button">{retryingDeliveryId === delivery.deliveryId ? 'retrying…' : 'retry'}</button>}{delivery.status === 'accepted' && <button aria-label={`Redeliver ${delivery.deliveryId}`} className="inline-action" disabled={retryingDeliveryId === delivery.deliveryId} onClick={() => redeliverTriggerDelivery(delivery.deliveryId)} title="Send this accepted request again. Use only when its execution did not start or was interrupted." type="button">{retryingDeliveryId === delivery.deliveryId ? 'redelivering…' : 'redeliver'}</button>}</span></div>)}</div>
-          <History title="TRIGGER HISTORY" events={triggerHistory} />
+          <History title="Trigger history" events={triggerHistory} />
         </> : unavailable(triggers, 'Trigger'))}
         {page === 'knowledge' && (knowledge.value ? <>
-          <div className="section-title"><span>PROJECT MARKDOWN</span><span><button className="title-action" onClick={() => { void reloadKnowledge(); }} type="button">REFRESH</button><b>{knowledge.value.length}</b></span></div>
+          <div className="section-title"><span>Project Wiki</span><span><button className="title-action" onClick={() => { void reloadKnowledge(); }} type="button">Refresh</button><b>{knowledge.value.length}</b></span></div>
           <div className="knowledge-layout">
             <div className="rows knowledge-files">{knowledge.value.map((document) => (
               <button
@@ -596,32 +642,37 @@ export function App() {
             ))}</div>
             <article className="knowledge-document">
               {selectedDocument
-                ? <><h2>{selectedDocument.path}</h2><pre>{selectedDocument.content}</pre></>
-                : <div className="empty-state"><strong>Select a Markdown document</strong><span>Knowledge remains ordinary project files; this view is read-only.</span></div>}
+                ? <><div className="knowledge-document-path">{selectedDocument.path}</div>
+                  <KnowledgeDocument path={selectedDocument.path} content={selectedDocument.content}
+                    paths={knowledge.value.map(({ path }) => path)} anchor={knowledgeAnchor}
+                    onNavigate={(path, anchor) => { void openDocument(path, anchor); }} /></>
+                : knowledge.value.length === 0
+                  ? <div className="empty-state"><strong>No Wiki pages yet</strong><span>Project Wiki pages will appear here when they are added to the project.</span></div>
+                  : <div className="empty-state"><strong>Select a Wiki page</strong><span>The project Wiki is read-only here.</span></div>}
             </article>
           </div>
         </> : unavailable(knowledge, 'Project Files'))}
       </section>
       {page !== 'channel' && !clientMode && <button className="dispatch-launcher" disabled={connectionState !== 'connected'} onClick={() => openDispatch()} type="button">
-        <span>+</span> DISPATCH
+        <span>+</span> Dispatch
       </button>}
       {dispatchDrawerOpen && <div className="drawer-layer" role="presentation" onMouseDown={(event) => {
         if (event.target === event.currentTarget && !dispatchSubmitting) setDispatchDrawerOpen(false);
       }}>
         <aside aria-label="Dispatch to Pet" aria-modal="true" className="dispatch-drawer" role="dialog">
           <div className="drawer-head">
-            <div><span>NEW DISPATCH</span><strong>Send work to a resident Pet</strong></div>
+            <div><span>New dispatch</span><strong>Send work to a resident Pet</strong></div>
             <button aria-label="Close dispatch" disabled={dispatchSubmitting} onClick={() => setDispatchDrawerOpen(false)} type="button">×</button>
           </div>
           <form className="drawer-composer" onSubmit={submitDispatch}>
             <label className="composer-target">
-              <span>DISPATCH TO</span>
+              <span>Dispatch to</span>
               <select disabled={dispatchSubmitting} onChange={(event) => setDispatchPet(event.target.value)} value={dispatchPet}>
                 {pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.name} ({pet.petId})</option>)}
               </select>
             </label>
             <div className="chat-input">
-              <label htmlFor="dispatch-goal">MESSAGE</label>
+              <label htmlFor="dispatch-goal">Message</label>
               <textarea
                 autoFocus
                 id="dispatch-goal"
@@ -634,13 +685,13 @@ export function App() {
               <div className="chat-actions">
                 <span>Enter to send / Shift+Enter for a new line</span>
                 <button disabled={dispatchSubmitting || connectionState !== 'connected' || !dispatchPet || !dispatchGoal.trim()}>
-                  {dispatchSubmitting ? 'SENDING…' : 'DISPATCH'}
+                  {dispatchSubmitting ? 'Sending…' : 'Dispatch'}
                 </button>
               </div>
             </div>
           </form>
           <div className="drawer-activity">
-            <div className="section-title"><span>RECENT ACTIVITY</span><b>{dispatches.length}</b></div>
+            <div className="section-title"><span>Recent activity</span><b>{dispatches.length}</b></div>
             {dispatches.length > 0 ? dispatches.slice(-6).reverse().map((dispatch) => <div className="dispatch-activity" key={dispatch.invocationId}>
               <em className={dispatch.observationLost ? 'unknown' : dispatch.state}>{dispatch.observationLost ? 'status unknown' : dispatch.state === 'completed' ? 'invocation ended' : dispatch.state}</em>
               <strong>{dispatch.request}</strong>
@@ -654,13 +705,13 @@ export function App() {
       </div>}
       {connectionModalOpen && <div className="modal-layer" role="presentation">
         <form aria-label="Connect to Studio" aria-modal="true" className="connection-modal" onSubmit={connect} role="dialog">
-          <div className="modal-title"><span>STUDIO CONNECTION</span><strong>Connect this Console to a running Studio Host</strong></div>
-          <label><span>HOST URL</span><input aria-label="Studio HTTP URL" autoFocus onChange={(event) => setConnectionUrlDraft(event.target.value)} value={connectionUrlDraft} /></label>
-          <label><span>BEARER TOKEN</span><input aria-label="Studio bearer token" onChange={(event) => setConnectionTokenDraft(event.target.value)} placeholder="Paste token" type="password" value={connectionTokenDraft} /></label>
+          <div className="modal-title"><span>Studio connection</span><strong>Connect this Console to a running Studio Host</strong></div>
+          <label><span>Host URL</span><input aria-label="Studio HTTP URL" autoFocus onChange={(event) => setConnectionUrlDraft(event.target.value)} value={connectionUrlDraft} /></label>
+          <label><span>Bearer token</span><input aria-label="Studio bearer token" onChange={(event) => setConnectionTokenDraft(event.target.value)} placeholder="Paste token" type="password" value={connectionTokenDraft} /></label>
           {connectionError && <div className="modal-error" role="alert">{connectionError}</div>}
           <div className="modal-actions">
-            {connectionState === 'connected' && <button onClick={() => setConnectionModalOpen(false)} type="button">CANCEL</button>}
-            <button disabled={connectionState === 'connecting'}>{connectionState === 'connecting' ? 'CONNECTING…' : 'CONNECT'}</button>
+            {connectionState === 'connected' && <button onClick={() => setConnectionModalOpen(false)} type="button">Cancel</button>}
+            <button disabled={connectionState === 'connecting'}>{connectionState === 'connecting' ? 'Connecting…' : 'Connect'}</button>
           </div>
         </form>
       </div>}

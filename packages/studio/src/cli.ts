@@ -6,6 +6,7 @@ import {
 import {
   initStudioWorkdir,
   type InitStudioWorkdirOptions,
+  type InitStudioWorkdirResult,
 } from './studioTemplate';
 import {
   launchStudioTmux,
@@ -23,6 +24,7 @@ Start an independent resident PinPawo Studio Host.
 
 Options:
   --workdir <directory>  workspace containing .pinpawo/studio.json (start/init)
+  --studio-data-root <directory>  parent for new Studio data (init only)
   --pet-port <port>      already-running resident Pet listener (required for tmux)
   --pet <id>             Pet TUI to include (repeatable; skips HTTP discovery)
   --studio-url <url>     running Studio HTTP origin for Pet discovery (default: 127.0.0.1:3211)
@@ -33,8 +35,9 @@ Options:
   --url <url>            Studio Console URL (default: http://127.0.0.1:5173)
   -h, --help             display help
 
-Init creates the shipped Studio configuration, Pet Capabilities, and initial
-Wiki files in the selected workdir without overwriting existing files.
+Init creates the shipped Studio configuration and Pet Capabilities in the
+selected workdir, and initial Wiki files in a separate Studio data directory.
+It does not overwrite existing files.
 Tmux connects to an existing Host and builds a tiled TUI for its Pets. Console
 starts the separately served Studio Console Web when needed, then opens it in
 the default browser.
@@ -44,10 +47,7 @@ ${STUDIO_OPERATOR_HELP}
 
 export type StudioHostCliHandlers = {
   runHost?: (options: StudioHostProcessOptions) => Promise<void> | void;
-  initWorkdir?: (options: InitStudioWorkdirOptions) => Promise<{
-    workdir: string;
-    files: string[];
-  }>;
+  initWorkdir?: (options: InitStudioWorkdirOptions) => Promise<InitStudioWorkdirResult>;
   launchTmux?: (options: StudioTmuxOptions) => Promise<void> | void;
   openConsole?: (options: StudioConsoleOptions) => Promise<void> | void;
   writeOutput?: (text: string) => void;
@@ -82,6 +82,7 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
   const command = knownCommand ? args[0] as 'init' | 'start' | 'tmux' | 'console' : 'start';
   const offset = knownCommand ? 1 : 0;
   let workdir: string | undefined;
+  let studioDataRoot: string | undefined;
   let agentSessionPort: number | undefined;
   let sessionName: string | undefined;
   let detached = false;
@@ -98,6 +99,12 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
         throw new Error(`--workdir is not valid for Studio ${command}.`);
       }
       workdir = readOptionValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    if (argument === '--studio-data-root') {
+      if (command !== 'init') throw new Error('--studio-data-root is only valid for Studio init.');
+      studioDataRoot = readOptionValue(args, index, argument);
       index += 1;
       continue;
     }
@@ -156,7 +163,7 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
     return {
       help: false,
       command,
-      options: { workdir: workdir ?? process.cwd() },
+      options: { workdir: workdir ?? process.cwd(), ...(studioDataRoot ? { studioDataRoot } : {}) },
     };
   }
   if (command === 'tmux') {
@@ -213,7 +220,7 @@ export async function runStudioHostCli(
   if (parsed.command === 'init') {
     const result = await (handlers.initWorkdir ?? initStudioWorkdir)(parsed.options);
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(
-      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\n`,
+      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\nWiki: ${result.wikiDirectory}\n`,
     );
     return;
   }

@@ -52,6 +52,7 @@ npm run test:browser -w @pinpawo/studio-console
 npm run test:browser:layout -w @pinpawo/studio-console
 npm run test:browser:message -w @pinpawo/studio-console
 npm run test:browser:session -w @pinpawo/studio-console
+npm run test:browser:knowledge -w @pinpawo/studio-console
 ```
 
 Both browser suites start temporary production Resident Host / HTTP / Channel
@@ -82,3 +83,9 @@ Screenshots default to `/tmp/channel-message-fullscreen-screenshots`.
 with an isolated temporary profile for every browser suite. Without built workspace
 packages, `TSX_TSCONFIG_PATH=apps/studio-console/tsconfig.browser.json` lets the Host
 fixture run from source.
+
+The Knowledge suite starts an isolated frontend on port 5219 and a synthetic
+HTTP/SSE fixture, without real Studio data. It tests the Channel entry, access
+boundary, Wiki navigation, mobile layout, and delayed-response races during
+page selection, refresh, Host switches and credential changes. Set
+`KNOWLEDGE_BROWSER_EXECUTABLE` to use an existing Chromium executable.

@@ -222,7 +222,7 @@ test('Bash and Git sharing one ShellRS share one logical session per Agent sessi
 
   // Git's CLI invocations go through the same instance; they add no held
   // processes and do not disturb Bash's handle.
-  await toolFrom(git, 'git_status').invoke({}, call('thread-shared'));
+  await toolFrom(git, 'git_commit').invoke({ message: 'x' }, call('thread-shared'));
   const listed = await shell.list('thread-shared');
   assert.deepEqual(listed.map((item) => item.processId), [processId]);
   assert.match(
@@ -242,7 +242,7 @@ test('Bash and Git on separate ShellRS instances are isolated', { skip: isWindow
   }, call('thread-split')));
   processIdFrom(started);
 
-  assert.match(String(await toolFrom(git, 'git_status').invoke({}, call('thread-split'))), /\S/);
+  assert.match(String(await toolFrom(git, 'git_commit').invoke({ message: 'x' }, call('thread-split'))), /\S/);
   assert.equal((await bashShell.list('thread-split')).length, 1);
   assert.equal((await gitShell.list('thread-split')).length, 0);
 

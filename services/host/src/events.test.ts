@@ -235,11 +235,10 @@ test('files and shell Toolkits expose operation metadata with their definitions'
 test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {
   const toolkit = createGitToolkit({ shell: new PosixShellRS() });
 
-  assert.equal(definition(toolkit, 'git_status')?.operation?.title, '查看 git 状态');
   assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
   assert.equal(definition(toolkit, 'git_add')?.review, undefined);
   assert.equal(definition(toolkit, 'git_commit')?.review, undefined);
-  assert.ok(definition(toolkit, 'git_shell')?.review);
+  assert.equal(definition(toolkit, 'git_push')?.review, undefined);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {

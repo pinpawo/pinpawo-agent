@@ -218,5 +218,5 @@ test('operation registry derives only from the effective Host inventory', async 
   });
 
   assert.equal(registry.resolveToolOperation('run_shell')?.source.name, 'shell');
-  assert.equal(registry.resolveToolOperation('git_status'), null);
+  assert.equal(registry.resolveToolOperation('git_commit'), null);
 });

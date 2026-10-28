@@ -13,12 +13,15 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 | Scheduler | `/scheduler`、`/scheduler/events`；创建一次性计划与取消未触发计划。 |
 | Notice | `/notices`；读取持久通知，不控制运行。 |
 | Trigger | `/triggers`、`/triggers/events`；查看定义、交付历史与外部接收说明。 |
-| Knowledge | Project Files 的 `/knowledge*` 只读 Markdown；显式刷新，不提供编辑或图索引。 |
+| Knowledge | Project Files 的 `/knowledge*` 只读项目 Wiki；默认展示 `PROJECT.md`，渲染 Markdown，支持目录、Wiki 内链接与锚点导航和显式刷新，不提供编辑或图索引。 |
 
 ## Channel 布局与交互
 
 页面导航是最左侧 56px 图标栏（移动端 48px）：顶部是 PinPawo 标志（`assets/brand` 白色 24px 版），每个页面一个图标，悬停或聚焦显示名称；底部是连接按钮，带状态点。连接状态文字在底部状态栏。
-左侧 232px 列表、中间独立滚动消息与固定 composer、右侧可折叠 320px 成员与详情面板。
+左侧 260px 列表、中间独立滚动消息与固定 composer、右侧可折叠 340px 成员与详情面板。
+消息时间线与 composer 限宽约 820px 居中，宽屏不横铺。
+字号统一用 `styles.css` `:root` 的档位变量（`--text-xs` 12px 到 `--text-title` 20px，正文 `--text-body` 15px），
+最小 12px；界面标签用普通无衬线字体和句首大写，等宽字体只用于代码、id 和键位。
 新建 Channel 填标题、可选说明，并显式勾选加入的 Pet；面板里可增删成员（Pet 或人的 id）。
 输入框用 Tiptap（Mention 扩展）：键入 `@` 在光标处弹出当前成员列表，选中后成为行内 mention，
 发送时序列化为 `[@label](participant:id)`；手打的 `@text` 不寻址。Enter 发送，Shift+Enter 换行，
@@ -28,6 +31,7 @@ Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是�
 
 正文完整显示；宽代码在块内滚动。普通连续笔记可视觉分组，引用保留独立边界。
 每条消息保留稳定 ID，引用只展示一层摘要并定位原文。技术身份放在展开详情和复制操作。
+Channel 标题栏向本地 Studio 身份提供 Wiki 入口，打开相同的项目 Knowledge 页面；Channel-only client 不提供该入口。
 Channel 只显示成员的公开消息；工具调用和运行过程不在 Channel 里显示。
 登记 label 用于显示，同名选择器携带身份，移除作者标明历史身份。
 

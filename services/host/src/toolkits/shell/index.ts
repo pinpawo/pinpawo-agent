@@ -74,10 +74,6 @@ export function createShellToolkit(deps: ShellToolkitDependencies): AgentToolkit
     description: '执行 shell 命令与托管长任务：免审批的检查命令、需审批的 run_shell / start_process、进程管理和当前时间。',
     tools: createShellToolDefinitions(deps).tools,
     instructions: shellToolkitInstructions.join('\n'),
-    reviewGuidance: {
-      allow: 'Local Git edits and ordinary pushes can be recovered. Comments, reviews, labels, PR/issue creation and edits, and CI reruns are ordinary GitHub collaboration, including through gh api write requests. Judge each command by its actual target and effect.',
-      ask: 'Discarding uncommitted work (reset --hard, clean, checkout/restore over changes, stash drop/clear), force-deleting branches or deleting tags, shared-history rewrites (force push, remote ref deletion), merging PRs, deleting repositories, branches, releases or issues, publishing releases, and changing secrets, credentials, access or repository settings require human review.',
-    },
     requires: shellRequirement,
     availability: shellAvailability(deps.shell),
   });

@@ -95,8 +95,11 @@ checkout、`--` 后的 refspec、`gh pr checkout --force` 都属此类）。所�
    高频、且能用结构排除危险形式的操作才值得做成专用工具。
 3. **`run_shell` / `start_process` 每次审核，放心让 LLM 调用。** 审核就是这类工具
    的防线，描述里不再额外限制使用时机。其他 git/gh 写操作（切换分支、stash、
-   rebase、评论、合并等）都走这里；auto review 结合 shell Toolkit 的
-   `reviewGuidance` 判断可恢复的日常操作和需要人工的操作。
+   rebase、评论、合并等）都走这里。auto review 只按通用风险分档判断，丢弃未提交
+   改动、强推、删除远端引用、合并等已在最高档里；shell Toolkit 不再另列 git/gh
+   的 `reviewGuidance` 清单。列清单同样是逐条补规则：列出的形式会不看任务一律
+   判最高分，没列出的反而被低估（#1013 实测：任务明确要求丢弃单个文件的
+   `git restore` 从 1 变成 10，复制 SSH 私钥到 /tmp 从 10 掉到 9）。
 
 ## Auto review 领域边界
 

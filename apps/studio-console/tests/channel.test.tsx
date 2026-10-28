@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   appendChannelDeliveries, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
-  channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
+  channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
 import { ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
@@ -248,4 +248,20 @@ test('routing outcomes show on the unaddressed message: who it went to, or why n
   assert.ok(markup.includes('Analyst · routed 86%'));
   assert.ok(markup.includes('title="It opened #1003."'));
   assert.ok(markup.includes('Not routed: no Pet needed'));
+});
+
+test('the timeline ends with the Pets running a turn in the Channel, earliest first', () => {
+  const working = [
+    { participantId: 'pet:reviewer', since: '2026-10-28T00:00:02Z' },
+    { participantId: 'pet:worker', since: '2026-10-28T00:00:01Z' },
+  ];
+  const all = [...members, { participantId: 'pet:reviewer', kind: 'pet', id: 'reviewer', label: 'Reviewer' }];
+  assert.equal(channelWorkingLabel(working.slice(1), all), 'Analyst is typing…');
+  assert.equal(channelWorkingLabel(working, all), 'Analyst and Reviewer are typing…');
+  assert.equal(channelWorkingLabel([...working, { participantId: 'pet:c', since: '3' }, { participantId: 'pet:d', since: '4' }], all),
+    'Analyst, Reviewer and 2 others are typing…');
+  const markup = renderToStaticMarkup(<ChannelTimeline messages={[message]} pending={false} onReply={() => undefined} members={all} working={working} />);
+  assert.match(markup, /<div class="channel-working" role="status">.*Analyst and Reviewer are typing…/);
+  assert.ok(markup.indexOf('channel-working') > markup.indexOf('Full public delivery'), 'shown after the newest message');
+  assert.doesNotMatch(renderToStaticMarkup(<ChannelTimeline messages={[message]} pending={false} onReply={() => undefined} members={all} />), /channel-working/);
 });

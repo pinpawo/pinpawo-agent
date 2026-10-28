@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
 import {
   channelDateKey, channelDeliveryLabel, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
-  channelPetSession, channelRoutingSkipLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession,
+  channelPetSession, channelRoutingSkipLabel, channelWorkingLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession, type ChannelWorking,
 } from './channelData';
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
@@ -79,10 +79,12 @@ type TimelineProps = {
   deliveries?: ChannelDelivery[];
   routingSkips?: ChannelRoutingSkip[];
   sessions?: ChannelSession[]; onViewSession?: (session: ChannelSession) => void;
+  /** Pet members running a turn in this Channel now. */
+  working?: ChannelWorking[];
 };
 
 export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
-  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession }: TimelineProps) {
+  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession, working = [] }: TimelineProps) {
   const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const byId = new Map(messages.map(item => [item.messageId, item]));
@@ -138,5 +140,8 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
         </div>
       </div>
     </article></React.Fragment>;
-  })}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
+  })}{working.length > 0 && <div className="channel-working" role="status">
+    <span className="channel-working-dots" aria-hidden="true"><i /><i /><i /></span>
+    <span>{channelWorkingLabel(working, members, viewerParticipantId)}</span>
+  </div>}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
 }

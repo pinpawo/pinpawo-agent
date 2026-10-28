@@ -87,6 +87,13 @@ button { color: #bdebed; background: #153438; }
 .channel-inline-state { margin-left: auto; padding: 1px 8px; color: #86b3ad; border-radius: 10px; background: rgba(111, 196, 154, .08); font-size: var(--text-xs); }
 .channel-inline-state.failed { color: #e0968f; background: rgba(223, 122, 115, .1); }
 .channel-inline-state.skipped { color: #9aa3ad; background: rgba(154, 163, 173, .1); }
+.channel-working { display: flex; align-items: center; gap: 10px; padding: 6px 16px 2px 66px; color: #819594; font-size: var(--text-sm); }
+.channel-working-dots { display: inline-flex; gap: 3px; padding: 6px 8px; border-radius: 10px; background: #152022; }
+.channel-working-dots i { width: 5px; height: 5px; border-radius: 50%; background: #86b3ad; animation: channel-working 1.2s infinite ease-in-out; }
+.channel-working-dots i:nth-child(2) { animation-delay: .15s; }
+.channel-working-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes channel-working { 0%, 60%, 100% { opacity: .3; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .channel-working-dots i { animation: none; opacity: .7; } }
 .channel-message.grouped { padding-top: 4px; }
 .channel-message.grouped .channel-avatar { height: 0; }
 .channel-message.grouped .channel-message-head { min-height: 0; height: 0; position: relative; }
@@ -247,6 +254,7 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
   .channel-heading p { font-size: var(--text-xs); }
   .channel-panel-toggle { padding-inline: 7px; font-size: var(--text-xs); }
   .channel-message { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding-inline: 8px; }
+  .channel-working { padding-left: 48px; }
   .channel-timeline-scroll { padding-inline: 8px; }
   .channel-avatar { width: 28px; height: 28px; font-size: var(--text-xs); }
   .channel-inline-state { flex-basis: 100%; margin-left: 0; }

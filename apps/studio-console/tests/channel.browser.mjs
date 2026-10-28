@@ -273,6 +273,7 @@ try {
   await alphaQueue.getByText('1 queued', { exact: true }).waitFor();
   await alphaQueue.getByText('Working · Separate investigation', { exact: true }).waitFor();
   await alphaQueue.locator('li').getByText('Participant loop', { exact: true }).waitFor();
+  assert.equal(await page.locator('.channel-working').count(), 0, 'a Pet at work in another Channel, queued here, is not typing here');
   assert.ok(!/working|busy|queued/.test((await page.locator('.channel-composer').innerText()).toLowerCase()), 'composer has no pre-send busy hints');
   await page.screenshot({ path: resolve(screenshotDir, '03-channel-global-queue.png'), fullPage: true });
   await page.getByRole('button', { name: 'Scheduler', exact: true }).hover();
@@ -310,6 +311,15 @@ try {
   const { channel: long } = await apiPost('/channels', { title: 'Long history', pets: [] });
   for (let index = 0; index < 105; index += 1) await apiPost('/channels/messages', { channelId: long.channelId, body: `History ${index}` });
   await page.setViewportSize({ width: 1440, height: 1000 });
+  // A Pet running a turn in the Channel shows as typing after the newest message: the local token by event, a client by its poll.
+  await apiPost('/channels/messages', { channelId: loopId, body: 'queue-hold', mentions: [{ participantId: 'pet:alpha' }] });
+  await page.locator('.channel-working').getByText('Alpha is typing…', { exact: true }).waitFor();
+  await bob.locator('.channel-working').getByText('Alpha is typing…', { exact: true }).waitFor({ timeout: 10000 });
+  await page.screenshot({ path: resolve(screenshotDir, '08-channel-typing.png'), fullPage: true });
+  await bob.screenshot({ path: resolve(screenshotDir, '09-channel-typing-client.png'), fullPage: true });
+  await waitFor(async () => (await loopOutputs()).length === 5, 'the typing Pet replies');
+  await page.locator('.channel-working').waitFor({ state: 'detached', timeout: 5000 });
+  await bob.locator('.channel-working').waitFor({ state: 'detached', timeout: 10000 });
   // A renamed Pet shows its new name without reconnecting: the local token through pet.* events, a client through its poll.
   await apiPost('/pets/rename', { petId: 'beta', name: 'Beta Renamed' });
   await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
@@ -376,7 +386,7 @@ try {
   await page.getByText('History 0', { exact: true }).waitFor();
   assert.equal(await shown(), 110, 'nothing is missing between the pages');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

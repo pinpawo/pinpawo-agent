@@ -18,6 +18,8 @@ See [Reference](../reference/index.md) for the current public reading path.
   当前状态边界、工具消息交接与恢复设计
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery
+- [Session Artifacts](agent-runtime/session-artifacts.md) — draft：session 显式发布、自己保管的交付文件；
+  pet-agent 定义 port、Toolkit 和上下文段落，Host 提供 local / COS 存储
 - [Review and interrupt semantics](agent-runtime/review.md) — 工具审核策略、执行与恢复
 - Capability / Toolkit 的组合规则见[公共契约](../reference/extensions/capability-toolkit.md)。
 
@@ -27,8 +29,6 @@ See [Reference](../reference/index.md) for the current public reading path.
   [process runtime](host/process-runtime.md),
   [workspace runtime configuration](host/workspace-runtime-config.md), and
   [app chat UI](host/app-chat-runtime-ui.md)
-- [Session Artifacts](host/session-artifacts.md) — draft：session 显式发布、自己保管的文件，
-  上下文段落、可替换存储（local / COS）与 `artifact://` 引用
 - [Tool operation summary 与 block kind](host/operation-summary.md) — draft：
   toolkit `summarize`、通用展示 block，以及新增 block kind 的固定流程
 - [TUI textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the

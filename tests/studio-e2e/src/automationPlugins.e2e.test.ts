@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 
+import { createStudioStorage } from '@pinpawo/studio-core';
+import {
+  ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
+} from '@pinpawo-plugin/channel';
 import { createSchedulerPlugin } from '@pinpawo-plugin/scheduler';
 import { createNoticePlugin } from '@pinpawo-plugin/notice';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
@@ -10,6 +14,21 @@ import { createStudioWithPets, type LivePet } from '../../../tests/support/liveP
 
 const STUDIO_TOKEN = 'studio-token-with-at-least-16-characters';
 const TRIGGER_SECRET = 'trigger-secret-with-at-least-16-characters';
+
+/** Schedules and Trigger rules run their Pet in a Channel, so it exists before the Studio starts. */
+async function seedChannel(t: TestContext, petIds: string[]) {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
+  const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })), humans: async () => undefined });
+  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: petIds });
+  return { channelId, channel: createChannelPlugin({ store, httpRoute: false }) };
+}
+
+/** The task body inside the channel_task input a Channel run hands the Pet. */
+function taskBody(request: string): string {
+  return (JSON.parse(request.slice(request.indexOf('{'), request.lastIndexOf('}') + 1)) as { body: string }).body;
+}
 
 async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -29,14 +48,16 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
       }),
       onQueueChange: () => () => undefined,
       onDispatchLifecycle: () => () => undefined,
-      dispatch: async ({ request }) => { received.push(request); },
+      dispatch: async ({ request }) => { received.push(taskBody(request)); },
     },
   };
+  const { channelId, channel } = await seedChannel(t, ['worker']);
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10 });
   const trigger = createTriggerPlugin({
     triggers: [{
       triggerId: 'build',
       petId: 'worker',
+      channelId,
       request: 'Handle build notification',
       source: { kind: 'http', secret: TRIGGER_SECRET },
     }],
@@ -45,7 +66,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
   const studio = await createStudioWithPets({
     studioId: 'automation-e2e',
     pets: [worker],
-    plugins: [scheduler, trigger, http],
+    plugins: [scheduler, trigger, channel, http],
   });
   t.after(() => studio.shutdown());
   const address = http.address();
@@ -56,11 +77,19 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
     'Content-Type': 'application/json',
   };
 
+  // A schedule names the Channel its Pet runs in; there is no bare dispatch.
+  const unbound = await fetch(`${base}/scheduler`, {
+    method: 'POST',
+    headers: studioHeaders,
+    body: JSON.stringify({ petId: 'worker', request: 'unbound', runAt: new Date().toISOString() }),
+  });
+  assert.equal(unbound.status, 400);
   const scheduleResponse = await fetch(`${base}/scheduler`, {
     method: 'POST',
     headers: studioHeaders,
     body: JSON.stringify({
       petId: 'worker',
+      channelId,
       request: 'scheduled request',
       runAt: new Date(Date.now() - 1000).toISOString(),
     }),
@@ -170,14 +199,16 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
       }),
       onQueueChange: () => () => undefined,
       onDispatchLifecycle: () => () => undefined,
-      dispatch: async ({ request }) => { received.push(request); },
+      dispatch: async ({ request }) => { received.push(taskBody(request)); },
     },
   };
   const githubSecret = 'github-webhook-secret-at-least-16-characters';
+  const { channelId, channel } = await seedChannel(t, ['reviewer']);
   const trigger = createTriggerPlugin({
     triggers: [{
       triggerId: 'github-pr-opened',
       petId: 'reviewer',
+      channelId,
       request: {
         template: 'Review PR #{{payload.pull_request.number}} after {{source.action}}.',
         context: ['source.deliveryId', 'payload.pull_request.number'],
@@ -189,7 +220,7 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
   const studio = await createStudioWithPets({
     studioId: 'github-trigger-e2e',
     pets: [worker],
-    plugins: [trigger, http],
+    plugins: [trigger, channel, http],
   });
   t.after(() => studio.shutdown());
   const address = http.address();

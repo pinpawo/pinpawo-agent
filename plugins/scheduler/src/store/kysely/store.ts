@@ -6,7 +6,7 @@ function scheduleRow(record: Selectable<SchedulerDatabase['schedules']>): Schedu
   return {
     scheduleId: record.schedule_id,
     petId: record.pet_id,
-    ...(record.channel_id === null ? {} : { channelId: record.channel_id }),
+    channelId: record.channel_id,
     request: record.request,
     runAt: record.run_at,
     status: record.status,
@@ -42,7 +42,7 @@ export class KyselyScheduleStore implements ScheduleStore {
     await this.db.insertInto('schedules').values({
       schedule_id: schedule.scheduleId,
       pet_id: schedule.petId,
-      channel_id: schedule.channelId ?? null,
+      channel_id: schedule.channelId,
       request: schedule.request,
       run_at: schedule.runAt,
       status: schedule.status,

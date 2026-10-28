@@ -26,36 +26,29 @@ function recordingPet(petId: string, dispatched: StudioDispatchRequest[]) {
   };
 }
 
-test('Scheduler dispatches one due schedule exactly once', async (t) => {
-  let requests = 0;
+test('Scheduler runs one due schedule exactly once', async (t) => {
+  const dispatched: StudioDispatchRequest[] = [];
   const events: string[] = [];
+  const channel = createChannelPlugin({ httpRoute: false });
   const plugin = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
   const studio = await createStudioWithPets({
     studioId: 'scheduler-test',
-    pets: [{
-      registration: { petId: 'worker', name: 'Worker' },
-      dispatch: {
-        getQueueSnapshot: () => ({
-          state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
-        }),
-        onQueueChange: () => () => undefined,
-        onDispatchLifecycle: () => () => undefined,
-        dispatch: async () => { requests += 1; },
-      },
-    }],
-    plugins: [plugin],
+    pets: [recordingPet('worker', dispatched)],
+    plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
-  studio.subscribe((event) => { events.push(event.type); });
+  const { channel: { channelId } } = await channel.service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: ['worker'] });
+  studio.subscribe((event) => { if (event.source !== 'channel') events.push(event.type); });
 
   const schedule = await plugin.service.create({
     petId: 'worker',
+    channelId,
     request: 'run once',
     runAt: new Date(Date.now() - 1000).toISOString(),
   });
   await new Promise((resolve) => setTimeout(resolve, 40));
 
-  assert.equal(requests, 1);
+  assert.equal(dispatched.length, 1);
   assert.equal((await plugin.service.get(schedule.scheduleId))?.status, 'dispatched');
   assert.deepEqual(events, [
     'schedule.created',

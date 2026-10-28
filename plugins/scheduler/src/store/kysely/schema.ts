@@ -6,7 +6,7 @@ export type SchedulerDatabase = {
   schedules: {
     schedule_id: string;
     pet_id: string;
-    channel_id: string | null;
+    channel_id: string;
     request: string;
     run_at: string;
     status: ScheduleStatus;

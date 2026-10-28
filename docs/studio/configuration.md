@@ -175,9 +175,9 @@ See [Channel routing](../design/studio/channel-routing.md).
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source
 credentials, template projection, deduplication and endpoints are documented once in
-[Automation Plugins](../design/studio/automation-plugins.md). The default external
-request Trigger requires `PINPAWO_STUDIO_TRIGGER_SECRET`; it does not automatically
-update Wiki on task or dispatch completion. Deliveries live in the Studio database and the
+[Automation Plugins](../design/studio/automation-plugins.md). Every rule names the
+`channelId` its Pet runs in, so the default template ships no rules: create the Channel,
+then add the rule. Deliveries live in the Studio database and the
 Plugin no longer takes a `databasePath` option; deliveries in an earlier `trigger.sqlite` are not migrated.
 
 `@pinpawo-plugin/project-files` projects Markdown from a configured Wiki root into

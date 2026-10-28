@@ -10,7 +10,7 @@ import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, typ
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
 import { KnowledgeDocument } from './KnowledgeDocument';
-import { appendChannelDeliveries, type ChannelDelivery, type ChannelRoutingSkip } from './channelData';
+import { appendChannelDeliveries, readChannelPages, type ChannelDelivery, type ChannelRoutingSkip, type ChannelRow } from './channelData';
 import { Bell, BookOpen, CalendarClock, MessagesSquare, Plug, Zap, type LucideIcon } from 'lucide-react';
 import logoMark from '../../../assets/brand/pinpawo-primary-white.svg';
 
@@ -25,7 +25,7 @@ const pageItems: { page: Page; label: string; Icon: LucideIcon }[] = [
 type ConnectionState = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Schedule = {
-  scheduleId: string; petId: string; request: string; runAt: string;
+  scheduleId: string; petId: string; channelId: string; request: string; runAt: string;
   status: 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled'; note?: string;
 };
 type Notice = {
@@ -157,6 +157,8 @@ export function App() {
   const [retryingInvocationId, setRetryingInvocationId] = useState('');
   const [retryingDeliveryId, setRetryingDeliveryId] = useState('');
   const [schedulePet, setSchedulePet] = useState('');
+  const [scheduleChannels, setScheduleChannels] = useState<ChannelRow[]>([]);
+  const [scheduleChannel, setScheduleChannel] = useState('');
   const [scheduleRequest, setScheduleRequest] = useState('');
   const [scheduleRunAt, setScheduleRunAt] = useState('');
 
@@ -193,12 +195,17 @@ export function App() {
         read<{ events: HistoryEvent[] }>('/scheduler/events').catch(() => ({ value: null, unavailable: true })),
         read<{ events: HistoryEvent[] }>('/triggers/events').catch(() => ({ value: null, unavailable: true })),
       ]);
+      // A schedule runs its Pet in a Channel; without the Channel Plugin there is none to pick.
+      const channels = await readChannelPages<ChannelRow>(async (path) => (await read(path)).value, '/channels', 'channels')
+        .catch(() => []);
       if (abort.signal.aborted) return;
       const nextPets = petResponse.value?.pets ?? [];
       setPets(nextPets);
       setPetsReady(true);
       setDispatchPet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
       setSchedulePet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
+      setScheduleChannels(channels);
+      setScheduleChannel((current) => channels.some(({ channelId }) => channelId === current) ? current : channels[0]?.channelId || '');
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
       setNotices({ ...notice, value: notice.value?.notices ?? null });
       setTriggers(trigger);
@@ -252,7 +259,8 @@ export function App() {
         const record = dispatchRecordFromEvent(event);
         if (record) setDispatches((current) => appendDispatchRecord(current, record));
         if (['scheduler', 'notice', 'trigger'].includes(event.source)
-          || (event.source === 'studio' && event.type.startsWith('pet.'))) refreshInBackground();
+          || (event.source === 'studio' && event.type.startsWith('pet.'))
+          || (event.source === 'channel' && (event.type === 'channel.created' || event.type === 'channel.updated'))) refreshInBackground();
         if (event.source === 'channel') {
           setChannelVersion(value => value + 1);
           const payload = event.payload as Partial<ChannelDelivery> & { petId?: string } | undefined;
@@ -461,11 +469,12 @@ export function App() {
     event.preventDefault();
     try {
       const runAt = new Date(scheduleRunAt);
-      if (!schedulePet || !scheduleRequest.trim() || !Number.isFinite(runAt.getTime())) {
-        throw new Error('Schedule requires a Pet, goal, and valid time.');
+      if (!schedulePet || !scheduleChannel || !scheduleRequest.trim() || !Number.isFinite(runAt.getTime())) {
+        throw new Error('Schedule requires a Pet, a Channel, goal, and valid time.');
       }
       void post('/scheduler', {
         petId: schedulePet,
+        channelId: scheduleChannel,
         request: scheduleRequest,
         runAt: runAt.toISOString(),
       }).then(() => {
@@ -602,12 +611,13 @@ export function App() {
         {page === 'scheduler' && (schedules.value ? <>
           <div className="section-title"><span>One-shot schedules</span><b>{schedules.value.length}</b></div>
           <form className="composer scheduler" onSubmit={submitSchedule}>
-            <select onChange={(event) => setSchedulePet(event.target.value)} value={schedulePet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
+            <select aria-label="Schedule Pet" onChange={(event) => setSchedulePet(event.target.value)} value={schedulePet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
+            <select aria-label="Schedule Channel" onChange={(event) => setScheduleChannel(event.target.value)} value={scheduleChannel}>{scheduleChannels.length === 0 && <option value="">No Channel yet</option>}{scheduleChannels.map((channel) => <option key={channel.channelId} value={channel.channelId}>{channel.title}</option>)}</select>
             <input onChange={(event) => setScheduleRequest(event.target.value)} placeholder="Scheduled goal…" value={scheduleRequest} />
             <input onChange={(event) => setScheduleRunAt(event.target.value)} type="datetime-local" value={scheduleRunAt} />
             <button>Schedule</button>
           </form>
-          <div className="rows">{schedules.value.map((schedule) => <div className="row" key={schedule.scheduleId}><em className={schedule.status}>{schedule.status}</em><time>{new Date(schedule.runAt).toLocaleString()}</time><strong>{schedule.request}</strong><span>{schedule.petId}{schedule.note ? ` · ${schedule.note}` : ''}{schedule.status === 'scheduled' && <button className="inline-action" onClick={() => { void post('/scheduler/control', { action: 'cancel', scheduleId: schedule.scheduleId }).catch((error) => setNotice(String(error))); }} type="button">cancel</button>}</span></div>)}</div>
+          <div className="rows">{schedules.value.map((schedule) => <div className="row" key={schedule.scheduleId}><em className={schedule.status}>{schedule.status}</em><time>{new Date(schedule.runAt).toLocaleString()}</time><strong>{schedule.request}</strong><span>{schedule.petId} in {scheduleChannels.find(({ channelId }) => channelId === schedule.channelId)?.title ?? schedule.channelId}{schedule.note ? ` · ${schedule.note}` : ''}{schedule.status === 'scheduled' && <button className="inline-action" onClick={() => { void post('/scheduler/control', { action: 'cancel', scheduleId: schedule.scheduleId }).catch((error) => setNotice(String(error))); }} type="button">cancel</button>}</span></div>)}</div>
           <History title="Scheduler history" events={schedulerHistory} />
         </> : unavailable(schedules, 'Scheduler'))}
         {page === 'notice' && (notices.value ? <>

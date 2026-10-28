@@ -1,13 +1,13 @@
 export type ScheduleStatus = 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled';
 
-/** Host's receipt for the run a schedule started; sessionId is set for a Channel run. */
+/** Host's receipt for the run a schedule started, in the Pet's Channel session. */
 export type ScheduleReceipt = { invocationId: string; sessionId?: string };
 
 export type Schedule = {
   scheduleId: string;
   petId: string;
-  /** Run the Pet in this Channel instead of a bare dispatch. */
-  channelId?: string;
+  /** The Channel the Pet runs in; its reply becomes a message there. */
+  channelId: string;
   request: string;
   runAt: string;
   status: ScheduleStatus;

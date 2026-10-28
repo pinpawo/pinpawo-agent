@@ -44,17 +44,7 @@
     {
       "id": "@pinpawo-plugin/trigger",
       "options": {
-        "triggers": [
-          {
-            "triggerId": "external-request",
-            "petId": "executor",
-            "request": "Handle the following external request. Return the result with evidence.",
-            "source": {
-              "kind": "http",
-              "secretEnv": "PINPAWO_STUDIO_TRIGGER_SECRET"
-            }
-          }
-        ]
+        "triggers": []
       }
     }
   ]

@@ -39,7 +39,8 @@ test('shell selection runs the production shell Toolkit in a real repository', {
     assert.match(await invoke(fixture, 'inspect_shell', 'git status --short 2>&1'), /M src\/cart\.ts[\s\S]*\?\? notes\.txt/);
     assert.match(await invoke(fixture, 'inspect_shell', 'gh pr checks 12'), /build\tpass/);
     assert.match(await invoke(fixture, 'inspect_shell', 'git clean -fd'), /^Error: inspect_shell 不执行该命令/);
-    assert.match(await invoke(fixture, 'run_shell', 'git clean -fd'), /Removing notes\.txt/);
+    // git localizes its own messages, so check the effect, not the wording.
+    await invoke(fixture, 'run_shell', 'git clean -fd');
     assert.equal(await invoke(fixture, 'inspect_shell', 'git status --short'), ' M src/cart.ts');
     assert.equal(shellCallCommand(fixture.calls[4]), 'git clean -fd');
   });
@@ -51,7 +52,7 @@ test('shell selection review approves reads and the confirmed command, rejects o
     assert.match(await invoke(fixture, 'run_shell', 'git push --force origin HEAD'), /\(no output\)|stderr/);
     const refusal = JSON.parse(await invoke(fixture, 'run_shell', 'git reset --hard HEAD'));
     assert.equal(refusal.source, 'human_reject');
-    assert.equal(await invoke(fixture, 'inspect_shell', 'git diff --stat | tail -1'), ' 1 file changed, 1 insertion(+)');
+    assert.equal(await invoke(fixture, 'inspect_shell', 'git diff --numstat | tail -1'), '1\t0\tsrc/cart.ts');
   });
 });
 

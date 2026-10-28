@@ -1,3 +1,4 @@
+import { resolvePetCredentialEnvironment, type PetCredentialSource } from '../../host/petCredentials';
 import type { ToolkitAvailability } from '@pinpawo/pet-agent';
 import type { RSServiceConnection } from '../../rsService/connection';
 import { type RSCallFailure, RSContractClient } from '../../rsService/contractClient';
@@ -39,6 +40,8 @@ function hostEnvironment(): Record<string, string> {
 
 export type ShellRSClientOptions = Readonly<{
   paths?: RSServicePaths;
+  /** Trusted Host source; resolved per exec, never from tool arguments. */
+  credentialSource?: PetCredentialSource;
   /** How to reach the service; defaults to starting it when none runs. */
   connect?: () => Promise<RSServiceConnection>;
   /** Overridable so the Windows path can be tested anywhere. */
@@ -79,8 +82,10 @@ export class ShellRSClient implements ShellRS {
   readonly version = SHELL_RS_VERSION;
 
   private readonly transport: RSContractClient;
+  private readonly credentialSource: PetCredentialSource | undefined;
 
   constructor(options: ShellRSClientOptions = {}) {
+    this.credentialSource = options.credentialSource;
     const platform = options.platform ?? process.platform;
     this.transport = new RSContractClient({
       rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
@@ -109,9 +114,19 @@ export class ShellRSClient implements ShellRS {
   async exec(agentSessionId: string, request: ShellExecRequest): Promise<ShellExecResult> {
     const { signal, ...rest } = request;
     if (signal?.aborted) return { status: 'aborted', stdout: '', stderr: '' };
+    const credentialEnv = this.credentialSource
+      ? await resolvePetCredentialEnvironment(this.credentialSource)
+      : undefined;
     const result = await this.transport.call(
       'exec',
-      { agentSessionId, request: { ...rest, baseEnv: hostEnvironment() } },
+      {
+        agentSessionId,
+        request: {
+          ...rest,
+          ...(credentialEnv ? { env: { ...rest.env, ...credentialEnv } } : {}),
+          baseEnv: hostEnvironment(),
+        },
+      },
       signal,
     ) as Exclude<ShellExecResult, { status: 'spawn_failed' }> | WireSpawnFailed;
     if (result.status !== 'spawn_failed') return result;

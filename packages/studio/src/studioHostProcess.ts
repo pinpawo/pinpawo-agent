@@ -1,6 +1,7 @@
 import {
   buildHostRuntimeConfig,
   type HostRuntimeConfig,
+  type PetCredentialSource,
 } from 'pinpawo/host-runtime';
 import { ensureWireAuthToken } from 'pinpawo/wire';
 import type { StudioPluginResolver } from './host/buildStudio';
@@ -12,6 +13,8 @@ import {
 } from './startStudioHost';
 
 export type StudioHostProcessOptions = {
+  /** Trusted embedding input; the ordinary CLI does not configure credentials. */
+  credentialSource?: PetCredentialSource;
   workdir?: string;
   resolvePlugin?: StudioPluginResolver;
   agentSessionPort?: number;
@@ -49,6 +52,7 @@ export async function runStudioHostProcess(
     });
   const hostOptions: StartStudioHostOptions = {
     runtimeConfig,
+    ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
     resolvePlugin,
     agentSessionTransport: { authToken },
     ...(options.agentSessionPort !== undefined

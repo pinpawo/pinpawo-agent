@@ -23,6 +23,8 @@ See [Reference](../reference/index.md) for the current public reading path.
 
 ## Local host and interfaces
 
+- [Instance credentials](host/pet-credentials.md) — opt-in Host source/ref binding
+  and per-command environment injection, without an OS sandbox guarantee
 - [Host architecture refactor](host/architecture-refactor.md),
   [process runtime](host/process-runtime.md),
   [workspace runtime configuration](host/workspace-runtime-config.md), and

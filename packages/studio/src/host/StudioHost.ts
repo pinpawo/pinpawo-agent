@@ -21,6 +21,7 @@ import {
   type HostRuntimeConfig,
   type LocalModelProfileRegistry,
   type ToolkitDefinitionSource,
+  type PetCredentialSource,
 } from 'pinpawo/host-runtime';
 import {
   buildStudio,
@@ -37,6 +38,8 @@ import {
 
 export type StudioHostOptions = {
   runtimeConfig?: HostRuntimeConfig;
+  /** Trusted composition input, never populated from HTTP/tool requests. */
+  credentialSource?: PetCredentialSource;
   resolvePlugin?: StudioPluginResolver;
   /** Composition hook for lifecycle tests and embedded hosts. */
   capabilityAssembly?: HostCapabilityAssembly;
@@ -76,6 +79,7 @@ export class StudioHost {
     this.caps = options.capabilityAssembly ?? new HostCapabilityAssembly({
       runtimeConfig,
       sourceId: 'studio-host',
+      credentialSource: options.credentialSource,
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
       includeBrowser: false,

@@ -1,3 +1,4 @@
+import { withPetExecutionIdentity, type PetCredentialSource } from '../../host/petCredentials';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,8 +38,9 @@ async function setup(t: TestContext) {
     await rm(root, { recursive: true, force: true });
   });
   // A "Host": its own client of the shared service.
-  const host = () => {
+  const host = (credentialSource?: PetCredentialSource) => {
     const rs = new ShellRSClient({
+      credentialSource,
       connect: async () => await RSServiceConnection.open({
         paths,
         token,
@@ -255,4 +257,36 @@ test('short and managed tools keep their semantics across the RS service', { ski
   assert.equal(timeout.termination, 'confirmed');
   assert.equal(timeout.stdout, 'partial');
   assert.equal((await next.list('tool-session')).filter((item) => item.status === 'running').length, 0);
+});
+
+
+test('instance credentials reach the process per exec, override request env, and rotate only for new processes', { skip: isWindows }, async (t) => {
+  const { host } = await setup(t);
+  let token = 'fake-a';
+  const shell = host({
+    readBindings: async (petId) => {
+      if (petId !== 'a' && petId !== 'b') throw new Error('missing');
+      return { TEST_TOKEN: petId };
+    },
+    resolve: async (ref) => ref === 'a' ? token : 'fake-b',
+  });
+  const run = (petId: string, session: string) => withPetExecutionIdentity(petId, () => shell.exec(session, {
+    ...exec, env: { TEST_TOKEN: 'model-override' }, command: { shell: 'printf "%s" "$TEST_TOKEN"' },
+  }));
+  const results = await Promise.all([run('a', 'channel-1'), run('b', 'channel-2'), run('a', 'channel-3')]);
+  assert.deepEqual(results.map((r) => r.status === 'exited' ? r.stdout : null), ['fake-a', 'fake-b', 'fake-a']);
+  const started = await withPetExecutionIdentity('a', () => shell.exec('long', {
+    ...exec, waitMs: 20, onTimeout: 'yield', command: { shell: 'sleep 0.2; printf "%s" "$TEST_TOKEN"' },
+  }));
+  assert.equal(started.status, 'yielded');
+  token = 'fake-new';
+  const fresh = await run('a', 'channel-1');
+  assert.equal(fresh.status === 'exited' ? fresh.stdout : null, 'fake-new');
+  if (started.status === 'yielded') {
+    const old = await shell.wait('long', started.process.processId, 5_000);
+    assert.equal(old.stdout, 'fake-a');
+  }
+  await assert.rejects(run('missing', 'channel-1'), /resolution failed/);
+  await assert.rejects(shell.exec('channel-1', { ...exec, command: { shell: 'echo should-not-run' } }), /active instance/);
+  assert.equal(process.env.TEST_TOKEN, undefined);
 });

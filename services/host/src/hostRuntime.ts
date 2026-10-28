@@ -81,3 +81,6 @@ export { readPetInvocationContext } from './host/petInvocationContext';
 export type { PetInvocationContext, PetInvocationScope } from './host/petInvocationContext';
 
 export { allocatePetSessionId } from './session/tuiSessionRegistry';
+
+export type { PetCredentialBindings, PetCredentialSource } from './host/petCredentials';
+export { FilePetCredentialSource } from './host/filePetCredentialSource';

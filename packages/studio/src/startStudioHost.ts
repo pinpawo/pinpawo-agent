@@ -30,6 +30,7 @@ function createHost(options: StartStudioHostOptions) {
     ?? buildHostRuntimeConfig(options.workdir);
   return new StudioHost({
     runtimeConfig,
+    ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
     ...(options.resolvePlugin ? { resolvePlugin: options.resolvePlugin } : {}),
     ...(options.capabilityAssembly
       ? { capabilityAssembly: options.capabilityAssembly }

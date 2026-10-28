@@ -416,9 +416,9 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
     get service() { return triggerService(); },
     start: async (pluginContext) => {
       if (context) throw new Error('Trigger Plugin is already started.');
-      // Targets are checked when a rule fires, not here: Pets are created and
-      // archived while Studio runs. A target that takes no work fails the
-      // delivery, which keeps the reason.
+      // Targets are checked when a rule fires, not here: Pets are created while
+      // Studio runs. An unknown target fails the delivery, which keeps the
+      // reason.
       const isLivePet = (petId: string) => pluginContext.listPets().some((pet) => pet.petId === petId);
       context = pluginContext;
       try {

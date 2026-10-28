@@ -3,8 +3,6 @@ export type PetRow = {
   definitionId: string;
   name: string;
   createdAt: string;
-  /** Absent while the Pet takes work. */
-  archivedAt?: string;
 };
 
 /**
@@ -19,8 +17,7 @@ export interface PetStore {
   /** Removes a Pet whose runtime could not be assembled, so its id can be used again. */
   deletePet(petId: string): Promise<void>;
   getPet(petId: string): Promise<PetRow | undefined>;
-  /** In creation order, archived ones included. */
+  /** In creation order. */
   listPets(): Promise<PetRow[]>;
   renamePet(petId: string, name: string): Promise<void>;
-  archivePet(petId: string, archivedAt: string): Promise<void>;
 }

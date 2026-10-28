@@ -42,8 +42,7 @@ CREATE TABLE studio_pets (
   pet_id        TEXT PRIMARY KEY,   -- 创建时指定，之后不变
   definition_id TEXT NOT NULL,
   name          TEXT NOT NULL,      -- 只用于显示，可改，不要求唯一
-  created_at    TEXT NOT NULL,
-  archived_at   TEXT                -- 为空表示在用
+  created_at    TEXT NOT NULL
 );
 ```
 
@@ -66,11 +65,12 @@ CREATE TABLE studio_pets (
 | --- | --- |
 | 创建 | 选定义、指定 `petId` 和名称，写入 `studio_pets`，随即装配 resident runtime，发 `pet.created` |
 | 改名 | 只改 `name`，发 `pet.renamed`；历史消息作者是 `pet:<petId>`，显示随名称变化。Pet 运行时自己看到的名字在下次装配（Host 重启）时更新 |
-| Host 启动 | 读取所有在用的 Pet，逐个装配；定义缺失时启动失败并指出是哪个 Pet |
-| 归档 | 先标记 `archived_at`，此后 dispatch 以 `pet_archived` 拒收；队列里还没开始的 dispatch 失败；正在跑的跑完；然后关闭 runtime，发 `pet.archived` |
-| 历史 | 归档不删 Session、checkpoint 和 Channel 消息；清理是另一回事，首期不做 |
+| Host 启动 | 读取所有 Pet，逐个装配；定义缺失时启动失败并指出是哪个 Pet |
+| Studio 关闭 | 先停 Plugin，再关闭每个 Pet 的 runtime；runtime 关完之前它的 dispatch 生命周期事件照常发布 |
 
-首期不做取消归档：要继续工作就新建一个 Pet。
+本期不做归档、停用和删除（评审时决定，避免在没有使用者时先做一套停用/恢复机制）。
+要做时需要先定在途工作怎么结束：拒收新 dispatch、队列里的明确失败、正在跑的 turn 跑完而不是被中止，
+并且等 runtime 结束后才解绑生命周期事件，Channel 才能记下最后一条回复。
 
 并发：一个 Pet 同时只跑一个 turn（现在的规则，单位从“配置的 Pet”变成“Pet 实例”）。
 同一定义的两个 Pet 可以并行。
@@ -87,9 +87,9 @@ CREATE TABLE studio_pets (
 
 - 所有投递都用 `petId`（实例）。Channel 成员、schedule、trigger 规则、`POST /dispatch` 都已经要求显式 petId；
   名称从不用于寻址。
-- 目标 Pet 不存在或已归档时直接失败，不换成其他 Pet，也不换成默认 Pet。
-- Trigger 不再在启动时校验目标 Pet（Pet 可以在运行中创建和归档，启动时的校验已经不够）：触发时由 Studio dispatch
-  拒收不存在或已归档的 Pet，失败记入 Trigger 自己的 delivery 日志。Scheduler 在创建 schedule 时校验，触发时同样按上面的规则失败。
+- 目标 Pet 不存在时直接失败，不换成其他 Pet，也不换成默认 Pet。
+- Trigger 不再在启动时校验目标 Pet（Pet 可以在运行中创建，启动时的校验已经不够）：触发时由 Studio dispatch
+  拒收不存在的 Pet，失败记入 Trigger 自己的 delivery 日志。Scheduler 在创建 schedule 时校验，触发时同样按上面的规则失败。
 - 不带 session 的 dispatch（`POST /dispatch`、不绑 Channel 的 schedule）目前落在该 Pet 当前选中的 Session。
   这是剩下的“活跃 Session 兜底”，第二阶段改为显式绑定（见“分阶段”）。
 
@@ -99,24 +99,23 @@ Studio core 在 `StudioPluginContext` 上提供 `pets`：
 
 ```ts
 type StudioPets = {
-  list: (options?: { includeArchived?: boolean }) => Promise<StudioPet[]>;
+  list: () => Promise<StudioPet[]>;
   get: (petId: string) => Promise<StudioPet | undefined>;
   definitions: () => StudioPetDefinition[];
   create: (input: { petId: string; definitionId: string; name: string }) => Promise<StudioPet>;
   rename: (petId: string, name: string) => Promise<StudioPet>;
-  archive: (petId: string) => Promise<StudioPet>;
 };
-type StudioPet = { petId: string; definitionId: string; name: string; createdAt: string; archivedAt?: string };
+type StudioPet = { petId: string; definitionId: string; name: string; createdAt: string };
 ```
 
-`listPets()` 保留为同步读取，只返回在用的 Pet（`{petId, name, definitionId}`），供 Plugin 校验成员和目标。
+`listPets()` 保留为同步读取，返回已装配的 Pet（`{petId, name, definitionId}`），供 Plugin 校验成员和目标。
 
-- studio-http：`GET /pets`（所有客户，在用的 Pet）；只接受本机 token 的 `GET /pets?archived=1`（含已归档）、
-  `GET /pet-definitions`、`POST /pets {petId, definitionId, name}`、`POST /pets/rename {petId, name}`、
-  `POST /pets/archive {petId}`。错误码：参数不合法 400，已存在 409，不存在 404。
-- `pinpawo-studio pets list [--archived] | definitions | create <petId> --definition <id> --name <name> | rename <petId> --name <name> | archive <petId>`。
+- studio-http：`GET /pets`（所有客户）；只接受本机 token 的 `GET /pet-definitions`、
+  `POST /pets {petId, definitionId, name}`、`POST /pets/rename {petId, name}`。错误码：参数不合法 400，已存在 409，不存在 404。
+- `pinpawo-studio pets list | definitions | create <petId> --definition <id> --name <name> | rename <petId> --name <name>`。
 - `pinpawo-studio init` 按模板为每份定义创建一个同名 Pet，新目录开箱即用。
-- Console 的 Pet 管理页放第三阶段；在此之前 Console 继续通过 `GET /pets` 列出 Pet。
+- Console 的 Pet 管理页放第三阶段；在此之前 Console 继续通过 `GET /pets` 列出 Pet，收到 `pet.created` / `pet.renamed`
+  事件（本机 token）或每次轮询（client）时刷新。
 
 装配的边界不变：Studio core 只持有实例记录和 dispatch / session 端口。`createStudio` 收 `definitions` 和
 Host 组合层提供的 `assemblePet(pet)`，拿回 `{dispatch, sessions, close}`；interaction 留在 Host
@@ -134,17 +133,16 @@ Studio 关闭时，先停 Plugin，再关闭所有 Pet 的 runtime。
 
 ## 分阶段
 
-1. **本阶段**：定义与实例拆开；`studio_pets` 与 `StudioPets`；Host 启动与运行中按实例装配、归档关闭；
-   HTTP / CLI / init；Trigger 改为触发时校验；测试覆盖创建、两个同定义实例互不串联、重启恢复同一实例与其 Session、
-   归档拒收。
+1. **本阶段**：定义与实例拆开；`studio_pets` 与 `StudioPets`；Host 启动与运行中按实例装配；
+   HTTP / CLI / init；Trigger 改为触发时校验；测试覆盖创建、两个同定义实例互不串联、重启恢复同一实例与其 Session。
 2. **Channel 外入口的 Session**：`POST /dispatch` 与不绑 Channel 的 schedule 显式指定或预留 Session，
    去掉 resident dispatch 的活跃 Session 兜底。
-3. **Console**：Pet 管理页（创建、改名、归档），Channel 成员选择显示定义。
+3. **Console**：Pet 管理页（创建、改名），Channel 成员选择显示定义。
+4. **归档**（待有使用场景再定）：按“生命周期”一节的要求设计在途工作的结束方式。
 
 ## 验收
 
 - [ ] 同一份定义创建两个 Pet，各自被寻址，Session 与运行互不影响，无需复制配置目录。
 - [ ] 一个 Pet 新建、切换 Session 不改变 petId。
 - [ ] Host 重启后恢复同一批 Pet 及其 Session，不产生重复 Pet。
-- [ ] 归档后 dispatch 被拒，历史仍可读；在途工作按“生命周期”一节结束。
-- [ ] 目标 Pet 不存在或已归档时失败，不落到其他 Pet 或默认 Pet。
+- [ ] 目标 Pet 不存在时失败，不落到其他 Pet 或默认 Pet。

@@ -225,7 +225,7 @@ export class StudioHost {
 
   /**
    * Pet-scoped Agent Session adapters owned by host, not Studio core. The map
-   * is live: Pets created or archived later appear in or leave it.
+   * is live: Pets created later appear in it.
    */
   getResidentPetInteractions(): ReadonlyMap<string, ResidentPetInteraction> {
     if (!this.studio) {

@@ -153,9 +153,9 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
 
 test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', async (t) => {
   const records: StudioPet[] = [];
-  const calls: unknown[] = [];
+  const calls: unknown[][] = [];
   const pets: StudioPets = {
-    list: async (options) => { calls.push(['list', options]); return records; },
+    list: async () => records,
     get: async (petId) => records.find(pet => pet.petId === petId),
     definitions: () => [{ definitionId: 'developer', name: 'Developer' }],
     create: async (input) => {
@@ -166,7 +166,6 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
       return pet;
     },
     rename: async (petId, name) => { calls.push(['rename', petId, name]); throw new StudioPetError('missing', 'not_found'); },
-    archive: async (petId) => { calls.push(['archive', petId]); return { ...records[0]!, archivedAt: 'later' }; },
   };
   const harness = createContext();
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
@@ -184,11 +183,9 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
   assert.equal((await created.json()).pet.petId, 'dev-a');
   assert.equal((await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Again' })).status, 409);
   assert.equal((await send('/pets/rename', { petId: 'ghost', name: 'X' })).status, 404);
-  assert.equal((await (await send('/pets/archive', { petId: 'dev-a' })).json()).pet.archivedAt, 'later');
+  assert.deepEqual(calls.map(([action]) => action), ['create', 'create', 'rename']);
   assert.deepEqual(await (await send('/pet-definitions')).json(), { definitions: [{ definitionId: 'developer', name: 'Developer' }] });
-  assert.deepEqual((await (await send('/pets?archived=1')).json()).pets.map(({ petId }: StudioPet) => petId), ['dev-a']);
-  assert.deepEqual(calls.at(-1), ['list', { includeArchived: true }]);
-  // Without the flag the route still lists the Pets that take work now.
+  // The listing is the live Pets Studio reports, not the management records.
   assert.deepEqual(await (await send('/pets')).json(), { pets: [] });
 });
 

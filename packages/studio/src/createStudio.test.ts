@@ -606,8 +606,8 @@ test('Pet creation checks the id, the definition and uniqueness, and frees the i
   await studio.shutdown();
 });
 
-test('archiving refuses new work, closes the runtime and keeps the record', async () => {
-  const { prepared, studio, closed } = instanceStudio();
+test('renaming changes the display name everywhere and publishes it', async () => {
+  const { prepared, studio } = instanceStudio();
   const events: string[] = [];
   studio.subscribe((event) => { if (event.type.startsWith('pet.')) events.push(event.type); });
   await prepared.activatePlugins();
@@ -615,24 +615,45 @@ test('archiving refuses new work, closes the runtime and keeps the record', asyn
   const renamed = await studio.pets.rename('dev', 'Developer One');
   assert.equal(renamed.name, 'Developer One');
   assert.equal(studio.listPets()[0]!.name, 'Developer One');
-  const archived = await studio.pets.archive('dev');
-  assert.ok(archived.archivedAt);
-  assert.deepEqual(closed, ['dev']);
-  assert.deepEqual(studio.listPets(), []);
-  assert.deepEqual(await studio.pets.list(), []);
-  assert.deepEqual((await studio.pets.list({ includeArchived: true })).map(({ petId }) => petId), ['dev']);
-  await assert.rejects(studio.dispatch({ petId: 'dev', request: 'late' }), (error: unknown) => (
-    error instanceof StudioPetError && error.code === 'pet_archived'
+  assert.equal((await studio.pets.get('dev'))?.name, 'Developer One');
+  await assert.rejects(studio.pets.rename('nobody', 'X'), (error: unknown) => (
+    error instanceof StudioPetError && error.code === 'not_found'
   ));
-  // Archiving again changes nothing.
-  assert.equal((await studio.pets.archive('dev')).archivedAt, archived.archivedAt);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(events, ['pet.created', 'pet.renamed', 'pet.archived']);
+  assert.deepEqual(events, ['pet.created', 'pet.renamed']);
   await studio.shutdown();
-  assert.deepEqual(closed, ['dev']);
 });
 
-test('a restarted Studio assembles the same active Pets once and leaves archived ones down', async () => {
+test('lifecycle events a Pet emits while its runtime closes still reach Studio', async () => {
+  const seen: string[] = [];
+  const prepared = prepareStudio({
+    studioId: 'closing',
+    definitions: [{ definitionId: 'developer', name: 'Developer' }],
+    assemblePet: async ({ petId }): Promise<StudioPetRuntime> => {
+      const listeners = new Set<Parameters<PetDispatchPort['onDispatchLifecycle']>[0]>();
+      const { dispatch } = binding(petId);
+      return {
+        dispatch: {
+          ...dispatch,
+          onDispatchLifecycle: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+        },
+        close: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          for (const listener of listeners) {
+            listener({ state: 'completed', dispatchId: 'last', request: 'r', reply: 'done' } as Parameters<typeof listener>[0]);
+          }
+        },
+      };
+    },
+  });
+  prepared.studio.subscribe((event) => { seen.push(event.type); });
+  await prepared.activatePlugins();
+  await prepared.studio.pets.create({ petId: 'dev', definitionId: 'developer', name: 'Dev' });
+  await prepared.studio.shutdown();
+  assert.ok(seen.includes('dispatch.completed'), seen.join(','));
+});
+
+test('a restarted Studio assembles the same Pets once', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
@@ -644,15 +665,14 @@ test('a restarted Studio assembles the same active Pets once and leaves archived
     await first.studio.pets.create({ petId: 'dev-a', definitionId: 'developer', name: 'A' });
     await first.studio.pets.create({ petId: 'dev-b', definitionId: 'developer', name: 'B' });
     await first.studio.pets.create({ petId: 'rev', definitionId: 'reviewer', name: 'R' });
-    await first.studio.pets.archive('dev-b');
     await first.studio.shutdown();
     assert.deepEqual(first.closed.sort(), ['dev-a', 'dev-b', 'rev']);
 
     const second = instanceStudio({ storage });
     await second.prepared.restorePets();
     await second.prepared.activatePlugins();
-    assert.deepEqual(second.assembled, ['dev-a', 'rev']);
-    assert.deepEqual(second.studio.listPets().map(({ petId }) => petId), ['dev-a', 'rev']);
+    assert.deepEqual(second.assembled, ['dev-a', 'dev-b', 'rev']);
+    assert.deepEqual(second.studio.listPets().map(({ petId }) => petId), ['dev-a', 'dev-b', 'rev']);
     await second.studio.dispatch({ petId: 'dev-a', request: 'continue' });
     assert.deepEqual(second.dispatched, [['dev-a', 'continue']]);
     await second.studio.shutdown();
@@ -661,7 +681,7 @@ test('a restarted Studio assembles the same active Pets once and leaves archived
   }
 });
 
-test('a Studio refuses to start when an active Pet names a definition it no longer lists', async () => {
+test('a Studio refuses to start when a Pet names a definition it no longer lists', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');

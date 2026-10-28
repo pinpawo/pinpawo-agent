@@ -23,7 +23,7 @@ import { createStudioStorage, type StudioStorageConfig } from './storage/studioS
 import { StudioClients } from './clients/studioClients';
 import { KyselyClientStore, type ClientDatabase } from './clients/store/kysely';
 import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
-import { StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
+import { StudioPetError, StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
 import { studioCoreMigrations } from './storage/coreMigrations';
 
 export type CreateStudioInput = {
@@ -88,7 +88,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     definitions: input.definitions,
     assemble: input.assemblePet,
     onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
-    onRetired: (petId) => {
+    onClosed: (petId) => {
       lifecycleObservers.get(petId)?.();
       lifecycleObservers.delete(petId);
     },
@@ -150,7 +150,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     await registry.restore();
     const pet = registry.getLive(request.petId);
-    if (!pet) throw await registry.explainUnavailable(request.petId);
+    if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${request.petId}"`, 'not_found');
 
     const idempotencyKey = request.idempotencyKey?.trim();
     if (request.idempotencyKey !== undefined && !idempotencyKey) {

@@ -5,6 +5,5 @@ export type PetDatabase = {
     definition_id: string;
     name: string;
     created_at: string;
-    archived_at: string | null;
   };
 };

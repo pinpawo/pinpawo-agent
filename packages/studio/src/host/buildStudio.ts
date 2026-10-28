@@ -75,8 +75,7 @@ export type BuildStudioResult = {
   /** 已装配的插件,按配置顺序。 */
   plugins: StudioPlugin[];
   /**
-   * The live Pets' Host resources by petId, kept current as Pets are created
-   * and archived. Studio core receives only their dispatch and session ports.
+   * The live Pets' Host resources by petId, kept current as Pets are created. Studio core receives only their dispatch and session ports.
    */
   residentPets: ReadonlyMap<string, ResidentPetHost>;
   /** The live Pets' Agent Session surfaces by petId, kept current the same way. */

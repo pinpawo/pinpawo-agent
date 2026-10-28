@@ -35,7 +35,6 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/events',
   '/pets',
   '/pets/rename',
-  '/pets/archive',
   '/pet-definitions',
   '/me',
   '/pet-sessions/snapshot',
@@ -566,14 +565,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     });
     app.all('/me', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
-    // Pets that take work; `?archived=1` adds archived records (local token only).
-    app.get('/pets', async (requestContext) => {
+    app.get('/pets', (requestContext) => {
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
-      if (requestContext.req.query('archived') !== '1') return requestContext.json({ pets: context.listPets() });
-      if (requestContext.get('principal')?.scope !== 'studio') {
-        return requestContext.json({ error: 'This client may not use this route.' }, 403);
-      }
-      return requestContext.json({ pets: await pets().list({ includeArchived: true }) });
+      return requestContext.json({ pets: context.listPets() });
     });
 
     // Pet management.
@@ -586,7 +580,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         return await work();
       } catch (error) {
         if (!(error instanceof StudioPetError)) throw error;
-        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404, pet_archived: 409 }[error.code], error.message);
+        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404 }[error.code], error.message);
       }
     };
     app.post('/pets', async (requestContext) => {
@@ -599,14 +593,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       const body = await readJsonBody(requestContext) as { petId?: unknown; name?: unknown } | null;
       return requestContext.json({ pet: await petRequest(() => pets().rename(body?.petId, body?.name)) });
     });
-    app.post('/pets/archive', async (requestContext) => {
-      const body = await readJsonBody(requestContext) as { petId?: unknown } | null;
-      return requestContext.json({ pet: await petRequest(() => pets().archive(body?.petId)) });
-    });
     app.get('/pet-definitions', (requestContext) => requestContext.json({ definitions: pets().definitions() }));
     app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
     app.all('/pets/rename', (requestContext) => methodNotAllowed(requestContext, ['POST']));
-    app.all('/pets/archive', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pet-definitions', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/events', (requestContext) => {

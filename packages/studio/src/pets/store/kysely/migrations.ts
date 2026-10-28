@@ -10,7 +10,6 @@ export const petMigrations: StudioMigrations = {
         .addColumn('definition_id', 'text', column => column.notNull())
         .addColumn('name', 'text', column => column.notNull())
         .addColumn('created_at', 'text', column => column.notNull())
-        .addColumn('archived_at', 'text')
         .execute();
     },
   },

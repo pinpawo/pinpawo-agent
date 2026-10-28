@@ -251,7 +251,8 @@ export function App() {
       onEvent: (event) => {
         const record = dispatchRecordFromEvent(event);
         if (record) setDispatches((current) => appendDispatchRecord(current, record));
-        if (['scheduler', 'notice', 'trigger'].includes(event.source)) refreshInBackground();
+        if (['scheduler', 'notice', 'trigger'].includes(event.source)
+          || (event.source === 'studio' && event.type.startsWith('pet.'))) refreshInBackground();
         if (event.source === 'channel') {
           setChannelVersion(value => value + 1);
           const payload = event.payload as Partial<ChannelDelivery> & { petId?: string } | undefined;
@@ -290,6 +291,8 @@ export function App() {
           setConnectionState('connected');
           setConnectionError('');
           setChannelVersion(value => value + 1);
+          // A client sees no events, so Pets created or renamed meanwhile come with the poll.
+          refreshInBackground();
         }).catch((error) => {
           if (abort.signal.aborted) return;
           setConnectionState('reconnecting');

@@ -9,27 +9,22 @@ import type { PetRow, PetStore } from './store/petStore';
 
 /** Thrown for a request that names an unknown Pet or breaks a Pet rule. */
 export class StudioPetError extends Error {
-  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found' | 'pet_archived') {
+  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found') {
     super(message);
     this.name = 'StudioPetError';
   }
 }
 
-/** Creating, renaming and archiving this Studio's Pets. */
+/** Creating and renaming this Studio's Pets. */
 export type StudioPets = {
-  /** In creation order; archived Pets only when asked for. */
-  list: (options?: { includeArchived?: boolean }) => Promise<StudioPet[]>;
+  /** In creation order. */
+  list: () => Promise<StudioPet[]>;
   get: (petId: string) => Promise<StudioPet | undefined>;
   /** The definitions this Studio may create Pets from. */
   definitions: () => StudioPetDefinition[];
   /** Record a new Pet and assemble its runtime; it takes work as soon as this resolves. */
   create: (input: { petId: unknown; definitionId: unknown; name: unknown }) => Promise<StudioPet>;
   rename: (petId: unknown, name: unknown) => Promise<StudioPet>;
-  /**
-   * Stop taking work: new dispatches are refused at once, queued ones fail,
-   * a running turn finishes, then the runtime closes. History stays.
-   */
-  archive: (petId: unknown) => Promise<StudioPet>;
 };
 
 /** A live Pet: its registration and the runtime ports the Host lent Studio. */
@@ -63,9 +58,8 @@ function registration(row: PetRow): StudioPetRegistration {
 }
 
 /**
- * The Studio's Pets: the records in the Studio database and the runtimes of
- * the active ones. Changes run one at a time, so a Pet id is never assembled
- * twice and an archive never races the create it follows.
+ * The Studio's Pets: the records in the Studio database and their runtimes.
+ * Changes run one at a time, so a Pet id is never assembled twice.
  */
 export class StudioPetRegistry implements StudioPets {
   private readonly live = new Map<string, LiveStudioPet>();
@@ -81,10 +75,10 @@ export class StudioPetRegistry implements StudioPets {
     assemble: StudioPetAssembler;
     /** A Pet became live (restored or created). */
     onLive: (pet: LiveStudioPet) => void;
-    /** A live Pet stopped taking work. */
-    onRetired: (petId: string) => void;
+    /** A live Pet's runtime has closed. */
+    onClosed: (petId: string) => void;
     /** A record changed; Studio publishes it. */
-    onChange: (type: 'pet.created' | 'pet.renamed' | 'pet.archived', pet: StudioPet) => void;
+    onChange: (type: 'pet.created' | 'pet.renamed', pet: StudioPet) => void;
   }) {
     const definitions = new Map<string, StudioPetDefinition>();
     for (const definition of options.definitions) {
@@ -96,7 +90,7 @@ export class StudioPetRegistry implements StudioPets {
     this.definitionsById = definitions;
   }
 
-  /** The live Pet with this id, if it takes work. */
+  /** The live Pet with this id. */
   getLive(petId: string): LiveStudioPet | undefined {
     return this.live.get(petId);
   }
@@ -105,7 +99,7 @@ export class StudioPetRegistry implements StudioPets {
     return [...this.live.values()];
   }
 
-  /** Assemble every active Pet once. Fails, naming the Pet, when its definition is gone. */
+  /** Assemble every Pet once. Fails, naming the Pet, when its definition is gone. */
   restore(): Promise<void> {
     this.restored ??= this.serialize(() => this.restoreNow());
     return this.restored;
@@ -114,7 +108,7 @@ export class StudioPetRegistry implements StudioPets {
   private async restoreNow(): Promise<void> {
     const rows = await (await this.options.store()).listPets();
     for (const row of rows) {
-      if (row.archivedAt || this.live.has(row.petId)) continue;
+      if (this.live.has(row.petId)) continue;
       if (!this.definitionsById.has(row.definitionId)) {
         throw new Error(
           `studio "${this.options.studioId}": Pet "${row.petId}" uses definition "${row.definitionId}", which this Studio no longer lists`,
@@ -124,9 +118,8 @@ export class StudioPetRegistry implements StudioPets {
     }
   }
 
-  async list(options: { includeArchived?: boolean } = {}): Promise<StudioPet[]> {
-    const rows = await (await this.options.store()).listPets();
-    return rows.filter(row => options.includeArchived || !row.archivedAt).map(toPet);
+  async list(): Promise<StudioPet[]> {
+    return (await (await this.options.store()).listPets()).map(toPet);
   }
 
   async get(petId: string): Promise<StudioPet | undefined> {
@@ -180,44 +173,17 @@ export class StudioPetRegistry implements StudioPets {
     });
   }
 
-  async archive(petId: unknown): Promise<StudioPet> {
-    const target = readPetId(petId);
-    return this.serialize(async () => {
-      const store = await this.options.store();
-      const row = await store.getPet(target);
-      if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
-      if (row.archivedAt) return toPet(row);
-      const archived = { ...row, archivedAt: new Date().toISOString() };
-      await store.archivePet(target, archived.archivedAt);
-      // Refuse new work before waiting on the running turn.
-      const live = this.live.get(target);
-      this.live.delete(target);
-      if (live) {
-        this.options.onRetired(target);
-        await live.runtime.close();
-      }
-      this.options.onChange('pet.archived', toPet(archived));
-      return toPet(archived);
-    });
-  }
-
-  /** Why a Pet id takes no work: archived, or unknown. */
-  async explainUnavailable(petId: string): Promise<StudioPetError> {
-    const row = await (await this.options.store()).getPet(petId);
-    return row?.archivedAt
-      ? new StudioPetError(`Pet "${petId}" is archived.`, 'pet_archived')
-      : new StudioPetError(`studio "${this.options.studioId}": unknown petId "${petId}"`, 'not_found');
-  }
-
   /** Close every live runtime; later changes are refused. */
   async close(): Promise<void> {
     this.closed = true;
     await this.changes.catch(() => undefined);
     const live = [...this.live.values()];
     this.live.clear();
-    const results = await Promise.allSettled(live.map(({ registration: { petId }, runtime }) => {
-      this.options.onRetired(petId);
-      return runtime.close();
+    // Keep observing until each runtime has closed, so its last lifecycle
+    // events still reach Studio.
+    const results = await Promise.allSettled(live.map(async ({ registration: { petId }, runtime }) => {
+      try { await runtime.close(); }
+      finally { this.options.onClosed(petId); }
     }));
     for (const result of results) {
       if (result.status === 'rejected') {

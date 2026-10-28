@@ -5,7 +5,6 @@ import type { PetDatabase } from './schema';
 function petRow(record: Selectable<PetDatabase['studio_pets']>): PetRow {
   return {
     petId: record.pet_id, definitionId: record.definition_id, name: record.name, createdAt: record.created_at,
-    ...(record.archived_at === null ? {} : { archivedAt: record.archived_at }),
   };
 }
 
@@ -20,7 +19,7 @@ export class KyselyPetStore implements PetStore {
 
   async createPet(row: PetRow): Promise<boolean> {
     const inserted = await this.db.insertInto('studio_pets').values({
-      pet_id: row.petId, definition_id: row.definitionId, name: row.name, created_at: row.createdAt, archived_at: row.archivedAt ?? null,
+      pet_id: row.petId, definition_id: row.definitionId, name: row.name, created_at: row.createdAt,
     }).onConflict(conflict => conflict.column('pet_id').doNothing()).executeTakeFirst();
     return Number(inserted.numInsertedOrUpdatedRows ?? 0) === 1;
   }
@@ -40,10 +39,5 @@ export class KyselyPetStore implements PetStore {
 
   async renamePet(petId: string, name: string): Promise<void> {
     await this.db.updateTable('studio_pets').set({ name }).where('pet_id', '=', petId).execute();
-  }
-
-  async archivePet(petId: string, archivedAt: string): Promise<void> {
-    await this.db.updateTable('studio_pets').set({ archived_at: archivedAt })
-      .where('pet_id', '=', petId).where('archived_at', 'is', null).execute();
   }
 }

@@ -102,9 +102,9 @@ export type StudioPluginContext = {
   notify: (event: StudioEventInput) => void;
   /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;
-  /** The Pets that take work now. */
+  /** The live Pets. */
   listPets: () => StudioPetRegistration[];
-  /** Create, rename and archive Pets, and read their records, archived ones included. */
+  /** Create and rename Pets, and read their records. */
   pets: StudioPets;
   /**
    * Read current resident dispatch-queue snapshots. This is observation only:

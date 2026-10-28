@@ -107,9 +107,9 @@ route 的 `authorization` 有三种：
 认证过的请求在 `StudioHttpRouteRequest.principal` 里带上 `{clientId, scope}`：本机 token 是
 `{clientId: 'local', scope: 'studio'}`，其他客户是 `scope: 'client'`。内置路由（`/dispatch`、
 `/events`、`/me`、`/pets*`、`/pet-definitions`、`/pet-sessions/*`、`/clients*`）是保留路径，贡献方不能覆盖。其中
-`GET /me`（返回 `{clientId, scope}`）和 `GET /pets`（在用的 Pet，只含 `petId`、`name`、`definitionId`）对所有客户开放，其余只接受本机
-token。Pet 管理（`GET /pets?archived=1`、`POST /pets`、`POST /pets/rename`、`POST /pets/archive`、`GET /pet-definitions`）
-见 [Pet 实例](pet-instance.md)。client 没有事件流，靠轮询 Channel 路由跟进；Console 用 client key 或 JWT 连接时只显示 Channel 页。
+`GET /me`（返回 `{clientId, scope}`）和 `GET /pets`（Studio 的 Pet，只含 `petId`、`name`、`definitionId`）对所有客户开放，其余只接受本机
+token。Pet 管理（`POST /pets`、`POST /pets/rename`、`GET /pet-definitions`）
+见 [Pet 实例](pet-instance.md)。client 没有事件流，靠轮询 Channel 路由（Console 也随轮询刷新 Pet 列表）跟进；Console 用 client key 或 JWT 连接时只显示 Channel 页。
 
 ### 客户身份
 

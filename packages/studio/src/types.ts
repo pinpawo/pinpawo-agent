@@ -14,8 +14,6 @@ export type StudioPet = {
   /** Display only; never used to address the Pet. */
   name: string;
   createdAt: string;
-  /** Absent while the Pet takes work. */
-  archivedAt?: string;
 };
 
 /** Studio-owned metadata used to target a currently live resident Pet. */
@@ -27,8 +25,8 @@ export type StudioPetRegistration = {
 
 /**
  * What the composing Host returns for one assembled Pet. Studio core keeps
- * only the dispatch and session ports and closes the runtime when the Pet is
- * archived or Studio shuts down.
+ * only the dispatch and session ports and closes the runtime when Studio
+ * shuts down.
  */
 export type StudioPetRuntime = {
   dispatch: PetDispatchPort;

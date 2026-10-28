@@ -16,11 +16,10 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
   pinpawo-studio clients add <clientId> --label <name>
   pinpawo-studio clients add-key <clientId>
   pinpawo-studio clients revoke <clientId>
-  pinpawo-studio pets list [--archived]
+  pinpawo-studio pets list
   pinpawo-studio pets definitions
   pinpawo-studio pets create <petId> --definition <definitionId> --name <name>
   pinpawo-studio pets rename <petId> --name <name>
-  pinpawo-studio pets archive <petId>
   pinpawo-studio queues
   pinpawo-studio snapshot <petId> [--full]
   pinpawo-studio events <petId> [--seconds N]
@@ -72,7 +71,6 @@ export type StudioOperatorOptions = {
   label?: string;
   definition?: string;
   name?: string;
-  archived?: boolean;
   pets: string[];
   member?: { kind: 'human' | 'pet'; id: string };
   idempotencyKey?: string;
@@ -112,7 +110,6 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     if (!PET_ACTIONS.includes(action ?? '')) {
       throw new Error(`Expected pets ${PET_ACTIONS.slice(0, -1).join(', ')}, or ${PET_ACTIONS.at(-1)}.`);
     }
-    if (action === 'list') allowed.add('--archived');
     if (action === 'create') { allowed.add('--definition'); allowed.add('--name'); }
     if (action === 'rename') allowed.add('--name');
   }
@@ -146,7 +143,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     if (!argument.startsWith('-')) { positional.push(argument); continue; }
     if (!allowed.has(argument)) throw new Error(`Unknown option for ${command}: ${argument}`);
     if (values.has(argument) && argument !== '--mention' && argument !== '--pet') throw new Error(`Duplicate option: ${argument}`);
-    if (argument === '--full' || argument === '--archived') { values.set(argument, 'true'); continue; }
+    if (argument === '--full') { values.set(argument, 'true'); continue; }
     const value = args[++index];
     if (!value?.trim() || (value.startsWith('-') && !(argument === '--file' && value === '-'))) {
       throw new Error(`${argument} requires a value.`);
@@ -192,14 +189,13 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
     title: values.get('--title'), description: values.get('--description'), pets: [...new Set(pets)],
     label: values.get('--label'), definition: values.get('--definition'), name: values.get('--name'),
-    archived: values.has('--archived'),
     ...(values.has('--member') ? { member: memberRef(values.get('--member')!) } : {}),
   };
 }
 
 const CHANNEL_ACTIONS = ['list', 'create', 'read', 'send', 'members', 'add-member', 'remove-member', 'sessions'];
 const CLIENT_ACTIONS = ['list', 'add', 'add-key', 'revoke'];
-const PET_ACTIONS = ['list', 'definitions', 'create', 'rename', 'archive'];
+const PET_ACTIONS = ['list', 'definitions', 'create', 'rename'];
 
 /** A participantId names one member: its kind and its URI-encoded id. */
 function memberRef(participantId: string): { kind: 'human' | 'pet'; id: string } {
@@ -243,10 +239,9 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
     if (action === 'add') body = { clientId: id, label: options.label };
     else if (action !== 'list') body = { clientId: id };
   } else if (command === 'pets') {
-    route = { list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename', archive: '/pets/archive' }[action!]!;
+    route = { list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename' }[action!]!;
     if (action === 'create') body = { petId: id, definitionId: options.definition, name: options.name };
     else if (action === 'rename') body = { petId: id, name: options.name };
-    else if (action === 'archive') body = { petId: id };
   } else if (['snapshot', 'events', 'send'].includes(command)) {
     base = options.agentUrl;
     route = `/agent-session/pets/${encodeURIComponent(id!)}/${command === 'send' ? 'messages' : command}`;
@@ -256,7 +251,6 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (options.before !== undefined) url.searchParams.set('before', String(options.before));
   if (options.limit !== undefined) url.searchParams.set('limit', String(options.limit));
   if (command === 'channels' && id && ['read', 'members', 'sessions'].includes(action!)) url.searchParams.set('channelId', id);
-  if (command === 'pets' && options.archived) url.searchParams.set('archived', '1');
   if (command === 'channels' && action === 'create') {
     body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: options.pets };
   } else if (action === 'add-member' || action === 'remove-member') {

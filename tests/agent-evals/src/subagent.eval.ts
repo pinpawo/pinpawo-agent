@@ -725,16 +725,19 @@ async function main() {
   printScoreTotals('Outcome checks (decide pass/fail):', outcomeKeys, rows);
   printScoreTotals('Process metrics (reported only):', metricKeys, rows);
   const shellRows = rows.flatMap((row) => row.scores.filter((item) => item.key === 'shell_tool_choice' && 'reviews' in item));
-  if (shellRows.length > 0) {
-    const reviews = shellRows.reduce((sum, item) => sum + item.reviews, 0);
-    const refusals = shellRows.reduce((sum, item) => sum + item.refusals, 0);
-    console.log(`  shell selection: ${reviews} production review(s), ${refusals} refusal(s) over ${shellRows.length} runs`);
+  // Write cases have no dedicated tool, so one review per run is expected; reads should need none.
+  for (const [label, readCase] of [['read', true], ['write', false]] as const) {
+    const group = shellRows.filter((item) => item.readCase === readCase);
+    if (group.length === 0) continue;
+    const reviews = group.reduce((sum, item) => sum + item.reviews, 0);
+    const refusals = group.reduce((sum, item) => sum + item.refusals, 0);
+    console.log(`  shell selection, ${label} cases: ${reviews} production review(s), ${refusals} refusal(s) over ${group.length} runs`);
   }
   for (const row of rows) {
     const failedScores = row.scores.filter((item) => item.score !== 1);
     if (failedScores.length === 0) continue;
     console.log(`  - ${row.testCase.name} #${row.repeat}${row.ok ? ' (metrics only)' : ''}: ${failedScores.map((item) => item.comment).join(' | ')}`);
-    if (!row.ok) console.log(`    output=${JSON.stringify(row.output)}`);
+    console.log(`    output=${JSON.stringify(row.output)}`);
   }
   console.log(runtime ? 'View results in Langfuse.' : 'Langfuse result storage disabled.');
   await runtime?.shutdown();

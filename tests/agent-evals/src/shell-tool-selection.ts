@@ -24,12 +24,19 @@ const cases = [
   ['gh-pr-comment-run', 'gh pr comment 12 --body LGTM', WRITE, '已确认在 PR 12 下留言 LGTM。'],
 ] as const;
 
+/**
+ * Every command the fixture runs reports this. A "nothing ran" reply to the
+ * model's own checks (`pwd`, `git status 2>&1`) made it conclude the shell was
+ * broken and retry reads in run_shell or skip the requested write.
+ */
+const FIXTURE_OUTPUT = 'Command completed successfully (controlled fixture output).';
+
 export const shellToolSelectionExamples = cases.map(([name, command, expectedTools, intent]) => ({
   name,
   inputs: {
     shell_tool_selection: true,
     task: `${intent}请执行 ${command}，然后简要报告结果。`,
-    shell_outputs: { [command]: 'Requested command completed successfully (controlled fixture output).' },
+    shell_outputs: { [command]: FIXTURE_OUTPUT },
   },
   outputs: {
     expected_has_deliverable: true,
@@ -40,6 +47,8 @@ export const shellToolSelectionExamples = cases.map(([name, command, expectedToo
 
 const SHELL_TOOLS = ['inspect_shell', 'run_shell', 'start_process'];
 const SEPARATOR = /\s*(?:&&|\|\||;|\|)\s*/;
+/** Redirections to a descriptor or a sink, which do not change which command runs. */
+const SINK_REDIRECT = /\s*\d*(?:&>>?|>>?|>\||[<>]&)\s*(?:\/dev\/null|\d+|-)(?=[\s;&|)]|$)/g;
 /** Output-only git global options that do not change which command runs. */
 const NEUTRAL_TOKENS = new Set(['--no-pager']);
 
@@ -54,7 +63,8 @@ const commandKey = (command: string) => command.trim().split(/\s+/)
 /** Whether the call runs `command`, alone or as one segment of a chain, in any flag order. */
 export function callRunsCommand(call: ShellCall, command: string) {
   const expected = commandKey(command);
-  return shellCallCommand(call).split(SEPARATOR).some((segment) => commandKey(segment) === expected);
+  return shellCallCommand(call).replace(SINK_REDIRECT, '').split(SEPARATOR)
+    .some((segment) => commandKey(segment) === expected);
 }
 
 /** What production does with the call: refuse it, run it directly, or run it after review. */
@@ -81,7 +91,7 @@ export function buildShellSelectionMockTools(outputs: Record<string, unknown> = 
       if (!verdict.allowed) return `Error: inspect_shell 不执行该命令（${verdict.reason}）。${verdict.redirect}`;
     }
     const recorded = Object.entries(outputs).find(([command]) => callRunsCommand(call, command));
-    return String(recorded?.[1] ?? 'Controlled fixture: no command was executed.');
+    return String(recorded?.[1] ?? FIXTURE_OUTPUT);
   }, { name: definition.name, description: definition.description, schema: definition.schema }));
   const promptSections = [createShellToolkit({ shell: unavailable }), createGitToolkit({ shell: unavailable }),
     createGithubToolkit({ shell: unavailable })]
@@ -122,5 +132,5 @@ export function shellToolChoiceEvaluator({ outputs, referenceOutputs }: {
   const refusals = calls.filter((call) => productionDisposition(call) === 'refused').length;
   return { key: 'shell_tool_choice', score: passed ? 1 : 0,
     comment: `Expected ${expected.command} via ${expected.names.join(' or ')}; ${reviews} review(s), ${refusals} refusal(s) in production`,
-    reviews, refusals };
+    readCase, reviews, refusals };
 }

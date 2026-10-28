@@ -31,6 +31,14 @@ test('shell selection fixtures record every call and refuse what production insp
   assert.equal(shellCallCommand(fixture.calls[1]), 'git reset --hard HEAD');
 });
 
+test('shell selection fixtures answer the model\'s own checks like the requested command', async () => {
+  const [example] = shellToolSelectionExamples;
+  const fixture = buildShellSelectionMockTools(example.inputs.shell_outputs);
+  const inspect = fixture.tools.find((candidate) => candidate.name === 'inspect_shell')!;
+  const requested = await inspect.invoke({ command: example.outputs.expected_shell_call.command });
+  assert.equal(await inspect.invoke({ command: 'pwd && git status 2>&1 | head' }), requested);
+});
+
 test('shell selection prompt carries the production shell, git and github toolkit instructions', () => {
   const { promptSections } = buildShellSelectionMockTools();
   assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
@@ -42,6 +50,9 @@ test('commands match as a chain segment and in any flag order', () => {
   assert.ok(callRunsCommand(callFor('inspect_shell', 'cd /repo && git --no-pager log --oneline -5'), 'git log -5 --oneline'));
   assert.ok(callRunsCommand(callFor('run_shell', 'git push origin HEAD --force'), 'git push --force origin HEAD'));
   assert.ok(!callRunsCommand(callFor('inspect_shell', 'git diff'), 'git diff --stat'));
+  assert.ok(callRunsCommand(callFor('inspect_shell', 'gh pr checks 12 2>&1; echo "exit:$?"'), 'gh pr checks 12'));
+  assert.ok(callRunsCommand(callFor('inspect_shell', 'git status --short 2>/dev/null | head'), 'git status --short'));
+  assert.ok(!callRunsCommand(callFor('run_shell', 'git clean -nd 2>&1'), 'git clean -fd'));
 });
 
 test('production disposition follows admission and review policies', () => {

@@ -55,6 +55,16 @@ test('bottom-line operations are refused at direct, prefixed and wrapped heads',
   allows('', false);
 });
 
+test('redirections are not arguments of the git/gh read they follow', () => {
+  for (const command of ['git remote -v 2>&1', 'git branch 2>/dev/null', 'git branch -a >/dev/null 2>&1',
+    'git tag &>/dev/null', 'git stash list 2>&-', 'gh pr checks 12 2>&1 | head', 'git log 1>&2', 'git show <&3',
+    'git status 2>&1; echo "exit=$?"', 'bash -c "git remote -v 2>&1"']) allows(command);
+  // A spaced number is an argument, so this still creates branch `2`.
+  allows('git branch 2 >/dev/null', false);
+  for (const command of ['git log 2>err.log', 'git log &>out.txt', 'git log &>>out.txt', 'git log >&out.txt',
+    'cat <>file']) redirects(command, /apply_patch/);
+});
+
 test('common write forms are refused and pointed at file tools or run_shell', () => {
   for (const command of ['echo hi > file', 'ls >> out.txt', 'cat a | tee b', 'mv a b', 'cp a b', 'touch x',
     'mkdir -p d', 'chmod +x s', "sed -i 's/a/b/' f", 'sed -i.bak s/a/b/ f', 'sed --in-place s/a/b/ f',

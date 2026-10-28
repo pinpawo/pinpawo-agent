@@ -1,6 +1,6 @@
 # Session Artifacts
 
-状态：draft，2026-10-28。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
+状态：draft，2026-10-28，待定问题已定。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
 
 ## 需求
 
@@ -84,12 +84,12 @@ type ArtifactSourceReader = (input: { path: string; workdir: string | null }) =>
 | 工具 | 作用 | 审核 |
 |---|---|---|
 | `publish_artifact(path, title?)` | 经 `ArtifactSourceReader` 读文件（workdir、`/tmp` 或 session 临时目录），写入当前 session 的 store，返回 ref 和一行可直接粘进回复的 Markdown 链接 | 不需要：只写自己 session 的 store |
-| `read_artifact(uri, maxBytes?)` | 读文本内容；二进制只返回 ref | 不需要 |
+| `read_artifact(uri, maxBytes?)` | 读当前 session 的 artifact 文本内容；二进制只返回 ref；其他 session 的 uri 一律拒绝 | 不需要 |
 | `list_artifacts()` | 列出当前 session 的全部 artifacts，用于超出上下文段落上限时 | 不需要 |
 
 - 发布时的 `threadId / runId / delegationId` 来自工具的 execution scope，模型不传。
 - 同一 session 的 Entry、Supervisor、Capability 执行方共享一个 store，按 `threadId` 区分，和 lane 无关。
-- 建议内置 Capability 默认在 `uses` 里声明 `artifacts`，用户 Capability 自己声明（见待定）。
+- 不默认开放：Capability 必须在 `uses` 里声明 `artifacts` 才能用，内置 Capability 也一样，按需声明。
 - `/tmp` 可以作为草稿区，因为发布时已经复制。如果要让写临时文件不触发审核，可以再给每个 session 分一个临时目录并在其中自动放行，这件事单独做。
 
 ## 上下文（pet-agent）
@@ -128,7 +128,7 @@ Adapter 在 Host 配置里选：
 
 以后的 S3 等同理，只是再加一个 adapter。
 
-`ArtifactSourceReader` 的 Host 实现按 files Toolkit 的规则解析路径（相对路径基于 workdir，绝对路径原样），只读普通文件，带单文件大小上限。
+`ArtifactSourceReader` 的 Host 实现按 files Toolkit 的规则解析路径（相对路径基于 workdir，绝对路径原样），只读普通文件。单文件上限 100 MB，超过时 `publish_artifact` 报错，不截断。不设每个 session 的总量上限。
 
 ## 对外：引用与读取
 
@@ -149,7 +149,7 @@ GET /agent-session/artifacts/:artifactId
 - Console：用 react-markdown 的 `urlTransform` 识别 `artifact://`（与现在的 `participant:` 链接同一处），渲染成文件卡片，Markdown 直接预览，其他类型下载。
 - TUI：显示标题；`local` adapter 下给出本地路径，其余给出 HTTP 地址。
 
-另一个 Pet 在 Channel 消息里看到 `artifact://` 链接时，可以用 `read_artifact` 读取同一 Host 内的 artifact。跨 Host 读取不在这一版里。
+不允许跨 session 读取：`read_artifact` 和 `list_artifacts` 只作用于当前 session。另一个 Pet 在 Channel 消息里看到 `artifact://` 链接时读不到内容；需要交接文件内容时，由发布方在消息正文里写明，或把文件放进双方都能访问的工作目录。人通过 HTTP 路由打开不受这条限制，按 session 观察权限判断。
 
 ## 删除
 
@@ -177,8 +177,8 @@ GET /agent-session/artifacts/:artifactId
 3. Agent Session HTTP 读取路由、Studio HTTP 代理、Console / TUI 渲染。
 4. `cos` adapter。
 
-## 待定
+## 已定（2026-10-28）
 
-- 跨 session 读取的范围：同一 Host 内任意 session 都可读，还是只限同一 Channel 的 session。
-- `artifacts` Toolkit 是对所有 Capability 默认开放，还是必须显式声明 `uses`。
-- 单文件大小上限和每个 session 的总量上限。
+- 不允许跨 session 读取。
+- `artifacts` Toolkit 必须在 Capability 的 `uses` 里声明。
+- 单文件上限 100 MB，不设 session 总量上限。

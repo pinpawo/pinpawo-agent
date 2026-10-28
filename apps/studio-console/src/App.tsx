@@ -159,6 +159,8 @@ export function App() {
   const [schedulePet, setSchedulePet] = useState('');
   const [scheduleChannels, setScheduleChannels] = useState<ChannelRow[]>([]);
   const [scheduleChannel, setScheduleChannel] = useState('');
+  // The Pets of the chosen Channel: a schedule can only target one of them. Null while unknown.
+  const [scheduleChannelPets, setScheduleChannelPets] = useState<string[] | null>(null);
   const [scheduleRequest, setScheduleRequest] = useState('');
   const [scheduleRunAt, setScheduleRunAt] = useState('');
 
@@ -203,7 +205,6 @@ export function App() {
       setPets(nextPets);
       setPetsReady(true);
       setDispatchPet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
-      setSchedulePet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
       setScheduleChannels(channels);
       setScheduleChannel((current) => channels.some(({ channelId }) => channelId === current) ? current : channels[0]?.channelId || '');
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
@@ -465,12 +466,43 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    if (page !== 'scheduler' || !token) return undefined;
+    if (!scheduleChannel) { setScheduleChannelPets([]); return undefined; }
+    const abort = new AbortController();
+    setScheduleChannelPets(null);
+    void fetch(`${normalizedUrl}/channels/members?channelId=${encodeURIComponent(scheduleChannel)}`, { headers, signal: abort.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Channel members failed (${response.status.toString()}).`);
+        const { members } = await response.json() as { members: { kind: string; id: string }[] };
+        if (!abort.signal.aborted) setScheduleChannelPets(members.filter(({ kind }) => kind === 'pet').map(({ id }) => id));
+      })
+      .catch((error) => {
+        if (abort.signal.aborted) return;
+        setScheduleChannelPets([]);
+        setNotice(error instanceof Error ? error.message : String(error));
+      });
+    return () => abort.abort();
+    // channelVersion moves on every Channel event, membership changes included.
+  }, [page, token, normalizedUrl, headers, scheduleChannel, channelVersion]);
+  const schedulePets = useMemo(
+    () => pets.filter(({ petId }) => scheduleChannelPets?.includes(petId)),
+    [pets, scheduleChannelPets],
+  );
+  useEffect(() => {
+    setSchedulePet((current) => schedulePets.some(({ petId }) => petId === current) ? current : schedulePets[0]?.petId ?? '');
+  }, [schedulePets]);
+  const scheduleBlocked = !scheduleChannel
+    ? 'Create a Channel first: a schedule runs its Pet in a Channel.'
+    : scheduleChannelPets !== null && schedulePets.length === 0 ? 'This Channel has no Pet member to schedule.' : '';
+
   const submitSchedule = (event: FormEvent) => {
     event.preventDefault();
     try {
       const runAt = new Date(scheduleRunAt);
-      if (!schedulePet || !scheduleChannel || !scheduleRequest.trim() || !Number.isFinite(runAt.getTime())) {
-        throw new Error('Schedule requires a Pet, a Channel, goal, and valid time.');
+      if (scheduleBlocked) throw new Error(scheduleBlocked);
+      if (!schedulePets.some(({ petId }) => petId === schedulePet) || !scheduleRequest.trim() || !Number.isFinite(runAt.getTime())) {
+        throw new Error('Schedule requires a Pet of the Channel, a goal, and a valid time.');
       }
       void post('/scheduler', {
         petId: schedulePet,
@@ -611,12 +643,13 @@ export function App() {
         {page === 'scheduler' && (schedules.value ? <>
           <div className="section-title"><span>One-shot schedules</span><b>{schedules.value.length}</b></div>
           <form className="composer scheduler" onSubmit={submitSchedule}>
-            <select aria-label="Schedule Pet" onChange={(event) => setSchedulePet(event.target.value)} value={schedulePet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
             <select aria-label="Schedule Channel" onChange={(event) => setScheduleChannel(event.target.value)} value={scheduleChannel}>{scheduleChannels.length === 0 && <option value="">No Channel yet</option>}{scheduleChannels.map((channel) => <option key={channel.channelId} value={channel.channelId}>{channel.title}</option>)}</select>
+            <select aria-label="Schedule Pet" disabled={schedulePets.length === 0} onChange={(event) => setSchedulePet(event.target.value)} value={schedulePet}>{schedulePets.length === 0 && <option value="">No Pet</option>}{schedulePets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
             <input onChange={(event) => setScheduleRequest(event.target.value)} placeholder="Scheduled goal…" value={scheduleRequest} />
             <input onChange={(event) => setScheduleRunAt(event.target.value)} type="datetime-local" value={scheduleRunAt} />
-            <button>Schedule</button>
+            <button disabled={Boolean(scheduleBlocked) || !schedulePet}>Schedule</button>
           </form>
+          {scheduleBlocked && <div className="compact-empty" role="status">{scheduleBlocked}</div>}
           <div className="rows">{schedules.value.map((schedule) => <div className="row" key={schedule.scheduleId}><em className={schedule.status}>{schedule.status}</em><time>{new Date(schedule.runAt).toLocaleString()}</time><strong>{schedule.request}</strong><span>{schedule.petId} in {scheduleChannels.find(({ channelId }) => channelId === schedule.channelId)?.title ?? schedule.channelId}{schedule.note ? ` · ${schedule.note}` : ''}{schedule.status === 'scheduled' && <button className="inline-action" onClick={() => { void post('/scheduler/control', { action: 'cancel', scheduleId: schedule.scheduleId }).catch((error) => setNotice(String(error))); }} type="button">cancel</button>}</span></div>)}</div>
           <History title="Scheduler history" events={schedulerHistory} />
         </> : unavailable(schedules, 'Scheduler'))}

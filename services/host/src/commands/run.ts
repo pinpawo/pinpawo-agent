@@ -59,7 +59,7 @@ export async function runAgent(options: RunAgentOptions) {
     logStartupConfig({
       mode: 'server',
       workdir: runtimeConfig.workdir,
-      petId: runtime.getPetConfig().petId,
+      petId: runtime.getPetConfig().definitionId,
       petName: runtime.getPetConfig().name,
     });
     const deps = runtime.buildChatHostDeps();

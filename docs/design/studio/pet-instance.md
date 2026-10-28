@@ -1,6 +1,6 @@
 # Pet 实例
 
-> 状态：设计已定，第一阶段实现中（issue #1015）
+> 状态：第一阶段已实现（issue #1015）；第二、三阶段未开始
 > 更新：2026-10-28
 
 ## 问题
@@ -65,7 +65,7 @@ CREATE TABLE studio_pets (
 | 操作 | 行为 |
 | --- | --- |
 | 创建 | 选定义、指定 `petId` 和名称，写入 `studio_pets`，随即装配 resident runtime，发 `pet.created` |
-| 改名 | 只改 `name`，发 `pet.renamed`；历史消息作者是 `pet:<petId>`，显示随名称变化 |
+| 改名 | 只改 `name`，发 `pet.renamed`；历史消息作者是 `pet:<petId>`，显示随名称变化。Pet 运行时自己看到的名字在下次装配（Host 重启）时更新 |
 | Host 启动 | 读取所有在用的 Pet，逐个装配；定义缺失时启动失败并指出是哪个 Pet |
 | 归档 | 先标记 `archived_at`，此后 dispatch 以 `pet_archived` 拒收；队列里还没开始的 dispatch 失败；正在跑的跑完；然后关闭 runtime，发 `pet.archived` |
 | 历史 | 归档不删 Session、checkpoint 和 Channel 消息；清理是另一回事，首期不做 |
@@ -88,8 +88,8 @@ CREATE TABLE studio_pets (
 - 所有投递都用 `petId`（实例）。Channel 成员、schedule、trigger 规则、`POST /dispatch` 都已经要求显式 petId；
   名称从不用于寻址。
 - 目标 Pet 不存在或已归档时直接失败，不换成其他 Pet，也不换成默认 Pet。
-- Trigger 不再在启动时校验目标 Pet（Pet 可以在运行中创建和归档，启动时的校验已经不够），改为触发时校验，
-  失败记入它自己的 delivery 日志。Scheduler 在创建 schedule 时校验，触发时同样按上面的规则失败。
+- Trigger 不再在启动时校验目标 Pet（Pet 可以在运行中创建和归档，启动时的校验已经不够）：触发时由 Studio dispatch
+  拒收不存在或已归档的 Pet，失败记入 Trigger 自己的 delivery 日志。Scheduler 在创建 schedule 时校验，触发时同样按上面的规则失败。
 - 不带 session 的 dispatch（`POST /dispatch`、不绑 Channel 的 schedule）目前落在该 Pet 当前选中的 Session。
   这是剩下的“活跃 Session 兜底”，第二阶段改为显式绑定（见“分阶段”）。
 
@@ -100,6 +100,7 @@ Studio core 在 `StudioPluginContext` 上提供 `pets`：
 ```ts
 type StudioPets = {
   list: (options?: { includeArchived?: boolean }) => Promise<StudioPet[]>;
+  get: (petId: string) => Promise<StudioPet | undefined>;
   definitions: () => StudioPetDefinition[];
   create: (input: { petId: string; definitionId: string; name: string }) => Promise<StudioPet>;
   rename: (petId: string, name: string) => Promise<StudioPet>;
@@ -110,15 +111,17 @@ type StudioPet = { petId: string; definitionId: string; name: string; createdAt:
 
 `listPets()` 保留为同步读取，只返回在用的 Pet（`{petId, name, definitionId}`），供 Plugin 校验成员和目标。
 
-- studio-http：`GET /pets`（所有客户，在用的 Pet；`?archived=1` 含已归档）、`GET /pet-definitions`、
-  `POST /pets`、`PATCH /pets/:petId`、`POST /pets/:petId/archive`（后三个只接受本机 token）。
-- `pinpawo-studio pets [list|create|rename|archive]`。
+- studio-http：`GET /pets`（所有客户，在用的 Pet）；只接受本机 token 的 `GET /pets?archived=1`（含已归档）、
+  `GET /pet-definitions`、`POST /pets {petId, definitionId, name}`、`POST /pets/rename {petId, name}`、
+  `POST /pets/archive {petId}`。错误码：参数不合法 400，已存在 409，不存在 404。
+- `pinpawo-studio pets list [--archived] | definitions | create <petId> --definition <id> --name <name> | rename <petId> --name <name> | archive <petId>`。
 - `pinpawo-studio init` 按模板为每份定义创建一个同名 Pet，新目录开箱即用。
 - Console 的 Pet 管理页放第三阶段；在此之前 Console 继续通过 `GET /pets` 列出 Pet。
 
-装配的边界不变：Studio core 只持有实例记录和 dispatch / session 端口；创建实例时调用 Host 组合层提供的
-`assemblePet(pet, definition)`，拿回 `{dispatch, sessions, interaction, close}`。Host 的 Agent Session
-传输按 `petId` 查找 interaction，所以运行中新建的 Pet 也能被 TUI 连接。
+装配的边界不变：Studio core 只持有实例记录和 dispatch / session 端口。`createStudio` 收 `definitions` 和
+Host 组合层提供的 `assemblePet(pet)`，拿回 `{dispatch, sessions, close}`；interaction 留在 Host
+（`buildStudio` 维护按 petId 的 live map），Agent Session 传输按 `petId` 查找它，所以运行中新建的 Pet 也能被 TUI 连接。
+Studio 关闭时，先停 Plugin，再关闭所有 Pet 的 runtime。
 
 ## 迁移
 

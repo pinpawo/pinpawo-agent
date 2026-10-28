@@ -1,7 +1,6 @@
 {
   "studioId": "studio",
-  "entryPetId": "executor",
-  "pets": ["executor", "reviewer", "wiki"],
+  "definitions": ["executor", "reviewer", "wiki"],
   "plugins": [
     {
       "id": "@pinpawo-plugin/studio-http",

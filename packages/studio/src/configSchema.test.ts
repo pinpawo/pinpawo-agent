@@ -15,27 +15,27 @@ const parsePet = (raw: unknown, source: string): PetConfig =>
 const parseStudio = (raw: unknown, source: string): StudioLocalConfig =>
   parseConfigValue(raw, studioLocalConfigSchema, source);
 
-function pet(petId: string, overrides: Partial<PetConfig> = {}): PetConfig {
+function pet(definitionId: string, overrides: Partial<PetConfig> = {}): PetConfig {
   return {
-    petId,
-    name: `Pet ${petId}`,
+    definitionId,
+    name: `Pet ${definitionId}`,
     ...overrides,
   };
 }
 
 test('parsePetLocalConfig accepts minimal valid config', () => {
   const config = parsePet(
-    { petId: 'p1', name: 'Pet 1' },
+    { definitionId: 'p1', name: 'Pet 1' },
     'test-source',
   );
-  assert.equal(config.petId, 'p1');
+  assert.equal(config.definitionId, 'p1');
   assert.equal(config.name, 'Pet 1');
 });
 
 test('parsePetLocalConfig keeps optional fields when provided', () => {
   const config = parsePet(
     {
-      petId: 'p1',
+      definitionId: 'p1',
       name: 'Script Pet',
       modelProfileId: 'qwen-max',
       defaultCapabilityName: 'studio_planning',
@@ -51,27 +51,27 @@ test('parsePetLocalConfig rejects non-object input', () => {
   assert.throws(() => parsePet(null, 'src'), /not a JSON object/);
 });
 
-test('parsePetLocalConfig requires petId and name', () => {
-  assert.throws(() => parsePet({ name: 'X' }, 'src'), /missing required string "petId"/);
-  assert.throws(() => parsePet({ petId: 'p1' }, 'src'), /missing required string "name"/);
+test('parsePetLocalConfig requires definitionId and name', () => {
+  assert.throws(() => parsePet({ name: 'X' }, 'src'), /missing required string "definitionId"/);
+  assert.throws(() => parsePet({ definitionId: 'p1' }, 'src'), /missing required string "name"/);
 });
 
 test('parsePetLocalConfig rejects bad types in optional fields', () => {
   assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', modelProfileId: '' }, 'src'),
+    () => parsePet({ definitionId: 'p1', name: 'X', modelProfileId: '' }, 'src'),
     /"modelProfileId" must be a non-empty string/,
   );
 });
 
 test('parsePetLocalConfig rejects retired capability name lists', () => {
   assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', capabilities: ['inspect'] }, 'src'),
-    /"capabilities" was replaced by the conventional pets\/<petId>\/capabilities directory/,
+    () => parsePet({ definitionId: 'p1', name: 'X', capabilities: ['inspect'] }, 'src'),
+    /"capabilities" was replaced by the conventional pets\/<definitionId>\/capabilities directory/,
   );
 });
 
-test('parsePetLocalConfig requires petId to be a safe directory segment', () => {
-  for (const petId of [
+test('parsePetLocalConfig requires definitionId to be a safe directory segment', () => {
+  for (const definitionId of [
     '.',
     '..',
     '../escape',
@@ -85,16 +85,23 @@ test('parsePetLocalConfig requires petId to be a safe directory segment', () => 
     'trailing ',
   ]) {
     assert.throws(
-      () => parsePet({ petId, name: 'X' }, 'src'),
-      /"petId" must be a safe path segment/,
+      () => parsePet({ definitionId, name: 'X' }, 'src'),
+      /"definitionId" must be a safe path segment/,
     );
   }
+});
+
+test('parsePetLocalConfig rejects the old petId field with migration guidance', () => {
+  assert.throws(
+    () => parsePet({ petId: 'p1', definitionId: 'p1', name: 'X' }, 'src'),
+    /"petId" was renamed to "definitionId"/,
+  );
 });
 
 test('parsePetLocalConfig rejects the retired raw model override', () => {
   assert.throws(
     () => parsePet(
-      { petId: 'p1', name: 'X', model: 'qwen-max' },
+      { definitionId: 'p1', name: 'X', model: 'qwen-max' },
       'src',
     ),
     /"model" was replaced by stable "modelProfileId"/,
@@ -103,21 +110,20 @@ test('parsePetLocalConfig rejects the retired raw model override', () => {
 
 test('retired cloud bindings and persona fields fail with migration guidance', () => {
   for (const field of ['personality', 'species', 'stage']) {
-    assert.throws(() => parsePet({ petId: 'p1', name: 'X', [field]: 'old' }, 'src'), /PET\.md/);
+    assert.throws(() => parsePet({ definitionId: 'p1', name: 'X', [field]: 'old' }, 'src'), /PET\.md/);
   }
-  for (const serverBinding of [{ petId: 'cloud' }, {}, null, 'old']) {
-    assert.throws(() => parsePet({ petId: 'p1', name: 'X', serverBinding }, 'src'), /serverBinding.*no longer supported/);
+  for (const serverBinding of [{ cloud: true }, {}, null, 'old']) {
+    assert.throws(() => parsePet({ definitionId: 'p1', name: 'X', serverBinding }, 'src'), /serverBinding.*no longer supported/);
   }
 });
 
 test('parseStudioLocalConfig accepts minimal valid config', () => {
   const cfg = parseStudio(
-    { studioId: 's1', entryPetId: 'p1', pets: ['p1'] },
+    { studioId: 's1', definitions: ['p1'] },
     'test-source',
   );
   assert.equal(cfg.studioId, 's1');
-  assert.equal(cfg.entryPetId, 'p1');
-  assert.deepEqual(cfg.pets, ['p1']);
+  assert.deepEqual(cfg.definitions, ['p1']);
   assert.equal(cfg.plugins, undefined);
 });
 
@@ -127,8 +133,7 @@ test('parseStudioLocalConfig keeps optional fields when provided', () => {
       studioId: 's1',
       name: 'My Studio',
       description: 'desc',
-      entryPetId: 'p1',
-      pets: ['p1', 'p2'],
+      definitions: ['p1', 'p2'],
     },
     'test-source',
   );
@@ -140,22 +145,29 @@ test('parseStudioLocalConfig rejects non-object input', () => {
   assert.throws(() => parseStudio(null, 'src'), /not a JSON object/);
 });
 
-test('parseStudioLocalConfig requires studioId / entryPetId / pets', () => {
+test('parseStudioLocalConfig requires studioId / definitions', () => {
   assert.throws(
-    () => parseStudio({ entryPetId: 'p1', pets: ['p1'] }, 'src'),
+    () => parseStudio({ definitions: ['p1'] }, 'src'),
     /missing required string "studioId"/,
   );
   assert.throws(
+    () => parseStudio({ studioId: 's1' }, 'src'),
+    /"definitions" must be a string\[\]/,
+  );
+  assert.throws(
+    () => parseStudio({ studioId: 's1', definitions: [] }, 'src'),
+    /"definitions" must not be empty/,
+  );
+});
+
+test('parseStudioLocalConfig rejects the retired pets and entryPetId fields', () => {
+  assert.throws(
     () => parseStudio({ studioId: 's1', pets: ['p1'] }, 'src'),
-    /missing required string "entryPetId"/,
+    /"pets" was renamed to "definitions"/,
   );
   assert.throws(
-    () => parseStudio({ studioId: 's1', entryPetId: 'p1' }, 'src'),
-    /"pets" must be a string\[\]/,
-  );
-  assert.throws(
-    () => parseStudio({ studioId: 's1', entryPetId: 'p1', pets: [] }, 'src'),
-    /"pets" must not be empty/,
+    () => parseStudio({ studioId: 's1', definitions: ['p1'], entryPetId: 'p1' }, 'src'),
+    /"entryPetId" was removed/,
   );
 });
 
@@ -164,8 +176,7 @@ test('parseStudioLocalConfig passes plugin options through without interpreting 
   const cfg = parseStudio(
     {
       studioId: 's1',
-      entryPetId: 'p1',
-      pets: ['p1'],
+      definitions: ['p1'],
       plugins: [
         { id: 'example-work' },
         { id: 'scheduler', options: { timezone: 'Asia/Shanghai', nested: { any: 1 } } },
@@ -183,7 +194,7 @@ test('parseStudioLocalConfig passes plugin options through without interpreting 
 });
 
 test('parseStudioLocalConfig rejects malformed plugin entries', () => {
-  const base = { studioId: 's1', entryPetId: 'p1', pets: ['p1'] };
+  const base = { studioId: 's1', definitions: ['p1'] };
   assert.throws(
     () => parseStudio({ ...base, plugins: 'example-work' }, 'src'),
     /"plugins" must be an array when present/,
@@ -205,8 +216,7 @@ test('parseStudioLocalConfig rejects malformed plugin entries', () => {
 test('parseStudioLocalConfig allows multiple instances of one Plugin id', () => {
   const cfg = parseStudio({
     studioId: 's1',
-    entryPetId: 'p1',
-    pets: ['p1'],
+    definitions: ['p1'],
     plugins: [
       { id: 'scheduler', options: { instance: 'morning' } },
       { id: 'scheduler', options: { instance: 'evening' } },
@@ -216,47 +226,35 @@ test('parseStudioLocalConfig allows multiple instances of one Plugin id', () => 
   assert.deepEqual(cfg.plugins?.map(({ id }) => id), ['scheduler', 'scheduler']);
 });
 
-test('resolveStudio joins pet configs in pets order', () => {
+test('resolveStudio joins Pet definitions in definitions order', () => {
   const studio = parseStudio(
-    { studioId: 's1', entryPetId: 'p2', pets: ['p1', 'p2', 'p3'] },
+    { studioId: 's1', definitions: ['p1', 'p2', 'p3'] },
     'src',
   );
   const petConfigs = [pet('p3'), pet('p1'), pet('p2'), pet('orphan')];
 
   const resolved = resolveStudio(studio, petConfigs);
-  assert.deepEqual(resolved.pets.map((p) => p.petId), ['p1', 'p2', 'p3']);
-  assert.equal(resolved.entryPet.petId, 'p2');
+  assert.deepEqual(resolved.definitions.map((p) => p.definitionId), ['p1', 'p2', 'p3']);
 });
 
-test('resolveStudio rejects duplicate pets', () => {
+test('resolveStudio rejects duplicate definitions', () => {
   const studio = parseStudio(
-    { studioId: 's1', entryPetId: 'p1', pets: ['p1', 'p1'] },
+    { studioId: 's1', definitions: ['p1', 'p1'] },
     'src',
   );
   assert.throws(
     () => resolveStudio(studio, [pet('p1')]),
-    /pets array has duplicate petId "p1"/,
+    /definitions array has duplicate id "p1"/,
   );
 });
 
-test('resolveStudio rejects entryPetId not in pets', () => {
+test('resolveStudio rejects unknown definition reference', () => {
   const studio = parseStudio(
-    { studioId: 's1', entryPetId: 'manager', pets: ['p1', 'p2'] },
-    'src',
-  );
-  assert.throws(
-    () => resolveStudio(studio, [pet('manager'), pet('p1'), pet('p2')]),
-    /entryPetId "manager" is not in pets/,
-  );
-});
-
-test('resolveStudio rejects unknown pet reference', () => {
-  const studio = parseStudio(
-    { studioId: 's1', entryPetId: 'p1', pets: ['p1', 'ghost'] },
+    { studioId: 's1', definitions: ['p1', 'ghost'] },
     'src',
   );
   assert.throws(
     () => resolveStudio(studio, [pet('p1')]),
-    /pet "ghost" has no matching pet config/,
+    /definition "ghost" has no matching file/,
   );
 });

@@ -127,9 +127,8 @@ test('shipped Pet Capabilities support explicit execution, review, and Wiki requ
   const studioConfig = JSON.parse(await readFile(
     path.join(workdir, '.pinpawo', 'studio.json'),
     'utf8',
-  )) as { entryPetId: string; pets: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
-  assert.equal(studioConfig.entryPetId, 'executor');
-  assert.deepEqual(studioConfig.pets, ['executor', 'reviewer', 'wiki']);
+  )) as { definitions: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
+  assert.deepEqual(studioConfig.definitions, ['executor', 'reviewer', 'wiki']);
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
     '@pinpawo-plugin/scheduler', '@pinpawo-plugin/project-files', '@pinpawo-plugin/trigger',

@@ -416,18 +416,10 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
     get service() { return triggerService(); },
     start: async (pluginContext) => {
       if (context) throw new Error('Trigger Plugin is already started.');
-      const petIds = new Set(pluginContext.listPets().map(({ petId }) => petId));
-      for (const definition of definitions.values()) {
-        const target = definition.target;
-        if (target.kind === 'pet' && !petIds.has(target.petId)) {
-          throw new Error(`Trigger "${definition.triggerId}" targets unknown pet "${target.petId}".`);
-        }
-        if (target.kind === 'event_payload') {
-          for (const petId of target.allowedPetIds ?? []) {
-            if (!petIds.has(petId)) throw new Error(`Trigger "${definition.triggerId}" allows unknown pet "${petId}".`);
-          }
-        }
-      }
+      // Targets are checked when a rule fires, not here: Pets are created and
+      // archived while Studio runs. A target that takes no work fails the
+      // delivery, which keeps the reason.
+      const isLivePet = (petId: string) => pluginContext.listPets().some((pet) => pet.petId === petId);
       context = pluginContext;
       try {
         const service = new TriggerService(options.store ?? new KyselyTriggerStore(
@@ -467,9 +459,6 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
         ) => {
           const envelope = buildTriggerRequestEnvelope(definition, input);
           const targetPetId = resolveTargetPetId(definition, envelope);
-          if (!petIds.has(targetPetId)) {
-            throw new Error(`Trigger "${definition.triggerId}" resolved unknown pet "${targetPetId}".`);
-          }
           const request = buildTriggerRequest(definition, input);
           const claimed = await service.claim(definition.triggerId, idempotencyKey, { targetPetId, request });
           if (claimed.duplicate) return { duplicate: true, delivery: claimed.delivery };
@@ -643,7 +632,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       const prior = await service.getDelivery(input.deliveryId);
                       if (!prior || !prior.targetPetId || !prior.request) throw new Error(`Trigger delivery "${input.deliveryId}" has no retained dispatch input.`);
                       const definition = definitions.get(prior.triggerId);
-                      if (!definition || !petIds.has(prior.targetPetId) || !permitsTargetPetId(definition, prior.targetPetId)) {
+                      if (!definition || !isLivePet(prior.targetPetId) || !permitsTargetPetId(definition, prior.targetPetId)) {
                         throw new Error(`Trigger delivery "${input.deliveryId}" is no longer routable by its current rule.`);
                       }
                       const targetPetId = prior.targetPetId;

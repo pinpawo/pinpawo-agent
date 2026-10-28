@@ -12,12 +12,13 @@ import { buildOrchestratorRunInput, buildReviewSpec, compileAgentRegistry, creat
   defineInstructionDocument, readPendingInterrupt, type AgentModels } from '@pinpawo/pet-agent';
 import { withScriptedDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -92,7 +93,7 @@ for (const decision of ['reject', 'cancel'] as const) {
       graphService: graphService as never,
     });
     const channel = createChannelPlugin({ httpRoute: false });
-    const studio = await createStudio({ studioId: 'review-stop', entryPetId: 'one', plugins: [channel],
+    const studio = await createStudioWithPets({ studioId: 'review-stop', plugins: [channel],
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
     });

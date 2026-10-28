@@ -6,7 +6,7 @@ import { createSchedulerPlugin } from '@pinpawo-plugin/scheduler';
 import { createNoticePlugin } from '@pinpawo-plugin/notice';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { createTriggerPlugin } from '@pinpawo-plugin/trigger';
-import { createStudio, type StudioPetBinding } from '@pinpawo/studio-core';
+import { createStudioWithPets, type LivePet } from '../../../tests/support/livePets';
 
 const STUDIO_TOKEN = 'studio-token-with-at-least-16-characters';
 const TRIGGER_SECRET = 'trigger-secret-with-at-least-16-characters';
@@ -21,7 +21,7 @@ async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
 
 test('Scheduler and Trigger contribute independent durable APIs through HTTP', async (t) => {
   const received: string[] = [];
-  const worker: StudioPetBinding = {
+  const worker: LivePet = {
     registration: { petId: 'worker', name: 'Worker' },
     dispatch: {
       getQueueSnapshot: () => ({
@@ -42,9 +42,8 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
     }],
   });
   const http = createStudioHttpPlugin({ port: 0, authToken: STUDIO_TOKEN });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'automation-e2e',
-    entryPetId: 'worker',
     pets: [worker],
     plugins: [scheduler, trigger, http],
   });
@@ -102,7 +101,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
 
 test('Scheduler queue audit creates a durable Notice without dispatching recovery work', async (t) => {
   let dispatched = 0;
-  const worker: StudioPetBinding = {
+  const worker: LivePet = {
     registration: { petId: 'worker', name: 'Worker' },
     dispatch: {
       getQueueSnapshot: () => ({
@@ -129,9 +128,8 @@ test('Scheduler queue audit creates a durable Notice without dispatching recover
     dispatchQueueAudit: { intervalMs: 1_000 },
   });
   const http = createStudioHttpPlugin({ port: 0, authToken: STUDIO_TOKEN });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'dispatch-gate-notice-e2e',
-    entryPetId: 'worker',
     pets: [worker],
     plugins: [http, notice, scheduler],
   });
@@ -164,7 +162,7 @@ test('Scheduler queue audit creates a durable Notice without dispatching recover
 
 test('GitHub webhook Trigger verifies signatures, filters event action, and deduplicates delivery', async (t) => {
   const received: string[] = [];
-  const worker: StudioPetBinding = {
+  const worker: LivePet = {
     registration: { petId: 'reviewer', name: 'Reviewer' },
     dispatch: {
       getQueueSnapshot: () => ({
@@ -188,9 +186,8 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
     }],
   });
   const http = createStudioHttpPlugin({ port: 0, authToken: STUDIO_TOKEN });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'github-trigger-e2e',
-    entryPetId: 'reviewer',
     pets: [worker],
     plugins: [trigger, http],
   });

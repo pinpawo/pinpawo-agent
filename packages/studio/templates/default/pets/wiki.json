@@ -1,5 +1,5 @@
 {
-  "petId": "wiki",
+  "definitionId": "wiki",
   "name": "Wiki",
   "defaultCapabilityName": "wiki_maintenance"
 }

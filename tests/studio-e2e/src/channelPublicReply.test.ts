@@ -8,12 +8,14 @@ import { join } from 'node:path';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, loadCapabilityDirectory, loadPetDocumentFile } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
+import { createStudioWithPets } from '../../../tests/support/livePets';
+import type { Studio } from '@pinpawo/studio-core';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -63,7 +65,7 @@ test('capability handoff reaches Channel only through the selected final root re
   const holdFinal = new Promise<void>(resolve => { release = resolve; });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const channel = createChannelPlugin({ httpRoute: false });
-  let studio: Awaited<ReturnType<typeof createStudio>> | undefined;
+  let studio: Studio | undefined;
   try {
     const capabilitiesRoot = join(root, 'capabilities');
     await mkdir(join(capabilitiesRoot, 'studio-execution'), { recursive: true });
@@ -129,7 +131,7 @@ test('capability handoff reaches Channel only through the selected final root re
         } as never,
       }));
     }
-    studio = await createStudio({ studioId: 'final-reply', entryPetId: 'acceptance-a', plugins: [channel],
+    studio = await createStudioWithPets({ studioId: 'final-reply', plugins: [channel],
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),

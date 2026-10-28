@@ -20,7 +20,6 @@ import type { BuildStudioResult, ResolvedStudioHostConfig } from './buildStudio'
 
 function fakeStudio(onShutdown: () => void): Studio {
   return {
-    entryPetId: 'pet-a',
     dispatch: async () => ({
       petId: 'pet-1',
       invocationId: 'invocation-1',
@@ -28,6 +27,7 @@ function fakeStudio(onShutdown: () => void): Studio {
     notify: () => {},
     subscribe: () => () => {},
     listPets: () => [],
+    pets: {} as Studio['pets'],
     shutdown: async () => { onShutdown(); },
   };
 }
@@ -87,7 +87,7 @@ function configuration(
     studioConfigPath: '/tmp/pinpawo-studio-host-test/.pinpawo/studio.json',
     petsDir: '/tmp/pinpawo-studio-host-test/.pinpawo/pets',
     resolved: {
-      pets: petIds.map((petId) => ({ petId, name: petId })),
+      definitions: petIds.map((definitionId) => ({ definitionId, name: definitionId })),
     } as ResolvedStudioHostConfig['resolved'],
     plugins,
   };
@@ -99,6 +99,7 @@ function result(studio: Studio): BuildStudioResult {
     resolved: {} as BuildStudioResult['resolved'],
     plugins: [],
     residentPets: new Map(),
+    residentPetInteractions: new Map(),
     activatePlugins: async () => undefined,
   };
 }

@@ -34,7 +34,7 @@ test('Studio init enables Channel and keeps only an explicit external-request Tr
 // Assemble the shipped Plugin selection and exercise the surviving public routes.
 test('shipped Plugins support explicit Wiki work and Knowledge without opening historical task storage', async (t) => {
   const { mkdir, rm, writeFile } = await import('node:fs/promises');
-  const { createStudio, resolveStudioHostConfig } = await import('@pinpawo/studio-core');
+  const { createStudio, resolveStudioHostConfig, resolveStudioStorage } = await import('@pinpawo/studio-core');
   const { createStudioHttpPlugin } = await import('@pinpawo-plugin/studio-http');
   const { createStudioPlugin: channelFactory } = await import('@pinpawo-plugin/channel');
   const { createStudioPlugin: noticeFactory } = await import('@pinpawo-plugin/notice');
@@ -93,32 +93,34 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];
-  for (const pet of configuration.resolved.pets) {
-    const loaded = await loadCapabilityDirectory(path.join(workdir, '.pinpawo', 'pets', pet.petId, 'capabilities'));
+  for (const pet of configuration.resolved.definitions) {
+    const loaded = await loadCapabilityDirectory(path.join(workdir, '.pinpawo', 'pets', pet.definitionId, 'capabilities'));
     const registry = compileAgentRegistry({ toolkits, capabilities: loaded.map(({ capability }) => capability) });
-    assert.deepEqual(registry.unavailableCapabilities, [], `${pet.petId} has no missing Toolkit bindings`);
+    assert.deepEqual(registry.unavailableCapabilities, [], `${pet.definitionId} has no missing Toolkit bindings`);
     const preferred = registry.capabilities.find(({ capability }) => capability.name === pet.defaultCapabilityName);
-    assert.ok(preferred, `${pet.petId} retains an executable default Capability`);
+    assert.ok(preferred, `${pet.definitionId} retains an executable default Capability`);
     assert.ok(preferred.toolNames.includes('channel_read_context'));
-    if (pet.petId === 'wiki') {
+    if (pet.definitionId === 'wiki') {
       for (const name of ['project_files_list', 'project_files_read', 'project_files_write']) {
         assert.ok(preferred.toolNames.includes(name), `Wiki Capability binds ${name}`);
       }
     }
   }
   const received: Array<{ petId: string; request: string }> = [];
+  // The workdir's own database: init created one Pet per template definition.
   const studio = await createStudio({
     studioId: configuration.resolved.studio.studioId,
-    entryPetId: configuration.resolved.studio.entryPetId,
     plugins: configuration.plugins,
-    pets: configuration.resolved.pets.map(({ petId, name }) => ({
-      registration: { petId, name },
+    storage: resolveStudioStorage(configuration.resolved.studio.storage, workdir),
+    definitions: configuration.resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
+    assemblePet: async ({ petId }) => ({
       dispatch: {
         getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async ({ request }) => { received.push({ petId, request }); },
       },
-    })),
+      close: async () => undefined,
+    }),
   });
   t.after(async () => {
     await studio.shutdown();

@@ -35,24 +35,24 @@ test('loadPetConfigs returns [] for an empty directory', async () => {
 
 test('loadPetConfigs loads all *.json files in sorted order', async () => {
   const dir = await mkTempDir('pet-cfg-multi-');
-  await writeJson(dir, 'b.json', { petId: 'b', name: 'B' });
-  await writeJson(dir, 'a.json', { petId: 'a', name: 'A' });
-  await writeJson(dir, 'c.json', { petId: 'c', name: 'C' });
+  await writeJson(dir, 'b.json', { definitionId: 'b', name: 'B' });
+  await writeJson(dir, 'a.json', { definitionId: 'a', name: 'A' });
+  await writeJson(dir, 'c.json', { definitionId: 'c', name: 'C' });
   // 非 json 文件应被忽略
   await fs.writeFile(path.join(dir, 'notes.md'), 'hello', 'utf8');
 
   const result = await loadPetConfigs(dir);
-  assert.deepEqual(result.map((p) => p.petId), ['a', 'b', 'c']);
+  assert.deepEqual(result.map((p) => p.definitionId), ['a', 'b', 'c']);
 });
 
-test('loadPetConfigs rejects duplicate petIds across files', async () => {
+test('loadPetConfigs rejects duplicate definition ids across files', async () => {
   const dir = await mkTempDir('pet-cfg-dup-');
-  await writeJson(dir, 'first.json', { petId: 'shared', name: 'First' });
-  await writeJson(dir, 'second.json', { petId: 'shared', name: 'Second' });
+  await writeJson(dir, 'first.json', { definitionId: 'shared', name: 'First' });
+  await writeJson(dir, 'second.json', { definitionId: 'shared', name: 'Second' });
 
   await assert.rejects(
     () => loadPetConfigs(dir),
-    /duplicate pet config petId "shared"/,
+    /duplicate pet definitionId "shared"/,
   );
 });
 
@@ -68,7 +68,7 @@ test('loadPetConfigs surfaces invalid JSON with file path', async () => {
 
 test('loadPetConfigs surfaces schema errors with file path', async () => {
   const dir = await mkTempDir('pet-cfg-badschema-');
-  await writeJson(dir, 'no-name.json', { petId: 'p1' });
+  await writeJson(dir, 'no-name.json', { definitionId: 'p1' });
 
   await assert.rejects(
     () => loadPetConfigs(dir),

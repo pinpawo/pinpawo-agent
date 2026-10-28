@@ -13,15 +13,6 @@ import {
  * 也不假设配置一定来自磁盘。
  */
 
-/**
- * Pet 本地配置。
- *
- * 设计立场:
- * - 本地配置声明 Host 身份与路由；行为与人设由 PET.md 定义。
- * - 同一台主机可以有多个 pet 配置共存(Studio 拼装多 pet 时用)。
- * - schema 只解析默认 Capability 名称；Studio Host composition 在 resident 启动前
- *   对已加载的 Pet Capability 做 fail-fast 可用性检查。
- */
 export type StudioPluginConfig = {
   id: string;
   options?: Record<string, unknown>;
@@ -40,25 +31,17 @@ export type StudioStorageSettings =
 /**
  * Studio 本地配置——单 workdir 单 studio。
  *
- * Studio 是一块插板:它只声明**有哪些 pet**、**装哪些插件**、以及外部
- * 入口派给谁。任务队列、依赖、进度、重试全部属于插件的领域,不出现在
- * 这里。
+ * Studio 是一块插板:它只声明**可以用哪些 Pet 定义**和**装哪些插件**。Pet 实例
+ * 不在配置里,它们是 Studio 数据库里的记录(docs/design/studio/pet-instance.md)。
+ * 任务队列、依赖、进度、重试全部属于插件的领域,不出现在这里。
  */
 export type StudioLocalConfig = {
   studioId: string;
   name?: string;
   description?: string;
 
-  /**
-   * 外部输入默认派给哪个 pet。宿主经 `dispatch({ petId: entryPetId, ... })` 使用。
-   *
-   * 它就是一次普通 dispatch —— 该 pet 只是恰好扮演拆解角色,studio 不认识
-   * "planner"这个概念,因此字段名不叫 plannerPetId。必须在 `pets` 中。
-   */
-  entryPetId: string;
-
-  /** 本 studio 可派活的 pet,引用 `PetConfig.petId`。 */
-  pets: string[];
+  /** 本 studio 可以创建 Pet 的定义,引用 `PetConfig.definitionId`。 */
+  definitions: string[];
 
   /**
    * 装哪些插件。**必须显式列出** —— studio 不做隐式装配,读一眼配置就知道
@@ -127,9 +110,15 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
     const name = reader.optionalString('name');
     const description = reader.optionalString('description');
 
-    const pets = reader.requiredStringArray('pets');
-    if (pets.length === 0) {
-      reader.fail('"pets" must not be empty', 'pets');
+    if (reader.raw.pets !== undefined) {
+      reader.fail('"pets" was renamed to "definitions"; Pet instances are created in Studio', 'pets');
+    }
+    if (reader.raw.entryPetId !== undefined) {
+      reader.fail('"entryPetId" was removed; address a Pet by its petId', 'entryPetId');
+    }
+    const definitions = reader.requiredStringArray('definitions');
+    if (definitions.length === 0) {
+      reader.fail('"definitions" must not be empty', 'definitions');
     }
 
     const plugins = parsePluginConfigs(reader);
@@ -139,8 +128,7 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
       studioId: reader.requiredString('studioId'),
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
-      entryPetId: reader.requiredString('entryPetId'),
-      pets,
+      definitions,
       ...(plugins !== undefined ? { plugins } : {}),
       ...(storage !== undefined ? { storage } : {}),
     };
@@ -148,53 +136,41 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
 });
 
 /**
- * Resolved studio:每个 pet 名都对应到具体的 PetConfig。
+ * Resolved studio:每个定义 id 都对应到具体的 PetConfig。
  */
 export type ResolvedStudio = {
   studio: StudioLocalConfig;
-  /** 按 `studio.pets` 顺序排列的 PetConfig */
-  pets: PetConfig[];
-  /** `entryPetId` 对应的 PetConfig(同时也在 pets 中) */
-  entryPet: PetConfig;
+  /** 按 `studio.definitions` 顺序排列的 Pet 定义 */
+  definitions: PetConfig[];
 };
 
 /**
- * 把 studio config 跟 pet config 列表 join 起来,做结构一致性校验:
- *   1. pets 数组不能有重复 petId
- *   2. entryPetId 必须出现在 pets 数组中
- *   3. pets 引用的每个 petId 都必须存在于已加载的 pet 配置中
+ * 把 studio config 跟 Pet 定义列表 join 起来,做结构一致性校验:
+ *   1. definitions 数组不能有重复 id
+ *   2. 引用的每个定义都必须存在于已加载的 Pet 定义中
  */
 export function resolveStudio(
   studio: StudioLocalConfig,
   petConfigs: PetConfig[],
 ): ResolvedStudio {
-  const petById = new Map<string, PetConfig>();
-  for (const pet of petConfigs) petById.set(pet.petId, pet);
+  const definitionById = new Map<string, PetConfig>();
+  for (const definition of petConfigs) definitionById.set(definition.definitionId, definition);
 
   const seen = new Set<string>();
-  for (const petId of studio.pets) {
-    if (seen.has(petId)) {
-      throw new Error(`studio "${studio.studioId}": pets array has duplicate petId "${petId}"`);
+  const definitions: PetConfig[] = [];
+  for (const definitionId of studio.definitions) {
+    if (seen.has(definitionId)) {
+      throw new Error(`studio "${studio.studioId}": definitions array has duplicate id "${definitionId}"`);
     }
-    seen.add(petId);
-  }
-
-  if (!studio.pets.includes(studio.entryPetId)) {
-    throw new Error(
-      `studio "${studio.studioId}": entryPetId "${studio.entryPetId}" is not in pets`,
-    );
-  }
-
-  const resolvedPets: PetConfig[] = [];
-  for (const petId of studio.pets) {
-    const pet = petById.get(petId);
-    if (!pet) {
+    seen.add(definitionId);
+    const definition = definitionById.get(definitionId);
+    if (!definition) {
       throw new Error(
-        `studio "${studio.studioId}": pet "${petId}" has no matching pet config in the configured pets directory`,
+        `studio "${studio.studioId}": definition "${definitionId}" has no matching file in the configured pets directory`,
       );
     }
-    resolvedPets.push(pet);
+    definitions.push(definition);
   }
 
-  return { studio, pets: resolvedPets, entryPet: petById.get(studio.entryPetId)! };
+  return { studio, definitions };
 }

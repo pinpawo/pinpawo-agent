@@ -23,8 +23,10 @@ test('operator parser accepts connection flags on either side and rejects incomp
     ['channels', 'participants'], ['channels', 'executions', 'c'], ['channels', 'create'], ['channels', 'create', 'c', '--title', 't'],
     ['channels', 'add-member', 'c'], ['channels', 'add-member', 'c', '--member', 'bot:x'], ['channels', 'members', 'c', '--after', '1'],
     ['events', 'p', '--seconds', '0'], ['events', 'p', '--seconds', '61'],
-    ['pets', '--studio-url', 'https://user:secret@example.com'],
-    ['pets', '--agent-url', 'http://localhost/path'],
+    ['pets', 'list', '--studio-url', 'https://user:secret@example.com'],
+    ['pets', 'list', '--agent-url', 'http://localhost/path'],
+    ['pets'], ['pets', 'show'], ['pets', 'list', 'a'], ['pets', 'create', 'a', '--name', 'A'],
+    ['pets', 'create', 'a', '--definition', 'd'], ['pets', 'rename', 'a'], ['pets', 'archive'],
     ['clients'], ['clients', 'show'], ['clients', 'list', 'a'], ['clients', 'add', 'a'], ['clients', 'add', '--label', 'A'],
     ['clients', 'revoke'], ['clients', 'add-key', 'a', '--label', 'A'],
   ]) assert.throws(() => parseStudioOperatorArgs(args));
@@ -89,7 +91,8 @@ test('operator commands send the existing wire protocol without retries or start
     [['channels', 'read', 'c', '--before', '9', '--limit', '3'], '/channels/context?before=9&limit=3&channelId=c'],
     [['channels', 'members', 'c'], '/channels/members?channelId=c'],
     [['channels', 'sessions', 'c'], '/channels/sessions?channelId=c'],
-    [['pets'], '/pets'], [['queues'], '/dispatch/queues'],
+    [['pets', 'list'], '/pets'], [['pets', 'list', '--archived'], '/pets?archived=1'],
+    [['pets', 'definitions'], '/pet-definitions'], [['queues'], '/dispatch/queues'],
   ] as [string[], string][]) {
     await run(args);
     assert.equal(seen.at(-1)?.url, path);
@@ -97,6 +100,12 @@ test('operator commands send the existing wire protocol without retries or start
     assert.equal(seen.at(-1)?.auth, 'Bearer test-local-authority');
     assert.deepEqual(JSON.parse(output), { accepted: true, nextAfter: 7, hasMore: true });
   }
+  await run(['pets', 'create', 'dev-a', '--definition', 'developer', '--name', 'Dev A']);
+  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A' }]);
+  await run(['pets', 'rename', 'dev-a', '--name', 'Dev']);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pets/rename', { petId: 'dev-a', name: 'Dev' }]);
+  await run(['pets', 'archive', 'dev-a']);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pets/archive', { petId: 'dev-a' }]);
   await run(['channels', 'send', 'c', '--file', join(dir, 'body.md'), '--mention', 'pet:reviewer', '--mention', 'pet:reviewer', '--mention', 'human:operator', '--reply-to', 'original']);
   assert.deepEqual(seen.at(-1)?.body, { channelId: 'c', body: '**Hello**\n\n```text\n@label\n```',
     mentions: [{ participantId: 'pet:reviewer' }, { participantId: 'human:operator' }], replyTo: 'original' });
@@ -155,7 +164,7 @@ test('stdin, token errors, JSON validation and operational help do not expose cr
   assert.equal(JSON.parse(output).messageId, 'saved');
   await assert.rejects(runStudioOperator(parseStudioOperatorArgs(['send', 'p', '--file', '-'])!, dependencies), /JSON/);
   assert.equal(fetched, 1);
-  await assert.rejects(runStudioOperator(parseStudioOperatorArgs(['pets'])!, {
+  await assert.rejects(runStudioOperator(parseStudioOperatorArgs(['pets', 'list'])!, {
     ...dependencies, readText: async () => { throw new Error('secret-token'); },
   }), /token is unavailable/);
   assert.equal(fetched, 1);
@@ -174,7 +183,7 @@ test('Studio and Agent Session origins remain separate and network mutations are
       return Response.json(String(url).includes('snapshot') ? { snapshot: { session: { timeline: [] } } } : {});
     }) as typeof fetch,
   };
-  await runStudioOperator(parseStudioOperatorArgs([...options, 'pets'])!, dependencies);
+  await runStudioOperator(parseStudioOperatorArgs([...options, 'pets', 'list'])!, dependencies);
   await runStudioOperator(parseStudioOperatorArgs([...options, 'snapshot', 'p'])!, dependencies);
   assert.deepEqual(routes, ['http://localhost:3291/pets', 'http://localhost:3292/agent-session/pets/p/snapshot']);
   let attempts = 0;

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import {
   buildHostRuntimeConfig, createResidentPetHost, FileSaver,
@@ -15,6 +15,7 @@ import {
   ChannelAccessError, createChannelPlugin, type ChannelDelivery, type ChannelMessage,
 } from '@pinpawo-plugin/channel';
 import { readChannelTestInput, readChannelTestTask } from '../../support/channelDispatchInput';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -40,8 +41,8 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
   const dispatched: Dispatched[] = [];
   const channel = createChannelPlugin();
   const http = createStudioHttpPlugin({ port: 0, authToken: 'channel-test-token' });
-  const studio = await createStudio({
-    studioId: 'test', entryPetId: 'reviewer', plugins: [channel, http],
+  const studio = await createStudioWithPets({
+    studioId: 'test', plugins: [channel, http],
     pets: [fakePet('reviewer', dispatched), fakePet('writer', dispatched)],
   });
   const base = `http://127.0.0.1:${http.address()!.port}`;
@@ -190,7 +191,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
       return { status: 'completed', reply: 'done' };
     },
   });
-  const studio = await createStudio({ studioId: 's', entryPetId: 'executor',
+  const studio = await createStudioWithPets({ studioId: 's',
     pets: [{ registration: { petId: 'executor', name: 'Executor' }, dispatch: host.resident.dispatch }], plugins: [channel],
   });
   try {
@@ -224,7 +225,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
 test('a Pet message is its Channel session public reply, written once, handed off through the mention path; failures are only events', async () => {
   const dispatched: Dispatched[] = [];
   const channel = createChannelPlugin({ httpRoute: false });
-  const studio = await createStudio({ studioId: 'pet-message', entryPetId: 'one', plugins: [channel],
+  const studio = await createStudioWithPets({ studioId: 'pet-message', plugins: [channel],
     pets: [fakePet('one', dispatched), fakePet('two', dispatched)] });
   const events: Array<{ type: string; payload?: any }> = [];
   studio.subscribe(event => { events.push(event); });
@@ -278,7 +279,7 @@ test('a Pet message is its Channel session public reply, written once, handed of
 test('run sends a channel_task to a member Pet session without writing a Channel message', async () => {
   const dispatched: Dispatched[] = [];
   const channel = createChannelPlugin({ httpRoute: false });
-  const studio = await createStudio({ studioId: 'run', entryPetId: 'one', plugins: [channel],
+  const studio = await createStudioWithPets({ studioId: 'run', plugins: [channel],
     pets: [fakePet('one', dispatched), fakePet('two', dispatched)] });
   try {
     const id = (await channel.service.createChannel(me, { title: 'Ops', pets: ['one'] })).channel.channelId;

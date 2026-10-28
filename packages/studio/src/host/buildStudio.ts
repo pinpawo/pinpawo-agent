@@ -7,7 +7,7 @@ import {
 } from '@pinpawo/pet-agent';
 import { prepareStudio } from '../createStudio';
 import type { Studio, StudioPlugin } from '../studioContract';
-import type { StudioPetBinding } from '../types';
+import type { StudioPetRegistration, StudioPetRuntime } from '../types';
 import {
   buildHostRuntimeConfig,
   createResidentPetHost,
@@ -15,7 +15,9 @@ import {
   type HostToolkitInventoryStore,
   type HostExecutionConfig,
   type LocalModelProfileRegistry,
+  type PetConfig,
   type ResidentPetHost,
+  type ResidentPetInteraction,
 } from 'pinpawo/host-runtime';
 import { loadPetConfigs } from 'pinpawo/host-runtime';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
@@ -37,9 +39,9 @@ export type BuildStudioInput = HostExecutionConfig & {
   modelProfiles: LocalModelProfileRegistry;
   /** Host fallback Capability 池；Studio uses general only without an explicit default. */
   hostCapabilities: readonly AgentCapability[];
-  /** 每个 Pet 从约定目录严格加载的 Agent Capability 定义。 */
+  /** 每份 Pet 定义从约定目录严格加载的 Agent Capability 定义,按 definitionId。 */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
-  /** Optional PET.md root-document snapshot keyed by Pet id. */
+  /** Optional PET.md root-document snapshot keyed by definition id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
   capabilityArtifactStore: CapabilityArtifactStore;
@@ -72,8 +74,13 @@ export type BuildStudioResult = {
   resolved: ResolvedStudio;
   /** 已装配的插件,按配置顺序。 */
   plugins: StudioPlugin[];
-  /** Host lifecycle resources; Studio core receives only their dispatch ports. */
+  /**
+   * The live Pets' Host resources by petId, kept current as Pets are created
+   * and archived. Studio core receives only their dispatch and session ports.
+   */
   residentPets: ReadonlyMap<string, ResidentPetHost>;
+  /** The live Pets' Agent Session surfaces by petId, kept current the same way. */
+  residentPetInteractions: ReadonlyMap<string, ResidentPetInteraction>;
   /** Idempotently activate configured Plugin lifecycles. */
   activatePlugins: () => Promise<void>;
 };
@@ -181,107 +188,118 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
   }
 
-  const residentPets = new Map<string, ResidentPetHost>();
-  const pets: StudioPetBinding[] = [];
-  try {
-    for (const petConfig of resolved.pets) {
-      const petCapabilities = [...(input.petCapabilities.get(petConfig.petId) ?? [])];
-      const petCapabilityNames = new Set<string>();
-      for (const capability of petCapabilities) {
-        if (capability.name === GENERAL_CAPABILITY_NAME) {
-          throw new Error(
-            `pet "${petConfig.petId}" cannot replace the Host baseline Capability "${GENERAL_CAPABILITY_NAME}"`,
-          );
-        }
-        if (petCapabilityNames.has(capability.name)) {
-          throw new Error(`pet "${petConfig.petId}" has duplicate Capability "${capability.name}"`);
-        }
-        petCapabilityNames.add(capability.name);
-      }
-      if (petConfig.defaultCapabilityName
-        && petConfig.defaultCapabilityName !== GENERAL_CAPABILITY_NAME
-        && !petCapabilityNames.has(petConfig.defaultCapabilityName)) {
+  // Check every definition up front, so a bad one fails Host start rather
+  // than the first create that uses it.
+  const definitions = new Map<string, { config: PetConfig; capabilities: AgentCapability[] }>();
+  for (const definition of resolved.definitions) {
+    const { definitionId } = definition;
+    const petCapabilities = [...(input.petCapabilities.get(definitionId) ?? [])];
+    const petCapabilityNames = new Set<string>();
+    for (const capability of petCapabilities) {
+      if (capability.name === GENERAL_CAPABILITY_NAME) {
         throw new Error(
-          `pet "${petConfig.petId}" default Capability "${petConfig.defaultCapabilityName}" is not available`,
+          `definition "${definitionId}" cannot replace the Host baseline Capability "${GENERAL_CAPABILITY_NAME}"`,
         );
       }
-
-      const resident = await createResidentPetHost({
-        petId: petConfig.petId,
-        petName: petConfig.name,
-        modelProfiles: input.modelProfiles,
-        ...(petConfig.modelProfileId ? { modelProfileId: petConfig.modelProfileId } : {}),
-        ...(petConfig.defaultCapabilityName
-          ? { defaultCapabilityName: petConfig.defaultCapabilityName }
-          : {}),
-        ...(input.petDocuments?.get(petConfig.petId)
-          ? { petDocument: input.petDocuments.get(petConfig.petId) }
-          : {}),
-        capabilities: selectStudioPetCapabilities({
-          ...(petConfig.defaultCapabilityName
-            ? { defaultCapabilityName: petConfig.defaultCapabilityName }
-            : {}),
-          generalCapability,
-          petCapabilities,
-        }),
-        toolkitInventory: input.toolkitInventory,
-        capabilityArtifactStore: input.capabilityArtifactStore,
-        checkpointer: input.checkpoint,
-        runtimeConfig: input.runtimeConfig,
-        toolAuthorizationMode: input.toolAuthorizationMode,
-        autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
-        sessionStatePath: path.join(
-          input.runtimeConfig.sessionRoot,
-          'resident-sessions',
-          `${encodeURIComponent(petConfig.petId)}.json`,
-        ),
-        adoptThreadId: `studio:${encodeURIComponent(studioConfig.studioId)}:pet:${encodeURIComponent(petConfig.petId)}`,
-      });
-      residentPets.set(petConfig.petId, resident);
-      pets.push({
-        registration: {
-          petId: petConfig.petId,
-          name: petConfig.name,
-        },
-        dispatch: resident.resident.dispatch,
-        sessions: resident.sessions,
-      });
+      if (petCapabilityNames.has(capability.name)) {
+        throw new Error(`definition "${definitionId}" has duplicate Capability "${capability.name}"`);
+      }
+      petCapabilityNames.add(capability.name);
     }
-  } catch (error) {
-    await Promise.allSettled([...residentPets.values()].map((resident) => resident.close()));
-    throw error;
+    if (definition.defaultCapabilityName
+      && definition.defaultCapabilityName !== GENERAL_CAPABILITY_NAME
+      && !petCapabilityNames.has(definition.defaultCapabilityName)) {
+      throw new Error(
+        `definition "${definitionId}" default Capability "${definition.defaultCapabilityName}" is not available`,
+      );
+    }
+    definitions.set(definitionId, {
+      config: definition,
+      capabilities: selectStudioPetCapabilities({
+        ...(definition.defaultCapabilityName
+          ? { defaultCapabilityName: definition.defaultCapabilityName }
+          : {}),
+        generalCapability,
+        petCapabilities,
+      }),
+    });
   }
 
-  let studio: Studio;
-  let activatePlugins: () => Promise<void>;
-  try {
-    const studioInput = {
-      studioId: studioConfig.studioId,
-      entryPetId: studioConfig.entryPetId,
-      pets,
-      plugins,
-      storage: resolveStudioStorage(studioConfig.storage, input.configuration.workdir),
-      models: {
-        resolve: (profileId?: string) => {
-          const config = input.modelProfiles.resolve(profileId);
-          return {
-            profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
-            baseUrl: config.baseUrl,
-            apiKey: config.apiKey,
-            model: config.model,
-            ...(config.structuredOutputMethod ? { structuredOutputMethod: config.structuredOutputMethod } : {}),
-          };
-        },
+  const residentPets = new Map<string, ResidentPetHost>();
+  const residentPetInteractions = new Map<string, ResidentPetInteraction>();
+  const assemblePet = async (pet: StudioPetRegistration): Promise<StudioPetRuntime> => {
+    const definition = definitions.get(pet.definitionId);
+    if (!definition) throw new Error(`Pet "${pet.petId}" uses unknown definition "${pet.definitionId}"`);
+    const { config } = definition;
+    const document = input.petDocuments?.get(pet.definitionId);
+    const resident = await createResidentPetHost({
+      petId: pet.petId,
+      petName: pet.name,
+      modelProfiles: input.modelProfiles,
+      ...(config.modelProfileId ? { modelProfileId: config.modelProfileId } : {}),
+      ...(config.defaultCapabilityName ? { defaultCapabilityName: config.defaultCapabilityName } : {}),
+      ...(document ? { petDocument: document } : {}),
+      capabilities: definition.capabilities,
+      toolkitInventory: input.toolkitInventory,
+      capabilityArtifactStore: input.capabilityArtifactStore,
+      checkpointer: input.checkpoint,
+      runtimeConfig: input.runtimeConfig,
+      toolAuthorizationMode: input.toolAuthorizationMode,
+      autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
+      sessionStatePath: path.join(
+        input.runtimeConfig.sessionRoot,
+        'resident-sessions',
+        `${encodeURIComponent(pet.petId)}.json`,
+      ),
+      adoptThreadId: `studio:${encodeURIComponent(studioConfig.studioId)}:pet:${encodeURIComponent(pet.petId)}`,
+    });
+    residentPets.set(pet.petId, resident);
+    residentPetInteractions.set(pet.petId, resident.interaction);
+    return {
+      dispatch: resident.resident.dispatch,
+      sessions: resident.sessions,
+      close: async () => {
+        residentPetInteractions.delete(pet.petId);
+        residentPets.delete(pet.petId);
+        await resident.close();
       },
     };
-    const prepared = prepareStudio(studioInput);
-    studio = prepared.studio;
-    activatePlugins = prepared.activatePlugins;
-    if (!input.deferPluginActivation) await activatePlugins();
+  };
+
+  const prepared = prepareStudio({
+    studioId: studioConfig.studioId,
+    definitions: resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
+    assemblePet,
+    plugins,
+    storage: resolveStudioStorage(studioConfig.storage, input.configuration.workdir),
+    models: {
+      resolve: (profileId?: string) => {
+        const config = input.modelProfiles.resolve(profileId);
+        return {
+          profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          model: config.model,
+          ...(config.structuredOutputMethod ? { structuredOutputMethod: config.structuredOutputMethod } : {}),
+        };
+      },
+    },
+  });
+  try {
+    // Before any transport listens: a TUI may connect to any active Pet.
+    await prepared.restorePets();
+    if (!input.deferPluginActivation) await prepared.activatePlugins();
   } catch (error) {
-    await Promise.allSettled([...residentPets.values()].map((resident) => resident.close()));
+    await prepared.studio.shutdown();
     throw error;
   }
 
-  return { studio, resolved, plugins, residentPets, activatePlugins };
+  return {
+    studio: prepared.studio,
+    resolved,
+    plugins,
+    residentPets,
+    residentPetInteractions,
+    activatePlugins: prepared.activatePlugins,
+  };
 }

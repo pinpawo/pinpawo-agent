@@ -45,6 +45,12 @@ export type ChannelDelivery = {
   sessionId?: string;
   error?: string;
 };
+/**
+ * A Pet member running a turn in this Channel now. Presence, not a message:
+ * kept in memory from the Pet's run lifecycle, never stored, and gone when the
+ * run ends or waits on a review. Published as `channel.working`.
+ */
+export type ChannelWorking = { participantId: string; since: string };
 /** Name of the hook through which another Plugin starts a Pet's run in a Channel. */
 export const CHANNEL_INPUTS_HOOK_NAME = 'inputs';
 /**
@@ -78,6 +84,12 @@ const petMessageEventSchema = z.object({
   message: z.object({ type: z.literal('message.completed'), messageId: z.string().min(1), text: z.string() }).passthrough(),
 });
 
+const channelRunEventSchema = z.object({
+  invocationId: z.string().min(1),
+  petId: z.string().min(1),
+  scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }),
+});
+
 export function createChannelPlugin(options: CreateChannelPluginOptions = {}): ChannelPlugin {
   let context: StudioPluginContext | undefined;
   let current: ChannelService | undefined;
@@ -90,6 +102,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let removeHttp: (() => void) | undefined;
   let unexposeInputs: (() => void) | undefined;
   let router: ChannelRouter | undefined;
+  /** Pet runs in a Channel that are executing now, by invocation. */
+  const running = new Map<string, { channelId: string; participantId: string; since: string }>();
   function host(): StudioPluginContext {
     if (!context) throw new Error('Channel Plugin is not started.');
     return context;
@@ -216,6 +230,30 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     }
   }
 
+  function workingIn(channelId: string): ChannelWorking[] {
+    const working = new Map<string, string>();
+    for (const run of running.values()) {
+      const since = working.get(run.participantId);
+      if (run.channelId === channelId && (!since || run.since < since)) working.set(run.participantId, run.since);
+    }
+    return [...working].map(([participantId, since]) => ({ participantId, since }));
+  }
+
+  /** A Pet works in a Channel while one of its runs there is running; queued or waiting on a review is not working. */
+  function observeRun(type: string, payload: unknown, occurredAt: string): void {
+    if (type === 'dispatch.message') return;
+    const parsed = channelRunEventSchema.safeParse(payload);
+    if (!parsed.success) return;
+    const { invocationId, petId, scope: { id: channelId } } = parsed.data;
+    const participantId = channelParticipantId('pet', petId);
+    const isWorking = () => workingIn(channelId).some(item => item.participantId === participantId);
+    const before = isWorking();
+    if (type !== 'dispatch.running') running.delete(invocationId);
+    else if (!running.has(invocationId)) running.set(invocationId, { channelId, participantId, since: occurredAt });
+    const working = isWorking();
+    if (working !== before) host().notify({ type: 'channel.working', payload: { channelId, participantId, working } });
+  }
+
   const readContext = tool(async (input) => {
     const { channelId, petId } = requireChannelInvocation();
     return JSON.stringify(await channelService().readContext({ kind: 'pet', id: petId }, channelId, input));
@@ -254,7 +292,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         resolveModel: studio.models.resolve,
       });
       unsubscribeHost = studio.subscribe(async (event) => {
-        if (event.source === 'resident-pet' && event.type === 'dispatch.message') await recordPetMessage(event.payload);
+        if (event.source !== 'resident-pet' || !event.type.startsWith('dispatch.')) return;
+        observeRun(event.type, event.payload, event.occurredAt);
+        if (event.type === 'dispatch.message') await recordPetMessage(event.payload);
       });
       unexposeInputs = studio.hooks.expose(CHANNEL_INPUTS_HOOK_NAME, inputs);
       unsubscribe = service.subscribe(event => studio.notify(event));
@@ -286,9 +326,14 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
             ...await service.listChannels(actor, page(url), { ...access, all: url.searchParams.get('all') === 'true' }),
             viewerParticipantId: viewer(actor),
           } })),
-          register('GET', '/channels/context', async ({ url }, actor) => ({ kind: 'json', body: {
-            ...await service.readContext(actor, channelOf(url), page(url)), viewerParticipantId: viewer(actor),
-          } })),
+          register('GET', '/channels/context', async ({ url }, actor) => {
+            const read = await service.readContext(actor, channelOf(url), page(url));
+            const members = new Set(read.members.map(member => member.participantId));
+            return { kind: 'json', body: {
+              ...read, viewerParticipantId: viewer(actor),
+              working: workingIn(read.channel.channelId).filter(item => members.has(item.participantId)),
+            } };
+          }),
           register('GET', '/channels/members', async ({ url }, actor, access) => ({ kind: 'json', body: { members: await service.listMembers(actor, channelOf(url), access) } })),
           register('GET', '/channels/sessions', async ({ url }, actor) => ({ kind: 'json', body: { sessions: await service.listSessions(actor, channelOf(url)) } })),
           register('POST', '/channels', async ({ readJson }, actor) => ({ kind: 'json', status: 201, body: await service.createChannel(actor, await readJson()) })),
@@ -322,6 +367,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       context = undefined;
       current = undefined;
       router = undefined;
+      running.clear();
     },
   };
 }

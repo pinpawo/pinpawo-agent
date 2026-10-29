@@ -74,28 +74,53 @@ button { color: #bdebed; background: #153438; }
 .channel-date { display: flex; align-items: center; gap: 14px; margin: 24px 16px 14px; color: #92a6a1; font-size: var(--text-xs); }
 .channel-date::before, .channel-date::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .channel-date time { flex: none; }
-.channel-message { position: relative; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; padding: 14px 16px; border: 0; border-radius: 10px; outline: 0; scroll-margin-block: 24px; }
-.channel-message:hover { background: #152022; }
-.channel-message.located { background: #173035; box-shadow: inset 2px 0 #6fcdd0; }
+.channel-message { position: relative; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; padding: 6px 16px; border: 0; border-radius: 10px; outline: 0; scroll-margin-block: 24px; }
+.channel-message.located .channel-bubble { box-shadow: 0 0 0 2px #6fcdd0; }
+/* Each message's content is one bubble: Pets, other people and the viewer each have their own tone. */
+.channel-bubble { width: fit-content; max-width: 100%; min-width: 0; box-sizing: border-box; margin-top: 4px; padding: 9px 14px;
+  border: 1px solid #1f3337; border-radius: 4px 14px 14px 14px; background: #132226; }
+.channel-message.human .channel-bubble { border-color: #262c3b; background: #181c27; }
+.channel-message.mine .channel-bubble { border-color: #24494b; background: #15302f; }
+.channel-message.grouped .channel-bubble { margin-top: 0; border-radius: 14px; }
+.channel-message:not(.grouped) { margin-top: 8px; }
+.channel-bubble > .channel-quote { margin: 2px 0 8px; background: rgba(255, 255, 255, .04); }
+/* The viewer's own messages sit on the right, without an avatar; everyone else's stay on the left. */
+.channel-message.mine { grid-template-columns: minmax(0, 1fr); }
+.channel-message.mine .channel-avatar { display: none; }
+.channel-message.mine .channel-message-content { display: flex; flex-direction: column; align-items: flex-end; }
+.channel-message.mine .channel-message-head { justify-content: flex-end; }
+.channel-message.mine .channel-bubble { max-width: 80%; border-radius: 14px 4px 14px 14px; }
+.channel-message.mine.grouped .channel-bubble { border-radius: 14px; }
+.channel-message.mine.grouped .channel-message-head time { display: none; }
+.channel-message.mine .channel-message-actions { right: auto; left: 16px; }
+.channel-message.mine .channel-technical dl { right: auto; left: 0; }
 .channel-message:focus-visible { outline: 2px solid #66d3d7; outline-offset: -2px; }
 .channel-avatar { height: 36px; width: 36px; display: grid; place-items: center; border-radius: 8px; background: #285052; color: #bde4e2; font-size: var(--text-sm); font-weight: 650; }
 .channel-avatar.human { background: #3d4058; color: #d9d7e9; }
 .channel-message-content { min-width: 0; }
-.channel-message-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-height: 22px; margin-bottom: 2px; }
+.channel-message-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-height: 22px; margin-bottom: 2px; }
 .channel-message-head strong { color: #d6e3df; font-size: var(--text-md); font-weight: 650; }
 .channel-message-head time, .channel-removed { color: #819594; font-size: var(--text-xs); }
-.channel-inline-state { margin-left: auto; padding: 1px 8px; color: #86b3ad; border-radius: 10px; background: rgba(111, 196, 154, .08); font-size: var(--text-xs); }
+.channel-inline-state { padding: 0 7px; color: #86b3ad; border-radius: 9px; background: rgba(111, 196, 154, .08); font-size: var(--text-xs); line-height: 18px; white-space: nowrap; }
 .channel-inline-state.failed { color: #e0968f; background: rgba(223, 122, 115, .1); }
 .channel-inline-state.skipped { color: #9aa3ad; background: rgba(154, 163, 173, .1); }
-.channel-message.grouped { padding-top: 4px; }
+.channel-working { display: flex; align-items: center; gap: 10px; padding: 6px 16px 2px 66px; color: #819594; font-size: var(--text-sm); }
+.channel-working-dots { display: inline-flex; gap: 3px; padding: 6px 8px; border-radius: 10px; background: #152022; }
+.channel-working-dots i { width: 5px; height: 5px; border-radius: 50%; background: #86b3ad; animation: channel-working 1.2s infinite ease-in-out; }
+.channel-working-dots i:nth-child(2) { animation-delay: .15s; }
+.channel-working-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes channel-working { 0%, 60%, 100% { opacity: .3; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .channel-working-dots i { animation: none; opacity: .7; } }
+.channel-message.grouped { padding-top: 0; }
 .channel-message.grouped .channel-avatar { height: 0; }
 .channel-message.grouped .channel-message-head { min-height: 0; height: 0; position: relative; }
+.channel-message.grouped .channel-message-head:has(.channel-inline-state, .channel-mentions) { height: auto; min-height: 20px; }
 .channel-message.grouped .channel-message-head time { position: absolute; right: calc(100% + 10px); top: 3px; opacity: 0; white-space: nowrap; }
 .channel-message.grouped:hover .channel-message-head time, .channel-message.grouped:focus-within .channel-message-head time { opacity: 1; }
-.channel-message-body { color: #c8d5d1; font-size: var(--text-body); line-height: 1.7; overflow-wrap: anywhere; }
-.channel-message-body > :first-child { margin-top: 2px; }
-.channel-message-body > :last-child { margin-bottom: 2px; }
-.channel-message-body p, .channel-message-body ul, .channel-message-body ol, .channel-message-body pre, .channel-message-body blockquote { margin: 12px 0; }
+.channel-message-body { color: #c8d5d1; font-size: var(--text-body); line-height: 1.65; overflow-wrap: anywhere; }
+.channel-message-body > :first-child { margin-top: 0; }
+.channel-message-body > :last-child { margin-bottom: 0; }
+.channel-message-body p, .channel-message-body ul, .channel-message-body ol, .channel-message-body pre, .channel-message-body blockquote { margin: 10px 0; }
 .channel-message-body h1, .channel-message-body h2, .channel-message-body h3, .channel-message-body h4 { margin: 20px 0 8px; color: #dce7e2; font-size: var(--text-xl); }
 .channel-message-body ul, .channel-message-body ol { padding-left: 22px; }
 .channel-message-body a, .channel-activity a { color: #73c9c9; }
@@ -247,9 +272,9 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
   .channel-heading p { font-size: var(--text-xs); }
   .channel-panel-toggle { padding-inline: 7px; font-size: var(--text-xs); }
   .channel-message { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding-inline: 8px; }
+  .channel-working { padding-left: 48px; }
   .channel-timeline-scroll { padding-inline: 8px; }
   .channel-avatar { width: 28px; height: 28px; font-size: var(--text-xs); }
-  .channel-inline-state { flex-basis: 100%; margin-left: 0; }
   .channel-date { margin-inline: 10px; }
   .channel-connection-note { padding-inline: 12px; }
   .channel-content > .connection-alert { display: block; font-size: var(--text-xs); }
@@ -320,13 +345,13 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
 }
 
 /* Channel messages: mentions, hover toolbar and details popover. */
-.channel-mentions { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0; font-size: var(--text-body); line-height: 1.65; }
+.channel-mentions { display: inline-flex; flex-wrap: wrap; gap: 4px; font-size: var(--text-xs); line-height: 18px; }
 .channel-mention { padding: 0 4px; color: #9adcd6; border-radius: 4px; background: rgba(75, 188, 177, .14); font-weight: 550; overflow-wrap: anywhere; }
 .channel-message-actions { position: absolute; z-index: 2; top: 8px; right: 16px; display: flex; align-items: center; gap: 2px; padding: 2px;
   border: 1px solid #2e4143; border-radius: 7px; background: #142022; box-shadow: 0 4px 14px #0006; opacity: 0; transition: opacity .12s ease; }
 .channel-message:hover .channel-message-actions, .channel-message:focus-within .channel-message-actions, .channel-message-actions:has(details[open]) { opacity: 1; }
 .channel-message-actions > button, .channel-technical summary { height: 24px; display: flex; align-items: center; padding: 0 8px; color: #9fc9c6;
-  border: 0; border-radius: 5px; background: transparent; font-size: var(--text-xs); }
+  border: 0; border-radius: 5px; background: transparent; font-size: var(--text-xs); white-space: nowrap; }
 .channel-message-actions > button:hover:not(:disabled), .channel-technical summary:hover { color: #d6f1ee; background: #1e3033; }
 .channel-technical { position: relative; }
 .channel-technical summary { cursor: pointer; list-style: none; }
@@ -408,7 +433,10 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
   .channel-composer-hint { display: none; }
 }
 @media (max-width: 700px), (hover: none) {
-  .channel-message-actions { position: static; justify-content: flex-start; margin-top: 4px; padding: 0; border: 0; background: transparent; box-shadow: none; opacity: 1; }
+  .channel-message-actions { position: static; justify-content: flex-start; flex-wrap: wrap; margin: 2px 0 0 -6px; padding: 0; border: 0; background: transparent; box-shadow: none; opacity: 1; }
+  .channel-message-actions > button, .channel-technical summary { padding-inline: 6px; color: #7f9e9b; }
+  .channel-message.mine .channel-message-actions { justify-content: flex-end; margin: 2px -6px 0 0; }
+  .channel-message.mine .channel-technical dl { right: 0; left: auto; }
   .channel-member-actions > .channel-member-remove { opacity: 1; }
 }
 

@@ -3,8 +3,8 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
 import {
-  channelDateKey, channelDeliveryLabel, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
-  channelPetSession, channelRoutingSkipLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession,
+  channelDateKey, channelDeliveryLabel, channelParticipantId, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
+  channelPetSession, channelRoutingSkipLabel, channelWorkingLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession, type ChannelWorking,
 } from './channelData';
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
@@ -79,10 +79,12 @@ type TimelineProps = {
   deliveries?: ChannelDelivery[];
   routingSkips?: ChannelRoutingSkip[];
   sessions?: ChannelSession[]; onViewSession?: (session: ChannelSession) => void;
+  /** Pet members running a turn in this Channel now. */
+  working?: ChannelWorking[];
 };
 
 export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
-  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession }: TimelineProps) {
+  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession, working = [] }: TimelineProps) {
   const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const byId = new Map(messages.map(item => [item.messageId, item]));
@@ -100,32 +102,37 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
     const session = item.author.kind === 'pet' ? channelPetSession(item.author.id, sessions) : undefined;
     // Inline @ links already show in the body; only list addressed members the body does not show.
     const inline = channelInlineMentionIds(item.body);
-    const extraMentions = item.mentions.filter(mention => !inline.has(mention.participantId));
+    // An addressed member with a known delivery shows once, as that delivery's state.
+    const delivered = outcomes.filter(delivery => delivery.participantId);
+    const listedMentions = item.mentions.filter(mention => !inline.has(mention.participantId)
+      && !delivered.some(delivery => delivery.participantId === mention.participantId));
     return <React.Fragment key={item.messageId}>{separator}<article id={'message-' + item.messageId} tabIndex={-1}
-      className={'channel-message' + (grouped ? ' grouped' : '') + (highlighted === item.messageId ? ' located' : '')}
+      className={'channel-message ' + (channelParticipantId(item.author) === viewerParticipantId ? 'mine' : item.author.kind) + (grouped ? ' grouped' : '') + (highlighted === item.messageId ? ' located' : '')}
       data-message-id={item.messageId} aria-label={identity.name + ' at ' + date.toLocaleTimeString()}>
       <div className={'channel-avatar ' + item.author.kind} aria-hidden="true">{grouped ? '' : avatar}</div>
       <div className="channel-message-content">
         <div className="channel-message-head">{!grouped && <><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">Removed Pet</span>}</>}
           <time dateTime={item.occurredAt} title={date.toLocaleString()}>{date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
-          {outcomes.filter(delivery => delivery.participantId).map(delivery => <span key={delivery.participantId} className={'channel-inline-state ' + delivery.state}
+          {listedMentions.length > 0 && <span className="channel-mentions" aria-label="Addressed participants">{listedMentions.map((mention, mentionIndex) =>
+            <span className="channel-mention" key={mentionIndex}>@{channelMentionLabel(mention, members, viewerParticipantId)}</span>)}</span>}
+          {delivered.map(delivery => <span key={delivery.participantId} className={'channel-inline-state ' + delivery.state}
             title={delivery.reason}>
-            {channelMentionLabel({ participantId: delivery.participantId! }, members, viewerParticipantId)} · {channelDeliveryLabel(delivery)}</span>)}
+            {`@${channelMentionLabel({ participantId: delivery.participantId! }, members, viewerParticipantId)} · ${channelDeliveryLabel(delivery)}`}</span>)}
           {skipped && <span className="channel-inline-state skipped" title={skipped.detail}>{channelRoutingSkipLabel(skipped)}</span>}
         </div>
+        <div className="channel-bubble">
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
-        {extraMentions.length > 0 && <div className="channel-mentions" aria-label="Addressed participants">{extraMentions.map((mention, mentionIndex) =>
-          <span className="channel-mention" key={mentionIndex}>@{channelMentionLabel(mention, members, viewerParticipantId)}</span>)}</div>}
         <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} />
-        {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
-          <p className="channel-record-error" role="alert" key={failureIndex}>
-            {delivery.participantId ? `${channelMentionLabel({ participantId: delivery.participantId }, members, viewerParticipantId)}: ` : 'Mentions were not delivered: '}{delivery.error ?? 'Delivery failed.'}</p>)}
         {item.artifacts.map((artifact, artifactIndex) => <div className="channel-artifact" key={artifactIndex}>
           {/^https?:\/\//i.test(artifact.uri) ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label ?? artifact.uri}</a> : <code>{artifact.label ?? artifact.uri}</code>}
           {artifact.version && <span> · {artifact.version}</span>}
         </div>)}
+        </div>
+        {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
+          <p className="channel-record-error" role="alert" key={failureIndex}>
+            {delivery.participantId ? `${channelMentionLabel({ participantId: delivery.participantId }, members, viewerParticipantId)}: ` : 'Mentions were not delivered: '}{delivery.error ?? 'Delivery failed.'}</p>)}
         <div className="channel-message-actions" role="toolbar" aria-label={'Message from ' + identity.name}>
           <button type="button" disabled={pending} aria-label={'Reply to ' + identity.name} onClick={() => onReply(item)}>Reply</button>
           {session && onViewSession && <button type="button" disabled={!connected} aria-label={`View ${identity.name} session`} onClick={() => onViewSession(session)}>Session</button>}
@@ -138,5 +145,8 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
         </div>
       </div>
     </article></React.Fragment>;
-  })}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
+  })}{working.length > 0 && <div className="channel-working" role="status">
+    <span className="channel-working-dots" aria-hidden="true"><i /><i /><i /></span>
+    <span>{channelWorkingLabel(working, members, viewerParticipantId)}</span>
+  </div>}</div>{viewer && <ChannelMessageViewer {...viewer} onClose={closeViewer} />}</>;
 }

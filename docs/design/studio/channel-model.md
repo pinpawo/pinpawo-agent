@@ -95,9 +95,14 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 - **@ 没有特殊路径。** Pet @ 其他成员（人或 Pet）和人 @ 成员完全一样：一条带 mentions 的消息写入 Channel，
   再由 Channel 统一的 mention 机制投递。不为 Pet 做任何特殊处理。
 - **过程不存，成员也不看过程。** Pet 的 operation（工具执行等）、subagent 消息和运行状态（排队、运行、等待审批、失败）
-  不写进 Channel，Channel 成员只能看到主对话的公开消息。持本机 token 的人仍可通过 `channel_sessions` 找到 session，
+  不写进 Channel，Channel 成员只能看到主对话的公开消息（和下面的"正在输入"）。持本机 token 的人仍可通过 `channel_sessions` 找到 session，
   用已有的 Pet session 视图（`PetSessionView`，`/pet-sessions/snapshot|events|review`，#925）查看过程并处理审批；
   这属于全局 Studio API，不是 Channel 成员权限。
+- **正在输入是在场状态，不是过程。** Pet 在本 Channel 的 run 处于 running 时，所有成员都能看到它"正在输入"；
+  排队、等待审批、结束都不算。Channel 从 Host 的 dispatch 生命周期（`scope:{namespace:'channel'}`）在内存里维护这一状态，
+  不落库、不写进时间线；`GET /channels/context` 返回 `working: [{participantId, since}]`（只含当前成员），
+  变化时发布 `channel.working {channelId, participantId, working}`。Host 重启时 run 本来也会结束，内存从空开始即可。
+  `channel_read_context`（Pet 视角）不带这一项。
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
   没有 @ 的消息只写入 Channel，不派发给任何 Pet，单 Pet 的 Channel 也一样；`replyTo` 本身不算 @（Console 的回复会预填原作者的 @，删掉就不会唤醒）。
   Channel 没有默认或兜底 Pet。Pet 只在下次被 @ 或被 schedule / trigger 唤醒时，通过 `channel_read_context` 读到这些消息。
@@ -110,7 +115,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 
 ## 事件
 
-Channel 只向 Studio 的全局事件总线发布事件（新消息、投递结果、成员变化）。事件和成员关系没有关联：
+Channel 只向 Studio 的全局事件总线发布事件（新消息、投递结果、成员变化、Pet 正在输入）。事件和成员关系没有关联：
 谁能收到、怎么消费，由暴露事件的 Plugin（例如 `studio-http`）决定，Channel 不做按成员过滤的事件流。
 
 ## schedule / trigger

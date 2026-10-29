@@ -1,6 +1,6 @@
 # Session Artifacts
 
-状态：draft，2026-10-29。第一阶段：显式发布、文件引用、按需下载。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
+状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
 
 ## 需求
 
@@ -20,7 +20,8 @@
 1. 显式发布：`publish_artifact` 把文件写进存储，返回稳定引用。
 2. 交付物引用：工具结果声明交付物，核心把它收进委派的执行记录。
 3. 按需下载：Agent 自己决定何时把引用下载到本地，再用现有文件工具读取。
-4. 人通过 HTTP 打开引用。
+4. 交付物跟着这次 run 的最终回复走，作为公开消息的结构化字段到达 Channel 和 Console。
+5. 人通过 HTTP 打开引用。
 
 不做（见[后续](#后续artifacts-管理)）：从引用反查归属、统一删除、保留策略、孤儿文件清理。
 
@@ -38,17 +39,21 @@
 - **Artifact**：session 显式发布的一个文件快照。Pet 写到 workdir 或临时目录的文件都不算，只有调用 `publish_artifact` 发布的才算。发布时复制一份进存储，源文件之后被改、被删或在 `/tmp` 里被清掉，都不影响已发布的版本。再发布一次得到新的 artifact。
 - **稳定引用**：`artifact://<key>`，长期有效，可以写进消息、交付和文档。`<key>` 本身就能定位存储对象（例如 `<workspaceId>/<threadId>/<artifactId>/<name>`），第一阶段不需要反查索引。
 - **临时下载地址**：由存储按需生成，例如 COS 的签名 URL，有过期时间，只用于这一次下载，不写进消息或上下文。
-- **交付物（deliverable）**：工具结果声明的一条引用 `{ uri, title }`。artifact 是交付物的一种来源，其他工具也可以用同一约定声明交付物，比如创建 PR 后交付 PR 链接。
+- **交付物（Deliverable）**：一次 run 交给请求方的引用 `{ uri, title? }`。由工具声明，由执行记录收集，跟着这次 run 的最终回复走。artifact 是交付物的一种来源，其他工具也可以用同一约定声明交付物，比如创建 PR 后交付 PR 链接。
+  - 和 `resultReferences` 分开：`resultReferences` 是执行证据的文本，供详情展示；Deliverable 是可以打开的引用。
+  - 各层只原样传递，不从正文推断，也不改写正文。
 
 ## 分层
 
 | 层 | 负责 |
 |---|---|
-| agent-contracts | `ArtifactRef`、`artifact://` 解析；工具结果里 `deliverables` 的 schema |
+| agent-contracts | `Deliverable` 类型与工具结果里 `deliverables` 的 schema；`ArtifactRef`、`artifact://` 解析 |
 | pet-agent 核心 | 在工具结果产生时收集 `deliverables`，写进 `delegate_capability` 的执行记录。不认识 artifact store。 |
 | artifacts Toolkit（独立包，如 `toolkits/artifacts`） | `ArtifactStore` 与 `ArtifactSourceReader` 两个 port；`publish_artifact` / `list_artifacts` / `download_artifact` 三个工具 |
-| Host | 注入 store adapter（local / COS）与 source reader；HTTP 打开引用；可选的 session 产物段落 |
-| 客户端（TUI / Console） | 渲染 `artifact://` 链接与交付物 |
+| Host | 注入 store adapter（local / COS）与 source reader；把本 run 的交付物挂到 `message.completed`；HTTP 打开引用；可选的 session 产物段落 |
+| agent-session 协议 | `message.completed.deliverables` 与 snapshot 里对应字段 |
+| Channel Plugin | 把 Pet 回复事件里的 `deliverables` 原样存进消息 |
+| 客户端（TUI / Console） | 渲染消息的 `deliverables` 与正文里的 `artifact://` 链接 |
 
 ## 交付物约定（agent-contracts + pet-agent）
 
@@ -67,6 +72,23 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 5. 只在 Capability 执行中产生；Entry 和 Supervisor 只调控制类工具。
 
 执行记录变为 `{ status, delivery: { text }, deliverables }`。Supervisor 验收和 Entry 回复时看到的是这份数据，和正文是否写了链接无关。
+
+## 交付物链路
+
+沿用现有的 `resultReferences` 路径：Host 的 `readReplyResultReferences`（`services/host/src/conversation/transcriptProjection.ts`）从回复所属 run 的执行记录取出 delivery，挂到 `message.completed`，再进 snapshot 和 Console。交付物在这条路上多带一个字段：
+
+```text
+工具结果 ToolMessage.artifact.deliverables
+  -> delegate_capability 执行记录 deliverables          （pet-agent，工具结果产生时收集）
+  -> message.completed.deliverables                       （Host readReplyDeliverables）
+  -> Channel 消息 deliverables                            （Channel recordPetMessage 原样存）
+  -> Console / TUI 渲染
+```
+
+- `readReplyDeliverables` 和 `readReplyResultReferences` 用同一个判定：回复所属的 run，执行状态为 `returned`。被 Supervisor 打回、之后重做的那次执行，已发布的文件留在 store 里，但不跟着回复走。
+- 合并本 run 所有 returned 执行的交付物，同一 uri 去重，保持发布顺序。
+- Channel 现有的 `artifacts: [{ uri, label?, version? }]` 改名为 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"。人发的消息也可以带。Console 现有的渲染改用新字段名。
+- 不新增事件、存储表或投影逻辑，每一跳只多一个字段。
 
 ## artifacts Toolkit
 
@@ -131,7 +153,6 @@ Adapter 在 Host 配置里选：
 
 - 从引用反查归属（Pet、session、存储对象）和管理入口。
 - 删除入口、保留策略、失败清理、孤儿文件处理。第一阶段不承诺随 session 删除自动清理。
-- 公开回复是否带结构化交付物（Channel 消息的 `artifacts` 字段），让交付物端到端不依赖 Entry 的回复正文。
 - 是否需要一个通用机制，让 toolkit 按 scope 提供动态上下文。
 
 ## 移除的旧实现
@@ -142,12 +163,13 @@ Adapter 在 Host 配置里选：
 - Host：`FileCapabilityArtifactStore`、`artifact_discovery` Toolkit、`capabilityArtifactRoot`、各处旧 store 注入；TUI 对 `artifact_discovery_context` 信封的解析。
 - 文档：`docs/reference/artifacts/` 移入 history。
 
-Channel 消息的 `artifacts` 字段先保留，等后续决定。`lifecycle.finalize` 删除写入接口后仍可改写 output / messages，是否保留另行决定。
+Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链路](#交付物链路)）。`lifecycle.finalize` 删除写入接口后仍可改写 output / messages，是否保留另行决定。
 
 ## 实现顺序
 
 1. 删除旧 pipeline（一个 PR）。改 prompt 后重跑受影响的 Supervisor eval。
-2. 交付物约定：agent-contracts schema、核心收集、执行记录与 prompt。
-3. artifacts Toolkit 与 Host `local` adapter、source reader。
-4. HTTP 打开引用、Console / TUI 渲染。
-5. `cos` adapter。
+2. 交付物约定：agent-contracts 的 `Deliverable` 与 schema、核心收集、执行记录与 prompt。
+3. 交付物链路：`message.completed.deliverables`、Channel 字段改名、Console / TUI 渲染。
+4. artifacts Toolkit 与 Host `local` adapter、source reader。
+5. HTTP 打开引用。
+6. `cos` adapter。

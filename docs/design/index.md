@@ -19,7 +19,7 @@ See [Reference](../reference/index.md) for the current public reading path.
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery
 - [Session Artifacts](agent-runtime/session-artifacts.md) — draft：第一阶段的显式发布、交付物引用与按需下载；
-  核心收集交付物，artifacts Toolkit 管存储，Host 提供 local / COS adapter
+  交付物随回复到达 Channel，artifacts Toolkit 管存储，Host 提供 local / COS adapter
 - [Review and interrupt semantics](agent-runtime/review.md) — 工具审核策略、执行与恢复
 - Capability / Toolkit 的组合规则见[公共契约](../reference/extensions/capability-toolkit.md)。
 

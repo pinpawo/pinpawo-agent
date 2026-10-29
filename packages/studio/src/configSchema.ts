@@ -50,6 +50,12 @@ export type StudioLocalConfig = {
   plugins?: StudioPluginConfig[];
 
   storage?: StudioStorageSettings;
+
+  /**
+   * Pet 凭据的密钥文件(绝对路径,内容是 32 字节的 base64)。`pinpawo-studio init`
+   * 把它生成在 workdir 外的 Studio 数据目录里;省略时 Pet 凭据锁定。
+   */
+  credentials?: { keyFile: string };
 };
 
 function parseStorage(reader: ConfigReader): StudioStorageSettings | undefined {
@@ -71,6 +77,15 @@ function parseStorage(reader: ConfigReader): StudioStorageSettings | undefined {
     section.fail('postgres storage needs exactly one of "url" and "urlEnv"');
   }
   return url !== undefined ? { kind, url } : { kind, urlEnv: urlEnv! };
+}
+
+function parseCredentials(reader: ConfigReader): { keyFile: string } | undefined {
+  const section = reader.optionalSection('credentials');
+  if (!section) return undefined;
+  for (const field of Object.keys(section.raw)) {
+    if (field !== 'keyFile') section.fail(`"${field}" is not a credentials setting`, field);
+  }
+  return { keyFile: section.requiredString('keyFile') };
 }
 
 function parsePluginConfigs(reader: ConfigReader): StudioPluginConfig[] | undefined {
@@ -123,6 +138,7 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
 
     const plugins = parsePluginConfigs(reader);
     const storage = parseStorage(reader);
+    const credentials = parseCredentials(reader);
 
     return {
       studioId: reader.requiredString('studioId'),
@@ -131,6 +147,7 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
       definitions,
       ...(plugins !== undefined ? { plugins } : {}),
       ...(storage !== undefined ? { storage } : {}),
+      ...(credentials !== undefined ? { credentials } : {}),
     };
   },
 });

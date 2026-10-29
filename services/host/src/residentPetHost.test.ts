@@ -5,6 +5,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { resolvePetCredentialEnvironment } from './host/petCredentials';
 import {
   reduceSession,
   type AgentServerMessage,
@@ -1014,13 +1015,21 @@ test('interactive roots never inherit another dispatch invocation context', asyn
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-interaction-context-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   const seen: unknown[] = [];
+  const credentialInstances: string[] = [];
+  const source = {
+    environment: async (petId: string) => { credentialInstances.push(petId); return {}; },
+  };
   const host = await createResidentPetHost({
     petId: 'interactive-pet', petName: 'Interactive', modelProfiles: createTestModelProfiles(),
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
-    runAgentTurn: async () => { seen.push(readPetInvocationContext()); return { status: 'completed', reply: 'done' }; },
+    runAgentTurn: async () => {
+      seen.push(readPetInvocationContext());
+      await resolvePetCredentialEnvironment(source);
+      return { status: 'completed', reply: 'done' };
+    },
   });
   const connection = peer([]);
   try {
@@ -1030,6 +1039,11 @@ test('interactive roots never inherit another dispatch invocation context', asyn
       assert.equal(readPetInvocationContext()?.petId, 'parent-pet');
     });
     assert.deepEqual(seen, [undefined]);
+    assert.deepEqual(credentialInstances, ['interactive-pet']);
+    await host.interaction.disconnect(connection);
+    await host.resident.dispatch.dispatch({ request: 'headless turn', dispatchId: 'credential-dispatch' });
+    await waitFor(() => credentialInstances.length === 2, 'dispatch did not resolve its credentials');
+    assert.deepEqual(credentialInstances, ['interactive-pet', 'interactive-pet']);
   } finally { await host.close(); }
 });
 

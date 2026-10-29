@@ -35,6 +35,8 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/events',
   '/pets',
   '/pets/rename',
+  '/pet-credentials',
+  '/pet-credentials/remove',
   '/pet-definitions',
   '/me',
   '/pet-sessions/snapshot',
@@ -580,7 +582,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         return await work();
       } catch (error) {
         if (!(error instanceof StudioPetError)) throw error;
-        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404 }[error.code], error.message);
+        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404, locked: 503 }[error.code], error.message);
       }
     };
     app.post('/pets', async (requestContext) => {
@@ -594,9 +596,29 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return requestContext.json({ pet: await petRequest(() => pets().rename(body?.petId, body?.name)) });
     });
     app.get('/pet-definitions', (requestContext) => requestContext.json({ definitions: pets().definitions() }));
+    // Credential values are write-only: reads return names and times.
+    app.get('/pet-credentials', async (requestContext) => {
+      const credentials = pets().credentials;
+      return requestContext.json({
+        unlocked: credentials.unlocked(),
+        credentials: await petRequest(() => credentials.list(requestContext.req.query('petId'))),
+      });
+    });
+    app.post('/pet-credentials', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown; envName?: unknown; value?: unknown } | null;
+      return requestContext.json({
+        credential: await petRequest(() => pets().credentials.set({ petId: body?.petId, envName: body?.envName, value: body?.value })),
+      });
+    });
+    app.post('/pet-credentials/remove', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown; envName?: unknown } | null;
+      return requestContext.json(await petRequest(() => pets().credentials.remove({ petId: body?.petId, envName: body?.envName })));
+    });
     app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
     app.all('/pets/rename', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pet-definitions', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+    app.all('/pet-credentials', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
+    app.all('/pet-credentials/remove', (requestContext) => methodNotAllowed(requestContext, ['POST']));
 
     app.get('/events', (requestContext) => {
       if (eventClients.size >= maxEventClients) {
@@ -723,7 +745,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         return await work();
       } catch (error) {
         if (!(error instanceof StudioClientError)) throw error;
-        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404 }[error.code], error.message);
+        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404, locked: 503 }[error.code], error.message);
       }
     };
     const readClientId = (body: unknown): unknown => (body as { clientId?: unknown } | null)?.clientId;

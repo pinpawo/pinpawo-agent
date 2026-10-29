@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { allocatePetSessionId } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -24,6 +24,7 @@ import { StudioClients } from './clients/studioClients';
 import { KyselyClientStore, type ClientDatabase } from './clients/store/kysely';
 import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
 import { StudioPetError, StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
+import { StudioPetCredentialVault } from './pets/petCredentials';
 import { studioCoreMigrations } from './storage/coreMigrations';
 
 export type CreateStudioInput = {
@@ -37,10 +38,14 @@ export type CreateStudioInput = {
   storage?: StudioStorageConfig;
   /** Model profiles Plugins may call directly. Without them, `models.resolve` throws. */
   models?: StudioModels;
+  /** The Studio's 32-byte credentials key. Without it Pet credentials are locked. */
+  credentialsKey?: Uint8Array;
 };
 
 export type PreparedStudio = {
   studio: Studio;
+  /** Decrypts a Pet's credentials; only for the composing Host, never for Plugins. */
+  credentialSource: PetCredentialSource;
   /** Assemble the Studio's active Pets. Idempotent; activatePlugins runs it first. */
   restorePets: () => Promise<void>;
   /** Start Plugin lifecycles after the composing Host has opened interaction transports. */
@@ -82,9 +87,12 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   let stopped = false;
 
   const lifecycleObservers = new Map<string, () => void>();
+  const petStore = async () => new KyselyPetStore(await openCore<PetDatabase>());
+  const credentials = new StudioPetCredentialVault({ store: petStore, key: input.credentialsKey });
   const registry = new StudioPetRegistry({
     studioId: input.studioId,
-    store: async () => new KyselyPetStore(await openCore<PetDatabase>()),
+    store: petStore,
+    credentials,
     definitions: input.definitions,
     assemble: input.assemblePet,
     onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
@@ -307,7 +315,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     pets: registry,
     shutdown,
   };
-  return { studio, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, credentialSource: credentials.source, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

@@ -27,6 +27,7 @@ test('operator parser accepts connection flags on either side and rejects incomp
     ['pets', 'list', '--agent-url', 'http://localhost/path'],
     ['pets'], ['pets', 'show'], ['pets', 'list', 'a'], ['pets', 'create', 'a', '--name', 'A'],
     ['pets', 'create', 'a', '--definition', 'd'], ['pets', 'rename', 'a'], ['pets', 'archive', 'a'], ['pets', 'list', '--archived'],
+    ['pets', 'set-credential', 'a', '--file', 'v'], ['pets', 'set-credential', 'a', '--env', 'X'], ['pets', 'unset-credential', 'a'],
     ['clients'], ['clients', 'show'], ['clients', 'list', 'a'], ['clients', 'add', 'a'], ['clients', 'add', '--label', 'A'],
     ['clients', 'revoke'], ['clients', 'add-key', 'a', '--label', 'A'],
   ]) assert.throws(() => parseStudioOperatorArgs(args));
@@ -93,6 +94,7 @@ test('operator commands send the existing wire protocol without retries or start
     [['channels', 'sessions', 'c'], '/channels/sessions?channelId=c'],
     [['pets', 'list'], '/pets'],
     [['pets', 'definitions'], '/pet-definitions'], [['queues'], '/dispatch/queues'],
+    [['pets', 'credentials', 'dev-a'], '/pet-credentials?petId=dev-a'],
   ] as [string[], string][]) {
     await run(args);
     assert.equal(seen.at(-1)?.url, path);
@@ -104,6 +106,11 @@ test('operator commands send the existing wire protocol without retries or start
   assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A' }]);
   await run(['pets', 'rename', 'dev-a', '--name', 'Dev']);
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pets/rename', { petId: 'dev-a', name: 'Dev' }]);
+  await writeFile(join(dir, 'token.txt'), 'fake-gh-token\n');
+  await run(['pets', 'set-credential', 'dev-a', '--env', 'GH_TOKEN', '--file', join(dir, 'token.txt')]);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pet-credentials', { petId: 'dev-a', envName: 'GH_TOKEN', value: 'fake-gh-token' }]);
+  await run(['pets', 'unset-credential', 'dev-a', '--env', 'GH_TOKEN']);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pet-credentials/remove', { petId: 'dev-a', envName: 'GH_TOKEN' }]);
   await run(['channels', 'send', 'c', '--file', join(dir, 'body.md'), '--mention', 'pet:reviewer', '--mention', 'pet:reviewer', '--mention', 'human:operator', '--reply-to', 'original']);
   assert.deepEqual(seen.at(-1)?.body, { channelId: 'c', body: '**Hello**\n\n```text\n@label\n```',
     mentions: [{ participantId: 'pet:reviewer' }, { participantId: 'human:operator' }], replyTo: 'original' });

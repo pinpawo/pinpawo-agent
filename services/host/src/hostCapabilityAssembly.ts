@@ -60,9 +60,12 @@ import type {
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
 import { FileSaver } from './fileSaver';
+import type { PetCredentialSource } from './host/petCredentials';
 
 export type HostCapabilityAssemblyOptions = {
   runtimeConfig: HostRuntimeConfig;
+  /** Optional instance credential source for all ShellRS-backed Toolkits. */
+  credentialSource?: PetCredentialSource;
   /** Distinguishes plugin toolkit source label for diagnostics. */
   sourceId: string;
   /** Host-owned checkpoint root. Independent hosts must not share a writer root. */
@@ -151,7 +154,9 @@ export class HostCapabilityAssembly {
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.
     // Files and web run in the Host process and need no RS.
-    const shell = this.rsInstances.add('shell', new ShellRSClient());
+    const shell = this.rsInstances.add('shell', new ShellRSClient({
+      credentialSource: options.credentialSource,
+    }));
     // BrowserRS also runs only in the RS service, which holds the one
     // extension bridge for every Host (#862).
     const browser = browserSelected

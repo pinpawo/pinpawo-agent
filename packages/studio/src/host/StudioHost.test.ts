@@ -100,6 +100,7 @@ function result(studio: Studio): BuildStudioResult {
     plugins: [],
     residentPets: new Map(),
     residentPetInteractions: new Map(),
+    credentialSource: { environment: async () => ({}) },
     activatePlugins: async () => undefined,
   };
 }

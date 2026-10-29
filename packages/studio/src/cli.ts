@@ -36,7 +36,8 @@ Options:
   -h, --help             display help
 
 Init creates the shipped Studio configuration and Pet Capabilities in the
-selected workdir, and initial Wiki files in a separate Studio data directory.
+selected workdir, and initial Wiki files and the Pet credentials key in a
+separate Studio data directory.
 It does not overwrite existing files.
 Tmux connects to an existing Host and builds a tiled TUI for its Pets. Console
 starts the separately served Studio Console Web when needed, then opens it in
@@ -220,7 +221,7 @@ export async function runStudioHostCli(
   if (parsed.command === 'init') {
     const result = await (handlers.initWorkdir ?? initStudioWorkdir)(parsed.options);
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(
-      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\nWiki: ${result.wikiDirectory}\n`,
+      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\nWiki: ${result.wikiDirectory}\nCredentials key: ${result.credentialsKeyFile}\n`,
     );
     return;
   }

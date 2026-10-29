@@ -16,6 +16,7 @@ import {
   type HostExecutionConfig,
   type LocalModelProfileRegistry,
   type PetConfig,
+  type PetCredentialSource,
   type ResidentPetHost,
   type ResidentPetInteraction,
 } from 'pinpawo/host-runtime';
@@ -23,6 +24,7 @@ import { loadPetConfigs } from 'pinpawo/host-runtime';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
+import { readStudioCredentialsKey } from './credentialsKey';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -71,6 +73,8 @@ export type ResolveStudioHostConfigInput = {
 
 export type BuildStudioResult = {
   studio: Studio;
+  /** Decrypts the running Pet's credentials for its commands; the Host's ShellRS uses it. */
+  credentialSource: PetCredentialSource;
   resolved: ResolvedStudio;
   /** 已装配的插件,按配置顺序。 */
   plugins: StudioPlugin[];
@@ -271,6 +275,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     assemblePet,
     plugins,
     storage: resolveStudioStorage(studioConfig.storage, input.configuration.workdir),
+    ...(studioConfig.credentials
+      ? { credentialsKey: await readStudioCredentialsKey(studioConfig.credentials.keyFile) }
+      : {}),
     models: {
       resolve: (profileId?: string) => {
         const config = input.modelProfiles.resolve(profileId);
@@ -295,6 +302,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   return {
     studio: prepared.studio,
+    credentialSource: prepared.credentialSource,
     resolved,
     plugins,
     residentPets,

@@ -20,6 +20,9 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
   pinpawo-studio pets definitions
   pinpawo-studio pets create <petId> --definition <definitionId> --name <name>
   pinpawo-studio pets rename <petId> --name <name>
+  pinpawo-studio pets credentials <petId>
+  pinpawo-studio pets set-credential <petId> --env <NAME> --file <value|->
+  pinpawo-studio pets unset-credential <petId> --env <NAME>
   pinpawo-studio queues
   pinpawo-studio snapshot <petId> [--full]
   pinpawo-studio events <petId> [--seconds N]
@@ -44,6 +47,10 @@ A Pet is one instance of a definition: create gives it a fixed petId that work
 is addressed to and a display name that can change; several Pets may share one
 definition. Archiving stops new work, lets a running turn finish and keeps the
 Pet's history.
+A Pet's credentials are environment variables its own shell, git and gh
+commands receive; other Pets never see them. Values are write-only (credentials
+lists names); set-credential reads the value from --file or stdin, so it stays
+out of shell history. They need the credentials key that init creates.
 A client key reaches channels commands, as the member human:<clientId>, and
 pets list; everything else needs the local Host token. clients add and add-key print the
 new key once; only its hash is stored. Revoking a client stops all its keys.
@@ -71,6 +78,7 @@ export type StudioOperatorOptions = {
   label?: string;
   definition?: string;
   name?: string;
+  env?: string;
   pets: string[];
   member?: { kind: 'human' | 'pet'; id: string };
   idempotencyKey?: string;
@@ -112,6 +120,8 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     }
     if (action === 'create') { allowed.add('--definition'); allowed.add('--name'); }
     if (action === 'rename') allowed.add('--name');
+    if (action === 'set-credential' || action === 'unset-credential') allowed.add('--env');
+    if (action === 'set-credential') allowed.add('--file');
   }
   if (command === 'channels') {
     if (!CHANNEL_ACTIONS.includes(action ?? '')) {
@@ -163,7 +173,9 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   if (command === 'clients' && action === 'add' && !values.has('--label')) throw new Error('--label is required.');
   if (command === 'pets' && action === 'create' && !values.has('--definition')) throw new Error('--definition is required.');
   if (command === 'pets' && (action === 'create' || action === 'rename') && !values.has('--name')) throw new Error('--name is required.');
-  if ((command === 'dispatch' || command === 'send' || (command === 'channels' && action === 'send')) && !values.has('--file')) {
+  if (command === 'pets' && (action === 'set-credential' || action === 'unset-credential') && !values.has('--env')) throw new Error('--env is required.');
+  if ((command === 'dispatch' || command === 'send' || (command === 'channels' && action === 'send')
+    || (command === 'pets' && action === 'set-credential')) && !values.has('--file')) {
     throw new Error('--file is required (use - for stdin).');
   }
   if (command === 'channels' && action === 'create' && !values.has('--title')) throw new Error('--title is required.');
@@ -188,14 +200,14 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
     title: values.get('--title'), description: values.get('--description'), pets: [...new Set(pets)],
-    label: values.get('--label'), definition: values.get('--definition'), name: values.get('--name'),
+    label: values.get('--label'), definition: values.get('--definition'), name: values.get('--name'), env: values.get('--env'),
     ...(values.has('--member') ? { member: memberRef(values.get('--member')!) } : {}),
   };
 }
 
 const CHANNEL_ACTIONS = ['list', 'create', 'read', 'send', 'members', 'add-member', 'remove-member', 'sessions'];
 const CLIENT_ACTIONS = ['list', 'add', 'add-key', 'revoke'];
-const PET_ACTIONS = ['list', 'definitions', 'create', 'rename'];
+const PET_ACTIONS = ['list', 'definitions', 'create', 'rename', 'credentials', 'set-credential', 'unset-credential'];
 
 /** A participantId names one member: its kind and its URI-encoded id. */
 function memberRef(participantId: string): { kind: 'human' | 'pet'; id: string } {
@@ -239,9 +251,13 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
     if (action === 'add') body = { clientId: id, label: options.label };
     else if (action !== 'list') body = { clientId: id };
   } else if (command === 'pets') {
-    route = { list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename' }[action!]!;
+    route = {
+      list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename',
+      credentials: '/pet-credentials', 'set-credential': '/pet-credentials', 'unset-credential': '/pet-credentials/remove',
+    }[action!]!;
     if (action === 'create') body = { petId: id, definitionId: options.definition, name: options.name };
     else if (action === 'rename') body = { petId: id, name: options.name };
+    else if (action === 'unset-credential') body = { petId: id, envName: options.env };
   } else if (['snapshot', 'events', 'send'].includes(command)) {
     base = options.agentUrl;
     route = `/agent-session/pets/${encodeURIComponent(id!)}/${command === 'send' ? 'messages' : command}`;
@@ -251,6 +267,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (options.before !== undefined) url.searchParams.set('before', String(options.before));
   if (options.limit !== undefined) url.searchParams.set('limit', String(options.limit));
   if (command === 'channels' && id && ['read', 'members', 'sessions'].includes(action!)) url.searchParams.set('channelId', id);
+  if (command === 'pets' && action === 'credentials') url.searchParams.set('petId', id!);
   if (command === 'channels' && action === 'create') {
     body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: options.pets };
   } else if (action === 'add-member' || action === 'remove-member') {
@@ -261,6 +278,9 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
     if (command === 'channels') {
       body = { channelId: id, body: text, mentions: options.mentions.map(participantId => ({ participantId })),
         ...(options.replyTo ? { replyTo: options.replyTo } : {}) };
+    } else if (command === 'pets') {
+      // Exactly the value: drop one trailing newline that a file or `echo` adds.
+      body = { petId: id, envName: options.env, value: text.replace(/\r?\n$/, '') };
     } else if (command === 'dispatch') {
       body = { petId: id, request: text, idempotencyKey: options.idempotencyKey ?? randomUUID() };
     } else {

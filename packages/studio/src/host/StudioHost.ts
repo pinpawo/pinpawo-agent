@@ -76,6 +76,13 @@ export class StudioHost {
     this.caps = options.capabilityAssembly ?? new HostCapabilityAssembly({
       runtimeConfig,
       sourceId: 'studio-host',
+      // The Studio is built after the assembly; commands only run once it is.
+      credentialSource: {
+        environment: async (petId) => {
+          if (!this.studio) throw new Error('Studio is not running.');
+          return this.studio.credentialSource.environment(petId);
+        },
+      },
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
       includeBrowser: false,

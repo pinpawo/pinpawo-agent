@@ -1,3 +1,11 @@
+/** One credential of a Pet; the value is stored only as an encrypted envelope. */
+export type PetCredentialRow = {
+  petId: string;
+  envName: string;
+  encryptedValue: string;
+  updatedAt: string;
+};
+
 export type PetRow = {
   petId: string;
   definitionId: string;
@@ -20,4 +28,10 @@ export interface PetStore {
   /** In creation order. */
   listPets(): Promise<PetRow[]>;
   renamePet(petId: string, name: string): Promise<void>;
+  /** By variable name. */
+  listCredentials(petId: string): Promise<PetCredentialRow[]>;
+  /** Inserts or replaces one variable. */
+  setCredential(row: PetCredentialRow): Promise<void>;
+  /** Returns false when the variable was not set. */
+  deleteCredential(petId: string, envName: string): Promise<boolean>;
 }

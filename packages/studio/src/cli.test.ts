@@ -102,7 +102,7 @@ test('Studio CLI initializes a workdir without starting a Host', async () => {
     runHost: () => assert.fail('init must not start a Host'),
     initWorkdir: async ({ workdir }) => {
       received = workdir;
-      return { workdir, files: ['.pinpawo/studio.json'], wikiDirectory: '/tmp/studio-data/wiki' };
+      return { workdir, files: ['.pinpawo/studio.json'], wikiDirectory: '/tmp/studio-data/wiki', credentialsKeyFile: '/tmp/studio-data/credentials.key' };
     },
     writeOutput: (text) => { output += text; },
   });

@@ -82,6 +82,7 @@ CREATE TABLE studio_pets (
 - Channel 沿用现有形状：`channel_sessions(channel_id, pet_id) → session_id`，每对 (Channel, Pet) 一个专用 Session。
   一个 Pet 加入多个 Channel，各有各的 Session，不合并上下文。
 - RS 资源仍按 Agent Session 管理，不改成按实例。实例级共享资源以后单独设计。
+- Pet 可以有自己的凭据（命令的环境变量），存在 Studio core，见 [Pet 凭据](pet-credentials.md)。
 
 ## 寻址
 
@@ -105,6 +106,7 @@ type StudioPets = {
   definitions: () => StudioPetDefinition[];
   create: (input: { petId: string; definitionId: string; name: string }) => Promise<StudioPet>;
   rename: (petId: string, name: string) => Promise<StudioPet>;
+  credentials: StudioPetCredentials; // 见 pet-credentials.md
 };
 type StudioPet = { petId: string; definitionId: string; name: string; createdAt: string };
 ```

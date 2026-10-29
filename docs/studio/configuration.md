@@ -41,6 +41,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
 | `plugins[].id` | When a Plugin is listed | Installed Plugin package name resolved by `StudioPluginResolver`. |
 | `plugins[].options` | No | Opaque object passed to that Plugin resolver. |
 | `storage` | No | Where Plugins keep data. Default `{ "kind": "sqlite", "path": ".pinpawo/studio/studio.sqlite" }` (path relative to the workdir). Postgres: `{ "kind": "postgres", "urlEnv": "PINPAWO_STUDIO_DATABASE_URL" }` or `{ "kind": "postgres", "url": "postgres://…" }`. See [Studio storage](../design/studio/storage.md). |
+| `credentials` | No | `{ "keyFile": "/abs/path/credentials.key" }`: the key (32 bytes, base64, mode 0600) that encrypts Pet credentials. `pinpawo-studio init` creates it in the Studio data directory. Without it Pet credentials are locked. See [Pet credentials](../design/studio/pet-credentials.md). |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
 is not listed, or a referenced pet file that is missing. A configured Plugin

@@ -6,10 +6,11 @@ import type {
   StudioPetRuntime,
 } from '../types';
 import type { PetRow, PetStore } from './store/petStore';
+import type { StudioPetCredentials } from './petCredentials';
 
 /** Thrown for a request that names an unknown Pet or breaks a Pet rule. */
 export class StudioPetError extends Error {
-  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found') {
+  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found' | 'locked') {
     super(message);
     this.name = 'StudioPetError';
   }
@@ -25,6 +26,8 @@ export type StudioPets = {
   /** Record a new Pet and assemble its runtime; it takes work as soon as this resolves. */
   create: (input: { petId: unknown; definitionId: unknown; name: unknown }) => Promise<StudioPet>;
   rename: (petId: unknown, name: unknown) => Promise<StudioPet>;
+  /** Each Pet's own environment variables for its commands; values are write-only. */
+  credentials: StudioPetCredentials;
 };
 
 /** A live Pet: its registration and the runtime ports the Host lent Studio. */
@@ -67,10 +70,12 @@ export class StudioPetRegistry implements StudioPets {
   private changes: Promise<unknown> = Promise.resolve();
   private restored: Promise<void> | null = null;
   private closed = false;
+  readonly credentials: StudioPetCredentials;
 
   constructor(private readonly options: {
     studioId: string;
     store: () => Promise<PetStore>;
+    credentials: StudioPetCredentials;
     definitions: readonly StudioPetDefinition[];
     assemble: StudioPetAssembler;
     /** A Pet became live (restored or created). */
@@ -88,6 +93,7 @@ export class StudioPetRegistry implements StudioPets {
       definitions.set(definition.definitionId, { ...definition });
     }
     this.definitionsById = definitions;
+    this.credentials = options.credentials;
   }
 
   /** The live Pet with this id. */

@@ -58,7 +58,9 @@ interface PetCredentialSource {
 - ShellRSClient 每次 `exec` 前取当前 Pet 的变量，只加到这一次请求的 `env`，同名时覆盖 Toolkit 给的值。
   不改 Host 全局环境，不缓存；改了值，之后启动的命令拿到新值，已经在跑的进程不变。
 - 没有活跃的 Pet turn、取值失败或解密失败时，命令不启动；错误不带原因，避免把值带进日志。
-- Studio Host 自己组合这个 source，不对外开注入口。Chat Host 不配置 source，行为不变。
+- Studio Host 在 `HostCapabilityAssembly.init({credentialSource})` 时把 source 交给装配，默认装配和调用者传入的装配
+  走同一条路，不会出现“命令照跑、却只带 Host 环境”的情况；同一装配再次 init 换了 source 会报错。
+  不对外开其他注入口。Chat Host 不传 source，行为不变。
 
 边界：这是进程环境注入，**不是沙箱**。shell 可以打印自己的环境变量，命令输出不做脱敏；
 同一用户的文件和进程访问也不在隔离范围内。Host 和 RS 服务自身的全局环境照旧继承，
@@ -81,7 +83,7 @@ type StudioPetCredentials = {
   `POST /pet-credentials {petId, envName, value}`；`POST /pet-credentials/remove {petId, envName}`。
   错误码：参数不合法 400，Pet 不存在 404，锁定 503。
 - CLI：`pinpawo-studio pets credentials <petId>`、`pets set-credential <petId> --env <NAME> --file <value|->`
-  （值从文件或 stdin 读，不进 shell 历史）、`pets unset-credential <petId> --env <NAME>`。
+  （值从文件或 stdin 原样读入，包括末尾换行，不做任何修改；不进 shell 历史）、`pets unset-credential <petId> --env <NAME>`。
 - Console 管理页随 #1015 第三阶段（Pet 管理页）一起做。
 
 ## 不做

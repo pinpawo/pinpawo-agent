@@ -332,3 +332,20 @@ test('StudioHost claims writer ownership before resolving executable extensions'
   ]);
   await host.shutdown();
 });
+
+test('a supplied capability assembly receives the Studio Pets\' credentials at init', async () => {
+  let source: HostCapabilityAssemblyInitOptions['credentialSource'];
+  const built = result(fakeStudio(() => undefined));
+  built.credentialSource = { environment: async (petId) => ({ PET: petId }) };
+  const host = new StudioHost({
+    capabilityAssembly: fakeCapabilityAssembly([], { onInit: (input) => { source = input.credentialSource; } }),
+    resolveStudioHostConfig: async () => configuration(),
+    buildStudio: async () => built,
+  });
+  try {
+    await host.init();
+    assert.ok(source, 'the assembly was given the Studio source');
+    assert.deepEqual(await source.environment('dev-a'), { PET: 'dev-a' });
+  } finally { await host.shutdown(); }
+  await assert.rejects(source!.environment('dev-a'), /not running/);
+});

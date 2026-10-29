@@ -74,9 +74,9 @@ test('real graph review/resume injects the running Pet\'s credential only at She
       handlers: [createShellRSServiceHandler(new PosixShellRS())], log: () => {}, });
     t.after(() => service.stop());
     const shell = new ShellRSClient({
-      credentialSource: {
+      credentialSource: () => ({
         environment: async petId => { resolvedInstances.push(petId); return source.environment(petId); },
-      },
+      }),
       connect: () => RSServiceConnection.open({ paths, token: rsToken,
         rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION } }),
     });

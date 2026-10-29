@@ -40,8 +40,12 @@ function hostEnvironment(): Record<string, string> {
 
 export type ShellRSClientOptions = Readonly<{
   paths?: RSServicePaths;
-  /** Trusted Host source; resolved per exec, never from tool arguments. */
-  credentialSource?: PetCredentialSource;
+  /**
+   * The Host's Pet credentials, read at each exec (the Host supplies them when it
+   * initializes). While set, commands run only inside a Pet turn and receive that
+   * Pet's variables; never selected by tool arguments.
+   */
+  credentialSource?: () => PetCredentialSource | undefined;
   /** How to reach the service; defaults to starting it when none runs. */
   connect?: () => Promise<RSServiceConnection>;
   /** Overridable so the Windows path can be tested anywhere. */
@@ -82,10 +86,10 @@ export class ShellRSClient implements ShellRS {
   readonly version = SHELL_RS_VERSION;
 
   private readonly transport: RSContractClient;
-  private readonly credentialSource: PetCredentialSource | undefined;
+  private readonly credentialSource: () => PetCredentialSource | undefined;
 
   constructor(options: ShellRSClientOptions = {}) {
-    this.credentialSource = options.credentialSource;
+    this.credentialSource = options.credentialSource ?? (() => undefined);
     const platform = options.platform ?? process.platform;
     this.transport = new RSContractClient({
       rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
@@ -114,8 +118,9 @@ export class ShellRSClient implements ShellRS {
   async exec(agentSessionId: string, request: ShellExecRequest): Promise<ShellExecResult> {
     const { signal, ...rest } = request;
     if (signal?.aborted) return { status: 'aborted', stdout: '', stderr: '' };
-    const credentialEnv = this.credentialSource
-      ? await resolvePetCredentialEnvironment(this.credentialSource)
+    const credentialSource = this.credentialSource();
+    const credentialEnv = credentialSource
+      ? await resolvePetCredentialEnvironment(credentialSource)
       : undefined;
     const result = await this.transport.call(
       'exec',

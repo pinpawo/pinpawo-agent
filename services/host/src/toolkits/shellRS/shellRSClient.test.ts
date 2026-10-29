@@ -40,7 +40,7 @@ async function setup(t: TestContext) {
   // A "Host": its own client of the shared service.
   const host = (credentialSource?: PetCredentialSource) => {
     const rs = new ShellRSClient({
-      credentialSource,
+      credentialSource: () => credentialSource,
       connect: async () => await RSServiceConnection.open({
         paths,
         token,

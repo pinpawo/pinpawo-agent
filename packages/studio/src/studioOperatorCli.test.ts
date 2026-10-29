@@ -108,7 +108,7 @@ test('operator commands send the existing wire protocol without retries or start
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pets/rename', { petId: 'dev-a', name: 'Dev' }]);
   await writeFile(join(dir, 'token.txt'), 'fake-gh-token\n');
   await run(['pets', 'set-credential', 'dev-a', '--env', 'GH_TOKEN', '--file', join(dir, 'token.txt')]);
-  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pet-credentials', { petId: 'dev-a', envName: 'GH_TOKEN', value: 'fake-gh-token' }]);
+  assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pet-credentials', { petId: 'dev-a', envName: 'GH_TOKEN', value: 'fake-gh-token\n' }]);
   await run(['pets', 'unset-credential', 'dev-a', '--env', 'GH_TOKEN']);
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pet-credentials/remove', { petId: 'dev-a', envName: 'GH_TOKEN' }]);
   await run(['channels', 'send', 'c', '--file', join(dir, 'body.md'), '--mention', 'pet:reviewer', '--mention', 'pet:reviewer', '--mention', 'human:operator', '--reply-to', 'original']);

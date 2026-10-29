@@ -49,8 +49,9 @@ definition. Archiving stops new work, lets a running turn finish and keeps the
 Pet's history.
 A Pet's credentials are environment variables its own shell, git and gh
 commands receive; other Pets never see them. Values are write-only (credentials
-lists names); set-credential reads the value from --file or stdin, so it stays
-out of shell history. They need the credentials key that init creates.
+lists names); set-credential stores the --file or stdin content exactly as read
+(a trailing newline included; use printf '%s' for a bare token), so the value
+stays out of shell history. They need the credentials key that init creates.
 A client key reaches channels commands, as the member human:<clientId>, and
 pets list; everything else needs the local Host token. clients add and add-key print the
 new key once; only its hash is stored. Revoking a client stops all its keys.
@@ -279,8 +280,8 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
       body = { channelId: id, body: text, mentions: options.mentions.map(participantId => ({ participantId })),
         ...(options.replyTo ? { replyTo: options.replyTo } : {}) };
     } else if (command === 'pets') {
-      // Exactly the value: drop one trailing newline that a file or `echo` adds.
-      body = { petId: id, envName: options.env, value: text.replace(/\r?\n$/, '') };
+      // Stored byte for byte; a trailing newline stays part of the value.
+      body = { petId: id, envName: options.env, value: text };
     } else if (command === 'dispatch') {
       body = { petId: id, request: text, idempotencyKey: options.idempotencyKey ?? randomUUID() };
     } else {

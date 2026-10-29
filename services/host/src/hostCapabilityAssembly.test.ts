@@ -86,6 +86,10 @@ test('HostCapabilityAssembly rejects extension definitions omitted from the firs
     }),
     /initialization already started without Toolkit source "late-source"/,
   );
+  await assert.rejects(
+    () => caps.init({ credentialSource: { environment: async () => ({}) } }),
+    /different Pet credential source/,
+  );
   failMaintenance();
   await assert.rejects(() => firstInit, /stop test initialization/);
 });

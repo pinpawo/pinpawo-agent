@@ -20,6 +20,7 @@ import {
   type HostToolkitInventoryStore,
   type HostRuntimeConfig,
   type LocalModelProfileRegistry,
+  type PetCredentialSource,
   type ToolkitDefinitionSource,
 } from 'pinpawo/host-runtime';
 import {
@@ -65,6 +66,13 @@ export class StudioHost {
   private readonly resolveStudioHostConfigImpl: typeof resolveStudioHostConfig;
   private readonly resolvePlugin: StudioPluginResolver | undefined;
   private studio: BuildStudioResult | null = null;
+  /** The Studio is built after the assembly initializes; commands only run once it is. */
+  private readonly credentialSource: PetCredentialSource = {
+    environment: async (petId) => {
+      if (!this.studio) throw new Error('Studio is not running.');
+      return this.studio.credentialSource.environment(petId);
+    },
+  };
   private capsInitialized = false;
   private initPromise: Promise<void> | null = null;
   private activationPromise: Promise<void> | null = null;
@@ -121,8 +129,11 @@ export class StudioHost {
       );
       // Load the shared Host catalog before resolving Pet directories so every
       // Pet snapshot is built against the same initialized baseline.
+      // Every assembly, default or supplied, gets the Pets' credentials here, so
+      // no Studio command silently runs with only the Host's environment.
       await this.caps.init({
         toolkitSources: pluginToolkitSources,
+        credentialSource: this.credentialSource,
       });
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();

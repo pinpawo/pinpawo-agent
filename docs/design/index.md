@@ -54,6 +54,8 @@ See [Reference](../reference/index.md) for the current public reading path.
   Trigger domain/API boundaries
 - [Studio 存储](studio/storage.md) — Plugin 共用的 SQLite / Postgres 数据库（Kysely）、
   按 Plugin 的迁移和异步 Store 接口
+- [Pet 凭据](studio/pet-credentials.md) — 每个 Pet 实例自己的加密环境变量，
+  注入它的 shell / git / gh 命令
 
 ## Historical Kanban designs
 

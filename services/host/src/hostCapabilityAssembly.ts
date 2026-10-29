@@ -60,6 +60,7 @@ import type {
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
 import { FileSaver } from './fileSaver';
+import type { PetCredentialSource } from './host/petCredentials';
 
 export type HostCapabilityAssemblyOptions = {
   runtimeConfig: HostRuntimeConfig;
@@ -82,10 +83,17 @@ export type HostCapabilityAssemblyOptions = {
 export type HostCapabilityAssemblyInitOptions = {
   /** Additional Toolkit definitions supplied by the concrete Host. */
   toolkitSources?: readonly ToolkitDefinitionSource[];
+  /**
+   * A Studio Host's Pet credentials for every ShellRS-backed Toolkit. Passed at
+   * init so any assembly the Host uses receives them the same way; with it,
+   * commands run only inside a Pet turn.
+   */
+  credentialSource?: PetCredentialSource;
 };
 
 type NormalizedHostCapabilityAssemblyInitOptions = Readonly<{
   toolkitSources: readonly ToolkitDefinitionSource[];
+  credentialSource?: PetCredentialSource;
 }>;
 
 function normalizeInitOptions(
@@ -93,6 +101,7 @@ function normalizeInitOptions(
 ): NormalizedHostCapabilityAssemblyInitOptions {
   return Object.freeze({
     toolkitSources: Object.freeze([...(options.toolkitSources ?? [])]),
+    ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
   });
 }
 
@@ -110,6 +119,12 @@ function assertInitOptionsCompatible(
   initialized: NormalizedHostCapabilityAssemblyInitOptions,
   requested: NormalizedHostCapabilityAssemblyInitOptions,
 ): void {
+  if (requested.credentialSource !== initialized.credentialSource) {
+    throw new Error(
+      'HostCapabilityAssembly initialization already started with a different Pet credential source. '
+      + 'It must be supplied on the first init() call.',
+    );
+  }
   const missingToolkitSource = requested.toolkitSources.find((source) => (
     !initialized.toolkitSources.some((candidate) => sameToolkitSource(candidate, source))
   ));
@@ -151,7 +166,9 @@ export class HostCapabilityAssembly {
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.
     // Files and web run in the Host process and need no RS.
-    const shell = this.rsInstances.add('shell', new ShellRSClient());
+    const shell = this.rsInstances.add('shell', new ShellRSClient({
+      credentialSource: () => this.initOptions?.credentialSource,
+    }));
     // BrowserRS also runs only in the RS service, which holds the one
     // extension bridge for every Host (#862).
     const browser = browserSelected

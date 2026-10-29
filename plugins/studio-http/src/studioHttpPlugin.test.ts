@@ -166,6 +166,16 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
       return pet;
     },
     rename: async (petId, name) => { calls.push(['rename', petId, name]); throw new StudioPetError('missing', 'not_found'); },
+    credentials: {
+      unlocked: () => true,
+      list: async (petId) => { calls.push(['credentials', petId]); return [{ envName: 'GH_TOKEN', updatedAt: 't' }]; },
+      set: async (input) => {
+        calls.push(['set-credential', input]);
+        if (input.petId === 'locked') throw new StudioPetError('locked', 'locked');
+        return { envName: input.envName as string, updatedAt: 't' };
+      },
+      remove: async (input) => { calls.push(['unset-credential', input]); return { removed: true }; },
+    },
   };
   const harness = createContext();
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
@@ -184,6 +194,22 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
   assert.equal((await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Again' })).status, 409);
   assert.equal((await send('/pets/rename', { petId: 'ghost', name: 'X' })).status, 404);
   assert.deepEqual(calls.map(([action]) => action), ['create', 'create', 'rename']);
+
+  // Credential values go in and never come back out.
+  const set = await send('/pet-credentials', { petId: 'dev-a', envName: 'GH_TOKEN', value: 'fake-secret' });
+  assert.equal(set.status, 200);
+  assert.deepEqual(await set.json(), { credential: { envName: 'GH_TOKEN', updatedAt: 't' } });
+  assert.equal((await send('/pet-credentials', { petId: 'locked', envName: 'GH_TOKEN', value: 'fake-secret' })).status, 503);
+  assert.deepEqual(await (await send('/pet-credentials?petId=dev-a')).json(), {
+    unlocked: true, credentials: [{ envName: 'GH_TOKEN', updatedAt: 't' }],
+  });
+  assert.deepEqual(await (await send('/pet-credentials/remove', { petId: 'dev-a', envName: 'GH_TOKEN' })).json(), { removed: true });
+  assert.deepEqual(calls.slice(3), [
+    ['set-credential', { petId: 'dev-a', envName: 'GH_TOKEN', value: 'fake-secret' }],
+    ['set-credential', { petId: 'locked', envName: 'GH_TOKEN', value: 'fake-secret' }],
+    ['credentials', 'dev-a'],
+    ['unset-credential', { petId: 'dev-a', envName: 'GH_TOKEN' }],
+  ]);
   assert.deepEqual(await (await send('/pet-definitions')).json(), { definitions: [{ definitionId: 'developer', name: 'Developer' }] });
   // The listing is the live Pets Studio reports, not the management records.
   assert.deepEqual(await (await send('/pets')).json(), { pets: [] });
@@ -676,8 +702,11 @@ test('HTTP Plugin authenticates Studio clients: the Host token has the global AP
   assert.equal((await call('/clients', AUTH_TOKEN, { clientId: 'bad id', label: 'Bad' })).status, 400);
 
   assert.deepEqual(await (await call('/whoami', key)).json(), { clientId: 'alice', scope: 'client' });
-  for (const path of ['/studio-only', '/clients', '/dispatch/queues', '/events', '/pet-sessions/snapshot']) {
+  for (const path of ['/studio-only', '/clients', '/dispatch/queues', '/events', '/pet-sessions/snapshot', '/pet-credentials?petId=local']) {
     assert.equal((await call(path, key)).status, 403, path);
+  }
+  for (const path of ['/pet-credentials', '/pet-credentials/remove']) {
+    assert.equal((await call(path, key, { petId: 'local', envName: 'GH_TOKEN', value: 'fake' })).status, 403, path);
   }
   // A client may learn who it is and read the Pet directory (registration only).
   assert.deepEqual(await (await call('/me', key)).json(), { clientId: 'alice', scope: 'client' });

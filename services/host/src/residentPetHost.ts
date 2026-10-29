@@ -1,4 +1,5 @@
 import { withoutPetInvocationContext } from './host/petInvocationContext';
+import { withPetExecutionIdentity } from './host/petCredentials';
 import { continueSuspendedDispatch } from './host/dispatchContinuation';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
@@ -270,7 +271,10 @@ export async function createResidentPetRuntime(
       }
     }
   };
-  const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
+  const executeTurn = options.runAgentTurn ?? runAgentSessionTurn;
+  const runAgentTurn: typeof executeTurn = (input) => withPetExecutionIdentity(
+    deps.petId, () => executeTurn(input),
+  );
   const runConversationTurn = continueSuspendedDispatch({
     petId: deps.petId, sessions, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
   });

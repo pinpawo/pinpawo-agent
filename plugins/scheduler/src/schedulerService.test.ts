@@ -28,7 +28,7 @@ for (const [backend, config] of backends) {
     service.subscribe(({ event }) => seen.push(event.eventType));
     const schedule = await service.create({ petId: ' worker ', channelId: 'ops', request: 'report', runAt: past() });
     assert.deepEqual([schedule.petId, schedule.channelId, schedule.status], ['worker', 'ops', 'scheduled']);
-    await assert.rejects(service.create({ petId: 'worker', request: 'x', runAt: 'later' }), /ISO date/);
+    await assert.rejects(service.create({ petId: 'worker', channelId: 'ops', request: 'x', runAt: 'later' }), /ISO date/);
     await assert.rejects(service.markDispatched(schedule.scheduleId), /is scheduled/);
     assert.equal(await service.claimDue(new Date(Date.now() - 60_000)), null, 'not due yet');
 
@@ -39,7 +39,7 @@ for (const [backend, config] of backends) {
     assert.deepEqual([done.status, done.receipt], ['dispatched', { invocationId: 'inv-1', sessionId: 's-1' }]);
     await assert.rejects(service.cancel(schedule.scheduleId), /is dispatched/);
 
-    const later = await service.create({ petId: 'worker', request: 'later', runAt: new Date(Date.now() + 60_000).toISOString() });
+    const later = await service.create({ petId: 'worker', channelId: 'ops', request: 'later', runAt: new Date(Date.now() + 60_000).toISOString() });
     assert.equal((await service.cancel(later.scheduleId)).status, 'cancelled');
 
     assert.deepEqual(seen, ['created', 'claimed', 'dispatched', 'created', 'cancelled']);
@@ -55,7 +55,7 @@ for (const [backend, config] of backends) {
 
   test(`${backend}: two Studios on one database claim a due schedule once`, () => withServices(async (open) => {
     const [a, b] = [await open(), await open()];
-    for (let index = 0; index < 4; index++) await a.create({ petId: 'worker', request: `job ${index.toString()}`, runAt: past() });
+    for (let index = 0; index < 4; index++) await a.create({ petId: 'worker', channelId: 'ops', request: `job ${index.toString()}`, runAt: past() });
     const claimed: string[] = [];
     await Promise.all([a, b].map(async (service) => {
       for (let next = await service.claimDue(); next; next = await service.claimDue()) claimed.push(next.scheduleId);
@@ -66,7 +66,7 @@ for (const [backend, config] of backends) {
 
   test(`${backend}: a schedule left dispatching by a stopped Studio is recovered as failed, not run again`, () => withServices(async (open) => {
     const first = await open();
-    const schedule = await first.create({ petId: 'worker', request: 'one shot', runAt: past() });
+    const schedule = await first.create({ petId: 'worker', channelId: 'ops', request: 'one shot', runAt: past() });
     await first.claimDue();
 
     const second = await open();

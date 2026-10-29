@@ -1,6 +1,6 @@
 # Pet 实例
 
-> 状态：第一阶段已实现（issue #1015）；第二、三阶段未开始
+> 状态：第一、二阶段已实现（issue #1015）；第三阶段未开始
 > 更新：2026-10-28
 
 ## 问题
@@ -90,8 +90,9 @@ CREATE TABLE studio_pets (
 - 目标 Pet 不存在时直接失败，不换成其他 Pet，也不换成默认 Pet。
 - Trigger 不再在启动时校验目标 Pet（Pet 可以在运行中创建，启动时的校验已经不够）：触发时由 Studio dispatch
   拒收不存在的 Pet，失败记入 Trigger 自己的 delivery 日志。Scheduler 在创建 schedule 时校验，触发时同样按上面的规则失败。
-- 不带 session 的 dispatch（`POST /dispatch`、不绑 Channel 的 schedule）目前落在该 Pet 当前选中的 Session。
-  这是剩下的“活跃 Session 兜底”，第二阶段改为显式绑定（见“分阶段”）。
+- Schedule 和 Trigger 只经 Channel 投递（`channelId` 必填），落在这对 (Channel, Pet) 的 Session。
+- `POST /dispatch` 不指定 Session，落在该 Pet 当前活跃的 Session。这是正式规则，不是兜底：
+  Session 不是调用方指定的东西。
 
 ## 管理入口
 
@@ -135,8 +136,9 @@ Studio 关闭时，先停 Plugin，再关闭所有 Pet 的 runtime。
 
 1. **本阶段**：定义与实例拆开；`studio_pets` 与 `StudioPets`；Host 启动与运行中按实例装配；
    HTTP / CLI / init；Trigger 改为触发时校验；测试覆盖创建、两个同定义实例互不串联、重启恢复同一实例与其 Session。
-2. **Channel 外入口的 Session**：`POST /dispatch` 与不绑 Channel 的 schedule 显式指定或预留 Session，
-   去掉 resident dispatch 的活跃 Session 兜底。
+2. **Schedule / Trigger 只经 Channel**：`channelId` 必填，删掉它们的直接 dispatch。`POST /dispatch`
+   保持落在活跃 Session（原计划的“显式指定 Session”取消：Session 不是调用方指定的东西）。
+   默认模板因此不再自带 external-request Trigger。
 3. **Console**：Pet 管理页（创建、改名），Channel 成员选择显示定义。
 4. **归档**（待有使用场景再定）：按“生命周期”一节的要求设计在途工作的结束方式。
 
@@ -145,4 +147,5 @@ Studio 关闭时，先停 Plugin，再关闭所有 Pet 的 runtime。
 - [ ] 同一份定义创建两个 Pet，各自被寻址，Session 与运行互不影响，无需复制配置目录。
 - [ ] 一个 Pet 新建、切换 Session 不改变 petId。
 - [ ] Host 重启后恢复同一批 Pet 及其 Session，不产生重复 Pet。
+- [ ] Schedule 和 Trigger 不带 `channelId` 时被拒绝，不会直接 dispatch 到活跃 Session。
 - [ ] 目标 Pet 不存在时失败，不落到其他 Pet 或默认 Pet。

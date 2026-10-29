@@ -7,7 +7,7 @@ import { createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';
-import { createTriggerPlugin } from './triggerPlugin';
+import { createStudioPlugin, createTriggerPlugin } from './triggerPlugin';
 import { TriggerService } from './triggerService';
 import { KyselyTriggerStore, triggerMigrations, type TriggerDatabase } from './store/kysely';
 import { createStudioWithPets } from '../../../tests/support/livePets';
@@ -20,6 +20,11 @@ async function seedChannel(t: TestContext, petIds: string[]) {
   const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })), humans: async () => undefined });
   const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: petIds });
   return { channelId, channel: createChannelPlugin({ store, httpRoute: false }), service };
+}
+
+/** The task body inside the channel_task input a Channel run hands the Pet. */
+function taskBody(request: string): string {
+  return (JSON.parse(request.slice(request.indexOf('{'), request.lastIndexOf('}') + 1)) as { body: string }).body;
 }
 
 function channelStudioPet(petId: string, dispatched: StudioDispatchRequest[]) {
@@ -42,6 +47,7 @@ test('Trigger projects direct service mutations through Studio events', async (t
     triggers: [{
       triggerId: 'build',
       petId: 'worker',
+      channelId: 'ops',
       request: 'Handle build',
       source: { kind: 'http', secret: 'trigger-secret-with-at-least-16-characters' },
     }],
@@ -74,11 +80,13 @@ test('Trigger projects direct service mutations through Studio events', async (t
 
 test('Trigger dispatches when a configured Studio event condition matches', async (t) => {
   const requests: string[] = [];
+  const { channelId, channel } = await seedChannel(t, ['wiki']);
   const plugin = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
       triggerId: 'wiki-on-task-change',
       petId: 'wiki',
+      channelId,
       request: {
         template: 'Update the project Wiki after {{event.type}} for {{payload.taskId}}.',
         context: ['payload.taskId', 'event.occurredAt'],
@@ -96,10 +104,10 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
         }),
         onQueueChange: () => () => undefined,
         onDispatchLifecycle: () => () => undefined,
-        dispatch: async (input) => { requests.push(input.request); },
+        dispatch: async (input) => { requests.push(taskBody(input.request)); },
       },
     }],
-    plugins: [plugin],
+    plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
 
@@ -124,11 +132,13 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
 
 test('Trigger keys event deliveries by event identity, not by the millisecond', async (t) => {
   const requests: string[] = [];
+  const { channelId, channel } = await seedChannel(t, ['wiki']);
   const plugin = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
       triggerId: 'notice-relay',
       petId: 'wiki',
+      channelId,
       request: { template: 'Read {{payload.noticeId}}', context: ['payload.noticeId'] },
       source: { kind: 'studio_event', eventSource: 'notice', type: 'notice.created' },
     }],
@@ -143,10 +153,10 @@ test('Trigger keys event deliveries by event identity, not by the millisecond', 
         }),
         onQueueChange: () => () => undefined,
         onDispatchLifecycle: () => () => undefined,
-        dispatch: async (input) => { requests.push(input.request); },
+        dispatch: async (input) => { requests.push(taskBody(input.request)); },
       },
     }],
-    plugins: [plugin],
+    plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
 
@@ -165,11 +175,13 @@ test('Trigger keys event deliveries by event identity, not by the millisecond', 
 
 test('Trigger resolves an explicit event payload target and records a retryable failed delivery', async (t) => {
   let attempts = 0;
+  const { channelId, channel } = await seedChannel(t, ['executor']);
   const plugin = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
       triggerId: 'assigned-task',
       target: { kind: 'event_payload', path: 'payload.assigneeId', allowedPetIds: ['executor'] },
+      channelId,
       request: { template: 'Start {{payload.taskId}}', context: ['payload.taskId'] },
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.assigned' },
     }],
@@ -189,7 +201,7 @@ test('Trigger resolves an explicit event payload target and records a retryable 
         },
       },
     }],
-    plugins: [plugin],
+    plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
   studio.notify({
@@ -212,6 +224,7 @@ test('Trigger request templates reject invalid expressions and duplicate context
     triggers: [{
       triggerId: 'invalid-template',
       petId: 'worker',
+      channelId: 'ops',
       request: { template: 'Handle {{payload[taskId]}}' },
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
@@ -222,6 +235,7 @@ test('Trigger request templates reject invalid expressions and duplicate context
     triggers: [{
       triggerId: 'duplicate-context',
       petId: 'worker',
+      channelId: 'ops',
       request: {
         template: 'Handle task',
         context: ['payload.taskId', 'payload.taskId'],
@@ -229,6 +243,16 @@ test('Trigger request templates reject invalid expressions and duplicate context
       source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   }), /must be unique/);
+});
+
+test('a Trigger rule names the Channel its Pet runs in', () => {
+  assert.throws(() => createStudioPlugin({
+    triggers: [{ triggerId: 'unbound', petId: 'worker', request: 'Report', source: { kind: 'http', secretEnv: 'TRIGGER_SECRET' } }],
+  }), /requires triggerId, target, channelId/);
+  assert.throws(() => createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{ triggerId: 'blank', petId: 'worker', channelId: ' ', request: 'Report', source: { kind: 'http', secret: 'trigger-secret-with-at-least-16-characters' } }],
+  }), /requires a channelId/);
 });
 
 test('a channel-bound Trigger runs its Pet in the Channel without posting there, and keeps the receipt', async (t) => {
@@ -350,6 +374,7 @@ test('Trigger keeps deliveries in the Studio database and fails the ones a stop 
     triggers: [{
       triggerId: 'build',
       petId: 'worker',
+      channelId: 'ops',
       request: 'Handle build',
       source: { kind: 'http', secret: 'trigger-secret-with-at-least-16-characters' },
     }],

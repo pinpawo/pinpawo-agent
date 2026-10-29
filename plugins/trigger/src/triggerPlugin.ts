@@ -48,9 +48,9 @@ export type TriggerDefinition = {
   /**
    * Deliver through this Channel's `inputs.run()`: the target Pet runs the request
    * in its Channel session and its public reply lands in the Channel. The request
-   * itself is not a Channel message. Without it the Pet receives a bare dispatch.
+   * itself is not a Channel message.
    */
-  channelId?: string;
+  channelId: string;
   request: TriggerRequest;
 };
 
@@ -287,7 +287,7 @@ function publicDefinition(definition: ParsedTriggerDefinition): Record<string, u
         }
         : { kind: 'http' },
     target: definition.target,
-    ...(definition.channelId === undefined ? {} : { channelId: definition.channelId }),
+    channelId: definition.channelId,
     request: definition.request,
   };
 }
@@ -305,10 +305,8 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Pars
           ...(definition.target.allowedPetIds === undefined ? {} : { allowedPetIds: definition.target.allowedPetIds.map((petId) => petId.trim()) }),
         }
       : petId === undefined ? undefined : { kind: 'pet' as const, petId: petId.trim() };
-    const channelId = definition.channelId?.trim();
-    if (channelId !== undefined && !channelId) {
-      throw new Error(`Trigger "${triggerId}" channelId must not be empty.`);
-    }
+    const channelId = definition.channelId.trim();
+    if (!channelId) throw new Error(`Trigger "${triggerId}" requires a channelId.`);
     const request = typeof definition.request === 'string'
       ? definition.request.trim()
       : {
@@ -340,7 +338,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Pars
       if (definition.source.secret.length < 16) {
         throw new Error(`HTTP Trigger "${triggerId}" requires a 16+ character secret.`);
       }
-      definitions.set(triggerId, { ...definition, triggerId, target, request, ...(channelId ? { channelId } : {}) });
+      definitions.set(triggerId, { ...definition, triggerId, target, request, channelId });
       continue;
     }
     if (definition.source.kind === 'github') {
@@ -356,7 +354,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Pars
         triggerId,
         target,
         request,
-        ...(channelId ? { channelId } : {}),
+        channelId,
         source: {
           ...definition.source,
           event,
@@ -382,7 +380,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Pars
       triggerId,
       target,
       request,
-      ...(channelId ? { channelId } : {}),
+      channelId,
       source: {
         ...definition.source,
         eventSource,
@@ -426,7 +424,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
           await pluginContext.storage.open<TriggerDatabase>(triggerMigrations(pluginContext.storage.dialect)),
         ));
         current = service;
-        if ([...definitions.values()].some((definition) => definition.channelId !== undefined)) {
+        if (definitions.size > 0) {
           removeChannelInputs = pluginContext.hooks.contribute<ChannelInputsHook>(
             options.channel?.pluginName ?? 'channel',
             'inputs',
@@ -436,16 +434,12 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
             },
           );
         }
-        // A channel-bound rule runs the Pet in its Channel session, where the
-        // Pet's reply becomes its Channel message; any other rule dispatches.
-        // The request is the Pet's task, not a Channel message, so nothing in
-        // it addresses another member. Either way the delivery keeps the receipt.
+        // A rule runs the Pet in its Channel session, where the Pet's reply
+        // becomes its Channel message. The request is the Pet's task, not a
+        // Channel message, so nothing in it addresses another member. The
+        // delivery keeps the receipt.
         const send = async (definition: ParsedTriggerDefinition, petId: string, request: string, deliveryId: string): Promise<TriggerDeliveryReceipt> => {
           const idempotencyKey = `trigger:${deliveryId}`;
-          if (definition.channelId === undefined) {
-            const { invocationId } = await pluginContext.dispatch({ petId, request, idempotencyKey });
-            return { invocationId };
-          }
           if (!channelInputs) throw new Error(`Trigger "${definition.triggerId}" needs the Channel Plugin, which is not running.`);
           return channelInputs.run(definition.channelId, petId, request, { kind: 'trigger', id: definition.triggerId }, { idempotencyKey });
         };
@@ -770,15 +764,15 @@ export function createStudioPlugin(value: Record<string, unknown> | undefined): 
     if (typeof definition.triggerId !== 'string'
       || target === null || (target === undefined && petId === undefined)
       || !isInstalledTriggerRequest(definition.request, index)
-      || (definition.channelId !== undefined && typeof definition.channelId !== 'string')) {
+      || typeof definition.channelId !== 'string') {
       throw new Error(
-        `Trigger Plugin triggers[${index.toString()}] requires triggerId, target, request, and source, and a string channelId when set.`,
+        `Trigger Plugin triggers[${index.toString()}] requires triggerId, target, channelId, request, and source.`,
       );
     }
     return {
       triggerId: definition.triggerId,
       ...(target ? { target } : { petId }),
-      ...(typeof definition.channelId === 'string' ? { channelId: definition.channelId } : {}),
+      channelId: definition.channelId,
       request: definition.request,
       source: parseSource(definition.source, index),
     };

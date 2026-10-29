@@ -70,7 +70,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   let initialDispatchQueueAuditTimer: NodeJS.Timeout | undefined;
   let unsubscribeMutations: (() => void) | undefined;
   let unsubscribeActivation: (() => void) | undefined;
-  // Due schedules wait until every Plugin has started: a channel-bound one
+  // Due schedules wait until every Plugin has started: a schedule
   // must not fail just because the Channel Plugin starts after this one.
   let activated = false;
   let unregisterRoutes: (() => void) | undefined;
@@ -78,15 +78,10 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   let channelInputs: ChannelInputsHook | undefined;
   let polling: Promise<void> | undefined;
 
-  // A channel-bound schedule runs the Pet in its Channel session, where the
-  // Pet's reply becomes its Channel message; any other schedule dispatches.
-  // Either way the schedule keeps the Host's receipt.
-  const send = async (host: StudioPluginContext, schedule: Schedule): Promise<ScheduleReceipt> => {
+  // A schedule runs the Pet in its Channel session, where the Pet's reply
+  // becomes its Channel message. The schedule keeps the Host's receipt.
+  const send = async (schedule: Schedule): Promise<ScheduleReceipt> => {
     const idempotencyKey = `schedule:${schedule.scheduleId}`;
-    if (schedule.channelId === undefined) {
-      const { invocationId } = await host.dispatch({ petId: schedule.petId, request: schedule.request, idempotencyKey });
-      return { invocationId };
-    }
     if (!channelInputs) throw new Error('This schedule needs the Channel Plugin, which is not running.');
     return channelInputs.run(schedule.channelId, schedule.petId, schedule.request,
       { kind: 'scheduler', id: schedule.scheduleId }, { idempotencyKey });
@@ -100,7 +95,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         const schedule = await service.claimDue();
         if (!schedule) break;
         try {
-          const receipt = await send(context, schedule);
+          const receipt = await send(schedule);
           await service.markDispatched(schedule.scheduleId, receipt);
         } catch (error) {
           await service.fail(schedule.scheduleId, asError(error).message);
@@ -160,7 +155,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
             payload: {
               scheduleId: schedule.scheduleId,
               petId: schedule.petId,
-              ...(schedule.channelId === undefined ? {} : { channelId: schedule.channelId }),
+              channelId: schedule.channelId,
               status: schedule.status,
               ...(schedule.receipt === undefined ? {} : { receipt: schedule.receipt }),
               sequence: event.sequence,
@@ -205,15 +200,15 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
                         || typeof value.petId !== 'string'
                         || typeof value.request !== 'string'
                         || typeof value.runAt !== 'string'
-                        || (value.channelId !== undefined && typeof value.channelId !== 'string')) {
-                        throw new Error('Scheduler request requires petId, request, and runAt, and a string channelId when set.');
+                        || typeof value.channelId !== 'string') {
+                        throw new Error('Scheduler request requires petId, channelId, request, and runAt.');
                       }
                       if (!pluginContext.listPets().some(({ petId }) => petId === value.petId)) {
                         throw new Error(`Unknown Studio petId "${value.petId}".`);
                       }
                       const schedule = await service.create({
                         petId: value.petId,
-                        ...(typeof value.channelId === 'string' ? { channelId: value.channelId } : {}),
+                        channelId: value.channelId,
                         request: value.request,
                         runAt: value.runAt,
                       });

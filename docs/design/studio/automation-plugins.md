@@ -38,14 +38,15 @@ Studio core       -X-> Scheduler/Trigger concrete package
 ```
 
 Channel 是对话和结果的汇集处。schedule / trigger 是 Pet 的自发行为，本身不是 Channel 成员或发言者。
-规则配置了 `channelId` 时，Trigger 不再自己 dispatch，而是调用 Channel Plugin 暴露的 `inputs` hook：
+每条规则都必须配置 `channelId`。Trigger 不自己 dispatch，而是调用 Channel Plugin 暴露的 `inputs` hook：
 `run(channelId, petId, request, {kind:'trigger', id: triggerId}, {idempotencyKey})`。Channel 只校验目标 Pet
 是该 Channel 的成员，然后在 `(channel, pet)` 绑定的 session、带 `channel` scope 派发
 `{type:'channel_task', version:1, channelId, origin, body}`。指令不写入 Channel；Pet 随后的公开回复照常以
 Pet 身份成为 Channel 消息，其中的 @ 照常交接。指令不是消息，正文里的寻址链接不会投递给任何成员。
 `run()` 返回 Host 回执（invocationId、sessionId），Trigger 存在 delivery 记录的 `receipt` 里。
 Channel 是软依赖：没有安装或没有启动 Channel Plugin、或 Pet 不是成员时，这类 delivery 记为 failed，
-并不会退回到无 session 的 dispatch。没有 `channelId` 的规则保持原来的直接 dispatch，同样保存回执。
+并不会退回到无 session 的 dispatch。没有 `channelId` 的规则在 Plugin 创建时就被拒绝：没有 Channel，
+Pet 的回复没有去处，Session 也说不清。
 
 两个 Plugin 都可向 HTTP Plugin 的 `routes` hook 贡献 API，但不依赖 HTTP 才能启动。
 HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 由贡献 route 的 Plugin
@@ -56,16 +57,15 @@ HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 
 第一版支持 durable one-shot schedule：`scheduleId/petId/request/runAt/status`。启动时把所有
 已到期且仍为 `scheduled` 的记录视为 missed fire，并按原计划只 claim/dispatch 一次。
 一次带条件的更新（只在仍是 `scheduled` 时生效）先把记录转成 `dispatching`，所以多个 Studio 共用一个数据库时
-同一条 schedule 只会被 claim 一次；然后调用 `context.dispatch()`；接受后
+同一条 schedule 只会被 claim 一次；然后经 Channel 派发（见下）；接受后
 标记 `dispatched`，表示 resident queue 已接纳而不是 Agent 执行完成；admission 失败标记
 `failed`。崩溃遗留的 `dispatching` 标记为
 `failed`，避免无法证明安全时重复派发。
 
-schedule 可以带可选的 `channelId`。带了它的 schedule 到期后不直接 dispatch，而是和
+schedule 必须带 `channelId`（`POST /scheduler` 缺它返回 400）。schedule 到期后不直接 dispatch，而是和
 Trigger 一样调用 Channel 的 `inputs.run()`（origin `{kind:'scheduler', id: scheduleId}`），Pet 在该 Channel 的
 session 里执行，它的公开回复落在 Channel 里。Channel Plugin 没有运行或 Pet 不是成员时，这条 schedule 标记
-`failed`，不退回直接 dispatch。没有 `channelId` 的 schedule 行为不变。两种情况都把 Host 回执保存为 schedule 的
-`receipt`。
+`failed`，不退回直接 dispatch。Host 回执保存为 schedule 的 `receipt`。
 
 Scheduler 的数据在 [Studio 存储](storage.md)里（表 `schedules`、`schedule_events`，迁移 `0001_schedules`），
 SQLite 和 Postgres 都可以；接口是 `ScheduleStore`（`plugins/scheduler/src/store/`）。以前的 `scheduler.sqlite`

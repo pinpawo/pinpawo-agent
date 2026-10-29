@@ -242,7 +242,6 @@ try {
     ].join('\n'),
   ], consumerDir, 'resolve initialized Studio workdir Plugins', 30_000, {
     PINPAWO_SMOKE_WORKDIR: initializedWorkdir,
-    PINPAWO_STUDIO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
     HOME: smokeHome,
     USERPROFILE: smokeHome,
     PINPAWO_WORKSPACES_DIR: join(smokeHome, 'workspaces'),

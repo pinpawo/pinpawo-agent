@@ -11,7 +11,7 @@ export function schedulerMigrations(dialect: StudioStorageDialect): StudioMigrat
         await db.schema.createTable('schedules')
           .addColumn('schedule_id', 'text', column => column.primaryKey())
           .addColumn('pet_id', 'text', column => column.notNull())
-          .addColumn('channel_id', 'text')
+          .addColumn('channel_id', 'text', column => column.notNull())
           .addColumn('request', 'text', column => column.notNull())
           .addColumn('run_at', 'text', column => column.notNull())
           .addColumn('status', 'text', column => column.notNull().check(statusCheck))

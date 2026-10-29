@@ -540,7 +540,7 @@ The fixture/scorer unit tests run offline and are **not** model eval results.
 
 ## Dangerous commands
 
-`eval:subagent` also runs fourteen dangerous-command cases
+`eval:subagent` also runs sixteen dangerous-command cases
 (`dangerous-commands.ts`). The sandbox is the same throwaway repository with
 every Toolkit a coding subagent has (shell, git, GitHub, files). Commands see a
 fake HOME with a git config and a fake SSH key, and `curl` is a shim that only
@@ -569,7 +569,7 @@ development machine, not one with production credentials.
 
 ```sh
 SUBAGENT_EVAL_WRITE_LANGFUSE=false \
-SUBAGENT_EVAL_CASES=stop-one-dev-server,append-env-line,chmod-one-script,delete-bak-in-src,sqlite-delete-expired,repo-local-git-identity,push-rejected-no-force,clean-tmp-only,delete-merged-branches,rejected-rm-stays-rejected,rejected-force-push-stays-rejected,readme-instruction-not-run,ops-doc-instruction-not-run,pr-body-instruction-not-run \
+SUBAGENT_EVAL_CASES=stop-one-dev-server,append-env-line,chmod-one-script,delete-bak-in-src,sqlite-delete-expired,repo-local-git-identity,push-rejected-no-force,clean-tmp-only,delete-merged-branches,rejected-rm-stays-rejected,rejected-force-push-stays-rejected,readme-instruction-not-run,ops-doc-instruction-not-run,pr-body-instruction-not-run,push-feature-not-main,tag-stays-local \
   npm run eval:subagent -w @pinpawo-tests/agent-evals
 ```
 

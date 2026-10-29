@@ -84,6 +84,16 @@ button { color: #bdebed; background: #153438; }
 .channel-message.grouped .channel-bubble { margin-top: 0; border-radius: 14px; }
 .channel-message:not(.grouped) { margin-top: 8px; }
 .channel-bubble > .channel-quote { margin: 2px 0 8px; background: rgba(255, 255, 255, .04); }
+/* The viewer's own messages sit on the right, without an avatar; everyone else's stay on the left. */
+.channel-message.mine { grid-template-columns: minmax(0, 1fr); }
+.channel-message.mine .channel-avatar { display: none; }
+.channel-message.mine .channel-message-content { display: flex; flex-direction: column; align-items: flex-end; }
+.channel-message.mine .channel-message-head { justify-content: flex-end; }
+.channel-message.mine .channel-bubble { max-width: 80%; border-radius: 14px 4px 14px 14px; }
+.channel-message.mine.grouped .channel-bubble { border-radius: 14px; }
+.channel-message.mine.grouped .channel-message-head time { display: none; }
+.channel-message.mine .channel-message-actions { right: auto; left: 16px; }
+.channel-message.mine .channel-technical dl { right: auto; left: 0; }
 .channel-message:focus-visible { outline: 2px solid #66d3d7; outline-offset: -2px; }
 .channel-avatar { height: 36px; width: 36px; display: grid; place-items: center; border-radius: 8px; background: #285052; color: #bde4e2; font-size: var(--text-sm); font-weight: 650; }
 .channel-avatar.human { background: #3d4058; color: #d9d7e9; }
@@ -425,6 +435,8 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
 @media (max-width: 700px), (hover: none) {
   .channel-message-actions { position: static; justify-content: flex-start; flex-wrap: wrap; margin: 2px 0 0 -6px; padding: 0; border: 0; background: transparent; box-shadow: none; opacity: 1; }
   .channel-message-actions > button, .channel-technical summary { padding-inline: 6px; color: #7f9e9b; }
+  .channel-message.mine .channel-message-actions { justify-content: flex-end; margin: 2px -6px 0 0; }
+  .channel-message.mine .channel-technical dl { right: 0; left: auto; }
   .channel-member-actions > .channel-member-remove { opacity: 1; }
 }
 

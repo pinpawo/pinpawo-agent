@@ -31,7 +31,6 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
 
 function fakeStudio(events: string[]): Studio {
   return {
-    entryPetId: 'planner',
     dispatch: async () => ({
       petId: 'planner',
       invocationId: 'invocation-1',
@@ -39,6 +38,7 @@ function fakeStudio(events: string[]): Studio {
     notify: () => undefined,
     subscribe: () => () => undefined,
     listPets: () => [],
+    pets: {} as Studio['pets'],
     shutdown: async () => { events.push('studio:shutdown'); },
   };
 }
@@ -49,7 +49,7 @@ function configuration(): ResolvedStudioHostConfig {
     studioConfigPath: '/tmp/pinpawo-start-studio-host-test/.pinpawo/studio.json',
     petsDir: '/tmp/pinpawo-start-studio-host-test/.pinpawo/pets',
     resolved: {
-      pets: [{ petId: 'planner', name: 'Planner' }],
+      definitions: [{ definitionId: 'planner', name: 'Planner' }],
     } as ResolvedStudioHostConfig['resolved'],
     plugins: [],
   };
@@ -69,6 +69,8 @@ test('top-level entry starts only the Pet Agent Session transport and owns shutd
         resolved: {} as BuildStudioResult['resolved'],
         plugins: [],
         residentPets: new Map(),
+    residentPetInteractions: new Map(),
+    credentialSource: { environment: async () => ({}) },
         activatePlugins: async () => { events.push('plugins:start'); },
       };
     },
@@ -107,6 +109,8 @@ test('Agent Session startup failure rolls the initialized Host back', async () =
       resolved: {} as BuildStudioResult['resolved'],
       plugins: [],
       residentPets: new Map(),
+    residentPetInteractions: new Map(),
+    credentialSource: { environment: async () => ({}) },
       activatePlugins: async () => { events.push('plugins:start'); },
     }),
     startAgentSessionTransport: async () => {
@@ -134,6 +138,8 @@ test('Plugin activation failure closes the ready Agent Session transport and Hos
       resolved: {} as BuildStudioResult['resolved'],
       plugins: [],
       residentPets: new Map(),
+    residentPetInteractions: new Map(),
+    credentialSource: { environment: async () => ({}) },
       activatePlugins: async () => {
         events.push('plugins:start');
         throw new Error('plugin failed');

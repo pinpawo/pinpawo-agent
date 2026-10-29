@@ -35,12 +35,12 @@ export class SchedulerService {
     return () => this.listeners.delete(listener);
   }
 
-  async create(input: { petId: string; channelId?: string; request: string; runAt: string }): Promise<Schedule> {
+  async create(input: { petId: string; channelId: string; request: string; runAt: string }): Promise<Schedule> {
     const now = new Date().toISOString();
     const schedule: Schedule = {
       scheduleId: randomUUID(),
       petId: nonEmpty(input.petId, 'petId'),
-      ...(input.channelId === undefined ? {} : { channelId: nonEmpty(input.channelId, 'channelId') }),
+      channelId: nonEmpty(input.channelId, 'channelId'),
       request: nonEmpty(input.request, 'request'),
       runAt: parseDate(input.runAt, 'runAt'),
       status: 'scheduled',

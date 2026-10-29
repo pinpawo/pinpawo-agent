@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createStudio, type StudioEvent } from '@pinpawo/studio-core';
+import { type StudioEvent } from '@pinpawo/studio-core';
 import type { PetInvocationScope } from 'pinpawo/host-runtime';
 import { createChannelPlugin, type RouteDecision, type RouteInput } from '@pinpawo-plugin/channel';
 import { readChannelTestInput } from '../../support/channelDispatchInput';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 const me = { kind: 'human' as const, id: 'local' };
 
@@ -32,8 +33,8 @@ async function routedStudio(decide: (input: RouteInput) => RouteDecision) {
     routing: { enabled: true, pets: { executor: 'Runs the work.' } },
     routeDecider: async (input) => { seen.push(input); return decide(input); },
   });
-  const studio = await createStudio({
-    studioId: 'test', entryPetId: 'executor', plugins: [channel],
+  const studio = await createStudioWithPets({
+    studioId: 'test', plugins: [channel],
     pets: [fakePet('executor', dispatched), fakePet('reviewer', dispatched)],
   });
   const events: StudioEvent[] = [];
@@ -89,7 +90,7 @@ test('routing leaves addressed messages, Pet messages and low-confidence decisio
 test('without routing an unaddressed message wakes no Pet', async (t) => {
   const dispatched: Dispatched[] = [];
   const channel = createChannelPlugin({ httpRoute: false });
-  const studio = await createStudio({ studioId: 'test', entryPetId: 'executor', plugins: [channel], pets: [fakePet('executor', dispatched)] });
+  const studio = await createStudioWithPets({ studioId: 'test', plugins: [channel], pets: [fakePet('executor', dispatched)] });
   t.after(() => studio.shutdown());
   const { channel: { channelId } } = await channel.service.createChannel(me, { title: 'Quiet', pets: ['executor'] });
   await channel.sendMessage(channelId, { body: 'Who is handling #1003?' }, me);

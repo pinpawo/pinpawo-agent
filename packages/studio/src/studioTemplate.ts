@@ -15,6 +15,14 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseConfigDocument } from '@pinpawo/pet-agent';
+import { loadPetConfigs } from 'pinpawo/host-runtime';
+import { studioLocalConfigSchema } from './configSchema';
+import { resolveStudioStorage } from './host/buildStudio';
+import { createStudioCredentialsKey } from './host/credentialsKey';
+import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
+import { studioCoreMigrations } from './storage/coreMigrations';
+import { createStudioStorage } from './storage/studioStorage';
 
 export type InitStudioWorkdirOptions = {
   workdir: string;
@@ -31,6 +39,8 @@ export type InitStudioWorkdirResult = {
   /** Paths under workdir are relative; Wiki files are absolute. */
   files: string[];
   wikiDirectory: string;
+  /** The Pet credentials key, next to the Wiki in the Studio data directory. */
+  credentialsKeyFile: string;
 };
 
 const DEFAULT_TEMPLATE_ROOT = fileURLToPath(
@@ -120,12 +130,14 @@ async function listTemplateFiles(templateRoot: string): Promise<TemplateFile[]> 
   return files;
 }
 
-function withWikiDirectory(content: string, wikiDirectory: string): string {
+function withStudioData(content: string, wikiDirectory: string, keyFile: string): string {
   const config: unknown = JSON.parse(content);
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     throw new Error('Studio template config must be an object.');
   }
   const record = config as Record<string, unknown>;
+  if (record.credentials !== undefined) throw new Error('Studio init cannot replace a template credentials setting.');
+  record.credentials = { keyFile };
   if (record.plugins === undefined) return `${JSON.stringify(record, null, 2)}\n`;
   if (!Array.isArray(record.plugins)) throw new Error('Studio template plugins must be an array.');
   for (const entry of record.plugins) {
@@ -147,7 +159,45 @@ function withWikiDirectory(content: string, wikiDirectory: string): string {
 
 type CreatedFile = { path: string; dev: number; ino: number; content: Buffer };
 
-/** Initialize a project configuration and a separate, durable Studio Wiki. */
+/**
+ * Give a new workdir one Pet per template definition, each under its
+ * definition's id and name, so the template's own references (a trigger's
+ * target, say) resolve on first start. Records the database files it is
+ * about to create in `createdFiles`, so a failed init can remove them.
+ */
+async function createTemplatePets(
+  workdir: string,
+  configPath: string,
+  configText: string,
+  createdFiles: string[],
+): Promise<void> {
+  // A custom template may name no definitions; then there is no Pet to create.
+  if (!Array.isArray((JSON.parse(configText) as { definitions?: unknown }).definitions)) return;
+  const config = parseConfigDocument({ content: configText, source: configPath, schema: studioLocalConfigSchema });
+  const storageConfig = resolveStudioStorage(config.storage, workdir);
+  const databaseFiles = storageConfig.kind === 'sqlite'
+    ? ['', '-wal', '-shm'].map(suffix => `${storageConfig.path}${suffix}`)
+    : [];
+  const existing = await Promise.all(databaseFiles.map(exists));
+  if (existing.some(Boolean)) throw new Error(`Studio init refuses to reuse the existing database ${databaseFiles[0]}.`);
+  createdFiles.push(...databaseFiles);
+  const definitions = new Map((await loadPetConfigs(path.join(path.dirname(configPath), 'pets')))
+    .map(definition => [definition.definitionId, definition]));
+  const storage = createStudioStorage(storageConfig);
+  try {
+    const store = new KyselyPetStore(await storage.open<PetDatabase>('studio', studioCoreMigrations));
+    const createdAt = new Date().toISOString();
+    for (const definitionId of config.definitions) {
+      const definition = definitions.get(definitionId);
+      if (!definition) throw new Error(`Studio template definition "${definitionId}" has no file.`);
+      await store.createPet({ petId: definitionId, definitionId, name: definition.name, createdAt });
+    }
+  } finally {
+    await storage.close();
+  }
+}
+
+/** Initialize a project configuration and a separate, durable Studio data directory (Wiki and credentials key). */
 export async function initStudioWorkdir(
   options: InitStudioWorkdirOptions,
 ): Promise<InitStudioWorkdirResult> {
@@ -172,11 +222,12 @@ export async function initStudioWorkdir(
   }
   const instanceDirectory = path.join(dataRoot, instanceId);
   const wikiDirectory = path.join(instanceDirectory, 'wiki');
+  const credentialsKeyFile = path.join(instanceDirectory, 'credentials.key');
   const files = await listTemplateFiles(templateRoot);
   const localFiles = files.filter(({ source }) => source !== 'wiki' && !source.startsWith(`wiki${path.sep}`));
   const wikiFiles = files.filter(({ source }) => source.startsWith(`wiki${path.sep}`));
   const configSource = await readFile(path.join(templateRoot, 'studio.json'), 'utf8');
-  const config = withWikiDirectory(configSource, wikiDirectory);
+  const config = withStudioData(configSource, wikiDirectory, credentialsKeyFile);
   const conflicts = await Promise.all(localFiles.map(async ({ destination }) => (
     await exists(path.join(workdir, destination)) ? destination : null
   )));
@@ -184,6 +235,7 @@ export async function initStudioWorkdir(
   if (conflict) throw new Error(`Studio init refuses to overwrite ${path.join(workdir, conflict)}.`);
 
   const created: CreatedFile[] = [];
+  const databaseFiles: string[] = [];
   const knowledgeDirs = new Set<string>();
   const remember = async (file: string) => {
     const info = await lstat(file);
@@ -194,6 +246,8 @@ export async function initStudioWorkdir(
     // Exclusive instance creation prevents two initializations from sharing data.
     await mkdir(instanceDirectory, { mode: 0o700 });
     knowledgeDirs.add(instanceDirectory);
+    await createStudioCredentialsKey(credentialsKeyFile);
+    await remember(credentialsKeyFile);
     for (const file of wikiFiles) {
       const destination = path.join(wikiDirectory, path.relative('wiki', file.source));
       for (let dir = path.dirname(destination); atOrInside(instanceDirectory, dir); dir = path.dirname(dir)) {
@@ -211,7 +265,10 @@ export async function initStudioWorkdir(
       else await copyFile(path.join(templateRoot, file.source), destination, constants.COPYFILE_EXCL);
       await remember(destination);
     }
+    await createTemplatePets(workdir, path.join(workdir, '.pinpawo/studio.json'), config, databaseFiles);
   } catch (error) {
+    // The database is new (createTemplatePets refuses an existing one).
+    for (const file of databaseFiles) await unlink(file).catch(() => undefined);
     // Only remove files created here that have not been replaced or modified.
     for (const file of created.reverse()) {
       try {
@@ -232,5 +289,6 @@ export async function initStudioWorkdir(
       ...wikiFiles.map(({ source }) => path.join(wikiDirectory, path.relative('wiki', source))),
     ],
     wikiDirectory,
+    credentialsKeyFile,
   };
 }

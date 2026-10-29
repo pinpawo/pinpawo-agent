@@ -109,4 +109,5 @@ Postgres，devDependency），不需要数据库服务；`tests/support/pglitePo
 
 1. Scheduler、Trigger、Notice 已迁入（各自的 `src/store/`），它们自己的 SQLite 文件和逐列 `ALTER TABLE` 都已删掉。
 2. Studio 客户身份已建在这里：所有者是 `studio`（迁移表 `studio_migrations`），表 `studio_clients`、`studio_client_keys`。
+   Pet 实例（[Pet 实例](pet-instance.md)）用同一份迁移历史，表 `studio_pets`。
    `studio` 因此是保留的 Plugin 名。

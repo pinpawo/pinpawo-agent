@@ -8,12 +8,13 @@ import { Annotation, Command, END, START, StateGraph, interrupt } from '@langcha
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -69,7 +70,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
       graphService: graphService as never,
     }));
   }
-  const studio = await createStudio({ studioId: 'sessions', entryPetId: pets[0]!, plugins: [channel],
+  const studio = await createStudioWithPets({ studioId: 'sessions', plugins: [channel],
     storage: { kind: 'sqlite', path: join(root, 'channels.sqlite') },
     pets: hosts.map((host, i) => ({ registration: { petId: pets[i]!, name: pets[i]! }, dispatch: host.resident.dispatch })),
   });
@@ -90,16 +91,16 @@ const replyOf = (f: Fixture, externalRef?: string) =>
   f.events.find(e => e.type === 'dispatch.message' && e.payload.message.messageId === externalRef)?.payload;
 const failures = (f: Fixture) => f.events.filter(e => e.type === 'channel.message_failed').map(e => e.payload);
 
-test('Markdown targets a legal special Pet identity without dispatching its registered prefix', async () => {
+test('Markdown targets a Pet whose id extends another one without dispatching that prefix', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-special-identity-'));
-  const f = await fixture(root, ['a', 'a)b'], () => 'Special identity delivery.');
+  const f = await fixture(root, ['a', 'a.b'], () => 'Special identity delivery.');
   try {
     const id = await open(f);
-    const result = await f.channel.sendMessage(id, { body: '[@Same name](participant:pet:a%29b) Inspect this.' }, me);
-    assert.deepEqual(result.deliveries.map(d => [d.participantId, d.state]), [['pet:a%29b', 'accepted']]);
+    const result = await f.channel.sendMessage(id, { body: '[@Same name](participant:pet:a.b) Inspect this.' }, me);
+    assert.deepEqual(result.deliveries.map(d => [d.participantId, d.state]), [['pet:a.b', 'accepted']]);
     await waitFor(async () => (await outputs(f, id)).length === 1);
-    assert.deepEqual(f.calls.map(call => call.petId), ['a)b']);
-    assert.equal((await outputs(f, id))[0]!.author.id, 'a)b');
+    assert.deepEqual(f.calls.map(call => call.petId), ['a.b']);
+    assert.equal((await outputs(f, id))[0]!.author.id, 'a.b');
     assert.equal(await f.channel.service.getSession(id, 'a'), undefined);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
@@ -265,7 +266,7 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
   let fail = true;
   const targets: string[] = [];
   let channel = createChannelPlugin({ httpRoute: false });
-  const create = () => createStudio({ studioId: 'retry', entryPetId: 'one', plugins: [channel], storage: { kind: 'sqlite', path: file }, pets: [{
+  const create = () => createStudioWithPets({ studioId: 'retry', plugins: [channel], storage: { kind: 'sqlite', path: file }, pets: [{
     registration: { petId: 'one', name: 'One' }, dispatch: {
       getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},

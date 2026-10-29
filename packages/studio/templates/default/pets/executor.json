@@ -1,5 +1,5 @@
 {
-  "petId": "executor",
+  "definitionId": "executor",
   "name": "Executor",
   "defaultCapabilityName": "studio_execution"
 }

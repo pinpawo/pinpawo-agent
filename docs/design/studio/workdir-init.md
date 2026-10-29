@@ -43,6 +43,11 @@ The mapping is owned by Studio's initialization API. Template files never
 contain checkpoint data, SQLite databases, resident-session files, or generated
 runtime outputs.
 
+After copying, `init` creates one Pet per template definition in the new Studio
+database, each with its definition's id and name (see [Pet instances](pet-instance.md)),
+so the template's own references, such as the trigger's target `executor`, resolve
+on first start. It refuses to reuse an existing database.
+
 ## One initialization path
 
 The standalone CLI and programmatic API use the same initializer. Tests may

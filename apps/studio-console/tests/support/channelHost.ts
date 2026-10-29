@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, Command, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
@@ -13,6 +13,7 @@ import { createTestModelProfiles } from '../../../../services/host/src/testing/m
 import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../../services/host/src/agent/agentGraphService';
+import { createStudioWithPets } from '../../../../tests/support/livePets';
 
 function fixtureReply(text: string) {
   return new AIMessage({ content: text, usage_metadata: {
@@ -78,7 +79,7 @@ for (const petId of ['alpha', 'beta']) {
     } as never,
   }));
 }
-const studio = await createStudio({ studioId: 'console-browser', entryPetId: 'alpha', plugins: [channel, http],
+const studio = await createStudioWithPets({ studioId: 'console-browser', plugins: [channel, http],
   storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
   pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: petNames[index]! },
     dispatch: host.resident.dispatch, sessions: host.sessions })),

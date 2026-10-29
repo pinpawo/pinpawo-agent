@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -44,7 +45,7 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
     graphService: graphService as never,
   });
   const channel = createChannelPlugin({ httpRoute: false });
-  const studio = await createStudio({ studioId: 'recursion-limit', entryPetId: 'one', plugins: [channel],
+  const studio = await createStudioWithPets({ studioId: 'recursion-limit', plugins: [channel],
     storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
   });

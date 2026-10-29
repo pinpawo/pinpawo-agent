@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
-import { createStudio } from '@pinpawo/studio-core';
+
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
@@ -14,6 +14,7 @@ import { parseStudioOperatorArgs, runStudioOperator } from '../../../packages/st
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 const LOCAL_TOKEN = 'channel-two-users-test-only';
 
@@ -33,7 +34,7 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
   const http = createStudioHttpPlugin({ port: 0, authToken: LOCAL_TOKEN });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const inputs: Array<{ petId: string; input: ChannelTestInput }> = [];
-  const pets = [{ petId: 'alpha', name: 'Alpha' }, { petId: 'beta', name: 'Beta' }];
+  const pets = [{ petId: 'alpha', name: 'Alpha', definitionId: 'alpha' }, { petId: 'beta', name: 'Beta', definitionId: 'beta' }];
   for (const { petId, name } of pets) {
     const config = buildHostRuntimeConfig(join(root, petId));
     const checkpointer = new FileSaver(config.checkpointPath);
@@ -60,7 +61,7 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
       } as never,
     }));
   }
-  const studio = await createStudio({ studioId: 'two-users', entryPetId: 'alpha', plugins: [channel, http],
+  const studio = await createStudioWithPets({ studioId: 'two-users', plugins: [channel, http],
     storage: { kind: 'sqlite', path: join(root, 'studio.sqlite') },
     pets: hosts.map((host, i) => ({ registration: pets[i]!, dispatch: host.resident.dispatch })),
   });
@@ -104,7 +105,7 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
 
     // Bob, over the CLI with his own key: sees the Channel and the Pets, and asks Alpha.
     assert.deepEqual((await cli(bobKeyFile, ['channels', 'list'])).channels.map((item: any) => item.channelId), [channelId]);
-    assert.deepEqual((await cli(bobKeyFile, ['pets'])).pets.map((pet: any) => pet.petId), ['alpha', 'beta']);
+    assert.deepEqual((await cli(bobKeyFile, ['pets', 'list'])).pets.map((pet: any) => pet.petId), ['alpha', 'beta']);
     const members = (await cli(bobKeyFile, ['channels', 'members', channelId])).members;
     assert.deepEqual(members.map((member: any) => [member.participantId, member.label]),
       [['human:alice', 'Alice'], ['pet:alpha', 'Alpha'], ['human:bob', 'Bob'], ['pet:beta', 'Beta']]);

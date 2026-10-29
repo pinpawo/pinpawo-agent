@@ -142,7 +142,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       const nextWindow = holding ? channelWindowAfterLater(heldRef.current, holding, next.nextAfter)
         : { channelId: selected, window: ++windows.current, nextAfter: next.nextAfter, nextBefore: next.nextBefore, hasEarlier: next.hasEarlier };
       if (!nextWindow) return;
-      setContext({ channel: next.channel, members: next.members, viewerParticipantId: next.viewerParticipantId });
+      setContext({ channel: next.channel, members: next.members, viewerParticipantId: next.viewerParticipantId, working: next.working ?? [] });
       setMessages(current => holding ? mergeChannelMessages(current, next.messages) : next.messages);
       updateHeld(nextWindow);
       setSessions(Array.isArray(bindings.sessions) ? bindings.sessions : []);
@@ -233,9 +233,10 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   };
 
   const lastSequence = messages.at(-1)?.sequence;
+  const working = context?.working ?? [];
   useEffect(() => {
     if (active && followLatest.current && timeline.current) timeline.current.scrollTop = timeline.current.scrollHeight;
-  }, [active, selected, lastSequence]);
+  }, [active, selected, lastSequence, working.length]);
   useEffect(() => {
     if (context && focusComposer.current) { focusComposer.current = false; composer.current?.focus(); }
   }, [context]);
@@ -304,7 +305,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               {held?.hasEarlier && <button className="channel-earlier" type="button" disabled={loadingEarlier || !connected}
                 onClick={() => { void loadEarlier(); }}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
               <ChannelTimeline messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage}
-                members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)} routingSkips={routingSkips}
+                members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)} routingSkips={routingSkips} working={working}
                 sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
                 onViewerChange={open => {
                   if (open) {

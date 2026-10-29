@@ -1,5 +1,5 @@
 {
-  "petId": "reviewer",
+  "definitionId": "reviewer",
   "name": "Reviewer",
   "defaultCapabilityName": "studio_review"
 }

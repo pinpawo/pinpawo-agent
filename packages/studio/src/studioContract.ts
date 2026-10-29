@@ -15,8 +15,9 @@
  *
  * Studio 不解释 event 的内容,也不持有由 event 推导出的状态。事件是
  * "发生了什么"(一次性、单向),不是"当前是什么样"(可查询、有生命周期)。
- * 这个区别决定了 studio 自己不存数据。插件的数据放在 Studio 提供的一个共享
- * 数据库里(`storage`),表和迁移归各插件所有,studio 只负责打开、迁移与关闭。
+ * 这个区别决定了 studio 不存由 event 推导出的状态;它自己只存客户身份和 Pet
+ * 实例。插件的数据放在 Studio 提供的一个共享数据库里(`storage`),表和迁移
+ * 归各插件所有,studio 只负责打开、迁移与关闭。
  *
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
  */
@@ -25,6 +26,7 @@ import type { JsonObject } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 
 import type { StudioPetRegistration } from './types';
+import type { StudioPets } from './pets/studioPets';
 import type { StudioPluginStorage } from './storage/studioStorage';
 import type { StudioClients } from './clients/studioClients';
 import type {
@@ -100,7 +102,10 @@ export type StudioPluginContext = {
   notify: (event: StudioEventInput) => void;
   /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;
+  /** The live Pets. */
   listPets: () => StudioPetRegistration[];
+  /** Create and rename Pets, and read their records. */
+  pets: StudioPets;
   /**
    * Read current resident dispatch-queue snapshots. This is observation only:
    * Studio neither stores them nor decides how a queue should progress.
@@ -210,17 +215,11 @@ export type StudioPlugin = {
 /* ─────────────── Studio ─────────────── */
 
 export type Studio = {
-  /**
-   * 外部输入默认派给谁。曾经有个 `submitRequest(goal)` 包着它 —— 那是多余的:
-   * 它完全等价于 `dispatch({ petId: entryPetId, request: goal })`,却让 entry pet
-   * 在 API 上有了专属地位。按插板的逻辑,
-   * entry pet 只是配置里的一个 pet。
-   */
-  entryPetId: string;
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
   /** eventId 省略时由 studio 分配。 */
   notify: (event: Omit<StudioEvent, 'eventId'> & { eventId?: string }) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];
+  pets: StudioPets;
   shutdown: () => Promise<void>;
 };

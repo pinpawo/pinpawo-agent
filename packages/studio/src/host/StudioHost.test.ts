@@ -20,7 +20,6 @@ import type { BuildStudioResult, ResolvedStudioHostConfig } from './buildStudio'
 
 function fakeStudio(onShutdown: () => void): Studio {
   return {
-    entryPetId: 'pet-a',
     dispatch: async () => ({
       petId: 'pet-1',
       invocationId: 'invocation-1',
@@ -28,6 +27,7 @@ function fakeStudio(onShutdown: () => void): Studio {
     notify: () => {},
     subscribe: () => () => {},
     listPets: () => [],
+    pets: {} as Studio['pets'],
     shutdown: async () => { onShutdown(); },
   };
 }
@@ -87,7 +87,7 @@ function configuration(
     studioConfigPath: '/tmp/pinpawo-studio-host-test/.pinpawo/studio.json',
     petsDir: '/tmp/pinpawo-studio-host-test/.pinpawo/pets',
     resolved: {
-      pets: petIds.map((petId) => ({ petId, name: petId })),
+      definitions: petIds.map((definitionId) => ({ definitionId, name: definitionId })),
     } as ResolvedStudioHostConfig['resolved'],
     plugins,
   };
@@ -99,6 +99,8 @@ function result(studio: Studio): BuildStudioResult {
     resolved: {} as BuildStudioResult['resolved'],
     plugins: [],
     residentPets: new Map(),
+    residentPetInteractions: new Map(),
+    credentialSource: { environment: async () => ({}) },
     activatePlugins: async () => undefined,
   };
 }
@@ -329,4 +331,21 @@ test('StudioHost claims writer ownership before resolving executable extensions'
     'caps:init',
   ]);
   await host.shutdown();
+});
+
+test('a supplied capability assembly receives the Studio Pets\' credentials at init', async () => {
+  let source: HostCapabilityAssemblyInitOptions['credentialSource'];
+  const built = result(fakeStudio(() => undefined));
+  built.credentialSource = { environment: async (petId) => ({ PET: petId }) };
+  const host = new StudioHost({
+    capabilityAssembly: fakeCapabilityAssembly([], { onInit: (input) => { source = input.credentialSource; } }),
+    resolveStudioHostConfig: async () => configuration(),
+    buildStudio: async () => built,
+  });
+  try {
+    await host.init();
+    assert.ok(source, 'the assembly was given the Studio source');
+    assert.deepEqual(await source.environment('dev-a'), { PET: 'dev-a' });
+  } finally { await host.shutdown(); }
+  await assert.rejects(source!.environment('dev-a'), /not running/);
 });

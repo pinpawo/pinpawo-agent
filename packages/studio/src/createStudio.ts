@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { allocatePetSessionId } from 'pinpawo/host-runtime';
+import type { Kysely } from 'kysely';
+import { allocatePetSessionId, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -15,46 +16,44 @@ import type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
 } from './studioInvocation';
-import type { StudioPetBinding, StudioPetRegistration } from './types';
+import type { StudioPetAssembler, StudioPetDefinition, StudioPetRegistration } from './types';
 import { StudioEventBus } from './studioEventBus';
 import { StudioPluginHookRegistry } from './studioPluginHooks';
 import { createStudioStorage, type StudioStorageConfig } from './storage/studioStorage';
 import { StudioClients } from './clients/studioClients';
-import { KyselyClientStore, clientMigrations, type ClientDatabase } from './clients/store/kysely';
+import { KyselyClientStore, type ClientDatabase } from './clients/store/kysely';
+import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
+import { StudioPetError, StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
+import { StudioPetCredentialVault } from './pets/petCredentials';
+import { studioCoreMigrations } from './storage/coreMigrations';
 
 export type CreateStudioInput = {
   studioId: string;
-  pets: StudioPetBinding[];
-  entryPetId: string;
+  /** The definitions this Studio may create Pets from. */
+  definitions: StudioPetDefinition[];
+  /** Builds one Pet's runtime; Studio calls it for each active Pet and for each Pet it creates. */
+  assemblePet: StudioPetAssembler;
   plugins?: StudioPlugin[];
   /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
   storage?: StudioStorageConfig;
   /** Model profiles Plugins may call directly. Without them, `models.resolve` throws. */
   models?: StudioModels;
+  /** The Studio's 32-byte credentials key. Without it Pet credentials are locked. */
+  credentialsKey?: Uint8Array;
 };
 
 export type PreparedStudio = {
   studio: Studio;
+  /** Decrypts a Pet's credentials; only for the composing Host, never for Plugins. */
+  credentialSource: PetCredentialSource;
+  /** Assemble the Studio's active Pets. Idempotent; activatePlugins runs it first. */
+  restorePets: () => Promise<void>;
   /** Start Plugin lifecycles after the composing Host has opened interaction transports. */
   activatePlugins: () => Promise<void>;
 };
 
 /** Prepare the Studio registry without running executable Plugin lifecycles. */
 export function prepareStudio(input: CreateStudioInput): PreparedStudio {
-  const petsById = new Map<string, StudioPetBinding>();
-  for (const pet of input.pets) {
-    const { petId } = pet.registration;
-    if (petsById.has(petId)) {
-      throw new Error(`studio "${input.studioId}": duplicate petId "${petId}"`);
-    }
-    petsById.set(petId, pet);
-  }
-  if (!petsById.has(input.entryPetId)) {
-    throw new Error(
-      `studio "${input.studioId}": entryPetId "${input.entryPetId}" is not among the configured pets`,
-    );
-  }
-
   const plugins = input.plugins ?? [];
   const pluginNames = new Set<string>();
   for (const plugin of plugins) {
@@ -69,15 +68,15 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
 
   const eventBus = new StudioEventBus();
   const idempotencyRecords = new Map<string, Promise<StudioDispatchReceipt>>();
-  const stopDispatchLifecycleObservers: Array<() => void> = [];
   const pluginHooks = new StudioPluginHookRegistry();
   const storage = createStudioStorage(input.storage ?? { kind: 'sqlite', path: ':memory:' });
-  let clientStore: Promise<KyselyClientStore> | undefined;
-  const clients = new StudioClients(() => {
-    clientStore ??= storage.open<ClientDatabase>('studio', clientMigrations).then(db => new KyselyClientStore(db));
-    clientStore.catch(() => { clientStore = undefined; });
-    return clientStore;
-  });
+  let coreDb: Promise<Kysely<unknown>> | undefined;
+  const openCore = async <DB>() => {
+    coreDb ??= storage.open<unknown>('studio', studioCoreMigrations);
+    coreDb.catch(() => { coreDb = undefined; });
+    return (await coreDb) as Kysely<DB>;
+  };
+  const clients = new StudioClients(async () => new KyselyClientStore(await openCore<ClientDatabase>()));
   const models: StudioModels = input.models ?? {
     resolve: () => { throw new Error(`studio "${input.studioId}" has no model profiles.`); },
   };
@@ -87,19 +86,36 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   let eventBusClosed = false;
   let stopped = false;
 
+  const lifecycleObservers = new Map<string, () => void>();
+  const petStore = async () => new KyselyPetStore(await openCore<PetDatabase>());
+  const credentials = new StudioPetCredentialVault({ store: petStore, key: input.credentialsKey });
+  const registry = new StudioPetRegistry({
+    studioId: input.studioId,
+    store: petStore,
+    credentials,
+    definitions: input.definitions,
+    assemble: input.assemblePet,
+    onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
+    onClosed: (petId) => {
+      lifecycleObservers.get(petId)?.();
+      lifecycleObservers.delete(petId);
+    },
+    onChange: (type, pet) => notify({ type, source: 'studio', occurredAt: new Date().toISOString(), payload: { pet } }),
+  });
+
   function listPets(): StudioPetRegistration[] {
-    return [...petsById.values()].map(({ registration }) => ({ ...registration }));
+    return registry.listLive().map(({ registration }) => ({ ...registration }));
   }
 
   function listDispatchQueues() {
-    return [...petsById.values()].map(({ registration, dispatch }) => ({
+    return registry.listLive().map(({ registration, runtime }) => ({
       petId: registration.petId,
-      ...dispatch.getQueueSnapshot(),
+      ...runtime.dispatch.getQueueSnapshot(),
     }));
   }
 
   const petSessionPort = (petId: string) => {
-    const port = petsById.get(petId)?.sessions;
+    const port = registry.getLive(petId)?.runtime.sessions;
     if (!port) throw new StudioPetUnavailableError(petId);
     return port;
   };
@@ -113,8 +129,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     eventBus.publish({ ...event, eventId: event.eventId ?? randomUUID() });
   }
 
-  for (const pet of petsById.values()) {
-    stopDispatchLifecycleObservers.push(pet.dispatch.onDispatchLifecycle((event) => {
+  function observeDispatchLifecycle(pet: LiveStudioPet): () => void {
+    return pet.runtime.dispatch.onDispatchLifecycle((event) => {
       notify({
         type: `dispatch.${event.state}`,
         source: 'resident-pet',
@@ -132,7 +148,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           ...(event.error ? { error: event.error } : {}),
         },
       });
-    }));
+    });
   }
 
   async function dispatch(
@@ -140,8 +156,9 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     source?: string,
   ): Promise<StudioDispatchReceipt> {
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
-    const pet = petsById.get(request.petId);
-    if (!pet) throw new Error(`studio "${input.studioId}": unknown petId "${request.petId}"`);
+    await registry.restore();
+    const pet = registry.getLive(request.petId);
+    if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${request.petId}"`, 'not_found');
 
     const idempotencyKey = request.idempotencyKey?.trim();
     if (request.idempotencyKey !== undefined && !idempotencyKey) {
@@ -164,7 +181,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       console.log(
         `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
       );
-      await pet.dispatch.dispatch({
+      await pet.runtime.dispatch.dispatch({
         request: request.request,
         dispatchId: invocationId,
         ...(request.session ? { session: { ...request.session } } : {}),
@@ -208,6 +225,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       }),
       subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
       listPets,
+      pets: registry,
       listDispatchQueues,
       petSessions,
       hooks: pluginHooks.contextFor(plugin.name),
@@ -240,7 +258,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   async function closeCore(): Promise<void> {
     if (eventBusClosed) return;
     eventBusClosed = true;
-    for (const stop of stopDispatchLifecycleObservers.splice(0)) stop();
+    // After every Plugin stopped: nothing dispatches any more.
+    await registry.close();
     await eventBus.close();
     idempotencyRecords.clear();
     // After every Plugin stopped: none of them may still be writing.
@@ -254,6 +273,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     const pending = (async () => {
       try {
+        await registry.restore();
         for (const plugin of plugins) {
           if (stopped) throw new Error(`studio "${input.studioId}": shutdown during Plugin startup`);
           // Include the currently starting Plugin in rollback: start() may have
@@ -288,17 +308,17 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   }
 
   const studio: Studio = {
-    entryPetId: input.entryPetId,
     dispatch,
     notify,
     subscribe: (handler) => eventBus.subscribe(handler),
     listPets,
+    pets: registry,
     shutdown,
   };
-  return { studio, activatePlugins };
+  return { studio, credentialSource: credentials.source, restorePets: () => registry.restore(), activatePlugins };
 }
 
-/** Create and activate a standalone Studio over already-live dispatch ports. */
+/** Create a Studio, assemble its active Pets and activate its Plugins. */
 export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const prepared = prepareStudio(input);
   await prepared.activatePlugins();

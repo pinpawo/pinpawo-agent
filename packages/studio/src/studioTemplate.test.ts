@@ -5,6 +5,7 @@ import path from 'node:path';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import test from 'node:test';
 import { initStudioWorkdir } from './studioTemplate';
+import { readStudioCredentialsKey } from './host/credentialsKey';
 
 async function createTemplate(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-template-'));
@@ -41,6 +42,9 @@ test('Studio init preserves a project Wiki and creates a separate configured Stu
   assert.equal(await readFile(path.join(result.wikiDirectory, 'PROJECT.md'), 'utf8'), '# Project\n');
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'original project Wiki\n');
   await assert.rejects(readFile(path.join(workdir, 'README.md')), /ENOENT/);
+  assert.equal(config.credentials.keyFile, result.credentialsKeyFile);
+  assert.equal(path.dirname(result.credentialsKeyFile), path.dirname(result.wikiDirectory));
+  assert.equal((await readStudioCredentialsKey(result.credentialsKeyFile)).byteLength, 32);
 });
 
 test('Studio init refuses existing configuration without touching it or the knowledge root', async () => {
@@ -127,9 +131,8 @@ test('shipped Pet Capabilities support explicit execution, review, and Wiki requ
   const studioConfig = JSON.parse(await readFile(
     path.join(workdir, '.pinpawo', 'studio.json'),
     'utf8',
-  )) as { entryPetId: string; pets: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
-  assert.equal(studioConfig.entryPetId, 'executor');
-  assert.deepEqual(studioConfig.pets, ['executor', 'reviewer', 'wiki']);
+  )) as { definitions: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
+  assert.deepEqual(studioConfig.definitions, ['executor', 'reviewer', 'wiki']);
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
     '@pinpawo-plugin/scheduler', '@pinpawo-plugin/project-files', '@pinpawo-plugin/trigger',

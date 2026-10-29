@@ -4,8 +4,11 @@
  * package never imports a concrete Plugin implementation.
  */
 
-export { createStudio } from './createStudio';
-export type { CreateStudioInput } from './createStudio';
+export { createStudio, prepareStudio } from './createStudio';
+export type { CreateStudioInput, PreparedStudio } from './createStudio';
+export { StudioPetError } from './pets/studioPets';
+export type { StudioPets } from './pets/studioPets';
+export type { StudioPetCredential, StudioPetCredentials } from './pets/petCredentials';
 export type {
   Studio,
   StudioDispatchReceipt,

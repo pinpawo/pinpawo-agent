@@ -3,13 +3,14 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { createStudio, createStudioStorage, StudioClients, type StudioDispatchRequest } from '@pinpawo/studio-core';
+import { createStudioStorage, StudioClients, type StudioDispatchRequest } from '@pinpawo/studio-core';
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';
 import { createSchedulerPlugin } from './schedulerPlugin';
 import { SchedulerService } from './schedulerService';
 import { KyselyScheduleStore, schedulerMigrations, type SchedulerDatabase } from './store/kysely';
+import { createStudioWithPets } from '../../../tests/support/livePets';
 
 function recordingPet(petId: string, dispatched: StudioDispatchRequest[]) {
   return {
@@ -25,37 +26,29 @@ function recordingPet(petId: string, dispatched: StudioDispatchRequest[]) {
   };
 }
 
-test('Scheduler dispatches one due schedule exactly once', async (t) => {
-  let requests = 0;
+test('Scheduler runs one due schedule exactly once', async (t) => {
+  const dispatched: StudioDispatchRequest[] = [];
   const events: string[] = [];
+  const channel = createChannelPlugin({ httpRoute: false });
   const plugin = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'scheduler-test',
-    entryPetId: 'worker',
-    pets: [{
-      registration: { petId: 'worker', name: 'Worker' },
-      dispatch: {
-        getQueueSnapshot: () => ({
-          state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
-        }),
-        onQueueChange: () => () => undefined,
-        onDispatchLifecycle: () => () => undefined,
-        dispatch: async () => { requests += 1; },
-      },
-    }],
-    plugins: [plugin],
+    pets: [recordingPet('worker', dispatched)],
+    plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
-  studio.subscribe((event) => { events.push(event.type); });
+  const { channel: { channelId } } = await channel.service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: ['worker'] });
+  studio.subscribe((event) => { if (event.source !== 'channel') events.push(event.type); });
 
   const schedule = await plugin.service.create({
     petId: 'worker',
+    channelId,
     request: 'run once',
     runAt: new Date(Date.now() - 1000).toISOString(),
   });
   await new Promise((resolve) => setTimeout(resolve, 40));
 
-  assert.equal(requests, 1);
+  assert.equal(dispatched.length, 1);
   assert.equal((await plugin.service.get(schedule.scheduleId))?.status, 'dispatched');
   assert.deepEqual(events, [
     'schedule.created',
@@ -79,7 +72,8 @@ test('Scheduler audits configured dispatch queues without changing their admissi
     allocateSessionId: () => 'unused',
     notify: (event) => { events.push(event); },
     subscribe: () => () => undefined,
-    listPets: () => [{ petId: 'worker', name: 'Worker' }],
+    listPets: () => [{ petId: 'worker', name: 'Worker', definitionId: 'worker' }],
+    pets: {} as Parameters<typeof plugin.start>[0]['pets'],
     listDispatchQueues: () => [{
       petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 2,
     }],
@@ -118,9 +112,8 @@ test('a channel-bound schedule runs its Pet in the Channel without posting there
   const dispatched: StudioDispatchRequest[] = [];
   const channel = createChannelPlugin({ httpRoute: false });
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'scheduler-channel',
-    entryPetId: 'reporter',
     pets: [recordingPet('reporter', dispatched)],
     plugins: [scheduler, channel],
   });
@@ -149,9 +142,8 @@ test('a channel-bound schedule fails when its Pet is not a member of the Channel
   const dispatched: StudioDispatchRequest[] = [];
   const channel = createChannelPlugin({ httpRoute: false });
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'scheduler-channel-member',
-    entryPetId: 'reporter',
     pets: [recordingPet('reporter', dispatched)],
     plugins: [scheduler, channel],
   });
@@ -173,9 +165,8 @@ test('a channel-bound schedule fails when its Pet is not a member of the Channel
 test('a channel-bound schedule fails when no Channel Plugin runs', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
-  const studio = await createStudio({
+  const studio = await createStudioWithPets({
     studioId: 'scheduler-no-channel',
-    entryPetId: 'reporter',
     pets: [recordingPet('reporter', dispatched)],
     plugins: [scheduler],
   });
@@ -215,9 +206,8 @@ for (const order of ['scheduler first', 'channel first'] as const) {
 
     const dispatched: StudioDispatchRequest[] = [];
     const scheduler = createSchedulerPlugin({ pollIntervalMs: 10, httpRoute: false });
-    const studio = await createStudio({
+    const studio = await createStudioWithPets({
       studioId: 'scheduler-restart',
-      entryPetId: 'reporter',
       pets: [recordingPet('reporter', dispatched)],
       plugins: order === 'scheduler first' ? [scheduler, channel] : [channel, scheduler],
       storage: { kind: 'sqlite', path: databasePath },

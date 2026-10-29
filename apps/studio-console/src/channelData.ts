@@ -15,7 +15,10 @@ export type ChannelMember = { participantId: string; kind: ChannelMemberKind | s
 export type ChannelContext = {
   channel: ChannelRow; members: ChannelMember[]; messages: ChannelMessage[];
   nextAfter: number; hasMore: boolean; nextBefore: number; hasEarlier: boolean; viewerParticipantId?: string;
+  /** Pet members running a turn in this Channel now; presence, not stored. */
+  working?: ChannelWorking[];
 };
+export type ChannelWorking = { participantId: string; since: string };
 /** Messages a Channel view reads at a time. */
 export const CHANNEL_PAGE_LIMIT = 100;
 /** The session a Pet uses in this Channel. */
@@ -52,6 +55,15 @@ export function channelReplyRecipientId(author: ChannelAuthor | undefined, membe
 export function channelMentionLabel(mention: ChannelMessage['mentions'][number], members: ChannelMember[], viewerParticipantId?: string): string {
   if (mention.participantId === viewerParticipantId) return 'Me';
   return members.find(item => item.participantId === mention.participantId)?.label ?? mention.label ?? mention.participantId;
+}
+
+/** Who is typing, earliest first: "A is typing…", "A and B are typing…", "A, B and 2 others are typing…". */
+export function channelWorkingLabel(working: ChannelWorking[], members: ChannelMember[], viewerParticipantId?: string): string {
+  const names = [...working].sort((a, b) => a.since.localeCompare(b.since))
+    .map(item => channelMentionLabel({ participantId: item.participantId }, members, viewerParticipantId));
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length <= 3) return `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are typing…`;
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} others are typing…`;
 }
 
 /** A member as the composer's @ list offers it. */

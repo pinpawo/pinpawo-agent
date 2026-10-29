@@ -41,6 +41,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
 | `plugins[].id` | When a Plugin is listed | Installed Plugin package name resolved by `StudioPluginResolver`. |
 | `plugins[].options` | No | Opaque object passed to that Plugin resolver. |
 | `storage` | No | Where Plugins keep data. Default `{ "kind": "sqlite", "path": ".pinpawo/studio/studio.sqlite" }` (path relative to the workdir). Postgres: `{ "kind": "postgres", "urlEnv": "PINPAWO_STUDIO_DATABASE_URL" }` or `{ "kind": "postgres", "url": "postgres://…" }`. See [Studio storage](../design/studio/storage.md). |
+| `credentials` | No | `{ "keyFile": "/abs/path/credentials.key" }`: the key (32 bytes, base64, mode 0600) that encrypts Pet credentials. `pinpawo-studio init` creates it in the Studio data directory. Without it Pet credentials are locked. See [Pet credentials](../design/studio/pet-credentials.md). |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
 is not listed, or a referenced pet file that is missing. A configured Plugin
@@ -175,9 +176,9 @@ See [Channel routing](../design/studio/channel-routing.md).
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source
 credentials, template projection, deduplication and endpoints are documented once in
-[Automation Plugins](../design/studio/automation-plugins.md). The default external
-request Trigger requires `PINPAWO_STUDIO_TRIGGER_SECRET`; it does not automatically
-update Wiki on task or dispatch completion. Deliveries live in the Studio database and the
+[Automation Plugins](../design/studio/automation-plugins.md). Every rule names the
+`channelId` its Pet runs in, so the default template ships no rules: create the Channel,
+then add the rule. Deliveries live in the Studio database and the
 Plugin no longer takes a `databasePath` option; deliveries in an earlier `trigger.sqlite` are not migrated.
 
 `@pinpawo-plugin/project-files` projects Markdown from a configured Wiki root into

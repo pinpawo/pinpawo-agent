@@ -18,7 +18,6 @@ npm install --global @pinpawo/studio
 
 WORKDIR=/path/to/project
 pinpawo-studio init --workdir "$WORKDIR"
-export PINPAWO_STUDIO_TRIGGER_SECRET='choose-a-secret-at-least-16-characters'
 pinpawo-studio --workdir "$WORKDIR"
 pinpawo-studio --workdir "$WORKDIR" --pet-port 3212
 
@@ -77,9 +76,9 @@ in the Studio configuration.
 Existing files are not overwritten. The package template itself contains no
 `.pinpawo/` runtime directory or generated state.
 
-The default template includes an HTTP Trigger for external requests. Set
-`PINPAWO_STUDIO_TRIGGER_SECRET` before starting the Host, or replace that
-Trigger in the initialized `.pinpawo/studio.json`.
+The default template enables the Trigger Plugin with no Triggers. A Trigger runs
+its Pet in a Channel, so create the Channel first, then add the Trigger with
+that `channelId` to `.pinpawo/studio.json`.
 The independent Studio Console remains a separate frontend application. From a
 source checkout, `pinpawo-studio console` starts its local development server
 when it is not already running, then opens the page. A published Studio CLI can

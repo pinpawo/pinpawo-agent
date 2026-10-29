@@ -20,6 +20,7 @@ import {
   type HostToolkitInventoryStore,
   type HostRuntimeConfig,
   type LocalModelProfileRegistry,
+  type PetCredentialSource,
   type ToolkitDefinitionSource,
 } from 'pinpawo/host-runtime';
 import {
@@ -65,6 +66,13 @@ export class StudioHost {
   private readonly resolveStudioHostConfigImpl: typeof resolveStudioHostConfig;
   private readonly resolvePlugin: StudioPluginResolver | undefined;
   private studio: BuildStudioResult | null = null;
+  /** The Studio is built after the assembly initializes; commands only run once it is. */
+  private readonly credentialSource: PetCredentialSource = {
+    environment: async (petId) => {
+      if (!this.studio) throw new Error('Studio is not running.');
+      return this.studio.credentialSource.environment(petId);
+    },
+  };
   private capsInitialized = false;
   private initPromise: Promise<void> | null = null;
   private activationPromise: Promise<void> | null = null;
@@ -121,26 +129,30 @@ export class StudioHost {
       );
       // Load the shared Host catalog before resolving Pet directories so every
       // Pet snapshot is built against the same initialized baseline.
+      // Every assembly, default or supplied, gets the Pets' credentials here, so
+      // no Studio command silently runs with only the Host's environment.
       await this.caps.init({
         toolkitSources: pluginToolkitSources,
+        credentialSource: this.credentialSource,
       });
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();
-      for (const pet of configuration.resolved.pets) {
-        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, pet.petId);
+      for (const { definitionId } of configuration.resolved.definitions) {
+        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, definitionId);
         const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
           rootDir: capabilityDir,
-          sourceId: `studio-pet:${pet.petId}`,
+          sourceId: `studio-pet:${definitionId}`,
         });
         petCapabilities.set(
-          pet.petId,
+          definitionId,
           snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
         );
-        const document = await loadPetDocument(configuration.petsDir, pet.petId);
-        if (document) petDocuments.set(pet.petId, document);
+        const document = await loadPetDocument(configuration.petsDir, definitionId);
+        if (document) petDocuments.set(definitionId, document);
       }
-      // Build the resident Studio now — before any transport starts listening.
-      // Requests only dispatch to this pre-built instance.
+      // Build the resident Studio and its active Pets now — before any
+      // transport starts listening. Pets created later use these same
+      // definition snapshots.
       this.studio = await this.buildStudioImpl({
         configuration,
         modelProfiles: this.caps.getModelProfiles(),
@@ -198,25 +210,13 @@ export class StudioHost {
     await this.activationPromise?.catch(() => undefined);
     const resident = this.studio;
     this.studio = null;
+    // Studio closes its Pets' runtimes after its Plugins stop.
     await resident?.studio.shutdown().catch((error) => {
       console.error(
         '[studio-host] resident Studio shutdown failed:',
         error instanceof Error ? error.message : error,
       );
     });
-    if (resident) {
-      const results = await Promise.allSettled(
-        [...resident.residentPets.values()].map((pet) => pet.close()),
-      );
-      for (const result of results) {
-        if (result.status === 'rejected') {
-          console.error(
-            '[studio-host] resident Pet shutdown failed:',
-            result.reason instanceof Error ? result.reason.message : result.reason,
-          );
-        }
-      }
-    }
     if (this.capsInitialized) {
       this.capsInitialized = false;
       await this.caps.shutdown();
@@ -234,14 +234,15 @@ export class StudioHost {
     return this.studio.studio;
   }
 
-  /** Pet-scoped Agent Session adapters owned by host, not Studio core. */
+  /**
+   * Pet-scoped Agent Session adapters owned by host, not Studio core. The map
+   * is live: Pets created later appear in it.
+   */
   getResidentPetInteractions(): ReadonlyMap<string, ResidentPetInteraction> {
     if (!this.studio) {
       throw new Error('StudioHost.getResidentPetInteractions() called before init()');
     }
-    return new Map(
-      [...this.studio.residentPets].map(([petId, pet]) => [petId, pet.interaction]),
-    );
+    return this.studio.residentPetInteractions;
   }
 
   // ---- Capability supply delegation ----

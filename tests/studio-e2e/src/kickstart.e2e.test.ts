@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initStudioWorkdir, type StudioPlugin } from '@pinpawo/studio-core';
 
-test('Studio init enables Channel and keeps only an explicit external-request Trigger', async (t) => {
+test('Studio init enables Channel and ships no Trigger: each one names a Channel', async (t) => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-init-e2e-'));
   const studioDataRoot = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-data-'));
   t.after(async () => { await rm(workdir, { recursive: true, force: true }); await rm(studioDataRoot, { recursive: true, force: true }); });
@@ -15,32 +15,25 @@ test('Studio init enables Channel and keeps only an explicit external-request Tr
     plugins: Array<{
       id: string;
       options?: {
-        triggers?: Array<{
-          triggerId: string;
-          source?: { secretEnv?: string };
-        }>;
+        triggers?: unknown[];
       };
     }>;
   };
   assert.ok(parsed.plugins.some(({ id }) => id === '@pinpawo-plugin/channel'));
   const trigger = parsed.plugins.find(({ id }) => id === '@pinpawo-plugin/trigger');
-  assert.equal(trigger?.options?.triggers?.length, 1);
-  assert.ok(trigger?.options?.triggers?.some((definition) => (
-    definition.triggerId === 'external-request'
-    && definition.source?.secretEnv === 'PINPAWO_STUDIO_TRIGGER_SECRET'
-  )));
+  assert.deepEqual(trigger?.options?.triggers, []);
 });
 
 // Assemble the shipped Plugin selection and exercise the surviving public routes.
 test('shipped Plugins support explicit Wiki work and Knowledge without opening historical task storage', async (t) => {
   const { mkdir, rm, writeFile } = await import('node:fs/promises');
-  const { createStudio, resolveStudioHostConfig } = await import('@pinpawo/studio-core');
+  const { createStudio, resolveStudioHostConfig, resolveStudioStorage } = await import('@pinpawo/studio-core');
   const { createStudioHttpPlugin } = await import('@pinpawo-plugin/studio-http');
   const { createStudioPlugin: channelFactory } = await import('@pinpawo-plugin/channel');
   const { createStudioPlugin: noticeFactory } = await import('@pinpawo-plugin/notice');
   const { createStudioPlugin: schedulerFactory } = await import('@pinpawo-plugin/scheduler');
   const { createStudioPlugin: filesFactory } = await import('@pinpawo-plugin/project-files');
-  const { createTriggerPlugin } = await import('@pinpawo-plugin/trigger');
+  const { createStudioPlugin: triggerFactory } = await import('@pinpawo-plugin/trigger');
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-retired-workdir-'));
   const studioDataRoot = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-data-'));
   const { wikiDirectory } = await initStudioWorkdir({ workdir, studioDataRoot });
@@ -62,18 +55,12 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     ['@pinpawo-plugin/notice', noticeFactory],
     ['@pinpawo-plugin/scheduler', schedulerFactory],
     ['@pinpawo-plugin/project-files', filesFactory],
+    ['@pinpawo-plugin/trigger', triggerFactory],
   ]);
   const configuration = await resolveStudioHostConfig({
     workdir,
     resolvePlugin: (id, options) => {
       if (id === '@pinpawo-plugin/studio-http') return http;
-      if (id === '@pinpawo-plugin/trigger') {
-        // Supply test credentials without consulting or mutating user environment.
-        const definitions = options!.triggers as Array<{ triggerId: string; petId: string; request: string }>;
-        return createTriggerPlugin({ triggers: definitions.map(({ triggerId, petId, request }) => ({
-          triggerId, petId, request, source: { kind: 'http' as const, secret: 'explicit-planning-test-secret' },
-        })) });
-      }
       const factory = factories.get(id);
       assert.ok(factory, `Unexpected configured Plugin: ${id}`);
       return factory(options, { workdir });
@@ -93,32 +80,34 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];
-  for (const pet of configuration.resolved.pets) {
-    const loaded = await loadCapabilityDirectory(path.join(workdir, '.pinpawo', 'pets', pet.petId, 'capabilities'));
+  for (const pet of configuration.resolved.definitions) {
+    const loaded = await loadCapabilityDirectory(path.join(workdir, '.pinpawo', 'pets', pet.definitionId, 'capabilities'));
     const registry = compileAgentRegistry({ toolkits, capabilities: loaded.map(({ capability }) => capability) });
-    assert.deepEqual(registry.unavailableCapabilities, [], `${pet.petId} has no missing Toolkit bindings`);
+    assert.deepEqual(registry.unavailableCapabilities, [], `${pet.definitionId} has no missing Toolkit bindings`);
     const preferred = registry.capabilities.find(({ capability }) => capability.name === pet.defaultCapabilityName);
-    assert.ok(preferred, `${pet.petId} retains an executable default Capability`);
+    assert.ok(preferred, `${pet.definitionId} retains an executable default Capability`);
     assert.ok(preferred.toolNames.includes('channel_read_context'));
-    if (pet.petId === 'wiki') {
+    if (pet.definitionId === 'wiki') {
       for (const name of ['project_files_list', 'project_files_read', 'project_files_write']) {
         assert.ok(preferred.toolNames.includes(name), `Wiki Capability binds ${name}`);
       }
     }
   }
   const received: Array<{ petId: string; request: string }> = [];
+  // The workdir's own database: init created one Pet per template definition.
   const studio = await createStudio({
     studioId: configuration.resolved.studio.studioId,
-    entryPetId: configuration.resolved.studio.entryPetId,
     plugins: configuration.plugins,
-    pets: configuration.resolved.pets.map(({ petId, name }) => ({
-      registration: { petId, name },
+    storage: resolveStudioStorage(configuration.resolved.studio.storage, workdir),
+    definitions: configuration.resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
+    assemblePet: async ({ petId }) => ({
       dispatch: {
         getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async ({ request }) => { received.push({ petId, request }); },
       },
-    })),
+      close: async () => undefined,
+    }),
   });
   t.after(async () => {
     await studio.shutdown();

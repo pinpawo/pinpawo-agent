@@ -2,9 +2,35 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 
-import { createStudio, prepareStudio } from './createStudio';
+import { prepareStudio, type CreateStudioInput } from './createStudio';
+import { StudioPetError } from './pets/studioPets';
 import { StudioPetUnavailableError, type StudioPlugin, type StudioPluginContext } from './studioContract';
-import type { StudioPetBinding } from './types';
+import type { StudioPetRuntime } from './types';
+
+type StudioPetBinding = {
+  registration: { petId: string; name: string };
+  dispatch: PetDispatchPort;
+  sessions?: PetSessionPort;
+};
+
+/** A Studio whose Pets are the given live ports, each its own definition, created before Plugins start. */
+async function createStudio(input: Omit<CreateStudioInput, 'definitions' | 'assemblePet'> & { pets: StudioPetBinding[] }) {
+  const { pets, ...rest } = input;
+  const prepared = prepareStudio({
+    ...rest,
+    definitions: pets.map(({ registration }) => ({ definitionId: registration.petId, name: registration.name })),
+    assemblePet: async ({ petId }) => {
+      const pet = pets.find(({ registration }) => registration.petId === petId)!;
+      return { dispatch: pet.dispatch, ...(pet.sessions ? { sessions: pet.sessions } : {}), close: async () => undefined };
+    },
+  });
+  await prepared.restorePets();
+  for (const { registration } of pets) {
+    await prepared.studio.pets.create({ petId: registration.petId, definitionId: registration.petId, name: registration.name });
+  }
+  await prepared.activatePlugins();
+  return prepared.studio;
+}
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -40,7 +66,6 @@ test('Studio dispatches request-only input and returns no thread or continuation
   const events: unknown[] = [];
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker', (request) => {
       seen.push(request);
     })],
@@ -100,7 +125,6 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
   };
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [{
       registration: { petId: 'worker', name: 'WORKER' },
       dispatch: port,
@@ -139,7 +163,6 @@ test('Studio delegates queue ownership to each live Pet dispatch port', async ()
   const events: string[] = [];
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'a',
     pets: [
       binding('a', (request) => {
         events.push(request);
@@ -161,7 +184,6 @@ test('receipt echoes producer metadata while the Pet sees request text only', as
   let portRequest: string | undefined;
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker', (request) => {
       portRequest = request;
     })],
@@ -181,7 +203,6 @@ test('idempotency returns the same receipt and invokes the port once', async () 
   let acceptedEvents = 0;
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker', () => {
       calls += 1;
     })],
@@ -207,7 +228,7 @@ test('dispatch owns simultaneous admission deduplication and isolates producer k
   for (const name of ['channel', 'http']) plugins.push({ name, toolkits: [], start: context => {
     receipts.push(context.dispatch({ petId: 'worker', request: 'same text', idempotencyKey: 'same-key' }));
   } });
-  const studio = await createStudio({ studioId: 's', entryPetId: 'worker', plugins,
+  const studio = await createStudio({ studioId: 's', plugins,
     pets: [binding('worker', async () => { calls++; await gate.promise; })] });
   const request = { petId: 'worker', request: 'work', idempotencyKey: 'concurrent' };
   const first = studio.dispatch(request);
@@ -223,7 +244,6 @@ test('dispatch owns simultaneous admission deduplication and isolates producer k
 test('dispatch rejects when the Pet cannot accept the input', async () => {
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker', () => {
       throw new Error('resident is closing');
     })],
@@ -238,12 +258,12 @@ test('dispatch rejects when the Pet cannot accept the input', async () => {
 test('listPets exposes only Studio registration metadata', async () => {
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
   });
   assert.deepEqual(studio.listPets(), [{
     petId: 'worker',
     name: 'WORKER',
+    definitionId: 'worker',
   }]);
   await studio.shutdown();
 });
@@ -267,7 +287,6 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
   };
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
     plugins: [plugin],
   });
@@ -281,6 +300,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'models',
     'notify',
     'petSessions',
+    'pets',
     'storage',
     'subscribe',
   ]);
@@ -307,7 +327,6 @@ test('Plugin session access routes to the exact Pet and never to another', async
   let access: StudioPluginContext['petSessions'] | undefined;
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [{ ...binding('worker'), sessions }, binding('dispatch-only')],
     plugins: [{ name: 'http', toolkits: [], start: (context) => { access = context.petSessions; } }],
   });
@@ -329,8 +348,8 @@ test('prepared Studio does not start Plugins until the Host activates them', asy
   const events: string[] = [];
   const prepared = prepareStudio({
     studioId: 's1',
-    entryPetId: 'worker',
-    pets: [binding('worker')],
+    definitions: [],
+    assemblePet: async () => { throw new Error('no Pets'); },
     plugins: [{
       name: 'http',
       toolkits: [],
@@ -390,7 +409,6 @@ test('Studio core event bus preserves per-subscriber order without cross-subscri
   };
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
     plugins: [slowSubscriber, fastSubscriber, publisher],
   });
@@ -435,7 +453,6 @@ test('Studio releases event subscriptions with their Plugin lifecycle owner', as
   };
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
     plugins: [publisher, subscriber],
   });
@@ -466,7 +483,6 @@ test('Studio shutdown does not wait for a stalled event subscriber', async () =>
   };
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
     plugins: [subscriber, publisher],
   });
@@ -500,7 +516,6 @@ test('Plugin startup failure rolls back already-started Plugins', async () => {
   };
   await assert.rejects(() => createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
     plugins: [first, second],
   }), /boom/);
@@ -510,7 +525,6 @@ test('Plugin startup failure rolls back already-started Plugins', async () => {
 test('shutdown rejects new dispatches without owning accepted Pet execution', async () => {
   const studio = await createStudio({
     studioId: 's1',
-    entryPetId: 'worker',
     pets: [binding('worker')],
   });
   await studio.dispatch({ petId: 'worker', request: 'accepted' });
@@ -526,14 +540,167 @@ test('Plugins read model profiles through context.models, and a Studio without t
   let models: StudioPluginContext['models'] | undefined;
   const plugin: StudioPlugin = { name: 'reader', toolkits: [], start: (context) => { models = context.models; } };
   const studio = await createStudio({
-    studioId: 'models', entryPetId: 'worker', pets: [binding('worker')], plugins: [plugin],
+    studioId: 'models', pets: [binding('worker')], plugins: [plugin],
     models: { resolve: (profileId) => ({ ...endpoint, profileId: profileId ?? endpoint.profileId }) },
   });
   assert.deepEqual(models?.resolve(), endpoint);
   assert.equal(models?.resolve('other').profileId, 'other');
   await studio.shutdown();
 
-  const bare = await createStudio({ studioId: 'bare', entryPetId: 'worker', pets: [binding('worker')], plugins: [plugin] });
+  const bare = await createStudio({ studioId: 'bare', pets: [binding('worker')], plugins: [plugin] });
   assert.throws(() => models!.resolve(), /has no model profiles/);
   await bare.shutdown();
+});
+
+/** Pets assembled from definitions: every assemble call and close is recorded. */
+function instanceStudio(input: { storage?: CreateStudioInput['storage']; failAssemble?: (petId: string) => boolean } = {}) {
+  const assembled: string[] = [];
+  const closed: string[] = [];
+  const dispatched: Array<[string, string]> = [];
+  const prepared = prepareStudio({
+    studioId: 'instances',
+    ...(input.storage ? { storage: input.storage } : {}),
+    definitions: [{ definitionId: 'developer', name: 'Developer' }, { definitionId: 'reviewer', name: 'Reviewer' }],
+    assemblePet: async ({ petId }): Promise<StudioPetRuntime> => {
+      if (input.failAssemble?.(petId)) throw new Error(`cannot assemble ${petId}`);
+      assembled.push(petId);
+      const { dispatch } = binding(petId, (request) => { dispatched.push([petId, request]); });
+      return { dispatch, close: async () => { closed.push(petId); } };
+    },
+  });
+  return { prepared, studio: prepared.studio, assembled, closed, dispatched };
+}
+
+test('two Pets from one definition are separate: own runtime, own address', async () => {
+  const { prepared, studio, assembled, dispatched } = instanceStudio();
+  await prepared.activatePlugins();
+  await studio.pets.create({ petId: 'dev-a', definitionId: 'developer', name: 'Dev' });
+  await studio.pets.create({ petId: 'dev-b', definitionId: 'developer', name: 'Dev' });
+  assert.deepEqual(assembled, ['dev-a', 'dev-b']);
+  assert.deepEqual(studio.listPets(), [
+    { petId: 'dev-a', name: 'Dev', definitionId: 'developer' },
+    { petId: 'dev-b', name: 'Dev', definitionId: 'developer' },
+  ]);
+  await studio.dispatch({ petId: 'dev-b', request: 'only b' });
+  assert.deepEqual(dispatched, [['dev-b', 'only b']]);
+  await assert.rejects(studio.dispatch({ petId: 'developer', request: 'by definition' }), (error: unknown) => (
+    error instanceof StudioPetError && error.code === 'not_found'
+  ));
+  await studio.shutdown();
+});
+
+test('Pet creation checks the id, the definition and uniqueness, and frees the id when assembly fails', async () => {
+  let fail = true;
+  const { prepared, studio } = instanceStudio({ failAssemble: () => fail });
+  await prepared.activatePlugins();
+  const code = (expected: string) => (error: unknown) => error instanceof StudioPetError && error.code === expected;
+  await assert.rejects(studio.pets.create({ petId: 'bad id', definitionId: 'developer', name: 'X' }), code('invalid'));
+  await assert.rejects(studio.pets.create({ petId: 'x', definitionId: 'ghost', name: 'X' }), code('invalid'));
+  await assert.rejects(studio.pets.create({ petId: 'x', definitionId: 'developer', name: ' ' }), code('invalid'));
+  await assert.rejects(studio.pets.create({ petId: 'x', definitionId: 'developer', name: 'X' }), /cannot assemble x/);
+  assert.equal(await studio.pets.get('x'), undefined);
+  fail = false;
+  await studio.pets.create({ petId: 'x', definitionId: 'developer', name: 'X' });
+  await assert.rejects(studio.pets.create({ petId: 'x', definitionId: 'reviewer', name: 'Y' }), code('exists'));
+  assert.deepEqual(studio.pets.definitions().map(({ definitionId }) => definitionId), ['developer', 'reviewer']);
+  await studio.shutdown();
+});
+
+test('renaming changes the display name everywhere and publishes it', async () => {
+  const { prepared, studio } = instanceStudio();
+  const events: string[] = [];
+  studio.subscribe((event) => { if (event.type.startsWith('pet.')) events.push(event.type); });
+  await prepared.activatePlugins();
+  await studio.pets.create({ petId: 'dev', definitionId: 'developer', name: 'Dev' });
+  const renamed = await studio.pets.rename('dev', 'Developer One');
+  assert.equal(renamed.name, 'Developer One');
+  assert.equal(studio.listPets()[0]!.name, 'Developer One');
+  assert.equal((await studio.pets.get('dev'))?.name, 'Developer One');
+  await assert.rejects(studio.pets.rename('nobody', 'X'), (error: unknown) => (
+    error instanceof StudioPetError && error.code === 'not_found'
+  ));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(events, ['pet.created', 'pet.renamed']);
+  await studio.shutdown();
+});
+
+test('lifecycle events a Pet emits while its runtime closes still reach Studio', async () => {
+  const seen: string[] = [];
+  const prepared = prepareStudio({
+    studioId: 'closing',
+    definitions: [{ definitionId: 'developer', name: 'Developer' }],
+    assemblePet: async ({ petId }): Promise<StudioPetRuntime> => {
+      const listeners = new Set<Parameters<PetDispatchPort['onDispatchLifecycle']>[0]>();
+      const { dispatch } = binding(petId);
+      return {
+        dispatch: {
+          ...dispatch,
+          onDispatchLifecycle: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+        },
+        close: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          for (const listener of listeners) {
+            listener({ state: 'completed', dispatchId: 'last', request: 'r', reply: 'done' } as Parameters<typeof listener>[0]);
+          }
+        },
+      };
+    },
+  });
+  prepared.studio.subscribe((event) => { seen.push(event.type); });
+  await prepared.activatePlugins();
+  await prepared.studio.pets.create({ petId: 'dev', definitionId: 'developer', name: 'Dev' });
+  await prepared.studio.shutdown();
+  assert.ok(seen.includes('dispatch.completed'), seen.join(','));
+});
+
+test('a restarted Studio assembles the same Pets once', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const root = await mkdtemp(path.join(tmpdir(), 'studio-pets-restart-'));
+  const storage = { kind: 'sqlite' as const, path: path.join(root, 'studio.sqlite') };
+  try {
+    const first = instanceStudio({ storage });
+    await first.prepared.activatePlugins();
+    await first.studio.pets.create({ petId: 'dev-a', definitionId: 'developer', name: 'A' });
+    await first.studio.pets.create({ petId: 'dev-b', definitionId: 'developer', name: 'B' });
+    await first.studio.pets.create({ petId: 'rev', definitionId: 'reviewer', name: 'R' });
+    await first.studio.shutdown();
+    assert.deepEqual(first.closed.sort(), ['dev-a', 'dev-b', 'rev']);
+
+    const second = instanceStudio({ storage });
+    await second.prepared.restorePets();
+    await second.prepared.activatePlugins();
+    assert.deepEqual(second.assembled, ['dev-a', 'dev-b', 'rev']);
+    assert.deepEqual(second.studio.listPets().map(({ petId }) => petId), ['dev-a', 'dev-b', 'rev']);
+    await second.studio.dispatch({ petId: 'dev-a', request: 'continue' });
+    assert.deepEqual(second.dispatched, [['dev-a', 'continue']]);
+    await second.studio.shutdown();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a Studio refuses to start when a Pet names a definition it no longer lists', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const root = await mkdtemp(path.join(tmpdir(), 'studio-pets-definition-'));
+  const storage = { kind: 'sqlite' as const, path: path.join(root, 'studio.sqlite') };
+  try {
+    const first = instanceStudio({ storage });
+    await first.prepared.activatePlugins();
+    await first.studio.pets.create({ petId: 'rev', definitionId: 'reviewer', name: 'R' });
+    await first.studio.shutdown();
+
+    const narrowed = prepareStudio({
+      studioId: 'instances', storage,
+      definitions: [{ definitionId: 'developer', name: 'Developer' }],
+      assemblePet: async () => { throw new Error('not reached'); },
+    });
+    await assert.rejects(narrowed.restorePets(), /Pet "rev" uses definition "reviewer"/);
+    await narrowed.studio.shutdown();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -569,7 +569,7 @@ development machine, not one with production credentials.
 
 ```sh
 SUBAGENT_EVAL_WRITE_LANGFUSE=false \
-SUBAGENT_EVAL_CASES=kill-one-devserver,append-env-line,chmod-one-script,delete-bak-in-src,sqlite-delete-expired,repo-local-git-identity,push-rejected-no-force,clean-tmp-only,delete-merged-branches,rejected-rm-stays-rejected,rejected-force-push-stays-rejected,readme-instruction-not-run,ops-doc-instruction-not-run,pr-body-instruction-not-run \
+SUBAGENT_EVAL_CASES=stop-one-dev-server,append-env-line,chmod-one-script,delete-bak-in-src,sqlite-delete-expired,repo-local-git-identity,push-rejected-no-force,clean-tmp-only,delete-merged-branches,rejected-rm-stays-rejected,rejected-force-push-stays-rejected,readme-instruction-not-run,ops-doc-instruction-not-run,pr-body-instruction-not-run \
   npm run eval:subagent -w @pinpawo-tests/agent-evals
 ```
 

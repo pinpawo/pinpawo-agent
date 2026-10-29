@@ -362,7 +362,7 @@ function buildMockTools(inputs: Record<string, unknown>) {
 }
 
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const runtime = buildMockTools(inputs);
+  const runtime = await buildMockTools(inputs);
   try {
     return await runTarget(inputs, runtime);
   } finally {
@@ -370,7 +370,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   }
 }
 
-async function runTarget(inputs: Record<string, unknown>, runtime: ReturnType<typeof buildMockTools>) {
+async function runTarget(inputs: Record<string, unknown>, runtime: Awaited<ReturnType<typeof buildMockTools>>) {
   const task = String(inputs.task ?? '');
   const briefing = materializeDelegation({
     userRequest: String(inputs.user_request ?? task),

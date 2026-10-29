@@ -3,7 +3,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
 import {
-  channelDateKey, channelDeliveryLabel, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
+  channelDateKey, channelDeliveryLabel, channelParticipantId, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
   channelPetSession, channelRoutingSkipLabel, channelWorkingLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession, type ChannelWorking,
 } from './channelData';
 
@@ -107,7 +107,7 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
     const listedMentions = item.mentions.filter(mention => !inline.has(mention.participantId)
       && !delivered.some(delivery => delivery.participantId === mention.participantId));
     return <React.Fragment key={item.messageId}>{separator}<article id={'message-' + item.messageId} tabIndex={-1}
-      className={'channel-message' + (grouped ? ' grouped' : '') + (highlighted === item.messageId ? ' located' : '')}
+      className={'channel-message ' + (channelParticipantId(item.author) === viewerParticipantId ? 'mine' : item.author.kind) + (grouped ? ' grouped' : '') + (highlighted === item.messageId ? ' located' : '')}
       data-message-id={item.messageId} aria-label={identity.name + ' at ' + date.toLocaleTimeString()}>
       <div className={'channel-avatar ' + item.author.kind} aria-hidden="true">{grouped ? '' : avatar}</div>
       <div className="channel-message-content">
@@ -120,17 +120,19 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
             {`@${channelMentionLabel({ participantId: delivery.participantId! }, members, viewerParticipantId)} · ${channelDeliveryLabel(delivery)}`}</span>)}
           {skipped && <span className="channel-inline-state skipped" title={skipped.detail}>{channelRoutingSkipLabel(skipped)}</span>}
         </div>
+        <div className="channel-bubble">
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
         <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} />
-        {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
-          <p className="channel-record-error" role="alert" key={failureIndex}>
-            {delivery.participantId ? `${channelMentionLabel({ participantId: delivery.participantId }, members, viewerParticipantId)}: ` : 'Mentions were not delivered: '}{delivery.error ?? 'Delivery failed.'}</p>)}
         {item.artifacts.map((artifact, artifactIndex) => <div className="channel-artifact" key={artifactIndex}>
           {/^https?:\/\//i.test(artifact.uri) ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label ?? artifact.uri}</a> : <code>{artifact.label ?? artifact.uri}</code>}
           {artifact.version && <span> · {artifact.version}</span>}
         </div>)}
+        </div>
+        {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
+          <p className="channel-record-error" role="alert" key={failureIndex}>
+            {delivery.participantId ? `${channelMentionLabel({ participantId: delivery.participantId }, members, viewerParticipantId)}: ` : 'Mentions were not delivered: '}{delivery.error ?? 'Delivery failed.'}</p>)}
         <div className="channel-message-actions" role="toolbar" aria-label={'Message from ' + identity.name}>
           <button type="button" disabled={pending} aria-label={'Reply to ' + identity.name} onClick={() => onReply(item)}>Reply</button>
           {session && onViewSession && <button type="button" disabled={!connected} aria-label={`View ${identity.name} session`} onClick={() => onViewSession(session)}>Session</button>}

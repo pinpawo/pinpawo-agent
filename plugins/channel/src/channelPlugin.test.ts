@@ -13,6 +13,7 @@ test('a Pet works in a Channel only while its run there is running, and context 
   const plugin = createChannelPlugin();
   const context: StudioPluginContext = {
     dispatch: async () => { throw new Error('not used'); },
+    registerContextProvider: () => () => undefined,
     allocateSessionId: () => 'unused',
     notify: (event) => { notified.push(event); },
     subscribe: (listener) => { listeners.push(listener); return () => undefined; },

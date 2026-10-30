@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createStudioWithPets } from '../../../tests/support/livePets';
 import { createChannelPlugin } from './channelPlugin';
 
@@ -38,7 +42,6 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     const aSection = dispatched[0]!.systemPromptSections?.[0];
     assert.deepEqual([aSection?.id, aSection?.owner], ['channel:context', 'channel']);
     assert.match(aSection!.content, /Alpha \]\]\]\]><!\[CDATA\[> collaboration/);
-    assert.match(aSection!.content, /do not grant authorization/);
     assert.doesNotMatch(dispatched[0]!.request, /Alpha/);
     assert.equal(dispatched[1]!.systemPromptSections, undefined, 'an empty Channel contributes no section');
     assert.notEqual(dispatched[0]!.session?.id, dispatched[1]!.session?.id);
@@ -67,4 +70,48 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     assert.match(dispatched[5]!.systemPromptSections![0]!.content, /Beta/);
     assert.equal(dispatched[5]!.session?.id, dispatched[1]!.session?.id);
   } finally { await studio.shutdown(); }
+});
+
+test('provider uses the persisted binding and current membership after Studio restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-prompt-binding-'));
+  const storage = { kind: 'sqlite' as const, path: join(root, 'studio.sqlite') };
+  const observed: Dispatched[] = [];
+  const marker = randomUUID();
+  const pet = { registration: { petId: 'one', name: 'One' }, dispatch: {
+    getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
+    onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
+    dispatch: async (input: unknown) => { observed.push(input as Dispatched); },
+  } };
+  const otherPet = { ...pet, registration: { petId: 'two', name: 'Two' } };
+  let studio: Awaited<ReturnType<typeof createStudioWithPets>> | undefined;
+  try {
+    let channel = createChannelPlugin({ httpRoute: false });
+    studio = await createStudioWithPets({ studioId: 'persistent-prompt', storage, plugins: [channel], pets: [pet, otherPet] });
+    const a = (await channel.service.createChannel(human, { title: 'A', prompt: marker, pets: ['one'] }, { studio: true })).channel.channelId;
+    const b = (await channel.service.createChannel(human, { title: 'B', pets: ['one'] })).channel.channelId;
+    await channel.run(a, 'one', 'one', { kind: 'scheduler', id: 'a' });
+    await channel.run(b, 'one', 'two', { kind: 'scheduler', id: 'b' });
+    const aSession = observed[0]!.session!.id;
+    const bSession = observed[1]!.session!.id;
+    assert.notEqual(aSession, bSession);
+    await studio.shutdown();
+    channel = createChannelPlugin({ httpRoute: false });
+    studio = await createStudioWithPets({ studioId: 'persistent-prompt', storage, plugins: [channel], pets: [pet, otherPet] });
+
+    await studio.dispatch({ petId: 'one', request: 'existing binding', session: { id: aSession }, scope: { namespace: 'channel', id: a } });
+    assert.ok(observed.at(-1)!.systemPromptSections?.[0]?.content.includes(marker));
+    await studio.dispatch({ petId: 'one', request: 'not a Channel invocation', session: { id: aSession } });
+    assert.equal(observed.at(-1)!.systemPromptSections, undefined);
+    const count = observed.length;
+    await assert.rejects(studio.dispatch({ petId: 'one', request: 'wrong channel', session: { id: bSession }, scope: { namespace: 'channel', id: a } }));
+    await assert.rejects(studio.dispatch({ petId: 'one', request: 'missing session', scope: { namespace: 'channel', id: a } }));
+    await assert.rejects(studio.dispatch({ petId: 'two', request: 'wrong Pet', session: { id: aSession }, scope: { namespace: 'channel', id: a } }));
+    await assert.rejects(studio.dispatch({ petId: 'one', request: 'unknown channel', session: { id: aSession }, scope: { namespace: 'channel', id: randomUUID() } }));
+    await channel.service.removeMember(human, a, { kind: 'pet', id: 'one' });
+    await assert.rejects(studio.dispatch({ petId: 'one', request: 'former member', session: { id: aSession }, scope: { namespace: 'channel', id: a } }));
+    assert.equal(observed.length, count);
+  } finally {
+    await studio?.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
 });

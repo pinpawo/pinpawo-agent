@@ -20,6 +20,7 @@ export type {
   StudioPetSessions,
   StudioPlugin,
   StudioPluginContext,
+  StudioContextProvider,
   StudioPluginHookInstaller,
   StudioPluginHooks,
   StudioModelEndpoint,

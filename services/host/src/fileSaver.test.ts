@@ -983,7 +983,7 @@ test('FileSaver matches official special-write ordering and overwrite semantics 
   const cp = checkpoint('cp-1', {});
   const metadata = { source: 'loop' as const, step: 1, parents: {} };
   const fileConfig = await file.put(initial, cp, metadata);
-  const memoryConfig = await memory.put(initial, cp, metadata, {});
+  const memoryConfig = await memory.put(initial, cp, metadata);
   for (const [saver, config] of [[file, fileConfig], [memory, memoryConfig]] as const) {
     await saver.putWrites(config, [
       ['ordinary', 'initial'], ['__error__', 'old-error'],

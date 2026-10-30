@@ -11,6 +11,8 @@ export { resolveLlmGenerationReserveTokens } from '../config/llmModelPresets';
 
 export function buildHostModels(
   llmConfig: AgentLlmConfig,
+  /** Eval-only generation override; runtime callers retain provider defaults. */
+  generationOptions: { temperature?: number } = {},
 ): AgentModels {
   const buildModel = (
     role: 'act' | 'decision' | 'answer' | 'observe' | 'subagent',
@@ -28,6 +30,7 @@ export function buildHostModels(
       }
       return new HostChatAnthropic({
         model,
+        ...generationOptions,
         apiKey: llmConfig.apiKey,
         clientOptions: { baseURL: llmConfig.baseUrl, timeout: llmConfig.timeoutMs ?? 45000 },
         maxRetries: llmConfig.maxRetries ?? 2,
@@ -36,7 +39,8 @@ export function buildHostModels(
     }
     return createReasoningPassbackChatOpenAI({
       model,
-      // Leave temperature to the provider; thinking and reasoning effort also use provider defaults.
+      ...generationOptions,
+      // Thinking and reasoning effort use provider defaults.
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,

@@ -225,10 +225,7 @@ export function createDecisionEvalModel(options: {
     structuredOutputMethod: method,
     timeoutMs: timeout,
     maxRetries: 0,
-  }).act;
-  // Both Host integrations expose this generation setting. Keep eval-only
-  // experiment overrides out of stored production profiles.
-  if (temperature !== null) Object.assign(model, { temperature });
+  }, temperature === null ? {} : { temperature }).act;
 
   return {
     model,

@@ -9,6 +9,7 @@ import {
   resolveModelProfile,
 } from '../../../../services/host/src/config/modelProfiles.ts';
 import type { StoredConfig } from '../../../../services/host/src/storage.ts';
+import type { ReasoningPassbackCompletions } from '../../../../services/host/src/agent/reasoningPassback.ts';
 import { HostChatAnthropic } from '../../../../services/host/src/agent/hostChatAnthropic.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
@@ -234,9 +235,14 @@ test('eval temperature is omitted by default and explicit experiment overrides r
 test('native eval subjects and judges use Messages while gateway Claude stays compatible', async () => {
   const { root, configPath } = writeProfiles();
   try {
-    for (const role of ['subject', 'judge'] as const) {
+    const cases = (['subject', 'judge'] as const).flatMap(role =>
+      [undefined, '0.7'].map(temperature => ({ role, temperature })));
+    for (const { role, temperature } of cases) {
       const evaluated = createDecisionEvalModel({ profileId: 'claude-native', role,
-        env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
+        env: { PROMPT_EVAL_CONFIG_PATH: configPath,
+          ...(temperature === undefined ? {} : {
+            [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_TEMPERATURE' : 'PROMPT_EVAL_JUDGE_TEMPERATURE']: temperature,
+          }) } });
       assert.ok(evaluated.model instanceof HostChatAnthropic);
       assert.equal(evaluated.method, 'functionCalling');
       assert.equal(evaluated.model.clientOptions.timeout, 120_000);
@@ -245,7 +251,9 @@ test('native eval subjects and judges use Messages while gateway Claude stays co
         const headers = new Headers(init?.headers);
         assert.equal(headers.get('x-api-key'), 'mock-native');
         assert.equal(headers.has('authorization'), false);
-        assert.equal(JSON.parse(String(init?.body)).max_tokens, 1024);
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.max_tokens, 1024);
+        assert.equal(body.temperature, temperature === undefined ? undefined : 0.7);
         return Response.json({ id: 'mock', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5',
           content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', stop_sequence: null,
           usage: { input_tokens: 1, output_tokens: 1 } });
@@ -259,6 +267,35 @@ test('native eval subjects and judges use Messages while gateway Claude stays co
       assert.throws(() => createDecisionEvalModel({ profileId: 'claude-native', role,
         env: { PROMPT_EVAL_CONFIG_PATH: configPath,
           [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_STRUCTURED_OUTPUT_METHOD' : 'PROMPT_EVAL_JUDGE_STRUCTURED_OUTPUT_METHOD']: 'jsonSchema' } }), /functionCalling only/);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('eval temperature overrides reach OpenAI completion requests for subjects and judges', async () => {
+  const { root, configPath } = writeProfiles();
+  try {
+    for (const role of ['subject', 'judge'] as const) {
+      for (const temperature of [undefined, '0.7']) {
+        const evaluated = createDecisionEvalModel({ profileId: 'endpoint-b', role,
+          env: { PROMPT_EVAL_CONFIG_PATH: configPath,
+            ...(temperature === undefined ? {} : {
+              [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_TEMPERATURE' : 'PROMPT_EVAL_JUDGE_TEMPERATURE']: temperature,
+            }) } });
+        const completions = (evaluated.model as unknown as { completions: ReasoningPassbackCompletions }).completions;
+        let requested = false;
+        completions.clientConfig.fetch = async (url, init) => {
+          requested = true;
+          assert.equal(String(url), 'https://b.example.test/v1/chat/completions');
+          const body = JSON.parse(String(init?.body));
+          assert.equal(body.temperature, temperature === undefined ? undefined : 0.7);
+          return Response.json({ id: 'mock', object: 'chat.completion', created: 0, model: 'same-model',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+        };
+        await evaluated.model.invoke('Hi');
+        assert.equal(requested, true);
+      }
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

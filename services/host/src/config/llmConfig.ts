@@ -10,11 +10,13 @@ import {
 import {
   findLlmModelPresetByKey,
   inferLlmModelPreset,
+  inferLlmStructuredOutputMethod,
   type LlmModelPreset,
 } from './llmModelPresets';
 
 type ModelIndependentLlmConfig = Omit<
   AgentLlmConfig,
+  | 'protocol'
   | 'apiKey'
   | 'baseUrl'
   | 'model'
@@ -91,17 +93,20 @@ export function createLocalModelProfileRegistry(options: {
         : undefined;
       const maxOutputTokens = profile.maxOutputTokens ?? preset?.maxOutputTokens;
       const fingerprint = fingerprintModelProfile(effectiveProfile).fingerprint;
+      const structuredOutputMethod = profile.protocol === 'anthropic-compatible'
+        ? 'functionCalling'
+        : effectiveProfile.structuredOutputMethod
+          ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl);
       return Object.freeze({
         ...llmDefaults,
+        protocol: profile.protocol ?? 'openai-compatible',
         apiKey: profile.apiKey,
         baseUrl: profile.baseUrl,
         model: profile.model,
         modelProfileId: profile.id,
         modelProfileFingerprint: fingerprint,
         inputModalities: effectiveProfile.inputModalities,
-        ...(effectiveProfile.structuredOutputMethod
-          ? { structuredOutputMethod: effectiveProfile.structuredOutputMethod }
-          : {}),
+        ...(structuredOutputMethod ? { structuredOutputMethod } : {}),
         ...(maxOutputTokens
           ? { maxOutputTokens }
           : {}),

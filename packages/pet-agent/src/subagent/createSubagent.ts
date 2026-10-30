@@ -1,5 +1,5 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
-import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
   composeSystemPrompt,
@@ -41,7 +41,7 @@ import {
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
-import { messageHasToolCalls } from '../utils/messages';
+import { messageHasToolCalls, readAiMessageText } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
@@ -95,6 +95,7 @@ function ensureSubagentMessageIds(messages: BaseMessage[]) {
 }
 
 function readMessageText(message: BaseMessage): string {
+  if (AIMessage.isInstance(message)) return readAiMessageText(message);
   if (typeof message.content === 'string') {
     return message.content;
   }

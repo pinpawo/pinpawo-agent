@@ -1,120 +1,115 @@
 import assert from 'node:assert/strict';
-import { createServer, type IncomingMessage } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import test from 'node:test';
-import {
-  AIMessage,
-  HumanMessage,
-  ToolMessage,
-  type BaseMessage,
-} from '@langchain/core/messages';
-import { buildHostModels } from './agentModels';
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatModelStream } from '@langchain/core/language_models/stream';
+import type { ChatModelStreamEvent } from '@langchain/core/language_models/event';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { readMessageTokenUsage } from '@pinpawo/pet-agent';
-import { buildCompletionsMessagesWithReasoning, normalizeCompletionsCacheUsage } from './reasoningPassback';
+import { buildHostModel } from './agentModels';
+import {
+  buildCompletionsMessagesWithReasoning,
+  normalizeCompletionsCacheUsage,
+  type ReasoningPassbackCompletions,
+} from './reasoningPassback';
 
-type RequestBody = { stream?: boolean; messages: Array<Record<string, unknown>> };
+type RequestBody = { stream?: boolean; tools?: unknown[]; messages: Array<Record<string, unknown>> };
 
-async function readBody(req: IncomingMessage): Promise<RequestBody> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-}
-
-async function withFakeProvider(
-  run: (baseUrl: string, requests: RequestBody[]) => Promise<void>,
-) {
-  const requests: RequestBody[] = [];
-  const server = createServer(async (req, res) => {
-    const body = await readBody(req);
+function fakeProvider(requests: RequestBody[]): typeof fetch {
+  return async (_url, init) => {
+    const body: RequestBody = JSON.parse(String(init?.body));
     requests.push(body);
     const usage = { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_cache_hit_tokens: 60 };
     const delta = {
-      role: 'assistant',
-      content: '',
-      reasoning_content: 'need the weather',
+      role: 'assistant', content: '', reasoning_content: 'need the weather',
       tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'weather', arguments: '{}' } }],
     };
     if (body.stream) {
-      res.writeHead(200, { 'content-type': 'text/event-stream' });
       const chunk = { id: 'r1', object: 'chat.completion.chunk', created: 0, model: 'deepseek-v4-pro',
         choices: [{ index: 0, delta, finish_reason: 'tool_calls' }], usage };
-      res.end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
-      return;
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
     }
-    res.writeHead(200, { 'content-type': 'application/json' });
     const { tool_calls, ...message } = delta;
-    res.end(JSON.stringify({
+    return Response.json({
       id: 'r1', object: 'chat.completion', created: 0, model: 'deepseek-v4-pro', usage,
       choices: [{ index: 0, message: { ...message, tool_calls: tool_calls.map(({ index: _i, ...call }) => call) },
         finish_reason: 'tool_calls' }],
-    }));
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  try {
-    await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, requests);
-  } finally {
-    server.close();
-  }
-}
-
-function assistantTurns(body: RequestBody) {
-  return body.messages.filter(message => message.role === 'assistant');
+    });
+  };
 }
 
 test('assistant reasoning is sent back from additional_kwargs and reasoning blocks', () => {
   const messages: BaseMessage[] = [
     new HumanMessage('hi'),
-    new AIMessage({
-      content: '',
-      additional_kwargs: { reasoning_content: 'kwargs reasoning' },
-      tool_calls: [{ id: 'a', name: 'weather', args: {} }],
-    }),
+    new AIMessage({ content: '', additional_kwargs: { reasoning_content: 'kwargs reasoning' },
+      tool_calls: [{ id: 'a', name: 'weather', args: {} }] }),
     new ToolMessage({ content: 'sunny', tool_call_id: 'a' }),
-    new AIMessage({
-      content: [{ type: 'reasoning', reasoning: 'block ' }, { type: 'reasoning', reasoning: 'reasoning' }],
-      tool_calls: [{ id: 'b', name: 'weather', args: {} }],
-    }),
+    new AIMessage({ content: [{ type: 'reasoning', reasoning: 'block ' }, { type: 'reasoning', reasoning: 'reasoning' }],
+      tool_calls: [{ id: 'b', name: 'weather', args: {} }] }),
     new ToolMessage({ content: 'rainy', tool_call_id: 'b' }),
     new AIMessage('no reasoning'),
   ];
-
   const params = buildCompletionsMessagesWithReasoning(messages, 'deepseek-v4-pro');
-
   assert.equal(params.length, messages.length);
-  assert.deepEqual(
-    params.filter(param => param.role === 'assistant').map(param => (param as { reasoning_content?: string }).reasoning_content),
-    ['kwargs reasoning', 'block reasoning', undefined],
-  );
+  assert.deepEqual(params.filter(param => param.role === 'assistant')
+    .map(param => (param as { reasoning_content?: string }).reasoning_content),
+  ['kwargs reasoning', 'block reasoning', undefined]);
+  const original = params.map((param, index) => ({ ...param, vendor_extension: index }));
+  const patched = buildCompletionsMessagesWithReasoning(messages, 'deepseek-v4-pro', { originalMessages: original });
+  assert.deepEqual(patched.map(param => (param as { vendor_extension?: number }).vendor_extension), [0, 1, 2, 3, 4, 5]);
 });
 
-for (const streaming of [false, true]) {
-  test(`tool-call turn round-trips reasoning_content to the provider (streaming=${streaming})`, async () => {
-    await withFakeProvider(async (baseUrl, requests) => {
-      const { act } = buildHostModels({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro' });
+test('an ordinary request without reasoning uses the same wire body as the official adapter', async () => {
+  const bodies: RequestBody[] = [];
+  const baseUrl = 'https://provider.example.test/v1';
+  const official = new ChatOpenAI({ apiKey: 'test-key', model: 'deepseek-v4-pro', maxRetries: 0,
+    configuration: { baseURL: baseUrl, fetch: fakeProvider(bodies) } });
+  const patched = buildHostModel({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro', maxRetries: 0 }, { streaming: false });
+  (patched as unknown as { completions: ReasoningPassbackCompletions }).completions.clientConfig.fetch = fakeProvider(bodies);
+  await official.invoke([new HumanMessage('hello')]);
+  await patched.invoke([new HumanMessage('hello')]);
+  assert.deepEqual(bodies[0], bodies[1]);
+});
+
+for (const mode of ['invoke', 'stream', 'v3'] as const) {
+  for (const patched of [false, true]) {
+    test(`tool history and cache usage with ${patched ? 'patch' : 'official adapter'} (${mode})`, async () => {
+      const requests: RequestBody[] = [];
+      const baseUrl = 'https://provider.example.test/v1';
+      const act = patched
+        ? buildHostModel({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro', maxRetries: 0 }, { streaming: false })
+        : new ChatOpenAI({ apiKey: 'test-key', model: 'deepseek-v4-pro', maxRetries: 0,
+          configuration: { baseURL: baseUrl, fetch: fakeProvider(requests) } });
+      const completions = (act as unknown as { completions: ReasoningPassbackCompletions }).completions;
+      completions.clientConfig.fetch = fakeProvider(requests);
+      const bound = (act as ChatOpenAI).bindTools([{ type: 'function', function: {
+        name: 'weather', description: 'Get weather', parameters: { type: 'object', properties: {} },
+      } }]);
       const history: BaseMessage[] = [new HumanMessage('weather?')];
-      const first = streaming
+      const run = async () => mode === 'stream'
         ? await (async () => {
           let merged;
-          for await (const chunk of await act.stream(history)) merged = merged ? merged.concat(chunk) : chunk;
+          for await (const chunk of await bound.stream(history)) merged = merged ? merged.concat(chunk) : chunk;
           return new AIMessage({ ...merged! });
         })()
-        : await act.invoke(history);
+        : mode === 'v3'
+          ? await new ChatModelStream(bound.streamEvents(history, { version: 'v3' } as never) as unknown as AsyncIterable<ChatModelStreamEvent>)
+          : await bound.invoke(history);
+      const first = await run();
       assert.equal(first.tool_calls?.length, 1);
-      assert.equal(readMessageTokenUsage(first)?.cachedInputTokens, 60);
+      assert.equal(readMessageTokenUsage(first)?.cachedInputTokens, patched || mode !== 'stream' ? 60 : undefined);
       assert.equal(readMessageTokenUsage(first)?.totalTokens, 120);
-
       history.push(first, new ToolMessage({ content: 'sunny', tool_call_id: 'call_1' }));
-      await act.invoke(history);
-
+      await run();
       assert.equal(requests.length, 2);
-      assert.deepEqual(
-        assistantTurns(requests[1]!).map(message => message.reasoning_content),
-        ['need the weather'],
-      );
+      assert.equal(requests[0]!.tools?.length, 1);
+      assert.equal(requests[1]!.tools?.length, 1);
+      assert.deepEqual(requests[1]!.messages.filter(message => message.role === 'assistant')
+        .map(message => message.reasoning_content), [patched ? 'need the weather' : undefined]);
     });
-  });
+  }
 }
-
 
 test('DeepSeek cache hits survive the OpenAI adapter boundary without inventing unknown zeros', () => {
   assert.deepEqual(normalizeCompletionsCacheUsage({ usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 60 } }), {
@@ -122,7 +117,8 @@ test('DeepSeek cache hits survive the OpenAI adapter boundary without inventing 
   });
   const unknown = { usage: { prompt_tokens: 100 } };
   assert.equal(normalizeCompletionsCacheUsage(unknown), unknown);
-  assert.deepEqual(normalizeCompletionsCacheUsage({ usage: { prompt_cache_hit_tokens: 60, prompt_tokens_details: { cached_tokens: 50 } } }), {
-    usage: { prompt_cache_hit_tokens: 60, prompt_tokens_details: { cached_tokens: 50 } },
-  });
+  const standard = { usage: { prompt_cache_hit_tokens: 60, prompt_tokens_details: { cached_tokens: 0 } } };
+  assert.equal(normalizeCompletionsCacheUsage(standard), standard);
+  const invalid = { usage: { prompt_cache_hit_tokens: -1 } };
+  assert.equal(normalizeCompletionsCacheUsage(invalid), invalid);
 });

@@ -1,4 +1,27 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+
+/** Read assistant-visible text without projecting reasoning or tool blocks. */
+export function readAiMessageText(message: AIMessage, legacySeparator = ''): string {
+  if (Array.isArray(message.content) && message.content.some(part =>
+    typeof part === 'string' || (part && typeof part === 'object' && !('type' in part) && 'text' in part))) {
+    // LangChain's text projection omits legacy strings and untyped text blocks.
+    // Keep those historical shapes while restricting typed blocks to text.
+    return (message.contentBlocks as unknown[]).map(part => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && (!('type' in part) || part.type === 'text')
+        && 'text' in part && typeof part.text === 'string') return part.text;
+      return '';
+    }).join(legacySeparator);
+  }
+  return message.text;
+}
+
+/** Identify the two supported representations of a tool call in message content. */
+export function isToolCallContentBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object') return false;
+  const type = (block as { type?: unknown }).type;
+  return type === 'tool_call' || type === 'tool_use';
+}
 
 export type MessageToolCallInfo = {
   id: string;

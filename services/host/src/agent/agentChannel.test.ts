@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { buildReviewStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
+import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 import type { AgentContext } from '../contextLoader';
 import {
   defineInstructionDocument,
@@ -536,4 +537,36 @@ test('explicit Host snapshots override changing process defaults at the Agent bo
   } finally {
     setConfig(previous);
   }
+});
+
+test('native review output defaults to function calling before endpoint inference', () => {
+  const result = buildReviewStructuredOutput({
+    protocol: 'anthropic-compatible',
+    apiKey: 'mock-key',
+    baseUrl: 'https://dashscope.aliyuncs.com',
+    model: 'claude-sonnet-4-5',
+  });
+  assert.equal(result?.method, 'functionCalling');
+});
+
+test('Host passes native single-call binding options to the actual SDK model', async () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(), userMessage: 'hello',
+    llmConfig: { protocol: 'anthropic-compatible', apiKey: 'test-key', baseUrl: 'https://anthropic.example.test', model: 'claude-sonnet-4-5', maxRetries: 0 },
+  });
+  const model = setup.graphConfig.models.answer;
+  assert.ok(model instanceof AnthropicCompatibleChatModel);
+  let called = false;
+  model.clientOptions.fetch = async (_url, init) => {
+    called = true;
+    const body = JSON.parse(String(init?.body));
+    assert.deepEqual(body.tool_choice, { type: 'auto', disable_parallel_tool_use: true });
+    assert.equal(body.parallel_tool_calls, undefined);
+    return Response.json({ id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5',
+      content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', stop_sequence: null,
+      usage: { input_tokens: 1, output_tokens: 1 } });
+  };
+  const lookup = tool(async () => 'ok', { name: 'lookup', description: 'lookup', schema: z.object({}) });
+  await model.bindTools([lookup], setup.graphConfig.entryAnswerToolOptions).invoke('hello');
+  assert.equal(called, true);
 });

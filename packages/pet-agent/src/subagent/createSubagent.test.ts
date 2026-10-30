@@ -70,6 +70,26 @@ class FailingSummaryModel extends BaseChatModel {
   }
 }
 
+test('subagent output includes public and legacy text without exposing reasoning blocks', async () => {
+  for (const legacy of [false, true]) {
+    class ContentModel extends BaseChatModel {
+      _llmType() { return 'content-fixture'; }
+      bindTools() { return this; }
+      async _generate() {
+        const message = new AIMessage({ content: [
+          ...(legacy ? [{ text: 'legacy ' }] : []),
+          { type: 'thinking', thinking: 'private thought', signature: 'sig', text: 'PRIVATE_THOUGHT' },
+          { type: 'text', text: 'public answer' },
+        ] as never });
+        return { generations: [{ message, text: message.text }] };
+      }
+    }
+    const result = await createSubagent({ model: new ContentModel({}), tools: [], promptSections: [],
+      messages: [new HumanMessage('do the task')] });
+    assert.equal(result.output, legacy ? 'legacy public answer' : 'public answer');
+  }
+});
+
 test('createSubagent rejects duplicate prompt section ids before invoking the model', async () => {
   await assert.rejects(
     createSubagent({

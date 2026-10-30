@@ -18,6 +18,8 @@ export type UserRequest = string;
 
 export type OrchestratorConfig = {
   models: AgentModels;
+  /** Model-specific LangChain tool-binding options for a single entry route. */
+  entryAnswerToolOptions?: NonNullable<Parameters<NonNullable<AgentModels['act']['bindTools']>>[1]> & Record<string, unknown>;
   /**
    * Capability identified in the Supervisor routing manifest as its default
    * candidate. Defaults to the well-known `general` Capability. This changes

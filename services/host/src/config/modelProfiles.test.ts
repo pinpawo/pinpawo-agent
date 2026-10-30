@@ -391,3 +391,69 @@ test('fingerprint changes with endpoint behavior but not API key', () => {
     fingerprintModelProfile(otherEndpoint).fingerprint,
   );
 });
+
+test('native protocol is explicit, validated, resolved and included in identity', () => {
+  const gateway = parseModelProfile(storedProfile({ model: 'claude-sonnet-4-5', provider: 'Anthropic' })).profile!;
+  assert.equal(gateway.protocol, undefined);
+  const native = parseModelProfile({ ...gateway, protocol: 'anthropic-compatible' }).profile!;
+  assert.equal(native.protocol, 'anthropic-compatible');
+  assert.notEqual(fingerprintModelProfile(native).fingerprint, fingerprintModelProfile(gateway).fingerprint);
+  for (const protocol of ['anthropic', 'unknown', '', null, false]) {
+    assert.equal(parseModelProfile({ ...gateway, protocol }).profile, undefined);
+  }
+  const explicitGateway = parseModelProfile({ ...gateway, protocol: 'openai-compatible' }).profile!;
+  assert.equal(fingerprintModelProfile(explicitGateway).fingerprint, fingerprintModelProfile(gateway).fingerprint);
+  assert.equal(parseModelProfile({ ...native, structuredOutputMethod: 'jsonMode' }).profile, undefined);
+  const snapshot = buildModelProfileRegistry({ stored: storedConfig({ primary: native }), env: {} });
+  const resolved = createLocalModelProfileRegistry({ snapshot }).resolve();
+  assert.equal(resolved.protocol, 'anthropic-compatible');
+  assert.equal(resolved.structuredOutputMethod, 'functionCalling');
+});
+
+test('resolved profile uses the structured-output method represented by its fingerprint', () => {
+  const inferred = storedProfile({ model: 'claude-sonnet-4-6' });
+  const explicit = storedProfile({ id: 'explicit', model: 'claude-sonnet-4-6', structuredOutputMethod: 'jsonMode' });
+  const unknown = storedProfile({ id: 'unknown' });
+  const snapshot = buildModelProfileRegistry({ stored: storedConfig({ primary: inferred, explicit, unknown }), env: {} });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+  assert.equal(registry.resolve().structuredOutputMethod, 'functionCalling');
+  assert.equal(registry.resolve('explicit').structuredOutputMethod, 'jsonMode');
+  assert.equal(registry.resolve('unknown').structuredOutputMethod, undefined);
+  assert.equal(registry.resolve().modelProfileFingerprint, fingerprintModelProfile(resolveModelProfile(snapshot, 'primary')).fingerprint);
+});
+
+
+test('official Anthropic profiles reject models that cannot use required forced tool choice', () => {
+  for (const model of [
+    'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-mythos-5-1',
+    'claude-sonnet-5-5-20261001',
+  ]) {
+    for (const method of [undefined, 'functionCalling']) {
+      const result = parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible', structuredOutputMethod: method }));
+      assert.equal(result.profile, undefined, model);
+      assert.match(result.issues.map(issue => issue.message).join('; '), /forced tool choice/);
+    }
+    assert.equal(parseModelProfile(storedProfile({ model, baseUrl: 'https://API.ANTHROPIC.COM:443/', protocol: 'anthropic-compatible' })).profile, undefined);
+    assert.ok(parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'openai-compatible' })).profile);
+    assert.ok(parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com' })).profile);
+    for (const baseUrl of ['https://gateway.example.test', 'https://api.anthropic.com.gateway.example', 'https://api.anthropic.com:8443', 'http://api.anthropic.com']) {
+      assert.ok(parseModelProfile(storedProfile({ model, baseUrl, protocol: 'anthropic-compatible' })).profile, baseUrl);
+    }
+  }
+  for (const model of ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-sonnet-5', 'custom-model']) {
+    assert.ok(parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible' })).profile, model);
+  }
+});
+
+test('unsupported native profiles are isolated and report their forced-tool limitation on selection', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile(),
+      future: storedProfile({ id: 'future', model: 'claude-opus-5-5', baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible' }),
+    }),
+    env: {},
+  });
+  assert.equal(resolveModelProfile(snapshot, 'primary').id, 'primary');
+  assert.match(snapshot.unavailableProfiles.future.map(issue => issue.message).join('; '), /forced tool choice/);
+  assert.throws(() => resolveModelProfile(snapshot, 'future'), /forced tool choice/);
+});

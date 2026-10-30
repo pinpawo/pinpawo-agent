@@ -169,3 +169,19 @@ test('a streamed response keeps one copy of each call after its ID is settled', 
     [['reasoning', undefined], ['tool_call', rebuilt.tool_calls![0].id]]);
   assert.equal((rebuilt.additional_kwargs.tool_calls as Array<{ id: string }>)[0].id, rebuilt.tool_calls![0].id);
 });
+
+
+test('native tool_use IDs stay paired after a provider reuses a history ID', () => {
+  const call = { id: 'toolu_reused', name: 'lookup', args: { query: 'hello' } };
+  const response = new AIMessage({
+    content: [{ type: 'text', text: 'Looking up' }, { type: 'tool_use', id: call.id, name: call.name, input: call.args }],
+    tool_calls: [call],
+  });
+  const settled = assignToolCallIds(response, [response]);
+  assert.notEqual(settled.tool_calls![0].id, call.id);
+  const blocks = settled.content as Array<{ type: string; id?: string; input?: unknown }>;
+  assert.equal(blocks[1].id, settled.tool_calls![0].id);
+  assert.deepEqual(blocks[1].input, call.args);
+  assert.equal(blocks[0].type, 'text');
+  assert.equal((response.content as Array<{ id?: string }>)[1].id, call.id);
+});

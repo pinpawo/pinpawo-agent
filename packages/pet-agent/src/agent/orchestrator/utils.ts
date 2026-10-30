@@ -1,3 +1,6 @@
+import { AIMessage } from '@langchain/core/messages';
+import { readAiMessageText } from '../../utils/messages';
+
 export function clipForPrompt(text: string, maxLength = 180): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
@@ -23,5 +26,6 @@ export function readContentText(content: unknown): string | null {
 }
 
 export function readMessageText(message: { content?: unknown }): string {
+  if (AIMessage.isInstance(message)) return readAiMessageText(message, '\n').trim();
   return (readContentText(message.content) ?? '').trim();
 }

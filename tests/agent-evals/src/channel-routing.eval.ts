@@ -15,9 +15,9 @@
  * Run:
  *   ROUTING_EVAL_MODEL_PROFILE_ID=deepseek-v4-flash npm run eval:channel-routing
  */
-import { inferLlmStructuredOutputMethod } from '../../../services/host/src/config/llmModelPresets.ts';
+import { buildHostModel } from '../../../services/host/src/agent/agentModels.ts';
 import { createChannelRouter, type RouteInput } from '../../../plugins/channel/src/channelRouting.ts';
-import { readProfile } from './scripts/decision-eval-model.ts';
+import { readResolvedProfile } from './scripts/decision-eval-model.ts';
 
 const pets = [
   { participantId: 'pet:executor', name: 'Executor' },
@@ -61,15 +61,16 @@ const profileId = process.env.ROUTING_EVAL_MODEL_PROFILE_ID ?? process.env.PROMP
 if (!profileId) throw new Error('Set ROUTING_EVAL_MODEL_PROFILE_ID to a model profile from ~/.pinpawo/config.json.');
 const repeats = Number(process.env.ROUTING_EVAL_REPEATS ?? 3);
 const threshold = process.env.ROUTING_EVAL_THRESHOLD ? Number(process.env.ROUTING_EVAL_THRESHOLD) : undefined;
-const profile = readProfile(profileId, process.env);
+const { profile, config } = readResolvedProfile(profileId, process.env);
 const router = createChannelRouter({
   enabled: true, pets: notes, ...(threshold !== undefined ? { threshold } : {}),
 }, {
   resolveModel: () => ({
-    profileId, baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model,
-    ...((profile.structuredOutputMethod ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl))
-      ? { structuredOutputMethod: profile.structuredOutputMethod ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl) }
-      : {}),
+    protocol: config.protocol, profileId, baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model,
+    structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
+    createChatModel: ({ maxOutputTokens, maxRetries, preferDeterministic, streaming, forceChatCompletions }) => buildHostModel({
+      ...config, maxOutputTokens, maxRetries,
+    }, { preferDeterministic, streaming, forceChatCompletions }),
   }),
 })!;
 

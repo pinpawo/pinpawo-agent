@@ -47,7 +47,9 @@ export function buildReviewStructuredOutput(
   llmConfig: AgentLlmConfig,
 ): GlobalReviewPolicyStructuredOutputConfig | undefined {
   const method = llmConfig.structuredOutputMethod
-    ?? inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+    ?? (llmConfig.protocol === 'anthropic-compatible'
+      ? 'functionCalling'
+      : inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl));
   if (!method) return undefined;
 
   const autoRepairEnabled = llmConfig.structuredOutputAutoRepair
@@ -119,6 +121,9 @@ export function buildLocalChatAgentInput(params: {
   return {
     graphConfig: {
       models,
+      ...(llmConfig.protocol === 'anthropic-compatible'
+        ? { entryAnswerToolOptions: { tool_choice: { type: 'auto', disable_parallel_tool_use: true } } }
+        : {}),
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
       checkpoint: params.checkpoint,
       contextWindowTokens: llmConfig.contextWindowTokens,

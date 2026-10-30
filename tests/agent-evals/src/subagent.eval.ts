@@ -38,6 +38,7 @@ import {
   shellToolChoiceEvaluator,
   shellToolSelectionExamples,
 } from './shell-tool-selection';
+import { buildDangerousCommandTools, dangerousCommandExamples, sandboxStateEvaluator } from './dangerous-commands';
 
 const DATASET_NAME = 'subagent-execution';
 const DATASET_DESCRIPTION = [
@@ -200,6 +201,7 @@ const examples = [
     },
   },
   ...shellToolSelectionExamples,
+  ...dangerousCommandExamples,
 ];
 
 const testCases = examples.map((example, index) => ({
@@ -208,7 +210,7 @@ const testCases = examples.map((example, index) => ({
   suite: 'subagent-execution',
   input: example.inputs,
   expected: example.outputs,
-  tags: example.inputs.shell_tool_selection ? ['permission_control'] : ['delegation_control'],
+  tags: example.inputs.shell_tool_selection || example.inputs.dangerous_command_case ? ['permission_control'] : ['delegation_control'],
   metadata: {
     difficulty: index < 3 ? 'easy' : 'medium',
     reason: example.outputs.reason,
@@ -259,7 +261,8 @@ function normalizeToolName(value: unknown): string | null {
 }
 
 function buildMockTools(inputs: Record<string, unknown>) {
-  if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.shell_outputs as Record<string, unknown>);
+  if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.requested_command as string);
+  if (inputs.dangerous_command_case) return buildDangerousCommandTools(inputs.dangerous_command_case as string);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const files = new Map<string, string>(
     Object.entries(inputs.files && typeof inputs.files === 'object' ? inputs.files : {})
@@ -359,7 +362,15 @@ function buildMockTools(inputs: Record<string, unknown>) {
 }
 
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const runtime = buildMockTools(inputs);
+  const runtime = await buildMockTools(inputs);
+  try {
+    return await runTarget(inputs, runtime);
+  } finally {
+    await ('dispose' in runtime ? runtime.dispose() : undefined);
+  }
+}
+
+async function runTarget(inputs: Record<string, unknown>, runtime: Awaited<ReturnType<typeof buildMockTools>>) {
   const task = String(inputs.task ?? '');
   const briefing = materializeDelegation({
     userRequest: String(inputs.user_request ?? task),
@@ -378,6 +389,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     promptSections: runtime.promptSections,
     messages,
     maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+    ...('workdir' in runtime ? { runtimeContext: { workdir: runtime.workdir } } : {}),
   });
 
   return {
@@ -387,6 +399,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     called_tools: runtime.calls.map((call) => call.name),
     call_count: runtime.calls.length,
     calls: runtime.calls,
+    ...('checkSandbox' in runtime ? { sandbox_problems: runtime.checkSandbox() } : {}),
     files: {
       'src/demo.ts': runtime.readFile('src/demo.ts'),
       'README.md': runtime.readFile('README.md'),
@@ -591,6 +604,7 @@ const outcomeEvaluators = [
   toolsAvoidedEvaluator('forbidden_tools_avoided', 'forbidden_tools'),
   forbiddenCommandsEvaluator,
   requestedCommandExecutedEvaluator,
+  sandboxStateEvaluator,
 ];
 
 const metricEvaluators = [
@@ -611,6 +625,7 @@ const outcomeKeys = [
   'forbidden_tools_avoided',
   'forbidden_commands_avoided',
   'requested_command_executed',
+  'sandbox_state_correct',
 ];
 
 const metricKeys = ['required_tools_called', 'unneeded_tools_avoided', 'shell_tool_choice'];
@@ -725,16 +740,19 @@ async function main() {
   printScoreTotals('Outcome checks (decide pass/fail):', outcomeKeys, rows);
   printScoreTotals('Process metrics (reported only):', metricKeys, rows);
   const shellRows = rows.flatMap((row) => row.scores.filter((item) => item.key === 'shell_tool_choice' && 'reviews' in item));
-  if (shellRows.length > 0) {
-    const reviews = shellRows.reduce((sum, item) => sum + item.reviews, 0);
-    const refusals = shellRows.reduce((sum, item) => sum + item.refusals, 0);
-    console.log(`  shell selection: ${reviews} production review(s), ${refusals} refusal(s) over ${shellRows.length} runs`);
+  // Write cases have no dedicated tool, so one review per run is expected; reads should need none.
+  for (const [label, readCase] of [['read', true], ['write', false]] as const) {
+    const group = shellRows.filter((item) => item.readCase === readCase);
+    if (group.length === 0) continue;
+    const reviews = group.reduce((sum, item) => sum + item.reviews, 0);
+    const refusals = group.reduce((sum, item) => sum + item.refusals, 0);
+    console.log(`  shell selection, ${label} cases: ${reviews} production review(s), ${refusals} refusal(s) over ${group.length} runs`);
   }
   for (const row of rows) {
     const failedScores = row.scores.filter((item) => item.score !== 1);
     if (failedScores.length === 0) continue;
     console.log(`  - ${row.testCase.name} #${row.repeat}${row.ok ? ' (metrics only)' : ''}: ${failedScores.map((item) => item.comment).join(' | ')}`);
-    if (!row.ok) console.log(`    output=${JSON.stringify(row.output)}`);
+    console.log(`    output=${JSON.stringify(row.output)}`);
   }
   console.log(runtime ? 'View results in Langfuse.' : 'Langfuse result storage disabled.');
   await runtime?.shutdown();

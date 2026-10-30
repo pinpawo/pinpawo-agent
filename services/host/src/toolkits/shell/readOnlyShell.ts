@@ -50,8 +50,13 @@ const PACKAGE_MANAGER_READS: Record<string, ReadonlySet<string>> = {
   pip3: new Set(['list', 'show', 'freeze', 'check', 'help', 'config', 'index', 'inspect', 'debug']),
 };
 const VERSION_FLAGS = new Set(['--version', '-v', '-V', '--help', '-h']);
-const REDIRECTS = new Set(['>', '>>', '>|']);
+/** Redirections that open their target for writing. */
+const OUTPUT_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>', '>&', '<>']);
+/** Redirections whose target is only read: an input file, a descriptor or a here-doc word. */
+const INPUT_REDIRECTS = new Set(['<', '<&', '<<', '<<<']);
 const REDIRECT_SINKS = new Set(['/dev/null', '/dev/stdout', '/dev/stderr']);
+/** `>&1`, `>&-`: duplicating or closing a descriptor writes no file. */
+const isDescriptor = (word: string = '') => /^(?:\d+|-)$/.test(word);
 /** `sh -c "…"` is followed this many levels deep. */
 const MAX_NESTING = 3;
 
@@ -66,8 +71,6 @@ function forcesKill(args: string[]) {
 }
 
 function checkCommand(words: string[], depth: number): Refusal | undefined {
-  const redirect = words.findIndex((word, index) => REDIRECTS.has(word) && !REDIRECT_SINKS.has(words[index + 1] ?? ''));
-  if (redirect !== -1) return { reason: `重定向 ${words[redirect]} 会写文件`, redirect: FILE_TOOLS };
   const tokens = [...words];
   while (['if', 'then', 'else', 'elif', '!'].includes(tokens[0])) tokens.shift();
   // Resolve transparent wrappers repeatedly; quoted arguments remain arguments.
@@ -190,16 +193,32 @@ function checkSource(source: string, depth: number): Refusal | undefined {
   for (const text of sources) {
     let tokens: ReturnType<typeof parse<never>>;
     try {
+      // shell-quote splits `2>&1` into an argument `2` and `>&`; drop the
+      // descriptor number first so it never reaches the command's arguments.
+      // `git branch 2 >x` keeps its space, so `2` stays a branch name.
+      const unnumbered = text.replace(/(^|[\s;&|()])\d+(?=[<>])/g, '$1');
       // Never expand from Host env or erase unknown variables into different heads.
-      tokens = parse(text, (name) => '${' + name + '}');
+      tokens = parse(unnumbered, (name) => '${' + name + '}');
     } catch {
       // Syntax validity belongs to the executing shell, not this check.
       continue;
     }
     let words: string[] = [];
-    for (const token of tokens) {
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
       if (typeof token === 'string') { words.push(token); continue; }
       if ('comment' in token) break;
+      if (OUTPUT_REDIRECTS.has(token.op) || INPUT_REDIRECTS.has(token.op)) {
+        // Redirections are not arguments: classify the command without them.
+        const next = tokens[index + 1];
+        const target = typeof next === 'string' ? next : '';
+        if (typeof next === 'string') index += 1;
+        const sink = REDIRECT_SINKS.has(target) || (token.op.endsWith('&') && isDescriptor(target));
+        if (OUTPUT_REDIRECTS.has(token.op) && !sink) {
+          return { reason: `重定向 ${token.op} 会写文件`, redirect: FILE_TOOLS };
+        }
+        continue;
+      }
       if (!SEPARATORS.has(token.op)) {
         words.push(token.op === 'glob' && 'pattern' in token ? token.pattern : token.op);
         continue;

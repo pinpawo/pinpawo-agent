@@ -1,5 +1,5 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
-import { HostChatAnthropic } from './hostChatAnthropic';
+import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 import type { AgentLlmConfig } from '../config/agentConfig';
 import {
   requiresLlmStreaming,
@@ -21,15 +21,18 @@ export function buildHostModels(
       ? llmConfig.observeModel
       : llmConfig.model;
 
-    if (llmConfig.protocol && !['openai-compatible', 'anthropic'].includes(llmConfig.protocol)) {
+    if (llmConfig.protocol && !['openai-compatible', 'anthropic-compatible'].includes(llmConfig.protocol)) {
       throw new Error(`Unsupported model protocol: ${llmConfig.protocol}`);
     }
-    if (llmConfig.protocol === 'anthropic') {
+    if (llmConfig.protocol === 'anthropic-compatible') {
       if (llmConfig.structuredOutputMethod && llmConfig.structuredOutputMethod !== 'functionCalling') {
-        throw new Error('anthropic currently supports structuredOutputMethod functionCalling only');
+        throw new Error('anthropic-compatible currently supports structuredOutputMethod functionCalling only');
       }
-      return new HostChatAnthropic({
+      return new AnthropicCompatibleChatModel({
         model,
+        // The pinned SDK defaults thinking to disabled. Omit it so the
+        // endpoint can apply its own default.
+        invocationKwargs: { thinking: undefined },
         ...generationOptions,
         apiKey: llmConfig.apiKey,
         clientOptions: { baseURL: llmConfig.baseUrl, timeout: llmConfig.timeoutMs ?? 45000 },

@@ -14,6 +14,7 @@ import {
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
+import { isToolCallContentBlock } from '../../../../utils/messages';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
@@ -205,7 +206,7 @@ function withoutRepeatedCalls(message: AIMessage, kept: ToolCall[]) {
   return new AIMessage({
     ...message,
     content: Array.isArray(message.content)
-      ? message.content.filter((block) => !['tool_call', 'tool_use'].includes((block as { type?: string }).type ?? '') || !isDropped(block))
+      ? message.content.filter((block) => !isToolCallContentBlock(block) || !isDropped(block))
       : message.content,
     additional_kwargs: Array.isArray(rawCalls)
       ? { ...message.additional_kwargs, tool_calls: rawCalls.filter((call) => !isDropped(call)) }

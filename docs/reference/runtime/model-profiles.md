@@ -44,7 +44,7 @@ Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens.
 `inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image support from a model name.
 
 `protocol` is optional: `openai-compatible` (the backward-compatible default) or
-`anthropic` (native Messages). Unknown values make the profile unavailable.
+`anthropic-compatible` (Anthropic Messages API). Unknown values make the profile unavailable.
 Native profiles accept only `functionCalling` for `structuredOutputMethod`,
 which is also their resolved default. See the [native configuration example](../../guides/model-profiles.md#native-anthropic).
 

@@ -3,23 +3,23 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { buildHostModels } from './agentModels';
-import { HostChatAnthropic } from './hostChatAnthropic';
+import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 
-const config = { protocol: 'anthropic' as const, apiKey: 'mock-key', baseUrl: 'https://anthropic.example.test', model: 'claude-sonnet-4-5', maxRetries: 0, maxOutputTokens: 1024 };
+const config = { protocol: 'anthropic-compatible' as const, apiKey: 'mock-key', baseUrl: 'https://anthropic.example.test', model: 'claude-sonnet-4-5', maxRetries: 0, maxOutputTokens: 1024 };
 const tool = { name: 'lookup', description: 'Look up a value', schema: z.object({ query: z.string() }) };
 function response(content: unknown[], stop_reason = 'end_turn') {
   return { id: 'msg_mock', type: 'message', role: 'assistant', model: config.model, content, stop_reason, stop_sequence: null, usage: { input_tokens: 12, output_tokens: 4 } };
 }
-function modelWithFetch(fetcher: NonNullable<HostChatAnthropic['clientOptions']['fetch']>) {
+function modelWithFetch(fetcher: NonNullable<AnthropicCompatibleChatModel['clientOptions']['fetch']>) {
   const model = buildHostModels(config).act;
-  assert.ok(model instanceof HostChatAnthropic);
+  assert.ok(model instanceof AnthropicCompatibleChatModel);
   model.clientOptions.fetch = fetcher;
   return model;
 }
 
 test('explicit protocol selects all roles and leaves gateway Claude on OpenAI', () => {
-  for (const model of Object.values(buildHostModels(config))) assert.ok(model instanceof HostChatAnthropic);
-  assert.equal(buildHostModels({ ...config, protocol: undefined }).act instanceof HostChatAnthropic, false);
+  for (const model of Object.values(buildHostModels(config))) assert.ok(model instanceof AnthropicCompatibleChatModel);
+  assert.equal(buildHostModels({ ...config, protocol: undefined }).act instanceof AnthropicCompatibleChatModel, false);
   assert.throws(() => buildHostModels({ ...config, structuredOutputMethod: 'jsonMode' }), /functionCalling only/);
 });
 
@@ -90,7 +90,7 @@ test('native stream emits text and usage through LangChain', async () => {
 test('explicit native thinking settings are preserved in the request', async () => {
   for (const thinking of [{ type: 'disabled' }, { type: 'adaptive' }] as const) {
     let requested = false;
-    const model = new HostChatAnthropic({
+    const model = new AnthropicCompatibleChatModel({
       model: config.model,
       apiKey: config.apiKey,
       maxRetries: 0,
@@ -156,4 +156,105 @@ test('cancelling an active native stream aborts the SDK request', async () => {
   controller.abort();
   await assert.rejects(async () => { for await (const _chunk of { [Symbol.asyncIterator]: () => iterator }) { /* Drain remaining chunks. */ } }, /abort/i);
   assert.equal(sdkSignal?.aborted, true);
+});
+
+test('native v3 event stream preserves provider-default thinking and the public text separately', async () => {
+  const events = [
+    ['message_start', { message: response([]) }],
+    ['content_block_start', { index: 0, content_block: { type: 'thinking', thinking: '' } }],
+    ['content_block_delta', { index: 0, delta: { type: 'thinking_delta', thinking: 'private' } }],
+    ['content_block_delta', { index: 0, delta: { type: 'signature_delta', signature: 'mock-signature' } }],
+    ['content_block_stop', { index: 0 }],
+    ['content_block_start', { index: 1, content_block: { type: 'redacted_thinking', data: 'mock-redacted' } }],
+    ['content_block_stop', { index: 1 }],
+    ['content_block_start', { index: 2, content_block: { type: 'text', text: '' } }],
+    ['content_block_delta', { index: 2, delta: { type: 'text_delta', text: 'public' } }],
+    ['content_block_stop', { index: 2 }],
+    ['message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 4 } }],
+    ['message_stop', {}],
+  ];
+  const model = modelWithFetch(async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.stream, true);
+    assert.equal('thinking' in body, false);
+    return new Response(events.map(([type, data]) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data as object })}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
+  });
+  const blocks = [];
+  let finishProvider: unknown;
+  let finishReason: unknown;
+  for await (const event of model.streamEvents('Hi')) {
+    if (event.event === 'content-block-finish') blocks.push(event.content);
+    if (event.event === 'message-finish') {
+      finishProvider = event.responseMetadata?.model_provider;
+      finishReason = event.reason;
+    }
+  }
+  assert.equal(finishProvider, 'anthropic');
+  assert.equal(finishReason, 'stop');
+  assert.deepEqual(blocks, [
+    { type: 'reasoning', reasoning: 'private', signature: 'mock-signature' },
+    { type: 'non_standard', value: { type: 'redacted_thinking', data: 'mock-redacted' } },
+    { type: 'text', text: 'public' },
+  ]);
+});
+
+test('tool-bound legacy stream preserves redacted thinking and visible text in separate blocks', async () => {
+  const events = [
+    ['message_start', { message: response([]) }],
+    ['content_block_start', { index: 0, content_block: { type: 'redacted_thinking', data: 'mock-redacted' } }],
+    ['content_block_stop', { index: 0 }],
+    ['content_block_start', { index: 1, content_block: { type: 'text', text: '' } }],
+    ['content_block_delta', { index: 1, delta: { type: 'text_delta', text: 'public' } }],
+    ['content_block_stop', { index: 1 }],
+    ['message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 4 } }],
+    ['message_stop', {}],
+  ];
+  const model = modelWithFetch(async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal('thinking' in body, false);
+    assert.equal(body.tools[0].name, 'lookup');
+    return new Response(events.map(([type, data]) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data as object })}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
+  });
+  let result;
+  for await (const chunk of await model.bindTools([tool]).stream('Hi')) result = result ? result.concat(chunk) : chunk;
+  assert.equal(result?.text, 'public');
+  assert.ok(Array.isArray(result?.content));
+  assert.ok(result.content.some(block => typeof block === 'object' && block.type === 'redacted_thinking' && block.data === 'mock-redacted'));
+});
+
+test('cancelling an active native v3 event stream aborts the SDK request and stops consumption', { timeout: 5_000 }, async () => {
+  const controller = new AbortController();
+  let sdkSignal: AbortSignal | null | undefined;
+  let sourceAborted = false;
+  const model = modelWithFetch(async (_url, init) => {
+    sdkSignal = init?.signal;
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        stream.enqueue(new TextEncoder().encode(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: response([]) })}\n\n`));
+        init?.signal?.addEventListener('abort', () => {
+          sourceAborted = true;
+          stream.error(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      },
+    });
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+  });
+  const iterator = model.streamEvents('Hi', { signal: controller.signal })[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.value?.event, 'message-start');
+  controller.abort();
+  // The provider may have already buffered its message-start metadata event.
+  // Consume that bounded remainder until cancellation ends the stream.
+  let terminated = false;
+  for (let i = 0; i < 3 && !terminated; i += 1) {
+    try {
+      terminated = (await iterator.next()).done === true;
+    } catch (error) {
+      assert.match(String(error), /abort/i);
+      terminated = true;
+    }
+  }
+  assert.equal(terminated, true);
+  assert.equal(sdkSignal?.aborted, true);
+  assert.equal(sourceAborted, true);
 });

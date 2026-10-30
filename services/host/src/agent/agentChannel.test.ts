@@ -540,7 +540,7 @@ test('explicit Host snapshots override changing process defaults at the Agent bo
 
 test('native review output defaults to function calling before endpoint inference', () => {
   const result = buildReviewStructuredOutput({
-    protocol: 'anthropic',
+    protocol: 'anthropic-compatible',
     apiKey: 'mock-key',
     baseUrl: 'https://dashscope.aliyuncs.com',
     model: 'claude-sonnet-4-5',

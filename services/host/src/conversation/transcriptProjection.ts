@@ -6,11 +6,10 @@ import {
   readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
-  readMessageText,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
 import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
-import { readLocalChatDisplayText } from './chatDisplayText';
+import { readLocalChatDisplayText, readPublicMessageText } from './chatDisplayText';
 import { readMessageToolCalls, readToolResults } from '../agent/agentStreamEvents';
 
 /**
@@ -45,7 +44,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
   return messages.flatMap<TuiCheckpointMessage>((message) => {
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
-    const text = readLocalChatDisplayText(message) ?? readMessageText(message);
+    const text = readLocalChatDisplayText(message) ?? readPublicMessageText(message);
     const toolCalls = readMessageToolCalls(message).map(call => ({ ...call, ...(results.get(call.id) ?? { status: 'running' as const }) }));
     if (!text && !toolCalls.length) {
       return [];

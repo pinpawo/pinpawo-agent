@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
 import { buildHostModels } from '../../../../services/host/src/agent/agentModels.ts';
-import { HostChatAnthropic } from '../../../../services/host/src/agent/hostChatAnthropic.ts';
+import { AnthropicCompatibleChatModel } from '../../../../services/host/src/agent/anthropicCompatibleChatModel.ts';
 import { runAgent } from '../../../../packages/pet-agent/src/agent/runAgent.ts';
 
 test('native Messages thinking and text reach the public runAgent reply', async () => {
   const model = buildHostModels({
-    protocol: 'anthropic', model: 'claude-sonnet-4-6', apiKey: 'mock-key',
+    protocol: 'anthropic-compatible', model: 'claude-sonnet-4-6', apiKey: 'mock-key',
     baseUrl: 'https://native.example.test', maxRetries: 0,
   }).act;
-  assert.ok(model instanceof HostChatAnthropic);
+  assert.ok(model instanceof AnthropicCompatibleChatModel);
   let requested = false;
   model.clientOptions.fetch = async (url, init) => {
     requested = true;

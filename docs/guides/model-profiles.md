@@ -21,15 +21,17 @@ Model credentials and endpoints come from stored profiles. Use
 
 ## Native Anthropic
 
-Set `protocol` explicitly to `anthropic` to use Anthropic Messages through
-LangChain ChatAnthropic. Add a profile such as this under `models.profiles`:
+Set `protocol` explicitly to `anthropic-compatible` to use the Anthropic Messages API through
+LangChain ChatAnthropic. This selects the Messages API transport for compatible
+endpoints; compatibility does not imply support for every Anthropic extension or
+for every model. Add a profile such as this under `models.profiles`:
 
 ```json
 "claude-native": {
   "id": "claude-native",
   "label": "Claude native",
   "provider": "anthropic",
-  "protocol": "anthropic",
+  "protocol": "anthropic-compatible",
   "model": "claude-sonnet-4-5",
   "baseUrl": "https://api.anthropic.com",
   "apiKey": "replace-with-a-local-secret",
@@ -63,6 +65,14 @@ error; choose a model supporting forced tool choice. This validation does not
 apply to OpenAI-compatible profiles. Other model names are not guaranteed to
 support this behavior; verify their endpoint and model capabilities. See
 [Anthropic's tool-choice documentation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools).
+
+### Streaming history limitation
+
+Host chat uses LangChain's v3 event stream. The current Anthropic integration
+has a separate limitation for direct legacy model `.stream()` calls without
+bound tools: a returned `redacted_thinking` block may be dropped by the SDK.
+Do not use that legacy stream to build multi-turn history when such blocks may
+be returned; preserve the provider's complete message through a supported path.
 
 ### Channel routing and evals
 

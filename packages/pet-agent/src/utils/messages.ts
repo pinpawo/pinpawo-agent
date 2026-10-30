@@ -1,5 +1,12 @@
 import type { BaseMessage } from '@langchain/core/messages';
 
+/** Identify the two supported representations of a tool call in message content. */
+export function isToolCallContentBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object') return false;
+  const type = (block as { type?: unknown }).type;
+  return type === 'tool_call' || type === 'tool_use';
+}
+
 export type MessageToolCallInfo = {
   id: string;
   name: string;

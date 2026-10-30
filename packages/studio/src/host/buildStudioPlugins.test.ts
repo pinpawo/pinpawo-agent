@@ -271,12 +271,12 @@ test('Plugin model resolution preserves the native Host default and an explicit 
   const result = await buildStudio({
     configuration,
     modelProfiles: createTestModelProfileRegistry([
-      { modelProfileId: 'native', protocol: 'anthropic', model: 'claude-sonnet-4-5' },
+      { modelProfileId: 'native', protocol: 'anthropic-compatible', model: 'claude-sonnet-4-5' },
       { modelProfileId: 'gateway' },
     ], 'native'),
     hostCapabilities: [generalCapability()], petCapabilities: new Map(),
     ...residentBuildResources(workdir),
   });
-  try { assert.deepEqual(seen, ['anthropic', 'openai-compatible']); }
+  try { assert.deepEqual(seen, ['anthropic-compatible', 'openai-compatible']); }
   finally { await result.studio.shutdown(); }
 });

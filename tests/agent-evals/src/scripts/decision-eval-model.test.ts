@@ -11,7 +11,7 @@ import {
 import { createLocalModelProfileRegistry } from '../../../../services/host/src/config/llmConfig.ts';
 import type { StoredConfig } from '../../../../services/host/src/storage.ts';
 import type { ReasoningPassbackCompletions } from '../../../../services/host/src/agent/reasoningPassback.ts';
-import { HostChatAnthropic } from '../../../../services/host/src/agent/hostChatAnthropic.ts';
+import { AnthropicCompatibleChatModel } from '../../../../services/host/src/agent/anthropicCompatibleChatModel.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
 function writeProfiles() {
@@ -23,13 +23,13 @@ function writeProfiles() {
       defaultProfileId: 'endpoint-a',
       profiles: {
         'claude-preset': {
-          id: 'claude-preset', label: 'Claude preset', protocol: 'anthropic',
+          id: 'claude-preset', label: 'Claude preset', protocol: 'anthropic-compatible',
           sourcePreset: 'claude-sonnet', model: 'claude-sonnet-4-6',
           baseUrl: 'https://native.example.test', apiKey: 'mock-native',
           contextWindowTokens: 200_000, inputModalities: ['text'],
         },
         'claude-native': {
-          id: 'claude-native', label: 'Claude native', protocol: 'anthropic',
+          id: 'claude-native', label: 'Claude native', protocol: 'anthropic-compatible',
           model: 'claude-sonnet-4-5', baseUrl: 'https://native.example.test',
           apiKey: 'mock-native', contextWindowTokens: 200_000,
           maxOutputTokens: 1024, inputModalities: ['text', 'image'],
@@ -250,7 +250,7 @@ test('native eval subjects and judges use Messages while gateway Claude stays co
           ...(temperature === undefined ? {} : {
             [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_TEMPERATURE' : 'PROMPT_EVAL_JUDGE_TEMPERATURE']: temperature,
           }) } });
-      assert.ok(evaluated.model instanceof HostChatAnthropic);
+      assert.ok(evaluated.model instanceof AnthropicCompatibleChatModel);
       assert.equal(evaluated.method, 'functionCalling');
       assert.equal(evaluated.model.clientOptions.timeout, 120_000);
       evaluated.model.clientOptions.fetch = async (url, init) => {
@@ -269,7 +269,7 @@ test('native eval subjects and judges use Messages while gateway Claude stays co
     }
     const gateway = createDecisionEvalModel({ profileId: 'claude-gateway', role: 'subject',
       env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
-    assert.equal(gateway.model instanceof HostChatAnthropic, false);
+    assert.equal(gateway.model instanceof AnthropicCompatibleChatModel, false);
     for (const role of ['subject', 'judge'] as const) {
       assert.throws(() => createDecisionEvalModel({ profileId: 'claude-native', role,
         env: { PROMPT_EVAL_CONFIG_PATH: configPath,
@@ -318,7 +318,7 @@ test('eval requests and metadata use Host-resolved preset output limits and moda
     const host = createLocalModelProfileRegistry({ snapshot }).resolve('claude-preset');
     const evaluated = createDecisionEvalModel({ profileId: 'claude-preset', role: 'subject',
       env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
-    assert.ok(evaluated.model instanceof HostChatAnthropic);
+    assert.ok(evaluated.model instanceof AnthropicCompatibleChatModel);
     assert.equal(host.maxOutputTokens, 64_000);
     assert.equal(evaluated.metadata.maxOutputTokens, host.maxOutputTokens);
     assert.deepEqual(host.inputModalities, ['text', 'image']);

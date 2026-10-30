@@ -101,7 +101,7 @@ export function createLocalModelProfileRegistry(options: {
         modelProfileId: profile.id,
         modelProfileFingerprint: fingerprint,
         inputModalities: effectiveProfile.inputModalities,
-        ...(profile.protocol === 'anthropic'
+        ...(profile.protocol === 'anthropic-compatible'
           ? { structuredOutputMethod: 'functionCalling' as const }
           : effectiveProfile.structuredOutputMethod
           ? { structuredOutputMethod: effectiveProfile.structuredOutputMethod }

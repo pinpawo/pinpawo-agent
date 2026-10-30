@@ -106,7 +106,7 @@ test('the llm decider rejects an HTTP error or a malformed answer', async () => 
 test('native routing fails at startup before any request, including the inherited Host default', () => {
   let requests = 0;
   const fetchImpl = (async () => { requests++; throw new Error('must not request'); }) as typeof fetch;
-  const native = { ...endpoint, protocol: 'anthropic' as const };
+  const native = { ...endpoint, protocol: 'anthropic-compatible' as const };
   assert.throws(() => createLlmRouteDecider(native, fetchImpl), /routing.decider.modelProfileId/);
   for (const modelProfileId of [undefined, 'native']) {
     assert.throws(() => createChannelRouter({ enabled: true, decider: { kind: 'llm', modelProfileId } }, {

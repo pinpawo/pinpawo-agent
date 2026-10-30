@@ -222,7 +222,7 @@ export function createDecisionEvalModel(options: {
           ?? env.DECISION_STRUCTURED_OUTPUT_METHOD
         : undefined),
   ) ?? effectiveConfig.structuredOutputMethod
-    ?? (profile.protocol === 'anthropic'
+    ?? (profile.protocol === 'anthropic-compatible'
       ? 'functionCalling'
       : inferLlmStructuredOutputMethod(profile.model, profile.baseUrl));
   const fingerprint = effectiveConfig.modelProfileFingerprint!;

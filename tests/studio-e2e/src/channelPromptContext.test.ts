@@ -34,6 +34,7 @@ test('Channel instructions reach the actual Pet model per invocation without rep
   const root = await mkdtemp(join(tmpdir(), 'channel-prompt-context-'));
   const me = { kind: 'human' as const, id: 'local' };
   const petMarker = randomUUID(), alpha = randomUUID(), beta = randomUUID(), revised = randomUUID();
+  const titleA = randomUUID(), descriptionA = randomUUID(), titleB = randomUUID();
   const observed: string[] = [];
   const nonSystemMessages: string[][] = [];
   let holdNext = false;
@@ -84,8 +85,8 @@ Pet identity marker: ${petMarker}
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: [{ registration: { petId: 'worker', name: 'Worker' }, dispatch: host.resident.dispatch }],
     });
-    const a = (await channel.service.createChannel(me, { title: 'A', prompt: alpha, pets: ['worker'] }, { studio: true })).channel.channelId;
-    const b = (await channel.service.createChannel(me, { title: 'B', prompt: beta, pets: ['worker'] }, { studio: true })).channel.channelId;
+    const a = (await channel.service.createChannel(me, { title: titleA, description: descriptionA, prompt: alpha, pets: ['worker'] }, { studio: true })).channel.channelId;
+    const b = (await channel.service.createChannel(me, { title: titleB, prompt: beta, pets: ['worker'] }, { studio: true })).channel.channelId;
     const sendAndWait = async (id: string, expectedCount: number) => {
       await channel.sendMessage(id, { body: 'Please respond.', mentions: [{ participantId: 'pet:worker' }] }, me);
       await waitFor(async () => (await channel.service.readContext(me, id, { limit: 100 })).messages.filter(m => m.author.kind === 'pet').length === expectedCount);
@@ -100,6 +101,9 @@ Pet identity marker: ${petMarker}
     assert.notEqual(observed[2], observed[3], 'updating the Channel instructions changes the system prompt');
     for (const [index, expected] of [alpha, beta, alpha, revised].entries()) {
       assert.ok(observed[index]!.includes(petMarker), 'the Pet identity remains in every model call');
+      assert.equal(observed[index]!.includes(titleA), index !== 1);
+      assert.equal(observed[index]!.includes(descriptionA), index !== 1);
+      assert.equal(observed[index]!.includes(titleB), index === 1);
       for (const marker of [alpha, beta, revised]) {
         assert.equal(observed[index]!.includes(marker), marker === expected, 'only the current Channel instructions reach the model');
         assert.ok(nonSystemMessages[index]!.every(message => !message.includes(marker)), 'Channel instructions are not mixed into conversation messages');
@@ -124,6 +128,13 @@ Pet identity marker: ${petMarker}
     assert.ok(!observed[5]!.includes(queuedRevision));
     await sendAndWait(b, 3);
     assert.ok(observed[6]!.includes(queuedRevision));
+    await channel.service.updateChannel(me, a, { prompt: null }, { studio: true });
+    await sendAndWait(a, 5);
+    assert.ok(observed[7]!.includes(titleA), 'Channel metadata remains available without an announcement');
+    assert.ok(!observed[7]!.includes(revised));
+    assert.ok(nonSystemMessages.every(messages => messages.every(message =>
+      !message.includes(titleA) && !message.includes(descriptionA) && !message.includes(titleB))),
+    'shared Channel context is not appended to conversation history');
   } finally {
     releaseModel?.();
     await host?.close(); await studio?.shutdown();

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   GENERAL_CAPABILITY_NAME,
+  defineCapability,
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
@@ -56,11 +57,17 @@ export function selectStudioPetCapabilities(input: {
   defaultCapabilityName?: string;
   generalCapability: AgentCapability;
   petCapabilities: readonly AgentCapability[];
+  pluginCapabilities?: readonly AgentCapability[];
 }): AgentCapability[] {
+  const petNames = new Set(input.petCapabilities.map(({ name }) => name));
+  const capabilities = [
+    ...input.petCapabilities,
+    ...(input.pluginCapabilities ?? []).filter(({ name }) => !petNames.has(name)),
+  ];
   const defaultCapabilityName = input.defaultCapabilityName ?? GENERAL_CAPABILITY_NAME;
   return defaultCapabilityName === GENERAL_CAPABILITY_NAME
-    ? [input.generalCapability, ...input.petCapabilities]
-    : [...input.petCapabilities];
+    ? [input.generalCapability, ...capabilities]
+    : capabilities;
 }
 
 export type ResolveStudioHostConfigInput = {
@@ -117,6 +124,9 @@ function validateResolvedPlugins(studioId: string, plugins: readonly StudioPlugi
     names.add(plugin.name);
     if (!Array.isArray(plugin.toolkits)) {
       throw new Error(`studio "${studioId}": plugin "${plugin.name}" must define a Toolkit list`);
+    }
+    if (plugin.capabilities !== undefined && !Array.isArray(plugin.capabilities)) {
+      throw new Error(`studio "${studioId}": plugin "${plugin.name}" capabilities must be a list`);
     }
     if (typeof plugin.start !== 'function') {
       throw new Error(`studio "${studioId}": plugin "${plugin.name}" must define start()`);
@@ -191,6 +201,20 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
   }
 
+  const pluginCapabilities = new Map<string, AgentCapability>();
+  for (const plugin of plugins) {
+    for (const definition of plugin.capabilities ?? []) {
+      const capability = defineCapability(definition);
+      if (capability.name === GENERAL_CAPABILITY_NAME) {
+        throw new Error(`Plugin "${plugin.name}" cannot replace the Host baseline Capability "${GENERAL_CAPABILITY_NAME}"`);
+      }
+      if (pluginCapabilities.has(capability.name)) {
+        throw new Error(`Duplicate Plugin Capability "${capability.name}"`);
+      }
+      pluginCapabilities.set(capability.name, capability);
+    }
+  }
+
   // Check every definition up front, so a bad one fails Host start rather
   // than the first create that uses it.
   const definitions = new Map<string, { config: PetConfig; capabilities: AgentCapability[] }>();
@@ -211,7 +235,8 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     }
     if (definition.defaultCapabilityName
       && definition.defaultCapabilityName !== GENERAL_CAPABILITY_NAME
-      && !petCapabilityNames.has(definition.defaultCapabilityName)) {
+      && !petCapabilityNames.has(definition.defaultCapabilityName)
+      && !pluginCapabilities.has(definition.defaultCapabilityName)) {
       throw new Error(
         `definition "${definitionId}" default Capability "${definition.defaultCapabilityName}" is not available`,
       );
@@ -224,6 +249,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           : {}),
         generalCapability,
         petCapabilities,
+        pluginCapabilities: [...pluginCapabilities.values()],
       }),
     });
   }

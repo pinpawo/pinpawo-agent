@@ -46,12 +46,15 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     assert.equal(first.deliveries[0]?.state, 'accepted');
     await channel.sendMessage(b, { body: 'hello', mentions: [{ participantId: 'pet:one' }] }, human);
     assert.equal(dispatched.length, 2);
-    const aSection = resolved[0]?.[0];
+    const aSection = resolved[0]?.find(section => section.id === 'channel:context');
     assert.deepEqual([aSection?.id, aSection?.owner], ['channel:context', 'channel']);
     assert.match(aSection!.content, /Alpha \]\]\]\]><!\[CDATA\[> collaboration/);
     assert.doesNotMatch(dispatched[0]!.request, /Alpha/);
     assert.equal(Object.hasOwn(dispatched[0]!, 'systemPromptSections'), false, 'context is not a dispatch parameter');
-    assert.equal(resolved[1], undefined, 'an empty Channel contributes no section');
+    assert.deepEqual(resolved[1]?.map(section => section.id), ['channel:protocol', 'channel:metadata']);
+    const metadata = resolved[1]!.find(section => section.id === 'channel:metadata')!;
+    assert.deepEqual(JSON.parse(metadata.content), { channelId: b, title: 'B' });
+    assert.equal(resolved[0]![0]!.content, resolved[1]![0]!.content, 'the Plugin supplies one shared protocol');
     assert.notEqual(dispatched[0]!.session?.id, dispatched[1]!.session?.id);
 
     await channel.service.updateChannel(human, a, { prompt: 'Updated A' }, { studio: true });
@@ -59,23 +62,23 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     await channel.run(a, 'one', 'scheduled', { kind: 'scheduler', id: 's' });
     await channel.run(b, 'one', 'triggered', { kind: 'trigger', id: 't' });
     assert.equal(dispatched.length, 4);
-    assert.match(resolved[2]![0]!.content, /Updated A/);
-    assert.doesNotMatch(resolved[2]![0]!.content, /Beta/);
-    assert.match(resolved[3]![0]!.content, /Beta/);
-    assert.doesNotMatch(resolved[3]![0]!.content, /Updated A/);
+    assert.match(resolved[2]!.find(section => section.id === 'channel:context')!.content, /Updated A/);
+    assert.doesNotMatch(resolved[2]!.find(section => section.id === 'channel:context')!.content, /Beta/);
+    assert.match(resolved[3]!.find(section => section.id === 'channel:context')!.content, /Beta/);
+    assert.doesNotMatch(resolved[3]!.find(section => section.id === 'channel:context')!.content, /Updated A/);
     assert.match(aSection!.content, /Alpha/, 'the previous dispatch remains a snapshot');
     assert.equal(dispatched[2]!.session?.id, dispatched[0]!.session?.id);
     assert.equal(dispatched[3]!.session?.id, dispatched[1]!.session?.id);
 
     await channel.service.updateChannel(human, a, { prompt: null }, { studio: true });
     await channel.run(a, 'one', 'cleared', { kind: 'scheduler', id: 's2' });
-    assert.equal(resolved[4], undefined);
+    assert.deepEqual(resolved[4]?.map(section => section.id), ['channel:protocol', 'channel:metadata'], 'clearing the announcement keeps the Plugin context');
 
     // An unaddressed human message takes the router path, not the mention path.
     await channel.sendMessage(b, { body: 'route this' }, human);
     for (let i = 0; i < 200 && dispatched.length < 6; i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(dispatched.length, 6);
-    assert.match(resolved[5]![0]!.content, /Beta/);
+    assert.match(resolved[5]!.find(section => section.id === 'channel:context')!.content, /Beta/);
     assert.equal(dispatched[5]!.session?.id, dispatched[1]!.session?.id);
   } finally { await studio.shutdown(); }
 });
@@ -114,7 +117,7 @@ test('provider uses the persisted binding and current membership after Studio re
       onPreparedContextResolver: value => { resolver = value; } });
 
     await studio.dispatch({ petId: 'one', request: 'existing binding', session: { id: aSession }, scope: { namespace: 'channel', id: a } });
-    assert.ok(observedSections.at(-1)?.[0]?.content.includes(marker));
+    assert.ok(observedSections.at(-1)?.find(section => section.id === 'channel:context')?.content.includes(marker));
     assert.equal(Object.hasOwn(observed.at(-1)!, 'systemPromptSections'), false);
     await studio.dispatch({ petId: 'one', request: 'not a Channel invocation', session: { id: aSession } });
     assert.equal(observedSections.at(-1), undefined);

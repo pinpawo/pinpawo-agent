@@ -105,7 +105,8 @@ still come from the compiled registry, and framework security remains authoritat
 
 ## Per-Pet Capability directory
 
-Directory membership is the Pet's Capability selection. No additional directory
+The Pet directory selects its own Capabilities. Configured Plugins may also
+supply shared Capability definitions to the Host. No additional directory
 configuration or name allowlist is required:
 
 ```text
@@ -120,7 +121,11 @@ Every immediate child must be a valid Capability directory. Invalid documents
 or duplicate Capability names fail Host startup. Directory symlinks are allowed,
 so multiple Pets can select one shared Capability without copying it. Capability
 names are scoped per Pet: two Pets may load different definitions with the same
-name, while duplicates inside one Pet remain an error.
+name, while duplicates inside one Pet remain an error. The Host merges Plugin
+Capabilities into each Pet's catalog. A Pet-local definition with the same name
+takes precedence, preserving existing customizations. Conflicting Plugin names
+and attempts to replace the Host's `general` Capability fail startup. These
+shared definitions still use the Agent's normal Toolkit binding and execution.
 
 The Host merges normal Toolkits and Toolkits defined by configured Studio Plugins
 into its unified Toolkit inventory. Each loaded Capability's `uses` declaration
@@ -159,7 +164,9 @@ read it. Only Studio authority can set a non-empty prompt on creation or modify
 or clear it later; ordinary clients can create Channels without a prompt. A
 non-member Studio authority can update the prompt alone, without gaining access
 to messages or permission to edit other metadata. Each Channel-scoped
-Pet run receives that Channel's prompt without changing the Pet's `PET.md`; a prompt
+Pet run receives the Plugin's common instructions, Channel title and description,
+and any configured announcement in its system prompt. This does not change
+the Pet's `PET.md`; a prompt
 edit applies to a subsequent dispatch, not to a run already in progress or its
 approval continuation. Use it to describe the current team's roles and how members
 collaborate. The routing model can also see it; routing still only considers human
@@ -186,9 +193,18 @@ Reviewer 独立判断交付是否符合意图；Wiki 关注项目知识与实际
 取舍时，说明情况并向合适的参与者或人类寻求帮助与决定。
 ```
 
-Default PET.md and Capability templates contain the runtime protocol; existing
-workdirs must compare and update those files manually, preserving local instructions.
-A link to a design document does not replace the instructions loaded by the Host.
+The Channel Plugin owns the common context-reading and addressing instructions.
+It also supplies one shared `channel_context` Capability for a separate analysis
+subtask that returns a summary to the main Pet. PET.md defines only the Pet's own
+role and boundaries; the Channel announcement defines team roles and collaboration.
+The Host still saves and delivers public replies through its existing event path.
+
+Existing workdirs are not rewritten. Remove obsolete per-Pet `channel_context`
+copies only after preserving any local customizations; otherwise those copies
+continue to override the Plugin's shared definition. Compare PET.md and dedicated
+Capabilities for duplicated Channel rules before upgrading. Restart the Host
+after changing these files or Plugin definitions; editing a Channel announcement
+uses the next-run behavior described above.
 
 A human's message that addresses nobody is stored and wakes no Pet. Setting the Channel
 Plugin option `routing.enabled` to `true` lets one model call choose a single Pet, or

@@ -45,8 +45,9 @@ Studio Host 启动时读取一次 `PET.md`，修改后需要重启 Host 才会�
 standalone CLI 把 Plugin id 作为已安装 package 名交给 `StudioPluginResolver`，package
 通过 `createStudioPlugin()` 创建 Plugin。Studio core 不扫描或静态 import 具体 Plugin；
 嵌入方仍可替换 resolver。安装完整入口 `@pinpawo/studio` 会自动安装六个基础 Plugin；
-其他配置的 Plugin 仍需预先安装。核心包为 `@pinpawo/studio-core`，启动过程不会联网下载。Plugin 可以定义 Toolkit，但 Capability 属于 Agent，并只从每个
-Pet 的约定目录加载。
+其他配置的 Plugin 仍需预先安装。核心包为 `@pinpawo/studio-core`，启动过程不会联网下载。Plugin 可以提供 Toolkit 和共享 Capability 定义，由 Host 与每个 Pet 目录中的专用能力
+合并装配。执行和工具绑定仍由 Agent 负责，Studio 不注册或执行 Capability。
+Pet 本地同名定义优先；不同 Plugin 的同名能力及替换 Host general 的定义会在启动时失败。
 
 `storage` 决定 Plugin 数据放在哪里，省略时是 workdir 下的 `.pinpawo/studio/studio.sqlite`。
 改用 Postgres 时写 `{ "kind": "postgres", "urlEnv": "PINPAWO_STUDIO_DATABASE_URL" }`（连接串放在环境变量里）
@@ -57,8 +58,12 @@ Studio 只登记 Pet 的稳定 id、公开名称和 `PetDispatchPort`。Agent �
 Capability inventory、Agent Session 与 checkpoint 都不进入 Studio 注册表。
 
 当前 Channel 寻址、Reply 默认与可信来源见[统一设计入口](../../design/studio/channel-addressing-and-execution.md)。
-既有工作区需手动对照新版 PET.md / Capability，保留本地约定；设计文档链接不能替代
-Host 实际加载的运行时指令，编辑后重启生效。
+Channel Plugin 自动向本 Channel 的可信运行注入公共说明、标题/介绍和可选公告，
+并提供一份共享 channel_context Capability，按需独立分析消息后把总结返回主 Pet。
+PET.md 只定义自身职责和边界，团队分工由公告说明。公告只允许 Studio authority 编辑，
+修改影响后续运行，不改变正在执行或待审批运行的快照，也不追加到对话消息历史。
+既有工作区需保留定制后手动清理旧的 channel_context 副本和重复公共规则；本地同名
+副本仍会优先于共享能力。Pet 或 Capability 文件编辑后重启生效。
 
 人类发的、没有 @ 任何人的 Channel 消息只保存，不唤醒 Pet。把 Channel Plugin 的 `options.routing.enabled`
 设为 `true` 后，会用一次模型调用为这类消息选一个 Pet 或不选（`decider: {kind:'llm', modelProfileId}`，

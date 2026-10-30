@@ -51,8 +51,15 @@ hook installation, and `storage`: `storage.open(migrations)` applies the Plugin'
 migrations in the shared Studio database (SQLite or Postgres, set by `studio.json` `storage`)
 and returns a Kysely instance. Each Plugin owns its tables and its `<name>_migrations` history;
 Studio closes the database after every Plugin has stopped. `allocateSessionId(petId)` names a new
-session for `dispatch({ session: { id, create: true } })` without creating it. A Plugin may define
-Toolkits; their tools call `readStudioInvocation()` from `@pinpawo/studio-core` to learn which admitted
+session for `dispatch({ session: { id, create: true } })` without creating it.
+A Plugin may export static `capabilities?: readonly AgentCapability[]`, alongside
+its Toolkits. The composing Host merges these definitions into each Pet's catalog;
+Studio does not register or execute Capabilities. Pet-local definitions take
+precedence over shared definitions with the same name. Duplicate names across
+Plugins and replacement of the Host baseline `general` Capability are rejected.
+Embedded callers that construct their own runtimes also own this catalog assembly.
+
+A Plugin may define Toolkits; their tools call `readStudioInvocation()` from `@pinpawo/studio-core` to learn which admitted
 dispatch (Pet, invocation, session, scope) they run in, and get `undefined` outside one. A Plugin
 cannot construct a Pet, inspect a runtime, or participate in Agent Session conversation, and needs
 no import from `pinpawo/host-runtime`.
@@ -130,7 +137,10 @@ human-facing description. It is trimmed, limited to 50,000 characters, and an
 empty value clears it. Current members can read it; only Studio authority can set
 a non-empty prompt on creation or modify or clear it later. Ordinary clients can
 create Channels without a prompt, but cannot edit one even as the creator. A
-Channel-scoped Pet dispatch uses a snapshot of the prompt for that run; edits apply to later dispatches, not to the current run or its approval
+Channel-scoped Pet run receives the Plugin's shared instructions and Channel metadata
+even without an announcement. Its `channel_context` Capability is supplied once by
+the Channel Plugin and executed by the Agent as an ordinary subtask. The Host uses a
+snapshot of the system sections for that run; edits apply to later dispatches, not to the current run or its approval
 continuation. The routing model can also see it, but routing still applies only to
 unaddressed human messages. The prompt expresses collaboration intent, not authorization; it
 does not override Host or PET safety rules, grant tool access, change review policy,

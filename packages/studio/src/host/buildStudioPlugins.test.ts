@@ -81,6 +81,24 @@ test('an explicit Pet default excludes the general fallback Capability', () => {
   );
 });
 
+test('shared Plugin Capabilities supplement Pet definitions without replacing local customizations', () => {
+  const shared: AgentCapability = { ...generalCapability(), name: 'shared_context' };
+  const extra: AgentCapability = { ...generalCapability(), name: 'shared_lookup' };
+  const local: AgentCapability = { ...shared, description: 'Local customization' };
+  const selected = selectStudioPetCapabilities({
+    defaultCapabilityName: local.name,
+    generalCapability: generalCapability(),
+    petCapabilities: [local],
+    pluginCapabilities: [shared, extra],
+  });
+  assert.deepEqual(selected.map(({ name }) => name), ['shared_context', 'shared_lookup']);
+  assert.equal(selected[0], local);
+  assert.equal(selected[1], extra);
+  assert.deepEqual(selectStudioPetCapabilities({
+    generalCapability: generalCapability(), petCapabilities: [], pluginCapabilities: [shared],
+  }).map(({ name }) => name), ['general', 'shared_context']);
+});
+
 const artifactStore: CapabilityArtifactStore = {
   writeArtifact: async () => { throw new Error('not used'); },
   readArtifact: async () => { throw new Error('not used'); },
@@ -119,6 +137,53 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   );
   return root;
 }
+
+test('a Plugin Capability can serve as a resident Pet default without a local copy', async () => {
+  const workdir = await writeStudioConfig([{ id: 'shared-context' }]);
+  const capability: AgentCapability = { ...generalCapability(), name: 'shared_context' };
+  await writeFile(path.join(workdir, '.pinpawo', 'pets', 'planner.json'), JSON.stringify({
+    definitionId: 'planner', name: 'Planner', defaultCapabilityName: capability.name,
+  }));
+  const configuration = await resolveStudioHostConfig({ workdir, resolvePlugin: () => ({
+    name: 'shared-context', toolkits: [], capabilities: [capability], start() {},
+  }) });
+  const input = {
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    hostCapabilities: [generalCapability()], petCapabilities: new Map(),
+    ...residentBuildResources(workdir),
+  };
+  const { studio, residentPets } = await buildStudio(input);
+  try {
+    await studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
+    assert.ok(residentPets.has('planner'));
+  } finally { await studio.shutdown(); }
+  await assert.rejects(buildStudio({ ...input, configuration: { ...configuration, plugins: [] } }), /default Capability .* is not available/);
+});
+
+test('Plugin Capability collisions and baseline replacement fail before Plugin activation', async () => {
+  const workdir = await writeStudioConfig([]);
+  const configuration = await resolveStudioHostConfig({ workdir });
+  let starts = 0;
+  const plugin = (name: string, capabilities: AgentCapability[]): StudioPlugin => ({
+    name, toolkits: [], capabilities, start() { starts++; },
+  });
+  const shared = { ...generalCapability(), name: 'shared_context' };
+  for (const [plugins, error] of [
+    [[plugin('first', [shared]), plugin('second', [shared])], /Duplicate Plugin Capability/],
+    [[plugin('first', [shared, shared])], /Duplicate Plugin Capability/],
+    [[plugin('first', [generalCapability()])], /cannot replace the Host baseline/],
+    [[plugin('first', [{ ...shared, instructions: { content: 'tampered', digest: 'invalid' } }])], /digest does not match/],
+  ] as const) {
+    await assert.rejects(buildStudio({
+      configuration: { ...configuration, plugins: [...plugins] },
+      modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+      hostCapabilities: [generalCapability()], petCapabilities: new Map(),
+      ...residentBuildResources(workdir),
+    }), error);
+  }
+  assert.equal(starts, 0);
+});
 
 test('plugin options from studio.json reach the injected resolver', async () => {
   const workdir = await writeStudioConfig([

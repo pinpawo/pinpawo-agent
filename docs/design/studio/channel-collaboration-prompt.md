@@ -19,12 +19,16 @@ Pet 的 `PET.md` 适合描述它是什么、承担什么长期定位。Channel �
 
 设计目标如下，具体完成情况以实现和测试为准：
 
-1. Channel Plugin 启动时向 Studio 注册作用域对应的上下文提供者。经人类消息、Pet 消息、路由、schedule 或 trigger 派发 Pet 时，Channel 只传可信 scope 与已持久化的 Pet 会话绑定；Host 经通用解析器调用 Studio 注册的提供者，校验绑定并取得当前 `prompt` 快照。无文本时不增加该片段。
+1. Channel Plugin 启动时向 Studio 注册作用域对应的上下文提供者。经人类消息、Pet 消息、路由、schedule 或 trigger 派发 Pet 时，Channel 只传可信 scope 与已持久化的 Pet 会话绑定；Host 经通用解析器调用 Studio 注册的提供者，校验绑定并取得公共说明、Channel 标题/介绍及可选公告的快照。没有公告时仍注入 Plugin 公共说明和 Channel 元数据；标题/介绍作为描述数据，不具有公告或授权效力。
 2. Host 使用已有 Agent system prompt sections，将该快照与 Pet 的根文档等上下文一起供本次运行使用，包括 Supervisor 和该运行中委派的 Capability；不将其伪装成用户消息，也不改写固定 `PET.md`。
 3. 运行中修改 Channel prompt 只影响后续独立派发；当前执行和其等待审批后的续跑使用同一个快照。即使 Host 重启后继续该次已持久化的审批，目标仍是使用原快照，而不是悄悄套用更新后的约定。恢复不能确定原快照时必须有明确的失败或兼容边界，不得静默串用另一个 Channel 的配置。
 4. 普通 Chat、非 Channel dispatch 和其他 Channel 的调用不继承本 Channel 片段；同一 Pet 从 A 切换到 B 再返回 A，分别使用各次调用所属的上下文。持久化绑定不自动让普通 Chat 获得 Channel 权限或回传能力。快照不追加到对话消息历史，避免反复运行积累同一段提示；但每次模型调用仍会携带本轮系统提示，因而继续占用上下文并可能产生输入 token 费用。持久化或注册提供者本身不保证模型侧缓存命中或减少费用。
 
-`channel_context` 这类 Capability 仍可按需读取并分析相关消息；系统提示中的协作约定不替代对近期对话和最新交付的读取，也不等于自动把消息历史带入模型。默认模板的 PET.md 已精简为定位和必要的工作、协作边界；已有 workdir 的 PET.md / Capability 不会因新增 Channel prompt 自动重写，应保留本地定制。
+`channel_context` 由 Channel Plugin 维护单一定义，通过 Plugin 的可选静态 `capabilities` 出口交给 Host，合入 Pet catalog；它仍是 Agent 执行的独立分析子任务，返回总结后主 Pet 继续工作。Studio 不管理 Capability 执行，dispatch 不携带能力或提示词内容。Pet 本地同名定义优先以保留定制，Plugin 之间的同名冲突和替换 Host general 的定义在启动时失败。
+
+这是对[既有领域关系设计](../host-agent-capability-toolkit.md)中“Plugin 不贡献 Capability”约束的拟议调整，需要随本 PR 明确审查；不是声称既有契约已经允许。它增加静态定义来源，不增加 Studio 能力执行器，也不改变 Agent graph、工具权限、review policy 或 dispatch 参数。自行组装 runtime 的嵌入方仍负责选择和装配共享定义；公共上下文说明仅在能力可用时建议委派。
+
+Channel 公共说明集中描述按需读取上下文、来源辨识和成员寻址；PET.md 只定义自身定位和边界，角色专用 Capability 只定义本职工作，团队角色由公告描述。消息保存、交付与是否触发仍由原有代码处理，不要求 Pet 执行这些机制。系统提示不替代读取近期对话，也不自动携带消息历史。已有 workdir 不自动重写；升级时应保留定制，再清理旧的公共 Capability 副本和重复协议，否则本地同名定义仍优先生效。
 
 ## 身份、权限与安全
 
@@ -34,7 +38,7 @@ Channel 参与者身份和 membership 由 Channel 与 Host 按既有机制核实
 
 ## 迁移与验证
 
-- 存储新增可空字段并迁移既有数据库；旧 Channel 未配置 prompt 时保持原行为，不清理消息、绑定或会话。Channel 新增或编辑提示词不应要求重建 Pet 实例或覆盖用户 PET.md。
+- 存储新增可空字段并迁移既有数据库；旧 Channel 未配置 prompt 时仍获得公共说明和元数据，消息、寻址与权限行为保持不变，不清理消息、绑定或会话。Channel 新增或编辑提示词不应要求重建 Pet 实例或覆盖用户 PET.md。
 - 分别验证创建、读取、更新和清空 prompt 以及普通客户端创建空提示词、创建者和普通成员不可修改、非成员 Studio authority 可单独更新提示词的访问控制，含混合更新；空配置、非 Channel 调用与旧数据库迁移应兼容。
 - 在模型输入边界观察不同 Channel 的真实 system sections、同一 Pet 的跨 Channel 隔离、工具和子任务继承；覆盖并发、连续运行、提示词更新及未配置时行为。
 - 覆盖等待审批与恢复，包括恢复前修改 Channel prompt、Host 重启后的恢复、旧记录无快照和不一致配置的处理；验证同次运行不改变上下文，下一次运行使用新配置。测试应检查实际调用结果与结构化边界，而非比较提示词文案。

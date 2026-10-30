@@ -4,6 +4,11 @@
 > [issue #645](https://github.com/pinpawo/pinpawo-agent/issues/645) 跟踪
 > 更新：2026-08-16
 
+> 待审议差异：[Channel 协作提示词草案](studio/channel-collaboration-prompt.md)
+> 在 PR #1033 中提议允许 Plugin 提供静态共享 Capability 定义，由 Host 独立装配。
+> 该实现调整了下文“Plugin 不贡献 Capability”的既有约束，尚不视为本设计已正式接受的修订；
+> Capability 执行、工具绑定及 Pet runtime 所有权仍归 Agent / Host。
+
 本文固定 Host、Agent、Capability 与 Toolkit 的领域关系，并约束 Chat Host、
 Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当前公共类型
 仍以 [Capability / Toolkit V2 契约](../reference/extensions/capability-toolkit.md)

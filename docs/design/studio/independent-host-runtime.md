@@ -31,8 +31,11 @@ Studio Host 外层管理资源，Studio core 只持有 PetDispatchPort；不构�
 不读取 checkpoint、不构造 LangGraph command。TUI 连接 Host 的 Pet listener。
 
 Plugin 按配置名由外部 StudioPluginResolver 解析；core 不 import、扫描或安装具体 Plugin。
-Plugin 可提供 Toolkit definitions，Host 与其他来源合成 inventory，Capability 按 uses
-选择工具。Resolver 不返回 Capability，Plugin 不注册或装配 Pet，不取得其私有 runtime 引用。
+Plugin 可提供 Toolkit definitions 以及可选的共享 Capability definitions；Host 将它们分别
+合成 Toolkit inventory 与每个 Pet 的 Capability catalog，Capability 按 uses 选择工具。
+共享定义不参与 Studio dispatch/event；执行、计划和工具绑定仍属于 Agent。Pet 目录中的
+同名定义优先，保留现有定制；Plugin 之间的重名和替换 Host general 的定义会在启动时失败。
+Plugin 不注册或装配 Pet，不取得其私有 runtime 引用。
 每 Pet 的能力目录及 PET.md 布局见[配置](../../studio/configuration.md)。
 
 ## 装配与生命周期

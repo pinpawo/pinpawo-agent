@@ -5,7 +5,7 @@ import { AIMessage, ChatMessage, HumanMessage, SystemMessage, ToolMessage } from
 import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 import { ReasoningPassbackCompletions } from './reasoningPassback';
 import {
-  buildHostModel,
+  buildModel,
   buildHostModels,
   resolveLlmGenerationReserveTokens,
 } from './agentModels';
@@ -154,7 +154,7 @@ test('all roles preserve OpenAI-compatible gateway requests, including an observ
 
 test('explicit generation temperature wins over deterministic preference on both protocols', () => {
   for (const protocol of ['openai-compatible', 'anthropic-compatible'] as const) {
-    const model = buildHostModel({
+    const model = buildModel({
       protocol, apiKey: 'mock-key', baseUrl: 'https://models.example.test', model: 'claude-sonnet-4-5',
     }, { preferDeterministic: true, temperature: 0.7 });
     assert.equal(readInvocationParams(model).temperature, 0.7);
@@ -165,18 +165,18 @@ test('single-model streaming override preserves role defaults and supports expli
   const config = { apiKey: 'mock-key', baseUrl: 'https://gateway.example.test/v1', model: 'glm-4.5' };
   const roles = buildHostModels(config);
   for (const model of Object.values(roles)) assert.equal(readInvocationParams(model).stream, true);
-  assert.equal(readInvocationParams(buildHostModel(config, { streaming: false })).stream, false);
-  assert.equal(readInvocationParams(buildHostModel(config, { streaming: true })).stream, true);
+  assert.equal(readInvocationParams(buildModel(config, { streaming: false })).stream, false);
+  assert.equal(readInvocationParams(buildModel(config, { streaming: true })).stream, true);
 
   const native = { ...config, protocol: 'anthropic-compatible' as const };
-  assert.equal(readInvocationParams(buildHostModel(native)).stream, false);
-  assert.equal(readInvocationParams(buildHostModel(native, { streaming: false })).stream, false);
-  assert.equal(readInvocationParams(buildHostModel(native, { streaming: true })).stream, true);
+  assert.equal(readInvocationParams(buildModel(native)).stream, false);
+  assert.equal(readInvocationParams(buildModel(native, { streaming: false })).stream, false);
+  assert.equal(readInvocationParams(buildModel(native, { streaming: true })).stream, true);
 });
 
 test('Chat Completions override keeps response-preferring gateway models on the existing wire protocol', async () => {
   for (const modelName of ['gpt-5.5-pro', 'gpt-5.6-codex', 'o3']) {
-    const instance = buildHostModel({
+    const instance = buildModel({
       apiKey: 'mock-key', baseUrl: 'https://gateway.example.test/v1', model: modelName,
       timeoutMs: 18_000, maxRetries: 0, maxOutputTokens: 300,
     }, { forceChatCompletions: true, streaming: false, preferDeterministic: true });
@@ -238,7 +238,7 @@ test('ordinary role still uses the OpenAI wrapper and its Responses routing', as
 
 
 test('ordinary OpenAI role keeps SDK system-to-developer behavior for reasoning models', async () => {
-  const model = buildHostModel({ apiKey: 'mock-key', baseUrl: 'https://gateway.example.test/v1',
+  const model = buildModel({ apiKey: 'mock-key', baseUrl: 'https://gateway.example.test/v1',
     model: 'o3', maxRetries: 0 }, { streaming: false });
   assert.ok(model instanceof ChatOpenAI);
   const completions = (model as unknown as { completions: ReasoningPassbackCompletions }).completions;

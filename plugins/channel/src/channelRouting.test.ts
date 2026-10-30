@@ -71,28 +71,47 @@ test('the llm decider resolves its profile at start and fails early for a missin
 
 
 test('the structured decider uses the configured method and dynamic candidate schema', async () => {
-  for (const method of ['jsonMode', 'jsonSchema', 'functionCalling'] as const) {
+  for (const method of [undefined, 'jsonMode', 'jsonSchema', 'functionCalling'] as const) {
     let observed: { schema: any; options: any; messages: any; signal: unknown } | undefined;
     const controller = new AbortController();
     const model = {
-      withStructuredOutput: (schema: unknown, options: unknown) => ({
+      withStructuredOutput: (schema: any, options: unknown) => ({
         invoke: async (messages: unknown, config: { signal: unknown }) => {
           observed = { schema, options, messages, signal: config.signal };
-          return { target: 'pet:executor', confidence: 0.8 };
+          return { target: schema.shape.target.options[0], confidence: 0.8, reason: 'Selected' };
         },
       }),
     } as unknown as BaseChatModel;
     let factoryOptions: unknown;
     const decider = createLlmRouteDecider({ ...endpoint, structuredOutputMethod: method,
       createChatModel: (options) => { factoryOptions = options; return model; } });
-    assert.deepEqual(await decider(input, controller.signal), { target: 'pet:executor', confidence: 0.8 });
+    assert.deepEqual(await decider(input, controller.signal), { target: 'pet:executor', confidence: 0.8, reason: 'Selected' });
     assert.deepEqual(factoryOptions, { maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true });
-    assert.deepEqual(observed?.schema.properties.target.enum, ['pet:executor', 'pet:reviewer', 'none']);
-    assert.deepEqual(observed?.options, { name: 'channel_route', method, ...(method === 'jsonSchema' ? { strict: true } : {}) });
+    assert.deepEqual(observed?.schema.shape.target.options, ['pet:executor', 'pet:reviewer', 'none']);
+    assert.deepEqual(observed?.options, { name: 'channel_route', method: method ?? 'jsonMode' });
     assert.equal(observed?.signal, controller.signal);
     assert.equal(observed?.messages[0]._getType(), 'system');
     assert.equal(observed?.messages[1]._getType(), 'human');
+    await decider({ ...input, pets: [{ participantId: 'pet:new', name: 'New' }] }, controller.signal);
+    assert.deepEqual(observed?.schema.shape.target.options, ['pet:new', 'none']);
   }
+});
+
+test('custom endpoints keep the legacy jsonMode default regardless of protocol', async () => {
+  let calls = 0;
+  const model = { withStructuredOutput: (_schema: unknown, options: unknown) => {
+    assert.deepEqual(options, { name: 'channel_route', method: 'jsonMode' });
+    return { invoke: async () => {
+      calls += 1;
+      return { target: 'none', confidence: 0.9, reason: 'No response needed' };
+    } };
+  } } as unknown as BaseChatModel;
+  const decider = createLlmRouteDecider({
+    ...endpoint, protocol: 'anthropic-compatible', structuredOutputMethod: undefined,
+    createChatModel: () => model,
+  });
+  assert.deepEqual(await decider(input, new AbortController().signal), { target: 'none', confidence: 0.9, reason: 'No response needed' });
+  assert.equal(calls, 1);
 });
 
 test('routing rejects endpoints without the Host model factory at startup', () => {
@@ -124,13 +143,22 @@ test('model construction and output failures do not expose private values', asyn
 });
 
 
-test('routing rejects missing or unsupported structured-output methods before creating a model', () => {
-  for (const method of [undefined, null, 'other']) {
-    let created = false;
-    const unresolved = { ...endpoint, protocol: 'anthropic-compatible' as const,
-      structuredOutputMethod: method as typeof endpoint.structuredOutputMethod,
-      createChatModel: () => { created = true; return {} as BaseChatModel; } };
-    assert.throws(() => createLlmRouteDecider(unresolved), /supported structuredOutputMethod/);
-    assert.equal(created, false);
+test('invalid structured decisions fail locally without retrying or exposing output', async () => {
+  for (const decision of [
+    { target: 'PRIVATE_OUTPUT', confidence: 0.8, reason: 'Invalid target' },
+    { target: 'pet:executor', confidence: 2, reason: 'Invalid confidence' },
+  ]) {
+    let calls = 0;
+    const model = { withStructuredOutput: () => ({ invoke: async () => {
+      calls += 1;
+      return decision;
+    } }) } as unknown as BaseChatModel;
+    const router = createChannelRouter({ enabled: true }, {
+      resolveModel: () => ({ ...endpoint, structuredOutputMethod: undefined, createChatModel: () => model }),
+    })!;
+    assert.deepEqual(await router.decide(input), {
+      kind: 'skip', reason: 'error', detail: 'Routing model request failed.',
+    });
+    assert.equal(calls, 1);
   }
 });

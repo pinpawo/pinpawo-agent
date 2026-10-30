@@ -1,6 +1,5 @@
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import { readReplyResultReferences } from '../conversation/transcriptProjection';
-import { readPublicMessageText } from '../conversation/chatDisplayText';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
@@ -10,6 +9,7 @@ import {
   NamespacedProtocolToolEventReader,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
+  readMessageText,
   readPendingInterrupt,
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
@@ -530,7 +530,7 @@ export async function runAgentSessionTurn(
     message === finalMessage || (!!message.id && message.id === finalMessage.id));
   const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
     && !finalMessage.tool_calls?.length && isPublicConversationMessage(finalMessage) && !isOldMessage
-    ? readPublicMessageText(finalMessage) : '';
+    ? readMessageText(finalMessage) : '';
   // FileSaver reloads different objects. Resolve the same reply by stable ID
   // inside the checkpoint collection before projecting its preceding deliveries.
   const checkpointReply = finalThreadState.messages.find(message =>

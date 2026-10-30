@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { convertMessagesToCompletionsMessageParams } from '@langchain/openai';
 import type { AgentLocalAttachment } from '@pinpawo/agent-session';
+import { readMessageText } from '@pinpawo/pet-agent';
 import {
   createAdmittedLocalChatHumanMessage,
   createLocalChatHumanMessage,
@@ -24,6 +25,7 @@ test('local attachment message exposes full paths to the model but not the trans
 
   const message = createLocalChatHumanMessage('review this', attachments);
   assert.equal(message.content, modelText);
+  assert.equal(readMessageText(message), modelText);
   assert.equal(
     readLocalChatDisplayText(message),
     'review this\n\nAttachments:\n- file: spec.md',

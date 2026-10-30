@@ -45,8 +45,12 @@ Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens.
 
 `protocol` is optional: `openai-compatible` (the backward-compatible default) or
 `anthropic-compatible` (Anthropic Messages API). Unknown values make the profile unavailable.
-Native profiles accept only `functionCalling` for `structuredOutputMethod`,
-which is also their resolved default. See the [native configuration example](../../guides/model-profiles.md#native-anthropic).
+`structuredOutputMethod` accepts `functionCalling`, `jsonMode`, or `jsonSchema`.
+Native profiles default to `functionCalling`; an explicit method is preserved
+in runtime configuration and its fingerprint. LangChain and the selected
+endpoint validate method capabilities when structured output is invoked;
+profile validation does not deny model IDs. See the
+[native configuration example](../../guides/model-profiles.md#native-anthropic).
 
 `provider` is display/provenance metadata. When omitted, it is derived from a known `sourcePreset` or the endpoint host.
 

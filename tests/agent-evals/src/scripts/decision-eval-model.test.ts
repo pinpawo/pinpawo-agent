@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { z } from 'zod';
 import {
   buildModelProfileRegistry,
   fingerprintModelProfile,
@@ -271,9 +272,22 @@ test('native eval subjects and judges use Messages while gateway Claude stays co
       env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
     assert.equal(gateway.model instanceof AnthropicCompatibleChatModel, false);
     for (const role of ['subject', 'judge'] as const) {
-      assert.throws(() => createDecisionEvalModel({ profileId: 'claude-native', role,
+      const evaluated = createDecisionEvalModel({ profileId: 'claude-native', role,
         env: { PROMPT_EVAL_CONFIG_PATH: configPath,
-          [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_STRUCTURED_OUTPUT_METHOD' : 'PROMPT_EVAL_JUDGE_STRUCTURED_OUTPUT_METHOD']: 'jsonSchema' } }), /functionCalling only/);
+          [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_STRUCTURED_OUTPUT_METHOD' : 'PROMPT_EVAL_JUDGE_STRUCTURED_OUTPUT_METHOD']: 'jsonSchema' } });
+      assert.ok(evaluated.model instanceof AnthropicCompatibleChatModel);
+      assert.equal(evaluated.method, 'jsonSchema');
+      evaluated.model.clientOptions.fetch = async (url, init) => {
+        assert.equal(String(url), 'https://native.example.test/v1/messages');
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.output_config.format.type, 'json_schema');
+        assert.equal(body.tool_choice, undefined);
+        return Response.json({ id: 'mock', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5',
+          content: [{ type: 'text', text: '{"value":"ok"}' }], stop_reason: 'end_turn', stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 } });
+      };
+      const output = await evaluated.model.withStructuredOutput(z.object({ value: z.string() }), { method: evaluated.method }).invoke('Hi');
+      assert.deepEqual(output, { value: 'ok' });
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -1,4 +1,4 @@
-import { buildHostModel } from '../../../../services/host/src/agent/agentModels.ts';
+import { buildModel } from '../../../../services/host/src/agent/agentModels.ts';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -229,7 +229,7 @@ export function createDecisionEvalModel(options: {
   ) ?? effectiveConfig.structuredOutputMethod
     ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl);
   const fingerprint = effectiveConfig.modelProfileFingerprint!;
-  const model = buildHostModel({
+  const model = buildModel({
     ...effectiveConfig,
     structuredOutputMethod: method,
     timeoutMs: timeout,

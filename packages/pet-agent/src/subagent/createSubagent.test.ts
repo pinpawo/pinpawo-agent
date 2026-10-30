@@ -79,14 +79,15 @@ test('subagent output includes public and legacy text without exposing reasoning
         const message = new AIMessage({ content: [
           ...(legacy ? [{ text: 'legacy ' }] : []),
           { type: 'thinking', thinking: 'private thought', signature: 'sig', text: 'PRIVATE_THOUGHT' },
-          { type: 'text', text: 'public answer' },
+          { type: 'tool_use', id: 'call-1', name: 'lookup', input: {}, text: 'PRIVATE_TOOL' },
+          { type: 'text', text: ' public answer ' },
         ] as never });
         return { generations: [{ message, text: message.text }] };
       }
     }
     const result = await createSubagent({ model: new ContentModel({}), tools: [], promptSections: [],
       messages: [new HumanMessage('do the task')] });
-    assert.equal(result.output, legacy ? 'legacy public answer' : 'public answer');
+    assert.equal(result.output, legacy ? 'legacy  public answer ' : ' public answer ');
   }
 });
 

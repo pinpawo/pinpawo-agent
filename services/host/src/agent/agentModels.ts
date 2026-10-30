@@ -2,10 +2,7 @@ import type { AgentModels } from '@pinpawo/pet-agent';
 import type { ChatOpenAIFields } from '@langchain/openai';
 import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 import type { AgentLlmConfig } from '../config/agentConfig';
-import {
-  requiresLlmStreaming,
-  resolveLlmGenerationReserveTokens,
-} from '../config/llmModelPresets';
+import { requiresLlmStreaming } from '../config/llmModelPresets';
 import { createReasoningPassbackChatOpenAI, ReasoningPassbackCompletions } from './reasoningPassback';
 
 export { resolveLlmGenerationReserveTokens } from '../config/llmModelPresets';
@@ -17,47 +14,39 @@ export type HostModelGenerationOptions = {
   preferDeterministic?: boolean;
   /** Override default streaming when the caller requires a particular wire mode. */
   streaming?: boolean;
-  /** Keep OpenAI-compatible calls on Chat Completions for legacy endpoints. */
+  /** Preserve Channel's legacy Chat Completions, max_tokens and system-role wire contract. */
   forceChatCompletions?: boolean;
 };
 
 /** Construct one model using the Host's protocol and generation settings. */
-export function buildHostModel(
+export function buildModel(
   llmConfig: AgentLlmConfig,
   generationOptions: HostModelGenerationOptions = {},
 ): AgentModels['act'] {
-  const model = llmConfig.model;
   if (llmConfig.protocol && !['openai-compatible', 'anthropic-compatible'].includes(llmConfig.protocol)) {
     throw new Error(`Unsupported model protocol: ${llmConfig.protocol}`);
   }
   const temperature = generationOptions.temperature
     ?? (generationOptions.preferDeterministic && llmConfig.protocol !== 'anthropic-compatible' ? 0 : undefined);
-  const sampling = temperature === undefined ? {} : { temperature };
+  const fields = {
+    model: llmConfig.model,
+    apiKey: llmConfig.apiKey,
+    maxRetries: llmConfig.maxRetries ?? 2,
+    ...(temperature === undefined ? {} : { temperature }),
+    ...(llmConfig.maxOutputTokens ? { maxTokens: llmConfig.maxOutputTokens } : {}),
+  };
   if (llmConfig.protocol === 'anthropic-compatible') {
-    if (llmConfig.structuredOutputMethod && llmConfig.structuredOutputMethod !== 'functionCalling') {
-      throw new Error('anthropic-compatible currently supports structuredOutputMethod functionCalling only');
-    }
     return new AnthropicCompatibleChatModel({
-      model,
-      ...sampling,
+      ...fields,
       ...(generationOptions.streaming !== undefined ? { streaming: generationOptions.streaming } : {}),
-      apiKey: llmConfig.apiKey,
       clientOptions: { baseURL: llmConfig.baseUrl, timeout: llmConfig.timeoutMs ?? 45000 },
-      maxRetries: llmConfig.maxRetries ?? 2,
-      ...(llmConfig.maxOutputTokens ? { maxTokens: llmConfig.maxOutputTokens } : {}),
     });
   }
-  const fields: ChatOpenAIFields = {
-    model,
-    ...sampling,
+  const openaiFields: ChatOpenAIFields = {
+    ...fields,
     // Thinking and reasoning effort use provider defaults.
     timeout: llmConfig.timeoutMs ?? 45000,
-    maxRetries: llmConfig.maxRetries ?? 2,
-    apiKey: llmConfig.apiKey,
-    ...(llmConfig.maxOutputTokens
-      ? { maxTokens: llmConfig.maxOutputTokens }
-      : {}),
-    streaming: generationOptions.streaming ?? requiresLlmStreaming(model),
+    streaming: generationOptions.streaming ?? requiresLlmStreaming(llmConfig.model),
     streamUsage: true,
     configuration: {
       baseURL: llmConfig.baseUrl,
@@ -65,8 +54,8 @@ export function buildHostModel(
     },
   };
   return generationOptions.forceChatCompletions
-    ? new ReasoningPassbackCompletions(fields, { legacyMaxTokens: true, preserveSystemRole: true })
-    : createReasoningPassbackChatOpenAI(fields);
+    ? new ReasoningPassbackCompletions(openaiFields, { legacyMaxTokens: true, preserveSystemRole: true })
+    : createReasoningPassbackChatOpenAI(openaiFields);
 }
 
 export function buildHostModels(
@@ -77,10 +66,10 @@ export function buildHostModels(
     ? { ...llmConfig, model: llmConfig.observeModel }
     : llmConfig;
   return {
-    act: buildHostModel(llmConfig, generationOptions),
-    decision: buildHostModel(llmConfig, generationOptions),
-    answer: buildHostModel(llmConfig, generationOptions),
-    observe: buildHostModel(observeConfig, generationOptions),
-    subagent: buildHostModel(llmConfig, generationOptions),
+    act: buildModel(llmConfig, generationOptions),
+    decision: buildModel(llmConfig, generationOptions),
+    answer: buildModel(llmConfig, generationOptions),
+    observe: buildModel(observeConfig, generationOptions),
+    subagent: buildModel(llmConfig, generationOptions),
   };
 }

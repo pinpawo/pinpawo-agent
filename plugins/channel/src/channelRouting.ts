@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { invokeStructuredOutput } from '@pinpawo/pet-agent';
 import type { StudioModelEndpoint } from '@pinpawo/studio-core';
 import type { ChannelMember } from './channelService';
 import type { ChannelMessageRow, ChannelRow } from './store/channelStore';
@@ -142,19 +143,12 @@ const ROUTE_SYSTEM_PROMPT = [
   'Answer with JSON only: {"target": "<participantId or none>", "confidence": <0..1>, "reason": "<one short sentence>"}.',
 ].join('\n');
 
-const decisionSchema = z.object({
-  target: z.string(), confidence: z.number().min(0).max(1), reason: z.string().max(500).optional(),
-});
-
 /** One structured model decision; no Agent or retries. */
 export function createLlmRouteDecider(endpoint: StudioModelEndpoint): RouteDecider {
   if (!endpoint.createChatModel) {
     throw new Error('Channel routing requires the Studio Host to provide createChatModel for its model profiles.');
   }
-  const method = endpoint.structuredOutputMethod;
-  if (method !== 'jsonMode' && method !== 'jsonSchema' && method !== 'functionCalling') {
-    throw new Error('Channel routing requires the Studio Host to provide a supported structuredOutputMethod.');
-  }
+  const method = endpoint.structuredOutputMethod ?? 'jsonMode';
   let model;
   try {
     model = endpoint.createChatModel({ maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true });
@@ -162,24 +156,24 @@ export function createLlmRouteDecider(endpoint: StudioModelEndpoint): RouteDecid
     throw new Error('Routing model initialization failed.');
   }
   return async (input, signal) => {
-    const targets = [...input.pets.map(pet => pet.participantId), 'none'];
-    const jsonSchema = {
-      type: 'object', additionalProperties: false, required: ['target', 'confidence', 'reason'],
-      properties: {
-        target: { type: 'string', enum: targets },
-        confidence: { type: 'number', minimum: 0, maximum: 1 },
-        reason: { type: 'string' },
-      },
-    };
+    const targets: [string, ...string[]] = ['none'];
+    targets.unshift(...input.pets.map(pet => pet.participantId));
+    // OpenAI's strict JSON Schema requires every field; other methods keep reason optional.
+    const reason = z.string().max(500);
+    const schema = z.object({
+      target: z.enum(targets), confidence: z.number().min(0).max(1), reason: method === 'jsonSchema' ? reason : reason.optional(),
+    });
     try {
-      const structuredModel = model.withStructuredOutput(jsonSchema, {
-        name: 'channel_route', method, ...(method === 'jsonSchema' ? { strict: true } : {}),
+      return await invokeStructuredOutput({
+        model,
+        schema,
+        options: { name: 'channel_route', method },
+        messages: [
+          new SystemMessage(ROUTE_SYSTEM_PROMPT),
+          new HumanMessage(JSON.stringify({ ...input, targets })),
+        ],
+        runnableConfig: { signal },
       });
-      const result = await structuredModel.invoke([
-        new SystemMessage(ROUTE_SYSTEM_PROMPT),
-        new HumanMessage(JSON.stringify({ ...input, targets })),
-      ], { signal });
-      return decisionSchema.parse(result);
     } catch (error) {
       // SDK parser errors can include the complete model response. Only
       // expose a safe class or HTTP status at the Channel boundary.

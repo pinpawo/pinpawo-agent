@@ -15,7 +15,7 @@
  * Run:
  *   ROUTING_EVAL_MODEL_PROFILE_ID=deepseek-v4-flash npm run eval:channel-routing
  */
-import { buildHostModel } from '../../../services/host/src/agent/agentModels.ts';
+import { buildModel } from '../../../services/host/src/agent/agentModels.ts';
 import { createChannelRouter, type RouteInput } from '../../../plugins/channel/src/channelRouting.ts';
 import { readResolvedProfile } from './scripts/decision-eval-model.ts';
 
@@ -68,7 +68,7 @@ const router = createChannelRouter({
   resolveModel: () => ({
     protocol: config.protocol, profileId, baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model,
     structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
-    createChatModel: ({ maxOutputTokens, maxRetries, preferDeterministic, streaming, forceChatCompletions }) => buildHostModel({
+    createChatModel: ({ maxOutputTokens, maxRetries, preferDeterministic, streaming, forceChatCompletions }) => buildModel({
       ...config, maxOutputTokens, maxRetries,
     }, { preferDeterministic, streaming, forceChatCompletions }),
   }),

@@ -3,11 +3,56 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import {
   messageHasToolCalls,
+  readContentText,
+  readMessageText,
   readMessageToolCallIds,
   readMessageToolCalls,
   readToolResultCallId,
 } from './messages';
 import { toolProtocolSafeMessages } from '../agent/messages';
+
+test('message text reads normalized AI text without reasoning or tool data', () => {
+  const message = new AIMessage({ content: [
+    { type: 'text', text: ' Hello' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'sig', text: 'PRIVATE_THOUGHT' },
+    { type: 'tool_use', id: 'call-1', name: 'lookup', input: {}, text: 'PRIVATE_TOOL' },
+    { type: 'text', text: ' world ' },
+  ] as never, additional_kwargs: { pinpawo: { localChatDisplayText: 'UI override' } } });
+
+  assert.equal(readMessageText(message), 'Hello world');
+  assert.equal(readMessageText(message, { trim: false, legacySeparator: '\n' }), ' Hello world ');
+});
+
+test('message text preserves legacy AI spacing while excluding typed private text', () => {
+  const message = new AIMessage({ content: [
+    ' prefix ',
+    { text: 'legacy' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'sig', text: 'PRIVATE_THOUGHT' },
+    { type: 'text', text: 'public' },
+    { type: 'tool_use', id: 'call-1', name: 'lookup', input: {}, text: 'PRIVATE_TOOL' },
+    ' suffix ',
+  ] as never });
+
+  assert.equal(readMessageText(message), 'prefix \nlegacy\n\npublic\n\n suffix');
+  assert.equal(readMessageText(message, { trim: false, legacySeparator: '' }), ' prefix legacypublic suffix ');
+  assert.equal(readMessageText(new AIMessage({ content: [{ text: ' untyped ' }] as never })), 'untyped');
+});
+
+test('message text keeps Human and Tool content handling and caller whitespace choices', () => {
+  const content = [' first ', { type: 'text', text: 'second' }, { text: ' third ' }];
+  const messages = [
+    new HumanMessage({ content: content as never }),
+    new ToolMessage({ content: content as never, tool_call_id: 'call-1' }),
+  ];
+  for (const message of messages) {
+    assert.equal(readMessageText(message), 'first \nsecond\n third');
+    assert.equal(readMessageText(message, { trim: false, legacySeparator: '' }), ' first second third ');
+  }
+  assert.equal(readMessageText(new HumanMessage(' hello ')), 'hello');
+  assert.equal(readMessageText({}), '');
+  assert.equal(readContentText(' hello '), ' hello ');
+  assert.equal(readContentText(null), null);
+});
 
 test('message utils read normalized tool calls from AI message shapes', () => {
   const standard = new AIMessage({

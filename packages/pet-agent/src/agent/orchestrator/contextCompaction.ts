@@ -10,7 +10,7 @@ import {
   toolProtocolSafeMessages,
 } from '../messages';
 import { readCapabilityExecutions } from './executionMessages';
-import { readMessageText } from './utils';
+import { readMessageText } from '../../utils/messages';
 import { xmlTextBlock } from '../../prompts/xml';
 
 const DEFAULT_KEEP_MESSAGES = 10;

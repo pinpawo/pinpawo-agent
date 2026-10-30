@@ -403,7 +403,7 @@ test('native protocol is explicit, validated, resolved and included in identity'
   }
   const explicitGateway = parseModelProfile({ ...gateway, protocol: 'openai-compatible' }).profile!;
   assert.equal(fingerprintModelProfile(explicitGateway).fingerprint, fingerprintModelProfile(gateway).fingerprint);
-  assert.equal(parseModelProfile({ ...native, structuredOutputMethod: 'jsonMode' }).profile, undefined);
+  assert.equal(parseModelProfile({ ...native, structuredOutputMethod: 'other' }).profile, undefined);
   const snapshot = buildModelProfileRegistry({ stored: storedConfig({ primary: native }), env: {} });
   const resolved = createLocalModelProfileRegistry({ snapshot }).resolve();
   assert.equal(resolved.protocol, 'anthropic-compatible');
@@ -423,37 +423,38 @@ test('resolved profile uses the structured-output method represented by its fing
 });
 
 
-test('official Anthropic profiles reject models that cannot use required forced tool choice', () => {
+test('native profiles accept model IDs without imposing a local endpoint capability list', () => {
   for (const model of [
     'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-mythos-5-1',
-    'claude-sonnet-5-5-20261001',
+    'claude-sonnet-5-5-20261001', 'custom-future-model',
   ]) {
-    for (const method of [undefined, 'functionCalling']) {
+    for (const method of [undefined, 'functionCalling', 'jsonSchema']) {
       const result = parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible', structuredOutputMethod: method }));
-      assert.equal(result.profile, undefined, model);
-      assert.match(result.issues.map(issue => issue.message).join('; '), /forced tool choice/);
+      assert.ok(result.profile, model);
+      assert.deepEqual(result.issues, []);
     }
-    assert.equal(parseModelProfile(storedProfile({ model, baseUrl: 'https://API.ANTHROPIC.COM:443/', protocol: 'anthropic-compatible' })).profile, undefined);
-    assert.ok(parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'openai-compatible' })).profile);
-    assert.ok(parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com' })).profile);
-    for (const baseUrl of ['https://gateway.example.test', 'https://api.anthropic.com.gateway.example', 'https://api.anthropic.com:8443', 'http://api.anthropic.com']) {
-      assert.ok(parseModelProfile(storedProfile({ model, baseUrl, protocol: 'anthropic-compatible' })).profile, baseUrl);
-    }
-  }
-  for (const model of ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-sonnet-5', 'custom-model']) {
-    assert.ok(parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible' })).profile, model);
   }
 });
 
-test('unsupported native profiles are isolated and report their forced-tool limitation on selection', () => {
+test('native explicit methods survive resolution and contribute to profile identity', () => {
+  const native = storedProfile({ protocol: 'anthropic-compatible', model: 'claude-opus-5-5', baseUrl: 'https://api.anthropic.com' });
   const snapshot = buildModelProfileRegistry({
     stored: storedConfig({
-      primary: storedProfile(),
-      future: storedProfile({ id: 'future', model: 'claude-opus-5-5', baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible' }),
+      primary: native,
+      schema: { ...native, id: 'schema', structuredOutputMethod: 'jsonSchema' },
+      mode: { ...native, id: 'mode', structuredOutputMethod: 'jsonMode' },
     }),
     env: {},
   });
-  assert.equal(resolveModelProfile(snapshot, 'primary').id, 'primary');
-  assert.match(snapshot.unavailableProfiles.future.map(issue => issue.message).join('; '), /forced tool choice/);
-  assert.throws(() => resolveModelProfile(snapshot, 'future'), /forced tool choice/);
+  const registry = createLocalModelProfileRegistry({ snapshot });
+  const resolvedDefault = registry.resolve();
+  assert.equal(resolvedDefault.structuredOutputMethod, 'functionCalling');
+  for (const [id, method] of [['schema', 'jsonSchema'], ['mode', 'jsonMode']] as const) {
+    const resolved = registry.resolve(id);
+    assert.equal(resolved.protocol, 'anthropic-compatible');
+    assert.equal(resolved.structuredOutputMethod, method);
+    assert.equal(resolved.modelProfileFingerprint, fingerprintModelProfile(resolveModelProfile(snapshot, id)).fingerprint);
+    assert.notEqual(resolved.modelProfileFingerprint, resolvedDefault.modelProfileFingerprint);
+  }
+  assert.notEqual(registry.resolve('schema').modelProfileFingerprint, registry.resolve('mode').modelProfileFingerprint);
 });

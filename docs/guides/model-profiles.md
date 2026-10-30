@@ -50,22 +50,21 @@ the existing OpenAI-compatible transport, including Claude through gateways.
 
 The first native integration supports text, image input, tool histories,
 streaming/cancellation, and usage via LangChain. Structured output uses
-`functionCalling` (also the native default); native profiles with `jsonMode`
-or `jsonSchema` are rejected explicitly. The selected integration supports
-`strict` with function calling; model/endpoint support still applies. Provider
+`functionCalling` by default. The pinned LangChain integration also supports
+`jsonSchema` through Anthropic's native JSON schema format. It accepts `strict`
+only with function calling; `jsonSchema` callers should omit that option.
+An explicit `jsonMode` is passed to LangChain, which currently warns and uses
+`jsonSchema` instead. Prefer `jsonSchema` when native JSON schema output is
+intended. Provider
 extensions such as extended thinking, prompt-cache controls, server tools,
 Bedrock and Vertex authentication are not exposed in this profile contract.
 
-This integration requires forced tool choice for structured output. Anthropic
-documents that Claude Opus 5.5 (`claude-opus-5-5`), Sonnet 5.5
-(`claude-sonnet-5-5`), Fable 5.1 (`claude-fable-5-1`), and Mythos 5.1
-(`claude-mythos-5-1`) reject forced tool choice. Anthropic-compatible profiles
-using the official `https://api.anthropic.com` endpoint and those model IDs,
-including date-suffixed snapshots, fail validation with an explicit error;
-choose a model supporting forced tool choice. Compatible gateways are not
-restricted by model name. Other model names and endpoints are not guaranteed to
-support this behavior; verify their endpoint and model capabilities. See
-[Anthropic's tool-choice documentation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools).
+Function calling uses forced tool choice. Support for forced tool choice and
+native JSON schema output depends on the actual model and endpoint. Profiles
+are not rejected by model name, and configuration validation does not probe the
+endpoint. Unsupported capabilities produce an SDK or endpoint error when used;
+select the structured-output method supported by your endpoint. Channel routing
+turns such errors into a skipped decision with a safe error class or HTTP status.
 
 ### Streaming history limitation
 
@@ -83,13 +82,24 @@ the Host default unless `routing.decider.modelProfileId` names another profile;
 the LLM decision uses a 300-token output limit, no retries, and its configured
 timeout. It prefers deterministic sampling for OpenAI-compatible profiles and
 leaves Anthropic sampling to the provider. Studio embedders supplying their
-own model resolver must provide `createChatModel` and the resolved
-`structuredOutputMethod` for LLM Channel routing; otherwise routing fails at
-startup with a configuration error.
+own model resolver must provide `createChatModel` for LLM Channel routing. The
+optional `structuredOutputMethod` defaults to the legacy `jsonMode` behavior;
+custom native resolvers should set `functionCalling` or `jsonSchema` explicitly.
+Channel uses the public structured-output helper with a dynamic Zod candidate
+schema and local validation. LangChain applies the method's wire options, including
+OpenAI's strict non-streaming JSON schema output, without Channel imposing a
+provider-specific `strict` option. A malformed model decision or an unknown
+target fails schema validation and becomes a safe skipped routing error;
+custom deciders still pass through the router's independent candidate check.
+JSON schema decisions require `reason` to satisfy the strict schema contract;
+other methods retain the optional reason.
 
 The Host constructs five separate model roles for Agent work; context
 compaction reuses the observe role. Profile-based decision, prompt, and
-Channel routing evals use the same single-model factory and resolved profile.
+Channel routing evals use the same `buildModel` factory and resolved profile.
+Its generation options preserve caller behavior: evals can override temperature,
+and Channel requests deterministic OpenAI sampling, non-streaming output, and
+the legacy Chat Completions wire contract (`max_tokens` and the system role).
 Scripted tests and mock models do not make provider calls.
 
 The legacy `orchestrator-route`, `orchestrator-flow.mock-subagent`, and

@@ -145,7 +145,7 @@ export type StudioModelEndpoint = {
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** When providing createChatModel for routing, set the resolved structured-output method. */
+  /** Routing defaults to legacy jsonMode; native custom resolvers should set their supported method. */
   structuredOutputMethod?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
   /** Creates a model from the complete Host-resolved profile. */
   createChatModel?: (options: {

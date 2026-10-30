@@ -26,7 +26,7 @@ import {
   type AgentInterfaceKind,
 } from '../chatInterface';
 import {
-  inferLlmStructuredOutputMethod,
+  resolveLlmStructuredOutputMethod,
 } from '../config/llmModelPresets';
 import {
   prepareAgentRegistry,
@@ -46,10 +46,7 @@ export type AgentChannelSetup = {
 export function buildReviewStructuredOutput(
   llmConfig: AgentLlmConfig,
 ): GlobalReviewPolicyStructuredOutputConfig | undefined {
-  const method = llmConfig.structuredOutputMethod
-    ?? (llmConfig.protocol === 'anthropic-compatible'
-      ? 'functionCalling'
-      : inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl));
+  const method = resolveLlmStructuredOutputMethod(llmConfig);
   if (!method) return undefined;
 
   const autoRepairEnabled = llmConfig.structuredOutputAutoRepair

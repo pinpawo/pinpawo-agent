@@ -1,5 +1,6 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext, type AgentRuntimeContext } from '../runtime/context';
+import { readMessageText } from '../utils/messages';
 import type { AgentCapability } from '../types/capability';
 import {
   filterAvailableToolkits,
@@ -40,9 +41,12 @@ function readReply(messages: BaseMessage[]): string {
   if (!last) return '';
   if (typeof last.content === 'string') return last.content.trim();
   // Expand blocks only for an AI reply without pending tool calls.
-  return AIMessage.isInstance(last) && !last.tool_calls?.length ? last.text.trim() : '';
+  return AIMessage.isInstance(last) && !last.tool_calls?.length
+    ? readMessageText(last, { legacySeparator: '' })
+    : '';
 }
 
+/** Invoke a graph once and return its final reply; streaming Hosts use the graph directly. */
 export async function runAgent(
   graph: OrchestratorGraph,
   input: AgentInvokeInput,

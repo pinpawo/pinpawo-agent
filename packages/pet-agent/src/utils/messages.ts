@@ -1,19 +1,59 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 
-/** Read assistant-visible text without projecting reasoning or tool blocks. */
-export function readAiMessageText(message: AIMessage, legacySeparator = ''): string {
-  if (Array.isArray(message.content) && message.content.some(part =>
-    typeof part === 'string' || (part && typeof part === 'object' && !('type' in part) && 'text' in part))) {
-    // LangChain's text projection omits legacy strings and untyped text blocks.
-    // Keep those historical shapes while restricting typed blocks to text.
-    return (message.contentBlocks as unknown[]).map(part => {
-      if (typeof part === 'string') return part;
-      if (part && typeof part === 'object' && (!('type' in part) || part.type === 'text')
-        && 'text' in part && typeof part.text === 'string') return part.text;
-      return '';
-    }).join(legacySeparator);
+/** Flatten raw content, preserving historical Human/Tool text block handling. */
+export function readContentText(content: unknown, separator = '\n'): string | null {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+      return part.text;
+    }
+    return '';
+  }).join(separator);
+}
+
+type MessageTextOptions = {
+  trim?: boolean;
+  /** Separator for legacy AI blocks and non-AI arrays; defaults to a newline. */
+  legacySeparator?: string;
+};
+
+/**
+ * Read message text without projecting assistant reasoning or tool blocks.
+ * Normalized AI text blocks concatenate; legacy AI and Human/Tool block arrays
+ * retain their historical separators. Interface display metadata is ignored.
+ */
+export function readMessageText(
+  message: { content?: unknown },
+): string;
+export function readMessageText(
+  message: { content?: unknown },
+  options: MessageTextOptions,
+): string;
+export function readMessageText(
+  message: { content?: unknown },
+  options: MessageTextOptions = {},
+): string {
+  let text: string;
+  if (AIMessage.isInstance(message)) {
+    const hasLegacyBlocks = Array.isArray(message.content) && message.content.some((part) =>
+      typeof part === 'string' || (part && typeof part === 'object' && !('type' in part) && 'text' in part));
+    if (hasLegacyBlocks) {
+      // LangChain's text getter omits strings and untyped text blocks. Retain
+      // those shapes while excluding typed reasoning/tool data, even with text.
+      const publicBlocks = (message.contentBlocks as unknown[]).map((part) => {
+        if (part && typeof part === 'object' && 'type' in part && part.type !== 'text') return '';
+        return part;
+      });
+      text = readContentText(publicBlocks, options.legacySeparator) ?? '';
+    } else {
+      text = message.text;
+    }
+  } else {
+    text = readContentText(message.content, options.legacySeparator) ?? '';
   }
-  return message.text;
+  return options.trim === false ? text : text.trim();
 }
 
 /** Identify the two supported representations of a tool call in message content. */

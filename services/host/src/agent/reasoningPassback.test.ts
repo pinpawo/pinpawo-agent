@@ -4,8 +4,8 @@ import { ChatOpenAI } from '@langchain/openai';
 import { ChatModelStream } from '@langchain/core/language_models/stream';
 import type { ChatModelStreamEvent } from '@langchain/core/language_models/event';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { readMessageTokenUsage } from '@pinpawo/pet-agent';
-import { buildHostModel } from './agentModels';
+import { readMessageTokenUsage } from '../../../../packages/pet-agent/src/agent/tokenUsage';
+import { buildModel } from './agentModels';
 import {
   buildCompletionsMessagesWithReasoning,
   normalizeCompletionsCacheUsage,
@@ -14,7 +14,7 @@ import {
 
 type RequestBody = { stream?: boolean; tools?: unknown[]; messages: Array<Record<string, unknown>> };
 
-function fakeProvider(requests: RequestBody[]): typeof fetch {
+function fakeProvider(requests: RequestBody[], { separateUsageChunk = false } = {}): typeof fetch {
   return async (_url, init) => {
     const body: RequestBody = JSON.parse(String(init?.body));
     requests.push(body);
@@ -26,7 +26,10 @@ function fakeProvider(requests: RequestBody[]): typeof fetch {
     if (body.stream) {
       const chunk = { id: 'r1', object: 'chat.completion.chunk', created: 0, model: 'deepseek-v4-pro',
         choices: [{ index: 0, delta, finish_reason: 'tool_calls' }], usage };
-      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+      const chunks = separateUsageChunk
+        ? [{ ...chunk, usage: null }, { ...chunk, choices: [] }]
+        : [chunk];
+      return new Response(`${chunks.map(part => `data: ${JSON.stringify(part)}\n\n`).join('')}data: [DONE]\n\n`, {
         headers: { 'content-type': 'text/event-stream' },
       });
     }
@@ -65,7 +68,7 @@ test('an ordinary request without reasoning uses the same wire body as the offic
   const baseUrl = 'https://provider.example.test/v1';
   const official = new ChatOpenAI({ apiKey: 'test-key', model: 'deepseek-v4-pro', maxRetries: 0,
     configuration: { baseURL: baseUrl, fetch: fakeProvider(bodies) } });
-  const patched = buildHostModel({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro', maxRetries: 0 }, { streaming: false });
+  const patched = buildModel({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro', maxRetries: 0 }, { streaming: false });
   (patched as unknown as { completions: ReasoningPassbackCompletions }).completions.clientConfig.fetch = fakeProvider(bodies);
   await official.invoke([new HumanMessage('hello')]);
   await patched.invoke([new HumanMessage('hello')]);
@@ -74,11 +77,11 @@ test('an ordinary request without reasoning uses the same wire body as the offic
 
 for (const mode of ['invoke', 'stream', 'v3'] as const) {
   for (const patched of [false, true]) {
-    test(`tool history and cache usage with ${patched ? 'patch' : 'official adapter'} (${mode})`, async () => {
+    test(`tool history and combined choices/usage with ${patched ? 'patch' : 'official adapter'} (${mode})`, async () => {
       const requests: RequestBody[] = [];
       const baseUrl = 'https://provider.example.test/v1';
       const act = patched
-        ? buildHostModel({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro', maxRetries: 0 }, { streaming: false })
+        ? buildModel({ apiKey: 'test-key', baseUrl, model: 'deepseek-v4-pro', maxRetries: 0 }, { streaming: false })
         : new ChatOpenAI({ apiKey: 'test-key', model: 'deepseek-v4-pro', maxRetries: 0,
           configuration: { baseURL: baseUrl, fetch: fakeProvider(requests) } });
       const completions = (act as unknown as { completions: ReasoningPassbackCompletions }).completions;
@@ -100,6 +103,14 @@ for (const mode of ['invoke', 'stream', 'v3'] as const) {
       assert.equal(first.tool_calls?.length, 1);
       assert.equal(readMessageTokenUsage(first)?.cachedInputTokens, patched || mode !== 'stream' ? 60 : undefined);
       assert.equal(readMessageTokenUsage(first)?.totalTokens, 120);
+      if (!patched && mode === 'stream') {
+        assert.deepEqual(first.response_metadata.usage, {
+          prompt_tokens: 200, completion_tokens: 40, total_tokens: 240, prompt_cache_hit_tokens: 120,
+        });
+        assert.equal(first.usage_metadata?.input_tokens, 100);
+        assert.equal(first.usage_metadata?.total_tokens, 120);
+        assert.equal(first.usage_metadata?.input_token_details?.cache_read, undefined);
+      }
       history.push(first, new ToolMessage({ content: 'sunny', tool_call_id: 'call_1' }));
       await run();
       assert.equal(requests.length, 2);
@@ -110,6 +121,26 @@ for (const mode of ['invoke', 'stream', 'v3'] as const) {
     });
   }
 }
+
+test('official legacy stream retains cache hits from a separate terminal usage chunk', async () => {
+  const requests: RequestBody[] = [];
+  const official = new ChatOpenAI({
+    apiKey: 'test-key', model: 'deepseek-v4-pro', maxRetries: 0,
+    configuration: { baseURL: 'https://provider.example.test/v1', fetch: fakeProvider(requests, { separateUsageChunk: true }) },
+  });
+  let merged;
+  for await (const chunk of await official.stream('hello')) merged = merged ? merged.concat(chunk) : chunk;
+  assert.ok(merged);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.stream, true);
+  assert.deepEqual(merged.response_metadata.usage, {
+    prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_cache_hit_tokens: 60,
+  });
+  assert.deepEqual(readMessageTokenUsage(merged), {
+    inputTokens: 100, outputTokens: 20, totalTokens: 120,
+    cachedInputTokens: 60, cacheEligibleInputTokens: 100,
+  });
+});
 
 test('DeepSeek cache hits survive the OpenAI adapter boundary without inventing unknown zeros', () => {
   assert.deepEqual(normalizeCompletionsCacheUsage({ usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 60 } }), {

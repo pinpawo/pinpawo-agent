@@ -75,10 +75,13 @@ export function buildCompletionsMessagesWithReasoning(
 }
 
 /**
- * Preserve the legacy DeepSeek cache field for LangChain's legacy stream path.
- * The installed SDK preserves it in non-streaming and native v3 responses,
- * but legacy streaming discards it before the application's usage reader.
- * Remove once that path also retains it and the request-level test passes.
+ * Normalize DeepSeek cache hits for @langchain/openai 1.6.0 / Core 1.2.13.
+ * When a legacy stream chunk carries both choices and usage, its raw usage is
+ * counted twice during concatenation, while normalized usage stays correct but
+ * omits prompt_cache_hit_tokens. The usage reader cannot combine those reports.
+ * A separate terminal usage chunk already works without this normalization.
+ * Remove when the official adapter's combined choices/usage regression retains
+ * accurate cache hits without this normalization.
  */
 export function normalizeCompletionsCacheUsage<T>(response: T): T {
   if (!response || typeof response !== 'object') return response;

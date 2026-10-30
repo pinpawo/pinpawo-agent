@@ -28,10 +28,22 @@ test('runAgent keeps ordinary string replies and empty outputs compatible', asyn
     { type: 'tool_use', id: 'tool_1', name: 'lookup', input: { text: 'private arguments' } },
   ] })])).reply, '');
   assert.equal((await runWithMessages([new ToolMessage({ content: ' result ', tool_call_id: 'tool_1' })])).reply, 'result');
+  assert.equal((await runWithMessages([new HumanMessage(' user text ')])).reply, 'user text');
+  assert.equal((await runWithMessages([new HumanMessage({ content: [{ type: 'text', text: 'user text' }] })])).reply, '');
   assert.equal((await runWithMessages([new ToolMessage({ content: [{ type: 'text', text: 'tool output' }], tool_call_id: 'tool_1' })])).reply, '');
   assert.equal((await runWithMessages([new AIMessage({
     content: [{ type: 'text', text: 'Preparing a tool call' },
       { type: 'tool_use', id: 'tool_1', name: 'lookup', input: {} }],
     tool_calls: [{ id: 'tool_1', name: 'lookup', args: {} }],
   })])).reply, '');
+});
+
+test('runAgent returns legacy AI text with its final-reply trimming and concatenation', async () => {
+  const result = await runWithMessages([new AIMessage({ content: [
+    ' Hello ',
+    { text: 'legacy ' },
+    { type: 'thinking', thinking: 'secret', signature: 'sig', text: 'PRIVATE_THOUGHT' },
+    { type: 'text', text: 'world ' },
+  ] as never })]);
+  assert.equal(result.reply, 'Hello legacy world');
 });

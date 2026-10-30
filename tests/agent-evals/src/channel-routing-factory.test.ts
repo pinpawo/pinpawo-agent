@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createChannelRouter, createLlmRouteDecider, type RouteInput } from '../../../plugins/channel/src/channelRouting.ts';
-import { buildHostModel } from '../../../services/host/src/agent/agentModels.ts';
+import { buildModel } from '../../../services/host/src/agent/agentModels.ts';
 import { AnthropicCompatibleChatModel } from '../../../services/host/src/agent/anthropicCompatibleChatModel.ts';
 import { ReasoningPassbackCompletions } from '../../../services/host/src/agent/reasoningPassback.ts';
 
@@ -30,7 +30,7 @@ function modelEndpoint(protocol: 'openai-compatible' | 'anthropic-compatible', f
     structuredOutputMethod: method ?? 'jsonMode' as const,
     createChatModel: (options: { maxOutputTokens: number; maxRetries: number; preferDeterministic: boolean; streaming?: boolean; forceChatCompletions?: boolean }) => {
       assert.deepEqual(options, { maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true });
-      const model = buildHostModel({ protocol, apiKey: endpoint.apiKey,
+      const model = buildModel({ protocol, apiKey: endpoint.apiKey,
         baseUrl: protocol === 'anthropic-compatible' ? 'https://models.test' : endpoint.baseUrl,
         model: modelName, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries,
         ...(method ? { structuredOutputMethod: method } : {}) }, { preferDeterministic: options.preferDeterministic, streaming: options.streaming, forceChatCompletions: options.forceChatCompletions });
@@ -59,6 +59,7 @@ for (const method of ['jsonSchema', 'jsonMode', 'functionCalling'] as const) {
       if (method === 'jsonSchema') {
         assert.equal(body.response_format.type, 'json_schema');
         assert.equal(body.response_format.json_schema.strict, true);
+        assert.deepEqual(body.response_format.json_schema.schema.required, ['target', 'confidence', 'reason']);
         assert.deepEqual(body.response_format.json_schema.schema.properties.target.enum, user.targets);
       } else if (method === 'jsonMode') {
         assert.equal(body.response_format.type, 'json_object');
@@ -73,6 +74,13 @@ for (const method of ['jsonSchema', 'jsonMode', 'functionCalling'] as const) {
     assert.equal(sent, true);
   });
 }
+
+test('jsonMode routing accepts a decision without the optional reason', async () => {
+  const value = { target: 'pet:executor', confidence: 0.8 };
+  const fetcher = (async () => Response.json(openAIReply('jsonMode', value))) as typeof fetch;
+  const result = await createLlmRouteDecider(modelEndpoint('openai-compatible', fetcher, 'jsonMode'))(input, AbortSignal.timeout(1_000));
+  assert.deepEqual(result, value);
+});
 
 test('routing remains non-streaming even for an OpenAI-compatible model that usually streams', async () => {
   let sent = false;
@@ -135,6 +143,27 @@ test('routing uses native Anthropic Messages with the same decision semantics', 
   const result = await createLlmRouteDecider(modelEndpoint('anthropic-compatible', fake, 'functionCalling'))(input, AbortSignal.timeout(1_000));
   assert.deepEqual(result, decision);
   assert.equal(sent, true);
+});
+
+test('routing supports native Anthropic JSON Schema without forcing tool choice', async () => {
+  let calls = 0;
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls += 1;
+    assert.equal(String(url), 'https://models.test/v1/messages');
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.output_config.format.type, 'json_schema');
+    const target = body.output_config.format.schema.properties.target;
+    assert.equal(target.type, 'string');
+    for (const value of ['pet:executor', 'pet:reviewer', 'none']) assert.ok(target.description.includes(JSON.stringify(value)));
+    assert.equal(body.tools, undefined);
+    assert.equal(body.tool_choice, undefined);
+    return Response.json({ id: 'msg_mock', type: 'message', role: 'assistant', model: 'small',
+      content: [{ type: 'text', text: JSON.stringify(decision) }],
+      stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+  }) as typeof fetch;
+  const result = await createLlmRouteDecider(modelEndpoint('anthropic-compatible', fetcher, 'jsonSchema'))(input, AbortSignal.timeout(1_000));
+  assert.deepEqual(result, decision);
+  assert.equal(calls, 1);
 });
 
 test('routing needs a model factory and preserves configured error handling', async () => {

@@ -4,7 +4,7 @@ import { inferLlmContextWindowTokens } from './llmContextWindow';
 import {
   findLlmModelPresetByKey,
   inferLlmModelPreset,
-  inferLlmStructuredOutputMethod,
+  resolveLlmStructuredOutputMethod,
   type LlmModelPreset,
 } from './llmModelPresets';
 import type { StoredConfig } from '../storage';
@@ -269,23 +269,9 @@ export function parseModelProfile(
   if (protocol !== 'openai-compatible' && protocol !== 'anthropic-compatible') {
     issues.push({ code: 'invalid_profile', message: 'protocol must be openai-compatible or anthropic-compatible' });
   }
-  if (protocol === 'anthropic-compatible' && value.structuredOutputMethod !== undefined
-    && value.structuredOutputMethod !== 'functionCalling') {
-    issues.push({ code: 'invalid_profile', message: 'anthropic-compatible currently supports structuredOutputMethod functionCalling only' });
-  }
   const label = readNonEmptyString(value.label, 'label', issues);
   const model = readNonEmptyString(value.model, 'model', issues);
   const baseUrl = normalizeBaseUrl(value.baseUrl, issues);
-  // This capability restriction is documented for Anthropic's own API;
-  // compatible gateways may implement the same model IDs differently.
-  if (protocol === 'anthropic-compatible' && model && baseUrl
-    && new URL(baseUrl).origin === 'https://api.anthropic.com'
-    && /^claude-(?:(?:opus|sonnet)-5-5|(?:fable|mythos)-5-1)(?:-[0-9]{8})?$/i.test(model)) {
-    issues.push({
-      code: 'invalid_profile',
-      message: 'this native Anthropic model does not support the forced tool choice required by functionCalling structured output; choose a supported model',
-    });
-  }
   const apiKey = readNonEmptyString(value.apiKey, 'apiKey', issues);
   const contextWindowTokens = readPositiveInteger(
     value.contextWindowTokens,
@@ -595,11 +581,7 @@ export function fingerprintModelProfile(profile: ModelProfileV1): ModelProfileFi
     endpoint: sanitizeEndpoint(profile.baseUrl).endpoint,
     contextWindowTokens: profile.contextWindowTokens,
     maxOutputTokens: profile.maxOutputTokens ?? preset?.maxOutputTokens ?? null,
-    structuredOutputMethod: profile.protocol === 'anthropic-compatible'
-      ? 'functionCalling'
-      : profile.structuredOutputMethod
-        ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl)
-        ?? null,
+    structuredOutputMethod: resolveLlmStructuredOutputMethod(profile) ?? null,
     inputModalities: [...profile.inputModalities].sort(),
   };
   return Object.freeze({

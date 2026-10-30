@@ -10,8 +10,11 @@ const tool = { name: 'lookup', description: 'Look up a value', schema: z.object(
 function response(content: unknown[], stop_reason = 'end_turn') {
   return { id: 'msg_mock', type: 'message', role: 'assistant', model: config.model, content, stop_reason, stop_sequence: null, usage: { input_tokens: 12, output_tokens: 4 } };
 }
-function modelWithFetch(fetcher: NonNullable<AnthropicCompatibleChatModel['clientOptions']['fetch']>) {
-  const model = buildHostModels(config).act;
+function modelWithFetch(
+  fetcher: NonNullable<AnthropicCompatibleChatModel['clientOptions']['fetch']>,
+  structuredOutputMethod?: 'functionCalling' | 'jsonSchema' | 'jsonMode',
+) {
+  const model = buildHostModels({ ...config, structuredOutputMethod }).act;
   assert.ok(model instanceof AnthropicCompatibleChatModel);
   model.clientOptions.fetch = fetcher;
   return model;
@@ -20,7 +23,6 @@ function modelWithFetch(fetcher: NonNullable<AnthropicCompatibleChatModel['clien
 test('explicit protocol selects all roles and leaves gateway Claude on OpenAI', () => {
   for (const model of Object.values(buildHostModels(config))) assert.ok(model instanceof AnthropicCompatibleChatModel);
   assert.equal(buildHostModels({ ...config, protocol: undefined }).act instanceof AnthropicCompatibleChatModel, false);
-  assert.throws(() => buildHostModels({ ...config, structuredOutputMethod: 'jsonMode' }), /functionCalling only/);
 });
 
 test('native SDK sends Messages auth, images and tool history, and preserves usage', async () => {
@@ -56,7 +58,7 @@ test('native SDK sends Messages auth, images and tool history, and preserves usa
   assert.ok(JSON.stringify(result.content).includes('Found'));
 });
 
-test('native structured output uses forced function tool and parses its result', async () => {
+test('native structured output defaults to a forced function tool and supports strict', async () => {
   const model = modelWithFetch(async (_url, init) => {
     const body = JSON.parse(String(init?.body));
     assert.equal('thinking' in body, false);
@@ -65,8 +67,49 @@ test('native structured output uses forced function tool and parses its result',
     assert.equal(body.tools[0].strict, true);
     return Response.json(response([{ type: 'tool_use', id: 'tool_2', name: 'result', input: { value: 'ok' } }], 'tool_use'));
   });
-  const result = await model.withStructuredOutput(z.object({ value: z.string() }), { name: 'result', method: 'functionCalling', strict: true }).invoke('Return a value');
+  const result = await model.withStructuredOutput(z.object({ value: z.string() }), { name: 'result', strict: true }).invoke('Return a value');
   assert.deepEqual(result, { value: 'ok' });
+});
+
+for (const method of ['jsonSchema', 'jsonMode'] as const) {
+  test(`native ${method} uses the SDK JSON schema request and text parser`, async (t) => {
+    const warnings = t.mock.method(console, 'warn', () => {});
+    let requests = 0;
+    const model = modelWithFetch(async (_url, init) => {
+      requests += 1;
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.output_config.format.type, 'json_schema');
+      assert.equal(body.output_config.format.schema.type, 'object');
+      assert.deepEqual(body.output_config.format.schema.properties, { value: { type: 'string' } });
+      assert.deepEqual(body.output_config.format.schema.required, ['value']);
+      assert.equal(body.tools, undefined);
+      assert.equal(body.tool_choice, undefined);
+      assert.equal(body.response_format, undefined);
+      return Response.json(response([{ type: 'text', text: '{"value":"ok"}' }]));
+    }, method);
+    const result = await model.withStructuredOutput(z.object({ value: z.string() }), { name: 'result', method }).invoke('Return a value');
+    assert.deepEqual(result, { value: 'ok' });
+    assert.equal(requests, 1);
+    // @langchain/anthropic 1.5.1 warns and falls back for jsonMode itself.
+    assert.equal(warnings.mock.callCount(), method === 'jsonMode' ? 1 : 0);
+  });
+}
+
+test('the native SDK rejects explicit strict for JSON schema and JSON mode before requesting', () => {
+  let requests = 0;
+  const model = modelWithFetch(async () => {
+    requests += 1;
+    return Response.json(response([{ type: 'text', text: '{"value":"ok"}' }]));
+  });
+  for (const method of ['jsonSchema', 'jsonMode'] as const) {
+    for (const strict of [true, false]) {
+      assert.throws(
+        () => model.withStructuredOutput(z.object({ value: z.string() }), { name: 'result', method, strict }),
+        /strict.*only supported.*functionCalling/,
+      );
+    }
+  }
+  assert.equal(requests, 0);
 });
 
 test('native stream emits text and usage through LangChain', async () => {

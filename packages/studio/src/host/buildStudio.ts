@@ -10,7 +10,7 @@ import type { Studio, StudioPlugin } from '../studioContract';
 import type { StudioPetRegistration, StudioPetRuntime } from '../types';
 import {
   buildHostRuntimeConfig,
-  buildHostModel,
+  buildModel,
   createResidentPetHost,
   type FileSaver,
   type HostToolkitInventoryStore,
@@ -288,7 +288,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           baseUrl: config.baseUrl,
           apiKey: config.apiKey,
           model: config.model,
-          createChatModel: (options) => buildHostModel({
+          createChatModel: (options) => buildModel({
             ...config,
             maxOutputTokens: options.maxOutputTokens,
             maxRetries: options.maxRetries,

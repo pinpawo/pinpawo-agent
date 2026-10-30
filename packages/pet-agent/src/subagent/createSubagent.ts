@@ -41,7 +41,7 @@ import {
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
-import { messageHasToolCalls, readAiMessageText } from '../utils/messages';
+import { messageHasToolCalls, readMessageText } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
@@ -94,30 +94,15 @@ function ensureSubagentMessageIds(messages: BaseMessage[]) {
   }
 }
 
-function readMessageText(message: BaseMessage): string {
-  if (AIMessage.isInstance(message)) return readAiMessageText(message);
-  if (typeof message.content === 'string') {
-    return message.content;
-  }
-  return message.content
-    .map((item) => {
-      if (typeof item === 'string') return item;
-      if (typeof item === 'object' && item !== null && 'text' in item) {
-        return typeof item.text === 'string' ? item.text : '';
-      }
-      return '';
-    })
-    .join('');
-}
-
 function readInvocationOutput(messages: BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message._getType() !== 'ai') continue;
     if (readSubagentGuardStopReason(message)) continue;
     if (messageHasToolCalls(message)) continue;
-    if (!readMessageText(message).trim()) continue;
-    return readMessageText(message);
+    const text = readMessageText(message, { trim: false, legacySeparator: '' });
+    if (!text.trim()) continue;
+    return text;
   }
   return null;
 }
@@ -141,7 +126,7 @@ function assertValidContextSummaryUpdate(update: unknown) {
     return;
   }
 
-  const content = readMessageText(summary);
+  const content = readMessageText(summary, { trim: false, legacySeparator: '' });
   const prefix = `${SUBAGENT_CONTEXT_SUMMARY_PREFIX}\n\n`;
   const summaryText = content.startsWith(prefix) ? content.slice(prefix.length) : content;
   if (

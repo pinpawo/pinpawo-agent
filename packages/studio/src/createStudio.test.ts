@@ -198,6 +198,41 @@ test('receipt echoes producer metadata while the Pet sees request text only', as
   await studio.shutdown();
 });
 
+test('in-process prompt sections are snapshotted before asynchronous admission', async () => {
+  const seen: Array<Parameters<PetDispatchPort['dispatch']>[0]> = [];
+  const worker = binding('worker');
+  worker.dispatch = { ...worker.dispatch, dispatch: async (request) => { seen.push(request); } };
+  const studio = await createStudio({ studioId: 's1', pets: [worker] });
+  try {
+    const sections = [{ id: 'channel:collaboration', owner: 'channel', content: 'original A' }];
+    const scope = { namespace: 'channel', id: 'a' };
+    const session = { id: 'worker:00000001', create: true };
+    const metadata = { nested: { value: 'original correlation' } };
+    const request = { petId: 'worker', request: 'work', idempotencyKey: 'key-a', metadata, scope, session, systemPromptSections: sections };
+    const admitted = studio.dispatch(request);
+    request.petId = 'other-pet';
+    request.request = 'another message';
+    request.idempotencyKey = 'key-b';
+    metadata.nested.value = 'mutated correlation';
+    sections[0]!.content = 'mutated after submission';
+    sections.push({ id: 'late', owner: 'channel', content: 'late entry' });
+    scope.id = 'b';
+    session.id = 'worker:00000002';
+    session.create = false;
+    const receipt = await admitted;
+    assert.deepEqual(receipt.metadata, { nested: { value: 'original correlation' } });
+    assert.equal(seen[0]?.request, 'work');
+    assert.deepEqual(seen[0]?.systemPromptSections, [{ id: 'channel:collaboration', owner: 'channel', content: 'original A' }]);
+    assert.deepEqual(seen[0]?.scope, { namespace: 'channel', id: 'a' });
+    assert.deepEqual(seen[0]?.session, { id: 'worker:00000001', create: true });
+    const retried = await studio.dispatch({ petId: 'worker', request: 'ignored', idempotencyKey: 'key-a' });
+    assert.equal(retried.invocationId, receipt.invocationId);
+    assert.equal(seen.length, 1, 'the original idempotency key was reserved');
+  } finally {
+    await studio.shutdown();
+  }
+});
+
 test('idempotency returns the same receipt and invokes the port once', async () => {
   let calls = 0;
   let acceptedEvents = 0;

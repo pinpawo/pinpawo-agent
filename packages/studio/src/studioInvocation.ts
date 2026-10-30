@@ -1,4 +1,5 @@
 import { readPetInvocationContext, type PetInvocationScope } from 'pinpawo/host-runtime';
+import type { SystemPromptSection } from '@pinpawo/pet-agent';
 import { isJsonObject, isJsonValue, type JsonObject } from '@pinpawo/agent-contracts';
 
 export type StudioDispatchRequest = {
@@ -14,10 +15,12 @@ export type StudioDispatchRequest = {
    * caller cannot claim it, or it could publish into another Plugin's domain.
    */
   scope?: PetInvocationScope;
+  /** In-process Plugin only: invocation-local authored context, never accepted from the wire. */
+  systemPromptSections?: readonly SystemPromptSection[];
 };
 
 /** The public wire form: Host-trusted targeting fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope'>;
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'systemPromptSections'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {

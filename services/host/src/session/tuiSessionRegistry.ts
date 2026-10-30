@@ -4,6 +4,8 @@ import type { AgentInputModality } from '@pinpawo/agent-session';
 import { atomicWriteFile } from '../atomicFile';
 import { buildTuiChatThreadId } from '../chatInterface';
 import type { PetInvocationScope } from '../host/petInvocationContext';
+import type { SystemPromptSection } from '@pinpawo/pet-agent';
+import { copyDispatchPromptSections } from '../host/dispatchPromptContext';
 
 export type TuiSessionRecord = {
   id: string;
@@ -30,6 +32,7 @@ export type TuiSessionPendingDispatch = {
   dispatchId: string;
   request: string;
   scope?: PetInvocationScope;
+  systemPromptSections?: readonly SystemPromptSection[];
 };
 
 export type TuiSessionState = {
@@ -361,11 +364,16 @@ function readPendingDispatch(value: unknown): TuiSessionPendingDispatch | null {
     || (scope && (!namespace || !scopeId))) {
     return null;
   }
+  let systemPromptSections: readonly SystemPromptSection[] | undefined;
+  try {
+    if (record.systemPromptSections !== undefined) systemPromptSections = copyDispatchPromptSections(record.systemPromptSections);
+  } catch { return null; }
   return {
     interruptId,
     dispatchId,
     request,
     ...(namespace && scopeId ? { scope: { namespace, id: scopeId } } : {}),
+    ...(systemPromptSections?.length ? { systemPromptSections } : {}),
   };
 }
 

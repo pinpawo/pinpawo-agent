@@ -51,5 +51,11 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
           .execute();
       },
     },
+    '0002_channel_prompt': {
+      async up(db: Kysely<unknown>) {
+        // Nullable so existing Channels keep their messages and have no prompt by default.
+        await db.schema.alterTable('channels').addColumn('prompt', 'text').execute();
+      },
+    },
   };
 }

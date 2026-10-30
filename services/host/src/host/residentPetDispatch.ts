@@ -1,6 +1,7 @@
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
+import { copyDispatchPromptSections, withDispatchPromptSections } from './dispatchPromptContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
@@ -43,9 +44,10 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession }) => {
+    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, systemPromptSections: suppliedSections }) => {
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
+      const systemPromptSections = suppliedSections === undefined ? undefined : copyDispatchPromptSections(suppliedSections);
       const petId = runtime.petId;
       // Resolve and persist before admission; neither queue time nor a TUI switch
       // may change the target. Legacy callers retain active-session behavior.
@@ -68,6 +70,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         if (!session) throw new Error('A waiting dispatch has no session to resume from.');
         sessions.setPendingDispatch(session.id, {
           interruptId: pending.interruptId, dispatchId, request, ...(scope ? { scope } : {}),
+          ...(systemPromptSections?.length ? { systemPromptSections } : {}),
         });
       };
 
@@ -94,6 +97,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                   turnSetup = turn.setup;
                   const result = await runAgentTurn({
                     ...turn,
+                    setup: withDispatchPromptSections(turn.setup, systemPromptSections),
                     emitEvent: (event) => {
                       if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
                       // Dispatch observers follow the conversation whichever session is on screen.

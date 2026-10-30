@@ -54,6 +54,7 @@ async function createWaitingHost() {
   const runtimeConfig = buildHostRuntimeConfig(root);
   const threads = new Map<string, { messages: AIMessage[]; reviewing: boolean }>();
   const turns: string[] = [];
+  const promptSnapshots: Array<{ threadId: string; kind: string; sections: readonly { id: string; owner?: string; content: string }[] }> = [];
   // Tests hold a resumed run, or one checkpoint read, open on these.
   const gates: { resume?: Promise<void>; read?: Promise<void> } = {};
   const host = await createResidentPetHost({
@@ -88,6 +89,7 @@ async function createWaitingHost() {
     runAgentTurn: async ({ request, setup, emitEvent }) => {
       const threadId = setup.input.threadId ?? '';
       turns.push(`${threadId}:${request.kind}`);
+      promptSnapshots.push({ threadId, kind: request.kind, sections: [...(setup.input.context?.systemPromptSections ?? [])] });
       if (request.kind === 'user_message') {
         threads.set(threadId, { messages: [new AIMessage('needs approval')], reviewing: true });
         emitEvent({
@@ -110,7 +112,7 @@ async function createWaitingHost() {
   });
   const lifecycle: PetDispatchLifecycleEvent[] = [];
   host.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
-  return { host, threads, turns, lifecycle, gates };
+  return { host, threads, turns, lifecycle, gates, promptSnapshots };
 }
 
 test('an exact session is read, followed and reviewed without changing the active session', async () => {
@@ -172,6 +174,46 @@ test('an exact session is read, followed and reviewed without changing the activ
     }), (error) => error instanceof PetSessionReviewRefusedError && error.code === 'review_closed');
     assert.equal(turns.length, turnCount);
     detach();
+  } finally {
+    await host.close();
+  }
+});
+
+test('channel prompt snapshots stay scoped across dispatch, queued mutation, resume and ordinary chat', async () => {
+  const { host, lifecycle, promptSnapshots } = await createWaitingHost();
+  const tuiPeer: AgentSessionPeer = { isConnected: () => true, send: () => true };
+  const id = 'channel:collaboration';
+  const onlyChannel = (sections: readonly { id: string; content: string }[]) => sections.filter((section) => section.id === id);
+  try {
+    await host.interaction.connect(tuiPeer);
+    const a = 'pet:0000000a';
+    const b = 'pet:0000000b';
+    const original = [{ id, owner: 'channel', content: 'Channel A original' }];
+    const acceptedA = host.resident.dispatch.dispatch({
+      request: 'A', dispatchId: 'dispatch-a', session: { id: a, create: true },
+      scope: { namespace: 'channel', id: 'A' }, systemPromptSections: original,
+    });
+    original[0]!.content = 'Channel A edited after admission';
+    await acceptedA;
+    await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-a' && event.state === 'waiting'), 'A did not suspend');
+    await host.resident.dispatch.dispatch({
+      request: 'B', dispatchId: 'dispatch-b', session: { id: b, create: true },
+      scope: { namespace: 'channel', id: 'B' }, systemPromptSections: [{ id, owner: 'channel', content: 'Channel B' }],
+    });
+    await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-b' && event.state === 'waiting'), 'B did not suspend');
+    const starts = promptSnapshots.filter((entry) => entry.kind === 'user_message');
+    assert.deepEqual(starts.map((entry) => onlyChannel(entry.sections)), [
+      [{ id, owner: 'channel', content: 'Channel A original' }],
+      [{ id, owner: 'channel', content: 'Channel B' }],
+    ]);
+    await host.sessions.review(a, {
+      requestId: 'resume-a', interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
+    });
+    await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-a' && event.state === 'completed'), 'A did not resume');
+    const resume = promptSnapshots.find((entry) => entry.kind === 'resume');
+    assert.deepEqual(onlyChannel(resume?.sections ?? []), [{ id, owner: 'channel', content: 'Channel A original' }]);
+    await host.interaction.handle(tuiPeer, { type: 'chat_request', requestId: 'plain-chat', message: 'ordinary chat' });
+    assert.deepEqual(onlyChannel(promptSnapshots.at(-1)?.sections ?? []), [], 'ordinary chat does not inherit a Channel prompt');
   } finally {
     await host.close();
   }

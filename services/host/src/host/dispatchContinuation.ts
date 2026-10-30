@@ -4,6 +4,7 @@ import { projectPendingInterrupt } from '../conversation/pendingInterruptProject
 import type { ServerTuiSessionService } from '../session/serverTuiSessions';
 import { readPetDispatchMessage, type PetDispatchLifecycleEvent } from './contracts';
 import { withPetInvocationContext } from './petInvocationContext';
+import { withDispatchPromptSections } from './dispatchPromptContext';
 
 type RunAgentTurn = (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
 
@@ -59,6 +60,7 @@ export function continueSuspendedDispatch(options: {
         { petId, dispatchId, sessionId: session.id, ...(scope ? { scope } : {}) },
         () => run({
           ...turn,
+          setup: withDispatchPromptSections(turn.setup, suspended.systemPromptSections),
           emitEvent: (event) => {
             if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
             const message = readPetDispatchMessage(event);

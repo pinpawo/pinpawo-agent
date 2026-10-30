@@ -43,6 +43,7 @@ See [Reference](../reference/index.md) for the current public reading path.
 
 ## Studio applications and Plugins
 
+- [Channel 协作提示词](studio/channel-collaboration-prompt.md) — draft for Channel-scoped collaboration context and Pet invocation isolation
 - [Channel 寻址、执行与状态](studio/channel-addressing-and-execution.md) — 唯一当前设计入口，
   参与者协议、固定 session、可信来源、公开回复、全局观察与现有限制；阶段原文见
   [Channel 历史](../history/studio/channel-evolution.md)

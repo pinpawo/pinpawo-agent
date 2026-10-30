@@ -153,6 +153,22 @@ Channels stored by earlier versions in `channels.sqlite` or `channels-v2.sqlite`
 `databasePath` option; schedules in an earlier `scheduler.sqlite` are not migrated.
 Its [current design](../design/studio/channel-addressing-and-execution.md) specifies
 unified message addressing, Reply defaults, server-assigned source envelopes and limits.
+A Channel may have a public collaboration prompt, separate from its description.
+Configure it through the Channel create/update API or Console. Current members can
+read it. Only Studio authority can set a non-empty prompt on creation or modify
+or clear it later; ordinary clients can create Channels without a prompt. A
+non-member Studio authority can update the prompt alone, without gaining access
+to messages or permission to edit other metadata. Each Channel-scoped
+Pet run receives that Channel's prompt without changing the Pet's `PET.md`; a prompt
+edit applies to a subsequent dispatch, not to a run already in progress or its
+approval continuation. Use it to describe the current team's roles and how members
+collaborate. The routing model can also see it; routing still only considers human
+messages with no @. It does not grant permissions or override Host / PET safety
+rules, and does not guarantee model compliance. A Pet can still use `channel_read_context`
+to inspect messages; the prompt does not automatically include conversation history.
+Existing workdir templates are not rewritten by this setting. See the
+[Channel prompt design](../design/studio/channel-collaboration-prompt.md).
+
 Default PET.md and Capability templates contain the runtime protocol; existing
 workdirs must compare and update those files manually, preserving local instructions.
 A link to a design document does not replace the instructions loaded by the Host.

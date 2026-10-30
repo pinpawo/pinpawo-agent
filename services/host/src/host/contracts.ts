@@ -1,4 +1,5 @@
 import type { PetInvocationScope } from './petInvocationContext';
+import type { SystemPromptSection } from '@pinpawo/pet-agent';
 import type {
   PendingInterruptProjection,
   AgentClientMessage,
@@ -52,6 +53,8 @@ export type PetDispatchRequest = {
   session?: { id: string; create?: boolean };
   /** Explicit Host-admitted domain scope, independent of the Agent Session. */
   scope?: PetInvocationScope;
+  /** Host-admitted invocation-local context; not a wire-controlled field. */
+  systemPromptSections?: readonly SystemPromptSection[];
 };
 
 export type PetDispatchLifecycleState =

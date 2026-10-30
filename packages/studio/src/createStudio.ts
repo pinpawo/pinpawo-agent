@@ -156,16 +156,24 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     source?: string,
   ): Promise<StudioDispatchReceipt> {
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    // Snapshot the complete Plugin request before asynchronous admission.
+    const petId = request.petId;
+    const requestText = request.request;
+    const suppliedIdempotencyKey = request.idempotencyKey;
+    const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
+    const systemPromptSections = request.systemPromptSections?.map((section) => ({ ...section }));
+    const session = request.session ? { ...request.session } : undefined;
+    const scope = request.scope ? { ...request.scope } : undefined;
     await registry.restore();
-    const pet = registry.getLive(request.petId);
-    if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${request.petId}"`, 'not_found');
+    const pet = registry.getLive(petId);
+    if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${petId}"`, 'not_found');
 
-    const idempotencyKey = request.idempotencyKey?.trim();
-    if (request.idempotencyKey !== undefined && !idempotencyKey) {
+    const idempotencyKey = suppliedIdempotencyKey?.trim();
+    if (suppliedIdempotencyKey !== undefined && !idempotencyKey) {
       throw new Error('Studio dispatch idempotencyKey must not be empty.');
     }
     const idempotencyRecordKey = idempotencyKey
-      ? JSON.stringify([source ?? 'studio', request.petId, idempotencyKey])
+      ? JSON.stringify([source ?? 'studio', petId, idempotencyKey])
       : null;
     const existing = idempotencyRecordKey
       ? idempotencyRecords.get(idempotencyRecordKey)
@@ -176,20 +184,20 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     // admission. Failed admissions release the reservation, in this domain.
     const admission = Promise.resolve().then(async () => {
       const invocationId = randomUUID();
-      const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
 
       console.log(
-        `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
+        `[studio] dispatch petId=${petId} source=${source ?? 'studio'} invocation=${invocationId}`,
       );
       await pet.runtime.dispatch.dispatch({
-        request: request.request,
+        request: requestText,
         dispatchId: invocationId,
-        ...(request.session ? { session: { ...request.session } } : {}),
-        ...(request.scope ? { scope: { ...request.scope } } : {}),
+        ...(session ? { session } : {}),
+        ...(scope ? { scope } : {}),
+        ...(systemPromptSections ? { systemPromptSections } : {}),
       });
 
       const receipt: StudioDispatchReceipt = Object.freeze({
-        petId: request.petId,
+        petId,
         invocationId,
         ...(metadata ? { metadata } : {}),
       });
@@ -199,8 +207,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         occurredAt: new Date().toISOString(),
         payload: {
           invocationId,
-          petId: request.petId,
-          request: request.request,
+          petId,
+          request: requestText,
           producer: source ?? 'studio',
         },
       });

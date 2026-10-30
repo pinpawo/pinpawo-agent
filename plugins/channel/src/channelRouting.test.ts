@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createChannelRouter, createLlmRouteDecider, type RouteInput } from './channelRouting';
+import { createChannelRouter, createLlmRouteDecider, routeInput, type RouteInput } from './channelRouting';
 import type { ChannelMember } from './channelService';
 import type { ChannelMessageRow } from './store/channelStore';
 
@@ -59,6 +59,20 @@ test('Pet notes from the routing settings reach the decider', async () => {
     { participantId: 'pet:executor', name: 'Executor', description: 'Runs the work.' },
     { participantId: 'pet:reviewer', name: 'Reviewer' },
   ]);
+});
+
+test('the Channel collaboration prompt reaches the routing model as Channel context', async () => {
+  const channel = { channelId: 'c', title: 'Release', prompt: 'Reviewer handles review questions.', createdBy: { kind: 'human' as const, id: 'local' }, createdAt: '', updatedAt: '' };
+  const input = routeInput(channel, message({ kind: 'human', id: 'local' }), undefined, [], [human, pet]);
+  let sent: Record<string, unknown> | undefined;
+  const fake = (async (_url: string, init: RequestInit) => {
+    sent = JSON.parse(String(init.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ target: 'none', confidence: 1 }) } }] }));
+  }) as unknown as typeof fetch;
+  await createLlmRouteDecider(endpoint, fake)(input, AbortSignal.timeout(1_000));
+  const modelInput = JSON.parse((sent!.messages as Array<{ content: string }>)[1]!.content) as RouteInput;
+  assert.deepEqual(modelInput.channel, { title: 'Release', prompt: channel.prompt });
+  assert.deepEqual(routeInput({ ...channel, prompt: undefined }, message({ kind: 'human', id: 'local' }), undefined, [], [human, pet]).channel, { title: 'Release' });
 });
 
 test('the llm decider resolves its profile at start and fails early for a missing one', () => {

@@ -567,6 +567,8 @@ test('Host passes native single-call binding options to the actual SDK model', a
       usage: { input_tokens: 1, output_tokens: 1 } });
   };
   const lookup = tool(async () => 'ok', { name: 'lookup', description: 'lookup', schema: z.object({}) });
-  await model.bindTools([lookup], setup.graphConfig.entryAnswerToolOptions).invoke('hello');
+  // The SDK forwards this native `auto` object, but its 1.5.1 type omits it.
+  const options = setup.graphConfig.entryAnswerToolOptions as unknown as Parameters<typeof model.bindTools>[1];
+  await model.bindTools([lookup], options).invoke('hello');
   assert.equal(called, true);
 });

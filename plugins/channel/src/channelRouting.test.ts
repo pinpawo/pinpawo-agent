@@ -102,3 +102,24 @@ test('the llm decider rejects an HTTP error or a malformed answer', async () => 
   await assert.rejects(createLlmRouteDecider(endpoint, reply(200, 'not json'))(input, AbortSignal.timeout(1_000)));
   await assert.rejects(createLlmRouteDecider(endpoint, reply(200, '{"target":"none","confidence":2}'))(input, AbortSignal.timeout(1_000)));
 });
+
+test('native routing fails at startup before any request, including the inherited Host default', () => {
+  let requests = 0;
+  const fetchImpl = (async () => { requests++; throw new Error('must not request'); }) as typeof fetch;
+  const native = { ...endpoint, protocol: 'anthropic' as const };
+  assert.throws(() => createLlmRouteDecider(native, fetchImpl), /routing.decider.modelProfileId/);
+  for (const modelProfileId of [undefined, 'native']) {
+    assert.throws(() => createChannelRouter({ enabled: true, decider: { kind: 'llm', modelProfileId } }, {
+      resolveModel: () => native, fetch: fetchImpl,
+    }), /only openai-compatible/);
+  }
+  assert.equal(requests, 0);
+  assert.equal(createChannelRouter({ enabled: false }, { resolveModel: () => native }), undefined);
+  const router = createChannelRouter({ enabled: true, decider: { kind: 'llm', modelProfileId: 'gateway' } }, {
+    resolveModel: (profileId) => {
+      assert.equal(profileId, 'gateway');
+      return { ...endpoint, protocol: 'openai-compatible' };
+    }, fetch: fetchImpl,
+  });
+  assert.ok(router);
+});

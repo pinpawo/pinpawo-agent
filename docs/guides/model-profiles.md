@@ -54,6 +54,21 @@ or `jsonSchema` are rejected explicitly. The selected integration supports
 extensions such as extended thinking, prompt-cache controls, server tools,
 Bedrock and Vertex authentication are not exposed in this profile contract.
 
+### Channel routing and evals
+
+Pet runs and profile-based decision/prompt evals use the selected protocol.
+Channel routing currently supports only OpenAI-compatible profiles. If the Host
+uses a native Anthropic default, configure the Channel plugin's
+`routing.decider` as `{ "kind": "llm", "modelProfileId": "routing-compatible" }`,
+where `routing-compatible` names a separate OpenAI-compatible profile. Otherwise,
+enabling routing fails at startup with an explicit protocol error. Disabled
+routing does not need a separate profile.
+
+The legacy `orchestrator-route`, `orchestrator-flow.mock-subagent`, and
+`structured-output-compat` eval scripts read OpenAI-compatible `LLM_*`/legacy
+`llm_*` settings, not versioned profiles. Use the profile-based decision/prompt
+evals for native Anthropic; the Channel routing eval rejects native profiles.
+
 ## Select a profile at startup
 
 If the profile already exists, select it for the process:

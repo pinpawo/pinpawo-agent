@@ -66,7 +66,7 @@ const router = createChannelRouter({
   enabled: true, pets: notes, ...(threshold !== undefined ? { threshold } : {}),
 }, {
   resolveModel: () => ({
-    profileId, baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model,
+    protocol: profile.protocol, profileId, baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model,
     ...((profile.structuredOutputMethod ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl))
       ? { structuredOutputMethod: profile.structuredOutputMethod ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl) }
       : {}),

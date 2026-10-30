@@ -121,6 +121,10 @@ const decisionSchema = z.object({
 
 /** One direct OpenAI-compatible chat completion; no Agent, tools or retries. */
 export function createLlmRouteDecider(endpoint: StudioModelEndpoint, fetchImpl: typeof fetch = fetch): RouteDecider {
+  if (endpoint.protocol !== undefined && endpoint.protocol !== 'openai-compatible') {
+    throw new Error('Channel routing supports only openai-compatible model profiles. '
+      + 'Set routing.decider.modelProfileId to an OpenAI-compatible profile when the Host default uses native Anthropic.');
+  }
   return async (input, signal) => {
     const targets = [...input.pets.map(pet => pet.participantId), 'none'];
     const jsonSchema = {

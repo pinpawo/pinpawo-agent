@@ -258,3 +258,25 @@ test('Capability names are scoped per Pet rather than globally across Studio', a
   assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['planner', 'writer']);
   await studio.shutdown();
 });
+
+test('Plugin model resolution preserves the native Host default and an explicit compatible profile', async () => {
+  const workdir = await writeStudioConfig([{ id: 'example-work' }]);
+  const seen: Array<string | undefined> = [];
+  const configuration = await resolveStudioHostConfig({ workdir, resolvePlugin: () => ({
+    ...fakePlugin(),
+    start: (context) => {
+      seen.push(context.models.resolve().protocol, context.models.resolve('gateway').protocol);
+    },
+  }) });
+  const result = await buildStudio({
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([
+      { modelProfileId: 'native', protocol: 'anthropic', model: 'claude-sonnet-4-5' },
+      { modelProfileId: 'gateway' },
+    ], 'native'),
+    hostCapabilities: [generalCapability()], petCapabilities: new Map(),
+    ...residentBuildResources(workdir),
+  });
+  try { assert.deepEqual(seen, ['anthropic', 'openai-compatible']); }
+  finally { await result.studio.shutdown(); }
+});

@@ -136,8 +136,10 @@ export type StudioPluginContext = {
   models: StudioModels;
 };
 
-/** An OpenAI-compatible endpoint from one of the Host's model profiles. */
+/** A Host model endpoint; consumers must check which protocols they support. */
 export type StudioModelEndpoint = {
+  /** Omission preserves the legacy OpenAI-compatible transport. */
+  protocol?: 'openai-compatible' | 'anthropic';
   profileId: string;
   baseUrl: string;
   apiKey: string;

@@ -1,4 +1,4 @@
-import { createReasoningPassbackChatOpenAI } from '../../../../services/host/src/agent/reasoningPassback.ts';
+import { buildHostModels } from '../../../../services/host/src/agent/agentModels.ts';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -216,24 +216,22 @@ export function createDecisionEvalModel(options: {
           ?? env.DECISION_STRUCTURED_OUTPUT_METHOD
         : undefined),
   ) ?? profile.structuredOutputMethod
-    ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl);
+    ?? (profile.protocol === 'anthropic'
+      ? 'functionCalling'
+      : inferLlmStructuredOutputMethod(profile.model, profile.baseUrl));
   const fingerprint = fingerprintModelProfile(profile).fingerprint;
+  const model = buildHostModels({
+    ...profile,
+    structuredOutputMethod: method,
+    timeoutMs: timeout,
+    maxRetries: 0,
+  }).act;
+  // Both Host integrations expose this generation setting. Keep eval-only
+  // experiment overrides out of stored production profiles.
+  if (temperature !== null) Object.assign(model, { temperature });
 
   return {
-    model: createReasoningPassbackChatOpenAI({
-      model: profile.model,
-      ...(temperature === null ? {} : { temperature }),
-      timeout,
-      maxRetries: 0,
-      apiKey: profile.apiKey,
-      configuration: {
-        baseURL: profile.baseUrl,
-        defaultHeaders: { Authorization: `Bearer ${profile.apiKey}` },
-      },
-      ...(profile.maxOutputTokens
-        ? { maxTokens: profile.maxOutputTokens }
-        : {}),
-    }) as unknown as AgentModels['act'],
+    model,
     method,
     label: `${profile.label} (${profile.model} @ ${new URL(profile.baseUrl).host})`,
     metadata: {

@@ -283,6 +283,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         const config = input.modelProfiles.resolve(profileId);
         return {
           profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
+          protocol: config.protocol ?? 'openai-compatible',
           baseUrl: config.baseUrl,
           apiKey: config.apiKey,
           model: config.model,

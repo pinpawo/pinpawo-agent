@@ -9,6 +9,7 @@ import {
   resolveModelProfile,
 } from '../../../../services/host/src/config/modelProfiles.ts';
 import type { StoredConfig } from '../../../../services/host/src/storage.ts';
+import { HostChatAnthropic } from '../../../../services/host/src/agent/hostChatAnthropic.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
 function writeProfiles() {
@@ -19,6 +20,18 @@ function writeProfiles() {
       version: 1,
       defaultProfileId: 'endpoint-a',
       profiles: {
+        'claude-native': {
+          id: 'claude-native', label: 'Claude native', protocol: 'anthropic',
+          model: 'claude-sonnet-4-5', baseUrl: 'https://native.example.test',
+          apiKey: 'mock-native', contextWindowTokens: 200_000,
+          maxOutputTokens: 1024, inputModalities: ['text', 'image'],
+        },
+        'claude-gateway': {
+          id: 'claude-gateway', label: 'Claude gateway', provider: 'anthropic',
+          model: 'claude-sonnet-4-5', baseUrl: 'https://gateway.example.test/v1',
+          apiKey: 'mock-gateway', contextWindowTokens: 200_000,
+          inputModalities: ['text'],
+        },
         'endpoint-a': {
           id: 'endpoint-a',
           label: 'Endpoint A',
@@ -213,6 +226,39 @@ test('eval temperature is omitted by default and explicit experiment overrides r
       assert.equal((evaluated.model as unknown as { temperature?: number }).temperature,
         temperature === undefined ? undefined : 0.7);
       assert.equal(evaluated.metadata.temperature, temperature === undefined ? null : 0.7);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('native eval subjects and judges use Messages while gateway Claude stays compatible', async () => {
+  const { root, configPath } = writeProfiles();
+  try {
+    for (const role of ['subject', 'judge'] as const) {
+      const evaluated = createDecisionEvalModel({ profileId: 'claude-native', role,
+        env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
+      assert.ok(evaluated.model instanceof HostChatAnthropic);
+      assert.equal(evaluated.method, 'functionCalling');
+      assert.equal(evaluated.model.clientOptions.timeout, 120_000);
+      evaluated.model.clientOptions.fetch = async (url, init) => {
+        assert.equal(String(url), 'https://native.example.test/v1/messages');
+        const headers = new Headers(init?.headers);
+        assert.equal(headers.get('x-api-key'), 'mock-native');
+        assert.equal(headers.has('authorization'), false);
+        assert.equal(JSON.parse(String(init?.body)).max_tokens, 1024);
+        return Response.json({ id: 'mock', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5',
+          content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 } });
+      };
+      await evaluated.model.invoke('Hi');
+    }
+    const gateway = createDecisionEvalModel({ profileId: 'claude-gateway', role: 'subject',
+      env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
+    assert.equal(gateway.model instanceof HostChatAnthropic, false);
+    for (const role of ['subject', 'judge'] as const) {
+      assert.throws(() => createDecisionEvalModel({ profileId: 'claude-native', role,
+        env: { PROMPT_EVAL_CONFIG_PATH: configPath,
+          [role === 'subject' ? 'PROMPT_EVAL_SUBJECT_STRUCTURED_OUTPUT_METHOD' : 'PROMPT_EVAL_JUDGE_STRUCTURED_OUTPUT_METHOD']: 'jsonSchema' } }), /functionCalling only/);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

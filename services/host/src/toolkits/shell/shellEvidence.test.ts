@@ -72,3 +72,30 @@ test('cd/cwd and explicit make filename resolve without falling back to unrelate
   assert.equal(files[0].path, join(cwd, 'sub', 'tasks.mk'));
   assert.equal(snapshots(await collectShellEvidence({ command: 'npm --prefix sub run build' }, cwd)).length, 0);
 });
+
+test('interpreter options explicitly leave entry source unresolved instead of guessing an operand', async t => {
+  const cwd = await fixture(t);
+  await mkdir(join(cwd, 'scripts'));
+  await writeFile(join(cwd, 'scripts/build.js'), 'console.log("must not silently assume this entry");');
+  await writeFile(join(cwd, 'script.sh'), 'echo script');
+  for (const command of ['node --enable-source-maps scripts/build.js', 'bash -e script.sh']) {
+    const direct = await collectShellEvidence({ command }, cwd);
+    assert.deepEqual(snapshots(direct), []);
+    assert.ok(direct.includes('Unresolved script entry:'), command);
+    await writeFile(join(cwd, 'package.json'), JSON.stringify({ scripts: { build: command } }));
+    const indirect = await collectShellEvidence({ command: 'npm run build' }, cwd);
+    assert.deepEqual(snapshots(indirect).map(file => file.path), [join(cwd, 'package.json')]);
+    assert.ok(indirect.includes('Unresolved script entry:'), command);
+  }
+});
+
+test('unresolved cd suppresses misleading source snapshots from literal tilde and dash directories', async t => {
+  const cwd = await fixture(t);
+  for (const directory of ['~/app', '-']) {
+    await mkdir(join(cwd, directory), { recursive: true });
+    await writeFile(join(cwd, directory, 'package.json'), JSON.stringify({ scripts: { build: 'echo wrong package' } }));
+    const evidence = await collectShellEvidence({ command: `cd ${directory} && npm run build` }, cwd);
+    assert.deepEqual(snapshots(evidence), [], directory);
+    assert.ok(evidence.includes('Unresolved cwd'), directory);
+  }
+});

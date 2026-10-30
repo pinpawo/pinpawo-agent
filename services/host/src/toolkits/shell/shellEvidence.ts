@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { open, readdir } from 'node:fs/promises';
-import { dirname, resolve, basename } from 'node:path';
+import { dirname, resolve, basename, isAbsolute } from 'node:path';
 import { parse } from 'shell-quote';
 
 const LIMIT = 24_000;
@@ -11,6 +11,7 @@ export async function collectShellEvidence(input: unknown, workdir: string | nul
   const args = input as { command?: unknown; cwd?: unknown } | null;
   if (typeof args?.command !== 'string') return 'Unavailable: missing command.';
   let cwd = resolve(workdir ?? process.cwd(), typeof args.cwd === 'string' ? args.cwd : '.');
+  let cwdKnown = true;
   const facts: string[] = ['Static source snapshots; includes do not prove complete execution semantics. Files can change after review.'];
   const seen = new Set<string>();
   let remaining = LIMIT;
@@ -34,10 +35,23 @@ export async function collectShellEvidence(input: unknown, workdir: string | nul
     } catch { note(`Unavailable: cannot read ${path}`); return null; }
     finally { await file?.close(); }
   }
-  async function entry(script: string, directory: string) {
-    // Only direct literal file operands. Other programs and transitive imports remain unverified.
-    const match = /^(?:node|python3?|bash|sh)\s+(?!-)([^\s;&|]+)|^(\.\/?[^\s;&|]+\.(?:sh|js|mjs|cjs|py))\b/.exec(script);
-    if (match) await read(resolve(directory, match[1] ?? match[2]));
+  async function entry(script: string | string[], directory: string) {
+    // Deliberately do not guess interpreter option arity or executable shell syntax.
+    let argv;
+    try { argv = typeof script === 'string' ? parse(script, name => '${' + name + '}') : script; }
+    catch { note(`Unresolved script entry: ${JSON.stringify(script)}`); return; }
+    if (!argv.every((word): word is string => typeof word === 'string')) {
+      note(`Unresolved script entry: ${JSON.stringify(script)}`); return;
+    }
+    const [program, ...operands] = argv;
+    if (!program) return;
+    const interpreter = /^(?:node|python3?|bash|sh)$/.test(basename(program));
+    const file = interpreter ? operands[0] : /\.(?:sh|js|mjs|cjs|py)$/.test(program) ? program : undefined;
+    if (!file || file.startsWith('-') || /[$`~]/.test(file)) {
+      if (interpreter || file) note(`Unresolved script entry: ${JSON.stringify(script)}`);
+      return;
+    }
+    await read(resolve(directory, file));
   }
   async function packageEvidence(directory: string, script: string | undefined, workspace?: string, searchUp = true) {
     let path = resolve(directory, 'package.json');
@@ -101,7 +115,22 @@ export async function collectShellEvidence(input: unknown, workdir: string | nul
   async function inspect() {
     if (!words.length) return;
     const [program, ...rest] = words;
-    if (program === 'cd' && rest.length === 1 && !/[$`]/.test(rest[0])) { cwd = resolve(cwd, rest[0]); return; }
+    if (program === 'cd') {
+      const target = rest[0];
+      if (rest.length !== 1 || !target || target.startsWith('-') || /[$`~]/.test(target)
+        || (!cwdKnown && !isAbsolute(target))) {
+        cwdKnown = false;
+        note(`Unresolved cwd after cd: ${JSON.stringify(rest)}; subsequent relative source paths are unverified`);
+      } else {
+        cwd = resolve(cwd, target);
+        cwdKnown = true;
+      }
+      return;
+    }
+    if (!cwdKnown) {
+      note(`Unresolved cwd: skipped source collection for ${JSON.stringify(words)}`);
+      return;
+    }
     const name = basename(program);
     if (name === 'npm') {
       let explicitPrefix = false;
@@ -139,7 +168,7 @@ export async function collectShellEvidence(input: unknown, workdir: string | nul
       }
       if (!files.length) note('Unavailable: no standard Makefile found');
       for (const file of files) await makeEvidence(resolve(directory, file), directory);
-    } else if (/^(?:node|python3?|sh|bash)$/.test(name) || /\.(?:sh|js|mjs|cjs|py)$/.test(program)) await entry(words.join(' '), cwd);
+    } else if (/^(?:node|python3?|sh|bash)$/.test(name) || /\.(?:sh|js|mjs|cjs|py)$/.test(program)) await entry(words, cwd);
     else if (['env', 'command', 'exec', 'pnpm', 'yarn', 'bun'].includes(name)) note(`Unresolved indirect execution: ${words.join(' ')}`);
   }
   for (const token of [...tokens, { op: ';' }]) {

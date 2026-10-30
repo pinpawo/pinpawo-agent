@@ -1,7 +1,8 @@
 import type { StructuredOutputMethod } from '@pinpawo/pet-agent';
-import type { ModelInputModality } from './modelProfiles';
+import type { ModelInputModality, ModelProtocol } from './modelProfiles';
 
 export type AgentLlmConfig = {
+  protocol?: ModelProtocol;
   apiKey: string;
   baseUrl: string;
   model: string;

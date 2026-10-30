@@ -45,7 +45,7 @@ export function assignToolCallIds<T extends BaseMessage>(response: T, history: r
     return blocks.map((block) => isCall(block) ? { ...(block as object), id: toolCalls[index++]!.id } : block);
   };
   const content = Array.isArray(response.content)
-    ? renamed(response.content, (block) => (block as { type?: string }).type === 'tool_call') as typeof response.content
+    ? renamed(response.content, (block) => ['tool_call', 'tool_use'].includes((block as { type?: string }).type ?? '')) as typeof response.content
     : response.content;
   const rawCalls = response.additional_kwargs?.tool_calls;
   return new AIMessage({

@@ -19,6 +19,41 @@ configuration; do not commit it or copy it into reports.
 Model credentials and endpoints come from stored profiles. Use
 `~/.pinpawo/.env` for runtime settings.
 
+## Native Anthropic
+
+Set `protocol` explicitly to `anthropic` to use Anthropic Messages through
+LangChain ChatAnthropic. Add a profile such as this under `models.profiles`:
+
+```json
+"claude-native": {
+  "id": "claude-native",
+  "label": "Claude native",
+  "provider": "anthropic",
+  "protocol": "anthropic",
+  "model": "claude-sonnet-4-5",
+  "baseUrl": "https://api.anthropic.com",
+  "apiKey": "replace-with-a-local-secret",
+  "contextWindowTokens": 200000,
+  "maxOutputTokens": 8192,
+  "structuredOutputMethod": "functionCalling",
+  "inputModalities": ["text", "image"]
+}
+```
+
+Use the API root as `baseUrl`; the SDK appends `/v1/messages`. Authentication
+uses the SDK's native `x-api-key` header. Configure limits and modalities for
+the actual model and endpoint you use. A provider label or Claude model name
+never selects the protocol. Omitted `protocol`, or `openai-compatible`, keeps
+the existing OpenAI-compatible transport, including Claude through gateways.
+
+The first native integration supports text, image input, tool histories,
+streaming/cancellation, and usage via LangChain. Structured output uses
+`functionCalling` (also the native default); native profiles with `jsonMode`
+or `jsonSchema` are rejected explicitly. The selected integration supports
+`strict` with function calling; model/endpoint support still applies. Provider
+extensions such as extended thinking, prompt-cache controls, server tools,
+Bedrock and Vertex authentication are not exposed in this profile contract.
+
 ## Select a profile at startup
 
 If the profile already exists, select it for the process:

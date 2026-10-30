@@ -1,4 +1,5 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
+import { HostChatAnthropic } from './hostChatAnthropic';
 import type { AgentLlmConfig } from '../config/agentConfig';
 import {
   requiresLlmStreaming,
@@ -18,6 +19,21 @@ export function buildHostModels(
       ? llmConfig.observeModel
       : llmConfig.model;
 
+    if (llmConfig.protocol && !['openai-compatible', 'anthropic'].includes(llmConfig.protocol)) {
+      throw new Error(`Unsupported model protocol: ${llmConfig.protocol}`);
+    }
+    if (llmConfig.protocol === 'anthropic') {
+      if (llmConfig.structuredOutputMethod && llmConfig.structuredOutputMethod !== 'functionCalling') {
+        throw new Error('anthropic currently supports structuredOutputMethod functionCalling only');
+      }
+      return new HostChatAnthropic({
+        model,
+        apiKey: llmConfig.apiKey,
+        clientOptions: { baseURL: llmConfig.baseUrl, timeout: llmConfig.timeoutMs ?? 45000 },
+        maxRetries: llmConfig.maxRetries ?? 2,
+        ...(llmConfig.maxOutputTokens ? { maxTokens: llmConfig.maxOutputTokens } : {}),
+      });
+    }
     return createReasoningPassbackChatOpenAI({
       model,
       // Leave temperature to the provider; thinking and reasoning effort also use provider defaults.

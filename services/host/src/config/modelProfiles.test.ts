@@ -391,3 +391,21 @@ test('fingerprint changes with endpoint behavior but not API key', () => {
     fingerprintModelProfile(otherEndpoint).fingerprint,
   );
 });
+
+test('native protocol is explicit, validated, resolved and included in identity', () => {
+  const gateway = parseModelProfile(storedProfile({ model: 'claude-sonnet-4-5', provider: 'Anthropic' })).profile!;
+  assert.equal(gateway.protocol, undefined);
+  const native = parseModelProfile({ ...gateway, protocol: 'anthropic' }).profile!;
+  assert.equal(native.protocol, 'anthropic');
+  assert.notEqual(fingerprintModelProfile(native).fingerprint, fingerprintModelProfile(gateway).fingerprint);
+  for (const protocol of ['unknown', '', null, false]) {
+    assert.equal(parseModelProfile({ ...gateway, protocol }).profile, undefined);
+  }
+  const explicitGateway = parseModelProfile({ ...gateway, protocol: 'openai-compatible' }).profile!;
+  assert.equal(fingerprintModelProfile(explicitGateway).fingerprint, fingerprintModelProfile(gateway).fingerprint);
+  assert.equal(parseModelProfile({ ...native, structuredOutputMethod: 'jsonMode' }).profile, undefined);
+  const snapshot = buildModelProfileRegistry({ stored: storedConfig({ primary: native }), env: {} });
+  const resolved = createLocalModelProfileRegistry({ snapshot }).resolve();
+  assert.equal(resolved.protocol, 'anthropic');
+  assert.equal(resolved.structuredOutputMethod, 'functionCalling');
+});

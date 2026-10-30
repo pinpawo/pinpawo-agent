@@ -47,7 +47,9 @@ export function buildReviewStructuredOutput(
   llmConfig: AgentLlmConfig,
 ): GlobalReviewPolicyStructuredOutputConfig | undefined {
   const method = llmConfig.structuredOutputMethod
-    ?? inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+    ?? (llmConfig.protocol === 'anthropic'
+      ? 'functionCalling'
+      : inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl));
   if (!method) return undefined;
 
   const autoRepairEnabled = llmConfig.structuredOutputAutoRepair

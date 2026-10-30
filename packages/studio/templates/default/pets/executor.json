@@ -1,5 +1,8 @@
 {
   "definitionId": "executor",
   "name": "Executor",
-  "defaultCapabilityName": "studio_execution"
+  "defaultCapabilityName": "studio_execution",
+  "sharedCapabilities": [
+    "channel_context"
+  ]
 }

@@ -61,7 +61,9 @@ resolved Host settings through `resolveHostExecutionConfig()` from
 `pinpawo/host-runtime`; review policy belongs to those settings, not model profiles.
 
 Per-Pet Capability directories are optional. The Host supplies the `general`
-fallback only when a Pet does not configure `defaultCapabilityName`.
+fallback when `defaultCapabilityName` is omitted or set to `general`. Shared
+definitions live in `.pinpawo/capabilities/` and are selected explicitly by each
+Pet JSON's `sharedCapabilities` list; installing a Plugin does not add Capabilities.
 
 `pinpawo-studio init` creates the shipped Issuer, Executor, Reviewer and Wiki definitions and Capabilities
 in the selected workdir, and an initial `PROJECT.md` in a separate durable Studio

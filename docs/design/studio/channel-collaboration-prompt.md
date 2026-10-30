@@ -24,19 +24,19 @@ Pet 的 `PET.md` 适合描述它是什么、承担什么长期定位。Channel �
 3. 运行中修改 Channel prompt 只影响后续独立派发；当前执行和其等待审批后的续跑使用同一个快照。即使 Host 重启后继续该次已持久化的审批，目标仍是使用原快照，而不是悄悄套用更新后的约定。恢复不能确定原快照时必须有明确的失败或兼容边界，不得静默串用另一个 Channel 的配置。
 4. 普通 Chat、非 Channel dispatch 和其他 Channel 的调用不继承本 Channel 片段；同一 Pet 从 A 切换到 B 再返回 A，分别使用各次调用所属的上下文。持久化绑定不自动让普通 Chat 获得 Channel 权限或回传能力。快照不追加到对话消息历史，避免反复运行积累同一段提示；但每次模型调用仍会携带本轮系统提示，因而继续占用上下文并可能产生输入 token 费用。持久化或注册提供者本身不保证模型侧缓存命中或减少费用。
 
-`channel_context` 由 Channel Plugin 维护单一定义，通过 Plugin 的可选静态 `capabilities` 出口交给 Host，合入 Pet catalog；它仍是 Agent 执行的独立分析子任务，返回总结后主 Pet 继续工作。Studio 不管理 Capability 执行，dispatch 不携带能力或提示词内容。Pet 本地同名定义优先以保留定制，Plugin 之间的同名冲突和替换 Host general 的定义在启动时失败。
+Channel 公共说明集中描述按需读取上下文、来源辨识和成员寻址；PET.md 只定义自身定位和边界，角色专用 Capability 只定义本职工作，团队角色由公告描述。消息保存、交付与是否触发仍由原有代码处理，不要求 Pet 执行这些机制。系统提示不替代读取近期对话，也不自动携带消息历史。
 
-这是对[既有领域关系设计](../host-agent-capability-toolkit.md)中“Plugin 不贡献 Capability”约束的拟议调整，需要随本 PR 明确审查；不是声称既有契约已经允许。它增加静态定义来源，不增加 Studio 能力执行器，也不改变 Agent graph、工具权限、review policy 或 dispatch 参数。自行组装 runtime 的嵌入方仍负责选择和装配共享定义；公共上下文说明仅在能力可用时建议委派。
+## 共享能力的选择与装配
 
-Channel 公共说明集中描述按需读取上下文、来源辨识和成员寻址；PET.md 只定义自身定位和边界，角色专用 Capability 只定义本职工作，团队角色由公告描述。消息保存、交付与是否触发仍由原有代码处理，不要求 Pet 执行这些机制。系统提示不替代读取近期对话，也不自动携带消息历史。已有 workdir 不自动重写；升级时应保留定制，再清理旧的公共 Capability 副本和重复协议，否则本地同名定义仍优先生效。
+共享能力是 Host 配置，定义集中在 `.pinpawo/capabilities/<directory>/CAPABILITY.md`。Pet JSON 的 `sharedCapabilities` 按文档 frontmatter `name` 显式引用，例如 `["channel_context"]`。没有引用的 Pet 不获得共享能力；Pet 私有目录中的能力继续照常加载。默认模板维护一份 `channel_context`，四个 Pet 配置分别引用它；它仍是普通分析子任务，将总结返回主 Pet。
 
-## 共享能力的待决边界
+[HostCapabilityCatalog](../../../services/host/src/hostCapabilityCatalog.ts) 复用既有目录加载、名称冲突和快照逻辑，将选中的共享定义与该 Pet 的私有定义装配。引用不存在、私有/共享同名或覆盖必需的 Host general 都明确失败，不静默优先某一来源。共享目录在一次 catalog load 中复用同一加载结果；定义或配置修改后重启 Host。
 
-当前 PR 实现是 **Channel 插件包提供静态能力，Host 加入所有 Pet 的能力列表**，不是某个 Channel 记录定义能力，也不是成员加入后才获得能力。参见 [定义加载](../../../plugins/channel/src/channelContextCapability.ts)、[Host 合并](../../../packages/studio/src/host/buildStudio.ts)与 [Channel 工具校验](../../../plugins/channel/src/channelPlugin.ts)。因此普通 Chat 和未加入 Channel 的 Pet 也能看到 `channel_context`；实际读取仍必须通过可信 Channel scope 和成员校验。公共 system prompt 的绑定校验不能视为 Capability 的选择机制。
+Channel Plugin 只提供 Toolkit 与公共上下文，不导出或自动添加 Capability；dispatch 也不携带能力或提示词。此方式保留[领域关系设计](../host-agent-capability-toolkit.md)的所有权边界，只扩展 Host 显式配置的来源选择。自行组装 runtime 的嵌入方继续负责其能力装配和上下文解析器。
 
-此处把共享定义来源与启用范围合在了一起，还在既有 [HostCapabilityCatalog](../../../services/host/src/hostCapabilityCatalog.ts) 之外引入了合并规则。它是本 PR 尚待收敛的设计问题，不能因运行测试通过就视为符合原 Accepted design。
+Capability 的选择与 Channel 的成员关系是两回事：显式选择后，该 Pet 的普通对话也可看到这项能力，但 Channel 工具仍校验可信调用 scope 和当前成员身份。加入 Channel 不改变能力清单；公告只在绑定通过校验的 Channel 运行中注入。
 
-建议让能力定义可以共享，由 Host 明确选择并通过统一 catalog 装配，Pet 继续执行普通 Capability；Channel 负责背景、公告和作用域内工具。合并前需撤回“安装插件即给所有 Pet 增加能力”的默认行为，或明确接受为新的设计。只有产品要求“加入某 Channel 才获得能力”时，才另行定义随绑定生效的能力选择；本 PR 当前没有这层机制。
+已有 workdir 不自动重写。迁移时保留定制，将共享文档集中存放，移除迁移 Pet 的同名私有副本，再添加引用；也可保留私有定义而不添加共享引用。不要同时保留同名私有定义和共享引用。具体目录与配置见 [Studio 配置](../../studio/configuration.md#per-pet-capability-directory)。
 
 ## 身份、权限与安全
 

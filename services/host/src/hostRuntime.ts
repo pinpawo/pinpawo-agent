@@ -72,6 +72,7 @@ export {
   petConfigSchema,
   PET_DOCUMENT_FILE_NAME,
   resolvePetCapabilityDirectory,
+  resolveSharedCapabilityDirectory,
   resolvePetDocumentPath,
 } from './config/petConfig';
 export type { PetConfig } from './config/petConfig';

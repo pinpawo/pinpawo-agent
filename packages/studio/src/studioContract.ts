@@ -23,7 +23,7 @@
  */
 
 import type { JsonObject } from '@pinpawo/agent-contracts';
-import type { AgentCapability, AgentToolkit, SystemPromptSection } from '@pinpawo/pet-agent';
+import type { AgentToolkit, SystemPromptSection } from '@pinpawo/pet-agent';
 import type { PetInvocationScope } from 'pinpawo/host-runtime';
 
 import type { StudioPetRegistration } from './types';
@@ -211,8 +211,8 @@ export type StudioDispatchQueue = {
  * };
  * ```
  *
- * Plugin 可以提供 Toolkit 和共享 Capability 定义。它们由 Host 组合层装配到
- * Agent；Studio core 不注册、解释或执行 Capability。
+ * Plugin 可以提供 Toolkit 定义。Capability 由 Host 根据 Pet 配置独立装配；
+ * Plugin 不注册或隐式附带 Capability，Studio core 不解释或执行 Capability。
  */
 export type StudioPlugin = {
   name: string;
@@ -220,8 +220,6 @@ export type StudioPlugin = {
   contextNamespaces?: readonly string[];
   /** Toolkit definitions owned by this Plugin and consumed only by Agent runtimes. */
   toolkits: readonly AgentToolkit[];
-  /** Shared Agent definitions assembled by the Host; a Pet's local definition takes precedence. */
-  capabilities?: readonly AgentCapability[];
   start: (context: StudioPluginContext) => Promise<void> | void;
   stop?: () => Promise<void> | void;
 };

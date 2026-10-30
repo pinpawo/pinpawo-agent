@@ -4,11 +4,6 @@
 > [issue #645](https://github.com/pinpawo/pinpawo-agent/issues/645) 跟踪
 > 更新：2026-08-16
 
-> 待审议差异：[Channel 协作提示词草案](studio/channel-collaboration-prompt.md)
-> 在 PR #1033 中提议允许 Plugin 提供静态共享 Capability 定义，由 Host 独立装配。
-> 该实现调整了下文“Plugin 不贡献 Capability”的既有约束，尚不视为本设计已正式接受的修订；
-> Capability 执行、工具绑定及 Pet runtime 所有权仍归 Agent / Host。
-
 本文固定 Host、Agent、Capability 与 Toolkit 的领域关系，并约束 Chat Host、
 Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当前公共类型
 仍以 [Capability / Toolkit V2 契约](../reference/extensions/capability-toolkit.md)
@@ -115,7 +110,9 @@ Capability 完全属于 Agent。Plugin 和 Studio 都不得注册、贡献或隐
 即使某个 Capability 会使用 Plugin 定义的 Toolkit，也必须由 Agent Host 独立装配。
 Studio Host 根据 `petId` 从
 `pets/<petId>/capabilities/<capability>/CAPABILITY.md` 严格加载。目录成员同时表达
-该 Pet 的定义来源与选择，不再通过 Pet JSON 名称列表或 Plugin resolver 装配。
+该 Pet 的私有定义来源与选择；共享定义位于 `.pinpawo/capabilities/`，由 Pet JSON 的
+`sharedCapabilities` 明确引用其名称。两类来源均由 HostCapabilityCatalog 装配，
+不通过 Plugin resolver 自动选择。
 不同 Pet 的 Capability registry 相互隔离；`general` 仍由 Agent Host 作为 baseline
 提供。
 
@@ -205,7 +202,8 @@ Browser、files、shell、web、git、github 都是普通 Toolkit：
    注入；“配置中出现 Plugin id”不等于 Studio package 依赖该 Plugin。Resolver 只返回
    Plugin，不返回 Capability；Plugin 定义的 Toolkit 必须在 resident Pet 构建前进入
    Host 的统一 inventory。Agent Capability 由 Studio Host 按 `petId` 从约定目录加载，
-   每个 Pet 的目录成员直接表达其定义与选择。
+   每个 Pet 的私有目录成员及 `sharedCapabilities` 显式引用表达其定义与选择，
+   共享定义复用同一 Host catalog 的加载与冲突规则。
 8. BrowserIntegration、BrowserProvider、LocalTools 或 RuntimeEnvironment 不能作为
    新的公共架构层；普通构造辅助不得反向定义领域模型。
 9. 如果实现需要改变稳定的 Pet Agent Chat graph、wire、checkpoint、Capability

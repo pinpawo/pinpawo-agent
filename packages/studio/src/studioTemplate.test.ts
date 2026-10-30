@@ -137,9 +137,17 @@ test('shipped Pet definitions support Issue, execution, review, and Wiki request
   const definitions = await loadPetConfigs(petsDir);
   assert.deepEqual(definitions.map(({ definitionId }) => definitionId).sort(), [...studioConfig.definitions].sort());
   assert.deepEqual(definitions.find(({ definitionId }) => definitionId === 'issuer'), {
-    definitionId: 'issuer', name: 'Issuer', defaultCapabilityName: 'studio_issue',
+    definitionId: 'issuer', name: 'Issuer', defaultCapabilityName: 'studio_issue', sharedCapabilities: ['channel_context'],
   });
   assert.ok(await loadPetDocument(petsDir, 'issuer'));
+  const sharedRoot = path.join(workdir, '.pinpawo', 'capabilities');
+  const shared = await loadCapabilityDirectory(sharedRoot);
+  assert.deepEqual(shared.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
+    { name: 'channel_context', uses: ['channel'] },
+  ]);
+  for (const definition of definitions) {
+    assert.deepEqual(definition.sharedCapabilities, ['channel_context']);
+  }
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
     '@pinpawo-plugin/scheduler', '@pinpawo-plugin/project-files', '@pinpawo-plugin/trigger',

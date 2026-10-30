@@ -4,7 +4,6 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
-import { loadChannelContextCapability } from './channelContextCapability';
 import { channelSystemContext } from './channelSystemContext';
 import { channelParticipantId } from './channelParticipants';
 import {
@@ -277,7 +276,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
 
   return {
     name: 'channel', contextNamespaces: ['channel'], sendMessage, run, toolkits: [toolkit],
-    capabilities: [loadChannelContextCapability()],
     get service() { return channelService(); },
     start: async (studio) => {
       const store = options.store

@@ -408,7 +408,7 @@ test('Entry routing accepts a tool call whose provider omitted the id', async ()
 test('Entry routing collapses a repeated identical call into one handoff', async () => {
   const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
   const { graph, seen, requests } = routingScript([new AIMessage({
-    content: '', tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+    content: [{ type: 'text', text: 'routing' }, ...['a', 'b'].map(id => ({ type: 'tool_use' as const, id, name: call.name, input: call.args }))], tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
   })]);
   const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
   assert.equal(seen.length, 1);
@@ -416,6 +416,9 @@ test('Entry routing collapses a repeated identical call into one handoff', async
   const routed = output.messages.filter((message) => AIMessage.isInstance(message) && message.tool_calls?.length);
   assert.equal(routed.length, 1);
   assert.equal((routed[0] as AIMessage).tool_calls?.length, 1);
+  const content = (routed[0] as AIMessage).content as Array<{ type: string; id?: string }>;
+  assert.deepEqual(content.filter(block => block.type === 'tool_use').map(block => block.id), ['a']);
+  assert.equal(content[0].type, 'text');
 });
 
 test('Entry routing fails on distinct calls without a repair turn', async () => {

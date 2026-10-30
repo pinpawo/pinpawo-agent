@@ -1,6 +1,6 @@
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type { ChatGenerationChunk, ChatResult } from '@langchain/core/outputs';
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   ChatOpenAI,
   ChatOpenAICompletions,
@@ -52,9 +52,15 @@ export function readReasoningContent(message: BaseMessage): string | undefined {
 export function buildCompletionsMessagesWithReasoning(
   messages: BaseMessage[],
   model: string,
+  options: { preserveSystemRole?: boolean } = {},
 ): CompletionsMessageParam[] {
   return messages.flatMap(message => {
-    const [first, ...rest] = convertMessagesToCompletionsMessageParams({ messages: [message], model });
+    const [converted, ...rest] = convertMessagesToCompletionsMessageParams({ messages: [message], model });
+    // Some OpenAI reasoning models are converted to developer automatically.
+    // Preserve the legacy Channel routing wire role only for actual SystemMessages.
+    const first = options.preserveSystemRole && SystemMessage.isInstance(message) && converted?.role === 'developer'
+      ? { ...converted, role: 'system' as const }
+      : converted;
     const reasoning = readReasoningContent(message);
     return first?.role === 'assistant' && reasoning
       ? [{ ...first, reasoning_content: reasoning }, ...rest]
@@ -85,6 +91,22 @@ async function normalizeCompletionsResponse(result: Promise<unknown>) {
 }
 
 export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
+  constructor(fields: ChatOpenAIFields, private readonly passbackOptions: { legacyMaxTokens?: boolean; preserveSystemRole?: boolean } = {}) {
+    super(fields);
+  }
+
+  override invocationParams(
+    options?: this['ParsedCallOptions'],
+    extra?: { streaming?: boolean },
+  ): ReturnType<ChatOpenAICompletions['invocationParams']> {
+    const params = super.invocationParams(options, extra);
+    if (this.passbackOptions.legacyMaxTokens && params.max_completion_tokens !== undefined) {
+      params.max_tokens = params.max_completion_tokens;
+      delete params.max_completion_tokens;
+    }
+    return params;
+  }
+
   override _generate(
     messages: BaseMessage[],
     options: CallOptions,
@@ -115,7 +137,7 @@ export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
     if (!source) return normalizeCompletionsResponse(super.completionWithRetry(request, requestOptions));
     const { [SOURCE_MESSAGES]: _source, ...rest } = requestOptions;
     return normalizeCompletionsResponse(super.completionWithRetry(
-      { ...request, messages: buildCompletionsMessagesWithReasoning(source, this.model) },
+      { ...request, messages: buildCompletionsMessagesWithReasoning(source, this.model, { preserveSystemRole: this.passbackOptions.preserveSystemRole }) },
       rest,
     ));
   }

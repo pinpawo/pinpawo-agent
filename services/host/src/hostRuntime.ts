@@ -6,7 +6,8 @@
  * capabilities, Toolkit runtimes, configuration, and checkpoints. It must not
  * import a concrete Host (Chat or Studio) or an optional Studio module.
  */
-export { buildHostModels, resolveLlmGenerationReserveTokens } from './agent/agentModels';
+export { buildHostModel, buildHostModels, resolveLlmGenerationReserveTokens } from './agent/agentModels';
+export type { HostModelGenerationOptions } from './agent/agentModels';
 export {
   createResidentPet,
   createResidentPetHost,

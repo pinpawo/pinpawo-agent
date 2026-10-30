@@ -1,4 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext, type AgentRuntimeContext } from '../runtime/context';
 import type { AgentCapability } from '../types/capability';
 import {
@@ -37,7 +37,10 @@ export type AgentRunResult = {
 
 function readReply(messages: BaseMessage[]): string {
   const last = messages.at(-1);
-  return typeof last?.content === 'string' ? last.content.trim() : '';
+  if (!last) return '';
+  if (typeof last.content === 'string') return last.content.trim();
+  // Expand blocks only for an AI reply without pending tool calls.
+  return AIMessage.isInstance(last) && !last.tool_calls?.length ? last.text.trim() : '';
 }
 
 export async function runAgent(

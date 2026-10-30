@@ -15,6 +15,7 @@ import {
 
 type ModelIndependentLlmConfig = Omit<
   AgentLlmConfig,
+  | 'protocol'
   | 'apiKey'
   | 'baseUrl'
   | 'model'
@@ -93,13 +94,16 @@ export function createLocalModelProfileRegistry(options: {
       const fingerprint = fingerprintModelProfile(effectiveProfile).fingerprint;
       return Object.freeze({
         ...llmDefaults,
+        protocol: profile.protocol ?? 'openai-compatible',
         apiKey: profile.apiKey,
         baseUrl: profile.baseUrl,
         model: profile.model,
         modelProfileId: profile.id,
         modelProfileFingerprint: fingerprint,
         inputModalities: effectiveProfile.inputModalities,
-        ...(effectiveProfile.structuredOutputMethod
+        ...(profile.protocol === 'anthropic-compatible'
+          ? { structuredOutputMethod: 'functionCalling' as const }
+          : effectiveProfile.structuredOutputMethod
           ? { structuredOutputMethod: effectiveProfile.structuredOutputMethod }
           : {}),
         ...(maxOutputTokens

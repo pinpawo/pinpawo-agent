@@ -54,6 +54,16 @@ or `jsonSchema` are rejected explicitly. The selected integration supports
 extensions such as extended thinking, prompt-cache controls, server tools,
 Bedrock and Vertex authentication are not exposed in this profile contract.
 
+This integration requires forced tool choice for structured output. Anthropic
+documents that Claude Opus 5.5 (`claude-opus-5-5`), Sonnet 5.5
+(`claude-sonnet-5-5`), Fable 5.1 (`claude-fable-5-1`), and Mythos 5.1
+(`claude-mythos-5-1`) reject forced tool choice. Native profiles using those
+model IDs, including date-suffixed snapshots, fail validation with an explicit
+error; choose a model supporting forced tool choice. This validation does not
+apply to OpenAI-compatible profiles. Other model names are not guaranteed to
+support this behavior; verify their endpoint and model capabilities. See
+[Anthropic's tool-choice documentation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools).
+
 ### Channel routing and evals
 
 Pet runs and profile-based decision/prompt evals use the selected protocol.

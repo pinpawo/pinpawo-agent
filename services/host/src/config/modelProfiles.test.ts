@@ -409,3 +409,35 @@ test('native protocol is explicit, validated, resolved and included in identity'
   assert.equal(resolved.protocol, 'anthropic');
   assert.equal(resolved.structuredOutputMethod, 'functionCalling');
 });
+
+
+test('native profiles reject models that cannot use required forced tool choice', () => {
+  for (const model of [
+    'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-mythos-5-1',
+    'claude-sonnet-5-5-20261001',
+  ]) {
+    for (const method of [undefined, 'functionCalling']) {
+      const result = parseModelProfile(storedProfile({ model, protocol: 'anthropic', structuredOutputMethod: method }));
+      assert.equal(result.profile, undefined, model);
+      assert.match(result.issues.map(issue => issue.message).join('; '), /forced tool choice/);
+    }
+    assert.ok(parseModelProfile(storedProfile({ model, protocol: 'openai-compatible' })).profile);
+    assert.ok(parseModelProfile(storedProfile({ model })).profile);
+  }
+  for (const model of ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-sonnet-5', 'custom-model']) {
+    assert.ok(parseModelProfile(storedProfile({ model, protocol: 'anthropic' })).profile, model);
+  }
+});
+
+test('unsupported native profiles are isolated and report their forced-tool limitation on selection', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile(),
+      future: storedProfile({ id: 'future', model: 'claude-opus-5-5', protocol: 'anthropic' }),
+    }),
+    env: {},
+  });
+  assert.equal(resolveModelProfile(snapshot, 'primary').id, 'primary');
+  assert.match(snapshot.unavailableProfiles.future.map(issue => issue.message).join('; '), /forced tool choice/);
+  assert.throws(() => resolveModelProfile(snapshot, 'future'), /forced tool choice/);
+});

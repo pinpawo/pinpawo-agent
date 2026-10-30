@@ -275,6 +275,15 @@ export function parseModelProfile(
   }
   const label = readNonEmptyString(value.label, 'label', issues);
   const model = readNonEmptyString(value.model, 'model', issues);
+  // These native Anthropic model families reject forced tool choice, which is
+  // required by this integration's functionCalling structured-output path.
+  if (protocol === 'anthropic' && model
+    && /^claude-(?:(?:opus|sonnet)-5-5|(?:fable|mythos)-5-1)(?:-[0-9]{8})?$/i.test(model)) {
+    issues.push({
+      code: 'invalid_profile',
+      message: 'this native Anthropic model does not support the forced tool choice required by functionCalling structured output; choose a supported model',
+    });
+  }
   const baseUrl = normalizeBaseUrl(value.baseUrl, issues);
   const apiKey = readNonEmptyString(value.apiKey, 'apiKey', issues);
   const contextWindowTokens = readPositiveInteger(

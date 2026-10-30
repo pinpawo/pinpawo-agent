@@ -32,6 +32,7 @@ test('native SDK sends Messages auth, images and tool history, and preserves usa
     assert.equal(headers.get('x-api-key'), 'mock-key');
     assert.equal(headers.has('authorization'), false);
     const body = JSON.parse(String(init?.body));
+    assert.equal('thinking' in body, false);
     assert.equal(body.max_tokens, 1024);
     assert.equal(body.parallel_tool_calls, undefined);
     assert.equal(body.tool_choice.disable_parallel_tool_use, true);
@@ -55,6 +56,7 @@ test('native SDK sends Messages auth, images and tool history, and preserves usa
 test('native structured output uses forced function tool and parses its result', async () => {
   const model = modelWithFetch(async (_url, init) => {
     const body = JSON.parse(String(init?.body));
+    assert.equal('thinking' in body, false);
     assert.equal(body.tool_choice.type, 'tool');
     assert.equal(body.response_format, undefined);
     assert.equal(body.tools[0].strict, true);
@@ -74,13 +76,37 @@ test('native stream emits text and usage through LangChain', async () => {
     ['message_stop', {}],
   ];
   const model = modelWithFetch(async (_url, init) => {
-    assert.equal(JSON.parse(String(init?.body)).stream, true);
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.stream, true);
+    assert.equal('thinking' in body, false);
     return new Response(events.map(([type, data]) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data as object })}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
   });
   const chunks = [];
   for await (const chunk of await model.stream('Hi')) chunks.push(chunk);
   assert.ok(JSON.stringify(chunks).includes('hello'));
   assert.ok(chunks.some(chunk => chunk.usage_metadata?.output_tokens === 4));
+});
+
+test('explicit native thinking settings are preserved in the request', async () => {
+  for (const thinking of [{ type: 'disabled' }, { type: 'adaptive' }] as const) {
+    let requested = false;
+    const model = new HostChatAnthropic({
+      model: config.model,
+      apiKey: config.apiKey,
+      maxRetries: 0,
+      thinking,
+      clientOptions: {
+        baseURL: config.baseUrl,
+        fetch: async (_url, init) => {
+          requested = true;
+          assert.deepEqual(JSON.parse(String(init?.body)).thinking, thinking);
+          return Response.json(response([{ type: 'text', text: 'ok' }]));
+        },
+      },
+    });
+    await model.invoke('Hi');
+    assert.equal(requested, true);
+  }
 });
 
 test('native request forwards cancellation and API errors', async () => {

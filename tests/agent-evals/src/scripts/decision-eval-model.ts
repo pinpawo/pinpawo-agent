@@ -7,12 +7,13 @@ import { resolve } from 'node:path';
 // second interpretation inside the published pet-agent runtime.
 import {
   buildModelProfileRegistry,
-  fingerprintModelProfile,
   MODEL_PROFILES_VERSION,
   resolveModelProfile,
   type ModelInputModality,
   type ModelProfileV1,
+  type ModelProfileRegistrySnapshot,
 } from '../../../../services/host/src/config/modelProfiles.ts';
+import { createLocalModelProfileRegistry } from '../../../../services/host/src/config/llmConfig.ts';
 import {
   inferLlmStructuredOutputMethod,
 } from '../../../../services/host/src/config/llmModelPresets.ts';
@@ -91,10 +92,10 @@ function inferModelFamily(model: string): string {
     ?? 'unknown';
 }
 
-export function readProfile(
+function readProfileSnapshot(
   profileId: string,
   env: EvalModelEnvironment,
-): ModelProfileV1 {
+): { profile: ModelProfileV1; snapshot: ModelProfileRegistrySnapshot } {
   if (!profileId.trim()) throw new Error('Model profile id is required.');
   if (!PROFILE_ID_PATTERN.test(profileId)) {
     throw new Error(
@@ -126,7 +127,11 @@ export function readProfile(
       PINPAWO_MODEL_PROFILE: profileId,
     },
   });
-  return resolveModelProfile(registry, profileId);
+  return { profile: resolveModelProfile(registry, profileId), snapshot: registry };
+}
+
+export function readProfile(profileId: string, env: EvalModelEnvironment): ModelProfileV1 {
+  return readProfileSnapshot(profileId, env).profile;
 }
 
 function readPricing(
@@ -193,7 +198,8 @@ export function createDecisionEvalModel(options: {
   env?: EvalModelEnvironment;
 }): DecisionEvalModel {
   const env = options.env ?? process.env;
-  const profile = readProfile(options.profileId, env);
+  const { profile, snapshot } = readProfileSnapshot(options.profileId, env);
+  const effectiveConfig = createLocalModelProfileRegistry({ snapshot }).resolve(options.profileId);
   const rolePrefix = options.role === 'judge'
     ? 'PROMPT_EVAL_JUDGE'
     : 'PROMPT_EVAL_SUBJECT';
@@ -215,13 +221,13 @@ export function createDecisionEvalModel(options: {
         ? env.DECISION_EVAL_STRUCTURED_OUTPUT_METHOD
           ?? env.DECISION_STRUCTURED_OUTPUT_METHOD
         : undefined),
-  ) ?? profile.structuredOutputMethod
+  ) ?? effectiveConfig.structuredOutputMethod
     ?? (profile.protocol === 'anthropic'
       ? 'functionCalling'
       : inferLlmStructuredOutputMethod(profile.model, profile.baseUrl));
-  const fingerprint = fingerprintModelProfile(profile).fingerprint;
+  const fingerprint = effectiveConfig.modelProfileFingerprint!;
   const model = buildHostModels({
-    ...profile,
+    ...effectiveConfig,
     structuredOutputMethod: method,
     timeoutMs: timeout,
     maxRetries: 0,
@@ -242,11 +248,11 @@ export function createDecisionEvalModel(options: {
       // remains host-private and contributes only through the fingerprint.
       endpointOrigin: projectEndpointOrigin(profile.baseUrl),
       contextWindowTokens: profile.contextWindowTokens,
-      maxOutputTokens: profile.maxOutputTokens ?? null,
+      maxOutputTokens: effectiveConfig.maxOutputTokens ?? null,
       temperature,
       reasoningEffort: 'provider-default',
       timeoutMs: timeout,
-      inputModalities: [...profile.inputModalities],
+      inputModalities: [...(effectiveConfig.inputModalities ?? profile.inputModalities)],
     },
     pricing: readPricing(profile.id, options.role, env),
   };

@@ -8,6 +8,7 @@ import {
   fingerprintModelProfile,
   resolveModelProfile,
 } from '../../../../services/host/src/config/modelProfiles.ts';
+import { createLocalModelProfileRegistry } from '../../../../services/host/src/config/llmConfig.ts';
 import type { StoredConfig } from '../../../../services/host/src/storage.ts';
 import type { ReasoningPassbackCompletions } from '../../../../services/host/src/agent/reasoningPassback.ts';
 import { HostChatAnthropic } from '../../../../services/host/src/agent/hostChatAnthropic.ts';
@@ -21,6 +22,12 @@ function writeProfiles() {
       version: 1,
       defaultProfileId: 'endpoint-a',
       profiles: {
+        'claude-preset': {
+          id: 'claude-preset', label: 'Claude preset', protocol: 'anthropic',
+          sourcePreset: 'claude-sonnet', model: 'claude-sonnet-4-6',
+          baseUrl: 'https://native.example.test', apiKey: 'mock-native',
+          contextWindowTokens: 200_000, inputModalities: ['text'],
+        },
         'claude-native': {
           id: 'claude-native', label: 'Claude native', protocol: 'anthropic',
           model: 'claude-sonnet-4-5', baseUrl: 'https://native.example.test',
@@ -297,5 +304,36 @@ test('eval temperature overrides reach OpenAI completion requests for subjects a
         assert.equal(requested, true);
       }
     }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('eval requests and metadata use Host-resolved preset output limits and modalities', async () => {
+  const { root, configPath, stored } = writeProfiles();
+  try {
+    const snapshot = buildModelProfileRegistry({
+      stored: stored as unknown as StoredConfig,
+      env: { PINPAWO_MODEL_PROFILE: 'claude-preset' },
+    });
+    const host = createLocalModelProfileRegistry({ snapshot }).resolve('claude-preset');
+    const evaluated = createDecisionEvalModel({ profileId: 'claude-preset', role: 'subject',
+      env: { PROMPT_EVAL_CONFIG_PATH: configPath } });
+    assert.ok(evaluated.model instanceof HostChatAnthropic);
+    assert.equal(host.maxOutputTokens, 64_000);
+    assert.equal(evaluated.metadata.maxOutputTokens, host.maxOutputTokens);
+    assert.deepEqual(host.inputModalities, ['text', 'image']);
+    assert.deepEqual(evaluated.metadata.inputModalities, host.inputModalities);
+    assert.equal(evaluated.metadata.fingerprint, host.modelProfileFingerprint);
+    let requested = false;
+    evaluated.model.clientOptions.fetch = async (_url, init) => {
+      requested = true;
+      const request = JSON.parse(String(init?.body));
+      assert.equal(request.max_tokens, host.maxOutputTokens);
+      return Response.json({ id: 'mock', type: 'message', role: 'assistant', model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 } });
+    };
+    await evaluated.model.invoke('Hi');
+    assert.equal(requested, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

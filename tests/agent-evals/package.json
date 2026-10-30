@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@langchain/core": "^1.2.1",
-    "@langchain/langgraph": "^1.4.7",
+    "@langchain/langgraph": "^1.5.1",
     "@langchain/openai": "^1.5.3",
     "@langfuse/client": "^5.10.0",
     "@langfuse/otel": "^5.10.0",

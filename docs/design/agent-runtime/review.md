@@ -146,12 +146,20 @@ The implementation follows these constraints:
   committing state and ending the current invocation is private to
   `PauseTaskInterrupt`. Review middleware, capability, Host, and interfaces do
   not choose that mechanism.
-- The target implementation wraps non-deterministic Review policy work in a
-  LangGraph `task()`, so resume restores its result instead of repeating it.
-- Until the upstream nested-task replay fix is released, one isolated
-  compatibility guard may inspect the current Pregel interrupt slot to skip the
-  repeated policy call. This exception is tracked by issue #749 and must not
-  become a Runtime or interface contract.
+- Review middleware wraps the global policy decision in the checkpointed
+  `toolkitReviewPolicy` LangGraph `task()`. Resume restores its result instead
+  of repeating the model call. Toolkit `request()` and deterministic
+  `canAutoApprove()` preparation still replay and must remain deterministic.
+- LangGraph 1.5.1 includes the upstream nested-task replay fix
+  ([#3028](https://github.com/langchain-ai/langgraphjs/pull/3028)); Toolkit Review
+  no longer reads private Pregel resume fields (tracked by
+  [#749](https://github.com/pinpawo/pinpawo-agent/issues/749)).
+- Checkpoints paused before this task was introduced have no recorded policy
+  result. Resuming them with the new graph can evaluate policy again; a new
+  authorization could bypass their pending human decision. Finish or cancel
+  pending reviews with the old runtime before upgrading. Cross-version resume
+  of those pending reviews is unsupported; this change provides no checkpoint
+  migration and does not alter persisted production state.
 - Stopping a run is control flow, not a subagent completion reason.
 - Pet Runtime does not read or edit checkpointer storage directly. It uses
   LangGraph graph APIs and ordinary Runtime state.

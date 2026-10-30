@@ -165,6 +165,47 @@ The implementation follows these constraints:
   LangGraph graph APIs and ordinary Runtime state.
 - Agent Session does not gain a derived `continuationAvailable` flag.
 
+## LangGraph 1.5.1 saver and message compatibility
+
+The locked `langchain` 1.5.14 `createAgent` uses `MessagesValue`, a
+`ReducedValue` with `messagesStateReducer`; it does not opt into experimental
+`MessagesDeltaValue` or `DeltaChannel`. The root Orchestrator likewise uses
+`messagesStateReducer`. No current default message path needs delta-history replay.
+
+LangGraph 1.5.0 changed the saver write-order contract
+([upstream #2961](https://github.com/langchain-ai/langgraphjs/pull/2961)). FileSaver
+persists the optional `taskPath` and numerical write index, and returns writes
+from both `getTuple()` and `list()` using the official `writesSortKey` comparator.
+Version-1 manifests remain readable: missing paths use `''`, and missing indices
+come from the existing storage key. Reads do not rewrite old manifests; a later
+write adds the metadata without changing checkpoint values or retention policy.
+This does not reconstruct task paths that old writers never recorded. Follow
+upstream's drain-before-upgrade boundary for an incomplete parallel delta-writing
+superstep, or functional tasks under Send/error-handler paths whose identities
+changed. That boundary is separate from this PR's newly checkpointed Review policy.
+It does not make every old checkpoint incompatible.
+
+FileSaver still retains only the latest checkpoint per namespace. It rejects
+unsnapshotted Delta checkpoints before publishing/pruning, and explicitly rejects
+requests for missing ancestor delta history, instead of silently rebuilding empty
+state. A DeltaChannel that snapshots every checkpoint works; other delta graphs
+need a full-history saver. This is a supported-storage boundary, not evidence of
+a failure in the current default Agent topology. No production data is migrated.
+
+LangGraph 1.5.1 also converts message chunks into ordinary messages in both
+message reducers ([upstream #3038](https://github.com/langchain-ai/langgraphjs/pull/3038)).
+FileSaver regressions exercise real `createAgent` invoke and v2/v3 streaming,
+Review interruption, tool-call edit/rejection, fresh saver instances, and the next
+model input. Parsed calls must not be rebuilt from stale `tool_call_chunks`.
+This fix is not a general synchronization rule for every message representation:
+v3 also has canonical `content` tool-call blocks. With the unchanged core 1.2.13,
+clearing only `tool_calls` while leaving those blocks can reconstruct calls on
+reload; deleting a call must update both representations. The regression fixture
+does so explicitly. Current Toolkit Review Reject retains calls with terminal
+ToolMessages, while Cancel removes the whole message; neither relies on clearing
+only that array. This separately reproduced fixture risk is not a claim of a
+production failure and does not change `reasoningPassback`.
+
 ## Interrupt abstraction
 
 Pet Runtime may implement each interrupt as a class or as an object satisfying

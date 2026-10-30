@@ -1,0 +1,207 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AIMessage, AIMessageChunk, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ChatGenerationChunk } from '@langchain/core/outputs';
+import {
+  Annotation, Command, DeltaChannel, END, START, StateGraph, interrupt, task, type StateSnapshot,
+} from '@langchain/langgraph';
+import { createAgent, createMiddleware } from 'langchain';
+import { FileSaver } from './fileSaver';
+
+for (const durability of ['async', 'exit'] as const) {
+  test(`FileSaver restores concurrent nested tasks once across partial resumes (${durability})`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'pinpawo-upgrade-replay-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'checkpoints.json');
+    const calls = { a: 0, b: 0, sibling: 0 };
+    const effects = { a: 0, b: 0 };
+    const State = Annotation.Root({
+      items: Annotation<string[]>({ reducer: (left, right) => left.concat(right), default: () => [] }),
+    });
+    type Output = typeof State.State & { __interrupt__?: Array<{ id?: string; value: unknown }> };
+    const buildGraph = () => {
+      const child = (name: 'a' | 'b') => new StateGraph(State)
+        .addNode('review', async () => {
+          const policy = await task('policy', async () => { calls[name]++; return 'needs human'; })();
+          const approved = interrupt({ name, policy });
+          assert.equal(approved, true);
+          effects[name]++;
+          return { items: [name] };
+        }).addEdge(START, 'review').addEdge('review', END).compile();
+      const a = child('a');
+      const b = child('b');
+      return new StateGraph(State)
+        .addNode('a', (_state, config) => a.invoke({ items: [] }, config))
+        .addNode('b', (_state, config) => b.invoke({ items: [] }, config))
+        .addNode('c', () => { calls.sibling++; return { items: ['c'] }; })
+        .addEdge(START, 'a').addEdge(START, 'b').addEdge(START, 'c')
+        .addEdge('a', END).addEdge('b', END).addEdge('c', END)
+        .compile({ checkpointer: new FileSaver(path) });
+    };
+    const config = { configurable: { thread_id: 'parallel-nested' }, durability };
+    let graph = buildGraph();
+    const paused = await graph.invoke({ items: [] }, config) as Output;
+    assert.equal(paused.__interrupt__?.length, 2);
+    assert.deepEqual(calls, { a: 1, b: 1, sibling: 1 });
+    const first = paused.__interrupt__!.find((item) => (item.value as { name: string }).name === 'a')!;
+    assert.ok(first.id);
+    graph = buildGraph();
+    const head = await graph.getState(config);
+    const partial = await graph.invoke(new Command({ resume: { [first.id]: true } }), {
+      ...config, configurable: { ...config.configurable, checkpoint_id: head.config.configurable?.checkpoint_id },
+    }) as Output;
+    assert.equal(partial.__interrupt__?.length, 1);
+    assert.deepEqual(effects, { a: 1, b: 0 });
+    assert.deepEqual(calls, { a: 1, b: 1, sibling: 1 });
+    graph = buildGraph();
+    const second = partial.__interrupt__![0];
+    assert.ok(second?.id);
+    const done = await graph.invoke(new Command({ resume: { [second.id]: true } }), config) as Output;
+    assert.equal(done.__interrupt__, undefined);
+    assert.deepEqual(done.items, ['a', 'b', 'c']);
+    assert.deepEqual(calls, { a: 1, b: 1, sibling: 1 });
+    assert.deepEqual(effects, { a: 1, b: 1 });
+    // Constructor GC must not drop writes needed to read the settled state.
+    const restarted = new FileSaver(path);
+    await restarted.collectThreadGarbage('parallel-nested');
+    assert.deepEqual((await buildGraph().getState(config)).values.items, done.items);
+  });
+}
+
+test('FileSaver refuses unsnapshotted DeltaChannels before latest-only pruning', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-upgrade-delta-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const State = Annotation.Root({
+    items: new DeltaChannel<string[], string>((left, writes) => left.concat(writes)),
+  });
+  const graph = new StateGraph(State).addNode('add', () => ({ items: 'next' }))
+    .addEdge(START, 'add').addEdge('add', END).compile({ checkpointer: saver });
+  await assert.rejects(graph.invoke({ items: 'first' }, {
+    configurable: { thread_id: 'delta' }, durability: 'sync',
+  }), /latest-only retention cannot persist DeltaChannel/);
+  await assert.rejects(saver.getDeltaChannelHistory({
+    config: { configurable: { thread_id: 'delta' } }, channels: ['items'],
+  }), /latest-only retention does not preserve ancestor writes/);
+});
+
+test('FileSaver restores DeltaChannels that snapshot every checkpoint', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-upgrade-delta-snapshot-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, 'checkpoints.json');
+  const State = Annotation.Root({
+    items: new DeltaChannel<string[], string>((left, writes) => left.concat(writes), { snapshotFrequency: 1 }),
+  });
+  const makeGraph = () => new StateGraph(State).addNode('add', () => ({ items: 'next' }))
+    .addEdge(START, 'add').addEdge('add', END).compile({ checkpointer: new FileSaver(path) });
+  const config = { configurable: { thread_id: 'snapshot-delta' } };
+  const result = await makeGraph().invoke({ items: 'first' }, config);
+  assert.deepEqual(result.items, ['first', 'next']);
+  assert.deepEqual((await makeGraph().getState(config)).values.items, result.items);
+});
+
+for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
+  for (const decision of ['reject', 'edit'] as const) {
+    test(`FileSaver retains normalized tool calls after ${mode}, ${decision}, and reload (#3038)`, async (t) => {
+      const root = mkdtempSync(join(tmpdir(), 'pinpawo-upgrade-message-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      const path = join(root, 'checkpoints.json');
+      let modelCalls = 0;
+      const observed: BaseMessage[][] = [];
+      class StreamingModel extends BaseChatModel {
+        _llmType() { return 'upgrade-stream-fixture'; }
+        bindTools() { return this; }
+        private response(messages: BaseMessage[]) {
+          observed.push(messages);
+          modelCalls++;
+          if (modelCalls > 1) return new AIMessageChunk({ id: 'answer', content: 'done' });
+          return new AIMessageChunk({
+            id: 'action', content: '', additional_kwargs: { fixture_marker: 'preserved' },
+            usage_metadata: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+            tool_call_chunks: [{ name: 'action_tool', args: '{"value":"original"}', id: 'call-1', index: 0 }],
+          });
+        }
+        async _generate(messages: BaseMessage[]) {
+          return { generations: [{ text: '', message: this.response(messages) }] };
+        }
+        async *_streamResponseChunks(messages: BaseMessage[]) {
+          yield new ChatGenerationChunk({ text: '', message: this.response(messages) });
+        }
+      }
+      const model = new StreamingModel({ outputVersion: 'v0' });
+      const makeAgent = () => createAgent({ model, checkpointer: new FileSaver(path), middleware: [
+        createMiddleware({ name: 'reviewFixture', afterModel: { canJumpTo: ['end'], hook: (state) => {
+          const message = state.messages.at(-1);
+          if (!AIMessage.isInstance(message) || message.id !== 'action') return;
+          interrupt({ kind: 'review' });
+          // This is the upstream bug's trigger: editing the parsed calls must
+          // not be undone by raw chunk fields when the checkpoint reloads.
+          // v3 also represents calls in canonical content blocks. Keep that
+          // representation consistent when deleting a call; core 1.2.13 will
+          // otherwise reconstruct it from content (a separate issue from raw
+          // tool_call_chunks, with the same core version before this upgrade).
+          if (decision === 'reject' && message.response_metadata.output_version === 'v1'
+            && Array.isArray(message.content)) {
+            message.content = message.content.filter((block) =>
+              typeof block !== 'object' || block.type !== 'tool_call');
+          }
+          message.tool_calls = decision === 'reject' ? [] : [{
+            id: 'call-1', name: 'action_tool', args: { value: 'edited' }, type: 'tool_call',
+          }];
+          return { messages: [message], jumpTo: 'end' as const };
+        } } }),
+      ] });
+      const config = { configurable: { thread_id: `${mode}-${decision}` } };
+      let agent = makeAgent();
+      if (mode === 'invoke') await agent.invoke({ messages: [new HumanMessage('Do the action.')] }, config);
+      else {
+        if (mode === 'streamEvents-v3') {
+          const stream = await agent.streamEvents({ messages: [new HumanMessage('Do the action.')] },
+            { ...config, version: 'v3' });
+          for await (const _event of stream) { /* Consume protocol v3's model stream. */ }
+          await stream.output;
+        } else {
+          const stream = agent.streamEvents({ messages: [new HumanMessage('Do the action.')] },
+            { ...config, version: 'v2' });
+          for await (const _event of stream) { /* Enable core model streaming callbacks. */ }
+        }
+      }
+      const saver = new FileSaver(path);
+      const tuple = await saver.getTuple(config);
+      const messages = tuple?.checkpoint.channel_values.messages as BaseMessage[];
+      const action = messages.at(-1)!;
+      assert.ok(AIMessage.isInstance(action));
+      assert.equal(AIMessageChunk.isInstance(action), false);
+      assert.equal('tool_call_chunks' in action, false);
+      // v3 projects model output through the standard protocol; v2/invoke
+      // exercise the reducer's preservation of arbitrary additional fields.
+      if (mode !== 'streamEvents-v3') assert.equal(action.additional_kwargs.fixture_marker, 'preserved');
+      assert.deepEqual(action.usage_metadata, { input_tokens: 3, output_tokens: 2, total_tokens: 5 });
+      assert.equal(tuple?.metadata?.counters_since_delta_snapshot, undefined,
+        'the locked createAgent uses MessagesValue (a full-value ReducedValue), not MessagesDeltaValue');
+      agent = makeAgent();
+      const state = await agent.getState(config) as StateSnapshot;
+      const pending = state.tasks.flatMap((item) => item.interrupts)[0];
+      assert.ok(pending?.id);
+      await agent.invoke(new Command({ resume: { [pending.id]: true } }), config);
+      agent = makeAgent();
+      const reloaded = ((await agent.getState(config)) as StateSnapshot).values.messages as BaseMessage[];
+      const savedAction = reloaded.find((message) => message.id === 'action');
+      assert.ok(AIMessage.isInstance(savedAction));
+      const expected = decision === 'reject' ? [] : [{
+        id: 'call-1', name: 'action_tool', args: { value: 'edited' }, type: 'tool_call',
+      }];
+      assert.deepEqual(savedAction.tool_calls, expected);
+      assert.equal('tool_call_chunks' in savedAction, false);
+      await agent.invoke({ messages: [new HumanMessage('Continue.')] }, config);
+      const previousAction = observed.at(-1)?.find((message) => message.id === 'action');
+      assert.ok(AIMessage.isInstance(previousAction));
+      assert.deepEqual(previousAction.tool_calls, expected, 'next model input must retain the human edit');
+      assert.equal(modelCalls, 2, 'resuming the review must not rerun the model');
+    });
+  }
+}

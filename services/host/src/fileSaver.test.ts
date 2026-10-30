@@ -879,3 +879,72 @@ test('FileSaver startup GC handles a fresh root and ignores stray files in store
   assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
   assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);
 });
+
+test('FileSaver persists task paths and sorts getTuple/list by the official writes key', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  const numericWrites = Array.from({ length: 12 }, (_, idx) => ['items', idx] as [string, unknown]);
+  await Promise.all([
+    saver.putWrites(config, numericWrites, 'task-a', 'z'),
+    saver.putWrites(config, [['items', 'early-path']], 'task-z', 'a'),
+    saver.putWrites(config, [['items', 'astral']], 'astral', '\u{10000}'),
+    saver.putWrites(config, [['items', 'BMP']], 'BMP', '\uE000'),
+    saver.putWrites(config, [['items', 'input']], 'input'),
+  ]);
+  const expected = [
+    ['input', 'items', 'input'],
+    ['task-z', 'items', 'early-path'],
+    ...numericWrites.map(([, value]) => ['task-a', 'items', value]),
+    ['BMP', 'items', 'BMP'],
+    ['astral', 'items', 'astral'],
+  ];
+  const restored = new FileSaver(filePath);
+  assert.deepEqual((await restored.getTuple(config))?.pendingWrites, expected);
+  const tuples = [];
+  for await (const tuple of restored.list(config)) tuples.push(tuple);
+  assert.deepEqual(tuples[0]?.pendingWrites, expected);
+});
+
+test('FileSaver reads pathless legacy writes and preserves their indices when appending', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, Array.from({ length: 12 }, (_, idx) => ['items', idx]), 'legacy,task');
+  const writesPath = join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '__root__', 'cp-1.json');
+  const manifest = JSON.parse(readFileSync(writesPath, 'utf8'));
+  for (const record of Object.values(manifest.writes) as Array<Record<string, unknown>>) {
+    delete record.taskPath;
+    delete record.writeIndex;
+  }
+  // Legacy insertion order must not be mistaken for numeric index order.
+  manifest.writes = Object.fromEntries(Object.entries(manifest.writes).reverse());
+  writeFileSync(writesPath, JSON.stringify(manifest));
+  const legacyBytes = readFileSync(writesPath, 'utf8');
+  const restored = new FileSaver(filePath);
+  const expected = Array.from({ length: 12 }, (_, idx) => ['legacy,task', 'items', idx]);
+  assert.deepEqual((await restored.getTuple(config))?.pendingWrites, expected);
+  assert.equal(readFileSync(writesPath, 'utf8'), legacyBytes, 'reading does not rewrite legacy data');
+  await restored.putWrites(config, [['items', 'new']], 'new-task', 'new-path');
+  assert.deepEqual((await new FileSaver(filePath).getTuple(config))?.pendingWrites,
+    [...expected, ['new-task', 'items', 'new']]);
+});
+
+
+test('FileSaver rejects replay-dependent Delta checkpoints without replacing the last valid state', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { items: ['preserved'] }), { source: 'loop', step: 1, parents: {} });
+  const deltaCheckpoint = checkpoint('cp-2', {});
+  deltaCheckpoint.channel_versions.items = 2;
+  await assert.rejects(saver.put(config, deltaCheckpoint, {
+    source: 'loop', step: 2, parents: {}, counters_since_delta_snapshot: { items: [1, 1] },
+  }), /latest-only retention cannot persist DeltaChannel/);
+  assert.equal((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.id, 'cp-1');
+  assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values.items, ['preserved']);
+});

@@ -18,6 +18,8 @@ import {
   BaseCheckpointSaver,
   WRITES_IDX_MAP,
   copyCheckpoint,
+  compareWritesSortKeys,
+  writesSortKey,
   getCheckpointId,
   type Checkpoint,
   type CheckpointListOptions,
@@ -49,6 +51,9 @@ type WritesManifest = {
     taskId: string;
     channel: string;
     valueHash: string;
+    /** Absent on pre-1.5 writes; those sort with the official empty path. */
+    taskPath?: string;
+    writeIndex?: number;
   }>;
 };
 
@@ -695,8 +700,15 @@ export class FileSaver extends BaseCheckpointSaver {
   private pendingWriteBytesFor(manifest: CheckpointManifest): [string, string, Uint8Array][] {
     const writes = this.readWritesManifest(this.writesPath(manifest.threadId, manifest.namespace, manifest.checkpointId));
     const threadDir = this.threadDir(manifest.threadId);
-    return Object.values(writes?.writes ?? {})
-      .map((record) => [record.taskId, record.channel, readObject(threadDir, record.valueHash)]);
+    return Object.entries(writes?.writes ?? {})
+      .map(([key, record]) => ({
+        record,
+        // Legacy manifests encoded the index after the last comma in the key.
+        sortKey: writesSortKey(record.taskPath ?? '', record.taskId,
+          record.writeIndex ?? Number(key.slice(key.lastIndexOf(',') + 1))),
+      }))
+      .sort((a, b) => compareWritesSortKeys(a.sortKey, b.sortKey))
+      .map(({ record }) => [record.taskId, record.channel, readObject(threadDir, record.valueHash)]);
   }
 
   /**
@@ -842,7 +854,7 @@ export class FileSaver extends BaseCheckpointSaver {
     namespace: string | undefined,
     checkpointId: string,
     outerKey: string,
-    writes: Record<string, [string, string, Uint8Array]>,
+    writes: Record<string, [string, string, Uint8Array, string, number]>,
   ) {
     const normalizedNamespace = namespace ?? '';
     const writeManifest: WritesManifest = {
@@ -858,6 +870,8 @@ export class FileSaver extends BaseCheckpointSaver {
         taskId: tuple[0],
         channel: tuple[1],
         valueHash: this.writeObject(this.threadDir(threadId), tuple[2]),
+        taskPath: tuple[3],
+        writeIndex: tuple[4],
       };
     }
     atomicWriteFile(this.writesPath(threadId, normalizedNamespace, checkpointId), JSON.stringify(writeManifest));
@@ -976,6 +990,12 @@ export class FileSaver extends BaseCheckpointSaver {
       throw new Error(`Failed to put checkpoint. Version ${checkpoint.v} is unsupported; FileSaver requires v4 or newer.`);
     }
 
+    for (const channel of Object.keys(metadata.counters_since_delta_snapshot ?? {})) {
+      if (checkpoint.channel_versions[channel] !== undefined
+        && !Object.hasOwn(checkpoint.channel_values, channel)) {
+        throw new Error(`FileSaver's latest-only retention cannot persist DeltaChannel "${channel}" without a snapshot. Use a full-history saver or snapshot every checkpoint.`);
+      }
+    }
     const preparedCheckpoint = copyCheckpoint(checkpoint);
     const [[, serializedCheckpoint], [, serializedMetadata]] = await Promise.all([
       this.serde.dumpsTyped(preparedCheckpoint),
@@ -998,7 +1018,7 @@ export class FileSaver extends BaseCheckpointSaver {
     };
   }
 
-  async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
+  async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string, taskPath = ''): Promise<void> {
     const threadId = config.configurable?.thread_id;
     const checkpointNamespace = config.configurable?.checkpoint_ns;
     const checkpointId = config.configurable?.checkpoint_id;
@@ -1016,12 +1036,14 @@ export class FileSaver extends BaseCheckpointSaver {
     await this.runExclusive(outerKey, async () => {
       await this.runStoreExclusive(async () => {
         const existingManifest = this.readWritesManifest(this.writesPath(threadId, checkpointNamespace ?? '', checkpointId));
-        const outerWrites: Record<string, [string, string, Uint8Array]> = {};
+        const outerWrites: Record<string, [string, string, Uint8Array, string, number]> = {};
         for (const [innerKey, record] of Object.entries(existingManifest?.writes ?? {})) {
           outerWrites[innerKey] = [
             record.taskId,
             record.channel,
             readObject(this.threadDir(threadId), record.valueHash),
+            record.taskPath ?? '',
+            record.writeIndex ?? Number(innerKey.slice(innerKey.lastIndexOf(',') + 1)),
           ];
         }
 
@@ -1034,6 +1056,8 @@ export class FileSaver extends BaseCheckpointSaver {
             taskId,
             channel,
             serializedValue,
+            taskPath,
+            writeIndex,
           ];
         }));
 
@@ -1062,6 +1086,11 @@ export class FileSaver extends BaseCheckpointSaver {
       const ledger = updateSessionUsageLedger(previous, id, call, baseline);
       if (ledger !== previous) atomicWriteFile(join(this.threadDir(threadId), 'usage.json'), JSON.stringify(ledger));
     });
+  }
+
+  override async getDeltaChannelHistory(options: Parameters<BaseCheckpointSaver['getDeltaChannelHistory']>[0]) {
+    if (options.channels.length === 0) return {};
+    throw new Error('FileSaver cannot reconstruct DeltaChannel history: latest-only retention does not preserve ancestor writes. Use a full-history saver or snapshot every checkpoint.');
   }
 
   async deleteThread(threadId: string): Promise<void> {

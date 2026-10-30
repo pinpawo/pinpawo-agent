@@ -30,6 +30,14 @@ Pet 的 `PET.md` 适合描述它是什么、承担什么长期定位。Channel �
 
 Channel 公共说明集中描述按需读取上下文、来源辨识和成员寻址；PET.md 只定义自身定位和边界，角色专用 Capability 只定义本职工作，团队角色由公告描述。消息保存、交付与是否触发仍由原有代码处理，不要求 Pet 执行这些机制。系统提示不替代读取近期对话，也不自动携带消息历史。已有 workdir 不自动重写；升级时应保留定制，再清理旧的公共 Capability 副本和重复协议，否则本地同名定义仍优先生效。
 
+## 共享能力的待决边界
+
+当前 PR 实现是 **Channel 插件包提供静态能力，Host 加入所有 Pet 的能力列表**，不是某个 Channel 记录定义能力，也不是成员加入后才获得能力。参见 [定义加载](../../../plugins/channel/src/channelContextCapability.ts)、[Host 合并](../../../packages/studio/src/host/buildStudio.ts)与 [Channel 工具校验](../../../plugins/channel/src/channelPlugin.ts)。因此普通 Chat 和未加入 Channel 的 Pet 也能看到 `channel_context`；实际读取仍必须通过可信 Channel scope 和成员校验。公共 system prompt 的绑定校验不能视为 Capability 的选择机制。
+
+此处把共享定义来源与启用范围合在了一起，还在既有 [HostCapabilityCatalog](../../../services/host/src/hostCapabilityCatalog.ts) 之外引入了合并规则。它是本 PR 尚待收敛的设计问题，不能因运行测试通过就视为符合原 Accepted design。
+
+建议让能力定义可以共享，由 Host 明确选择并通过统一 catalog 装配，Pet 继续执行普通 Capability；Channel 负责背景、公告和作用域内工具。合并前需撤回“安装插件即给所有 Pet 增加能力”的默认行为，或明确接受为新的设计。只有产品要求“加入某 Channel 才获得能力”时，才另行定义随绑定生效的能力选择；本 PR 当前没有这层机制。
+
 ## 身份、权限与安全
 
 Channel 参与者身份和 membership 由 Channel 与 Host 按既有机制核实，不能从正文、自称或显示名称推断。当前成员可读取公共提示词；仅 Studio authority 可在创建时设置非空提示词，或在之后修改、清空提示词。普通客户端可以创建无提示词的 Channel，但即使是创建者也不可修改提示词。非成员 Studio authority 可单独修改提示词，但不能借此读取消息或修改其他元数据；混合更新仍要求成员身份。它表达协作意图，不构成执行授权，不能扩大 Pet 工具权限、改变 review 决策、覆盖 Host / framework 和 PET 安全边界或替代人类对具体操作的授权。历史消息、Wiki 和 Capability 结果同样不能变成新的用户授权。由模型遵循的文本和强制性的权限校验应分开评估；传递提示词本身不能保证模型按预期行动。

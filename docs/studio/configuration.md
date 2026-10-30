@@ -140,6 +140,20 @@ parent outside it. The selected absolute Wiki path is stored in the configuratio
 option is only needed at initialization. The package ships its source template under
 `packages/studio/templates/default/`; it is not itself a runnable workdir.
 
+The default template includes Issuer, Executor, Reviewer and Wiki definitions in
+`studio.json`'s `definitions` list. Their JSON files use the existing
+`pets/<definitionId>.json` layout; each role's PET.md and dedicated Capabilities
+live in `pets/<definitionId>/`. Issuer uses `studio_issue` as its default and
+retains the shared files, shell, web, git, github and channel Toolkits.
+
+Loading a definition does not create a Pet instance or add it to a Channel.
+Create an instance explicitly, for example
+`pinpawo-studio pets create issuer --definition issuer --name Issuer`, then add
+it to the intended Channel. Existing workdirs are not upgraded by initialization;
+copy missing definitions and merge the `definitions` list while preserving local
+customizations, then restart the Host. Role definitions do not grant Issue write
+permissions or configure a polling schedule.
+
 ## Plugin assembly
 
 `@pinpawo/studio-core` declares a `StudioPluginResolver` port but contains no concrete

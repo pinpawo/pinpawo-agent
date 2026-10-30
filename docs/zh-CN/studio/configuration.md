@@ -7,6 +7,14 @@
 `.pinpawo/pets/<petId>/capabilities/<name>/CAPABILITY.md`。Pet 还可以在
 `.pinpawo/pets/<petId>/PET.md` 中定义跨 Capability 保持一致的工作方式。
 
+默认模板统一维护 Issuer、Executor、Reviewer 和 Wiki，并在 `definitions` 中加载这四份
+定义。JSON 沿用 `pets/<definitionId>.json`，PET.md 和专用 Capability 放在相应定义目录中。
+Issuer 的默认能力为 `studio_issue`，保留 files、shell、web、git、github 和 channel 工具。
+加载定义不会自动创建实例或加入 Channel；例如显式执行
+`pinpawo-studio pets create issuer --definition issuer --name Issuer` 后，再把实例加入目标 Channel。
+已有工作区需保留定制后补充定义、合并 `definitions` 并重启 Host，不会因初始化自动升级，
+也不会自动获得 Issue 写权限或创建定时巡检。
+
 ```json
 {
   "studioId": "content-studio",

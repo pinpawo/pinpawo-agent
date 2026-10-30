@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
+import { loadCapabilityDirectory, loadPetConfigs, loadPetDocument } from 'pinpawo/host-runtime';
 import test from 'node:test';
 import { initStudioWorkdir } from './studioTemplate';
 import { readStudioCredentialsKey } from './host/credentialsKey';
@@ -124,7 +124,7 @@ test('Studio init does not add Project Files to a custom template', async () => 
   assert.equal(await readFile(path.join(result.wikiDirectory, 'PROJECT.md'), 'utf8'), '# Project\n');
 });
 
-test('shipped Pet Capabilities support explicit execution, review, and Wiki requests', async () => {
+test('shipped Pet definitions support Issue, execution, review, and Wiki requests', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
   await initStudioWorkdir({ workdir, studioDataRoot: await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-data-')) });
 
@@ -132,7 +132,14 @@ test('shipped Pet Capabilities support explicit execution, review, and Wiki requ
     path.join(workdir, '.pinpawo', 'studio.json'),
     'utf8',
   )) as { definitions: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
-  assert.deepEqual(studioConfig.definitions, ['executor', 'reviewer', 'wiki']);
+  assert.deepEqual(studioConfig.definitions, ['issuer', 'executor', 'reviewer', 'wiki']);
+  const petsDir = path.join(workdir, '.pinpawo', 'pets');
+  const definitions = await loadPetConfigs(petsDir);
+  assert.deepEqual(definitions.map(({ definitionId }) => definitionId).sort(), [...studioConfig.definitions].sort());
+  assert.deepEqual(definitions.find(({ definitionId }) => definitionId === 'issuer'), {
+    definitionId: 'issuer', name: 'Issuer', defaultCapabilityName: 'studio_issue',
+  });
+  assert.ok(await loadPetDocument(petsDir, 'issuer'));
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
     '@pinpawo-plugin/scheduler', '@pinpawo-plugin/project-files', '@pinpawo-plugin/trigger',
@@ -158,6 +165,7 @@ test('shipped Pet Capabilities support explicit execution, review, and Wiki requ
     }],
   });
 
+  const issuerCapabilities = await loadCapabilityDirectory(path.join(petsDir, 'issuer', 'capabilities'));
   const executorCapabilities = await loadCapabilityDirectory(path.join(
     workdir,
     '.pinpawo',
@@ -179,6 +187,9 @@ test('shipped Pet Capabilities support explicit execution, review, and Wiki requ
     'wiki',
     'capabilities',
   ));
+  assert.deepEqual(issuerCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
+    { name: 'studio_issue', uses: ['files', 'shell', 'web', 'git', 'github', 'channel'] },
+  ]);
   assert.deepEqual(executorCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
     { name: 'studio_execution', uses: ['files', 'shell', 'web', 'git', 'github', 'channel'] },
   ]);

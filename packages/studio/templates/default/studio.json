@@ -1,6 +1,6 @@
 {
   "studioId": "studio",
-  "definitions": ["executor", "reviewer", "wiki"],
+  "definitions": ["issuer", "executor", "reviewer", "wiki"],
   "plugins": [
     {
       "id": "@pinpawo-plugin/studio-http",

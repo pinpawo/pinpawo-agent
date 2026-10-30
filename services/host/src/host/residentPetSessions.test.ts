@@ -49,7 +49,7 @@ const review = buildReviewSpec({
  * One Pet whose TUI sits on its active session while a Channel dispatch waits
  * for review in another. Each thread's checkpoint is a plain map entry.
  */
-async function createWaitingHost() {
+async function createWaitingHost(resolveInvocationContext?: Parameters<typeof createResidentPetHost>[0]['resolveInvocationContext']) {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-session-port-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   const threads = new Map<string, { messages: AIMessage[]; reviewing: boolean }>();
@@ -69,6 +69,7 @@ async function createWaitingHost() {
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-sessions.json'),
+    ...(resolveInvocationContext ? { resolveInvocationContext } : {}),
     graphService: {
       readThreadState: async (setup: { input: { threadId?: string } }) => {
         const thread = threads.get(setup.input.threadId ?? '');
@@ -179,26 +180,33 @@ test('an exact session is read, followed and reviewed without changing the activ
   }
 });
 
-test('channel prompt snapshots stay scoped across dispatch, queued mutation, resume and ordinary chat', async () => {
-  const { host, lifecycle, promptSnapshots } = await createWaitingHost();
-  const tuiPeer: AgentSessionPeer = { isConnected: () => true, send: () => true };
+test('provider snapshots stay scoped across dispatch, mutation, resume and ordinary chat', async () => {
   const id = 'channel:collaboration';
+  const original = [{ id, owner: 'channel', content: 'Channel A original' }];
+  const sections = new Map([
+    ['A', original],
+    ['B', [{ id, owner: 'channel', content: 'Channel B' }]],
+  ]);
+  const resolvedTargets: Array<{ petId: string; sessionId?: string; scope: { namespace: string; id: string } }> = [];
+  const { host, lifecycle, promptSnapshots } = await createWaitingHost(async (target) => {
+    resolvedTargets.push(target);
+    return sections.get(target.scope.id);
+  });
+  const tuiPeer: AgentSessionPeer = { isConnected: () => true, send: () => true };
   const onlyChannel = (sections: readonly { id: string; content: string }[]) => sections.filter((section) => section.id === id);
   try {
     await host.interaction.connect(tuiPeer);
     const a = 'pet:0000000a';
     const b = 'pet:0000000b';
-    const original = [{ id, owner: 'channel', content: 'Channel A original' }];
-    const acceptedA = host.resident.dispatch.dispatch({
+    await host.resident.dispatch.dispatch({
       request: 'A', dispatchId: 'dispatch-a', session: { id: a, create: true },
-      scope: { namespace: 'channel', id: 'A' }, systemPromptSections: original,
+      scope: { namespace: 'channel', id: 'A' },
     });
     original[0]!.content = 'Channel A edited after admission';
-    await acceptedA;
     await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-a' && event.state === 'waiting'), 'A did not suspend');
     await host.resident.dispatch.dispatch({
       request: 'B', dispatchId: 'dispatch-b', session: { id: b, create: true },
-      scope: { namespace: 'channel', id: 'B' }, systemPromptSections: [{ id, owner: 'channel', content: 'Channel B' }],
+      scope: { namespace: 'channel', id: 'B' },
     });
     await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-b' && event.state === 'waiting'), 'B did not suspend');
     const starts = promptSnapshots.filter((entry) => entry.kind === 'user_message');
@@ -214,9 +222,47 @@ test('channel prompt snapshots stay scoped across dispatch, queued mutation, res
     assert.deepEqual(onlyChannel(resume?.sections ?? []), [{ id, owner: 'channel', content: 'Channel A original' }]);
     await host.interaction.handle(tuiPeer, { type: 'chat_request', requestId: 'plain-chat', message: 'ordinary chat' });
     assert.deepEqual(onlyChannel(promptSnapshots.at(-1)?.sections ?? []), [], 'ordinary chat does not inherit a Channel prompt');
+    assert.deepEqual(resolvedTargets, [
+      { petId: 'pet', sessionId: a, scope: { namespace: 'channel', id: 'A' } },
+      { petId: 'pet', sessionId: b, scope: { namespace: 'channel', id: 'B' } },
+    ]);
   } finally {
     await host.close();
   }
+});
+
+test('a failing context provider rejects admission without creating a session', async () => {
+  const { host, lifecycle } = await createWaitingHost(async () => { throw new Error('context unavailable'); });
+  try {
+    await assert.rejects(host.resident.dispatch.dispatch({
+      request: 'work', session: { id: 'pet:0000000c', create: true }, scope: { namespace: 'channel', id: 'c' },
+    }), /context unavailable/);
+    await assert.rejects(host.sessions.snapshot('pet:0000000c'), PetSessionNotFoundError);
+    assert.equal(lifecycle.length, 0);
+  } finally {
+    await host.close();
+  }
+});
+
+test('provider receives a stable target while admission waits, and a closed Host rejects the result', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let targetSeen: { petId: string; sessionId?: string; scope: { namespace: string; id: string } } | undefined;
+  const { host, lifecycle } = await createWaitingHost(async (target) => {
+    targetSeen = target;
+    await gate;
+    return [{ id: 'context', content: 'value' }];
+  });
+  const session = { id: 'pet:0000000d', create: true };
+  const scope = { namespace: 'channel', id: 'A' };
+  const admission = host.resident.dispatch.dispatch({ request: 'work', session, scope });
+  session.id = 'pet:0000000e';
+  scope.id = 'B';
+  assert.deepEqual(targetSeen, { petId: 'pet', sessionId: 'pet:0000000d', scope: { namespace: 'channel', id: 'A' } });
+  await host.close();
+  release();
+  await assert.rejects(admission, /closing/);
+  assert.equal(lifecycle.length, 0);
 });
 
 test('an unknown session is refused without creating one', async () => {

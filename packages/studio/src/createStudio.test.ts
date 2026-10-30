@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 
-import { prepareStudio, type CreateStudioInput } from './createStudio';
+import { prepareStudio, type CreateStudioInput, type PreparedStudio } from './createStudio';
 import { StudioPetError } from './pets/studioPets';
 import { StudioPetUnavailableError, type StudioPlugin, type StudioPluginContext } from './studioContract';
 import type { StudioPetRuntime } from './types';
@@ -16,12 +16,21 @@ type StudioPetBinding = {
 /** A Studio whose Pets are the given live ports, each its own definition, created before Plugins start. */
 async function createStudio(input: Omit<CreateStudioInput, 'definitions' | 'assemblePet'> & { pets: StudioPetBinding[] }) {
   const { pets, ...rest } = input;
-  const prepared = prepareStudio({
+  let prepared: PreparedStudio;
+  prepared = prepareStudio({
     ...rest,
     definitions: pets.map(({ registration }) => ({ definitionId: registration.petId, name: registration.name })),
     assemblePet: async ({ petId }) => {
       const pet = pets.find(({ registration }) => registration.petId === petId)!;
-      return { dispatch: pet.dispatch, ...(pet.sessions ? { sessions: pet.sessions } : {}), close: async () => undefined };
+      // A real resident Host resolves its admitted invocation context through
+      // the composition port. This fake exercises that same boundary.
+      const dispatch: PetDispatchPort = { ...pet.dispatch, dispatch: async (request) => {
+        if (request.scope) await prepared.resolveInvocationContext({
+          petId, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
+        });
+        return pet.dispatch.dispatch(request);
+      } };
+      return { dispatch, ...(pet.sessions ? { sessions: pet.sessions } : {}), close: async () => undefined };
     },
   });
   await prepared.restorePets();
@@ -225,7 +234,7 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     const receipt = await admitted;
     assert.deepEqual(receipt.metadata, { nested: { value: 'original correlation' } });
     assert.equal(seen[0]?.request, 'work');
-    assert.deepEqual(seen[0]?.systemPromptSections, [{ id: 'channel:collaboration', owner: 'channel', content: 'original A' }]);
+    assert.equal(Object.hasOwn(seen[0]!, 'systemPromptSections'), false);
     assert.deepEqual(targets, [{ petId: 'worker', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' } }]);
     assert.deepEqual(seen[0]?.scope, { namespace: 'channel', id: 'a' });
     assert.deepEqual(seen[0]?.session, { id: 'worker:00000001', create: true });
@@ -234,11 +243,12 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     assert.equal(seen.length, 1, 'the original idempotency key was reserved');
     assert.equal(resolves, 1);
     sections[0]!.content = 'updated';
-    assert.equal(seen[0]?.systemPromptSections?.[0]?.content, 'original A');
     await studio.dispatch({ petId: 'worker', request: 'next', scope: { namespace: 'channel', id: 'a' }, session: { id: 'worker:00000001' } });
-    assert.equal(seen[1]?.systemPromptSections?.[0]?.content, 'updated');
+    assert.equal(resolves, 2, 'a new scoped invocation resolves context');
+    assert.equal(Object.hasOwn(seen[1]!, 'systemPromptSections'), false);
     await studio.dispatch({ petId: 'worker', request: 'ordinary', session: { id: 'worker:00000001' } });
-    assert.equal(seen[2]?.systemPromptSections, undefined);
+    assert.equal(resolves, 2, 'an unscoped invocation does not resolve Plugin context');
+    assert.equal(Object.hasOwn(seen[2]!, 'systemPromptSections'), false);
   } finally {
     await studio.shutdown();
   }

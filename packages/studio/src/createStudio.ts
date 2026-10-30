@@ -47,6 +47,8 @@ export type PreparedStudio = {
   studio: Studio;
   /** Decrypts a Pet's credentials; only for the composing Host, never for Plugins. */
   credentialSource: PetCredentialSource;
+  /** Resolve a trusted invocation's Plugin context for the composing Host. */
+  resolveInvocationContext: StudioContextProvider;
   /** Assemble the Studio's active Pets. Idempotent; activatePlugins runs it first. */
   restorePets: () => Promise<void>;
   /** Start Plugin lifecycles after the composing Host has opened interaction transports. */
@@ -168,6 +170,26 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     });
   }
 
+  // Host composition supplies this resolver to resident runtimes. Plugins own
+  // their own context; dispatch itself transports no prompt content.
+  const resolveInvocationContext: StudioContextProvider = async (target) => {
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    const namespace = target.scope.namespace;
+    const owner = contextProviderOwners.get(namespace);
+    const provider = contextProviders.get(namespace);
+    if (owner && !provider) throw new Error(`Context provider for "${namespace}" is unavailable.`);
+    if (!provider) return undefined;
+    const snapshot = Object.freeze({
+      petId: target.petId,
+      ...(target.sessionId ? { sessionId: target.sessionId } : {}),
+      scope: Object.freeze({ ...target.scope }),
+    });
+    const sections = await provider.provide(snapshot);
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    if (contextProviders.get(namespace) !== provider) throw new Error(`Context provider for "${namespace}" is unavailable.`);
+    return sections;
+  };
+
   async function dispatch(
     request: StudioDispatchRequest,
     source?: string,
@@ -202,7 +224,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     const admission = Promise.resolve().then(async () => {
       const invocationId = randomUUID();
 
-      let systemPromptSections;
       if (scope) {
         if (source && pluginNames.has(scope.namespace) && source !== scope.namespace) {
           throw new Error(`Plugin "${source}" cannot dispatch in context namespace "${scope.namespace}" owned by another Plugin.`);
@@ -211,15 +232,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         if (owner && source && source !== owner) {
           throw new Error(`Plugin "${source}" cannot dispatch in context namespace "${scope.namespace}" owned by "${owner}".`);
         }
-        const provider = contextProviders.get(scope.namespace);
-        if (owner && !provider) throw new Error(`Context provider for "${scope.namespace}" is unavailable.`);
-        if (provider) {
-          const target = Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }) });
-          const sections = await provider.provide(target);
-          if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
-          if (contextProviders.get(scope.namespace) !== provider) throw new Error(`Context provider for "${scope.namespace}" is unavailable.`);
-          systemPromptSections = sections?.map((section) => ({ ...section }));
-        }
+        if (owner && !contextProviders.has(scope.namespace)) throw new Error(`Context provider for "${scope.namespace}" is unavailable.`);
       }
 
       console.log(
@@ -230,7 +243,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         dispatchId: invocationId,
         ...(session ? { session } : {}),
         ...(scope ? { scope } : {}),
-        ...(systemPromptSections ? { systemPromptSections } : {}),
       });
 
       const receipt: StudioDispatchReceipt = Object.freeze({
@@ -384,7 +396,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     pets: registry,
     shutdown,
   };
-  return { studio, credentialSource: credentials.source, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, credentialSource: credentials.source, resolveInvocationContext, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

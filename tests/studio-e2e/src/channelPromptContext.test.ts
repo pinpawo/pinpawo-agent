@@ -13,13 +13,14 @@ import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../s
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 class ObservingModel extends BaseChatModel {
-  constructor(private readonly observe: (messages: BaseMessage[]) => void) { super({}); }
+  constructor(private readonly observe: (messages: BaseMessage[]) => void | Promise<void>) { super({}); }
   _llmType() { return 'channel-prompt-context-test'; }
   bindTools() { return this; }
   async _generate(messages: BaseMessage[]) {
-    this.observe(messages);
+    await this.observe(messages);
     return { generations: [{ message: new AIMessage('Done.'), text: 'Done.' }] };
   }
 }
@@ -35,12 +36,20 @@ test('Channel instructions reach the actual Pet model per invocation without rep
   const petMarker = randomUUID(), alpha = randomUUID(), beta = randomUUID(), revised = randomUUID();
   const observed: string[] = [];
   const nonSystemMessages: string[][] = [];
-  const model = new ObservingModel(messages => {
+  let holdNext = false;
+  let modelStarted: (() => void) | undefined;
+  let releaseModel: (() => void) | undefined;
+  const model = new ObservingModel(async messages => {
     assert.equal(messages[0]?._getType(), 'system');
     observed.push(messages[0]!.text);
     nonSystemMessages.push(messages.slice(1).map(message => message.text));
+    if (holdNext) {
+      holdNext = false;
+      await new Promise<void>(resolve => { releaseModel = resolve; modelStarted?.(); });
+    }
   });
   const channel = createChannelPlugin({ httpRoute: false });
+  const contextBridge = createInvocationContextBridge();
   let host: Awaited<ReturnType<typeof createResidentPetHost>> | undefined;
   let studio: Awaited<ReturnType<typeof createStudioWithPets>> | undefined;
   try {
@@ -59,6 +68,7 @@ Pet identity marker: ${petMarker}
       graphConfig: { ...setup.graphConfig, models: { act: model, answer: model, subagent: model } },
     });
     host = await createResidentPetHost({ petId: 'worker', petName: 'Worker', runtimeConfig: config,
+      resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory),
       checkpointer: new FileSaver(config.checkpointPath), sessionStatePath: config.tuiSessionPath,
@@ -70,6 +80,7 @@ Pet identity marker: ${petMarker}
       } as never,
     });
     studio = await createStudioWithPets({ studioId: 'prompt-e2e', plugins: [channel],
+      onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: [{ registration: { petId: 'worker', name: 'Worker' }, dispatch: host.resident.dispatch }],
     });
@@ -94,7 +105,27 @@ Pet identity marker: ${petMarker}
         assert.ok(nonSystemMessages[index]!.every(message => !message.includes(marker)), 'Channel instructions are not mixed into conversation messages');
       }
     }
+
+    // A queued run keeps the prompt snapshot from admission, even if another
+    // Channel's prompt changes before this same Pet gets to execute it.
+    const queuedRevision = randomUUID();
+    const holding = new Promise<void>(resolve => { modelStarted = resolve; });
+    holdNext = true;
+    const held = channel.sendMessage(a, { body: 'Hold this run.', mentions: [{ participantId: 'pet:worker' }] }, me);
+    await holding;
+    await channel.sendMessage(b, { body: 'Run after the held task.', mentions: [{ participantId: 'pet:worker' }] }, me);
+    await channel.service.updateChannel(me, b, { prompt: queuedRevision }, { studio: true });
+    releaseModel!();
+    await held;
+    await waitFor(async () => (await channel.service.readContext(me, b, { limit: 100 })).messages.filter(m => m.author.kind === 'pet').length === 2);
+    assert.equal(observed.length, 6);
+    assert.ok(observed[4]!.includes(revised));
+    assert.ok(observed[5]!.includes(beta));
+    assert.ok(!observed[5]!.includes(queuedRevision));
+    await sendAndWait(b, 3);
+    assert.ok(observed[6]!.includes(queuedRevision));
   } finally {
+    releaseModel?.();
     await host?.close(); await studio?.shutdown();
     await rm(root, { recursive: true, force: true });
   }

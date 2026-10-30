@@ -1,7 +1,7 @@
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
-import { copyDispatchPromptSections, withDispatchPromptSections } from './dispatchPromptContext';
+import { snapshotInvocationSections, withInvocationSections } from './invocationSystemContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
@@ -28,6 +28,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     runtimeDeps,
     graphService,
     runAgentTurn,
+    resolveInvocationContext,
     loadContext,
     sessions,
     localHandlers,
@@ -44,15 +45,20 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, systemPromptSections: suppliedSections }) => {
+    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession }) => {
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
-      const systemPromptSections = suppliedSections === undefined ? undefined : copyDispatchPromptSections(suppliedSections);
+      const session = suppliedSession ? { ...suppliedSession } : undefined;
       const petId = runtime.petId;
+      const resolved = scope && resolveInvocationContext
+        ? await resolveInvocationContext(Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }) }))
+        : undefined;
+      if (context.isClosing()) throw new Error('Resident Pet is closing.');
+      const systemPromptSections = resolved === undefined ? undefined : snapshotInvocationSections(resolved);
       // Resolve and persist before admission; neither queue time nor a TUI switch
       // may change the target. Legacy callers retain active-session behavior.
-      const target = suppliedSession
-        ? sessions.ensureDispatchSession(petId, suppliedSession.id, suppliedSession.create === true)
+      const target = session
+        ? sessions.ensureDispatchSession(petId, session.id, session.create === true)
         : undefined;
       let pendingInterrupt: PendingInterruptProjection | undefined;
       const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
@@ -97,7 +103,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                   turnSetup = turn.setup;
                   const result = await runAgentTurn({
                     ...turn,
-                    setup: withDispatchPromptSections(turn.setup, systemPromptSections),
+                    setup: withInvocationSections(turn.setup, systemPromptSections),
                     emitEvent: (event) => {
                       if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
                       // Dispatch observers follow the conversation whichever session is on screen.

@@ -15,6 +15,7 @@ import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/t
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -24,6 +25,7 @@ async function waitFor(done: () => boolean | Promise<boolean>) {
   throw new Error('Timed out');
 }
 async function fixture(root: string, pets = ['one'], reply?: (input: string) => string) {
+  const contextBridge = createInvocationContextBridge();
   const channel = createChannelPlugin({ httpRoute: false });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const calls: Array<{ petId: string; thread: string; text: string; count: number; input?: ChannelTestInput }> = [];
@@ -63,6 +65,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
       },
     };
     hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,
+      resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -71,6 +74,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
     }));
   }
   const studio = await createStudioWithPets({ studioId: 'sessions', plugins: [channel],
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     storage: { kind: 'sqlite', path: join(root, 'channels.sqlite') },
     pets: hosts.map((host, i) => ({ registration: { petId: pets[i]!, name: pets[i]! }, dispatch: host.resident.dispatch })),
   });

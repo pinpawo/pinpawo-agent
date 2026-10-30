@@ -13,13 +13,13 @@ Pet 的 `PET.md` 适合描述它是什么、承担什么长期定位。Channel �
 
 此前 Channel 有标题、说明、成员和消息；Pet 可通过 `channel_read_context` 主动读取说明和公开历史，但没有独立的协作提示词注入。Pet 的 `PET.md` 由 Host 启动时读取，并在 Pet 的各模型角色使用；Capability 定义通过各自目录装配。Channel 消息的可信作者、范围与公开输出规则仍由 [Channel 寻址、执行与状态](channel-addressing-and-execution.md) 负责。
 
-本草案为 Channel 增加独立的可选 `prompt`，供 Studio authority 配置团队协作约定；它与面向阅读者的 `description` 是不同字段，不将历史消息或 Wiki 内容自动拼成提示词。Channel Plugin 持有该配置及其存储，并向 Studio 注册通用的上下文提供者；Studio 根据可信作用域及 Pet 的会话绑定取得本次运行需要的上下文，交给 Host 组装，不引入 Studio 对具体 Channel Plugin 的依赖，也不修改 PET.md 本身。同一个 Pet 可以参加多个 Channel，各自使用独立的 `(Channel, Pet)` session 和本 Channel 的约定。
+本草案为 Channel 增加独立的可选 `prompt`，供 Studio authority 配置团队协作约定；它与面向阅读者的 `description` 是不同字段，不将历史消息或 Wiki 内容自动拼成提示词。Channel Plugin 持有该配置及其存储，并向 Studio 注册通用的上下文提供者；Studio 的标准 Host 组合层在装配 Pet runtime 时接入通用上下文解析器；自行组装 runtime 的嵌入方需要显式连接解析器。Host 根据可信作用域及 Pet 的会话绑定取得本次运行需要的上下文并组装，不引入 Studio 对具体 Channel Plugin 的依赖，也不修改 PET.md 本身。同一个 Pet 可以参加多个 Channel，各自使用独立的 `(Channel, Pet)` session 和本 Channel 的约定。
 
 ## 生命周期与作用范围
 
 设计目标如下，具体完成情况以实现和测试为准：
 
-1. Channel Plugin 启动时向 Studio 注册作用域对应的上下文提供者。经人类消息、Pet 消息、路由、schedule 或 trigger 派发 Pet 时，Channel 只传可信 scope 与已持久化的 Pet 会话绑定；Studio 调用提供者，校验绑定并取得当前 `prompt` 快照。无文本时不增加该片段。
+1. Channel Plugin 启动时向 Studio 注册作用域对应的上下文提供者。经人类消息、Pet 消息、路由、schedule 或 trigger 派发 Pet 时，Channel 只传可信 scope 与已持久化的 Pet 会话绑定；Host 经通用解析器调用 Studio 注册的提供者，校验绑定并取得当前 `prompt` 快照。无文本时不增加该片段。
 2. Host 使用已有 Agent system prompt sections，将该快照与 Pet 的根文档等上下文一起供本次运行使用，包括 Supervisor 和该运行中委派的 Capability；不将其伪装成用户消息，也不改写固定 `PET.md`。
 3. 运行中修改 Channel prompt 只影响后续独立派发；当前执行和其等待审批后的续跑使用同一个快照。即使 Host 重启后继续该次已持久化的审批，目标仍是使用原快照，而不是悄悄套用更新后的约定。恢复不能确定原快照时必须有明确的失败或兼容边界，不得静默串用另一个 Channel 的配置。
 4. 普通 Chat、非 Channel dispatch 和其他 Channel 的调用不继承本 Channel 片段；同一 Pet 从 A 切换到 B 再返回 A，分别使用各次调用所属的上下文。持久化绑定不自动让普通 Chat 获得 Channel 权限或回传能力。快照不追加到对话消息历史，避免反复运行积累同一段提示；但每次模型调用仍会携带本轮系统提示，因而继续占用上下文并可能产生输入 token 费用。持久化或注册提供者本身不保证模型侧缓存命中或减少费用。

@@ -5,7 +5,7 @@ import { atomicWriteFile } from '../atomicFile';
 import { buildTuiChatThreadId } from '../chatInterface';
 import type { PetInvocationScope } from '../host/petInvocationContext';
 import type { SystemPromptSection } from '@pinpawo/pet-agent';
-import { copyDispatchPromptSections } from '../host/dispatchPromptContext';
+import { snapshotInvocationSections } from '../host/invocationSystemContext';
 
 export type TuiSessionRecord = {
   id: string;
@@ -366,7 +366,7 @@ function readPendingDispatch(value: unknown): TuiSessionPendingDispatch | null {
   }
   let systemPromptSections: readonly SystemPromptSection[] | undefined;
   try {
-    if (record.systemPromptSections !== undefined) systemPromptSections = copyDispatchPromptSections(record.systemPromptSections);
+    if (record.systemPromptSections !== undefined) systemPromptSections = snapshotInvocationSections(record.systemPromptSections);
   } catch { return null; }
   return {
     interruptId,

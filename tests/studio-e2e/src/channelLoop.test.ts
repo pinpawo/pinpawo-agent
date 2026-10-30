@@ -14,6 +14,7 @@ import { createTestModelProfiles } from '../../../services/host/src/testing/mode
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -25,6 +26,7 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
 
 test('one member protocol drives a normal Pet loop, same-session inputs and actual global queue observations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-loop-'));
+  const contextBridge = createInvocationContextBridge();
   const channel = createChannelPlugin();
   const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
   const http = createStudioHttpPlugin({ port: 0, authToken: 'channel-loop-test-only' });
@@ -66,6 +68,7 @@ test('one member protocol drives a normal Pet loop, same-session inputs and actu
     }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
     const graphConfig = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
     hosts.push(await createResidentPetHost({ petId, petName: 'Same name', runtimeConfig: config,
+      resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: config.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -80,6 +83,7 @@ test('one member protocol drives a normal Pet loop, same-session inputs and actu
     }));
   }
   const studio = await createStudioWithPets({ studioId: 'loop', plugins: [channel, http],
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
     pets: hosts.map((host, i) => ({ registration: { petId: ['alpha', 'beta'][i]!, name: 'Same name' }, dispatch: host.resident.dispatch })),
   });

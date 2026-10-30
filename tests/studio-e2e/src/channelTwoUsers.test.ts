@@ -15,6 +15,7 @@ import { createTestModelProfiles } from '../../../services/host/src/testing/mode
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 const LOCAL_TOKEN = 'channel-two-users-test-only';
 
@@ -30,6 +31,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, label: string) {
  */
 test('two users with their own keys share a Channel with two Pets over HTTP and the CLI', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-two-users-'));
+  const contextBridge = createInvocationContextBridge();
   const channel = createChannelPlugin();
   const http = createStudioHttpPlugin({ port: 0, authToken: LOCAL_TOKEN });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
@@ -48,6 +50,7 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
     }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
     const graphConfig = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
     hosts.push(await createResidentPetHost({ petId, petName: name, runtimeConfig: config,
+      resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: config.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -62,6 +65,7 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
     }));
   }
   const studio = await createStudioWithPets({ studioId: 'two-users', plugins: [channel, http],
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     storage: { kind: 'sqlite', path: join(root, 'studio.sqlite') },
     pets: hosts.map((host, i) => ({ registration: pets[i]!, dispatch: host.resident.dispatch })),
   });

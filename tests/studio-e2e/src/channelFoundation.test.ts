@@ -16,6 +16,7 @@ import {
 } from '@pinpawo-plugin/channel';
 import { readChannelTestInput, readChannelTestTask } from '../../support/channelDispatchInput';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -161,6 +162,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
 
 test('real resident queue binds tools to current Channel and Pet, rejects spoofing, non-members and metadata fallback', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'channel-resident-'));
+  const contextBridge = createInvocationContextBridge();
   const runtimeConfig = buildHostRuntimeConfig(root);
   const channel = createChannelPlugin({ httpRoute: false });
   assert.deepEqual(channel.toolkits[0]!.tools.map((entry) => entry.tool.name), ['channel_read_context']);
@@ -173,6 +175,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const host = await createResidentPetHost({
     petId: 'executor', petName: 'Not the author ID', modelProfiles: createTestModelProfiles(),
+    resolveInvocationContext: contextBridge.resolveInvocationContext,
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: {
@@ -192,6 +195,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     },
   });
   const studio = await createStudioWithPets({ studioId: 's',
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     pets: [{ registration: { petId: 'executor', name: 'Executor' }, dispatch: host.resident.dispatch }], plugins: [channel],
   });
   try {

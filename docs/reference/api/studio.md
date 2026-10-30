@@ -44,7 +44,7 @@ publishing another accepted event. Simultaneous submissions share the pending
 admission Promise. Keys are scoped to producer and Pet; a failed admission releases
 the process-local reservation. This is not a durable replay or exactly-once guarantee.
 
-Plugins may declare `contextNamespaces` and register a context provider during startup. For an admitted dispatch in such a namespace, Studio asks its owner to resolve invocation-local system sections from the trusted scope, Pet and session; it passes the resulting snapshot to the Host. Providers are not HTTP inputs, and ordinary unscoped conversations do not acquire a Plugin scope. A declared provider that is unavailable causes scoped admission to fail. Context sections may be sent with each model call, so registration does not itself reduce token use.
+Plugins may declare `contextNamespaces` and register a context provider during startup. The composing Host receives a generic context resolver. For a scoped invocation, the Host asks its owner to resolve system sections from the trusted scope, Pet and session, then snapshots them for the run. Prompt content is not a dispatch parameter. The built-in Studio Host connects this resolver when constructing each resident Pet; embedded applications that assemble their own Pet runtimes must connect it explicitly. Providers are not HTTP inputs, and ordinary unscoped conversations do not acquire a Plugin scope. A declared provider that is unavailable causes scoped admission to fail. Context sections may be sent with each model call, so registration does not itself reduce token use.
 
 Plugins receive `dispatch`, `notify`, `subscribe`, `listPets`, `listDispatchQueues`, Plugin
 hook installation, and `storage`: `storage.open(migrations)` applies the Plugin's pending

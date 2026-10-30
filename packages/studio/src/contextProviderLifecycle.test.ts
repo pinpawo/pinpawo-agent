@@ -2,8 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort } from 'pinpawo/host-runtime';
 
-import { prepareStudio } from './createStudio';
+import { prepareStudio, type PreparedStudio } from './createStudio';
 import type { StudioPlugin, StudioPluginContext } from './studioContract';
+
+/** A fake resident Host uses the composition resolver, not dispatch fields. */
+function withContextResolver(
+  getPrepared: () => PreparedStudio,
+  port: PetDispatchPort,
+  onResolved?: (value: unknown) => void,
+): PetDispatchPort {
+  return { ...port, dispatch: async request => {
+    if (request.scope) {
+      const resolved = await getPrepared().resolveInvocationContext({
+        petId: 'worker', ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
+      });
+      onResolved?.(resolved);
+    }
+    return port.dispatch(request);
+  } };
+}
 
 test('a failed Plugin start rolls back its context provider and a new Studio can register it', async () => {
   let failedContext: StudioPluginContext | undefined;
@@ -27,6 +44,7 @@ test('a failed Plugin start rolls back its context provider and a new Studio can
   await failed.studio.shutdown();
 
   const received: Parameters<PetDispatchPort['dispatch']>[0][] = [];
+  const resolved: unknown[] = [];
   const dispatch: PetDispatchPort = {
     getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => undefined,
@@ -36,7 +54,7 @@ test('a failed Plugin start rolls back its context provider and a new Studio can
   const fresh = prepareStudio({
     studioId: 'fresh',
     definitions: [{ definitionId: 'worker', name: 'Worker' }],
-    assemblePet: async () => ({ dispatch, close: async () => undefined }),
+    assemblePet: async () => ({ dispatch: withContextResolver(() => fresh, dispatch, value => { resolved.push(value); }), close: async () => undefined }),
     plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
       context.registerContextProvider('channel', () => [{ id: 'channel:test', content: 'second' }]);
     } }],
@@ -46,7 +64,8 @@ test('a failed Plugin start rolls back its context provider and a new Studio can
     await fresh.studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker' });
     await fresh.activatePlugins();
     await fresh.studio.dispatch({ petId: 'worker', request: 'work', scope: { namespace: 'channel', id: 'one' } });
-    assert.deepEqual(received[0]?.systemPromptSections, [{ id: 'channel:test', content: 'second' }]);
+    assert.deepEqual(resolved[0], [{ id: 'channel:test', content: 'second' }]);
+    assert.equal(Object.hasOwn(received[0]!, 'systemPromptSections'), false);
   } finally {
     await fresh.studio.shutdown();
   }
@@ -63,7 +82,7 @@ test('a declared context namespace fails closed until its provider is active', a
   const prepared = prepareStudio({
     studioId: 'not-yet-active',
     definitions: [{ definitionId: 'worker', name: 'Worker' }],
-    assemblePet: async () => ({ dispatch, close: async () => undefined }),
+    assemblePet: async () => ({ dispatch: withContextResolver(() => prepared, dispatch), close: async () => undefined }),
     plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
       context.registerContextProvider('channel', () => []);
     } }],
@@ -112,7 +131,7 @@ for (const action of ['unregister', 'shutdown'] as const) {
     const prepared = prepareStudio({
       studioId: `provider-${action}`,
       definitions: [{ definitionId: 'worker', name: 'Worker' }],
-      assemblePet: async () => ({ dispatch, close: async () => undefined }),
+      assemblePet: async () => ({ dispatch: withContextResolver(() => prepared, dispatch), close: async () => undefined }),
       plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
         remove = context.registerContextProvider('channel', async () => {
           markStarted();

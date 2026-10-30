@@ -15,6 +15,7 @@ import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../s
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 import type { Studio } from '@pinpawo/studio-core';
 
 /** The local Host token's Studio client, as a Channel member. */
@@ -64,6 +65,7 @@ test('capability handoff reaches Channel only through the selected final root re
   let arrivedAtFinal = false, release!: () => void, betaCalls = 0;
   const holdFinal = new Promise<void>(resolve => { release = resolve; });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
+  const contextBridge = createInvocationContextBridge();
   const channel = createChannelPlugin({ httpRoute: false });
   let studio: Studio | undefined;
   try {
@@ -121,6 +123,7 @@ test('capability handoff reaches Channel only through the selected final root re
         graphConfig: { ...setup.graphConfig, models: { act: supervisor, answer: entry, subagent } },
       });
       hosts.push(await createResidentPetHost({ petId, petName: petId === 'acceptance-a' ? 'A' : 'B · Reviewer', runtimeConfig,
+        resolveInvocationContext: contextBridge.resolveInvocationContext,
         modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
         capabilities, petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
         capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -132,6 +135,7 @@ test('capability handoff reaches Channel only through the selected final root re
       }));
     }
     studio = await createStudioWithPets({ studioId: 'final-reply', plugins: [channel],
+      onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),

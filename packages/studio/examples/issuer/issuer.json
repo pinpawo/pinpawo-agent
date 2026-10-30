@@ -1,0 +1,5 @@
+{
+  "definitionId": "issuer",
+  "name": "Issuer",
+  "defaultCapabilityName": "studio_issue"
+}

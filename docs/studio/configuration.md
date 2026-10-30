@@ -169,6 +169,23 @@ to inspect messages; the prompt does not automatically include conversation hist
 Existing workdir templates are not rewritten by this setting. See the
 [Channel prompt design](../design/studio/channel-collaboration-prompt.md).
 
+For example, a Channel that coordinates project issues and delivery could use the
+following instructions. This is an example, not a default: it is never applied
+automatically. Adapt the purpose and roles to the actual Channel members.
+
+```text
+本 Channel 围绕项目事项协调进度和交付，帮助人类和成员对齐意图与结果。
+
+Issuer 关注 Issue 的意图、状态和与人类的沟通；Executor 负责实现和自验；
+Reviewer 独立判断交付是否符合意图；Wiki 关注项目知识与实际变化是否一致。
+
+结合当前上下文和事实判断如何协作，不预设固定顺序。优先处理自己职责和能力
+范围内的事；即使具备工具，也不要默认代替其他角色承担其主要工作。可以适度
+协助，但不替代其他角色的判断或人类授权。需要其他成员行动时，明确接收人并
+说明事项和必要背景；超出能力范围、缺少信息或涉及未确定的产品、架构和权限
+取舍时，说明情况并向合适的参与者或人类寻求帮助与决定。
+```
+
 Default PET.md and Capability templates contain the runtime protocol; existing
 workdirs must compare and update those files manually, preserving local instructions.
 A link to a design document does not replace the instructions loaded by the Host.

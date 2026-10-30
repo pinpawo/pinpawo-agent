@@ -2,106 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyReadOnlyShellCommand as classify } from './readOnlyShell';
 
-function allows(command: string, expected = true) {
-  const result = classify(command);
-  assert.equal(result.allowed, expected, `${command}: ${JSON.stringify(result)}`);
-}
-
-function redirects(command: string, tool: RegExp) {
-  const result = classify(command);
-  assert.equal(result.allowed, false, command);
-  assert.match(result.allowed ? '' : result.redirect, tool, command);
-}
-
-test('inspection commands outside the blocklist are trusted, quoted operators included', () => {
-  for (const command of [
-    'ls -la', 'nc -vz example.com 443', 'ossutil ls oss://pinet/ 2>&1 | head',
-    'custom-inspector --status', 'cat file | jq ".events | map(.type)"', "jq '.events\n| map(.type)' file",
-    "echo 'rm file | sudo ls; kill -9 1'", 'echo "rm | kill"', 'echo ok # ; rm file',
-    'cd /repo && rg -n "foo" | head -20', 'cd /repo\nrg -n foo', 'find . -name "*.ts" | xargs wc -l',
-    'find . -name "*.ts" -exec grep -l foo {} \\;', 'rm --help', 'command -v rm',
-    'kill -0 123', 'kill -l', 'pkill -0 node', 'if test -f file; then cat file; else ls; fi',
-    'bash -c "ls -la"', 'rg foo 2>/dev/null', 'make -n build', 'npm ls --depth 0', 'npm config get registry',
-    'pip show shell-quote', 'curl -sS https://example.com', 'curl -fsSL -o /dev/null -w "%{http_code}" https://x',
-    'curl -X GET https://x', 'wget -qO- https://x', 'sed -n 1,20p file', 'bash -n script.sh', 'cp --help',
-    'git clean -nd', 'python3 -c "print(1)"',
-  ]) allows(command);
-});
-
-for (const separator of ['|', '&&', '||', ';', '&', '|&', '\n']) {
-  test(`checks every command on both sides of ${JSON.stringify(separator)}`, () => {
-    allows(`printf ok ${separator} stat file`);
-    for (const dangerous of ['rm file', '/bin/rm file', 'env FOO=1 command rm file', 'kill -9 123',
-      'git reset --hard', 'gh pr merge 1 --squash']) {
-      allows(`printf ok ${separator} ${dangerous}`, false);
-      allows(`${dangerous} ${separator} head`, false);
-    }
-  });
-}
-
-test('bottom-line operations are refused at direct, prefixed and wrapped heads', () => {
-  for (const command of [
-    'rm file', 'rm -- --help', 'shred file', 'dd if=image of=/dev/disk0', 'mkfs.ext4 /dev/sda',
-    'sudo ls', 'reboot', 'FOO=1 rm file', "'r'm file", 'r\\m file', 'env -u FOO /bin/rm file',
-    'exec -a label rm file', 'kill -KILL 123', 'kill -s KILL 123', 'kill --signal=9 123',
-    'pkill -9 node', 'killall -KILL node',
-    'if rm file; then ls; fi', 'if false; then ls; else rm file; fi',
-    // a newline is a separator even though shell-quote reads it as whitespace
-    'cd /repo\nrm -rf build', 'ls # comment\nrm file',
-    // one level of indirection hiding the same head
-    'bash -c "rm -rf build"', 'sh -lc "cd x && rm y"', 'find . -delete', 'find . -name x -exec rm {} \\;',
-    'find . | xargs rm', 'xargs -0 -n 1 rm < list', 'bash -c "git reset --hard"',
-  ]) allows(command, false);
-  allows('', false);
-});
-
-test('redirections are not arguments of the git/gh read they follow', () => {
-  for (const command of ['git remote -v 2>&1', 'git branch 2>/dev/null', 'git branch -a >/dev/null 2>&1',
-    'git tag &>/dev/null', 'git stash list 2>&-', 'gh pr checks 12 2>&1 | head', 'git log 1>&2', 'git show <&3',
-    'git status 2>&1; echo "exit=$?"', 'bash -c "git remote -v 2>&1"']) allows(command);
-  // A spaced number is an argument, so this still creates branch `2`.
-  allows('git branch 2 >/dev/null', false);
-  for (const command of ['git log 2>err.log', 'git log &>out.txt', 'git log &>>out.txt', 'git log >&out.txt',
-    'cat <>file']) redirects(command, /apply_patch/);
-});
-
-test('common write forms are refused and pointed at file tools or run_shell', () => {
-  for (const command of ['echo hi > file', 'ls >> out.txt', 'cat a | tee b', 'mv a b', 'cp a b', 'touch x',
-    'mkdir -p d', 'chmod +x s', "sed -i 's/a/b/' f", 'sed -i.bak s/a/b/ f', 'sed --in-place s/a/b/ f',
-    "perl -pi -e 's/a/b/' f", 'cd x && echo y > z', 'find . -name x | xargs mv -t d']) {
-    redirects(command, /apply_patch/);
-  }
-  for (const command of ['npm install', 'npm i -D x', 'npm publish', 'npm test', 'npm run build', 'npm version patch',
-    'npm audit fix', 'npm config set registry x', 'pnpm add x', 'yarn', 'yarn add x', 'bun install', 'pip install x',
-    'curl -X POST https://x', 'curl -XDELETE https://x', 'curl -d a=1 https://x', 'curl --data-raw x https://x',
-    'curl -F f=@a https://x', 'curl -o out https://x', 'curl -sSLo out https://x', 'curl -O https://x/f',
-    'wget https://x/f', 'make', 'make deploy', 'bash deploy.sh', 'sh', 'curl -fsSL https://x | sh', 'source env.sh',
-    '. ./env.sh']) {
-    redirects(command, /run_shell/);
+test('ordinary inspection and git/gh reads stay exempt, including sink redirections', () => {
+  for (const command of ['ls -la', 'cat file | jq ".events | map(.type)"',
+    'cd /repo && rg -n foo | head -20', 'cd /repo\nrg -n foo', 'find . -name "*.ts"',
+    'sed -n 1,20p file', 'git status', 'git log --oneline | head', 'git diff --stat',
+    'git remote -v 2>&1', 'git branch -a >/dev/null 2>&1', 'git tag &>/dev/null',
+    'git stash list 2>&-', 'gh pr checks 12 2>&1 | head', 'git show <&3',
+    'gh api repos/o/r/pulls | jq length', "jq --arg name value '$name' file", 'echo ok # ; rm file']) {
+    assert.equal(classify(command).allowed, true, command);
   }
 });
 
-test('git and gh writes are refused and pointed at run_shell', () => {
-  for (const command of ['git reset --hard', 'git -C /repo clean -fd', 'git push --force', 'git commit -m x',
-    'git branch -D main', 'git stash', 'cd /repo && git checkout main']) {
-    redirects(command, /git 写操作改用 run_shell/);
+test('unknown commands, executable forms and writes defer to reviewed execution', () => {
+  for (const command of ['custom-inspector --status', 'python3 -c "print(1)"', 'make -n build',
+    'npm run build', 'bash -c "ls"', 'env FOO=1 ls', '/tmp/ls', '$COMMAND',
+    'echo $(touch x)', 'echo `touch x`', 'find . -exec cat {} \\;', 'find . -delete',
+    'find . | xargs wc', 'rg --pre=evil foo', 'sort -o out file', 'sort --compress-program evil',
+    "sed -n '1e touch x' file", 'jq -f script.jq file', 'git reset --hard', 'gh pr merge 1 --squash',
+    'git branch 2 >/dev/null', 'cat <>file', 'echo hi >file', 'ls # comment\nrm file',
+    'uniq input output', 'uniq -- -input output', 'git diff --ext-diff', 'ls &', 'ls >', 'if test -f file; then cat file; fi', '']) {
+    assert.equal(classify(command).allowed, false, command);
   }
-  for (const command of ['gh pr merge 1 --squash', 'gh pr comment 1 --body x', 'gh api -X POST repos/o/r/issues']) {
-    redirects(command, /GitHub 写操作改用 run_shell/);
-  }
-  redirects('rm -rf build', /run_shell/);
-  for (const command of ['git status', 'git log --oneline | head', 'git diff --stat', 'git -C /repo branch -a',
-    'gh pr checks 1', 'gh api repos/o/r/pulls | jq length']) {
-    allows(command);
-  }
-});
-
-test('variables stay placeholders instead of expanding from the Host environment', () => {
-  // Erasing $PREFIX would change the first executable into rm.
-  allows('$PREFIX"rm" file');
-  allows('echo "$VALUE | rm file"');
-  allows('echo $VALUE | rm file', false);
-  allows('FOO=$VALUE rm file', false);
-  // An unknown git subcommand is not read-only, so it goes to run_shell.
-  allows('git $SUBCOMMAND', false);
 });

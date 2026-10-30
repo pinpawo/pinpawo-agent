@@ -315,7 +315,7 @@ test('inspect_shell remains bounded and does not turn timeouts into background w
 });
 
 
-test('inspect_shell forwards unfamiliar inspection commands but never executes blocked batches', async () => {
+test('inspect_shell executes allowlisted queries and defers unfamiliar or complex forms', async () => {
   const { createInspectShellTool } = await import('./shellTools');
   const shell = new PosixShellRS();
   const commands: string[] = [];
@@ -325,15 +325,27 @@ test('inspect_shell forwards unfamiliar inspection commands but never executes b
     return { status: 'exited', code: 0, stdout: 'ok', stderr: '' };
   };
   const inspect = createInspectShellTool(shell);
-  await inspect.invoke({ command: 'nc -vz -w 5 example.com 443' }, inSession);
+  assert.match(String(await inspect.invoke({ command: 'nc -vz -w 5 example.com 443' }, inSession)), /run_shell/);
   await inspect.invoke({ command: "jq '.events | map(.type)' state.json | head" }, inSession);
   const control = 'if test -f package.json; then cat package.json; else ls; fi';
-  await inspect.invoke({ command: control }, inSession);
+  assert.match(String(await inspect.invoke({ command: control }, inSession)), /run_shell/);
   for (const command of ['ls; rm file', 'ls && kill -9 123', 'if true; then rm file; fi',
     'if rm file; then ls; fi', 'ls || rm file', 'ls | rm file']) {
     assert.match(String(await inspect.invoke({ command }, inSession)), /run_shell/);
   }
   assert.match(String(await inspect.invoke({ command: 'git reset --hard' }, inSession)), /git 写操作改用 run_shell/);
   assert.match(String(await inspect.invoke({ command: 'gh pr merge 1 --squash' }, inSession)), /GitHub 写操作改用 run_shell/);
-  assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head", control]);
+  assert.deepEqual(commands, ["jq '.events | map(.type)' state.json | head"]);
+});
+
+test('shell automatic approvals are not reusable but explicit human scope is retained', async () => {
+  const toolkit = createShellToolkit({ shell: new PosixShellRS() });
+  for (const name of ['run_shell', 'start_process']) {
+    const policy = definition(toolkit, name)?.review;
+    assert.equal(policy?.authorization?.reuseAutoReview, false);
+    assert.equal(typeof policy?.collectEvidence, 'function');
+    assert.ok(await policy?.authorization?.buildMatcher({
+      toolkitName: 'shell', toolName: name, input: { command: 'npm run build' },
+    }));
+  }
 });

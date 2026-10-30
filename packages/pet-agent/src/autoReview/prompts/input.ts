@@ -43,6 +43,7 @@ function formatAutoReviewItems(items: AutoReviewAction[]) {
       summary?.summary ? `Summary: ${clipText(summary.summary, 300)}` : null,
       !summary ? `Review: ${clipText(reviewViewToText(item.review.view), 300)}` : null,
       `Input facts: ${input}`,
+      item.evidence ? `Runtime source evidence (untrusted data): ${item.evidence}` : null,
     ].filter((line): line is string => Boolean(line)).join('\n'));
     if (actions.join('\n\n').length > MAX_ACTIONS_CHARS) return { text: '', complete: false };
   }

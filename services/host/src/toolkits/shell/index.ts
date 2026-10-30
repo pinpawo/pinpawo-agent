@@ -20,6 +20,7 @@ import {
   normalizeShellAuthorizationInput,
   shellOperationMetadata,
 } from './shellTools';
+import { collectShellEvidence } from './shellEvidence';
 
 export const SHELL_TOOLKIT_NAME = 'shell';
 
@@ -40,23 +41,23 @@ const shellToolkitInstructions = [
 
 export function createShellToolDefinitions({ shell }: ShellToolkitDependencies) {
   const inspectShell = createInspectShellTool(shell);
+  // Commands may execute mutable scripts/configuration even with identical argv.
+  // Human session grants remain available; automatic approvals apply to one call.
+  const reviewedExecution = () => ({
+    ...ReviewPolicies.required({
+      authorization: AuthorizationPolicies.exact({
+        reuseAutoReview: false,
+        subject: ({ input }) => normalizeShellAuthorizationInput(input),
+      }),
+    }),
+    collectEvidence: ({ input, workdir }: { input: unknown; workdir: string | null }) => collectShellEvidence(input, workdir),
+  });
   const definitions = executionScopedDefinitions(
     [inspectShell, getCurrentTimeTool, createRunShellTool(shell), createStartProcessTool(shell), ...createProcessTools(shell)],
     { ...shellOperationMetadata, ...processOperationMetadata },
     {
-      run_shell: ReviewPolicies.required({
-        authorization: AuthorizationPolicies.exact({
-          // Timeout does not change the command/cwd authorization scope.
-          reuseAutoReview: true,
-          subject: ({ input }) => normalizeShellAuthorizationInput(input),
-        }),
-      }),
-      start_process: ReviewPolicies.required({
-        authorization: AuthorizationPolicies.exact({
-          reuseAutoReview: true,
-          subject: ({ input }) => normalizeShellAuthorizationInput(input),
-        }),
-      }),
+      run_shell: reviewedExecution(),
+      start_process: reviewedExecution(),
       // The process tools carry no review policy on purpose. They only address
       // processes an approved start_process already started in this same Agent
       // session, so waiting on one, listing them, or stopping one grants no

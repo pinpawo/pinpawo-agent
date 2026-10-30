@@ -298,6 +298,7 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     }
     if (definition.review) {
       assertOptionalFunction(`Toolkit "${toolkit.name}" tool "${toolName}" review.canAutoApprove`, definition.review.canAutoApprove);
+      assertOptionalFunction(`Toolkit "${toolkit.name}" tool "${toolName}" review.collectEvidence`, definition.review.collectEvidence);
       const authorization = definition.review.authorization;
       if (authorization !== undefined) {
         const owner = `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization`;

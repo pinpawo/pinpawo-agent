@@ -48,3 +48,18 @@ test('AutoReviewer reads a null or missing reason as empty', async () => {
       { complete: true, assessment: { riskScore, reason: '' } });
   }
 });
+
+test('runtime evidence reaches the model as source data and shares the input budget', async () => {
+  const evidence = '/project/package.json\n{"scripts":{"build":"echo <source-marker>"}}';
+  let calls = 0;
+  const model = { withStructuredOutput: () => ({ invoke: async (messages: { content: string }[]) => {
+    calls++;
+    assert.ok(messages[1].content.includes(evidence));
+    return { riskScore: 1, reason: 'test response' };
+  } }) } as unknown as BaseChatModel;
+  const reviewer = createAutoReviewer({ model });
+  await reviewer.assess({ reviews: [{ ...action({ command: 'npm run build' }), evidence }] });
+  assert.equal(calls, 1);
+  assert.deepEqual(await reviewer.assess({ reviews: [{ ...action({ command: 'make' }), evidence: 'x'.repeat(140_000) }] }), { complete: false });
+  assert.equal(calls, 1);
+});

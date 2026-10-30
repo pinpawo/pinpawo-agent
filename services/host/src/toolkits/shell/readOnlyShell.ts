@@ -1,21 +1,8 @@
 import { parse } from 'shell-quote';
-import { shortBundle } from '../cli/cliArgs';
 import { ghWriteReason } from '../cli/ghCommands';
 import { gitWriteReason } from '../cli/gitCommands';
 
-/**
- * Admission for `inspect_shell`: a blocklist, not an allowlist.
- *
- * The model is trusted to keep mutations out of `inspect_shell`; its tool
- * description says so. This check refuses the bottom line — operations with
- * obvious irreversible effects — and the common write forms: git/gh writes,
- * file writes (redirects, `sed -i`, `mv`, `cp`, `tee`…), package installs and
- * publishes, curl/wget writes, `make` and running script files. Each refusal
- * names the tool to use instead, usually `run_shell`, where git/gh writes are
- * reviewed only in their risky forms.
- * It is not a shell parser or a sandbox: loop and case bodies, interpreter
- * code (`python -c`, `node -e`) and other dynamic code are not inspected.
- */
+/** A small admission allowlist, not a sandbox. Unrecognized forms use run_shell. */
 export type ReadOnlyShellVerdict =
   | { allowed: true }
   | { allowed: false; reason: string; redirect: string };
@@ -27,169 +14,61 @@ const FILE_TOOLS = '写文件改用 apply_patch、write_file 等文件工具；�
 const GIT_TOOLS = 'git 暂存、提交和普通推送改用 git_add、git_commit、git_push；其他 git 写操作改用 run_shell，它会走工具审批。';
 const GH_TOOLS = '创建 PR、issue 改用 gh_pr_create、gh_issue_create；其他 GitHub 写操作改用 run_shell，它会走工具审批。';
 
-const DESTRUCTIVE_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
-const KILL_COMMANDS = new Set(['kill', 'pkill', 'killall']);
-const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'time', 'nohup']);
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
-const SEPARATORS = new Set(['|', '&&', '||', ';', '&', '|&']);
-const XARGS_VALUE_FLAGS = new Set(['-I', '-n', '-P', '-L', '-d', '-E', '-s', '-a',
-  '--max-args', '--max-procs', '--max-lines', '--delimiter', '--eof', '--max-chars', '--arg-file']);
-const FIND_EXEC_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir']);
-const FILE_WRITE_COMMANDS = new Set(['mv', 'cp', 'ln', 'touch', 'mkdir', 'rmdir', 'unlink', 'chmod', 'chown',
-  'chgrp', 'truncate', 'install', 'tee', 'patch']);
-const IN_PLACE_EDITORS = new Set(['sed', 'perl']);
-/** Read-only subcommands; any other subcommand installs, publishes or runs scripts. */
-const PACKAGE_MANAGER_READS: Record<string, ReadonlySet<string>> = {
-  npm: new Set(['ls', 'list', 'll', 'la', 'view', 'v', 'info', 'show', 'outdated', 'why', 'explain', 'search',
-    'help', 'root', 'bin', 'prefix', 'doctor', 'ping', 'whoami', 'query', 'fund', 'config', 'audit']),
-  pnpm: new Set(['ls', 'list', 'll', 'why', 'outdated', 'view', 'info', 'root', 'bin', 'help', 'audit',
-    'licenses', 'config']),
-  yarn: new Set(['list', 'info', 'why', 'outdated', 'help', 'licenses', 'audit', 'bin', 'config']),
-  bun: new Set(['outdated', 'help']),
-  pip: new Set(['list', 'show', 'freeze', 'check', 'help', 'config', 'index', 'inspect', 'debug']),
-  pip3: new Set(['list', 'show', 'freeze', 'check', 'help', 'config', 'index', 'inspect', 'debug']),
-};
-const VERSION_FLAGS = new Set(['--version', '-v', '-V', '--help', '-h']);
-/** Redirections that open their target for writing. */
+const SEPARATORS = new Set(['|', '&&', '||', ';', '|&']);
 const OUTPUT_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>', '>&', '<>']);
-/** Redirections whose target is only read: an input file, a descriptor or a here-doc word. */
-const INPUT_REDIRECTS = new Set(['<', '<&', '<<', '<<<']);
+const INPUT_REDIRECTS = new Set(['<', '<&']);
 const REDIRECT_SINKS = new Set(['/dev/null', '/dev/stdout', '/dev/stderr']);
-/** `>&1`, `>&-`: duplicating or closing a descriptor writes no file. */
 const isDescriptor = (word: string = '') => /^(?:\d+|-)$/.test(word);
-/** `sh -c "…"` is followed this many levels deep. */
-const MAX_NESTING = 3;
+const READS = new Set(['cat', 'head', 'tail', 'wc', 'ls', 'pwd', 'stat', 'file', 'du', 'df',
+  'basename', 'dirname', 'realpath', 'readlink', 'echo', 'true', 'false', 'test', '[',
+  'sort', 'uniq', 'cut', 'tr', 'diff', 'cmp', 'rg', 'grep', 'jq', 'cd']);
+// These tools have executable/output options. Only the ordinary query forms bypass review.
+const FLAGS: Record<string, RegExp> = {
+  file: /^(?:--(?:help|version|mime|mime-type|mime-encoding|brief|dereference)|-[bhiLNz0]+)$/,
+  rg: /^(?:--(?:files|hidden|no-ignore|no-heading|heading|line-number|ignore-case|fixed-strings|count|files-with-matches|files-without-match|glob|type|type-add|context|before-context|after-context|color|sort|stats|max-count|max-depth|no-messages|multiline|pcre2)(?:=.*)?|-[nilLoSsvwFxzUPcHgABCemtf0-9]+)$/,
+  grep: /^(?:--(?:color|include|exclude|exclude-dir)(?:=.*)?|-[nrilLEFvwxcsHhoABCe0-9]+)$/,
+  jq: /^(?:--(?:arg|argjson|slurpfile|rawfile|raw-output|compact-output|null-input|slurp|raw-input|exit-status|sort-keys|monochrome-output)|-[rscnRejSMC]+)$/,
+  sort: /^(?:--(?:numeric-sort|reverse|unique|key|field-separator)(?:=.*)?|-[nruhkVt]+)$/,
+  diff: /^(?:--(?:stat|brief|recursive|unified|exclude)(?:=.*)?|-[uqrwaBbiIEUN0-9]+)$/,
+};
 
-const basename = (word: string = '') => word.replace(/^.*\//, '');
-const assignment = (word: string = '') => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
-const beforeDoubleDash = (args: string[]) => (args.includes('--') ? args.slice(0, args.indexOf('--')) : args);
-
-function forcesKill(args: string[]) {
-  return args.some((arg, index) => /^-(?:9|(?:sig)?kill)$/i.test(arg)
-    || /^--signal=(?:9|(?:sig)?kill)$/i.test(arg)
-    || (['-s', '--signal'].includes(arg) && /^(?:9|(?:sig)?kill)$/i.test(args[index + 1] ?? '')));
-}
-
-function checkCommand(words: string[], depth: number): Refusal | undefined {
-  const tokens = [...words];
-  while (['if', 'then', 'else', 'elif', '!'].includes(tokens[0])) tokens.shift();
-  // Resolve transparent wrappers repeatedly; quoted arguments remain arguments.
-  while (true) {
-    while (assignment(tokens[0])) tokens.shift();
-    if (!WRAPPERS.has(basename(tokens[0]))) break;
-    const wrapper = basename(tokens.shift());
-    if (wrapper === 'command' && ['-v', '-V'].includes(tokens[0])) return;
-    while (tokens[0]?.startsWith('-') || assignment(tokens[0])) {
-      const flag = tokens.shift()!;
-      if ((wrapper === 'env' && ['-u', '--unset', '-C', '--chdir'].includes(flag)) || (wrapper === 'exec' && flag === '-a')) tokens.shift();
-      if (flag === '--') break;
-    }
+function checkCommand(words: string[]): Refusal | undefined {
+  if (!words.length) return;
+  const [name, ...args] = words;
+  const refuse = (reason = `${name} 的调用形式不在免审白名单内`): Refusal => ({ reason, redirect: RUN_SHELL });
+  // Assignments, paths, wrappers and dynamic programs require review.
+  if (!/^[a-z][a-z0-9_-]*$/.test(name) && name !== '[') return refuse();
+  if (name === 'git' && args.some(arg => ['--ext-diff', '--textconv'].includes(arg))) return refuse();
+  if (name === 'git') { const reason = gitWriteReason(args); return reason ? { reason, redirect: GIT_TOOLS } : undefined; }
+  if (name === 'gh') { const reason = ghWriteReason(args); return reason ? { reason, redirect: GH_TOOLS } : undefined; }
+  if (name === 'sed') {
+    // No e/w/r extensions, script files or in-place editing. Keep the common range-print query.
+    return args[0] === '-n' && /^\d+(?:,\d+|,\$)?p$/.test(args[1] ?? '')
+      && args.slice(2).every(arg => !arg.startsWith('-')) ? undefined : refuse();
   }
-  const name = basename(tokens.shift());
-  const options = beforeDoubleDash(tokens);
-
-  if ((DESTRUCTIVE_COMMANDS.has(name) || /^mkfs\./.test(name))
-    && !options.some((arg) => ['--help', '--version'].includes(arg))) {
-    return { reason: `${name} 有不可逆副作用`, redirect: RUN_SHELL };
-  }
-  if (KILL_COMMANDS.has(name) && forcesKill(options)) {
-    return { reason: `${name} 强制终止进程`, redirect: RUN_SHELL };
-  }
-  const write = checkWrite(name, tokens);
-  if (write) return write;
-  if (name === 'git') {
-    const reason = gitWriteReason(tokens);
-    return reason ? { reason, redirect: GIT_TOOLS } : undefined;
-  }
-  if (name === 'gh') {
-    const reason = ghWriteReason(tokens);
-    return reason ? { reason, redirect: GH_TOOLS } : undefined;
-  }
-  // One level of indirection that hides the same heads.
   if (name === 'find') {
-    if (tokens.includes('-delete')) return { reason: 'find -delete 会删除文件', redirect: RUN_SHELL };
-    for (let index = 0; index < tokens.length; index += 1) {
-      if (!FIND_EXEC_ACTIONS.has(tokens[index])) continue;
-      const end = tokens.findIndex((arg, at) => at > index && (arg === ';' || arg === '+'));
-      const refusal = checkCommand(tokens.slice(index + 1, end === -1 ? undefined : end), depth);
-      if (refusal) return refusal;
-    }
+    const allowed = new Set(['-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth',
+      '-size', '-mtime', '-mmin', '-print', '-print0', '-empty', '-readable', '-writable', '-executable', '-not', '-a', '-o']);
+    return args.some(arg => arg.startsWith('-') && !allowed.has(arg)) ? refuse() : undefined;
   }
-  if (name === 'xargs') {
-    let index = 0;
-    while (tokens[index]?.startsWith('-')) index += XARGS_VALUE_FLAGS.has(tokens[index]) ? 2 : 1;
-    if (index < tokens.length) return checkCommand(tokens.slice(index), depth);
-  }
-  if (SHELLS.has(name)) {
-    const flag = options.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
-    const script = flag === -1 ? undefined : options[flag + 1];
-    if (script) return depth < MAX_NESTING ? checkSource(script, depth + 1) : undefined;
-    const syntaxOnly = options.some((arg) => shortBundle(arg).includes('n'));
-    if (!syntaxOnly && !(tokens.length > 0 && tokens.every((arg) => VERSION_FLAGS.has(arg)))) {
-      return { reason: `${name} 会运行脚本`, redirect: RUN_SHELL };
-    }
-  }
-  if (name === 'source' || name === '.') return { reason: `${name} 会运行脚本`, redirect: RUN_SHELL };
+  if (!READS.has(name)) return refuse();
+  // uniq's second positional operand is an output file; only pipeline filters bypass review.
+  if (name === 'uniq') return args.every(arg => /^-[cduiz]+$/.test(arg)) ? undefined : refuse();
+  const options = args.slice(0, args.indexOf('--') === -1 ? undefined : args.indexOf('--'));
+  if (FLAGS[name] && options.some(arg => arg.startsWith('-') && arg !== '-' && !FLAGS[name].test(arg))) return refuse();
+  if (FLAGS[name]) return undefined;
+  // Unknown output/control options use reviewed execution.
+  if (options.some(arg => /^(?:--(?:output|follow|files0-from|reference|use-compress-program)(?:=|$)|-o.+)/.test(arg))) return refuse();
+  if (['sort', 'diff', 'cat', 'ls', 'head', 'tail', 'wc', 'stat', 'file', 'du', 'df', 'cut', 'tr', 'uniq', 'cmp', 'realpath', 'readlink', 'basename', 'dirname'].includes(name)
+    && options.some(arg => arg.startsWith('--') && !/^--(?:help|version|all|human-readable|bytes|lines|words|count|recursive|dereference|format|printf|size|summarize|total|zero|zero-terminated|number|number-nonblank|show-all|color|directory|long|parents|relative-to|relative-base)(?:=|$)/.test(arg))) return refuse();
   return undefined;
-}
-
-/** Common write forms of otherwise ordinary commands. `args` excludes the program. */
-function checkWrite(name: string, args: string[]): Refusal | undefined {
-  const options = beforeDoubleDash(args);
-  if (FILE_WRITE_COMMANDS.has(name) && !options.some((arg) => VERSION_FLAGS.has(arg))) {
-    return { reason: `${name} 会写文件`, redirect: FILE_TOOLS };
-  }
-  if (IN_PLACE_EDITORS.has(name)
-    && options.some((arg) => arg.startsWith('--in-place') || (/^-[A-Za-z]*i/.test(arg) && !arg.startsWith('--')))) {
-    return { reason: `${name} -i 会原地改写文件`, redirect: FILE_TOOLS };
-  }
-  const reads = PACKAGE_MANAGER_READS[name];
-  if (reads) {
-    const subcommand = options.find((arg) => !arg.startsWith('-'));
-    const readOnly = subcommand === undefined
-      ? options.some((arg) => VERSION_FLAGS.has(arg))
-      : reads.has(subcommand)
-        && !(subcommand === 'audit' && options.includes('fix'))
-        && !(subcommand === 'config' && !['get', 'list', 'ls'].includes(options[options.indexOf(subcommand) + 1] ?? ''));
-    if (!readOnly) return { reason: `${[name, subcommand].filter(Boolean).join(' ')} 会安装、发布或运行脚本`, redirect: RUN_SHELL };
-  }
-  if (name === 'curl' && curlWrites(options)) return { reason: 'curl 会发送写请求或写文件', redirect: RUN_SHELL };
-  if (name === 'wget' && !wgetToStdout(options)) return { reason: 'wget 会下载并写文件', redirect: RUN_SHELL };
-  if (name === 'make' && !options.some((arg) => ['--dry-run', '--just-print', '--recon', '--question', '--help',
-    '--version'].includes(arg) || shortBundle(arg).some((letter) => 'nqv'.includes(letter)))) {
-    return { reason: 'make 会构建或运行任务', redirect: RUN_SHELL };
-  }
-  return undefined;
-}
-
-function curlWrites(args: string[]) {
-  return args.some((arg, index) => {
-    const next = args[index + 1] ?? '';
-    const method = arg === '-X' || arg === '--request' ? next
-      : arg.startsWith('--request=') ? arg.slice('--request='.length)
-        : /^-X./.test(arg) ? arg.slice(2) : null;
-    if (method !== null) return !['GET', 'HEAD'].includes(method.toUpperCase());
-    if (/^--(?:data|json|form|upload-file|remote-name)/.test(arg)) return true;
-    if (arg === '--output' || arg.startsWith('--output=')) {
-      const target = arg === '--output' ? next : arg.slice('--output='.length);
-      return !['-', '/dev/null'].includes(target);
-    }
-    const letters = shortBundle(arg);
-    if (letters.some((letter) => 'dFTO'.includes(letter))) return true;
-    return letters.at(-1) === 'o' && !['-', '/dev/null'].includes(next);
-  });
-}
-
-function wgetToStdout(args: string[]) {
-  return args.some((arg, index) => arg === '--spider' || arg === '--output-document=-' || /^-[A-Za-z]*O-$/.test(arg)
-    || ((arg === '--output-document' || /^-[A-Za-z]*O$/.test(arg)) && args[index + 1] === '-'));
 }
 
 /** Split on the separators shell-quote exposes and check every command head. */
-function checkSource(source: string, depth: number): Refusal | undefined {
-  // shell-quote reads a newline as plain whitespace, so each line is also
-  // checked alone; otherwise `cd x⏎rm -rf y` would hide `rm` as an argument.
-  const sources = source.includes('\n') ? [source, ...source.split('\n')] : [source];
+function checkSource(source: string): Refusal | undefined {
+  // shell-quote reads a newline as plain whitespace, so check each line
+  // alone; otherwise `cd x⏎rm -rf y` would hide `rm` as an argument.
+  const sources = source.split(/\r?\n/);
   for (const text of sources) {
     let tokens: ReturnType<typeof parse<never>>;
     try {
@@ -201,7 +80,7 @@ function checkSource(source: string, depth: number): Refusal | undefined {
       tokens = parse(unnumbered, (name) => '${' + name + '}');
     } catch {
       // Syntax validity belongs to the executing shell, not this check.
-      continue;
+      return { reason: '无法解析检查命令', redirect: RUN_SHELL };
     }
     let words: string[] = [];
     for (let index = 0; index < tokens.length; index += 1) {
@@ -212,7 +91,8 @@ function checkSource(source: string, depth: number): Refusal | undefined {
         // Redirections are not arguments: classify the command without them.
         const next = tokens[index + 1];
         const target = typeof next === 'string' ? next : '';
-        if (typeof next === 'string') index += 1;
+        if (typeof next !== 'string') return { reason: '重定向缺少目标', redirect: RUN_SHELL };
+        index += 1;
         const sink = REDIRECT_SINKS.has(target) || (token.op.endsWith('&') && isDescriptor(target));
         if (OUTPUT_REDIRECTS.has(token.op) && !sink) {
           return { reason: `重定向 ${token.op} 会写文件`, redirect: FILE_TOOLS };
@@ -220,21 +100,35 @@ function checkSource(source: string, depth: number): Refusal | undefined {
         continue;
       }
       if (!SEPARATORS.has(token.op)) {
-        words.push(token.op === 'glob' && 'pattern' in token ? token.pattern : token.op);
-        continue;
+        if (token.op === 'glob' && 'pattern' in token) { words.push(token.pattern); continue; }
+        return { reason: '动态或复杂 shell 形式需要审核', redirect: RUN_SHELL };
       }
-      const refusal = checkCommand(words, depth);
+      const refusal = checkCommand(words);
       if (refusal) return refusal;
       words = [];
     }
-    const refusal = checkCommand(words, depth);
+    const refusal = checkCommand(words);
     if (refusal) return refusal;
   }
   return undefined;
 }
 
+function hasDynamicExpansion(source: string) {
+  let quote = '';
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (char === '\\' && quote !== "'") { index++; continue; }
+    if ((char === "'" || char === '"') && (!quote || quote === char)) {
+      quote = quote ? '' : char;
+    } else if (quote !== "'" && (char === '$' || char === '`')) return true;
+  }
+  return false;
+}
+
 export function classifyReadOnlyShellCommand(command: string): ReadOnlyShellVerdict {
   if (!command.trim()) return { allowed: false, reason: '空命令', redirect: '请提供要执行的检查命令。' };
-  const refusal = checkSource(command, 0);
+  // Reject shell expansion before tokenization, which otherwise hides executable substitutions.
+  if (hasDynamicExpansion(command) || /\\\n/.test(command)) return { allowed: false, reason: '动态 shell 展开需要审核', redirect: RUN_SHELL };
+  const refusal = checkSource(command);
   return refusal ? { allowed: false, ...refusal } : { allowed: true };
 }

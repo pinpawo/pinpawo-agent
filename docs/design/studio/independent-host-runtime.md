@@ -32,7 +32,9 @@ Studio Host 外层管理资源，Studio core 只持有 PetDispatchPort；不构�
 
 Plugin 按配置名由外部 StudioPluginResolver 解析；core 不 import、扫描或安装具体 Plugin。
 Plugin 可提供 Toolkit definitions，Host 与其他来源合成 inventory，Capability 按 uses
-选择工具。Resolver 不返回 Capability，Plugin 不注册或装配 Pet，不取得其私有 runtime 引用。
+选择工具。Plugin 不贡献 Capability、不注册或装配 Pet，也不取得私有 runtime 引用。
+Studio Host 从每个 Pet 的私有能力目录及配置中显式引用的共享目录，通过既有
+HostCapabilityCatalog 统一装配；未引用的共享能力不会进入该 Pet 的 catalog。
 每 Pet 的能力目录及 PET.md 布局见[配置](../../studio/configuration.md)。
 
 ## 装配与生命周期

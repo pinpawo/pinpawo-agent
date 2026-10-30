@@ -15,6 +15,7 @@ import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/t
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -24,6 +25,7 @@ async function waitFor(done: () => boolean | Promise<boolean>) {
   throw new Error('Timed out');
 }
 async function fixture(root: string, pets = ['one'], reply?: (input: string) => string) {
+  const contextBridge = createInvocationContextBridge();
   const channel = createChannelPlugin({ httpRoute: false });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const calls: Array<{ petId: string; thread: string; text: string; count: number; input?: ChannelTestInput }> = [];
@@ -63,6 +65,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
       },
     };
     hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,
+      resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -71,6 +74,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
     }));
   }
   const studio = await createStudioWithPets({ studioId: 'sessions', plugins: [channel],
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     storage: { kind: 'sqlite', path: join(root, 'channels.sqlite') },
     pets: hosts.map((host, i) => ({ registration: { petId: pets[i]!, name: pets[i]! }, dispatch: host.resident.dispatch })),
   });
@@ -302,7 +306,7 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
   } finally { await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('a bound session alone does not publish; scope mismatch and a departed Pet report failure; native review is not a message', async () => {
+test('a bound session alone does not publish; invalid scopes and late replies fail; native review is not a message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-destination-'));
   const f = await fixture(root);
   try {
@@ -315,13 +319,23 @@ test('a bound session alone does not publish; scope mismatch and a departed Pet 
     const receipt = await f.studio.dispatch({ petId: 'one', request: 'not public', session: { id: sessionId }, metadata: { channelId: a } });
     await waitFor(() => f.events.some(e => e.type === 'dispatch.completed' && e.payload.invocationId === receipt.invocationId));
     assert.equal((await outputs(f, a)).length, 1);
-    await f.studio.dispatch({ petId: 'one', request: 'wrong destination', session: { id: sessionId }, scope: { namespace: 'channel', id: b } });
+    const acceptedCalls = f.calls.length;
+    await assert.rejects(f.studio.dispatch({ petId: 'one', request: 'wrong destination', session: { id: sessionId }, scope: { namespace: 'channel', id: b } }), /binding/);
+    assert.equal(f.calls.length, acceptedCalls, 'invalid scope is rejected before a run is queued');
+    // Late or forged Host events must still fail safely even though new runs
+    // are rejected at admission.
+    const lateReply = (channelId: string, id: string) => f.studio.notify({ source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
+      payload: { petId: 'one', invocationId: id, sessionId, scope: { namespace: 'channel', id: channelId },
+        message: { type: 'message.completed', messageId: id, role: 'assistant', text: 'Must not be published.' } } });
+    lateReply(b, 'wrong-destination');
     await waitFor(() => failures(f).length === 1);
     assert.deepEqual([failures(f)[0].channelId, failures(f)[0].sessionId], [b, sessionId]);
     assert.match(failures(f)[0].error, /session does not match/);
     assert.equal((await outputs(f, b)).length, 0);
     await f.channel.service.removeMember(me, a, { kind: 'pet', id: 'one' });
-    await f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } });
+    await assert.rejects(f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } }), /not a member/);
+    assert.equal(f.calls.length, acceptedCalls, 'former members are rejected before a run is queued');
+    lateReply(a, 'former-member');
     await waitFor(() => failures(f).length === 2);
     assert.deepEqual([failures(f)[1].channelId, failures(f)[1].petId], [a, 'one']);
     assert.match(failures(f)[1].error, /not a member/);

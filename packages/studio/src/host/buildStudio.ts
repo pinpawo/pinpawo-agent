@@ -5,7 +5,7 @@ import {
   type CapabilityArtifactStore,
   type PetDocument,
 } from '@pinpawo/pet-agent';
-import { prepareStudio } from '../createStudio';
+import { prepareStudio, type PreparedStudio } from '../createStudio';
 import type { Studio, StudioPlugin } from '../studioContract';
 import type { StudioPetRegistration, StudioPetRuntime } from '../types';
 import {
@@ -41,7 +41,7 @@ export type BuildStudioInput = HostExecutionConfig & {
   modelProfiles: LocalModelProfileRegistry;
   /** Host fallback Capability 池；Studio uses general only without an explicit default. */
   hostCapabilities: readonly AgentCapability[];
-  /** 每份 Pet 定义从约定目录严格加载的 Agent Capability 定义,按 definitionId。 */
+  /** Host catalog snapshots for each Pet definition, including explicit shared references. */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
   /** Optional PET.md root-document snapshot keyed by definition id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
@@ -230,6 +230,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   const residentPets = new Map<string, ResidentPetHost>();
   const residentPetInteractions = new Map<string, ResidentPetInteraction>();
+  // Pets are restored only after prepareStudio returns; this late-bound bridge
+  // keeps Plugin context owned by Studio without extending the dispatch port.
+  let prepared: PreparedStudio;
   const assemblePet = async (pet: StudioPetRegistration): Promise<StudioPetRuntime> => {
     const definition = definitions.get(pet.definitionId);
     if (!definition) throw new Error(`Pet "${pet.petId}" uses unknown definition "${pet.definitionId}"`);
@@ -242,6 +245,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ...(config.modelProfileId ? { modelProfileId: config.modelProfileId } : {}),
       ...(config.defaultCapabilityName ? { defaultCapabilityName: config.defaultCapabilityName } : {}),
       ...(document ? { petDocument: document } : {}),
+      resolveInvocationContext: async (target) => prepared.resolveInvocationContext(target),
       capabilities: definition.capabilities,
       toolkitInventory: input.toolkitInventory,
       capabilityArtifactStore: input.capabilityArtifactStore,
@@ -269,7 +273,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     };
   };
 
-  const prepared = prepareStudio({
+  prepared = prepareStudio({
     studioId: studioConfig.studioId,
     definitions: resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
     assemblePet,

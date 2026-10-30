@@ -10,6 +10,7 @@ import {
   type StudioPetSessions,
   type StudioPlugin,
   type StudioPluginContext,
+  type StudioContextProvider,
   type StudioModels,
 } from './studioContract';
 import type {
@@ -46,6 +47,8 @@ export type PreparedStudio = {
   studio: Studio;
   /** Decrypts a Pet's credentials; only for the composing Host, never for Plugins. */
   credentialSource: PetCredentialSource;
+  /** Resolve a trusted invocation's Plugin context for the composing Host. */
+  resolveInvocationContext: StudioContextProvider;
   /** Assemble the Studio's active Pets. Idempotent; activatePlugins runs it first. */
   restorePets: () => Promise<void>;
   /** Start Plugin lifecycles after the composing Host has opened interaction transports. */
@@ -69,6 +72,22 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const eventBus = new StudioEventBus();
   const idempotencyRecords = new Map<string, Promise<StudioDispatchReceipt>>();
   const pluginHooks = new StudioPluginHookRegistry();
+  const contextProviders = new Map<string, { owner: string; provide: StudioContextProvider }>();
+  // Remember ownership after unregister so a missing provider cannot silently
+  // remove context or be replaced by a different Plugin during this lifecycle.
+  const contextProviderOwners = new Map<string, string>();
+  for (const plugin of plugins) {
+    for (const namespace of plugin.contextNamespaces ?? []) {
+      if (typeof namespace !== 'string' || !namespace.trim() || namespace !== namespace.trim()) {
+        throw new Error('Context provider namespace must be non-empty and trimmed.');
+      }
+      if (pluginNames.has(namespace) && namespace !== plugin.name) {
+        throw new Error(`Context namespace "${namespace}" is reserved for Plugin "${namespace}".`);
+      }
+      if (contextProviderOwners.has(namespace)) throw new Error(`Context namespace "${namespace}" is declared more than once.`);
+      contextProviderOwners.set(namespace, plugin.name);
+    }
+  }
   const storage = createStudioStorage(input.storage ?? { kind: 'sqlite', path: ':memory:' });
   let coreDb: Promise<Kysely<unknown>> | undefined;
   const openCore = async <DB>() => {
@@ -151,21 +170,49 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     });
   }
 
+  // Host composition supplies this resolver to resident runtimes. Plugins own
+  // their own context; dispatch itself transports no prompt content.
+  const resolveInvocationContext: StudioContextProvider = async (target) => {
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    const namespace = target.scope.namespace;
+    const owner = contextProviderOwners.get(namespace);
+    const provider = contextProviders.get(namespace);
+    if (owner && !provider) throw new Error(`Context provider for "${namespace}" is unavailable.`);
+    if (!provider) return undefined;
+    const snapshot = Object.freeze({
+      petId: target.petId,
+      ...(target.sessionId ? { sessionId: target.sessionId } : {}),
+      scope: Object.freeze({ ...target.scope }),
+    });
+    const sections = await provider.provide(snapshot);
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    if (contextProviders.get(namespace) !== provider) throw new Error(`Context provider for "${namespace}" is unavailable.`);
+    return sections;
+  };
+
   async function dispatch(
     request: StudioDispatchRequest,
     source?: string,
   ): Promise<StudioDispatchReceipt> {
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    // Snapshot the complete Plugin request before asynchronous admission.
+    const petId = request.petId;
+    const requestText = request.request;
+    const suppliedIdempotencyKey = request.idempotencyKey;
+    const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
+    const session = request.session ? { ...request.session } : undefined;
+    const scope = request.scope ? { ...request.scope } : undefined;
     await registry.restore();
-    const pet = registry.getLive(request.petId);
-    if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${request.petId}"`, 'not_found');
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    const pet = registry.getLive(petId);
+    if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${petId}"`, 'not_found');
 
-    const idempotencyKey = request.idempotencyKey?.trim();
-    if (request.idempotencyKey !== undefined && !idempotencyKey) {
+    const idempotencyKey = suppliedIdempotencyKey?.trim();
+    if (suppliedIdempotencyKey !== undefined && !idempotencyKey) {
       throw new Error('Studio dispatch idempotencyKey must not be empty.');
     }
     const idempotencyRecordKey = idempotencyKey
-      ? JSON.stringify([source ?? 'studio', request.petId, idempotencyKey])
+      ? JSON.stringify([source ?? 'studio', petId, idempotencyKey])
       : null;
     const existing = idempotencyRecordKey
       ? idempotencyRecords.get(idempotencyRecordKey)
@@ -176,20 +223,30 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     // admission. Failed admissions release the reservation, in this domain.
     const admission = Promise.resolve().then(async () => {
       const invocationId = randomUUID();
-      const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
+
+      if (scope) {
+        if (source && pluginNames.has(scope.namespace) && source !== scope.namespace) {
+          throw new Error(`Plugin "${source}" cannot dispatch in context namespace "${scope.namespace}" owned by another Plugin.`);
+        }
+        const owner = contextProviderOwners.get(scope.namespace);
+        if (owner && source && source !== owner) {
+          throw new Error(`Plugin "${source}" cannot dispatch in context namespace "${scope.namespace}" owned by "${owner}".`);
+        }
+        if (owner && !contextProviders.has(scope.namespace)) throw new Error(`Context provider for "${scope.namespace}" is unavailable.`);
+      }
 
       console.log(
-        `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
+        `[studio] dispatch petId=${petId} source=${source ?? 'studio'} invocation=${invocationId}`,
       );
       await pet.runtime.dispatch.dispatch({
-        request: request.request,
+        request: requestText,
         dispatchId: invocationId,
-        ...(request.session ? { session: { ...request.session } } : {}),
-        ...(request.scope ? { scope: { ...request.scope } } : {}),
+        ...(session ? { session } : {}),
+        ...(scope ? { scope } : {}),
       });
 
       const receipt: StudioDispatchReceipt = Object.freeze({
-        petId: request.petId,
+        petId,
         invocationId,
         ...(metadata ? { metadata } : {}),
       });
@@ -199,8 +256,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         occurredAt: new Date().toISOString(),
         payload: {
           invocationId,
-          petId: request.petId,
-          request: request.request,
+          petId,
+          request: requestText,
           producer: source ?? 'studio',
         },
       });
@@ -217,6 +274,22 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {
     return {
       dispatch: (request) => dispatch(request, plugin.name),
+      registerContextProvider: (namespace, provide) => {
+        if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+        if (typeof namespace !== 'string' || !namespace.trim() || namespace !== namespace.trim()) {
+          throw new Error('Context provider namespace must be non-empty and trimmed.');
+        }
+        if (typeof provide !== 'function') throw new Error('Context provider must be a function.');
+        if (pluginNames.has(namespace) && namespace !== plugin.name) {
+          throw new Error(`Context namespace "${namespace}" is reserved for Plugin "${namespace}".`);
+        }
+        const owner = contextProviderOwners.get(namespace);
+        if (!owner || owner !== plugin.name) throw new Error(`Context namespace "${namespace}" is not declared by Plugin "${plugin.name}".`);
+        if (contextProviders.has(namespace)) throw new Error(`Context provider for "${namespace}" is already registered.`);
+        const entry = { owner: plugin.name, provide };
+        contextProviders.set(namespace, entry);
+        return () => { if (contextProviders.get(namespace) === entry) contextProviders.delete(namespace); };
+      },
       allocateSessionId: allocatePetSessionId,
       notify: (event: StudioEventInput) => notify({
         ...event,
@@ -249,6 +322,9 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           error instanceof Error ? error.message : error,
         );
       } finally {
+        for (const [namespace, provider] of contextProviders) {
+          if (provider.owner === plugin.name) contextProviders.delete(namespace);
+        }
         eventBus.releaseOwner(plugin.name);
         pluginHooks.releasePlugin(plugin.name);
       }
@@ -262,6 +338,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     await registry.close();
     await eventBus.close();
     idempotencyRecords.clear();
+    contextProviders.clear();
+    contextProviderOwners.clear();
     // After every Plugin stopped: none of them may still be writing.
     await storage.close().catch((error: unknown) => {
       console.error('[studio] storage failed to close:', error instanceof Error ? error.message : error);
@@ -280,6 +358,9 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           // acquired resources before rejecting.
           startedPlugins.push(plugin);
           await plugin.start(buildPluginContext(plugin));
+          for (const namespace of plugin.contextNamespaces ?? []) {
+            if (!contextProviders.has(namespace)) throw new Error(`Plugin "${plugin.name}" did not register context provider "${namespace}".`);
+          }
         }
         // Every hook a Plugin can contribute to is exposed by now, so work that
         // depends on another Plugin can start without guessing at start order.
@@ -315,7 +396,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     pets: registry,
     shutdown,
   };
-  return { studio, credentialSource: credentials.source, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, credentialSource: credentials.source, resolveInvocationContext, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

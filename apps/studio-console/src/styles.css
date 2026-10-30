@@ -160,6 +160,7 @@ button { color: #bdebed; background: #153438; }
 .channel-detail > .empty-state span { line-height: 1.5; }
 .channel-activity { width: 340px; border-left: 1px solid var(--line); }
 .channel-record-error { max-height: 100px; overflow: auto; margin: 0; padding: 9px 10px; color: #e0a099 !important; border-left: 2px solid #bb746c; background: #291e1d; font-size: var(--text-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.channel-create-dialog { max-height: calc(100dvh - 48px); overflow-y: auto; }
 .channel-create-pets { display: grid; gap: 7px; margin: 0; padding: 10px 12px; border: 1px solid #334246; border-radius: 3px; color: #a9bbb7; font-size: var(--text-sm); }
 .channel-create-pets legend { padding: 0 4px; color: #7d9392; font-size: var(--text-xs); }
 .connection-modal .channel-create-pets label { display: flex; align-items: center; gap: 8px; }
@@ -412,6 +413,11 @@ footer { min-width: 0; display: flex; align-items: center; gap: 16px; padding: 0
 .channel-section-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .channel-section-label h3 { margin: 0; color: #a9bcb6; font-size: var(--text-sm); font-weight: 600; }
 .channel-section-label > span { color: #6f8584; font-size: var(--text-xs); }
+.channel-instructions .channel-section-label button, .channel-instructions-actions button { padding: 4px 9px; border-radius: 6px; font-size: var(--text-xs); }
+.channel-instructions-text { margin: 0; color: #bacac5; font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.channel-instructions form { display: grid; gap: 8px; }
+.channel-instructions textarea { width: 100%; min-height: 96px; padding: 8px; resize: vertical; color: #cbd7d5; border: 1px solid #334246; border-radius: 6px; background: #0c1214; font-size: var(--text-sm); }
+.channel-instructions-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .channel-global-queues { margin-bottom: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .channel-queue { padding: 7px 0; }
 .channel-queue-head { display: flex; align-items: center; gap: 8px; }

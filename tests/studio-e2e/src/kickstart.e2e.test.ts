@@ -67,7 +67,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     },
   });
   const { compileAgentRegistry } = await import('@pinpawo/pet-agent');
-  const { loadCapabilityDirectory } = await import('pinpawo/host-runtime');
+  const { HostCapabilityCatalog, resolveSharedCapabilityDirectory } = await import('pinpawo/host-runtime');
   const { createFilesToolkit } = await import('../../../services/host/src/toolkits/files/index');
   const { createShellToolkit } = await import('../../../services/host/src/toolkits/shell/index');
   const { createWebToolkit } = await import('../../../services/host/src/toolkits/web/index');
@@ -80,10 +80,19 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];
+  const catalog = new HostCapabilityCatalog({ loadConfiguredCapabilities: async () => [] });
+  await catalog.load();
   for (const pet of configuration.resolved.definitions) {
-    const loaded = await loadCapabilityDirectory(path.join(workdir, '.pinpawo', 'pets', pet.definitionId, 'capabilities'));
-    const registry = compileAgentRegistry({ toolkits, capabilities: loaded.map(({ capability }) => capability) });
+    const snapshot = await catalog.createDirectorySnapshot({
+      rootDir: path.join(configuration.petsDir, pet.definitionId, 'capabilities'),
+      sourceId: `studio-pet:${pet.definitionId}`,
+      shared: { rootDir: resolveSharedCapabilityDirectory(configuration.petsDir), names: pet.sharedCapabilities ?? [] },
+    });
+    const registry = compileAgentRegistry({ toolkits, capabilities: snapshot.capabilities });
     assert.deepEqual(registry.unavailableCapabilities, [], `${pet.definitionId} has no missing Toolkit bindings`);
+    const contextCapability = registry.capabilities.find(({ capability }) => capability.name === 'channel_context');
+    assert.ok(contextCapability, `${pet.definitionId} explicitly selects the shared context Capability`);
+    assert.deepEqual(contextCapability.toolNames, ['channel_read_context']);
     const preferred = registry.capabilities.find(({ capability }) => capability.name === pet.defaultCapabilityName);
     assert.ok(preferred, `${pet.definitionId} retains an executable default Capability`);
     assert.ok(preferred.toolNames.includes('channel_read_context'));
@@ -116,7 +125,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   });
   const base = `http://127.0.0.1:${http.address()!.port}`;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['executor', 'reviewer', 'wiki']);
+  assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['executor', 'issuer', 'reviewer', 'wiki']);
   for (const route of ['/kanban', '/kanban/events']) {
     assert.equal((await fetch(base + route, { headers })).status, 404);
   }

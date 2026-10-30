@@ -44,13 +44,20 @@ publishing another accepted event. Simultaneous submissions share the pending
 admission Promise. Keys are scoped to producer and Pet; a failed admission releases
 the process-local reservation. This is not a durable replay or exactly-once guarantee.
 
+Plugins may declare `contextNamespaces` and register a context provider during startup. The composing Host receives a generic context resolver. For a scoped invocation, the Host asks its owner to resolve system sections from the trusted scope, Pet and session, then snapshots them for the run. Prompt content is not a dispatch parameter. The built-in Studio Host connects this resolver when constructing each resident Pet; embedded applications that assemble their own Pet runtimes must connect it explicitly. Providers are not HTTP inputs, and ordinary unscoped conversations do not acquire a Plugin scope. A declared provider that is unavailable causes scoped admission to fail. Context sections may be sent with each model call, so registration does not itself reduce token use.
+
 Plugins receive `dispatch`, `notify`, `subscribe`, `listPets`, `listDispatchQueues`, Plugin
 hook installation, and `storage`: `storage.open(migrations)` applies the Plugin's pending
 migrations in the shared Studio database (SQLite or Postgres, set by `studio.json` `storage`)
 and returns a Kysely instance. Each Plugin owns its tables and its `<name>_migrations` history;
 Studio closes the database after every Plugin has stopped. `allocateSessionId(petId)` names a new
-session for `dispatch({ session: { id, create: true } })` without creating it. A Plugin may define
-Toolkits; their tools call `readStudioInvocation()` from `@pinpawo/studio-core` to learn which admitted
+session for `dispatch({ session: { id, create: true } })` without creating it.
+Capability definitions and selection belong to the Host. Studio's Pet configuration
+may explicitly reference shared definitions with `sharedCapabilities`; the existing
+Host catalog assembles these with the Pet's private directory. Plugins do not
+register or automatically add Capabilities. See [configuration](../../studio/configuration.md#per-pet-capability-directory).
+
+A Plugin may define Toolkits; their tools call `readStudioInvocation()` from `@pinpawo/studio-core` to learn which admitted
 dispatch (Pet, invocation, session, scope) they run in, and get `undefined` outside one. A Plugin
 cannot construct a Pet, inspect a runtime, or participate in Agent Session conversation, and needs
 no import from `pinpawo/host-runtime`.
@@ -107,20 +114,36 @@ only; a reconnect rebuilds from the checkpoint snapshot.
 Channel contributes these routes to the HTTP Plugin with `client` authorization:
 any Studio client key, or the local Host token, may call them. The caller is the
 member `human:<clientId>` (the local token is `human:local`). A request on a
-Channel the actor is not a current member of is `403`; an unknown Channel is `404`.
+Channel the actor is not a current member of is `403` except for the Studio-authority
+management routes noted below; an unknown Channel is `404`.
 A human joins only as an active Studio client, and its label is the client's label.
 
 | Route | Input / result |
 |---|---|
 | `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. With `all=true`, the local Host token lists every Channel. |
-| `POST /channels` | `title`, optional `description`, required `pets: [...]`; the creator and those Pets are the initial members. `201 { channel, members }`. |
-| `POST /channels/update` | `channelId`, optional `title`, optional `description` (`null` clears it). |
+| `POST /channels` | `title`, optional `description` and `prompt`, required `pets: [...]`; only Studio authority may supply a non-empty prompt. Ordinary clients can create a Channel without one. The creator and those Pets are the initial members. `201 { channel, members }`. |
+| `POST /channels/update` | `channelId`, optional `title`, optional `description` and `prompt` (`null` clears the corresponding field). Members may edit title and description; only Studio authority may modify or clear prompt, even when the caller created the Channel. Non-member Studio authority may update prompt alone; mixed updates still require membership. |
 | `GET /channels/context?channelId=...` | Channel, current members, a page of messages (the newest by default; `before` reads older, `after` newer), `viewerParticipantId`. |
 | `GET /channels/members?channelId=...` | Current members. The local Host token may read any Channel's members. |
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
+
+`prompt` is an optional Channel collaboration instruction, separate from its
+human-facing description. It is trimmed, limited to 50,000 characters, and an
+empty value clears it. Current members can read it; only Studio authority can set
+a non-empty prompt on creation or modify or clear it later. Ordinary clients can
+create Channels without a prompt, but cannot edit one even as the creator. A
+Channel-scoped Pet run receives the Plugin's shared instructions and Channel metadata
+even without an announcement. The optional `channel_context` Capability is selected
+explicitly through Pet configuration and executed by the Agent as an ordinary subtask. The Host uses a
+snapshot of the system sections for that run; edits apply to later dispatches, not to the current run or its approval
+continuation. The routing model can also see it, but routing still applies only to
+unaddressed human messages. The prompt expresses collaboration intent, not authorization; it
+does not override Host or PET safety rules, grant tool access, change review policy,
+or change Channel membership. Supplying it does not guarantee model compliance. See the
+[design draft](../../design/studio/channel-collaboration-prompt.md).
 
 Pagination uses `after` / `limit` and returns `nextAfter` / `hasMore`. Channel
 messages are read from the newest page by default; `before=nextBefore` reads the

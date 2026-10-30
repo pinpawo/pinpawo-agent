@@ -1,5 +1,8 @@
 {
   "definitionId": "reviewer",
   "name": "Reviewer",
-  "defaultCapabilityName": "studio_review"
+  "defaultCapabilityName": "studio_review",
+  "sharedCapabilities": [
+    "channel_context"
+  ]
 }

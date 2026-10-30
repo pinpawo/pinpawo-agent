@@ -15,7 +15,7 @@ import { HostGraphService } from './agentGraphService';
 import { adaptRootStream } from '../events/rootStreamEventAdapter';
 import type { AgentChannelSetup } from './agentChannel';
 
-for (const decision of ['respond', 'reject'] as const) {
+for (const decision of ['approve', 'respond', 'reject', 'cancel'] as const) {
   test(`Host v3 streams a reviewed multi-chunk action and restores ${decision} via FileSaver (#1029)`, async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'pinpawo-host-stream-review-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -23,6 +23,11 @@ for (const decision of ['respond', 'reject'] as const) {
     let calls = 0;
     let toolRuns = 0;
     let supervisorCalls = 0;
+    let policyCalls = 0;
+    const policyModel = { withStructuredOutput: () => ({ invoke: async () => {
+      policyCalls++;
+      return { riskScore: 10, reason: 'Requires human authorization.' };
+    } }) } as unknown as AgentModels['act'];
     const inputs: BaseMessage[][] = [];
     class Model extends BaseChatModel {
       _llmType() { return 'multi-chunk-review-fixture'; }
@@ -65,14 +70,14 @@ for (const decision of ['respond', 'reject'] as const) {
     const makeSetup = () => ({
       registry,
       graphConfig: {
-        models: { act: entry, answer: entry, subagent: model }, checkpoint: new FileSaver(path),
+        models: { act: entry, answer: entry, decision: policyModel, subagent: model }, checkpoint: new FileSaver(path),
         runSupervisorRunner: withScriptedDelegation({ invoke: async () => {
           supervisorCalls++;
           if (supervisorCalls === 1) return { name: 'submit_plan', args: { tasks: [{ capability: 'general', objective: 'Inspect.' }] } };
           return { reply: 'Done.' };
         } }),
       },
-      input: { threadId: `host-stream-${decision}`, messages: [new HumanMessage('Inspect.')], globalReviewPolicy: { mode: 'require_authorization' } },
+      input: { threadId: `host-stream-${decision}`, messages: [new HumanMessage('Inspect.')], globalReviewPolicy: { mode: 'auto_authorization' } },
       interfaceContext: { kind: 'tui', threadId: `host-stream-${decision}`, capabilities: { humanReview: true, sessionAuthorization: false } },
     } as AgentChannelSetup);
     const observed: Array<{ type: string; text?: string }> = [];
@@ -91,12 +96,16 @@ for (const decision of ['respond', 'reject'] as const) {
     const reviewId = pending.payload.reviews[0]?.id;
     assert.ok(reviewId);
     assert.equal(calls, 1);
+    assert.equal(policyCalls, 1);
     assert.equal(toolRuns, 0);
-    await consume(restartedService, restartedSetup, { interruptId: pending.interruptId, value: { decisions: [{
-      reviewId, selectedOptionId: decision, ...(decision === 'respond' ? { input: { message: 'Use read-only.' } } : {}),
-    }] } });
-    assert.equal(toolRuns, 0);
-    assert.equal(calls, decision === 'respond' ? 2 : 1);
+    await consume(restartedService, restartedSetup, { interruptId: pending.interruptId,
+      value: decision === 'cancel' ? { action: 'cancel' } : { decisions: [{
+        reviewId, selectedOptionId: decision, ...(decision === 'respond' ? { input: { message: 'Use read-only.' } } : {}),
+      }] },
+    });
+    assert.equal(policyCalls, 1, 'resume must restore the persisted auto-review model result');
+    assert.equal(toolRuns, decision === 'approve' ? 1 : 0);
+    assert.equal(calls, decision === 'approve' || decision === 'respond' ? 2 : 1);
     if (decision === 'respond') {
       const next = inputs.at(-1)!;
       const action = next.find((item) => AIMessage.isInstance(item) && item.id === 'action');

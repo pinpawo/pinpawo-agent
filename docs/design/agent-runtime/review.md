@@ -165,6 +165,14 @@ The implementation follows these constraints:
   LangGraph graph APIs and ordinary Runtime state.
 - Agent Session does not gain a derived `continuationAvailable` flag.
 
+A resume at the latest checkpoint is distinct from explicitly replaying an
+older checkpoint. A MemorySaver regression replays a checkpoint from before the
+nested review and observes the policy task and, after a new approval, the action
+run again. This does not mean every older checkpoint replays identically.
+FileSaver retains only the latest checkpoint in each namespace; a pruned older
+root checkpoint cannot be retrieved for time travel. No resume or replay mode
+here promises exactly-once side effects across crashes.
+
 ## LangGraph 1.5.1 saver and message compatibility
 
 The locked `langchain` 1.5.14 `createAgent` uses `MessagesValue`, a
@@ -228,8 +236,12 @@ only the legacy `_streamResponseChunks` bridge: a text block and tool-call chunk
 both indexed `0` can collide in core 1.2.13's `convertChunksToEvents`, losing
 the parsed tool call. A marked TODO regression captures the observed failure;
 the native ChatOpenAI event path does not reproduce it in the localhost fixture.
-The upstream [langchainjs #11182](https://github.com/langchain-ai/langchainjs/issues/11182)
-describes a related compatibility-bridge collision. No claim is made that a
+The public `AgentModels` and `createSubagent` contracts accept caller-provided
+`BaseChatModel`s, but mixed text and tool calls through this legacy v3 bridge
+cannot currently be guaranteed. The exact upstream issue is
+[langchainjs #11074](https://github.com/langchain-ai/langchainjs/issues/11074);
+its proposed fixes are not merged as of this review, and the latest available
+core 1.3.2 still contains the colliding index logic. No claim is made that a
 particular production provider has exhibited this failure.
 
 ## Interrupt abstraction

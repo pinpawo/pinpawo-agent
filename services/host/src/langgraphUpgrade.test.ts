@@ -284,7 +284,7 @@ for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
 }
 
 test('legacy custom-model streaming keeps text and tool chunks with colliding indices',
-  { todo: 'LangChain core compat stream bridge conflates text index 0 with tool-call index 0; native ChatOpenAI has a separate event implementation.' },
+  { todo: 'Upstream langchainjs#11074: legacy compat bridge conflates text and tool-call index 0; native ChatOpenAI uses separate events.' },
   async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'pinpawo-compat-collision-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));

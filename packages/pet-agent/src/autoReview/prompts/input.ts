@@ -41,7 +41,7 @@ function formatAutoReviewItems(items: AutoReviewAction[]) {
       summary?.target ? `Target: ${summary.target}` : null,
       // Summaries aid interpretation but cannot replace or hide the actual input.
       summary?.summary ? `Summary: ${clipText(summary.summary, 300)}` : null,
-      `Review: ${reviewViewToText(item.review.view)}`,
+      !summary ? `Review: ${clipText(reviewViewToText(item.review.view), 300)}` : null,
       `Input facts: ${input}`,
     ].filter((line): line is string => Boolean(line)).join('\n'));
     if (actions.join('\n\n').length > MAX_ACTIONS_CHARS) return { text: '', complete: false };

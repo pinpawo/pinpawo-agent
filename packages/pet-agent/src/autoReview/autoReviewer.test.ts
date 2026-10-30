@@ -48,24 +48,3 @@ test('AutoReviewer reads a null or missing reason as empty', async () => {
       { complete: true, assessment: { riskScore, reason: '' } });
   }
 });
-
-test('existing review blocks reach the model in full and share the action budget', async () => {
-  const source = JSON.stringify({ scripts: { build: `echo ${'x'.repeat(500)} source-tail-${Date.now()}` } });
-  let calls = 0;
-  const model = { withStructuredOutput: () => ({ invoke: async (messages: { content: string }[]) => {
-    calls++;
-    assert.ok(messages[1].content.includes(source));
-    return { riskScore: 1, reason: 'test response' };
-  } }) } as unknown as BaseChatModel;
-  const reviewer = createAutoReviewer({ model });
-  const item: AutoReviewAction = {
-    ...action({ command: 'npm run build' }),
-    operation: { summarize: () => ({ summary: 'npm run build' }) },
-    review: buildReviewSpec({ view: { kind: 'operation', blocks: [{ kind: 'code', text: source, language: 'json' }] }, options: [] }),
-  };
-  assert.deepEqual(Object.keys(item.review).sort(), ['id', 'options', 'schemaVersion', 'view']);
-  await reviewer.assess({ reviews: [item] });
-  item.review.view = { kind: 'operation', blocks: [{ kind: 'code', text: 'x'.repeat(140_000) }] };
-  assert.deepEqual(await reviewer.assess({ reviews: [item] }), { complete: false });
-  assert.equal(calls, 1);
-});

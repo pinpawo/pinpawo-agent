@@ -20,7 +20,6 @@ import {
   normalizeShellAuthorizationInput,
   shellOperationMetadata,
 } from './shellTools';
-import { invokesShellScript, shellScriptContext } from './shellScriptContext';
 
 export const SHELL_TOOLKIT_NAME = 'shell';
 
@@ -41,32 +40,23 @@ const shellToolkitInstructions = [
 
 export function createShellToolDefinitions({ shell }: ShellToolkitDependencies) {
   const inspectShell = createInspectShellTool(shell);
-  const reviewedExecution = () => {
-    const policy = ReviewPolicies.required({
-      authorization: AuthorizationPolicies.exact({
-        reuseAutoReview: true,
-        subject: ({ input }) => {
-          const action = normalizeShellAuthorizationInput(input);
-          // Script effects can change without argv changing. Keep approval scoped to this call.
-          return invokesShellScript(action.command) ? null : action;
-        },
-      }),
-    });
-    return { ...policy, request: async (ctx: Parameters<typeof policy.request>[0]) => {
-      const review = await policy.request(ctx);
-      if (review && 'schemaVersion' in review && review.view.kind === 'operation') {
-        const blocks = await shellScriptContext(ctx.input);
-        if (blocks.length) review.view = { ...review.view, blocks: [...(review.view.blocks ?? []), ...blocks] };
-      }
-      return review;
-    } };
-  };
   const definitions = executionScopedDefinitions(
     [inspectShell, getCurrentTimeTool, createRunShellTool(shell), createStartProcessTool(shell), ...createProcessTools(shell)],
     { ...shellOperationMetadata, ...processOperationMetadata },
     {
-      run_shell: reviewedExecution(),
-      start_process: reviewedExecution(),
+      run_shell: ReviewPolicies.required({
+        authorization: AuthorizationPolicies.exact({
+          // Timeout does not change the command/cwd authorization scope.
+          reuseAutoReview: true,
+          subject: ({ input }) => normalizeShellAuthorizationInput(input),
+        }),
+      }),
+      start_process: ReviewPolicies.required({
+        authorization: AuthorizationPolicies.exact({
+          reuseAutoReview: true,
+          subject: ({ input }) => normalizeShellAuthorizationInput(input),
+        }),
+      }),
       // The process tools carry no review policy on purpose. They only address
       // processes an approved start_process already started in this same Agent
       // session, so waiting on one, listing them, or stopping one grants no

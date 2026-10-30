@@ -215,6 +215,23 @@ ToolMessages, while Cancel removes the whole message; neither relies on clearing
 only that array. This separately reproduced fixture risk is not a claim of a
 production failure and does not change `reasoningPassback`.
 
+The Host v3 projection also consumes initial text in `content-block-start`,
+while filtering reasoning/thinking blocks from public text, including committed
+message and tool-call fallbacks. Integration fixtures use the actual Host graph
+service and FileSaver with a deterministic streaming model, and separately use
+the model factory's native ChatOpenAI path against localhost SSE. The latter
+verifies the next provider request carries the aggregated reasoning and the
+matching tool result, without calling a paid service.
+
+A separate limitation remains for custom LangChain chat models that implement
+only the legacy `_streamResponseChunks` bridge: a text block and tool-call chunk
+both indexed `0` can collide in core 1.2.13's `convertChunksToEvents`, losing
+the parsed tool call. A marked TODO regression captures the observed failure;
+the native ChatOpenAI event path does not reproduce it in the localhost fixture.
+The upstream [langchainjs #11182](https://github.com/langchain-ai/langchainjs/issues/11182)
+describes a related compatibility-bridge collision. No claim is made that a
+particular production provider has exhibited this failure.
+
 ## Interrupt abstraction
 
 Pet Runtime may implement each interrupt as a class or as an object satisfying

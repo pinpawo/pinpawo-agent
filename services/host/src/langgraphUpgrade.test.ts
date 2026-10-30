@@ -11,6 +11,7 @@ import {
 } from '@langchain/langgraph';
 import { createAgent, createMiddleware } from 'langchain';
 import { FileSaver } from './fileSaver';
+import { adaptRootStream } from './events/rootStreamEventAdapter';
 
 for (const durability of ['async', 'exit'] as const) {
   test(`FileSaver restores concurrent nested tasks once across partial resumes (${durability})`, async (t) => {
@@ -177,7 +178,23 @@ for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
           return { generations: [{ text: '', message: this.response(messages) }] };
         }
         async *_streamResponseChunks(messages: BaseMessage[]) {
-          yield new ChatGenerationChunk({ text: '', message: this.response(messages) });
+          const response = this.response(messages);
+          if (response.id !== 'action') {
+            yield new ChatGenerationChunk({ text: 'done', message: response });
+            return;
+          }
+          // One provider response split across text, reasoning and JSON-argument
+          // deltas. These are accumulated by the real model callback path.
+          const chunks = [
+            new AIMessageChunk({ id: 'action', content: [{ type: 'reasoning', reasoning: 'private ', index: 0 }], additional_kwargs: { fixture_marker: 'preserved' } }),
+            new AIMessageChunk({ id: 'action', content: [{ type: 'reasoning', reasoning: 'thought', index: 0 }] }),
+            new AIMessageChunk({ id: 'action', content: [{ type: 'text', text: 'Visible ', index: 1 }],
+              tool_call_chunks: [{ name: 'action_tool', args: '{"value":', id: 'call-1', index: 2 }] }),
+            new AIMessageChunk({ id: 'action', content: [{ type: 'text', text: 'reply', index: 1 }],
+              tool_call_chunks: [{ args: '"original"}', index: 2 }],
+              usage_metadata: { input_tokens: 3, output_tokens: 2, total_tokens: 5 } }),
+          ];
+          for (const chunk of chunks) yield new ChatGenerationChunk({ text: '', message: chunk });
         }
       }
       const model = new StreamingModel({ outputVersion: 'v0' });
@@ -210,7 +227,12 @@ for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
         if (mode === 'streamEvents-v3') {
           const stream = await agent.streamEvents({ messages: [new HumanMessage('Do the action.')] },
             { ...config, version: 'v3' });
-          for await (const _event of stream) { /* Consume protocol v3's model stream. */ }
+          const publicText: string[] = [];
+          for await (const event of adaptRootStream(stream, { isMainAssistantNode: () => true })) {
+            if (event.type === 'assistant.delta') publicText.push(event.text);
+          }
+          assert.equal(publicText.join(''), 'Visible reply');
+          assert.doesNotMatch(publicText.join(''), /private|thought/);
           await stream.output;
         } else {
           const stream = agent.streamEvents({ messages: [new HumanMessage('Do the action.')] },
@@ -225,10 +247,17 @@ for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
       assert.ok(AIMessage.isInstance(action));
       assert.equal(AIMessageChunk.isInstance(action), false);
       assert.equal('tool_call_chunks' in action, false);
+      assert.deepEqual(action.tool_calls, [{ type: 'tool_call', id: 'call-1', name: 'action_tool', args: { value: 'original' } }]);
+      if (mode !== 'invoke') {
+        assert.match(JSON.stringify(action.content), /Visible reply/);
+        assert.match(JSON.stringify(action.content), /private thought/);
+      }
       // v3 projects model output through the standard protocol; v2/invoke
       // exercise the reducer's preservation of arbitrary additional fields.
       if (mode !== 'streamEvents-v3') assert.equal(action.additional_kwargs.fixture_marker, 'preserved');
-      assert.deepEqual(action.usage_metadata, { input_tokens: 3, output_tokens: 2, total_tokens: 5 });
+      assert.equal(action.usage_metadata?.input_tokens, 3);
+      assert.equal(action.usage_metadata?.output_tokens, 2);
+      assert.equal(action.usage_metadata?.total_tokens, 5);
       assert.equal(tuple?.metadata?.counters_since_delta_snapshot, undefined,
         'the locked createAgent uses MessagesValue (a full-value ReducedValue), not MessagesDeltaValue');
       agent = makeAgent();
@@ -253,3 +282,35 @@ for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
     });
   }
 }
+
+test('legacy custom-model streaming keeps text and tool chunks with colliding indices',
+  { todo: 'LangChain core compat stream bridge conflates text index 0 with tool-call index 0; native ChatOpenAI has a separate event implementation.' },
+  async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'pinpawo-compat-collision-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'checkpoints.json');
+    class LegacyModel extends BaseChatModel {
+      _llmType() { return 'compat-collision-fixture'; }
+      bindTools() { return this; }
+      async _generate(): Promise<never> { throw new Error('expected model streaming'); }
+      async *_streamResponseChunks() {
+        yield new ChatGenerationChunk({ text: 'Visible ', message: new AIMessageChunk({ id: 'action', content: 'Visible ' }) });
+        yield new ChatGenerationChunk({ text: '', message: new AIMessageChunk({ id: 'action', content: '',
+          tool_call_chunks: [{ id: 'call-1', name: 'action_tool', args: '{"value":"', index: 0 }] }) });
+        yield new ChatGenerationChunk({ text: '', message: new AIMessageChunk({ id: 'action', content: '',
+          tool_call_chunks: [{ args: 'original"}', index: 0 }] }) });
+      }
+    }
+    const agent = createAgent({ model: new LegacyModel({}), checkpointer: new FileSaver(path), middleware: [
+      createMiddleware({ name: 'compatReview', afterModel: { hook: () => { interrupt({ kind: 'review' }); } } }),
+    ] });
+    const config = { configurable: { thread_id: 'compat-collision' } };
+    const stream = await agent.streamEvents({ messages: [new HumanMessage('Inspect.')] }, { ...config, version: 'v3' });
+    for await (const _event of stream) { /* Consume real v3 callbacks. */ }
+    await stream.output;
+    const messages = (await new FileSaver(path).getTuple(config))?.checkpoint.channel_values.messages as BaseMessage[];
+    const action = messages.find(message => message.id === 'action');
+    assert.ok(AIMessage.isInstance(action));
+    assert.deepEqual(action.tool_calls?.map(({ id, name, args }) => ({ id, name, args })),
+      [{ id: 'call-1', name: 'action_tool', args: { value: 'original' } }]);
+  });

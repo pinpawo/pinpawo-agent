@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@langchain/core": "^1.2.1",
-    "@langchain/langgraph": "^1.4.7",
+    "@langchain/langgraph": "^1.5.1",
     "@pinpawo/pet-agent": "^1.0.1",
     "zod": "^3.22.0"
   },

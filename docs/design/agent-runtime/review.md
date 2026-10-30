@@ -146,16 +146,103 @@ The implementation follows these constraints:
   committing state and ending the current invocation is private to
   `PauseTaskInterrupt`. Review middleware, capability, Host, and interfaces do
   not choose that mechanism.
-- The target implementation wraps non-deterministic Review policy work in a
-  LangGraph `task()`, so resume restores its result instead of repeating it.
-- Until the upstream nested-task replay fix is released, one isolated
-  compatibility guard may inspect the current Pregel interrupt slot to skip the
-  repeated policy call. This exception is tracked by issue #749 and must not
-  become a Runtime or interface contract.
+- Review middleware wraps the global policy decision in the checkpointed
+  `toolkitReviewPolicy` LangGraph `task()`. Resume restores its result instead
+  of repeating the model call. Toolkit `request()` and deterministic
+  `canAutoApprove()` preparation still replay and must remain deterministic.
+- LangGraph 1.5.1 includes the upstream nested-task replay fix
+  ([#3028](https://github.com/langchain-ai/langgraphjs/pull/3028)); Toolkit Review
+  no longer reads private Pregel resume fields (tracked by
+  [#749](https://github.com/pinpawo/pinpawo-agent/issues/749)).
+- Checkpoints paused before this task was introduced have no recorded policy
+  result. Resuming them with the new graph can evaluate policy again; a new
+  authorization could bypass their pending human decision. Finish or cancel
+  pending reviews with the old runtime before upgrading. Cross-version resume
+  of those pending reviews is unsupported; this change provides no checkpoint
+  migration and does not alter persisted production state.
 - Stopping a run is control flow, not a subagent completion reason.
 - Pet Runtime does not read or edit checkpointer storage directly. It uses
   LangGraph graph APIs and ordinary Runtime state.
 - Agent Session does not gain a derived `continuationAvailable` flag.
+
+A resume at the latest checkpoint is distinct from explicitly replaying an
+older checkpoint. A MemorySaver regression replays a checkpoint from before the
+nested review and observes the policy task and, after a new approval, the action
+run again. This does not mean every older checkpoint replays identically.
+FileSaver retains only the latest checkpoint in each namespace; a pruned older
+root checkpoint cannot be retrieved for time travel. No resume or replay mode
+here promises exactly-once side effects across crashes.
+
+## LangGraph 1.5.1 saver and message compatibility
+
+The locked `langchain` 1.5.14 `createAgent` uses `MessagesValue`, a
+`ReducedValue` with `messagesStateReducer`; it does not opt into experimental
+`MessagesDeltaValue` or `DeltaChannel`. The root Orchestrator likewise uses
+`messagesStateReducer`. No current default message path needs delta-history replay.
+
+LangGraph 1.5.0 changed the saver write-order contract
+([upstream #2961](https://github.com/langchain-ai/langgraphjs/pull/2961)). FileSaver
+persists the optional `taskPath` and numerical write index, and returns writes
+from both `getTuple()` and `list()` using the official `writesSortKey` comparator.
+Version-1 manifests remain readable: missing paths use `''`, and missing indices
+come from the existing storage key. Reads do not rewrite old manifests; a later
+write adds the metadata without changing checkpoint values or retention policy.
+Checkpoint advancement and startup maintenance validate manifest identity and
+all reachable object hashes before publishing/pruning; GC validates them before
+sweeping. A damaged reference aborts those operations instead of erasing
+potential recovery evidence. This integrity scan reads reachable objects on each
+checkpoint advance; its performance on large production histories has not been
+benchmarked.
+
+This does not reconstruct task paths that old writers never recorded. Follow
+upstream's drain-before-upgrade boundary for an incomplete parallel delta-writing
+superstep, or functional tasks under Send/error-handler paths whose identities
+changed. That boundary is separate from this PR's newly checkpointed Review policy.
+It does not make every old checkpoint incompatible.
+
+FileSaver still retains only the latest checkpoint per namespace. It rejects
+unsnapshotted Delta checkpoints before publishing/pruning, and explicitly rejects
+requests for missing ancestor delta history, instead of silently rebuilding empty
+state. A DeltaChannel works only when its snapshot is actually present in every
+saved checkpoint; `snapshotFrequency: 1` alone does not guarantee this when
+a later step updates only other channels. Other delta graphs need a full-history
+saver. This is a supported-storage boundary, not evidence of
+a failure in the current default Agent topology. No production data is migrated.
+
+LangGraph 1.5.1 also converts message chunks into ordinary messages in both
+message reducers ([upstream #3038](https://github.com/langchain-ai/langgraphjs/pull/3038)).
+FileSaver regressions exercise real `createAgent` invoke and v2/v3 streaming,
+Review interruption, tool-call edit/rejection, fresh saver instances, and the next
+model input. Parsed calls must not be rebuilt from stale `tool_call_chunks`.
+This fix is not a general synchronization rule for every message representation:
+v3 also has canonical `content` tool-call blocks. With the unchanged core 1.2.13,
+clearing only `tool_calls` while leaving those blocks can reconstruct calls on
+reload; deleting a call must update both representations. The regression fixture
+does so explicitly. Current Toolkit Review Reject retains calls with terminal
+ToolMessages, while Cancel removes the whole message; neither relies on clearing
+only that array. This separately reproduced fixture risk is not a claim of a
+production failure and does not change `reasoningPassback`.
+
+The Host v3 projection also consumes initial text in `content-block-start`,
+while filtering reasoning/thinking blocks from public text, including committed
+message and tool-call fallbacks. Integration fixtures use the actual Host graph
+service and FileSaver with a deterministic streaming model, and separately use
+the model factory's native ChatOpenAI path against localhost SSE. The latter
+verifies the next provider request carries the aggregated reasoning and the
+matching tool result, without calling a paid service.
+
+A separate limitation remains for custom LangChain chat models that implement
+only the legacy `_streamResponseChunks` bridge: a text block and tool-call chunk
+both indexed `0` can collide in core 1.2.13's `convertChunksToEvents`, losing
+the parsed tool call. A marked TODO regression captures the observed failure;
+the native ChatOpenAI event path does not reproduce it in the localhost fixture.
+The public `AgentModels` and `createSubagent` contracts accept caller-provided
+`BaseChatModel`s, but mixed text and tool calls through this legacy v3 bridge
+cannot currently be guaranteed. The exact upstream issue is
+[langchainjs #11074](https://github.com/langchain-ai/langchainjs/issues/11074);
+its proposed fixes are not merged as of this review, and the latest available
+core 1.3.2 still contains the colliding index logic. No claim is made that a
+particular production provider has exhibited this failure.
 
 ## Interrupt abstraction
 

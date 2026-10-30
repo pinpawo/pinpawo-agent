@@ -552,3 +552,39 @@ test('main tool calls reach the conversation as messages and settle, including c
     namespace: ['capability:1'], data: { event: 'tool-started', tool_call_id: 'call:new', tool_name: 'lookup' },
   } }, new Map()), null);
 });
+
+
+test('protocol content-block-start emits initial text but never reasoning text', () => {
+  const state: RootStreamAdapterState = new Map();
+  const namespace = ['entryAnswer:task'];
+  const event = (data: Record<string, unknown>) => ({
+    type: 'event' as const, seq: 1, method: 'messages', params: { namespace, data },
+  });
+  readRootStreamChatEvent(event({ event: 'message-start', id: 'reply' }), state);
+  const initial = readRootStreamChatEvent(event({ event: 'content-block-start',
+    content: { type: 'text', text: 'Hello ' } }), state);
+  assert.equal(initial?.type === 'assistant.delta' ? initial.text : undefined, 'Hello ');
+  assert.equal(readRootStreamChatEvent(event({ event: 'content-block-start',
+    content: { type: 'reasoning', text: 'private thought' } }), state), null);
+  const later = readRootStreamChatEvent(event({ event: 'content-block-delta',
+    delta: { type: 'text-delta', text: 'world' } }), state);
+  assert.equal(later?.type === 'assistant.delta' ? later.text : undefined, 'world');
+});
+
+test('committed message fallback and tool call projections exclude private text blocks', async () => {
+  const hidden = [{ type: 'reasoning', text: 'private reasoning' },
+    { type: 'thinking', text: 'private thought' }, { type: 'text', text: 'Public text' }];
+  const final = setAgentMessageMetadata(new AIMessage({ id: 'public', content: hidden }), { runId: 'run' });
+  const toolCall = setAgentMessageMetadata(new AIMessage({ id: 'tool', content: hidden,
+    tool_calls: [{ id: 'call-1', name: 'lookup', args: {}, type: 'tool_call' }],
+  }), { runId: 'run' });
+  async function* events() {
+    yield { type: 'event' as const, seq: 1, method: 'values', params: { namespace: [], data: { runId: 'run', messages: [] } } };
+    yield { type: 'event' as const, seq: 2, method: 'values', params: { namespace: [], data: { runId: 'run', messages: [final] } } };
+    yield { type: 'event' as const, seq: 3, method: 'values', params: { namespace: [], data: { runId: 'run', messages: [final, toolCall] } } };
+  }
+  const results: RootStreamChatEvent[] = [];
+  for await (const event of adaptRootStream(events())) results.push(event);
+  const text = results.filter(event => event.type === 'assistant.delta' || event.type === 'tool_calls.message');
+  assert.deepEqual(text.map(event => event.text), ['Public text', 'Public text']);
+});

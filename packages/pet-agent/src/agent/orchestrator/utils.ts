@@ -15,6 +15,10 @@ export function readContentText(content: unknown): string | null {
     .map((part) => {
       if (typeof part === 'string') return part;
       if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+        // Provider and legacy checkpoint reasoning blocks can carry `text`;
+        // never promote private reasoning to user-visible reply text.
+        if ('type' in part && (part.type === 'reasoning' || part.type === 'thinking'
+          || part.type === 'redacted_thinking' || part.type === 'reasoning_content' || part.type === 'analysis')) return '';
         return part.text;
       }
       return '';

@@ -6,7 +6,7 @@ import { ChannelMessageInput, type ChannelMessageInputHandle } from './ChannelMe
 import { PetSessionView } from './PetSessionView';
 import type { PetSessionTarget } from './petSession';
 import {
-  appendChannelDeliveries, channelJoinablePets, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
+  appendChannelDeliveries, channelCanEditPrompt, channelJoinablePets, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
   channelPetSession, channelReplyRecipientId, channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages,
   readChannelContext, readChannelLater, readChannelPages, type ChannelWindow,
   type ChannelContext, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
@@ -45,6 +45,10 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [pending, setPending] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [createPrompt, setCreatePrompt] = useState('');
+  const [promptEditing, setPromptEditing] = useState(false);
+  const [promptDraft, setPromptDraft] = useState('');
+  const [promptError, setPromptError] = useState('');
   const [createPets, setCreatePets] = useState<string[]>([]);
   const [body, setBody] = useState('');
   const [joiningPet, setJoiningPet] = useState('');
@@ -179,6 +183,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     if (id === selected) { setNavigationOpen(false); return; }
     setSelected(id); setContext(null); setMessages([]); setSessions([]); updateHeld(null);
     setReply(undefined); setBody(''); setError(''); setMemberError(''); setJoiningHuman('');
+    setPromptEditing(false); setPromptDraft(''); setPromptError('');
     setHighlightedMessage(''); setNavigationOpen(false);
     followLatest.current = true; setAtLatest(true);
   };
@@ -203,13 +208,15 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     event.preventDefault();
     void submit(async () => {
       const value = await post('/channels', {
-        title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}), pets: createPets,
+        title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}),
+        ...(!clientMode && createPrompt.trim() ? { prompt: createPrompt.trim() } : {}), pets: createPets,
       }) as { channel: ChannelRow; members: ChannelMember[] };
       setChannels(current => [...current, value.channel]); setSelected(value.channel.channelId);
       setContext(null); setMessages([]); setSessions([]); updateHeld(null); setReply(undefined); setBody('');
       followLatest.current = true; focusComposer.current = true; setAtLatest(true);
       setHighlightedMessage(''); setNavigationOpen(false);
-      setCreating(false); setTitle(''); setDescription(''); setCreatePets([]);
+      setCreating(false); setTitle(''); setDescription(''); setCreatePrompt(''); setCreatePets([]);
+      setPromptEditing(false); setPromptDraft(''); setPromptError('');
     });
   };
   const send = (event: FormEvent) => {
@@ -224,6 +231,16 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
         setSent(current => appendChannelDeliveries(current, result.deliveries!.map(item => ({ ...item, channelId: result.channelId, messageId: result.messageId }))));
       }
     });
+  };
+  const savePrompt = (event: FormEvent) => {
+    event.preventDefault();
+    const channelId = selected;
+    void submit(async () => {
+      const channel = await post('/channels/update', { channelId, prompt: promptDraft.trim() || null }) as ChannelRow;
+      setChannels(current => current.map(item => item.channelId === channelId ? channel : item));
+      setContext(current => current?.channel.channelId === channelId ? { ...current, channel } : current);
+      setPromptEditing(false); setPromptError('');
+    }, setPromptError);
   };
   const manageMember = (path: string, member: { kind: string; id: string }, done?: () => void) => {
     void submit(async () => {
@@ -362,6 +379,21 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       <div className="channel-sidebar-head"><h2>Members <span className="channel-count">{members.length}</span></h2>
         <button type="button" aria-label="Close Channel details" onClick={() => setActivityOpen(false)}>×</button></div>
       <div className="channel-activity-scroll">
+        {context && <section className="channel-activity-section channel-instructions" aria-label="Channel instructions">
+          <div className="channel-section-label"><h3>Channel instructions</h3>
+            {!promptEditing && channelCanEditPrompt(clientMode) && <button type="button" disabled={!connected || pending}
+              onClick={() => { setPromptDraft(context.channel.prompt ?? ''); setPromptError(''); setPromptEditing(true); }}>Edit</button>}
+          </div>
+          <p className="channel-history-hint">Used for new Channel tasks. Existing tasks keep their instructions.</p>
+          {!channelCanEditPrompt(clientMode) && <p className="channel-history-hint">Only the Studio owner can edit these instructions.</p>}
+          {promptEditing ? <form onSubmit={savePrompt}>
+            <textarea aria-label="Edit Channel instructions" maxLength={50_000} rows={6} value={promptDraft}
+              disabled={!connected || pending} onChange={event => setPromptDraft(event.target.value)} />
+            {promptError && <p className="channel-record-error" role="alert">{promptError}</p>}
+            <div className="channel-instructions-actions"><button type="button" disabled={pending} onClick={() => { setPromptEditing(false); setPromptError(''); }}>Cancel</button>
+              <button type="submit" disabled={!connected || pending}>Save instructions</button></div>
+          </form> : <p className="channel-instructions-text">{context.channel.prompt || 'No shared instructions yet.'}</p>}
+        </section>}
         {context && <section className="channel-activity-section" aria-label="Channel members">
           <p className="channel-history-hint">Only members can read, post and be addressed here.</p>
           <ul className="channel-members">{members.map(member => {
@@ -410,11 +442,12 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       onClose={() => setSessionView(null)} />}
     {creating && <div className="modal-layer" role="presentation" onMouseDown={event => {
       if (event.target === event.currentTarget && !submitting.current) setCreating(false);
-    }}><form ref={createDialog} aria-label="Create Channel" aria-modal="true" role="dialog" className="connection-modal" onSubmit={create}>
+    }}><form ref={createDialog} aria-label="Create Channel" aria-modal="true" role="dialog" className="connection-modal channel-create-dialog" onSubmit={create}>
       <div className="modal-title"><span>New Channel</span><strong>A conversation with the Pets you choose</strong></div>
       {error && <div className="modal-error" role="alert">{error}</div>}
       <label><span>Title</span><input data-initial-focus aria-label="Channel title" required maxLength={160} value={title} onChange={event => setTitle(event.target.value)} /></label>
       <label><span>Description (optional)</span><textarea aria-label="Channel description" maxLength={50_000} value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
+      {!clientMode && <label><span>Channel instructions (optional)</span><textarea aria-label="Channel instructions" maxLength={50_000} value={createPrompt} onChange={event => setCreatePrompt(event.target.value)} rows={3} placeholder="How should members work together?" /></label>}
       <fieldset className="channel-create-pets"><legend>Pets</legend>
         {pets.map(pet => <label key={pet.petId}><input type="checkbox" checked={createPets.includes(pet.petId)}
           onChange={event => setCreatePets(current => event.target.checked ? [...current, pet.petId] : current.filter(id => id !== pet.petId))} />

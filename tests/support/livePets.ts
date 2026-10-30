@@ -1,6 +1,7 @@
 import {
   prepareStudio,
   type CreateStudioInput,
+  type PreparedStudio,
   type Studio,
   type StudioPetRuntime,
 } from '@pinpawo/studio-core';
@@ -14,6 +15,8 @@ export type LivePet = {
 
 export type CreateStudioWithPetsInput = Omit<CreateStudioInput, 'definitions' | 'assemblePet'> & {
   pets: LivePet[];
+  /** Connect preassembled resident Hosts to this Studio's Plugin context resolver. */
+  onPreparedContextResolver?: (resolver: PreparedStudio['resolveInvocationContext']) => void;
 };
 
 /**
@@ -23,7 +26,7 @@ export type CreateStudioWithPetsInput = Omit<CreateStudioInput, 'definitions' | 
  * Studio database already holds it (a restarted Studio).
  */
 export async function createStudioWithPets(input: CreateStudioWithPetsInput): Promise<Studio> {
-  const { pets, ...rest } = input;
+  const { pets, onPreparedContextResolver, ...rest } = input;
   const byId = new Map(pets.map(pet => [pet.registration.petId, pet]));
   const definitions = new Map(pets.map(({ registration }) => {
     const definitionId = registration.definitionId ?? registration.petId;
@@ -38,6 +41,7 @@ export async function createStudioWithPets(input: CreateStudioWithPetsInput): Pr
       return { dispatch: pet.dispatch, ...(pet.sessions ? { sessions: pet.sessions } : {}), close: async () => undefined };
     },
   });
+  onPreparedContextResolver?.(prepared.resolveInvocationContext);
   try {
     await prepared.restorePets();
     for (const { registration } of pets) {

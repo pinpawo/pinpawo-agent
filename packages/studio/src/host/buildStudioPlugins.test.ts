@@ -121,6 +121,28 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   return root;
 }
 
+test('a Host-selected shared Capability can serve as a resident Pet default', async () => {
+  const workdir = await writeStudioConfig([]);
+  const capability: AgentCapability = { ...generalCapability(), name: 'shared_context' };
+  await writeFile(path.join(workdir, '.pinpawo', 'pets', 'planner.json'), JSON.stringify({
+    definitionId: 'planner', name: 'Planner', defaultCapabilityName: capability.name,
+    sharedCapabilities: [capability.name],
+  }));
+  const configuration = await resolveStudioHostConfig({ workdir });
+  const input = {
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    hostCapabilities: [generalCapability()], petCapabilities: new Map([['planner', [capability]]]),
+    ...residentBuildResources(workdir),
+  };
+  const { studio, residentPets } = await buildStudio(input);
+  try {
+    await studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
+    assert.ok(residentPets.has('planner'));
+  } finally { await studio.shutdown(); }
+  await assert.rejects(buildStudio({ ...input, petCapabilities: new Map() }), /default Capability .* is not available/);
+});
+
 test('plugin options from studio.json reach the injected resolver', async () => {
   const workdir = await writeStudioConfig([
     { id: 'example-work', options: { timezone: 'Asia/Shanghai' } },
@@ -145,6 +167,54 @@ test('plugin options from studio.json reach the injected resolver', async () => 
 
   assert.equal(result.plugins.length, 1);
   assert.deepEqual(seen, [{ timezone: 'Asia/Shanghai' }]);
+});
+
+test('buildStudio wires a Plugin context provider into new and restored resident Pet Hosts', async () => {
+  const workdir = await writeStudioConfig([{ id: 'context-owner' }]);
+  const targets: unknown[] = [];
+  const plugin: StudioPlugin = {
+    name: 'context-owner', toolkits: [], contextNamespaces: ['project'],
+    start(context) {
+      context.registerContextProvider('project', async (target) => {
+        targets.push(target);
+        // Stop before any model call; this checks the real Host's admission
+        // bridge, not a mock dispatch adapter or a paid model request.
+        throw new Error('observed real Host context resolution');
+      });
+    },
+  };
+  const configuration = await resolveStudioHostConfig({ workdir, resolvePlugin: () => plugin });
+  const make = () => buildStudio({
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    hostCapabilities: [generalCapability()],
+    petCapabilities: new Map(),
+    ...residentBuildResources(workdir),
+  });
+  const first = await make();
+  try {
+    await first.studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
+    await assert.rejects(first.studio.dispatch({
+      petId: 'planner', request: 'new resident', session: { id: 'planner:00000001', create: true },
+      scope: { namespace: 'project', id: 'first' },
+    }), /observed real Host context resolution/);
+  } finally {
+    await first.studio.shutdown();
+  }
+  const restored = await make();
+  try {
+    assert.deepEqual(restored.studio.listPets().map(({ petId }) => petId), ['planner']);
+    await assert.rejects(restored.studio.dispatch({
+      petId: 'planner', request: 'restored resident', session: { id: 'planner:00000002', create: true },
+      scope: { namespace: 'project', id: 'second' },
+    }), /observed real Host context resolution/);
+    assert.deepEqual(targets, [
+      { petId: 'planner', sessionId: 'planner:00000001', scope: { namespace: 'project', id: 'first' } },
+      { petId: 'planner', sessionId: 'planner:00000002', scope: { namespace: 'project', id: 'second' } },
+    ]);
+  } finally {
+    await restored.studio.shutdown();
+  }
 });
 
 test('a plugin declared without options still builds', async () => {

@@ -2,6 +2,7 @@ import type {
   AgentCapability,
   CapabilityArtifactStore,
   PetDocument,
+  SystemPromptSection,
 } from '@pinpawo/pet-agent';
 import type { AgentRuntimeEvent, AgentServerMessage } from '@pinpawo/agent-session';
 
@@ -24,6 +25,7 @@ import type {
   PetDispatchLifecycleEvent,
 } from './contracts';
 import type { ResidentPetCoordinator } from './residentPetCoordinator';
+import type { PetInvocationScope } from './petInvocationContext';
 
 /**
  * What the two surfaces share.
@@ -59,6 +61,12 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   persistToolAuthorizationMode?: ServerHandlerOptions['persistToolAuthorizationMode'];
   /** Existing opaque checkpoint thread, adopted only when no Agent Session exists. */
   adoptThreadId?: string;
+  /** Resolve common invocation context from a trusted scope at admission. */
+  resolveInvocationContext?: (target: Readonly<{
+    petId: string;
+    sessionId?: string;
+    scope: PetInvocationScope;
+  }>) => Promise<readonly SystemPromptSection[] | undefined>;
 };
 
 export type CreateResidentPetHostOptions = CreateResidentPetRuntimeOptions;
@@ -76,6 +84,7 @@ export type ResidentPetRuntimeContext = {
   runtimeDeps: ServerRuntimeDepsStore;
   graphService: HostGraphService;
   runAgentTurn: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
+  resolveInvocationContext?: CreateResidentPetRuntimeOptions['resolveInvocationContext'];
   loadContext: typeof loadAgentContext;
   sessions: ServerTuiSessionService;
   coordinator: ResidentPetCoordinator;

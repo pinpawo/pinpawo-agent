@@ -19,7 +19,7 @@ Channel 里没有 @ 的消息只写入时间线，不会派发给任何 Pet（[C
 - **默认关闭。** 关闭时不调用任何模型，无 @ 消息只存不派发，和现在一样。
 - **不发言。** 路由只决定交给谁，被选中的 Pet 按普通交接收到消息，由它自己回答。
   Channel 的作者仍然只有 `human | pet`，4 张表不变。
-- **不看过程。** 输入只有 Channel 成员和公开消息，不读 Pet session、operation 或运行状态。
+- **不看过程。** 输入包括 Channel 信息、可选协作提示词、成员和公开消息，不读 Pet session、operation 或运行状态。
   "#1003 谁在处理"这类问题，路由只需要从公开消息里认出是 Executor 提过 #1003，然后交给 Executor；
   Executor 的 session 里有这件事的上下文，由它回答。
 - **与 Agent runtime 无关。** 不经过 pet-agent、Supervisor 或 Toolkit，只做一次决策调用，没有工具、没有多轮。
@@ -40,7 +40,7 @@ Channel 里没有 @ 的消息只写入时间线，不会派发给任何 Pet（[C
 ### 输入
 
 - 当前消息：作者 label、正文、`replyTo` 的作者和正文。
-- Channel 标题和说明。
+- Channel 标题、说明和可选协作提示词。该提示词是协作意图，不能授予权限，也不能保证模型按预期路由。
 - Pet 成员：`participantId`、名称，以及路由设置里该 Pet 的一句话说明（见“配置”）。
 - 最近 N 条公开消息（默认 20）：作者、正文截断到固定长度。
 
@@ -71,7 +71,7 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 | 优点 | 快、便宜、输出形状由模型保证，概率可用 | 不需要新厂商；复用已有模型配置；能给 `reason` |
 | 缺点 | 新接一家 API；只保证形状，不保证决策稳定 | 慢一些、贵一些；confidence 不可靠 |
 
-`llm` 决策器只用 Pet 运行时之外的一次直接调用，不走 LangChain Agent。它的 prompt 固定在 Channel 插件里：
+`llm` 决策器只用 Pet 运行时之外的一次直接调用，不走 LangChain Agent。它的基本路由指令在 Channel 插件里，并接收当前 Channel 的协作提示词作为上下文：
 说明任务是"选一个最该回应的 Pet，或 none"，列出 Pet 和说明，要求人和人之间的闲聊、致谢、无需行动的消息选 `none`。
 
 调用失败、超时或返回不合法（`target` 不是当前 Pet 成员）：视为不派发，发布事件，不重试。消息已经保存。

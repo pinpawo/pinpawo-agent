@@ -10,6 +10,7 @@ import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpaw
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -37,7 +38,9 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
         { lc_error_code: 'GRAPH_RECURSION_LIMIT' });
     },
   };
+  const contextBridge = createInvocationContextBridge();
   const host = await createResidentPetHost({ petId: 'one', petName: 'One', runtimeConfig,
+    resolveInvocationContext: contextBridge.resolveInvocationContext,
     modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
     capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -46,6 +49,7 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
   });
   const channel = createChannelPlugin({ httpRoute: false });
   const studio = await createStudioWithPets({ studioId: 'recursion-limit', plugins: [channel],
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
   });

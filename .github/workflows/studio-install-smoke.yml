@@ -72,6 +72,8 @@ jobs:
           cache: npm
       - name: Install workspace dependencies
         run: npm ci
+      - name: Check knowledge root authorization
+        run: node --import tsx/esm --test plugins/project-files/src/projectFilesRoot.test.ts
       - name: Pack, install, and check Studio
         run: npm run test:install -w @pinpawo/studio
       - name: Locate npm logs

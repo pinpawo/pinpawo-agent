@@ -181,7 +181,7 @@ test('tui session registry persists a suspended dispatch across restart and summ
   const filePath = path.join(dir, 'sessions.json');
   const state = loadTuiSessionState(filePath);
   const session = ensureActiveTuiSession(state, 'pet', 'test-profile');
-  const pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it', scope: { namespace: 'channel', id: 'ch-1' } };
+  const pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it', scope: { namespace: 'channel', id: 'ch-1' }, systemPromptSections: [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }] };
   setTuiSessionPendingDispatch(state, session.id, pendingDispatch);
   updateTuiSessionSummary(state, session.id, { title: 'renamed' });
   saveTuiSessionState(state, filePath);

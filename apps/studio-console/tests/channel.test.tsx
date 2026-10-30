@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  appendChannelDeliveries, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
+  appendChannelDeliveries, channelCanEditPrompt, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
@@ -18,6 +18,11 @@ const members: ChannelMember[] = [
   { participantId: 'human:studio-operator', kind: 'human', id: 'studio-operator', label: 'studio-operator' },
   { participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' },
 ];
+
+test('Channel instructions editing is limited to Studio authority', () => {
+  assert.equal(channelCanEditPrompt(true), false, 'ordinary clients may not edit, even on Channels they created');
+  assert.equal(channelCanEditPrompt(false), true, 'Studio authority may edit');
+});
 
 test('Reply defaults to the original author while it is a member; changes and clearing stay explicit', () => {
   const current = [...members, { participantId: 'pet:a%29b', kind: 'pet', id: 'a)b', label: 'Analyst' }, { participantId: 'human:worker', kind: 'human', id: 'worker', label: 'worker' }];

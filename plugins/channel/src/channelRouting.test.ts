@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { createChannelRouter, createLlmRouteDecider, type RouteInput } from './channelRouting';
+import { createChannelRouter, createLlmRouteDecider, routeInput, type RouteInput } from './channelRouting';
 import type { ChannelMember } from './channelService';
 import type { ChannelMessageRow } from './store/channelStore';
 
@@ -60,6 +60,21 @@ test('Pet notes from the routing settings reach the decider', async () => {
     { participantId: 'pet:executor', name: 'Executor', description: 'Runs the work.' },
     { participantId: 'pet:reviewer', name: 'Reviewer' },
   ]);
+});
+
+test('the Channel collaboration prompt reaches the routing model as Channel context', async () => {
+  const channel = { channelId: 'c', title: 'Release', prompt: 'Reviewer handles review questions.', createdBy: { kind: 'human' as const, id: 'local' }, createdAt: '', updatedAt: '' };
+  const input = routeInput(channel, message({ kind: 'human', id: 'local' }), undefined, [], [human, pet]);
+  let modelInput: RouteInput | undefined;
+  const model = { withStructuredOutput: () => ({
+    invoke: async (messages: Array<{ content: unknown }>) => {
+      modelInput = JSON.parse(String(messages[1]!.content)) as RouteInput;
+      return { target: 'none', confidence: 1 };
+    },
+  }) } as unknown as BaseChatModel;
+  await createLlmRouteDecider({ ...endpoint, createChatModel: () => model })(input, AbortSignal.timeout(1_000));
+  assert.deepEqual(modelInput?.channel, { title: 'Release', prompt: channel.prompt });
+  assert.deepEqual(routeInput({ ...channel, prompt: undefined }, message({ kind: 'human', id: 'local' }), undefined, [], [human, pet]).channel, { title: 'Release' });
 });
 
 test('the llm decider resolves its profile at start and fails early for a missing one', () => {

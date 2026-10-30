@@ -6,7 +6,7 @@ import { AnthropicCompatibleChatModel } from '../../../services/host/src/agent/a
 import { ReasoningPassbackCompletions } from '../../../services/host/src/agent/reasoningPassback.ts';
 
 const input: RouteInput = {
-  channel: { title: 'Release' }, message: { author: 'Barry', body: 'Who is handling #1003?' },
+  channel: { title: 'Release', prompt: 'Reviewer handles review questions.' }, message: { author: 'Barry', body: 'Who is handling #1003?' },
   pets: [{ participantId: 'pet:executor', name: 'Executor' }, { participantId: 'pet:reviewer', name: 'Reviewer' }],
   history: [{ author: 'Executor', body: 'Opened #1003.' }],
 };
@@ -55,6 +55,7 @@ for (const method of ['jsonSchema', 'jsonMode', 'functionCalling'] as const) {
       assert.equal(body.max_tokens, 300);
       assert.equal(body.max_completion_tokens, undefined);
       const user = JSON.parse(body.messages[1].content);
+      assert.deepEqual(user.channel, input.channel);
       assert.deepEqual(user.targets, ['pet:executor', 'pet:reviewer', 'none']);
       if (method === 'jsonSchema') {
         assert.equal(body.response_format.type, 'json_schema');
@@ -130,6 +131,8 @@ test('routing uses native Anthropic Messages with the same decision semantics', 
     assert.equal(headers.get('x-api-key'), 'k');
     assert.equal(headers.has('authorization'), false);
     const body = JSON.parse(String(init?.body));
+    const content = body.messages[0].content;
+    assert.deepEqual(JSON.parse(typeof content === 'string' ? content : content[0].text).channel, input.channel);
     assert.equal(body.max_tokens, 300);
     assert.equal(body.temperature, undefined);
     assert.equal(body.thinking, undefined);
@@ -151,6 +154,8 @@ test('routing supports native Anthropic JSON Schema without forcing tool choice'
     calls += 1;
     assert.equal(String(url), 'https://models.test/v1/messages');
     const body = JSON.parse(String(init?.body));
+    const content = body.messages[0].content;
+    assert.deepEqual(JSON.parse(typeof content === 'string' ? content : content[0].text).channel, input.channel);
     assert.equal(body.output_config.format.type, 'json_schema');
     const target = body.output_config.format.schema.properties.target;
     assert.equal(target.type, 'string');

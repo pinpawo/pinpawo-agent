@@ -7,7 +7,7 @@
 > 2026-10-14：按 [Channel 模型](channel-model.md) 重新实现：成员、自然对话（无目标/修订）、Pet 公开回复即消息、
 > schedule / trigger 的 `run()`。本文已同步；数据与规则以 Channel 模型为准。
 
-早期方案与验收沿革见[历史记录](../../history/studio/channel-evolution.md)。
+早期方案与验收沿革见[历史记录](../../history/studio/channel-evolution.md)。Channel 公共协作提示的作用域与迁移目标见[设计草案](channel-collaboration-prompt.md)。
 
 ## 职责
 

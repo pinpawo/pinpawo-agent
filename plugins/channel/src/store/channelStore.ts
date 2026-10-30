@@ -8,6 +8,8 @@ export type ChannelRow = {
   channelId: string;
   title: string;
   description?: string;
+  /** Channel-authored collaboration instructions, separate from its public description. */
+  prompt?: string;
   createdBy: MemberRef;
   createdAt: string;
   updatedAt: string;
@@ -72,7 +74,7 @@ export interface ChannelStore {
   /** Runs `work` atomically against the store it is given; nested calls join the outer transaction. */
   transaction<T>(work: (store: ChannelStore) => Promise<T>): Promise<T>;
   createChannel(row: ChannelRow): Promise<void>;
-  updateChannel(channelId: string, patch: { title?: string; description?: string | null; updatedAt: string }): Promise<void>;
+  updateChannel(channelId: string, patch: { title?: string; description?: string | null; prompt?: string | null; updatedAt: string }): Promise<void>;
   getChannel(channelId: string): Promise<ChannelRow | undefined>;
   /**
    * Inside a transaction, holds the Channel's row lock until it ends, so

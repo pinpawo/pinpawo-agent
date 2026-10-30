@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { StudioModelEndpoint } from '@pinpawo/studio-core';
 import type { ChannelMember } from './channelService';
 import type { ChannelMessageRow, ChannelRow } from './store/channelStore';
@@ -20,6 +21,29 @@ type ParsedRoutingOptions = z.output<typeof channelRoutingOptionsSchema>;
 
 const DEFAULTS = { llm: { threshold: 0.5, timeoutMs: 10_000 } } as const;
 const BODY_LIMIT = 2_000;
+
+class RoutingHttpError extends Error {
+  constructor(status: number) {
+    super(`Routing model returned HTTP ${status}.`);
+  }
+}
+
+function safeRoutingError(error: unknown, signal: AbortSignal): Error {
+  if (signal.aborted) {
+    const reason = signal.reason;
+    return new Error(reason && typeof reason === 'object' && 'name' in reason && reason.name === 'TimeoutError'
+      ? 'Routing model request timed out.' : 'Routing model request aborted.');
+  }
+  if (error instanceof RoutingHttpError) return error;
+  const name = error && typeof error === 'object' && 'name' in error ? error.name : undefined;
+  if (name === 'AbortError' || name === 'APIUserAbortError') return new Error('Routing model request aborted.');
+  if (name === 'TimeoutError' || name === 'APITimeoutError') return new Error('Routing model request timed out.');
+  const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+  if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) {
+    return new RoutingHttpError(status);
+  }
+  return new Error('Routing model request failed.');
+}
 
 export type RouteCandidate = { participantId: string; name: string; description?: string };
 /** What a decider sees: public Channel messages and members, nothing of any Pet's process. */
@@ -50,7 +74,6 @@ export type ChannelRouter = {
 export function createChannelRouter(value: ChannelRoutingOptions | undefined, options: {
   decider?: RouteDecider;
   resolveModel?: (profileId?: string) => StudioModelEndpoint;
-  fetch?: typeof fetch;
 }): ChannelRouter | undefined {
   const settings: ParsedRoutingOptions = channelRoutingOptionsSchema.parse(value ?? {});
   if (!settings.enabled) return undefined;
@@ -61,8 +84,11 @@ export function createChannelRouter(value: ChannelRoutingOptions | undefined, op
     const { modelProfileId } = settings.decider;
     if (!options.resolveModel) throw new Error('Channel routing with an llm decider needs the Studio model profiles.');
     // Resolve now so a wrong profile id fails at start, not on the first message.
-    const endpoint = options.resolveModel(modelProfileId);
-    return createLlmRouteDecider(endpoint, options.fetch);
+    // Resolution errors can contain host-private configuration details.
+    let endpoint: StudioModelEndpoint;
+    try { endpoint = options.resolveModel(modelProfileId); }
+    catch { throw new Error('Channel routing could not resolve the configured model profile.'); }
+    return createLlmRouteDecider(endpoint);
   })();
   return {
     historyLimit: settings.historyLimit,
@@ -72,11 +98,12 @@ export function createChannelRouter(value: ChannelRoutingOptions | undefined, op
       const candidates = new Set(input.pets.map(pet => pet.participantId));
       const pets = input.pets.map(pet => ({ ...pet, ...(settings.pets[petIdOf(pet.participantId)] ? { description: settings.pets[petIdOf(pet.participantId)] } : {}) }));
       let decision: RouteDecision;
-      try { decision = await decider({ ...input, pets }, AbortSignal.timeout(timeoutMs)); }
-      catch (error) { return { kind: 'skip', reason: 'error', detail: error instanceof Error ? error.message : String(error) }; }
+      const signal = AbortSignal.timeout(timeoutMs);
+      try { decision = await decider({ ...input, pets }, signal); }
+      catch (error) { return { kind: 'skip', reason: 'error', detail: safeRoutingError(error, signal).message }; }
       const confidence = decision.confidence;
       if (decision.target === 'none') return { kind: 'skip', reason: 'none', confidence };
-      if (!candidates.has(decision.target) || !Number.isFinite(confidence)) return { kind: 'skip', reason: 'invalid', confidence, detail: decision.target };
+      if (!candidates.has(decision.target) || !Number.isFinite(confidence)) return { kind: 'skip', reason: 'invalid', confidence, detail: 'Invalid routing target or confidence.' };
       if (confidence < threshold) return { kind: 'skip', reason: 'low_confidence', confidence };
       return { kind: 'route', participantId: decision.target, confidence, ...(decision.reason ? { reason: decision.reason } : {}) };
     },
@@ -119,11 +146,20 @@ const decisionSchema = z.object({
   target: z.string(), confidence: z.number().min(0).max(1), reason: z.string().max(500).optional(),
 });
 
-/** One direct OpenAI-compatible chat completion; no Agent, tools or retries. */
-export function createLlmRouteDecider(endpoint: StudioModelEndpoint, fetchImpl: typeof fetch = fetch): RouteDecider {
-  if (endpoint.protocol !== undefined && endpoint.protocol !== 'openai-compatible') {
-    throw new Error('Channel routing supports only openai-compatible model profiles. '
-      + 'Set routing.decider.modelProfileId to an OpenAI-compatible profile when the Host default uses native Anthropic.');
+/** One structured model decision; no Agent or retries. */
+export function createLlmRouteDecider(endpoint: StudioModelEndpoint): RouteDecider {
+  if (!endpoint.createChatModel) {
+    throw new Error('Channel routing requires the Studio Host to provide createChatModel for its model profiles.');
+  }
+  const method = endpoint.structuredOutputMethod;
+  if (method !== 'jsonMode' && method !== 'jsonSchema' && method !== 'functionCalling') {
+    throw new Error('Channel routing requires the Studio Host to provide a supported structuredOutputMethod.');
+  }
+  let model;
+  try {
+    model = endpoint.createChatModel({ maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true });
+  } catch {
+    throw new Error('Routing model initialization failed.');
   }
   return async (input, signal) => {
     const targets = [...input.pets.map(pet => pet.participantId), 'none'];
@@ -135,35 +171,19 @@ export function createLlmRouteDecider(endpoint: StudioModelEndpoint, fetchImpl: 
         reason: { type: 'string' },
       },
     };
-    const method = endpoint.structuredOutputMethod ?? 'jsonMode';
-    const output = method === 'jsonSchema'
-      ? { response_format: { type: 'json_schema', json_schema: { name: 'channel_route', strict: true, schema: jsonSchema } } }
-      : method === 'functionCalling'
-        ? {
-          tools: [{ type: 'function', function: { name: 'channel_route', description: 'Report the routing decision.', parameters: jsonSchema } }],
-          tool_choice: { type: 'function', function: { name: 'channel_route' } },
-        }
-        : { response_format: { type: 'json_object' } };
-    const response = await fetchImpl(`${endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${endpoint.apiKey}` },
-      body: JSON.stringify({
-        model: endpoint.model,
-        messages: [
-          { role: 'system', content: ROUTE_SYSTEM_PROMPT },
-          { role: 'user', content: JSON.stringify({ ...input, targets }) },
-        ],
-        temperature: 0,
-        max_tokens: 300,
-        ...output,
-      }),
-    });
-    if (!response.ok) throw new Error(`Routing model returned HTTP ${response.status}.`);
-    const body = await response.json() as {
-      choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
-    };
-    const message = body.choices?.[0]?.message;
-    const text = message?.tool_calls?.[0]?.function?.arguments ?? message?.content ?? '';
-    return decisionSchema.parse(JSON.parse(text));
+    try {
+      const structuredModel = model.withStructuredOutput(jsonSchema, {
+        name: 'channel_route', method, ...(method === 'jsonSchema' ? { strict: true } : {}),
+      });
+      const result = await structuredModel.invoke([
+        new SystemMessage(ROUTE_SYSTEM_PROMPT),
+        new HumanMessage(JSON.stringify({ ...input, targets })),
+      ], { signal });
+      return decisionSchema.parse(result);
+    } catch (error) {
+      // SDK parser errors can include the complete model response. Only
+      // expose a safe class or HTTP status at the Channel boundary.
+      throw safeRoutingError(error, signal);
+    }
   };
 }

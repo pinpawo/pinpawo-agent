@@ -1,4 +1,4 @@
-import { buildHostModels } from '../../../../services/host/src/agent/agentModels.ts';
+import { buildHostModel } from '../../../../services/host/src/agent/agentModels.ts';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -134,6 +134,12 @@ export function readProfile(profileId: string, env: EvalModelEnvironment): Model
   return readProfileSnapshot(profileId, env).profile;
 }
 
+/** Reuse the Host's resolved settings, including preset limits and modalities. */
+export function readResolvedProfile(profileId: string, env: EvalModelEnvironment) {
+  const { profile, snapshot } = readProfileSnapshot(profileId, env);
+  return { profile, config: createLocalModelProfileRegistry({ snapshot }).resolve(profileId) };
+}
+
 function readPricing(
   profileId: string,
   role: PromptEvalModelRole,
@@ -198,8 +204,7 @@ export function createDecisionEvalModel(options: {
   env?: EvalModelEnvironment;
 }): DecisionEvalModel {
   const env = options.env ?? process.env;
-  const { profile, snapshot } = readProfileSnapshot(options.profileId, env);
-  const effectiveConfig = createLocalModelProfileRegistry({ snapshot }).resolve(options.profileId);
+  const { profile, config: effectiveConfig } = readResolvedProfile(options.profileId, env);
   const rolePrefix = options.role === 'judge'
     ? 'PROMPT_EVAL_JUDGE'
     : 'PROMPT_EVAL_SUBJECT';
@@ -222,16 +227,14 @@ export function createDecisionEvalModel(options: {
           ?? env.DECISION_STRUCTURED_OUTPUT_METHOD
         : undefined),
   ) ?? effectiveConfig.structuredOutputMethod
-    ?? (profile.protocol === 'anthropic-compatible'
-      ? 'functionCalling'
-      : inferLlmStructuredOutputMethod(profile.model, profile.baseUrl));
+    ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl);
   const fingerprint = effectiveConfig.modelProfileFingerprint!;
-  const model = buildHostModels({
+  const model = buildHostModel({
     ...effectiveConfig,
     structuredOutputMethod: method,
     timeoutMs: timeout,
     maxRetries: 0,
-  }, temperature === null ? {} : { temperature }).act;
+  }, temperature === null ? {} : { temperature });
 
   return {
     model,

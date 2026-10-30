@@ -76,18 +76,25 @@ be returned; preserve the provider's complete message through a supported path.
 
 ### Channel routing and evals
 
-Pet runs and profile-based decision/prompt evals use the selected protocol.
-Channel routing currently supports only OpenAI-compatible profiles. If the Host
-uses a native Anthropic default, configure the Channel plugin's
-`routing.decider` as `{ "kind": "llm", "modelProfileId": "routing-compatible" }`,
-where `routing-compatible` names a separate OpenAI-compatible profile. Otherwise,
-enabling routing fails at startup with an explicit protocol error. Disabled
-routing does not need a separate profile.
+Pet runs, Channel routing, and profile-based decision/prompt evals use the
+Host model factory and the selected profile's protocol. Channel routing uses
+the Host default unless `routing.decider.modelProfileId` names another profile;
+the LLM decision uses a 300-token output limit, no retries, and its configured
+timeout. It prefers deterministic sampling for OpenAI-compatible profiles and
+leaves Anthropic sampling to the provider. Studio embedders supplying their
+own model resolver must provide `createChatModel` and the resolved
+`structuredOutputMethod` for LLM Channel routing; otherwise routing fails at
+startup with a configuration error.
+
+The Host constructs five separate model roles for Agent work; context
+compaction reuses the observe role. Profile-based decision, prompt, and
+Channel routing evals use the same single-model factory and resolved profile.
+Scripted tests and mock models do not make provider calls.
 
 The legacy `orchestrator-route`, `orchestrator-flow.mock-subagent`, and
 `structured-output-compat` eval scripts read OpenAI-compatible `LLM_*`/legacy
-`llm_*` settings, not versioned profiles. Use the profile-based decision/prompt
-evals for native Anthropic; the Channel routing eval rejects native profiles.
+`llm_*` settings, not versioned profiles. The Langfuse route eval reuses the
+legacy orchestrator-route entry. Use profile-based evals for Anthropic Messages.
 
 ## Select a profile at startup
 

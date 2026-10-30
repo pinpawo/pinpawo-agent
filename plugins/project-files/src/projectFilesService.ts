@@ -82,7 +82,9 @@ function canonicalRoot(root: string): string {
   const missing: string[] = [];
   for (;;) {
     try {
-      return path.join(realpathSync(current), ...missing);
+      // Match fs/promises.realpath: the JS realpathSync implementation preserves
+      // Windows 8.3 aliases (e.g. RUNNER~1), while the native API expands them.
+      return path.join(realpathSync.native(current), ...missing);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       const parent = path.dirname(current);

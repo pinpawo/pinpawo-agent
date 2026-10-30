@@ -34,9 +34,11 @@ test('Channel instructions reach the actual Pet model per invocation without rep
   const me = { kind: 'human' as const, id: 'local' };
   const petMarker = randomUUID(), alpha = randomUUID(), beta = randomUUID(), revised = randomUUID();
   const observed: string[] = [];
+  const nonSystemMessages: string[][] = [];
   const model = new ObservingModel(messages => {
     assert.equal(messages[0]?._getType(), 'system');
     observed.push(messages[0]!.text);
+    nonSystemMessages.push(messages.slice(1).map(message => message.text));
   });
   const channel = createChannelPlugin({ httpRoute: false });
   let host: Awaited<ReturnType<typeof createResidentPetHost>> | undefined;
@@ -79,13 +81,17 @@ Pet identity marker: ${petMarker}
     };
     await sendAndWait(a, 1);
     await sendAndWait(b, 1);
-    await channel.service.updateChannel(me, a, { prompt: revised }, { studio: true });
     await sendAndWait(a, 2);
-    assert.equal(observed.length, 3);
-    for (const [index, expected] of [alpha, beta, revised].entries()) {
+    await channel.service.updateChannel(me, a, { prompt: revised }, { studio: true });
+    await sendAndWait(a, 3);
+    assert.equal(observed.length, 4);
+    assert.equal(observed[0], observed[2], 'the same Pet and Channel session has a stable system prompt across turns');
+    assert.notEqual(observed[2], observed[3], 'updating the Channel instructions changes the system prompt');
+    for (const [index, expected] of [alpha, beta, alpha, revised].entries()) {
       assert.ok(observed[index]!.includes(petMarker), 'the Pet identity remains in every model call');
       for (const marker of [alpha, beta, revised]) {
         assert.equal(observed[index]!.includes(marker), marker === expected, 'only the current Channel instructions reach the model');
+        assert.ok(nonSystemMessages[index]!.every(message => !message.includes(marker)), 'Channel instructions are not mixed into conversation messages');
       }
     }
   } finally {

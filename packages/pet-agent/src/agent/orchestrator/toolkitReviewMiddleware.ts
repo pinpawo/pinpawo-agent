@@ -543,18 +543,6 @@ async function prepareToolkitToolReview(params: {
   if (approvedReviewIds.has(reviewPayload.review.id)) {
     return { type: 'allow' };
   }
-  let evidence: string | undefined;
-  if (binding.reviewPolicy.collectEvidence) {
-    try {
-      evidence = await binding.reviewPolicy.collectEvidence({
-        toolkitName: binding.toolkit.name, toolName: binding.toolName,
-        input: currentInput, operation: binding.operation,
-        workdir: ctx.reviewContext?.workdir ?? null,
-      });
-    } catch {
-      evidence = 'Runtime source evidence unavailable: collection failed. Underlying effects are unverified.';
-    }
-  }
   return {
     type: 'review',
     review: {
@@ -566,7 +554,6 @@ async function prepareToolkitToolReview(params: {
       reviewPolicy: binding.reviewPolicy,
       authorizationMatcher,
       autoReviewContext: binding.toolkit.reviewGuidance,
-      evidence,
       ...(authorizationMatcher ? { authorization: {
         matcherType: authorizationMatcher.type,
         reuseAutoReview: canReuseAutoReviewAuthorization(binding.reviewPolicy.authorization, authorizationMatcher),

@@ -20,7 +20,9 @@ test('unknown commands, executable forms and writes defer to reviewed execution'
     'find . | xargs wc', 'rg --pre=evil foo', 'sort -o out file', 'sort --compress-program evil',
     "sed -n '1e touch x' file", 'jq -f script.jq file', 'git reset --hard', 'gh pr merge 1 --squash',
     'git branch 2 >/dev/null', 'cat <>file', 'echo hi >file', 'ls # comment\nrm file',
-    'uniq input output', 'uniq -- -input output', 'git diff --ext-diff', 'ls &', 'ls >', 'if test -f file; then cat file; fi', '']) {
+    'uniq input output', 'uniq -- -input output', 'git diff --ext-diff', 'git grep -Ocat pattern',
+    'git reflog write refs/heads/main old new message', "echo ok # '\necho `touch marker`",
+    'ls &', 'ls >', 'if test -f file; then cat file; fi', '']) {
     assert.equal(classify(command).allowed, false, command);
   }
 });

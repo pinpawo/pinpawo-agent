@@ -59,8 +59,6 @@ export type ToolReviewBlock = {
 export type ToolReviewResult = ReviewSpec | ToolReviewBlock | null;
 
 export type ToolReviewPolicy = {
-  /** Runtime facts only; never execute the proposed action to collect evidence. */
-  collectEvidence?: (ctx: ToolAutoAuthorizationContext) => Promise<string>;
   /** Auto-mode quick approval: true approves; false/errors defer, never reject.
    * Must be side-effect free. Not a mandatory validation or an approval event.
    */

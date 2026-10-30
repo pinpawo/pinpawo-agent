@@ -20,7 +20,7 @@ import {
   normalizeShellAuthorizationInput,
   shellOperationMetadata,
 } from './shellTools';
-import { collectShellEvidence } from './shellEvidence';
+import { invokesShellScript, shellScriptContext } from './shellScriptContext';
 
 export const SHELL_TOOLKIT_NAME = 'shell';
 
@@ -41,17 +41,26 @@ const shellToolkitInstructions = [
 
 export function createShellToolDefinitions({ shell }: ShellToolkitDependencies) {
   const inspectShell = createInspectShellTool(shell);
-  // Commands may execute mutable scripts/configuration even with identical argv.
-  // Human session grants remain available; automatic approvals apply to one call.
-  const reviewedExecution = () => ({
-    ...ReviewPolicies.required({
+  const reviewedExecution = () => {
+    const policy = ReviewPolicies.required({
       authorization: AuthorizationPolicies.exact({
-        reuseAutoReview: false,
-        subject: ({ input }) => normalizeShellAuthorizationInput(input),
+        reuseAutoReview: true,
+        subject: ({ input }) => {
+          const action = normalizeShellAuthorizationInput(input);
+          // Script effects can change without argv changing. Keep approval scoped to this call.
+          return invokesShellScript(action.command) ? null : action;
+        },
       }),
-    }),
-    collectEvidence: ({ input, workdir }: { input: unknown; workdir: string | null }) => collectShellEvidence(input, workdir),
-  });
+    });
+    return { ...policy, request: async (ctx: Parameters<typeof policy.request>[0]) => {
+      const review = await policy.request(ctx);
+      if (review && 'schemaVersion' in review && review.view.kind === 'operation') {
+        const blocks = await shellScriptContext(ctx.input);
+        if (blocks.length) review.view = { ...review.view, blocks: [...(review.view.blocks ?? []), ...blocks] };
+      }
+      return review;
+    } };
+  };
   const definitions = executionScopedDefinitions(
     [inspectShell, getCurrentTimeTool, createRunShellTool(shell), createStartProcessTool(shell), ...createProcessTools(shell)],
     { ...shellOperationMetadata, ...processOperationMetadata },

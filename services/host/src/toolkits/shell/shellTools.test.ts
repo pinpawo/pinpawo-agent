@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { summarizeToolOperation, type AgentToolkit } from '@pinpawo/pet-agent';
+import { summarizeToolOperation, type AgentToolkit, type ToolAuthorizationMatcher } from '@pinpawo/pet-agent';
 import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
@@ -272,7 +272,7 @@ test('start_process is reviewed with the original command and cwd', async () => 
   assert.ok(buildMatcher);
   const review = await item.review.request({ ...context, authorizationMatcher: await buildMatcher(context) });
   assert.deepEqual(review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
-    ['approve', 'approve-and-authorize-thread', 'reject', 'respond']);
+    ['approve', 'reject', 'respond']);
   for (const name of ['wait_process', 'list_processes', 'terminate_process']) {
     assert.equal(definition(toolkit, name)?.review, undefined);
   }
@@ -338,14 +338,28 @@ test('inspect_shell executes allowlisted queries and defers unfamiliar or comple
   assert.deepEqual(commands, ["jq '.events | map(.type)' state.json | head"]);
 });
 
-test('shell automatic approvals are not reusable but explicit human scope is retained', async () => {
+test('script execution permits current-call approval while ordinary commands retain session authorization', async () => {
   const toolkit = createShellToolkit({ shell: new PosixShellRS() });
   for (const name of ['run_shell', 'start_process']) {
     const policy = definition(toolkit, name)?.review;
-    assert.equal(policy?.authorization?.reuseAutoReview, false);
-    assert.equal(typeof policy?.collectEvidence, 'function');
-    assert.ok(await policy?.authorization?.buildMatcher({
-      toolkitName: 'shell', toolName: name, input: { command: 'npm run build' },
-    }));
+    assert.ok(policy?.authorization);
+    assert.deepEqual(Object.keys(policy).sort(), ['authorization', 'request']);
+    assert.equal(policy.authorization.reuseAutoReview, true);
+    for (const command of ['npm run build', 'make build', 'node scripts/build.js', 'cd app && npm test',
+      'NODE_ENV=production npm run build', 'env npm run build', 'npm t', 'npm tst']) {
+      const context = { toolkitName: 'shell', toolName: name, input: { command },
+        operation: definition(toolkit, name)?.operation,
+        reviewCapabilities: { humanReview: true, sessionAuthorization: true } };
+      const authorizationMatcher: ToolAuthorizationMatcher | null = await policy.authorization.buildMatcher(context);
+      assert.equal(authorizationMatcher, null, command);
+      const review = await policy.request({ ...context, authorizationMatcher });
+      assert.ok(review && 'schemaVersion' in review);
+      assert.deepEqual(Object.keys(review).sort(), ['id', 'options', 'schemaVersion', 'view']);
+      assert.deepEqual(review && 'schemaVersion' in review ? review.options.map(option => option.id) : [],
+        ['approve', 'reject', 'respond']);
+    }
+    for (const command of ['printf ok', 'npm view run', 'npm config get start']) {
+      assert.ok(await policy.authorization.buildMatcher({ toolkitName: 'shell', toolName: name, input: { command } }), command);
+    }
   }
 });

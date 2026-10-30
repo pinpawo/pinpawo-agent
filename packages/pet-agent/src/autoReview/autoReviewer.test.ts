@@ -49,17 +49,23 @@ test('AutoReviewer reads a null or missing reason as empty', async () => {
   }
 });
 
-test('runtime evidence reaches the model as source data and shares the input budget', async () => {
-  const evidence = '/project/package.json\n{"scripts":{"build":"echo <source-marker>"}}';
+test('existing review blocks reach the model in full and share the action budget', async () => {
+  const source = JSON.stringify({ scripts: { build: `echo ${'x'.repeat(500)} source-tail-${Date.now()}` } });
   let calls = 0;
   const model = { withStructuredOutput: () => ({ invoke: async (messages: { content: string }[]) => {
     calls++;
-    assert.ok(messages[1].content.includes(evidence));
+    assert.ok(messages[1].content.includes(source));
     return { riskScore: 1, reason: 'test response' };
   } }) } as unknown as BaseChatModel;
   const reviewer = createAutoReviewer({ model });
-  await reviewer.assess({ reviews: [{ ...action({ command: 'npm run build' }), evidence }] });
-  assert.equal(calls, 1);
-  assert.deepEqual(await reviewer.assess({ reviews: [{ ...action({ command: 'make' }), evidence: 'x'.repeat(140_000) }] }), { complete: false });
+  const item: AutoReviewAction = {
+    ...action({ command: 'npm run build' }),
+    operation: { summarize: () => ({ summary: 'npm run build' }) },
+    review: buildReviewSpec({ view: { kind: 'operation', blocks: [{ kind: 'code', text: source, language: 'json' }] }, options: [] }),
+  };
+  assert.deepEqual(Object.keys(item.review).sort(), ['id', 'options', 'schemaVersion', 'view']);
+  await reviewer.assess({ reviews: [item] });
+  item.review.view = { kind: 'operation', blocks: [{ kind: 'code', text: 'x'.repeat(140_000) }] };
+  assert.deepEqual(await reviewer.assess({ reviews: [item] }), { complete: false });
   assert.equal(calls, 1);
 });

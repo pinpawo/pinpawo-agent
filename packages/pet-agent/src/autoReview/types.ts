@@ -7,8 +7,6 @@ export type AutoReviewAction = {
   toolkitName: string;
   toolName: string;
   input: unknown;
-  /** Runtime-collected untrusted source data, never policy. */
-  evidence?: string;
   operation?: ToolOperationMetadata;
   autoReviewContext?: ToolkitReviewGuidance;
   review: ReviewSpec;

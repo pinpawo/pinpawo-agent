@@ -38,7 +38,7 @@ function checkCommand(words: string[]): Refusal | undefined {
   const refuse = (reason = `${name} 的调用形式不在免审白名单内`): Refusal => ({ reason, redirect: RUN_SHELL });
   // Assignments, paths, wrappers and dynamic programs require review.
   if (!/^[a-z][a-z0-9_-]*$/.test(name) && name !== '[') return refuse();
-  if (name === 'git' && args.some(arg => ['--ext-diff', '--textconv'].includes(arg))) return refuse();
+  if (name === 'git' && args.some(arg => ['--ext-diff', '--textconv'].includes(arg) || /^-O/.test(arg))) return refuse();
   if (name === 'git') { const reason = gitWriteReason(args); return reason ? { reason, redirect: GIT_TOOLS } : undefined; }
   if (name === 'gh') { const reason = ghWriteReason(args); return reason ? { reason, redirect: GH_TOOLS } : undefined; }
   if (name === 'sed') {
@@ -114,13 +114,16 @@ function checkSource(source: string): Refusal | undefined {
 }
 
 function hasDynamicExpansion(source: string) {
-  let quote = '';
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (char === '\\' && quote !== "'") { index++; continue; }
-    if ((char === "'" || char === '"') && (!quote || quote === char)) {
-      quote = quote ? '' : char;
-    } else if (quote !== "'" && (char === '$' || char === '`')) return true;
+  // Admission parses each line separately; comment quotes cannot mask expansion on a later line.
+  for (const line of source.split(/\r?\n/)) {
+    let quote = '';
+    for (let index = 0; index < line.length; index++) {
+      const char = line[index];
+      if (char === '\\' && quote !== "'") { index++; continue; }
+      if ((char === "'" || char === '"') && (!quote || quote === char)) {
+        quote = quote ? '' : char;
+      } else if (quote !== "'" && (char === '$' || char === '`')) return true;
+    }
   }
   return false;
 }

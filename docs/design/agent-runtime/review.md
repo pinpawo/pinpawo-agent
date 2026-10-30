@@ -188,8 +188,10 @@ It does not make every old checkpoint incompatible.
 FileSaver still retains only the latest checkpoint per namespace. It rejects
 unsnapshotted Delta checkpoints before publishing/pruning, and explicitly rejects
 requests for missing ancestor delta history, instead of silently rebuilding empty
-state. A DeltaChannel that snapshots every checkpoint works; other delta graphs
-need a full-history saver. This is a supported-storage boundary, not evidence of
+state. A DeltaChannel works only when its snapshot is actually present in every
+saved checkpoint; `snapshotFrequency: 1` alone does not guarantee this when
+a later step updates only other channels. Other delta graphs need a full-history
+saver. This is a supported-storage boundary, not evidence of
 a failure in the current default Agent topology. No production data is migrated.
 
 LangGraph 1.5.1 also converts message chunks into ordinary messages in both

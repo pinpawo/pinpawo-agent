@@ -190,6 +190,27 @@ function isCheckpointManifest(value: unknown): value is CheckpointManifest {
   return Object.values(record.channelValueRefs).every(isChannelValueRef);
 }
 
+function isWritesManifest(value: unknown): value is WritesManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  if (manifest.version !== 1 || typeof manifest.threadId !== 'string'
+    || typeof manifest.namespace !== 'string' || typeof manifest.checkpointId !== 'string'
+    || typeof manifest.outerKey !== 'string' || !manifest.writes
+    || typeof manifest.writes !== 'object' || Array.isArray(manifest.writes)) return false;
+  return Object.entries(manifest.writes).every(([key, value]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    if (typeof record.taskId !== 'string' || typeof record.channel !== 'string'
+      || typeof record.valueHash !== 'string'
+      || (record.taskPath !== undefined && typeof record.taskPath !== 'string')
+      || (record.writeIndex !== undefined && !Number.isSafeInteger(record.writeIndex))) return false;
+    const prefix = `${record.taskId},`;
+    const suffix = key.startsWith(prefix) ? key.slice(prefix.length) : '';
+    if (!/^-?\d+$/.test(suffix) || !Number.isSafeInteger(Number(suffix))) return false;
+    return record.writeIndex === undefined || record.writeIndex === Number(suffix);
+  });
+}
+
 function isSupportedCheckpointVersion(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 4;
 }
@@ -652,16 +673,21 @@ export class FileSaver extends BaseCheckpointSaver {
 
   private readWritesManifest(path: string): WritesManifest | null {
     try {
-      return JSON.parse(readFileSync(path, 'utf-8')) as WritesManifest;
-    } catch {
-      return null;
+      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+      if (!isWritesManifest(parsed)) throw new Error('unsupported writes manifest format');
+      return parsed;
+    } catch (error) {
+      if (isMissingPathError(error)) return null;
+      throw new Error(`checkpoint writes manifest is unreadable: ${path}`, { cause: error });
     }
   }
 
   /** GC variant of readWritesManifest: an unreadable manifest aborts GC instead of dropping its references. */
   private readWritesManifestForGc(path: string): WritesManifest {
     try {
-      return JSON.parse(readFileSync(path, 'utf-8')) as WritesManifest;
+      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+      if (!isWritesManifest(parsed)) throw new Error('unsupported writes manifest format');
+      return parsed;
     } catch (error) {
       throw new Error(`checkpoint writes manifest is unreadable: ${path}`, { cause: error });
     }
@@ -993,7 +1019,7 @@ export class FileSaver extends BaseCheckpointSaver {
     for (const channel of Object.keys(metadata.counters_since_delta_snapshot ?? {})) {
       if (checkpoint.channel_versions[channel] !== undefined
         && !Object.hasOwn(checkpoint.channel_values, channel)) {
-        throw new Error(`FileSaver's latest-only retention cannot persist DeltaChannel "${channel}" without a snapshot. Use a full-history saver or snapshot every checkpoint.`);
+        throw new Error(`FileSaver's latest-only retention cannot persist DeltaChannel "${channel}" without a snapshot. Use a full-history saver or ensure this channel is snapshotted in every checkpoint.`);
       }
     }
     const preparedCheckpoint = copyCheckpoint(checkpoint);
@@ -1090,7 +1116,7 @@ export class FileSaver extends BaseCheckpointSaver {
 
   override async getDeltaChannelHistory(options: Parameters<BaseCheckpointSaver['getDeltaChannelHistory']>[0]) {
     if (options.channels.length === 0) return {};
-    throw new Error('FileSaver cannot reconstruct DeltaChannel history: latest-only retention does not preserve ancestor writes. Use a full-history saver or snapshot every checkpoint.');
+    throw new Error('FileSaver cannot reconstruct DeltaChannel history: latest-only retention does not preserve ancestor writes. Use a full-history saver or ensure this channel is snapshotted in every checkpoint.');
   }
 
   async deleteThread(threadId: string): Promise<void> {

@@ -104,6 +104,54 @@ test('FileSaver restores DeltaChannels that snapshot every checkpoint', async (t
   assert.deepEqual((await makeGraph().getState(config)).values.items, result.items);
 });
 
+test('snapshotFrequency 1 does not guarantee snapshots when only another channel changes', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-delta-quiet-step-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const State = Annotation.Root({
+    items: new DeltaChannel<string[], string>((left, writes) => left.concat(writes), { snapshotFrequency: 1 }),
+    status: Annotation<string>({ reducer: (_left, right) => right, default: () => '' }),
+  });
+  const graph = new StateGraph(State)
+    .addNode('delta', () => ({ items: 'next' }))
+    .addNode('ordinary', () => ({ status: 'done' }))
+    .addEdge(START, 'delta').addEdge('delta', 'ordinary').addEdge('ordinary', END)
+    .compile({ checkpointer: new FileSaver(join(root, 'checkpoints.json')) });
+  await assert.rejects(graph.invoke({ items: 'first', status: '' }, {
+    configurable: { thread_id: 'quiet-delta' }, durability: 'sync',
+  }), /latest-only retention cannot persist DeltaChannel/);
+});
+
+for (const decision of ['reject', 'cancel'] as const) {
+  test(`FileSaver retains a nested ${decision} without running the action or replaying policy`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'pinpawo-saver-decline-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'checkpoints.json');
+    const State = Annotation.Root({ result: Annotation<string>({ reducer: (_left, right) => right, default: () => '' }) });
+    let policies = 0;
+    let effects = 0;
+    const build = () => {
+      const child = new StateGraph(State).addNode('review', async () => {
+        await task('policy', async () => { policies++; return 'review'; })();
+        const answer = interrupt({ kind: 'review' });
+        if (answer === 'approve') effects++;
+        return { result: String(answer) };
+      }).addEdge(START, 'review').addEdge('review', END).compile();
+      return new StateGraph(State).addNode('child', (state, config) => child.invoke(state, config))
+        .addEdge(START, 'child').addEdge('child', END)
+        .compile({ checkpointer: new FileSaver(path) });
+    };
+    const config = { configurable: { thread_id: `decline-${decision}` } };
+    const paused = await build().invoke({ result: '' }, config) as { __interrupt__?: Array<{ id?: string }> };
+    const id = paused.__interrupt__?.[0]?.id;
+    assert.ok(id);
+    const completed = await build().invoke(new Command({ resume: { [id]: decision } }), config);
+    assert.equal(completed.result, decision);
+    assert.equal(policies, 1);
+    assert.equal(effects, 0);
+    assert.equal((await build().getState(config)).values.result, decision);
+  });
+}
+
 for (const mode of ['invoke', 'streamEvents-v2', 'streamEvents-v3'] as const) {
   for (const decision of ['reject', 'edit'] as const) {
     test(`FileSaver retains normalized tool calls after ${mode}, ${decision}, and reload (#3038)`, async (t) => {

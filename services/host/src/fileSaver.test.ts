@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Checkpoint } from '@langchain/langgraph-checkpoint';
-import { Annotation, END, START, StateGraph, interrupt } from '@langchain/langgraph';
+import { Annotation, END, START, StateGraph, MemorySaver, interrupt } from '@langchain/langgraph';
 import { FileSaver } from './fileSaver';
 
 function createTempDir(t: TestContext) {
@@ -947,4 +947,57 @@ test('FileSaver rejects replay-dependent Delta checkpoints without replacing the
   }), /latest-only retention cannot persist DeltaChannel/);
   assert.equal((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.id, 'cp-1');
   assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values.items, ['preserved']);
+});
+
+
+test('FileSaver propagates unreadable pending writes and never replaces them', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const saver = new FileSaver(path);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['items', 'first']], 'task-a', 'a');
+  const writesPath = join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '__root__', 'cp-1.json');
+  const valid = readFileSync(writesPath, 'utf8');
+  for (const damaged of ['{damaged', '{}', JSON.stringify({ version: 1, writes: {} })]) {
+    writeFileSync(writesPath, damaged);
+    await assert.rejects(saver.getTuple(config), /checkpoint writes manifest is unreadable/);
+    await assert.rejects(saver.putWrites(config, [['items', 'second']], 'task-b', 'b'),
+      /checkpoint writes manifest is unreadable/);
+    await assert.rejects(saver.collectThreadGarbage('thread-1'), /checkpoint writes manifest is unreadable/);
+    assert.equal(readFileSync(writesPath, 'utf8'), damaged);
+  }
+  writeFileSync(writesPath, valid);
+  await saver.putWrites(config, [['items', 'second']], 'task-b', 'b');
+  assert.deepEqual((await new FileSaver(path).getTuple(config))?.pendingWrites,
+    [['task-a', 'items', 'first'], ['task-b', 'items', 'second']]);
+});
+
+
+test('FileSaver matches official special-write ordering and overwrite semantics after restart', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const file = new FileSaver(path);
+  const memory = new MemorySaver();
+  const initial = { configurable: { thread_id: 'thread-1' } };
+  const cp = checkpoint('cp-1', {});
+  const metadata = { source: 'loop' as const, step: 1, parents: {} };
+  const fileConfig = await file.put(initial, cp, metadata);
+  const memoryConfig = await memory.put(initial, cp, metadata, {});
+  for (const [saver, config] of [[file, fileConfig], [memory, memoryConfig]] as const) {
+    await saver.putWrites(config, [
+      ['ordinary', 'initial'], ['__error__', 'old-error'],
+      ['__interrupt__', 'old-interrupt'], ['__resume__', 'old-resume'],
+    ], 'task', 'path');
+    await saver.putWrites(config, [
+      ['ordinary', 'replacement'], ['__error__', 'new-error'],
+      ['__interrupt__', 'new-interrupt'], ['__resume__', 'new-resume'],
+    ], 'task', 'path');
+  }
+  const actual = (await new FileSaver(path).getTuple(fileConfig))?.pendingWrites;
+  assert.deepEqual(actual, (await memory.getTuple(memoryConfig))?.pendingWrites);
+  assert.deepEqual(actual, [
+    ['task', '__resume__', 'new-resume'], ['task', '__interrupt__', 'new-interrupt'],
+    ['task', '__error__', 'new-error'], ['task', 'ordinary', 'initial'],
+  ]);
 });

@@ -160,7 +160,14 @@ function jsonToBytes(value: unknown): Uint8Array {
 }
 
 function readObject(threadDir: string, hash: string): Uint8Array {
-  return new Uint8Array(readFileSync(objectPath(threadDir, hash)));
+  if (!/^[0-9a-f]{64}$/.test(hash)) {
+    throw new Error(`checkpoint object hash is invalid: ${hash}`);
+  }
+  const bytes = new Uint8Array(readFileSync(objectPath(threadDir, hash)));
+  if (objectHash(bytes) !== hash) {
+    throw new Error(`checkpoint object hash mismatch: ${hash}`);
+  }
+  return bytes;
 }
 
 function isChannelValueRef(value: unknown): value is ChannelValueRef {
@@ -379,8 +386,11 @@ export class FileSaver extends BaseCheckpointSaver {
       throw new Error('Checkpoint startup maintenance requires the Host writer lease.');
     }
     await this.runStoreExclusive(() => {
-      for (const threadSegment of readSubdirsForGc(join(this.casRootDir, 'threads'))) {
-        const threadDir = join(this.casRootDir, 'threads', threadSegment);
+      const threadDirs = readSubdirsForGc(join(this.casRootDir, 'threads'))
+        .map((threadSegment) => join(this.casRootDir, 'threads', threadSegment));
+      // Validate every thread before maintenance mutates any of them.
+      for (const threadDir of threadDirs) this.collectReachableObjectHashes(threadDir);
+      for (const threadDir of threadDirs) {
         this.pruneThreadHistory(threadDir);
         this.gcThreadObjects(threadDir);
       }
@@ -813,6 +823,9 @@ export class FileSaver extends BaseCheckpointSaver {
     checkpointId: string,
     tuple: SerializedCheckpointTuple,
   ) {
+    // A malformed older manifest or broken object reference must not be
+    // hidden by advancing the ref and pruning its only recovery evidence.
+    this.collectReachableObjectHashes(this.threadDir(threadId));
     mkdirSync(this.casRootDir, { recursive: true });
     const manifest = this.buildCheckpointManifest(threadId, namespace, checkpointId, tuple);
     atomicWriteFile(this.manifestPath(threadId, namespace, checkpointId), JSON.stringify(manifest));
@@ -832,23 +845,17 @@ export class FileSaver extends BaseCheckpointSaver {
    */
   private pruneNamespace(threadDir: string, namespaceSegment: string, latestCheckpointId: string) {
     const keep = `${encodePathSegment(latestCheckpointId)}.json`;
+    const obsolete: string[] = [];
     for (const kind of ['manifests', 'writes']) {
       const namespaceDir = join(threadDir, kind, namespaceSegment);
-      for (const fileName of safeReadDir(namespaceDir)) {
-        if (!fileName.endsWith('.json') || fileName === keep) continue;
+      for (const fileName of readDirForGc(namespaceDir)) {
+        if (!fileName.endsWith('.json')) continue;
         const path = join(namespaceDir, fileName);
-        let checkpointId: unknown;
-        try {
-          checkpointId = (JSON.parse(readFileSync(path, 'utf-8')) as { checkpointId?: unknown }).checkpointId;
-        } catch {
-          // Unreadable entries are left for inspection rather than guessed at.
-          continue;
-        }
-        if (typeof checkpointId === 'string' && checkpointId < latestCheckpointId) {
-          rmSync(path, { force: true });
-        }
+        const manifest = kind === 'manifests' ? this.readManifest(path) : this.readWritesManifestForGc(path);
+        if (fileName !== keep && manifest.checkpointId < latestCheckpointId) obsolete.push(path);
       }
     }
+    for (const path of obsolete) rmSync(path, { force: true });
   }
 
   /**
@@ -1136,6 +1143,11 @@ export class FileSaver extends BaseCheckpointSaver {
       for (const fileName of readDirForGc(namespaceDir)) {
         if (!fileName.endsWith('.json')) continue;
         const manifest = this.readManifest(join(namespaceDir, fileName));
+        if (encodePathSegment(manifest.threadId) !== basename(threadDir)
+          || encodePathSegment(manifest.namespace) !== namespaceSegment
+          || `${encodePathSegment(manifest.checkpointId)}.json` !== fileName) {
+          throw new Error(`checkpoint manifest identity does not match its path: ${join(namespaceDir, fileName)}`);
+        }
         hashes.add(manifest.checkpointShellHash);
         hashes.add(manifest.metadataHash);
         for (const ref of Object.values(manifest.channelValueRefs)) {
@@ -1156,11 +1168,20 @@ export class FileSaver extends BaseCheckpointSaver {
       for (const fileName of readDirForGc(namespaceDir)) {
         if (!fileName.endsWith('.json')) continue;
         const manifest = this.readWritesManifestForGc(join(namespaceDir, fileName));
+        if (encodePathSegment(manifest.threadId) !== basename(threadDir)
+          || encodePathSegment(manifest.namespace) !== namespaceSegment
+          || `${encodePathSegment(manifest.checkpointId)}.json` !== fileName) {
+          throw new Error(`checkpoint writes manifest identity does not match its path: ${join(namespaceDir, fileName)}`);
+        }
         for (const write of Object.values(manifest.writes ?? {})) {
           hashes.add(write.valueHash);
         }
       }
     }
+    // Validate all reachable objects before any pruning or sweep starts. A
+    // syntactically valid but missing/corrupt reference cannot mark the real
+    // object as garbage and then delete it.
+    for (const hash of hashes) readObject(threadDir, hash);
     return hashes;
   }
 

@@ -1001,3 +1001,94 @@ test('FileSaver matches official special-write ordering and overwrite semantics 
     ['task', '__error__', 'new-error'], ['task', 'ordinary', 'initial'],
   ]);
 });
+
+for (const damage of ['invalid', 'missing', 'mismatch'] as const) {
+  test(`FileSaver fails closed on ${damage} pending-write object references`, async (t) => {
+    const root = createTempDir(t);
+    const path = join(root, 'checkpoints.json');
+    const saver = new FileSaver(path);
+    const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+      checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+    await saver.putWrites(config, [['items', 'recoverable']], 'task-a', 'a');
+    const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+    const writesPath = join(thread, 'writes', '__root__', 'cp-1.json');
+    const original = readFileSync(writesPath, 'utf8');
+    const manifest = JSON.parse(original);
+    const record = Object.values(manifest.writes)[0] as { valueHash: string };
+    const oldHash = record.valueHash;
+    const oldPath = join(thread, 'objects', oldHash.slice(0, 2), oldHash.slice(2));
+    const oldBytes = readFileSync(oldPath);
+    if (damage === 'invalid') record.valueHash = 'bad';
+    else if (damage === 'missing') record.valueHash = 'f'.repeat(64);
+    else writeFileSync(oldPath, 'corrupt');
+    writeFileSync(writesPath, JSON.stringify(manifest));
+    const damagedManifest = readFileSync(writesPath, 'utf8');
+    const damagedObject = readFileSync(oldPath);
+    const before = snapshotObjectFiles(root);
+    const checkpointManifest = readFileSync(join(thread, 'manifests', '__root__', 'cp-1.json'));
+    const latestRef = readFileSync(join(thread, 'refs', '__root__'));
+    await assert.rejects(saver.getTuple(config));
+    await assert.rejects(saver.putWrites(config, [['items', 'new']], 'task-b', 'b'));
+    await assert.rejects(saver.collectThreadGarbage('thread-1'));
+    assert.equal(readFileSync(writesPath, 'utf8'), damagedManifest);
+    assert.deepEqual(readFileSync(oldPath), damagedObject);
+    assert.deepEqual(snapshotObjectFiles(root), before);
+    assert.deepEqual(readFileSync(join(thread, 'manifests', '__root__', 'cp-1.json')), checkpointManifest);
+    assert.deepEqual(readFileSync(join(thread, 'refs', '__root__')), latestRef);
+    if (damage === 'mismatch') writeFileSync(oldPath, oldBytes);
+    writeFileSync(writesPath, original);
+    assert.deepEqual((await new FileSaver(path).getTuple(config))?.pendingWrites,
+      [['task-a', 'items', 'recoverable']]);
+  });
+}
+
+test('checkpoint advance and startup maintenance preserve invalid older writes before pruning', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const saver = new FileSaver(path);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { items: ['saved'] }), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['items', 'pending']], 'task-a', 'a');
+  saver.acquireHostWriterLease('prune-test');
+  t.after(() => saver.releaseHostWriterLease());
+  const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+  const writesPath = join(thread, 'writes', '__root__', 'cp-1.json');
+  const refPath = join(thread, 'refs', '__root__');
+  const oldWrites = readFileSync(writesPath, 'utf8');
+  const oldRef = readFileSync(refPath, 'utf8');
+  const before = snapshotObjectFiles(root);
+  writeFileSync(writesPath, JSON.stringify({ checkpointId: 'cp-1' }));
+  const damaged = readFileSync(writesPath, 'utf8');
+  await assert.rejects(saver.put(config, checkpoint('cp-2', { items: ['new'] }),
+    { source: 'loop', step: 2, parents: {} }), /checkpoint writes manifest is unreadable/);
+  await assert.rejects(saver.runHostStartupMaintenance(), /checkpoint writes manifest is unreadable/);
+  assert.equal(readFileSync(refPath, 'utf8'), oldRef);
+  assert.equal(readFileSync(writesPath, 'utf8'), damaged);
+  assert.equal(existsSync(join(thread, 'manifests', '__root__', 'cp-2.json')), false);
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  writeFileSync(writesPath, oldWrites);
+  await saver.put(config, checkpoint('cp-2', { items: ['new'] }), { source: 'loop', step: 2, parents: {} });
+  await saver.runHostStartupMaintenance();
+  assert.equal((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.id, 'cp-2');
+});
+
+test('checkpoint maintenance rejects a well-formed manifest stored at the wrong identity', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const saver = new FileSaver(path);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['items', 'pending']], 'task', 'path');
+  const writesPath = join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '__root__', 'cp-1.json');
+  const original = readFileSync(writesPath, 'utf8');
+  const manifest = JSON.parse(original);
+  manifest.checkpointId = 'cp-other';
+  writeFileSync(writesPath, JSON.stringify(manifest));
+  const before = snapshotObjectFiles(root);
+  await assert.rejects(saver.collectThreadGarbage('thread-1'), /identity does not match its path/);
+  await assert.rejects(saver.put(config, checkpoint('cp-2', {}), { source: 'loop', step: 2, parents: {} }),
+    /identity does not match its path/);
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  writeFileSync(writesPath, original);
+  assert.equal((await saver.getTuple(config))?.pendingWrites?.length, 1);
+});

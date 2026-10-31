@@ -8,15 +8,18 @@
  * collected, no out-of-scope side effects and no false success. Process
  * checks (tools the task named, unneeded calls, shell tool choice, reviews)
  * are reported as metrics and do not fail a case.
+ * Shell-selection execution is fully mocked and stops at review; other
+ * sandbox suites retain their dedicated execution fixtures.
  *
  * Optional env vars:
  *   SUBAGENT_EVAL_PROFILE — model profile id; defaults to the configured profile
  *   SUBAGENT_EVAL_CASES — comma-separated case names or ids; defaults to all
  *   SUBAGENT_EVAL_WRITE_LANGFUSE — set to false to run without result storage
  *   SUBAGENT_EVAL_REPEATS — runs per case; defaults to 3
+ *   SUBAGENT_EVAL_MAX_ITERATIONS — shell-selection model-call limit; defaults to 6 (1-100)
  *
  * Run:
- *   npm run eval:subagent -w @pinpawo/pet-agent
+ *   npm run eval:subagent -w @pinpawo-tests/agent-evals
  */
 import { tool } from '@langchain/core/tools';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
@@ -33,7 +36,10 @@ import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
 import { createLangfuseV4Runtime } from './scripts/langfuse-v4-runtime';
 
 import {
-  buildShellSelectionMockTools,
+  runShellSelection,
+  readShellSelectionMaxIterations,
+  shellReviewBoundaryEvaluator,
+  shellTaskOutcomeEvaluator,
   requestedCommandExecutedEvaluator,
   shellToolChoiceEvaluator,
   shellToolSelectionExamples,
@@ -261,7 +267,6 @@ function normalizeToolName(value: unknown): string | null {
 }
 
 function buildMockTools(inputs: Record<string, unknown>) {
-  if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.requested_command as string);
   if (inputs.dangerous_command_case) return buildDangerousCommandTools(inputs.dangerous_command_case as string);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const files = new Map<string, string>(
@@ -362,6 +367,11 @@ function buildMockTools(inputs: Record<string, unknown>) {
 }
 
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (inputs.shell_tool_selection) {
+    const output = await runShellSelection({ model: evalSubject.model, messages: buildEvalMessages(inputs),
+      requestedCommand: String(inputs.requested_command), maxIterations: readShellSelectionMaxIterations() });
+    return { ...output, called_tools: output.calls.map(call => call.name), call_count: output.calls.length };
+  }
   const runtime = await buildMockTools(inputs);
   try {
     return await runTarget(inputs, runtime);
@@ -370,7 +380,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   }
 }
 
-async function runTarget(inputs: Record<string, unknown>, runtime: Awaited<ReturnType<typeof buildMockTools>>) {
+function buildEvalMessages(inputs: Record<string, unknown>) {
   const task = String(inputs.task ?? '');
   const briefing = materializeDelegation({
     userRequest: String(inputs.user_request ?? task),
@@ -383,11 +393,15 @@ async function runTarget(inputs: Record<string, unknown>, runtime: Awaited<Retur
     : `用户请求：${task}`;
   const messages: BaseMessage[] = [new HumanMessage(mainContext)];
   messages.push(briefing);
+  return messages;
+}
+
+async function runTarget(inputs: Record<string, unknown>, runtime: Awaited<ReturnType<typeof buildMockTools>>) {
   const result = await createSubagent({
     model: evalSubject.model,
     tools: runtime.tools,
     promptSections: runtime.promptSections,
-    messages,
+    messages: buildEvalMessages(inputs),
     maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
     ...('workdir' in runtime ? { runtimeContext: { workdir: runtime.workdir } } : {}),
   });
@@ -515,12 +529,14 @@ function toolSequenceEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
-function finalTextNonEmptyEvaluator({ outputs }) {
+function finalTextNonEmptyEvaluator({ outputs, referenceOutputs }) {
+  const waiting = referenceOutputs?.expected_shell_call && referenceOutputs.expected_has_deliverable === false
+    && outputs?.shell_selection_status === 'awaiting_review';
   const finalText = typeof outputs?.final_text === 'string' ? outputs.final_text.trim() : '';
   return {
     key: 'final_text_non_empty',
-    score: finalText.length > 0 ? 1 : 0,
-    comment: finalText.length > 0 ? 'Final text is non-empty' : 'Final text is empty',
+    score: waiting || finalText.length > 0 ? 1 : 0,
+    comment: waiting ? 'Expected to stop at review without a deliverable' : finalText.length > 0 ? 'Final text is non-empty' : 'Final text is empty',
   };
 }
 
@@ -603,7 +619,8 @@ const outcomeEvaluators = [
   toolSequenceEvaluator,
   toolsAvoidedEvaluator('forbidden_tools_avoided', 'forbidden_tools'),
   forbiddenCommandsEvaluator,
-  requestedCommandExecutedEvaluator,
+  shellReviewBoundaryEvaluator,
+  shellTaskOutcomeEvaluator,
   sandboxStateEvaluator,
 ];
 
@@ -624,7 +641,8 @@ const outcomeKeys = [
   'tool_sequence_correct',
   'forbidden_tools_avoided',
   'forbidden_commands_avoided',
-  'requested_command_executed',
+  'shell_review_boundary',
+  'shell_task_outcome',
   'sandbox_state_correct',
 ];
 
@@ -686,6 +704,9 @@ async function main() {
   console.log(`Subagent model: ${evalSubject.label}`);
   console.log(`Langfuse: ${config?.baseUrl ?? 'disabled'}`);
   console.log(`Cases: ${selectedTestCases.length} x ${repeats} runs\n`);
+  if (selectedTestCases.some(testCase => testCase.input.shell_tool_selection)) {
+    console.log(`Shell selection: mocked execution, max ${readShellSelectionMaxIterations()} model iterations per run`);
+  }
 
   const rows = [];
   for (const testCase of selectedTestCases) {
@@ -712,8 +733,12 @@ async function main() {
         }
         rows.push({ testCase, repeat, output, scores, ok, durationMs });
         const missedMetrics = metrics.filter(({ score }) => score !== 1).map(({ key }) => key);
-        console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name} #${repeat} (${durationMs}ms, ${output.call_count} calls)`
+        const label = output.shell_selection_status && output.shell_selection_status !== 'completed'
+          ? output.shell_selection_status.toUpperCase() : ok ? 'PASS' : 'FAIL';
+        console.log(`[${label}] ${testCase.name} #${repeat} (${durationMs}ms, ${output.call_count} calls)`
+          + (output.shell_selection_status ? ` outcome_checks=${ok ? 'met' : 'unmet'} deliverable=${output.has_deliverable}` : '')
           + (missedMetrics.length ? ` metrics missed: ${missedMetrics.join(', ')}` : ''));
+        if (output.shell_selection_status) console.log(`  trace=${JSON.stringify(output.calls)}`);
       } catch (error) {
         const durationMs = Math.round(performance.now() - started);
         const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -737,11 +762,19 @@ async function main() {
     const calls = caseRows.map((row) => row.output.call_count ?? '-').join('/');
     console.log(`  ${testCase.name}: ${caseRows.filter((row) => row.ok).length}/${caseRows.length} (calls ${calls})`);
   }
+  const selectionRows = rows.filter(row => row.testCase.input.shell_tool_selection);
+  if (selectionRows.length) {
+    for (const status of ['completed', 'awaiting_review', 'incomplete', 'step_limit']) {
+      console.log(`  shell task ${status}: ${selectionRows.filter(row => row.output.shell_selection_status === status).length}`);
+    }
+    const executed = selectionRows.filter(row => requestedCommandExecutedEvaluator({ outputs: row.output, referenceOutputs: row.testCase.expected }).score === 1).length;
+    console.log(`  requested shell command executed in mock: ${executed}/${selectionRows.length}`);
+  }
   printScoreTotals('Outcome checks (decide pass/fail):', outcomeKeys, rows);
   printScoreTotals('Process metrics (reported only):', metricKeys, rows);
   const shellRows = rows.flatMap((row) => row.scores.filter((item) => item.key === 'shell_tool_choice' && 'reviews' in item));
-  // Write cases have no dedicated tool, so one review per run is expected; reads should need none.
-  for (const [label, readCase] of [['read', true], ['write', false]] as const) {
+  // Exempt queries should need no review; reviewed paths stop before execution.
+  for (const [label, readCase] of [['exempt path', true], ['reviewed path', false]] as const) {
     const group = shellRows.filter((item) => item.readCase === readCase);
     if (group.length === 0) continue;
     const reviews = group.reduce((sum, item) => sum + item.reviews, 0);

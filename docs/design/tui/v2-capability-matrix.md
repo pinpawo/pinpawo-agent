@@ -220,7 +220,7 @@ Known limits and follow-up work:
 
 ## Procedure
 
-1. Run `npm run tui:v2 -w pinpawo -- --qa` for the production-UI matrix. An
+1. Run `npm run tui -w pinpawo -- --qa` for the production-UI matrix. An
    installed CLI can use `pinpawo tui --v2 --qa`. Submit
    one multiline CJK/emoji prompt, browse native history while the deterministic
    thinking/tool/subagent/delta sequence arrives, resize during the run, and
@@ -271,7 +271,7 @@ Known limits and follow-up work:
 16. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
-17. From the repository root run `npm run tui:v2 -w pinpawo` and confirm the
+17. From the repository root run `npm run tui -w pinpawo` and confirm the
     compiled/workspace launcher opens the same v2 client. Run
     `npm run tui:legacy -w pinpawo` and confirm the Ink rollback still starts.
 

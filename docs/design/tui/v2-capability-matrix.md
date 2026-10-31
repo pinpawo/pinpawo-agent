@@ -50,7 +50,7 @@ The probe covers:
 | production runtime stop | `requestStop()` aborts the runtime's keepalive wait immediately instead of delaying shutdown by the configured polling interval | host lifecycle unit |
 | production process restart | the local HTTP/WebSocket transport exposes an idempotent close lifecycle; two independent Bun host processes reuse one port and production FileSaver state while v2 reconnects, restores non-empty history/token usage, and continues the same session | host lifecycle unit + Bun child-process integration test |
 | production TUI process entry | the real `main.ts` process runs inside expect-managed macOS PTYs with `--server-port` pinned to independent production hosts, authenticates to them, applies snapshots, accepts attachment paste/removal, composer/history/`@path` flows, renders updated operation/subagent/multi-delta Markdown, resolves both a direct checkpoint review and an actual reviewed toolkit call, consumes a structured attachment with a real read tool, and performs real `$VISUAL` plus `$PAGER` handoffs; an active response also survives a live 80×24 → 44×18 → 96×28 resize while preserving and later submitting a multiline CJK draft; pager return, Markdown export, guarded write/read execution, `/quit`, privacy boundaries, and ordered checkpoint rehydration are verified across host restarts | Bun child-process PTY integration test |
-| repeatable cross-terminal QA entry | `pinpawo tui --v2 --qa` follows the normal workspace/binary/packaged-bundle launcher and runs the production `main.ts` UI with an explicit deterministic transport, preloaded native history, immediate thinking feedback, timed operation/subagent/multi-delta/completion events, and stable token usage; its macOS expect PTY test enters through the public CLI and proves the production waiting, ordered timeline, completion status, and `/quit` path without a host or model account | CLI + launcher unit tests and child-process PTY test |
+| repeatable cross-terminal QA entry | `pinpawo tui --qa` follows the normal workspace/binary/packaged-bundle launcher and runs the production `main.ts` UI with an explicit deterministic transport, preloaded native history, immediate thinking feedback, timed operation/subagent/multi-delta/completion events, and stable token usage; its macOS expect PTY test enters through the public CLI and proves the production waiting, ordered timeline, completion status, and `/quit` path without a host or model account | CLI + launcher unit tests and child-process PTY test |
 | canonical timeline order | message/operation/subagent/message order is retained through the production host and settles in the same order on the real terminal surface | automated + Bun native + child-process production PTY test |
 | operation raw payload | shared projection retains transient raw data | automated test |
 | live ordered operation tail | running/updated operations remain visible with later subagent/message rows on one transient surface, then commit atomically in canonical order; a no-smoke production PTY observes started, output-delta, completed output, distinct subagent progress, multiple assistant deltas, and the final rich-text commit | Bun native + child-process production PTY test |
@@ -92,11 +92,11 @@ The probe covers:
 | post-submit activity feedback | an accepted request continuously animates the live indicator with the canonical session actor at a bounded 240 ms cadence while the run remains active; thinking, tool use, streaming, review pause, and interruption have distinct labels, the empty composer remains available for drafting and advertises Esc interruption, and only the fixed footer row is repainted; the same terminal-safe actor label reaches settled timeline rows, pager, and export metadata | automated model test + child-process PTY regression; continuous-animation browse anchoring remains in the cross-terminal matrix |
 | two-line status | run/connection/notice and session in/out/context/workspace facts remain separate with narrow-width degradation | automated test |
 | borderless welcome | terminal-raster paw, TUI/host versions, actor, model, workdir, loaded capabilities, and shortcuts commit once before timeline history | automated + Bun native test |
-| Phase 5 CLI entry | `pinpawo tui --v2` selects a bundled/workspace OpenTUI executable or workspace source while `--legacy` remains an explicit rollback | automated test + compiled PTY |
+| Phase 5 CLI entry | `pinpawo tui` selects a bundled/workspace OpenTUI executable or workspace source; the transitional `--v2` selector and the `--legacy` Ink rollback have since been retired, so the OpenTUI client is the only TUI | automated test + compiled PTY |
 | npm distribution payload | one Bun-targeted JS bundle and versioned manifest ship in `pinpawo`; npm selects Bun/OpenTUI platform packages | automated manifest tests + installed-tarball PTY |
 | distribution integrity and platform launch | launcher verifies the bundle byte count/SHA-256 before execution and resolves package-local Bun runtimes for darwin/Linux/Windows on x64/arm64; Windows uses the direct `bun.exe` rather than a command shim | automated test matrix |
 | distribution artifact boot | a fresh runtime-neutral bundle is built outside the source entrypoint, its byte count/SHA-256 are rechecked, and its non-interactive version probe loads the external OpenTUI runtime before publishing | Bun native prepublish test |
-| installed package check and QA | `pinpawo tui --v2 --check` follows the normal launch plan without a terminal; the release smoke packs local tarballs, performs a lifecycle-enabled install in an empty project, verifies npm-selected Bun/OpenTUI assets, and runs that installed CLI path with bounded stages; on macOS the same clean install enters the packaged `--qa` bundle through a real `xterm-256color` PTY, waits for composer readiness, submits with Enter, observes waiting plus final usage, verifies composer recovery, and exits through `/quit` | non-interactive check passed on local darwin-arm64 and clean Node 24 Linux arm64/x64 containers plus the first GitHub Actions macOS, Ubuntu, and Windows matrix; installed interactive QA passed on local darwin-arm64 and is now part of the macOS workflow |
+| installed package check and QA | `pinpawo tui --check` follows the normal launch plan without a terminal; the release smoke packs local tarballs, performs a lifecycle-enabled install in an empty project, verifies npm-selected Bun/OpenTUI assets, and runs that installed CLI path with bounded stages; on macOS the same clean install enters the packaged `--qa` bundle through a real `xterm-256color` PTY, waits for composer readiness, submits with Enter, observes waiting plus final usage, verifies composer recovery, and exits through `/quit` | non-interactive check passed on local darwin-arm64 and clean Node 24 Linux arm64/x64 containers plus the first GitHub Actions macOS, Ubuntu, and Windows matrix; installed interactive QA passed on local darwin-arm64 and is now part of the macOS workflow |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
@@ -116,7 +116,7 @@ The probe covers:
 | root tests | `npm test` | passed on current macOS with host 789/789 and Chrome extension 22/22; the preceding 787-test baseline also passed after a clean Linux arm64 `npm ci`, with the two newer cases isolated to CLI/launcher argument forwarding |
 | root build | `npm run build` | passed |
 | CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
-| installed tarball v2 startup | `npm run test:tui-install -w pinpawo` installs generated local tarballs in an empty project and runs the installed `pinpawo tui --v2 --check` path | passed with package-local Bun/OpenTUI on local darwin-arm64 and Linux arm64/x64, plus GitHub-hosted macOS, Ubuntu, and Windows; interactive PTY remains separately covered |
+| installed tarball v2 startup | `npm run test:tui-install -w pinpawo` installs generated local tarballs in an empty project and runs the installed `pinpawo tui --check` path | passed with package-local Bun/OpenTUI on local darwin-arm64 and Linux arm64/x64, plus GitHub-hosted macOS, Ubuntu, and Windows; interactive PTY remains separately covered |
 
 ## Manual terminal matrix
 
@@ -221,7 +221,7 @@ Known limits and follow-up work:
 ## Procedure
 
 1. Run `npm run tui -w pinpawo -- --qa` for the production-UI matrix. An
-   installed CLI can use `pinpawo tui --v2 --qa`. Submit
+   installed CLI can use `pinpawo tui --qa`. Submit
    one multiline CJK/emoji prompt, browse native history while the deterministic
    thinking/tool/subagent/delta sequence arrives, resize during the run, and
    confirm the final `in/out: 20,000/3,000` status. Press Esc on a second turn
@@ -272,8 +272,10 @@ Known limits and follow-up work:
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
 17. From the repository root run `npm run tui -w pinpawo` and confirm the
-    compiled/workspace launcher opens the same v2 client. Run
-    `npm run tui:legacy -w pinpawo` and confirm the Ink rollback still starts.
+    compiled/workspace launcher opens the production OpenTUI client
+    (`npm run tui:v2 -w pinpawo` is an equivalent alias). The legacy Ink client
+    and its `tui:legacy` rollback script have been removed, so there is no
+    rollback path left to verify.
 
 ## Decision gate
 

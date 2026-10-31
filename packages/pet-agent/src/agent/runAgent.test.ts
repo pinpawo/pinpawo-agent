@@ -37,13 +37,3 @@ test('runAgent keeps ordinary string replies and empty outputs compatible', asyn
     tool_calls: [{ id: 'tool_1', name: 'lookup', args: {} }],
   })])).reply, '');
 });
-
-test('runAgent returns legacy AI text with its final-reply trimming and concatenation', async () => {
-  const result = await runWithMessages([new AIMessage({ content: [
-    ' Hello ',
-    { text: 'legacy ' },
-    { type: 'thinking', thinking: 'secret', signature: 'sig', text: 'PRIVATE_THOUGHT' },
-    { type: 'text', text: 'world ' },
-  ] as never })]);
-  assert.equal(result.reply, 'Hello legacy world');
-});

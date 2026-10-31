@@ -1,6 +1,8 @@
 // @ts-nocheck — eval script, types from langsmith barrel are incomplete
 import { readCapabilityExecutions } from '../../../packages/pet-agent/src/agent/orchestrator/executionMessages';
 import { readFixtureDelivery } from '../../../packages/pet-agent/src/testing/capabilityDelivery';
+import { readMessageText } from '../../../packages/pet-agent/src/utils/messages';
+import type { OrchestratorStateType } from '../../../packages/pet-agent/src/agent/orchestrator/state';
 /**
  * LangSmith evaluation: orchestrator flow with mocked subagent.
  *
@@ -239,10 +241,10 @@ class ProbeSubagentModel extends BaseChatModel {
         return delivery ? [delivery.deliveryId] : [];
       }),
       nonSystemTexts: nonSystem.filter((message) => AIMessage.isInstance(message)).map((message) =>
-        typeof message?.content === 'string' ? message.content : ''),
+        readMessageText(message)),
     });
     const message = this.respond(messages, this.invocationStats.length);
-    const text = typeof message.content === 'string' ? message.content : '';
+    const text = message.text;
     return { generations: [{ text, message }] };
   }
 }
@@ -449,14 +451,14 @@ export async function target(
 }
 
 function extractResult(
-  result: Record<string, unknown>,
+  result: OrchestratorStateType,
   inputs: Record<string, unknown>,
   subagentModel: ProbeSubagentModel,
   followUp: { previousIterations: number; freshRun: boolean; planPreserved: boolean; priorDeliverySeen: boolean } | null,
 ): Record<string, unknown> {
   const routeMode = routeModeFromResult(result);
   const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
-  const messages = Array.isArray(result.messages) ? result.messages : [];
+  const messages = result.messages;
   const visibleMessages = messages.filter((message) => {
     const pinpawo = message?.additional_kwargs?.pinpawo;
     return !pinpawo || typeof pinpawo !== 'object' || !('lane' in pinpawo);
@@ -495,7 +497,7 @@ function extractResult(
     phase: latestAnnounce || observedRunDelegations.length > 0 || activeDelegation?.status === 'awaiting_decision'
       ? 'after_subagent'
       : 'initial_request',
-    reply: typeof lastMsg?.content === 'string' ? lastMsg.content : '',
+    reply: lastMsg ? readMessageText(lastMsg) : '',
     delegation_count: readCapabilityExecutions(result.messages ?? []).length,
     delegation_statuses: runDelegationSummaries.map((item) => item.status),
     latest_announce_kind: latestObservedDelegation?.status

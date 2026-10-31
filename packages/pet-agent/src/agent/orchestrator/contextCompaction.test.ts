@@ -82,29 +82,27 @@ test('compaction includes completed main tool results in the summary input', asy
   assert.ok(!compacted.messages.includes(result));
 });
 
-test('compaction retains public and legacy assistant text without reasoning in input or output', async () => {
+test('compaction retains standard message text without reasoning in input or output', async () => {
   let summaryInput = '';
   const model = {
     invoke: async (messages: BaseMessage[]) => {
       summaryInput = String(messages.at(-1)?.content);
       return new AIMessage({ content: [
-        { type: 'thinking', thinking: 'private', signature: 'sig', text: 'PRIVATE_SUMMARY_THOUGHT' },
+        { type: 'thinking', thinking: 'PRIVATE_SUMMARY_THOUGHT', signature: 'sig' },
         { type: 'text', text: 'safe summary' },
-      ] as never });
+      ] });
     },
   } as unknown as BaseChatModel;
   const result = await compactOrchestratorMessages({
     messages: [new HumanMessage({ content: [{ type: 'text', text: 'human context' }] }),
       new AIMessage({ content: [
-        { text: 'legacy text' },
-        { type: 'thinking', thinking: 'private', signature: 'sig', text: 'PRIVATE_HISTORY_THOUGHT' },
+        { type: 'thinking', thinking: 'PRIVATE_HISTORY_THOUGHT', signature: 'sig' },
         { type: 'text', text: 'public history' },
-      ] as never }), new HumanMessage('latest')],
+      ] }), new HumanMessage('latest')],
     model,
     options: { keepMessages: 1 },
   });
   assert.match(summaryInput, /human context/);
-  assert.match(summaryInput, /legacy text/);
   assert.match(summaryInput, /public history/);
   assert.doesNotMatch(summaryInput, /PRIVATE_HISTORY_THOUGHT/);
   assert.ok(result.messages.some(message => String(message.content).includes('safe summary')));

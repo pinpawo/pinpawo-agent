@@ -41,7 +41,7 @@ import {
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
-import { messageHasToolCalls, readMessageText } from '../utils/messages';
+import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
@@ -100,7 +100,7 @@ function readInvocationOutput(messages: BaseMessage[]): string | null {
     if (message._getType() !== 'ai') continue;
     if (readSubagentGuardStopReason(message)) continue;
     if (messageHasToolCalls(message)) continue;
-    const text = readMessageText(message, { trim: false, legacySeparator: '' });
+    const text = message.text;
     if (!text.trim()) continue;
     return text;
   }
@@ -126,7 +126,7 @@ function assertValidContextSummaryUpdate(update: unknown) {
     return;
   }
 
-  const content = readMessageText(summary, { trim: false, legacySeparator: '' });
+  const content = summary.text;
   const prefix = `${SUBAGENT_CONTEXT_SUMMARY_PREFIX}\n\n`;
   const summaryText = content.startsWith(prefix) ? content.slice(prefix.length) : content;
   if (

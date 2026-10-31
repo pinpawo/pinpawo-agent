@@ -136,7 +136,7 @@ async function summarizeMessages(params: {
   );
 
   const summary = readMessageText(response);
-  if (!summary.trim()) throw new Error('Context compaction produced an empty summary.');
+  if (!summary) throw new Error('Context compaction produced an empty summary.');
   return summary;
 }
 

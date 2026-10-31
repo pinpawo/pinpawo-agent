@@ -211,24 +211,3 @@ test('checkpoint projection reads only normalized text from native multi-block a
     { id: 'native-reply', role: 'assistant', text: 'Hello world' },
   ]);
 });
-
-
-test('checkpoint projection retains legacy string blocks without exposing typed private blocks', () => {
-  const reply = new AIMessage({ id: 'legacy-reply', content: [
-    'prefix',
-    { type: 'text', text: 'middle' },
-    { type: 'thinking', thinking: 'secret', signature: 'sig', text: 'secret' },
-    'suffix',
-  ] as never });
-  assert.deepEqual(readTuiCheckpointMessages([reply]), [
-    { id: 'legacy-reply', role: 'assistant', text: 'prefix\nmiddle\n\nsuffix' },
-  ]);
-});
-
-
-test('checkpoint projection retains legacy untyped text blocks', () => {
-  const reply = new AIMessage({ id: 'untyped-reply', content: [{ text: 'legacy text' }] as never });
-  assert.deepEqual(readTuiCheckpointMessages([reply]), [
-    { id: 'untyped-reply', role: 'assistant', text: 'legacy text' },
-  ]);
-});

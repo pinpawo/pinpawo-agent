@@ -14,42 +14,35 @@ import { toolProtocolSafeMessages } from '../agent/messages';
 test('message text reads normalized AI text without reasoning or tool data', () => {
   const message = new AIMessage({ content: [
     { type: 'text', text: ' Hello' },
-    { type: 'thinking', thinking: 'private reasoning', signature: 'sig', text: 'PRIVATE_THOUGHT' },
-    { type: 'tool_use', id: 'call-1', name: 'lookup', input: {}, text: 'PRIVATE_TOOL' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'sig' },
+    { type: 'tool_use', id: 'call-1', name: 'lookup', input: { text: 'private arguments' } },
+    { type: 'image_url', image_url: 'data:image/png;base64,aW1hZ2U=' },
     { type: 'text', text: ' world ' },
-  ] as never, additional_kwargs: { pinpawo: { localChatDisplayText: 'UI override' } } });
+  ], additional_kwargs: { pinpawo: { localChatDisplayText: 'UI override' } } });
 
   assert.equal(readMessageText(message), 'Hello world');
-  assert.equal(readMessageText(message, { trim: false, legacySeparator: '\n' }), ' Hello world ');
 });
 
-test('message text preserves legacy AI spacing while excluding typed private text', () => {
-  const message = new AIMessage({ content: [
-    ' prefix ',
-    { text: 'legacy' },
-    { type: 'thinking', thinking: 'private reasoning', signature: 'sig', text: 'PRIVATE_THOUGHT' },
-    { type: 'text', text: 'public' },
-    { type: 'tool_use', id: 'call-1', name: 'lookup', input: {}, text: 'PRIVATE_TOOL' },
-    ' suffix ',
-  ] as never });
-
-  assert.equal(readMessageText(message), 'prefix \nlegacy\n\npublic\n\n suffix');
-  assert.equal(readMessageText(message, { trim: false, legacySeparator: '' }), ' prefix legacypublic suffix ');
-  assert.equal(readMessageText(new AIMessage({ content: [{ text: ' untyped ' }] as never })), 'untyped');
-});
-
-test('message text keeps Human and Tool content handling and caller whitespace choices', () => {
-  const content = [' first ', { type: 'text', text: 'second' }, { text: ' third ' }];
+test('message text reads standard Human and Tool text blocks around images', () => {
   const messages = [
-    new HumanMessage({ content: content as never }),
-    new ToolMessage({ content: content as never, tool_call_id: 'call-1' }),
+    new HumanMessage({ content: [
+      { type: 'text', text: ' first ' },
+      { type: 'image_url', image_url: 'data:image/png;base64,aW1hZ2U=' },
+      { type: 'text', text: 'second ' },
+    ] }),
+    new ToolMessage({ content: [
+      { type: 'text', text: ' first ' },
+      { type: 'image_url', image_url: 'data:image/png;base64,aW1hZ2U=' },
+      { type: 'text', text: 'second ' },
+    ], tool_call_id: 'call-1' }),
   ];
   for (const message of messages) {
-    assert.equal(readMessageText(message), 'first \nsecond\n third');
-    assert.equal(readMessageText(message, { trim: false, legacySeparator: '' }), ' first second third ');
+    assert.equal(readMessageText(message), 'first second');
   }
   assert.equal(readMessageText(new HumanMessage(' hello ')), 'hello');
-  assert.equal(readMessageText({}), '');
+});
+
+test('raw content reader preserves strings and ignores missing content', () => {
   assert.equal(readContentText(' hello '), ' hello ');
   assert.equal(readContentText(null), null);
 });

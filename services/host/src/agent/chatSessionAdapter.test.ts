@@ -218,7 +218,7 @@ test('runAgentSessionTurn sources tool operations from the root protocol stream,
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.equal(setup.input.messages.length, 1);
   assert.equal(setup.input.messages[0]?._getType(), 'human');
-  assert.equal(readMessageText(setup.input.messages[0] ?? {}), 'hello');
+  assert.equal(readMessageText(setup.input.messages[0] ?? new HumanMessage('')), 'hello');
   assert.match(readAgentMessageCreatedAt(setup.input.messages[0]!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
   assert.deepEqual(emittedTools, [
     {
@@ -862,7 +862,7 @@ test('runAgentSessionTurn allows a user message after an aborted non-review run 
     streamEvents(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
       return (async function* () {
         streamInputs.push(inputOverride);
-        assert.equal(readMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
+        assert.equal(readMessageText(streamSetup.input.messages.at(-1) ?? new HumanMessage('')), 'new request');
         yield protocolEvent('values', { messages: finalMessages });
       })();
     },

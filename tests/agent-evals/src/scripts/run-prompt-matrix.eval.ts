@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
+import { readMessageText } from '../../../../packages/pet-agent/src/utils/messages.ts';
 import type { PromptEvalReport } from '../prompt-eval-report.ts';
 import {
   assertPromptEvalMatrixPricing,
@@ -83,23 +84,6 @@ function redImageDataUrl() {
   return `data:image/png;base64,${png.toString('base64')}`;
 }
 
-function messageText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.map((block) => {
-    if (typeof block === 'string') return block;
-    if (
-      typeof block === 'object'
-      && block !== null
-      && 'text' in block
-      && typeof block.text === 'string'
-    ) {
-      return block.text;
-    }
-    return '';
-  }).join(' ');
-}
-
 async function runImageUnderstanding(
   subject: ReturnType<typeof createDecisionEvalModel>,
 ): Promise<PromptEvalModalityResult> {
@@ -138,7 +122,7 @@ async function runImageUnderstanding(
         promptEvalModality: 'image',
       },
     });
-    output = messageText(response.content).trim();
+    output = readMessageText(response);
     const usage = usageCollector.read();
     const passed = /^RED[.!]?$/i.test(output);
     return {

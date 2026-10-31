@@ -46,7 +46,12 @@ function readReply(messages: BaseMessage[]): string {
     : '';
 }
 
-/** Invoke a graph once and return its final reply; streaming Hosts use the graph directly. */
+/**
+ * Public SDK convenience entry: invoke a graph once and project its final reply.
+ * Production Host turns use the graph's streaming API instead of this wrapper.
+ * AgentInvokeInput and buildAgentRunnableConfig are shared with that Host path;
+ * removing this entry would not remove those helpers or model/protocol handling.
+ */
 export async function runAgent(
   graph: OrchestratorGraph,
   input: AgentInvokeInput,

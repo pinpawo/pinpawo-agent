@@ -19,6 +19,10 @@ import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
+import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
+import { createCapabilityRoutingManifest } from '../../runSupervisor/routingManifest';
+import { buildCapabilityRoutingManifest } from '../../prompts/capabilityRoutingManifest';
+import { getInvokeOptions, getInvokeRegistry } from '../config';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -127,7 +131,7 @@ export function createContinueTool() {
     description: 'Continue the unfinished tasks in the current plan. Do not use it when the plan has no unfinished tasks; use plan_request for a new request.',
     schema: z.object({
       goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS).optional()
-        .describe('Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with what the user said this time and write the complete updated goal, in the output language the user asked for if they named one. Omit it to keep the original goal.'),
+        .describe('Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with the new requirements to state the complete updated goal for the current Agent, within its identity, responsibilities and available Capabilities. Use the output language the user asked for if they named one. Omit it to keep the original goal.'),
     }).strict(),
   });
 }
@@ -146,10 +150,10 @@ export function createPlanRequestTool() {
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
-      description: 'Create an execution plan for the user\'s current goal.',
+      description: 'Request planning for the current Agent\'s goal in this turn.',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
-          .describe('The goal the user currently wants to achieve. State it clearly using the conversation context, keep the user\'s requirements, and do not widen the task scope yourself. Write it in the output language the user asked for if they named one; otherwise, in the language of their request.'),
+          .describe('The outcome the current Agent should undertake in this turn, based on its identity, responsibilities, available Capabilities and the conversation. Retain the relevant user requirements and constraints without taking over work belonging to others or widening the request. Write it in the output language the user asked for if they named one; otherwise, in the language of their request.'),
       }).strict(),
     },
   );
@@ -239,7 +243,17 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
+    const catalog = createCapabilityCatalog({
+      registry: getInvokeRegistry(runnableConfig),
+      allowedCapabilityNames: getInvokeOptions(runnableConfig).allowedCapabilityNames,
+    });
+    const manifest = createCapabilityRoutingManifest({ catalog, defaultCapabilityName: config.defaultCapabilityName });
+    // Read the invocation's current registry, not earlier plans or deliveries.
+    // This summary informs the model without becoming conversation history.
+    const systemMessage = new SystemMessage([
+      buildEntryAnswerSystemPrompt(),
+      buildCapabilityRoutingManifest(manifest),
+    ].join('\n\n'));
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
     const response = await invokeOrchestratorModel(model, {
       systemMessage,

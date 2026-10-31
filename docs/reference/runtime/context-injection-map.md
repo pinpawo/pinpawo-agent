@@ -105,12 +105,24 @@ Routes the request: reply directly, ask a question, or hand off via
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt()` — routing rules, plus shared invocation context |
+| system instructions | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt()` — routing and goal-definition rules, plus shared invocation context such as the Pet's identity and Channel announcement |
+| system facts | invocation projection / `FACT` | Current `<capability_routing_manifest>`: available Capability names, purposes, Toolkit summaries and the default Capability when available |
+| plan snapshot | `DYNAMIC` / `FACT` | `<supervisor_snapshot>` — the saved goal and plan, with their origin |
 | history | `DYNAMIC` / `HISTORY` | `mainConversationMessages(state.messages)` |
 
-**This node receives no XML fact blocks.** It is the only model node that sees
-the main conversation and nothing else — deliberately, because it is the node
-that decides what the goal *is*.
+Before defining the run goal, Entry is instructed to consider the current
+Agent's identity, available Capabilities and the main conversation. The user's
+overall request provides the context and constraints; the goal should state
+the work this Agent is responsible for in this turn. Available tools do not
+expand that responsibility.
+
+The Capability summary is rebuilt from the current invocation's compiled
+registry and `allowedCapabilityNames`. Entry reuses the catalog, manifest and
+renderer used by Supervisor, so both see the same available names and purposes.
+An unavailable default is omitted. The summary does not contain the full
+Capability instructions and is not appended to canonical message history.
+PET.md and Channel context continue to arrive through shared system sections;
+they are not copied into the summary.
 
 `mainConversationMessages()` excludes every lane-tagged message. Briefings are
 current Capability inputs and never enter canonical state. An accepted
@@ -129,7 +141,10 @@ the runtime renders the fact and the model makes the choice — nothing in the
 runtime infers the answer from the plan being non-empty.
 
 **Output → state:** `plan_request(goal)` resolves the run goal against the whole
-conversation. This authors the initial goal; user-directed Supervisor adjustments may revise it. See §8.
+conversation, current identity and available Capabilities. The goal should
+preserve the user's requirements and constraints while identifying this Agent's
+part in the work. The original request remains in the main conversation. This authors the
+initial goal; user-directed Supervisor adjustments may revise it. See §8.
 `continue` adopts the saved plan into this run, which is what places Supervisor
 at a Boundary over facts it now owns.
 
@@ -320,8 +335,10 @@ planned task is an invariant violation: `delegate_capability` and
 `review_current` fail the run (`requirePlanGoal`).
 
 Why the run request is model-authored: the last human message is often a continuation
-utterance ("嗯。开始吧") that states no goal. EntryAnswer resolves the initial goal from conversation; Supervisor uses the
-existing goal and current task conversation to interpret later adjustments. Verbatim text is still preserved
+utterance ("嗯。开始吧") that states no goal. Entry Answer resolves the initial
+goal from conversation together with the current identity and Capability summary.
+Supervisor uses the existing goal and current task conversation to interpret
+later adjustments. Verbatim text is still preserved
 when the resolved goal equals the current message, so formatting-sensitive
 requests are unaffected.
 

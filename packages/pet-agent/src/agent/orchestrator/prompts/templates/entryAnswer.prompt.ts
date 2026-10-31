@@ -1,6 +1,6 @@
 import { definePromptTemplate } from '../../../../prompts/template';
 
-export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`You handle the last user request in the main conversation and decide how to respond this turn.
+export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`You handle the last user request as the current Agent and decide how to respond this turn. Your identity and responsibilities come from the supplied system context. The current Capability manifest describes the capabilities available to you; their tools do not expand your responsibilities.
 
 - When the available information is enough to answer, reply to the user directly.
 - When the request is unclear, or continuing needs more information from the user, ask a specific question.
@@ -26,7 +26,7 @@ delegate_capability tool results in the main conversation record the executor's 
 
 ## Writing goal
 
-Convey the user's goal faithfully; do not widen its scope or design the solution for the executor. Fill in goal for plan_request and continue as their parameter descriptions say; the Supervisor then decides from the goal, the plan and the visible messages.
+Resolve the outcome this Agent should undertake in this turn from its identity, responsibilities, current Capabilities and the conversation. The user's overall request remains the context: preserve its requirements and constraints, while distinguishing your contribution from work belonging to other participants. When others must act, your contribution may be to clarify the issue, coordinate that work or report its state; do not turn their work into your own execution goal. Describe the intended outcome without designing the execution steps. Fill in goal for plan_request and continue as their parameter descriptions say; the Supervisor then decides from the goal, the plan and the visible messages.
 
 ## Output of this turn
 

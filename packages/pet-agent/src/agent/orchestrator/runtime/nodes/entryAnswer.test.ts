@@ -5,6 +5,9 @@ import { runAgent } from '../../../runAgent';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { defineInstructionDocument, type AgentCapability } from '../../../../types/capability';
 import { compileAgentRegistry } from '../../registry';
 import type { RunSupervisorInput } from '../../runSupervisor/runner';
 import { buildOrchestratorRunInput } from '../../state';
@@ -32,6 +35,31 @@ function readSnapshot(text: string) {
     /<item capability="([^"]+)" status="([^"]+)">\s*<objective>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/g,
   )].map(([, capability, status, objective]) => ({ capability, status, objective }));
   return { origin: origin[1], goal: goal ? goal[1] : null, plan };
+}
+
+function readCapabilityManifest(text: string) {
+  const manifest = text.match(/<capability_routing_manifest\b([^>]*)>([\s\S]*?)<\/capability_routing_manifest>/);
+  assert.ok(manifest, 'Entry must receive the current capability manifest.');
+  return {
+    defaultCapabilityName: manifest[1].match(/\bdefault="([^"]+)"/)?.[1],
+    capabilities: [...manifest[2].matchAll(/<capability name="([^"]+)">([\s\S]*?)<\/capability>/g)].map(([, name, body]) => ({
+      name,
+      purpose: body.match(/<purpose>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/)?.[1],
+      toolkits: [...body.matchAll(/<toolkit name="([^"]+)">([\s\S]*?)<\/toolkit>/g)].map(([, toolkitName, toolkitBody]) => ({
+        name: toolkitName,
+        description: toolkitBody.match(/<description>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/)?.[1],
+      })),
+    })),
+  };
+}
+
+function entryCapability(): AgentCapability {
+  return {
+    name: `cap_${randomUUID().replaceAll('-', '')}`,
+    description: randomUUID(),
+    uses: [],
+    instructions: defineInstructionDocument({ content: randomUUID() }),
+  };
 }
 
 
@@ -493,6 +521,96 @@ test('root invocation context reaches direct Entry replies and final Answer with
     for (const messages of seen) {
       for (const section of common) assert.equal(messages[0].text.includes(section.content), false);
     }
+  }
+});
+
+test('Entry receives identity and capability summaries before resolving the goal without persisting the summaries', async () => {
+  const identity = randomUUID();
+  const channel = randomUUID();
+  const toolkitName = `toolkit_${randomUUID().replaceAll('-', '')}`;
+  const toolkitDescription = randomUUID();
+  const capability = { ...entryCapability(), uses: [toolkitName] };
+  const request = randomUUID();
+  const goal = randomUUID();
+  const seen: BaseMessage[][] = [];
+  const scripted = entryAnswerModel('plan', messages => seen.push(messages), goal);
+  const supervisorInputs: RunSupervisorInput[] = [];
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    defaultCapabilityName: capability.name,
+    runSupervisorRunner: { async invoke(input) { supervisorInputs.push(input); return { reply: 'Done.' }; } },
+  });
+
+  const result = await runAgent(graph, {
+    messages: [new HumanMessage(request)],
+    context: { systemPromptSections: [
+      { id: 'pet:document', content: identity },
+      { id: 'channel:context', content: channel },
+    ] },
+    capabilities: [capability],
+    toolkits: [{
+      name: toolkitName, description: toolkitDescription,
+      tools: [{ tool: tool(() => 'unused', { name: 'read_probe', description: randomUUID(), schema: z.object({}) }) }],
+    }],
+  });
+
+  assert.equal(seen.length, 1);
+  const system = seen[0].filter(message => message._getType() === 'system').map(message => message.text).join('\n');
+  for (const content of [identity, channel]) assert.equal(system.split(content).length - 1, 1);
+  assert.deepEqual(readCapabilityManifest(system), {
+    defaultCapabilityName: capability.name,
+    capabilities: [{ name: capability.name, purpose: capability.description, toolkits: [{ name: toolkitName, description: toolkitDescription }] }],
+  });
+  assert.equal(seen[0].some(message => message.text.includes(capability.instructions.content)), false);
+  assert.equal(supervisorInputs[0].userRequest, goal);
+  assert.ok(supervisorInputs[0].messages.some(message => message.text === request));
+  assert.ok(result.messages.some(message => message.text === request));
+  for (const messages of [supervisorInputs[0].messages, result.messages]) {
+    assert.equal(messages.some(message => message.text.includes(capability.description)), false);
+    assert.equal(messages.some(message => message.text.includes(toolkitDescription)), false);
+  }
+});
+
+test('Entry refreshes the capability summary and applies the current allowlist on every invocation', async () => {
+  const first = entryCapability();
+  const second = entryCapability();
+  const seen: BaseMessage[][] = [];
+  const scripted = entryAnswerModel('direct', messages => seen.push(messages));
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    defaultCapabilityName: second.name,
+    runSupervisorRunner: { async invoke() { throw new Error('Direct replies do not need Supervisor.'); } },
+  });
+  const invoke = (capabilities: AgentCapability[], allowedCapabilityNames?: string[]) => runAgent(graph, {
+    messages: [new HumanMessage(randomUUID())], capabilities, allowedCapabilityNames,
+  });
+
+  await invoke([first, second], [first.name]);
+  const firstInput = seen[0].map(message => message.text).join('\n');
+  assert.deepEqual(readCapabilityManifest(firstInput), {
+    defaultCapabilityName: undefined,
+    capabilities: [{ name: first.name, purpose: first.description, toolkits: [] }],
+  });
+  for (const hidden of [second.name, second.description, first.instructions.content, second.instructions.content]) {
+    assert.equal(firstInput.includes(hidden), false);
+  }
+
+  const updated = { ...second, description: randomUUID() };
+  await invoke([updated]);
+  const secondInput = seen[1].map(message => message.text).join('\n');
+  assert.deepEqual(readCapabilityManifest(secondInput), {
+    defaultCapabilityName: updated.name,
+    capabilities: [{ name: updated.name, purpose: updated.description, toolkits: [] }],
+  });
+  for (const stale of [first.name, first.description, second.description, updated.instructions.content]) {
+    assert.equal(secondInput.includes(stale), false);
+  }
+
+  await invoke([first, second], []);
+  const emptyInput = seen[2].map(message => message.text).join('\n');
+  assert.deepEqual(readCapabilityManifest(emptyInput), { defaultCapabilityName: undefined, capabilities: [] });
+  for (const hidden of [first.name, first.description, second.name, second.description]) {
+    assert.equal(emptyInput.includes(hidden), false);
   }
 });
 

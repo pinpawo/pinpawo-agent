@@ -14,6 +14,7 @@ import {
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
+import { isToolCallContentBlock } from '../../../../utils/messages';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
@@ -205,7 +206,7 @@ function withoutRepeatedCalls(message: AIMessage, kept: ToolCall[]) {
   return new AIMessage({
     ...message,
     content: Array.isArray(message.content)
-      ? message.content.filter((block) => (block as { type?: string }).type !== 'tool_call' || !isDropped(block))
+      ? message.content.filter((block) => !isToolCallContentBlock(block) || !isDropped(block))
       : message.content,
     additional_kwargs: Array.isArray(rawCalls)
       ? { ...message.additional_kwargs, tool_calls: rawCalls.filter((call) => !isDropped(call)) }
@@ -223,8 +224,8 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   }
   // Ask for one routing call. A provider that still returns several distinct
   // calls fails the protocol check below; the hint is not paired with a repair turn.
-  const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1]
-    & { parallel_tool_calls: boolean } = { parallel_tool_calls: false };
+  const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1] =
+    config.entryAnswerToolOptions ?? { parallel_tool_calls: false };
   const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
   const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 

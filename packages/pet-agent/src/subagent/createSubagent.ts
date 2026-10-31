@@ -1,5 +1,5 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
-import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
   composeSystemPrompt,
@@ -94,29 +94,15 @@ function ensureSubagentMessageIds(messages: BaseMessage[]) {
   }
 }
 
-function readMessageText(message: BaseMessage): string {
-  if (typeof message.content === 'string') {
-    return message.content;
-  }
-  return message.content
-    .map((item) => {
-      if (typeof item === 'string') return item;
-      if (typeof item === 'object' && item !== null && 'text' in item) {
-        return typeof item.text === 'string' ? item.text : '';
-      }
-      return '';
-    })
-    .join('');
-}
-
 function readInvocationOutput(messages: BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message._getType() !== 'ai') continue;
     if (readSubagentGuardStopReason(message)) continue;
     if (messageHasToolCalls(message)) continue;
-    if (!readMessageText(message).trim()) continue;
-    return readMessageText(message);
+    const text = message.text;
+    if (!text.trim()) continue;
+    return text;
   }
   return null;
 }
@@ -140,7 +126,7 @@ function assertValidContextSummaryUpdate(update: unknown) {
     return;
   }
 
-  const content = readMessageText(summary);
+  const content = summary.text;
   const prefix = `${SUBAGENT_CONTEXT_SUMMARY_PREFIX}\n\n`;
   const summaryText = content.startsWith(prefix) ? content.slice(prefix.length) : content;
   if (

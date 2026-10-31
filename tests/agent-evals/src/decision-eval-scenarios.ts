@@ -3,7 +3,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { buildEntryAnswerSystemPrompt } from '../../../packages/pet-agent/src/agent/orchestrator/prompts/answer.ts';
 import { PLAN_REQUEST_TOOL_NAME, createPlanRequestTool, createContinueTool, entryPlanMessage } from '../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
-import { readMessageText } from '../../../packages/pet-agent/src/agent/orchestrator/utils.ts';
+import { readMessageText } from '../../../packages/pet-agent/src/utils/messages.ts';
 import type { AgentModels } from '../../../packages/pet-agent/src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../../packages/pet-agent/src/utils/structuredOutput.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';

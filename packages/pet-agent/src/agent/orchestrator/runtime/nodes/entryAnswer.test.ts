@@ -349,7 +349,7 @@ test('Entry Answer receives an accepted delegation result as execution data, not
 
 });
 
-function routingScript(turns: AIMessage[]) {
+function routingScript(turns: AIMessage[], entryAnswerToolOptions?: Record<string, unknown>) {
   const seen: BaseMessage[][] = [];
   const bindOptions: unknown[] = [];
   const model = {
@@ -366,6 +366,7 @@ function routingScript(turns: AIMessage[]) {
   const requests: string[] = [];
   const graph = createOrchestratorGraph({
     models: { act: model, answer: model },
+    entryAnswerToolOptions,
     runSupervisorRunner: { async invoke(input) { requests.push(input.userRequest); return { reply: 'done' }; } },
   });
   return { graph, seen, requests, bindOptions };
@@ -374,6 +375,12 @@ function routingScript(turns: AIMessage[]) {
 test('Entry routing asks the provider for a single routing call', () => {
   const { bindOptions } = routingScript([]);
   assert.deepEqual(bindOptions, [{ parallel_tool_calls: false }]);
+});
+
+test('Entry routing forwards host-selected tool binding options', () => {
+  const options = { tool_choice: { type: 'auto', disable_parallel_tool_use: true } };
+  const { bindOptions } = routingScript([], options);
+  assert.deepEqual(bindOptions, [options]);
 });
 
 test('Entry hands off once when a streamed turn also carries its call as a content block', async () => {
@@ -408,7 +415,7 @@ test('Entry routing accepts a tool call whose provider omitted the id', async ()
 test('Entry routing collapses a repeated identical call into one handoff', async () => {
   const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
   const { graph, seen, requests } = routingScript([new AIMessage({
-    content: '', tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+    content: [{ type: 'text', text: 'routing' }, ...['a', 'b'].map(id => ({ type: 'tool_use' as const, id, name: call.name, input: call.args }))], tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
   })]);
   const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
   assert.equal(seen.length, 1);
@@ -416,6 +423,9 @@ test('Entry routing collapses a repeated identical call into one handoff', async
   const routed = output.messages.filter((message) => AIMessage.isInstance(message) && message.tool_calls?.length);
   assert.equal(routed.length, 1);
   assert.equal((routed[0] as AIMessage).tool_calls?.length, 1);
+  const content = (routed[0] as AIMessage).content as Array<{ type: string; id?: string }>;
+  assert.deepEqual(content.filter(block => block.type === 'tool_use').map(block => block.id), ['a']);
+  assert.equal(content[0].type, 'text');
 });
 
 test('Entry routing fails on distinct calls without a repair turn', async () => {

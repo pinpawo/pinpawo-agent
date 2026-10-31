@@ -106,7 +106,7 @@ function executionDeliveries(input: RunSupervisorInput | undefined): DelegationD
   });
 }
 
-import { readMessageText } from './utils';
+import { readMessageText } from '../../utils/messages';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
 
 function plannerMessageContextText(input: RunSupervisorInput | null | undefined) {

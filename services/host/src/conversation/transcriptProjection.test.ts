@@ -199,3 +199,15 @@ test('reply references contain only preceding paired deliveries from its own run
   assert.equal(projected.some(message => message.text === 'Evidence one'), false);
   assert.deepEqual(readTuiCheckpointMessages(messages), projected);
 });
+
+test('checkpoint projection reads only normalized text from native multi-block assistant replies', () => {
+  const reply = new AIMessage({ id: 'native-reply', content: [
+    { type: 'text', text: 'Hello' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'signature' },
+    { type: 'text', text: ' world' },
+  ] });
+  assert.equal(reply.text, 'Hello world');
+  assert.deepEqual(readTuiCheckpointMessages([reply]), [
+    { id: 'native-reply', role: 'assistant', text: 'Hello world' },
+  ]);
+});

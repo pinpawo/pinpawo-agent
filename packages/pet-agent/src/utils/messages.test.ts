@@ -3,11 +3,49 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import {
   messageHasToolCalls,
+  readContentText,
+  readMessageText,
   readMessageToolCallIds,
   readMessageToolCalls,
   readToolResultCallId,
 } from './messages';
 import { toolProtocolSafeMessages } from '../agent/messages';
+
+test('message text reads normalized AI text without reasoning or tool data', () => {
+  const message = new AIMessage({ content: [
+    { type: 'text', text: ' Hello' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'sig' },
+    { type: 'tool_use', id: 'call-1', name: 'lookup', input: { text: 'private arguments' } },
+    { type: 'image_url', image_url: 'data:image/png;base64,aW1hZ2U=' },
+    { type: 'text', text: ' world ' },
+  ], additional_kwargs: { pinpawo: { localChatDisplayText: 'UI override' } } });
+
+  assert.equal(readMessageText(message), 'Hello world');
+});
+
+test('message text reads standard Human and Tool text blocks around images', () => {
+  const messages = [
+    new HumanMessage({ content: [
+      { type: 'text', text: ' first ' },
+      { type: 'image_url', image_url: 'data:image/png;base64,aW1hZ2U=' },
+      { type: 'text', text: 'second ' },
+    ] }),
+    new ToolMessage({ content: [
+      { type: 'text', text: ' first ' },
+      { type: 'image_url', image_url: 'data:image/png;base64,aW1hZ2U=' },
+      { type: 'text', text: 'second ' },
+    ], tool_call_id: 'call-1' }),
+  ];
+  for (const message of messages) {
+    assert.equal(readMessageText(message), 'first second');
+  }
+  assert.equal(readMessageText(new HumanMessage(' hello ')), 'hello');
+});
+
+test('raw content reader preserves strings and ignores missing content', () => {
+  assert.equal(readContentText(' hello '), ' hello ');
+  assert.equal(readContentText(null), null);
+});
 
 test('message utils read normalized tool calls from AI message shapes', () => {
   const standard = new AIMessage({

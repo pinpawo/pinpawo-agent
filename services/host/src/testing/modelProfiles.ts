@@ -96,6 +96,7 @@ export function createTestModelProfileRegistry(
   }
   const profiles = Object.fromEntries(inputs.map((input) => {
     const base = createModelProfile({
+      protocol: input.protocol,
       id: input.modelProfileId,
       label: input.label ?? input.modelProfileId,
       apiKey: input.apiKey ?? `secret-${input.modelProfileId}`,

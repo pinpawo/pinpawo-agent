@@ -218,7 +218,7 @@ test('runAgentSessionTurn sources tool operations from the root protocol stream,
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.equal(setup.input.messages.length, 1);
   assert.equal(setup.input.messages[0]?._getType(), 'human');
-  assert.equal(readMessageText(setup.input.messages[0] ?? {}), 'hello');
+  assert.equal(readMessageText(setup.input.messages[0] ?? new HumanMessage('')), 'hello');
   assert.match(readAgentMessageCreatedAt(setup.input.messages[0]!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
   assert.deepEqual(emittedTools, [
     {
@@ -862,7 +862,7 @@ test('runAgentSessionTurn allows a user message after an aborted non-review run 
     streamEvents(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
       return (async function* () {
         streamInputs.push(inputOverride);
-        assert.equal(readMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
+        assert.equal(readMessageText(streamSetup.input.messages.at(-1) ?? new HumanMessage('')), 'new request');
         yield protocolEvent('values', { messages: finalMessages });
       })();
     },
@@ -1286,7 +1286,7 @@ test('runAgentSessionTurn refuses an unknown interrupt emitted by a graph', asyn
 
 test('committed Supervisor reply uses one message identity for delta and completion', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
-  const reply = new AIMessage({ id: 'supervisor-final', content: [{ type: 'text', text: 'Inspection' }, { type: 'text', text: 'complete.' }],
+  const reply = new AIMessage({ id: 'supervisor-final', content: [{ type: 'text', text: 'Inspection\n' }, { type: 'text', text: 'complete.' }],
     additional_kwargs: { pinpawo: { runId: 'run-current' } } });
   const setup = { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup;
   let reads = 0;
@@ -1381,4 +1381,29 @@ test('live reply references survive FileSaver deserialization in the production 
     assert.deepEqual(completed?.type === 'message.completed' ? completed.resultReferences : undefined,
       [{ id: 'delivery', title: 'Inspect', text: 'Evidence' }]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('native multi-block final reply agrees across committed delta and completion', async () => {
+  const events: AgentRuntimeEvent[] = [];
+  const reply = new AIMessage({ id: 'native-final', content: [
+    { type: 'text', text: 'Hello' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'signature' },
+    { type: 'text', text: ' world' },
+  ], additional_kwargs: { pinpawo: { runId: 'native-run' } } });
+  let reads = 0;
+  const result = await runAgentSessionTurn({
+    request: { kind: 'user_message', requestId: 'native-req', message: 'Hello' },
+    setup: { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup,
+    graphService: {
+      async readThreadState() { return { messages: ++reads === 1 ? [] : [reply], pendingInterrupt: null }; },
+      streamEvents: () => (async function* () {
+        yield protocolEvent('values', { messages: [], runId: 'native-run' });
+        yield protocolEvent('values', { messages: [reply], runId: 'native-run' });
+      })(),
+    } as unknown as HostGraphService,
+    isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+  });
+  assert.deepEqual(result, { status: 'completed', reply: 'Hello world' });
+  const visible = events.filter(event => event.type === 'message.delta' || event.type === 'message.completed');
+  assert.deepEqual(visible.map(event => event.type === 'message.delta' || event.type === 'message.completed' ? event.text : null), ['Hello world', 'Hello world']);
 });

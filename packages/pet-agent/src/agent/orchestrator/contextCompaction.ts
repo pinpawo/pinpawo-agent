@@ -10,7 +10,7 @@ import {
   toolProtocolSafeMessages,
 } from '../messages';
 import { readCapabilityExecutions } from './executionMessages';
-import { readMessageText } from './utils';
+import { readMessageText } from '../../utils/messages';
 import { xmlTextBlock } from '../../prompts/xml';
 
 const DEFAULT_KEEP_MESSAGES = 10;
@@ -136,7 +136,7 @@ async function summarizeMessages(params: {
   );
 
   const summary = readMessageText(response);
-  if (!summary.trim()) throw new Error('Context compaction produced an empty summary.');
+  if (!summary) throw new Error('Context compaction produced an empty summary.');
   return summary;
 }
 

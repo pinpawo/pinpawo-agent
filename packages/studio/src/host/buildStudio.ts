@@ -10,6 +10,7 @@ import type { Studio, StudioPlugin } from '../studioContract';
 import type { StudioPetRegistration, StudioPetRuntime } from '../types';
 import {
   buildHostRuntimeConfig,
+  buildModel,
   createResidentPetHost,
   type FileSaver,
   type HostToolkitInventoryStore,
@@ -287,10 +288,20 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         const config = input.modelProfiles.resolve(profileId);
         return {
           profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
+          protocol: config.protocol ?? 'openai-compatible',
           baseUrl: config.baseUrl,
           apiKey: config.apiKey,
           model: config.model,
-          ...(config.structuredOutputMethod ? { structuredOutputMethod: config.structuredOutputMethod } : {}),
+          createChatModel: (options) => buildModel({
+            ...config,
+            maxOutputTokens: options.maxOutputTokens,
+            maxRetries: options.maxRetries,
+          }, {
+            preferDeterministic: options.preferDeterministic,
+            ...(options.streaming !== undefined ? { streaming: options.streaming } : {}),
+            ...(options.forceChatCompletions !== undefined ? { forceChatCompletions: options.forceChatCompletions } : {}),
+          }),
+          structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
         };
       },
     },

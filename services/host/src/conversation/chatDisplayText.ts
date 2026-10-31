@@ -1,9 +1,9 @@
 import type { BaseMessage } from '@langchain/core/messages';
 
 /**
- * Where a message carries the text the interface should show, as opposed to
- * the text the model was given. Written when the execution input is built,
- * read back here for display.
+ * UI override for local user input whose model content includes attachment
+ * details. Transcript projection prefers this metadata; model invocation uses
+ * message.content. The key is retained for persisted checkpoints.
  */
 export const DISPLAY_TEXT_METADATA_KEY = 'localChatDisplayText';
 

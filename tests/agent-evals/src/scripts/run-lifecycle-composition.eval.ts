@@ -30,8 +30,7 @@ import {
 } from '../../../../packages/pet-agent/src/agent/messages/index.ts';
 import { isDelegationBriefingMessage } from '../../../../packages/pet-agent/src/agent/orchestrator/delegation/index.ts';
 import type { OrchestratorStateType } from '../../../../packages/pet-agent/src/agent/orchestrator/state.ts';
-import { readMessageText } from '../../../../packages/pet-agent/src/agent/orchestrator/utils.ts';
-import { readMessageToolCalls } from '../../../../packages/pet-agent/src/utils/messages.ts';
+import { readMessageText, readMessageToolCalls } from '../../../../packages/pet-agent/src/utils/messages.ts';
 import type { AgentModels } from '../../../../packages/pet-agent/src/types/agent.ts';
 import {
   defineInstructionDocument,

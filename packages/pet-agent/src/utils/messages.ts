@@ -1,5 +1,30 @@
 import type { BaseMessage } from '@langchain/core/messages';
 
+/** Flatten raw tool-event content for display; model replies use BaseMessage.text. */
+export function readContentText(content: unknown, separator = '\n'): string | null {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+      return part.text;
+    }
+    return '';
+  }).join(separator);
+}
+
+/** Read the framework's text projection, trimmed for display and summary callers. */
+export function readMessageText(message: BaseMessage): string {
+  return message.text.trim();
+}
+
+/** Identify the two supported representations of a tool call in message content. */
+export function isToolCallContentBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object') return false;
+  const type = (block as { type?: unknown }).type;
+  return type === 'tool_call' || type === 'tool_use';
+}
+
 export type MessageToolCallInfo = {
   id: string;
   name: string;

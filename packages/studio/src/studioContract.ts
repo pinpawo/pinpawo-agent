@@ -22,6 +22,7 @@
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
  */
 
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { JsonObject } from '@pinpawo/agent-contracts';
 import type { AgentToolkit, SystemPromptSection } from '@pinpawo/pet-agent';
 import type { PetInvocationScope } from 'pinpawo/host-runtime';
@@ -146,13 +147,24 @@ export type StudioPluginContext = {
   models: StudioModels;
 };
 
-/** An OpenAI-compatible endpoint from one of the Host's model profiles. */
+/** A Host model endpoint; consumers must check which protocols they support. */
 export type StudioModelEndpoint = {
+  /** Omission preserves the legacy OpenAI-compatible transport. */
+  protocol?: 'openai-compatible' | 'anthropic-compatible';
   profileId: string;
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Routing defaults to legacy jsonMode; native custom resolvers should set their supported method. */
   structuredOutputMethod?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+  /** Creates a model from the complete Host-resolved profile. */
+  createChatModel?: (options: {
+    maxOutputTokens: number;
+    maxRetries: number;
+    preferDeterministic: boolean;
+    streaming?: boolean;
+    forceChatCompletions?: boolean;
+  }) => BaseChatModel;
 };
 export type StudioModels = {
   /** The named profile, or the Host default; throws for an unknown profile or when the Studio has none. */

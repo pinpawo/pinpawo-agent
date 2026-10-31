@@ -15,6 +15,7 @@ import {
 } from '../../../../packages/pet-agent/src/agent/createAgentRuntime';
 import { buildReviewSpec } from '../../../../packages/pet-agent/src/types/reviewSpec';
 import { randomUUID } from 'node:crypto';
+import { readMessageText } from '../../../../packages/pet-agent/src/utils/messages';
 import {
   mainConversationMessages,
 } from '../../../../packages/pet-agent/src/agent/messages/index';
@@ -148,7 +149,7 @@ class ToolReviewRejectSubagentModel extends BaseChatModel {
       : new AIMessage(this.finalResponse);
     return {
       generations: [{
-        text: typeof message.content === 'string' ? message.content : '',
+        text: message.text,
         message,
       }],
     };
@@ -177,8 +178,8 @@ function readInterruptPayload(value: unknown): {
 }
 
 function readLastText(messages: BaseMessage[]): string {
-  const content = messages.at(-1)?.content;
-  return typeof content === 'string' ? content : '';
+  const message = messages.at(-1);
+  return message ? readMessageText(message) : '';
 }
 
 async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> {

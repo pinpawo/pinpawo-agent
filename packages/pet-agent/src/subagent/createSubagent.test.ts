@@ -70,6 +70,25 @@ class FailingSummaryModel extends BaseChatModel {
   }
 }
 
+test('subagent output preserves text spacing without exposing reasoning or tool blocks', async () => {
+  class ContentModel extends BaseChatModel {
+    _llmType() { return 'content-fixture'; }
+    bindTools() { return this; }
+    async _generate() {
+      const message = new AIMessage({ content: [
+        { type: 'thinking', thinking: 'private thought', signature: 'sig' },
+        { type: 'tool_use', id: 'call-1', name: 'lookup', input: { text: 'private arguments' } },
+        { type: 'text', text: ' public ' },
+        { type: 'text', text: 'answer ' },
+      ] });
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
+  const result = await createSubagent({ model: new ContentModel({}), tools: [], promptSections: [],
+    messages: [new HumanMessage('do the task')] });
+  assert.equal(result.output, ' public answer ');
+});
+
 test('createSubagent rejects duplicate prompt section ids before invoking the model', async () => {
   await assert.rejects(
     createSubagent({

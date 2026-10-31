@@ -78,7 +78,8 @@ npm test
 npm run build
 ```
 
-Start the source TUI with `npm run tui -w pinpawo`.
+Start the source TUI with `npm run tui -w pinpawo` (`npm run tui:v2 -w pinpawo` is an
+equivalent alias; both run `tsx src/index.ts tui`).
 
 ## Configuration
 

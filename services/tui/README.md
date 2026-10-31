@@ -73,15 +73,18 @@ Install dependencies, then start the client from the repository root:
 
 ```sh
 npm install
-npm run tui:v2 -w pinpawo
+npm run tui -w pinpawo
 ```
+
+`npm run tui:v2 -w pinpawo` is an equivalent alias, since both scripts run
+`tsx src/index.ts tui`.
 
 The client starts its own local agent Host as a stdio child process, so no second
 terminal is needed. To attach to one that is already listening instead, start
 `npm run start -w pinpawo -- run` in another terminal and name its port:
 
 ```sh
-npm run tui:v2 -w pinpawo -- --server-port 3210
+npm run tui -w pinpawo -- --server-port 3210
 ```
 
 An installed package runs the Bun-targeted bundle carried at
@@ -92,7 +95,7 @@ bundle, or global `bun`. `PINPAWO_TUI_V2_BIN` can select an explicit standalone
 build and `PINPAWO_BUN_BIN` can select a Bun runtime. Direct development remains
 available with `npm run dev -w @pinpawo/tui`.
 
-Use `npm run tui:v2 -w pinpawo -- --check` to verify the resolved workspace or
+Use `npm run tui -w pinpawo -- --check` to verify the resolved workspace or
 installed runtime without entering terminal mode.
 
 The empty-project distribution check is verified on local darwin-arm64 and
@@ -293,7 +296,7 @@ previous session are then discarded.
 Run the cross-terminal production-UI QA harness without a host or model account:
 
 ```sh
-npm run tui:v2 -w pinpawo -- --qa
+npm run tui -w pinpawo -- --qa
 ```
 
 An installed CLI can run the same scenario with

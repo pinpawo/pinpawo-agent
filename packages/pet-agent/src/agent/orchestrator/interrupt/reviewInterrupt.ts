@@ -156,8 +156,11 @@ function appendInvalidDecisionMessage(
   };
 }
 
-/** Render a rejected Host preflight without mutating the checkpointed review. */
-export function markPendingInterruptInvalidResponse(pending: PendingInterrupt): PendingInterrupt {
+/**
+ * The pending action remains valid; only the submitted response was rejected.
+ * Return a temporary display copy with the existing notice, without writing storage.
+ */
+export function withInvalidReviewResponseNotice(pending: PendingInterrupt): PendingInterrupt {
   return {
     ...pending,
     payload: {

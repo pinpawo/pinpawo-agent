@@ -7,7 +7,7 @@ import {
   isGraphRecursionLimitError,
   isValidHumanReviewResume,
   isPublicConversationMessage,
-  markPendingInterruptInvalidResponse,
+  withInvalidReviewResponseNotice,
   NamespacedProtocolToolEventReader,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
@@ -323,7 +323,7 @@ export async function runAgentSessionTurn(
     // and validates it. Reject malformed input before constructing that map;
     // the Runtime owns its schema and the existing invalid-decision view.
     emitInterruptRequested({
-      pendingInterrupt: markPendingInterruptInvalidResponse(initialThreadState.pendingInterrupt),
+      pendingInterrupt: withInvalidReviewResponseNotice(initialThreadState.pendingInterrupt),
       requestId,
       emitEvent,
     });

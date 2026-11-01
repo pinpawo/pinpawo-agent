@@ -14,6 +14,8 @@ export const humanReviewCancelResumeSchema = z.object({
   action: z.enum(['cancel', 'interrupt_run']),
 }).strict();
 
+export type HumanReviewCancelResume = z.infer<typeof humanReviewCancelResumeSchema>;
+
 /** The transport shape only; review identities and effects remain runtime policy. */
 export const humanReviewResumeSchema = z.union([
   humanReviewBatchResponseSchema,

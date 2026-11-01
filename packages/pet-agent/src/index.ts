@@ -124,7 +124,7 @@ export {
   ORCHESTRATOR_RECURSION_LIMIT,
   HUMAN_REVIEW_INTERRUPT_KIND,
   readPendingInterrupt,
-  markPendingInterruptInvalidResponse,
+  withInvalidReviewResponseNotice,
   settleAbortedRun,
   UnknownInterruptPayloadError,
   streamOrchestratorGraph,

@@ -9,6 +9,7 @@ import type {
 import {
   humanReviewBatchResponseSchema,
   humanReviewCancelResumeSchema,
+  type HumanReviewCancelResume,
 } from './reviewResponseSchema';
 
 export type ReviewResponseResolutionErrorCode =
@@ -19,10 +20,6 @@ export type ReviewResponseResolutionErrorCode =
   | 'invalid_input'
   | 'invalid_effect'
   | 'invalid_response';
-
-type HumanReviewCancelResume = {
-  action: 'cancel' | 'interrupt_run';
-};
 
 export class ReviewResponseResolutionError extends Error {
   readonly code: ReviewResponseResolutionErrorCode;

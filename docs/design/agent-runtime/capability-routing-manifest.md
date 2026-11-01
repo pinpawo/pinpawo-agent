@@ -53,11 +53,20 @@ The model-facing manifest excludes complete instructions, individual tool schema
 Toolkit instructions, paths, digests, and provenance. Supervisor receives these
 registry facts in its invocation context, not its stable system prompt.
 
-Entry Answer uses the same catalog, manifest and renderer to include the current
-Capability summary in its system prompt before resolving the goal. The summary
-is rebuilt from the current invocation's registry and Host allowlist; shared
-PET.md and Channel system sections retain their existing injection path. Neither
-projection is appended to canonical root messages.
+When the current invocation supplies a non-empty, schema-validated
+`context.systemPromptSections` array, Entry Answer uses the same catalog, manifest
+and renderer to include the current Capability summary in its system prompt before
+resolving the goal. Its system instructions and the `plan_request` and `continue`
+tool descriptions then ask it to consider the injected identity and responsibilities.
+The summary is rebuilt from the current invocation's registry and Host allowlist;
+shared PET.md and Channel system sections retain their existing injection path.
+
+Without external sections, or with an empty array, Entry keeps its original system
+instructions and tool descriptions and receives no Capability manifest. A typed
+`workdir` alone does not enable the new form. Invalid sections fail validation;
+they do not select a fallback. This choice is made per invocation and does not
+change Supervisor's existing manifest or optional detail-disclosure behavior.
+Neither projection is appended to canonical root messages.
 
 ## Disclosure and lifetime
 

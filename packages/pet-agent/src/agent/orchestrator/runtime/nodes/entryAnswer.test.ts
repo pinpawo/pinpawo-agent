@@ -3,12 +3,15 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { runAgent } from '../../../runAgent';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { defineInstructionDocument, type AgentCapability } from '../../../../types/capability';
+import type { AgentRuntimeContext } from '../../../../runtime/context';
+import { composeSystemPrompt } from '../../../../prompts/systemPrompt';
 import { compileAgentRegistry } from '../../registry';
+import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import type { RunSupervisorInput } from '../../runSupervisor/runner';
 import { buildOrchestratorRunInput } from '../../state';
 import type { OrchestratorStateType } from '../../state';
@@ -19,7 +22,7 @@ import { withScriptedDelegation, type ScriptedSupervisorRunner } from '../../run
 function createOrchestratorGraph(config: Omit<OrchestratorConfig, 'runSupervisorRunner'> & { runSupervisorRunner?: ScriptedSupervisorRunner }) {
   return createRuntimeGraph({ ...config, runSupervisorRunner: config.runSupervisorRunner ? withScriptedDelegation(config.runSupervisorRunner) : undefined });
 }
-import { captureRunUserRequest, entryPlanMessage, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
+import { captureRunUserRequest, createContinueTool, createPlanRequestTool, entryPlanMessage, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import {
   mainConversationMessages,
@@ -60,6 +63,27 @@ function entryCapability(): AgentCapability {
     uses: [],
     instructions: defineInstructionDocument({ content: randomUUID() }),
   };
+}
+
+type EntryRoutingTool = ReturnType<typeof createPlanRequestTool> | ReturnType<typeof createContinueTool>;
+
+function entryToolDescriptions(tools: readonly EntryRoutingTool[]) {
+  return tools.map(({ name, description, schema }) => ({
+    name, description, goalDescription: schema.shape.goal.description,
+  }));
+}
+
+function observeEntryBindings(respond: (messages: BaseMessage[]) => AIMessage) {
+  const invocations: Array<{ messages: BaseMessage[]; tools: EntryRoutingTool[]; options: unknown }> = [];
+  const model = {
+    bindTools: (tools: EntryRoutingTool[], options: unknown) => ({
+      invoke: async (messages: BaseMessage[]) => {
+        invocations.push({ messages, tools, options });
+        return respond(messages);
+      },
+    }),
+  } as unknown as BaseChatModel;
+  return { model, invocations };
 }
 
 
@@ -214,8 +238,9 @@ test('plan_request retires the saved plan so Supervisor plans the new request fr
   assert.deepEqual(supervisorInputs[0]?.state, { runId: null, goal: null, plan: [] });
 });
 
-for (const scenario of ['keep', 'widen'] as const) {
-  test(`continue adopts the saved plan and ${scenario === 'keep' ? 'keeps' : 'replaces'} its goal`, async () => {
+for (const { scenario, hasExternalContext } of (['keep', 'widen'] as const)
+  .flatMap(scenario => [false, true].map(hasExternalContext => ({ scenario, hasExternalContext })))) {
+  test(`continue adopts the saved plan and ${scenario === 'keep' ? 'keeps' : 'replaces'} its goal with external context ${hasExternalContext}`, async () => {
     const supervisorInputs: RunSupervisorInput[] = [];
     const widened = 'Plan the trip and book the restaurant.';
     const model = { bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
@@ -227,7 +252,10 @@ for (const scenario of ['keep', 'widen'] as const) {
       { id: 'open', capability: 'general', objective: 'Book the hotel.', status: 'pending' as const },
     ] };
     const output = await graph.invoke({ ...buildOrchestratorRunInput([new HumanMessage('接着做，顺便订餐厅。')]),
-      runSupervisorState: saved }, invokeConfig());
+      runSupervisorState: saved }, {
+      ...invokeConfig(),
+      ...(hasExternalContext ? { context: { workdir: null, systemPromptSections: [{ id: randomUUID(), content: randomUUID() }] } } : {}),
+    });
     const state = supervisorInputs[0]!.state;
     assert.equal(supervisorInputs[0]?.mode, 'boundary');
     assert.equal(state.runId, output.runId);
@@ -400,15 +428,24 @@ function routingScript(turns: AIMessage[], entryAnswerToolOptions?: Record<strin
   return { graph, seen, requests, bindOptions };
 }
 
-test('Entry routing asks the provider for a single routing call', () => {
-  const { bindOptions } = routingScript([]);
+test('Entry routing asks the provider for a single routing call when invoked', async () => {
+  const { graph, bindOptions } = routingScript([new AIMessage(randomUUID())]);
+  assert.deepEqual(bindOptions, []);
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(randomUUID())]), invokeConfig());
   assert.deepEqual(bindOptions, [{ parallel_tool_calls: false }]);
 });
 
-test('Entry routing forwards host-selected tool binding options', () => {
+test('Entry routing forwards host-selected tool binding options in both context modes', async () => {
   const options = { tool_choice: { type: 'auto', disable_parallel_tool_use: true } };
-  const { bindOptions } = routingScript([], options);
-  assert.deepEqual(bindOptions, [options]);
+  const { graph, bindOptions } = routingScript([new AIMessage(randomUUID()), new AIMessage(randomUUID())], options);
+  assert.deepEqual(bindOptions, []);
+  for (const hasExternalContext of [false, true]) await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage(randomUUID())]), {
+      ...invokeConfig(),
+      ...(hasExternalContext ? { context: { workdir: null, systemPromptSections: [{ id: randomUUID(), content: randomUUID() }] } } : {}),
+    },
+  );
+  assert.deepEqual(bindOptions, [options, options]);
 });
 
 test('Entry hands off once when a streamed turn also carries its call as a content block', async () => {
@@ -524,6 +561,135 @@ test('root invocation context reaches direct Entry replies and final Answer with
   }
 });
 
+test('Entry tool variants preserve their schemas while selecting different goal guidance', () => {
+  const goal = randomUUID();
+  for (const makeTool of [createPlanRequestTool, createContinueTool]) {
+    const defaults = makeTool();
+    const plain = makeTool(false);
+    const scoped = makeTool(true);
+    assert.deepEqual(entryToolDescriptions([defaults]), entryToolDescriptions([plain]));
+    assert.notEqual(plain.schema.shape.goal.description, scoped.schema.shape.goal.description);
+    assert.deepEqual(Object.keys(plain.schema.shape), ['goal']);
+    assert.deepEqual(Object.keys(scoped.schema.shape), Object.keys(plain.schema.shape));
+    assert.equal(scoped.name, plain.name);
+    assert.equal(scoped.schema.shape.goal.isOptional(), plain.schema.shape.goal.isOptional());
+    for (const input of [{ goal }, { goal: `  ${goal}\n` }, {}, { goal: '' }, { goal: ' \n ' },
+      { goal: 7 }, { goal: null }, { goal, unexpected: true }, { goal: goal.repeat(100) }]) {
+      const summarize = (result: ReturnType<typeof plain.schema.safeParse>) => result.success
+        ? { success: true, data: result.data }
+        : { success: false, issues: result.error.issues.map(({ code, path }) => ({ code, path })) };
+      assert.deepEqual(summarize(scoped.schema.safeParse(input)), summarize(plain.schema.safeParse(input)));
+    }
+    assert.deepEqual(scoped.schema.parse({ goal: `  ${goal}\n` }), { goal });
+    assert.equal(scoped.schema.safeParse({}).success, scoped.name === 'continue');
+    assert.equal(scoped.schema.safeParse({ goal, unexpected: true }).success, false);
+  }
+  assert.equal(buildEntryAnswerSystemPrompt(), buildEntryAnswerSystemPrompt(false));
+  assert.notEqual(buildEntryAnswerSystemPrompt(false), buildEntryAnswerSystemPrompt(true));
+});
+
+test('only external system sections select role-aware Entry input and bound tools', async t => {
+  const workdir = `/tmp/${randomUUID()}`;
+  const section = (id: string) => ({ id, content: randomUUID() });
+  const cases: Array<{ name: string; context?: AgentRuntimeContext; scoped: boolean }> = [
+    { name: 'no context', scoped: false },
+    { name: 'empty context', context: {}, scoped: false },
+    { name: 'empty sections', context: { systemPromptSections: [] }, scoped: false },
+    { name: 'workdir only', context: { workdir }, scoped: false },
+    { name: 'workdir with empty sections', context: { workdir, systemPromptSections: [] }, scoped: false },
+    { name: 'anonymous caller section', context: { systemPromptSections: [section(randomUUID())] }, scoped: true },
+    { name: 'PET only', context: { systemPromptSections: [section('pet:document')] }, scoped: true },
+    { name: 'Channel only', context: { systemPromptSections: [section('channel:context')] }, scoped: true },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async () => {
+    const capability = entryCapability();
+    const request = randomUUID();
+    const goal = randomUUID();
+    const observed = observeEntryBindings(() => new AIMessage({ content: '', tool_calls: [{
+      id: randomUUID(), name: PLAN_REQUEST_TOOL_NAME, args: { goal: `  ${goal}\n` },
+    }] }));
+    const supervisorInputs: RunSupervisorInput[] = [];
+    const graph = createOrchestratorGraph({
+      models: { act: observed.model, answer: observed.model }, defaultCapabilityName: capability.name,
+      runSupervisorRunner: { async invoke(input) { supervisorInputs.push(input); return { reply: randomUUID() }; } },
+    });
+    const result = await runAgent(graph, {
+      messages: [new HumanMessage(request)], capabilities: [capability], context: scenario.context,
+    });
+    assert.equal(observed.invocations.length, 1);
+    const { messages, tools, options } = observed.invocations[0];
+    assert.deepEqual(options, { parallel_tool_calls: false });
+    assert.deepEqual(entryToolDescriptions(tools), entryToolDescriptions([
+      createPlanRequestTool(scenario.scoped), createContinueTool(scenario.scoped),
+    ]));
+    const systems = messages.filter(message => message._getType() === 'system');
+    assert.equal(systems.length, 1);
+    const system = systems[0].text;
+    if (scenario.scoped) {
+      assert.ok(system.startsWith(buildEntryAnswerSystemPrompt(true)));
+      assert.deepEqual(readCapabilityManifest(system), {
+        defaultCapabilityName: capability.name,
+        capabilities: [{ name: capability.name, purpose: capability.description, toolkits: [] }],
+      });
+    } else {
+      assert.equal(system, composeSystemPrompt(new SystemMessage(buildEntryAnswerSystemPrompt(false)), scenario.context).text);
+      for (const hidden of [capability.name, capability.description]) assert.equal(system.includes(hidden), false);
+    }
+    for (const injected of scenario.context?.systemPromptSections ?? []) {
+      assert.equal(system.split(injected.content).length - 1, 1);
+    }
+    assert.equal(system.includes(capability.instructions.content), false);
+    assert.equal(supervisorInputs.length, 1);
+    assert.equal(supervisorInputs[0].userRequest, goal);
+    assert.equal(supervisorInputs[0].mode, 'entry');
+    assert.ok(supervisorInputs[0].messages.some(message => message.text === request));
+    assert.ok(result.messages.some(message => ToolMessage.isInstance(message) && message.name === PLAN_REQUEST_TOOL_NAME));
+    const privateFacts = [capability.description, ...(scenario.context?.systemPromptSections ?? []).map(item => item.content)];
+    for (const history of [supervisorInputs[0].messages, result.messages]) {
+      for (const hidden of privateFacts) assert.equal(history.some(message => message.text.includes(hidden)), false);
+    }
+  });
+});
+
+test('one Entry graph switches external context on, off and on without retaining summaries or bound guidance', async () => {
+  const capabilities = [entryCapability(), entryCapability(), entryCapability()];
+  const firstSection = { id: randomUUID(), content: randomUUID() };
+  const nextSection = { id: randomUUID(), content: randomUUID() };
+  const contexts: Array<AgentRuntimeContext | undefined> = [
+    { systemPromptSections: [firstSection] }, undefined, { systemPromptSections: [nextSection] },
+  ];
+  const observed = observeEntryBindings(() => new AIMessage(randomUUID()));
+  const graph = createOrchestratorGraph({
+    models: { act: observed.model, answer: observed.model },
+    runSupervisorRunner: { async invoke() { throw new Error('Direct replies do not need Supervisor.'); } },
+  });
+  for (const [index, context] of contexts.entries()) {
+    await runAgent(graph, { messages: [new HumanMessage(randomUUID())], context, capabilities: [capabilities[index]] });
+    assert.equal(observed.invocations.length, index + 1);
+    const { messages, tools } = observed.invocations[index];
+    const system = messages[0].text;
+    const scoped = index !== 1;
+    assert.deepEqual(entryToolDescriptions(tools), entryToolDescriptions([
+      createPlanRequestTool(scoped), createContinueTool(scoped),
+    ]));
+    if (scoped) {
+      assert.deepEqual(readCapabilityManifest(system).capabilities, [{
+        name: capabilities[index].name, purpose: capabilities[index].description, toolkits: [],
+      }]);
+    } else {
+      assert.equal(system, buildEntryAnswerSystemPrompt(false));
+    }
+    for (const [otherIndex, capability] of capabilities.entries()) {
+      assert.equal(system.includes(capability.description), scoped && otherIndex === index);
+      assert.equal(system.includes(capability.instructions.content), false);
+    }
+    assert.equal(system.includes(firstSection.content), index === 0);
+    assert.equal(system.includes(nextSection.content), index === 2);
+  }
+  assert.notDeepEqual(entryToolDescriptions(observed.invocations[0].tools), entryToolDescriptions(observed.invocations[1].tools));
+  assert.deepEqual(entryToolDescriptions(observed.invocations[0].tools), entryToolDescriptions(observed.invocations[2].tools));
+});
+
 test('Entry receives identity and capability summaries before resolving the goal without persisting the summaries', async () => {
   const identity = randomUUID();
   const channel = randomUUID();
@@ -583,6 +749,7 @@ test('Entry refreshes the capability summary and applies the current allowlist o
   });
   const invoke = (capabilities: AgentCapability[], allowedCapabilityNames?: string[]) => runAgent(graph, {
     messages: [new HumanMessage(randomUUID())], capabilities, allowedCapabilityNames,
+    context: { systemPromptSections: [{ id: randomUUID(), content: randomUUID() }] },
   });
 
   await invoke([first, second], [first.name]);
@@ -615,8 +782,9 @@ test('Entry refreshes the capability summary and applies the current allowlist o
 });
 
 
-for (const status of ['empty', 'completed', 'superseded'] as const) {
-  test(`Entry exposes the ${status} plan and rejects continue without handing off`, async () => {
+for (const { status, hasExternalContext } of (['empty', 'completed', 'superseded'] as const)
+  .flatMap(status => [false, true].map(hasExternalContext => ({ status, hasExternalContext })))) {
+  test(`Entry exposes the ${status} plan and rejects continue without handing off with external context ${hasExternalContext}`, async () => {
     const plan = { runId: null, goal: status === 'empty' ? null : 'Plan the trip.', plan: status === 'empty' ? [] : [
       { id: 'trip', capability: 'general', objective: 'Plan the trip.', status },
     ] };
@@ -639,7 +807,10 @@ for (const status of ['empty', 'completed', 'superseded'] as const) {
     const graph = createOrchestratorGraph({ models: { act: model, answer: model }, runSupervisorRunner: {
       invoke: async () => { throw new Error('Invalid continue must not hand off to Supervisor.'); },
     } });
-    const output = await graph.invoke({ ...buildOrchestratorRunInput([new HumanMessage('继续。')]), runSupervisorState: plan }, invokeConfig());
+    const output = await graph.invoke({ ...buildOrchestratorRunInput([new HumanMessage('继续。')]), runSupervisorState: plan }, {
+      ...invokeConfig(),
+      ...(hasExternalContext ? { context: { workdir: null, systemPromptSections: [{ id: randomUUID(), content: randomUUID() }] } } : {}),
+    });
     assert.equal(turns, 2);
     assert.deepEqual(output.runSupervisorState, plan);
     assert.equal(output.runIterationCount, 0);

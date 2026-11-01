@@ -1,6 +1,6 @@
 import { definePromptTemplate } from '../../../../prompts/template';
 
-export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`You handle the last user request as the current Agent and decide how to respond this turn. Your identity and responsibilities come from the supplied system context. The current Capability manifest describes the capabilities available to you; their tools do not expand your responsibilities.
+export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{ introduction: string; goalGuidance: string }>(`{introduction}
 
 - When the available information is enough to answer, reply to the user directly.
 - When the request is unclear, or continuing needs more information from the user, ask a specific question.
@@ -26,7 +26,7 @@ delegate_capability tool results in the main conversation record the executor's 
 
 ## Writing goal
 
-Resolve the outcome this Agent should undertake in this turn from its identity, responsibilities, current Capabilities and the conversation. The user's overall request remains the context: preserve its requirements and constraints, while distinguishing your contribution from work belonging to other participants. When others must act, your contribution may be to clarify the issue, coordinate that work or report its state; do not turn their work into your own execution goal. Describe the intended outcome without designing the execution steps. Fill in goal for plan_request and continue as their parameter descriptions say; the Supervisor then decides from the goal, the plan and the visible messages.
+{goalGuidance}
 
 ## Output of this turn
 
@@ -34,4 +34,14 @@ You have no business tools and cannot execute, read, query, modify or verify ext
 
 Choose one for this turn: output a final user-facing reply; or output one valid routing tool call, and in the message text tell the user in one sentence what happens next and its scope. That sentence only announces the handoff; it does not replace the routing tool call and does not claim the work is done.
 
-Write everything the user sees (replies, questions, the one-sentence note with a routing call, and goal) in the output language the user explicitly asked for; otherwise, in the language of the user's latest request.`, []);
+Write everything the user sees (replies, questions, the one-sentence note with a routing call, and goal) in the output language the user explicitly asked for; otherwise, in the language of the user's latest request.`, ['introduction', 'goalGuidance']);
+
+export const ENTRY_ANSWER_DEFAULT_GUIDANCE = {
+  introduction: 'You handle the last user request in the main conversation and decide how to respond this turn.',
+  goalGuidance: 'Convey the user\'s goal faithfully; do not widen its scope or design the solution for the executor. Fill in goal for plan_request and continue as their parameter descriptions say; the Supervisor then decides from the goal, the plan and the visible messages.',
+};
+
+export const ENTRY_ANSWER_CONTEXT_GUIDANCE = {
+  introduction: 'You handle the last user request as the current Agent and decide how to respond this turn. Your identity and responsibilities come from the supplied system context. The current Capability manifest describes the capabilities available to you; their tools do not expand your responsibilities.',
+  goalGuidance: 'Resolve the outcome this Agent should undertake in this turn from its identity, responsibilities, current Capabilities and the conversation. The user\'s overall request remains the context: preserve its requirements and constraints, while distinguishing your contribution from work belonging to other participants. When others must act, your contribution may be to clarify the issue, coordinate that work or report its state; do not turn their work into your own execution goal. Describe the intended outcome without designing the execution steps. Fill in goal for plan_request and continue as their parameter descriptions say; the Supervisor then decides from the goal, the plan and the visible messages.',
+};

@@ -105,16 +105,25 @@ Routes the request: reply directly, ask a question, or hand off via
 
 | Slot | Class | Content |
 |---|---|---|
-| system instructions | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt()` — routing and goal-definition rules, plus shared invocation context such as the Pet's identity and Channel announcement |
-| system facts | invocation projection / `FACT` | Current `<capability_routing_manifest>`: available Capability names, purposes, Toolkit summaries and the default Capability when available |
+| system instructions | `RUN-STABLE` / `INSTRUCTION` | Entry routing and goal-definition rules selected for the current invocation, plus shared invocation context such as the Pet's identity and Channel announcement |
+| system facts | invocation projection / `FACT` | With non-empty validated external system sections, the current `<capability_routing_manifest>`: available Capability names, purposes, Toolkit summaries and the default Capability when available |
 | plan snapshot | `DYNAMIC` / `FACT` | `<supervisor_snapshot>` — the saved goal and plan, with their origin |
 | history | `DYNAMIC` / `HISTORY` | `mainConversationMessages(state.messages)` |
 
-Before defining the run goal, Entry is instructed to consider the current
-Agent's identity, available Capabilities and the main conversation. The user's
-overall request provides the context and constraints; the goal should state
-the work this Agent is responsible for in this turn. Available tools do not
-expand that responsibility.
+Entry selects the new goal-definition instructions only when the current
+`AgentRuntimeContext.systemPromptSections` is non-empty after schema validation.
+In that form, the system prompt and the `plan_request` and `continue` tool
+descriptions ask it to consider the current Agent's identity, available Capabilities
+and the main conversation. The user's overall request provides the context and
+constraints; the goal should state the work this Agent is responsible for in this
+turn. Available tools do not expand that responsibility.
+
+Absent sections or `[]` retain the original system instructions and tool
+descriptions, with no Entry Capability manifest. A typed `workdir` alone does not
+count as external system sections. Invalid sections are rejected rather than
+treated as absent. Selection uses the current invocation, not earlier messages
+or a cached graph's first invocation; it does not inspect Pet, Channel, or owner
+identifiers. Supervisor's existing context and optional detail reading are unchanged.
 
 The Capability summary is rebuilt from the current invocation's compiled
 registry and `allowedCapabilityNames`. Entry reuses the catalog, manifest and
@@ -141,10 +150,12 @@ the runtime renders the fact and the model makes the choice — nothing in the
 runtime infers the answer from the plan being non-empty.
 
 **Output → state:** `plan_request(goal)` resolves the run goal against the whole
-conversation, current identity and available Capabilities. The goal should
-preserve the user's requirements and constraints while identifying this Agent's
-part in the work. The original request remains in the main conversation. This authors the
-initial goal; user-directed Supervisor adjustments may revise it. See §8.
+conversation. With external system sections, the goal-definition instructions also
+use the current identity and Capability summary to identify this Agent's part in
+the work while preserving the user's requirements and constraints. Without those
+sections, the original instructions to faithfully convey the user's goal apply.
+The original request remains in the main conversation. This authors the initial
+goal; user-directed Supervisor adjustments may revise it. See §8.
 `continue` adopts the saved plan into this run, which is what places Supervisor
 at a Boundary over facts it now owns.
 
@@ -336,7 +347,8 @@ planned task is an invariant violation: `delegate_capability` and
 
 Why the run request is model-authored: the last human message is often a continuation
 utterance ("嗯。开始吧") that states no goal. Entry Answer resolves the initial
-goal from conversation together with the current identity and Capability summary.
+goal from conversation; when external system sections are supplied, its instructions
+also use the current identity and Capability summary as described in §4.
 Supervisor uses the existing goal and current task conversation to interpret
 later adjustments. Verbatim text is still preserved
 when the resolved goal equals the current message, so formatting-sensitive

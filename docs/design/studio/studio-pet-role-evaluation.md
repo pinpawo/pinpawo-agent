@@ -50,11 +50,22 @@ Channel protocol, metadata, and an optional announcement. The shared
 appends these sections after the internal stage prompt, followed by the structured
 workdir and any execution-local sections.
 
+Entry selects its identity-aware system instructions, Capability manifest and
+matching `plan_request`/`continue` descriptions only when the invocation's
+`context.systemPromptSections` array is non-empty after schema validation. This
+fixture exercises that form through real Host and Channel assembly. The condition
+is generic: it does not depend on Studio or a particular section ID, and Host
+runtime-environment sections also qualify. Missing sections or `[]` retain the
+original Entry system instructions and tool descriptions without a manifest;
+typed workdir alone does not enable the new form. Invalid sections fail validation.
+Supervisor's existing prompt, routing summaries and optional detail-reading
+mechanism remain unchanged.
+
 Capability information has different representations at each stage:
 
 | Stage | System prompt | Other model input |
 | --- | --- | --- |
-| [Entry](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts) | Internal Entry instructions, Capability routing summaries, then PET, Host, Channel, and workdir sections. | Current conversation and plan state. Capability bodies are not included at this stage. |
+| [Entry](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts) | In this fixture's injected form: internal Entry instructions, Capability routing summaries, then PET, Host, Channel, and workdir sections. | Current conversation and plan state. Capability bodies are not included at this stage. |
 | [Supervisor Entry or Boundary](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.ts) | Internal instructions for the selected stage, then the same PET, Host, Channel, and workdir sections. | A temporary HumanMessage frame contains the request, routing catalog, and disclosed Capability bodies. A separate frame contains the current decision context. |
 | [Capability subtask](../../../packages/pet-agent/src/subagent/createSubagent.ts) | Framework instructions, inherited PET, Host, Channel, and workdir sections, followed by delivery context, Toolkit instructions, the selected Capability body, and execution context. | The delegated task and relevant execution messages. |
 

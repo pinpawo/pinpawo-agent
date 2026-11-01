@@ -29,7 +29,7 @@ export type CreateChannelPluginOptions = {
   /** Defaults to the Channel tables in the Studio database. */
   store?: ChannelStore;
   httpRoute?: false | { pluginName?: string };
-  /** Who answers a human's message that addresses nobody. Off by default. */
+  /** Who should attend to an unaddressed member message. Off by default. */
   routing?: ChannelRoutingOptions;
   /** Replaces the configured decider; for embedders and tests. */
   routeDecider?: RouteDecider;
@@ -42,6 +42,8 @@ export type ChannelDelivery = {
   via?: 'routing';
   confidence?: number;
   reason?: string;
+  /** The routing model's suggested focus, delivered as context rather than an instruction from the author. */
+  focus?: string;
   invocationId?: string;
   sessionId?: string;
   error?: string;
@@ -151,15 +153,24 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     return deliveries;
   }
 
-  async function sendMessage(channelId: string, input: unknown, author: MemberRef) {
-    const { message, created } = await channelService().postMessage(author, channelId, input);
+  /** Both member posts and new public Pet replies use the same delivery path. */
+  async function deliverAndRoute(message: ChannelMessage): Promise<ChannelDelivery[]> {
     const deliveries = await deliver(message);
     // Routing waits on a model; the poster does not. Its outcome arrives as an event.
-    if (created && router && message.mentions.length === 0) void route(router, message);
+    if (router && message.mentions.length === 0) void route(router, message);
+    return deliveries;
+  }
+
+  async function sendMessage(channelId: string, input: unknown, author: MemberRef) {
+    const { message, created, mentionError } = await channelService().postMessage(author, channelId, input);
+    const deliveries = created && !mentionError ? await deliverAndRoute(message) : [];
+    if (mentionError) {
+      host().notify({ type: 'channel.delivery', payload: { channelId, messageId: message.messageId, state: 'failed', error: mentionError } });
+    }
     return { message, deliveries };
   }
 
-  /** Let routing choose one Pet for a human's message that addressed nobody. */
+  /** Let routing choose one other Pet to attend to an unaddressed public message. */
   async function route(active: ChannelRouter, message: ChannelMessage): Promise<void> {
     const studio = host();
     const skip = (payload: Record<string, unknown>) => studio.notify({
@@ -179,13 +190,19 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         return skip(rest);
       }
       const target = members.find(member => member.participantId === outcome.participantId);
-      if (!target || target.kind !== 'pet') return skip({ reason: 'invalid', detail: outcome.participantId });
+      if (!target || target.kind !== 'pet' || target.participantId === channelParticipantId(message.author.kind, message.author.id)) {
+        return skip({ reason: 'invalid', detail: outcome.participantId });
+      }
       const labels = new Map(members.map(member => [member.participantId, member.label]));
-      const decided = { via: 'routing' as const, confidence: outcome.confidence, ...(outcome.reason ? { reason: outcome.reason } : {}) };
+      const decided = {
+        via: 'routing' as const, confidence: outcome.confidence,
+        ...(outcome.reason ? { reason: outcome.reason } : {}),
+        ...(outcome.focus ? { focus: outcome.focus } : {}),
+      };
       let delivery: ChannelDelivery;
       try {
         const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
-          channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing'),
+          channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing', outcome.focus),
           `channel:${message.channelId}:${message.messageId}:route`);
         delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
       } catch (error) {
@@ -223,7 +240,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       if (mentionError) {
         studio.notify({ type: 'channel.delivery', payload: { channelId, messageId: saved.messageId, state: 'failed', error: mentionError } });
       }
-      if (created) await deliver(saved);
+      // Invalid mentions were retained for observation; they are not a new
+      // unaddressed conversation for the router to repair or reinterpret.
+      if (created && !mentionError) await deliverAndRoute(saved);
     } catch (error) {
       // Nobody waits on this write; observers are the only ones who can see it failed.
       studio.notify({ type: 'channel.message_failed', payload: {

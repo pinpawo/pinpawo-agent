@@ -1,7 +1,7 @@
 # Channel 路由
 
 > 状态：`llm` 决策器已实现（配置读 `studio.json`）；`jev` 决策器和 Console 设置页未实现
-> 更新：2026-10-22
+> 更新：2026-11-02
 
 ## 问题
 
@@ -9,13 +9,15 @@ Channel 里没有 @ 的消息只写入时间线，不会派发给任何 Pet（[C
 这符合"自然对话"：人和人之间说话不该唤醒 Pet。但用户常常只是没指定对象，并不是不需要回应。
 例如在有 Executor、Reviewer、Wiki 的 Channel 里问"#1003 是谁在处理？"，现在没有任何人接。
 
-缺的是**分诊**：判断这条消息要不要交给 Pet、交给谁。Channel 不加兜底 Pet，也不加特殊成员。
+需要**分诊**：判断这条公开消息是否需要其他 Pet 关注、交给谁、关注哪部分。人类输入与
+Pet 的新公开回复使用同一入口；没有 @ 的回复也能进入协作，确认与重复结论可以选择 `none`。
+Channel 不加兜底 Pet，也不加特殊成员。
 分诊是 Channel 插件内部的一个可开关功能，用一次轻量的模型决策完成，与 Pet 的 Agent runtime 无关。
 
 ## 边界
 
 - **在 Channel 内部。** 路由是 `plugins/channel` 的一部分，不是独立 Plugin，也不新增 hook。
-  它在消息保存后、`deliver()` 之前运行，选中的 Pet 和 @ 走同一个派发函数。
+  它在新消息保存并处理显式寻址后异步运行，选中的 Pet 和 @ 走同一个派发函数。
 - **默认关闭。** 关闭时不调用任何模型，无 @ 消息只存不派发，和现在一样。
 - **不发言。** 路由只决定交给谁，被选中的 Pet 按普通交接收到消息，由它自己回答。
   Channel 的作者仍然只有 `human | pet`，4 张表不变。
@@ -28,18 +30,19 @@ Channel 里没有 @ 的消息只写入时间线，不会派发给任何 Pet（[C
 
 只处理同时满足以下条件的消息：
 
-1. 消息作者是 `human`。Pet 的消息从不触发，避免 Pet 之间无 @ 的循环。
+1. 是合法成员新保存的公开消息（`human` 或 `pet`）。Pet 的 Agent Session 回传与成员发言走同一派发入口；相同外部消息的重放不重复决策。
 2. 消息的 `mentions` 为空。有 @ 的消息走现有的 mention 交付。
-3. 所在 Channel 至少有一个 Pet 成员。
+3. 所在 Channel 至少有一个可选 Pet 成员；Pet 作者本人不在本条消息的候选中。
 4. 路由设置为开启。
 
 `replyTo` 不特殊处理：服务端不把它当 @。Console 的回复会预填原作者的 @，那时消息已有 mention，不经过路由。
+Pet 的非法 @ 会保留消息并报告投递失败，不把清空后的 mentions 当作合法无 @ 发言再次路由。
 
 ## 决策
 
 ### 输入
 
-- 当前消息：作者 label、正文、`replyTo` 的作者和正文。
+- 当前消息：作者 label、存储确认的 `authorIdentity`（participantId 与 kind）、正文、`replyTo` 的作者和正文；历史消息也保留作者身份。显示名与正文自称不能更改来源。
 - Channel 标题、说明和可选协作提示词。该提示词是协作意图，不能授予权限，也不能保证模型按预期路由。
 - Pet 成员：`participantId`、名称，以及路由设置里该 Pet 的一句话说明（见“配置”）。
 - 最近 N 条公开消息（默认 20）：作者、正文截断到固定长度。
@@ -53,11 +56,13 @@ type RouteDecision = {
   target: string | 'none';   // 当前 Pet 成员的 participantId，或 none
   confidence: number;        // 0..1
   reason?: string;           // 只用于展示和事件，不进 Pet 输入
+  focus?: string;            // 发给所选 Pet 的关注建议，最多 500 字符
 };
 type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDecision>;
 ```
 
-`target = none` 或 `confidence < threshold` 时不派发。只选一个 Pet；多个都合适时，由被选中的 Pet 在回复里 @ 其他人。
+`target = none` 或 `confidence < threshold` 时不派发。只选一个 Pet；它仍自行决定是否需要回应、行动或交接。无候选时不调用模型。
+`focus` 会 trim，空白等于无提示；不合法的关注字段跳过派发。它不是新任务、计划、已确认事实或授权。
 选错了不需要专门的纠正机制：用户 @ 正确的 Pet 即可。
 
 ### 两种决策器
@@ -72,7 +77,9 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 | 缺点 | 新接一家 API；只保证形状，不保证决策稳定 | 慢一些、贵一些；confidence 不可靠 |
 
 `llm` 决策器只用 Pet 运行时之外的一次直接调用，不走 LangChain Agent。它的基本路由指令在 Channel 插件里，并接收当前 Channel 的协作提示词作为上下文：
-说明任务是"选一个最该回应的 Pet，或 none"，列出 Pet 和说明，要求人和人之间的闲聊、致谢、无需行动的消息选 `none`。
+说明任务是"选一个需要关注这条信息的 Pet，或 none"，列出 Pet 和说明；根据当前公开讨论判断
+结果是否仍需传达，普通确认、重复结论与无需其他成员关注的信息选 `none`。关注建议结合角色，
+不规定后续动作或增加新的义务。
 
 调用失败、超时或返回不合法（`target` 不是当前 Pet 成员）：视为不派发，发布事件，不重试。消息已经保存。
 
@@ -83,6 +90,8 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 - 派发输入仍是 `channel_message` 封装，额外带 `addressedBy: 'routing'`，让 Pet 知道这条消息没有点名找它：
   不是自己的事时，可以简短说明并 @ 更合适的成员。
 - 消息本身不改写：不补 mentions，正文原样保存。
+- `contextHint.instruction` 保留插件固定的读取最新 Channel 提示，`contextHint.focus` 可带模型生成的关注方向。
+  分配 `reason` 仍只用于审计；关注建议不写入 system prompt，也不替 Pet 设定 goal 或计划。
 - 投递结果照常发布 `channel.delivery` 事件，多带 `via: 'routing'`、`confidence`、`reason`。
 - 不派发时发布 `channel.routing.skipped`（channelId、messageId、原因 `none | low_confidence | error | invalid`、分数）。
 
@@ -143,14 +152,16 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 
 - 路由不回答问题、不写 Channel 消息、不读 Pet session 或运行状态。
 - 不给 Channel 加默认 Pet 字段或成员角色。
-- 不处理 Pet 发的消息。
 - 不做多目标派发和重试。
+- 不读取或公开 Pet 的私有执行结果；公开发言遗漏的事实不会由路由补造。
+- 不用硬编码角色流程决定下一位接收者。`none` 与同消息幂等不保证不同新消息之间不会往返，仍需评价真实模型的参与和收口行为。
 
 ## 待定
 
 - 默认用哪家的 Jev，以及各家请求格式是否一致。实现前用真实调用确认格式和延迟。
-- eval：`npm run eval:channel-routing -w @pinpawo-tests/agent-evals`（`ROUTING_EVAL_MODEL_PROFILE_ID=<profile>`）跑 14 个带标注的
-  片段（"谁在处理 X"、追问、新请求、回复 Pet、闲聊、致谢、回复人），分别统计误唤醒、漏派、派错和延迟。
+- eval：`npm run eval:channel-routing -w @pinpawo-tests/agent-evals`（`ROUTING_EVAL_MODEL_PROFILE_ID=<profile>`）跑 20 个带标注的
+  片段，包括原有 14 个人类消息案例，以及 Pet 公开交付、状态对齐、知识变化和收口。分别统计误唤醒、漏派、派错、错误与延迟，记录 `focus` 和存在率，不按固定措辞评分。
+  `ROUTING_EVAL_CASE_IDS` 可选择案例，`ROUTING_EVAL_OUTPUT_DIR` 可保存私有逐例输入与结果；已有结果不覆盖。
   `jev` 实现后用同一组片段比较，决定默认 `kind`。
 
 ## 涉及的改动

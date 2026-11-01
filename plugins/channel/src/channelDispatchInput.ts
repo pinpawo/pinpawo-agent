@@ -4,7 +4,7 @@ import type { ChannelMessageRow } from './store/channelStore';
 /** Who started a Pet's spontaneous run in a Channel. */
 export type ChannelRunOrigin = { kind: 'scheduler' | 'trigger'; id: string };
 
-// Plugin-owned guidance, not the decider's free-form reason or message content.
+// Fixed Plugin guidance. A separate focus may carry the decider's attention suggestion.
 const routingContextHint = {
   source: 'channel-routing',
   action: 'read-latest-channel',
@@ -32,6 +32,8 @@ export function channelDispatchInput(
   labelOf: (participantId: string) => string | undefined = () => undefined,
   /** `routing`: nobody addressed this message; Channel routing chose this Pet. */
   addressedBy?: 'routing',
+  /** Model-generated attention suggestion, separate from the fixed reading instruction. */
+  focus?: string,
 ): string {
   const author = (entry: ChannelMessageRow) => {
     const participantId = channelParticipantId(entry.author.kind, entry.author.id);
@@ -43,7 +45,7 @@ export function channelDispatchInput(
     channelId: message.channelId, messageId: message.messageId,
     author: author(message), body: message.body,
     ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
-    ...(addressedBy ? { addressedBy, contextHint: routingContextHint } : {}),
+    ...(addressedBy ? { addressedBy, contextHint: { ...routingContextHint, ...(focus?.trim() ? { focus: focus.trim() } : {}) } } : {}),
   });
 }
 

@@ -13,7 +13,7 @@ const input: RouteInput = {
 const endpoint = { profileId: 'p', baseUrl: 'https://models.test/v1/', apiKey: 'k', model: 'small' };
 
 type Method = 'functionCalling' | 'jsonMode' | 'jsonSchema';
-const decision = { target: 'pet:executor', confidence: 0.8, reason: 'It opened #1003.' };
+const decision = { target: 'pet:executor', confidence: 0.8, reason: 'It opened #1003.', focus: 'Consider whether its current state changes the release decision.' };
 const openAIReply = (method: Method, value: unknown = decision) => {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   const message = method === 'functionCalling'
@@ -60,7 +60,8 @@ for (const method of ['jsonSchema', 'jsonMode', 'functionCalling'] as const) {
       if (method === 'jsonSchema') {
         assert.equal(body.response_format.type, 'json_schema');
         assert.equal(body.response_format.json_schema.strict, true);
-        assert.deepEqual(body.response_format.json_schema.schema.required, ['target', 'confidence', 'reason']);
+        assert.deepEqual(body.response_format.json_schema.schema.required, ['target', 'confidence', 'reason', 'focus']);
+        assert.equal(body.response_format.json_schema.schema.properties.focus.maxLength, 500);
         assert.deepEqual(body.response_format.json_schema.schema.properties.target.enum, user.targets);
       } else if (method === 'jsonMode') {
         assert.equal(body.response_format.type, 'json_object');

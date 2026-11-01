@@ -1,6 +1,6 @@
 # 执行期间的新输入与 Studio system interrupt
 
-状态：实现草稿，待 review；本地行为验证通过，尚未部署到 Toolbox。
+状态：实现草稿，待 review；已完成本地行为验证及 Toolbox 首轮实机观察。
 
 ## 问题与目标
 
@@ -54,13 +54,19 @@ Hook 不取出消息、不追加用户正文、不写 checkpoint，也不构造 
 
 ## Channel 的提示
 
-Channel decision LLM 选中接收者后，在已有的 dispatch JSON envelope 中增加固定
-`contextHint`，建议通过 `channel_read_context` 或显式配置的 `channel_context`
-Capability 读取最新相关消息，结合已有成果判断是否仍需行动。
+Channel decision LLM 可为没有 @ 的人类消息或 Pet 公开回复选择一个其他 Pet，或选择
+`none`。选中接收者后，在已有的 dispatch JSON envelope 中提供 `contextHint`：固定
+提示建议通过 `channel_read_context` 或显式配置的 `channel_context` Capability 读取
+最新相关消息；可选的 `focus` 由分配模型指出与接收者相关的关注方向。Pet 结合原消息、
+最新上下文、自身身份和能力判断是否仍需行动。
 
-提示来自 Channel 插件固定代码；路由模型的自由文本 reason、群公告和完整消息历史
-不作为提示拼入用户消息。公告仍使用原有 system context provider。显式 @ 和
-schedule/trigger 保持各自已有输入形式；本次不扩展 Pet 无 @ 消息的自动路由。
+固定读取提示来自 Channel 插件代码；`focus` 是模型基于公开对话的建议，不代表原作者
+指令、已确认事实、目标或新授权，不写入 system prompt 或强制生成计划。路由的审计
+`reason` 不进入 Pet 输入，原始消息作者和正文保持不变。公告仍使用原有 system context
+provider。显式 @ 和 schedule/trigger 保持各自已有输入形式。
+
+分配入口、作者候选排除、非法 @ 与重复公开回传的边界见
+[Channel 路由](../studio/channel-routing.md)。分配模型不读取 Pet 私有执行结果。
 
 ## 验证与限制
 

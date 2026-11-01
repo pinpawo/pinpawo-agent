@@ -21,11 +21,12 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
   const dispatched: Dispatched[] = [];
   const resolved: Sections[] = [];
   const routingReason = randomUUID();
+  const routingFocus = randomUUID();
   let resolver!: StudioContextProvider;
   const channel = createChannelPlugin({
     httpRoute: false,
     routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:one', confidence: 1, reason: routingReason }),
+    routeDecider: async () => ({ target: 'pet:one', confidence: 1, reason: routingReason, focus: routingFocus }),
   });
   const studio = await createStudioWithPets({
     studioId: 'channel-prompt', plugins: [channel],
@@ -88,8 +89,10 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     assert.equal(routed.addressedBy, 'routing');
     assert.equal(routed.contextHint?.source, 'channel-routing');
     assert.equal(routed.contextHint?.action, 'read-latest-channel');
+    assert.equal(routed.contextHint?.focus, routingFocus);
     assert.equal(routed.body, 'route this');
     assert.equal(dispatched[5]!.request.includes(routingReason), false, 'the decision reason remains outside the Pet request');
+    assert.ok(resolved[5]?.every(section => !section.content.includes(routingFocus)), 'dynamic attention stays outside the system context');
     assert.equal(dispatched[5]!.request.includes('Beta'), false, 'the announcement remains in the provider context');
     assert.match(resolved[5]!.find(section => section.id === 'channel:context')!.content, /Beta/);
     assert.deepEqual(resolved[5]?.map(section => section.id), ['channel:protocol', 'channel:metadata', 'channel:context']);

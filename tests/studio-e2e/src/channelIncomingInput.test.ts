@@ -9,7 +9,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { defineInstructionDocument } from '@pinpawo/pet-agent';
-import { createChannelPlugin } from '@pinpawo-plugin/channel';
+import { createChannelPlugin, type RouteInput } from '@pinpawo-plugin/channel';
 import { channelDispatchInput } from '../../../plugins/channel/src/channelDispatchInput';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
@@ -45,10 +45,16 @@ async function waitFor(done: () => boolean | Promise<boolean>) {
 for (const delivery of ['boundary', 'interrupt'] as const) {
   test(`Channel input continues the saved plan after ${delivery} without duplicate public delivery`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'channel-incoming-'));
-    const announcement = randomUUID(), update = randomUUID(), final = randomUUID();
+    const announcement = randomUUID(), update = randomUUID(), final = randomUUID(), focus = randomUUID();
     const me = { kind: 'human' as const, id: 'local' };
+    const routing: RouteInput[] = [];
     const channel = createChannelPlugin({ httpRoute: false, routing: { enabled: true },
-      routeDecider: async () => ({ target: 'pet:worker', confidence: 1 }),
+      routeDecider: async input => {
+        routing.push(input);
+        if (input.message.body === final) return { target: 'none', confidence: 1 };
+        return { target: 'pet:worker', confidence: 1,
+          ...(input.message.body === update ? { focus } : {}) };
+      },
     });
     const bridge = createInvocationContextBridge();
     const lifecycle: Array<{ state: string; dispatchId: string }> = [];
@@ -89,6 +95,10 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
         assert.equal(input.author.kind, 'pet', 'continuation preserves the actual source');
         assert.equal(input.author.participantId, 'pet:reviewer');
         assert.equal(input.body, update);
+        if (delivery === 'boundary') {
+          assert.equal(input.addressedBy, 'routing');
+          assert.equal(input.contextHint?.focus, focus, 'dynamic focus reaches the real Entry model');
+        }
         return call('continue', {}, 'continue-input');
       });
       const supervisor = new ScriptedModel((messages, index) => {
@@ -96,6 +106,13 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
         if (index === 1) return call('delegate_capability', { briefing: 'Perform controlled work.' }, 'delegate');
         assert.ok(messages.some(message => message._getType() === 'human' && message.text.includes(update)),
           'the next Supervisor sees the new Channel input');
+        if (delivery === 'boundary') {
+          assert.ok(messages.some(message => message._getType() === 'human'
+            && message.text.includes(update) && message.text.includes(focus)),
+            'the Supervisor receives the same routing focus with the incoming message');
+          assert.ok(messages.filter(message => message._getType() === 'system').every(message => !message.text.includes(focus)),
+            'a routing suggestion does not become system authority');
+        }
         const result = [...messages].reverse().find(message => ToolMessage.isInstance(message) && message.name === 'delegate_capability');
         if (delivery === 'boundary') {
           assert.ok(result, 'the completed delivery survives checkpoint and continuation');
@@ -144,7 +161,13 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
       await channel.sendMessage(cid, { body: 'Start the controlled work.' }, me);
       await waitFor(() => started);
       if (delivery === 'boundary') {
-        await channel.sendMessage(cid, { body: update, mentions: [{ participantId: 'pet:worker' }] }, { kind: 'pet', id: 'reviewer' });
+        const reviewer = await channel.run(cid, 'reviewer', 'Return the controlled review.', { kind: 'trigger', id: 'test-review' });
+        studio.notify({ source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
+          payload: { petId: 'reviewer', invocationId: reviewer.invocationId, sessionId: reviewer.sessionId,
+            scope: { namespace: 'channel', id: cid },
+            message: { type: 'message.completed', messageId: 'review-result', role: 'assistant', text: update } },
+        });
+        await waitFor(() => host!.resident.dispatch.getQueueSnapshot().queuedDispatches === 1);
         assert.equal(aborted, false, 'ordinary input waits for the delegation');
         assert.equal(entryCalls, 1);
         release();
@@ -157,8 +180,17 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
       }
       await waitFor(async () => (await channel.service.readContext(me, cid)).messages.some(message => message.body === final));
       await waitFor(() => host!.resident.dispatch.getQueueSnapshot().state === 'open');
+      await waitFor(() => routing.some(input => input.message.body === final));
       const messages = (await channel.service.readContext(me, cid)).messages;
       assert.deepEqual(messages.filter(message => message.author.id === 'worker').map(message => message.body), [final]);
+      assert.equal(routing.filter(input => input.message.body === final).length, 1, 'the final acknowledgement is considered once and stops');
+      if (delivery === 'boundary') {
+        const routedReview = routing.filter(input => input.message.body === update);
+        assert.equal(routedReview.length, 1);
+        assert.deepEqual(routedReview[0]!.message.authorIdentity, { participantId: 'pet:reviewer', kind: 'pet' });
+        assert.deepEqual(routedReview[0]!.pets.map(pet => pet.participantId), ['pet:worker']);
+        assert.deepEqual(messages.find(message => message.body === update)?.mentions, []);
+      }
       assert.equal(toolCalls, 1, 'continuing does not replay the earlier tool');
       assert.equal(aborted, delivery === 'interrupt');
       assert.equal(lifecycle.filter(event => event.state === 'running').length, 2);

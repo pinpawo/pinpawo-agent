@@ -6,7 +6,7 @@ export type ChannelTestInput = {
   author: Author; body: string;
   replyTo?: { messageId: string; author: Author; body: string };
   addressedBy?: 'routing';
-  contextHint?: { source: 'channel-routing'; action: 'read-latest-channel'; instruction: string };
+  contextHint?: { source: 'channel-routing'; action: 'read-latest-channel'; instruction: string; focus?: string };
 };
 export type ChannelTestTask = {
   type: 'channel_task'; version: 1; channelId: string;

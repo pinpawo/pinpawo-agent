@@ -18,10 +18,11 @@ export type AgentLlmConfig = {
   maxRetries?: number;
   verbose?: boolean;
   /**
-   * Override structured-output retry behavior after parse/schema failure.
-   * When unset, every structured-output method retries once.
+   * Override bounded structured-output repair after parse/schema failure.
+   * When unset, every structured-output method allows one repair call with
+   * validation feedback. Transport retries remain controlled by maxRetries.
    */
   structuredOutputAutoRepair?: boolean;
-  /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
+  /** Additional schema repair calls, capped at 3. Default: 1 when enabled. */
   structuredOutputRepairMaxRetries?: number;
 };

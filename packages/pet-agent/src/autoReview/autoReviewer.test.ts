@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ensureConfig, RunnableLambda, type RunnableConfig } from '@langchain/core/runnables';
+import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import { createAutoReviewer } from './autoReviewer';
 import { buildReviewSpec } from '../types/reviewSpec';
 import type { AutoReviewAction } from './types';
@@ -47,4 +50,35 @@ test('AutoReviewer reads a null or missing reason as empty', async () => {
     assert.deepEqual(await reviewer.assess({ reviews: [action({ path: '/project/a' })] }),
       { complete: true, assessment: { riskScore, reason: '' } });
   }
+});
+
+test('private assessment inherits cancellation and trace context while clearing public callbacks', async () => {
+  // LangGraph initializes this in production; this standalone reviewer fixture
+  // deliberately has no graph or agent runtime dependency.
+  AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
+  const controller = new AbortController();
+  const reason = new Error('stop private review');
+  let start!: () => void;
+  const started = new Promise<void>(resolve => { start = resolve; });
+  let calls = 0;
+  const model = { withStructuredOutput: () => ({ invoke: async (_messages: unknown, config?: RunnableConfig) => {
+    calls++;
+    const effective = ensureConfig(config);
+    assert.equal(effective.signal, controller.signal);
+    assert.equal(effective.metadata?.usageScope, 'review');
+    assert.equal(effective.configurable?.thread_id, 'private-review');
+    assert.deepEqual(effective.callbacks, []);
+    start();
+    controller.abort(reason);
+    throw reason;
+  } }) } as unknown as BaseChatModel;
+  const reviewer = createAutoReviewer({ model });
+  const assessment = RunnableLambda.from(() => reviewer.assess({ reviews: [action({ path: '/project/a' })] })).invoke(undefined, {
+    callbacks: [{ handleLLMNewToken: () => assert.fail('private text must not reach the public stream') }],
+    signal: controller.signal, metadata: { usageScope: 'review' }, configurable: { thread_id: 'private-review' },
+  });
+  const rejected = assert.rejects(assessment, error => error === reason);
+  await started;
+  await rejected;
+  assert.equal(calls, 1);
 });

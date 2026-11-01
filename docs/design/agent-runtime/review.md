@@ -187,12 +187,12 @@ from both `getTuple()` and `list()` using the official `writesSortKey` comparato
 Version-1 manifests remain readable: missing paths use `''`, and missing indices
 come from the existing storage key. Reads do not rewrite old manifests; a later
 write adds the metadata without changing checkpoint values or retention policy.
-Checkpoint advancement and startup maintenance validate manifest identity and
-all reachable object hashes before publishing/pruning; GC validates them before
-sweeping. A damaged reference aborts those operations instead of erasing
-potential recovery evidence. This integrity scan reads reachable objects on each
-checkpoint advance; its performance on large production histories has not been
-benchmarked.
+Checkpoint advancement validates manifest identity and reachable object hashes
+within the namespace it can prune. Reused content-addressed objects are checked
+before a new checkpoint or pending write references them. Startup maintenance
+and GC validate every namespace before pruning or sweeping. A damaged reference
+aborts the affected operation instead of erasing potential recovery evidence.
+Advancing one namespace does not reread unrelated completed subgraphs.
 
 This does not reconstruct task paths that old writers never recorded. Follow
 upstream's drain-before-upgrade boundary for an incomplete parallel delta-writing

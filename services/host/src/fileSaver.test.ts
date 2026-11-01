@@ -1092,3 +1092,92 @@ test('checkpoint maintenance rejects a well-formed manifest stored at the wrong 
   writeFileSync(writesPath, original);
   assert.equal((await saver.getTuple(config))?.pendingWrites?.length, 1);
 });
+
+test('advancing a checkpoint does not reread unrelated subgraph manifests or payloads', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const metadata = { source: 'loop' as const, step: 1, parents: {} };
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { status: 'initial' }), metadata);
+  const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+  const unrelatedPaths = new Set<string>();
+  for (let i = 0; i < 12; i++) {
+    const namespace = `completed-child-${i}`;
+    const child = await saver.put({ configurable: { thread_id: 'thread-1', checkpoint_ns: namespace } },
+      checkpoint('cp-1', { packet: { content: `${i}:` + 'x'.repeat(65_536) } }), metadata);
+    await saver.putWrites(child, [['result', { child: i }]], `task-${i}`);
+    const manifestPath = join(thread, 'manifests', namespace, 'cp-1.json');
+    const writesPath = join(thread, 'writes', namespace, 'cp-1.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const writes = JSON.parse(readFileSync(writesPath, 'utf8'));
+    unrelatedPaths.add(resolve(manifestPath));
+    unrelatedPaths.add(resolve(writesPath));
+    for (const hash of [manifest.channelValueRefs.packet.hash,
+      ...Object.values(writes.writes).map((record) => (record as { valueHash: string }).valueHash)]) {
+      unrelatedPaths.add(resolve(join(thread, 'objects', hash.slice(0, 2), hash.slice(2))));
+    }
+  }
+
+  const unrelatedReads: string[] = [];
+  const original = fs.readFileSync;
+  fs.readFileSync = ((path: Parameters<typeof fs.readFileSync>[0], ...rest: unknown[]) => {
+    if (typeof path === 'string' && unrelatedPaths.has(resolve(path))) unrelatedReads.push(path);
+    return (original as (...args: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync;
+  syncBuiltinESMExports();
+  try {
+    await saver.put(config, checkpoint('cp-2', { status: 'updated' }), metadata);
+  } finally {
+    fs.readFileSync = original;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(unrelatedReads, [], 'a small root update must not read completed child history');
+  assert.deepEqual((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.channel_values,
+    { status: 'updated' });
+  await saver.collectThreadGarbage('thread-1');
+  assert.equal((await saver.getTuple({ configurable: {
+    thread_id: 'thread-1', checkpoint_ns: 'completed-child-0',
+  } }))?.pendingWrites?.length, 1);
+});
+
+test('namespace-scoped checkpoint advancement validates reused objects and global maintenance still fails closed', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const metadata = { source: 'loop' as const, step: 1, parents: {} };
+  let config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { status: 'initial' }), metadata);
+  const packet = { content: 'shared child object' };
+  await saver.put({ configurable: { thread_id: 'thread-1', checkpoint_ns: 'child' } },
+    checkpoint('cp-1', { packet }), metadata);
+  saver.acquireHostWriterLease('namespace-preflight-test');
+  t.after(() => saver.releaseHostWriterLease());
+  const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+  const childPath = join(thread, 'manifests', 'child', 'cp-1.json');
+  const childManifest = readFileSync(childPath);
+  const hash = JSON.parse(childManifest.toString()).channelValueRefs.packet.hash as string;
+  const objectPath = join(thread, 'objects', hash.slice(0, 2), hash.slice(2));
+  const objectBytes = readFileSync(objectPath);
+  writeFileSync(objectPath, 'corrupt');
+
+  // This namespace cannot prune the damaged child and does not reuse its data.
+  config = await saver.put(config, checkpoint('cp-2', { status: 'updated' }), metadata);
+  const refPath = join(thread, 'refs', '__root__');
+  const latestRef = readFileSync(refPath);
+  const before = snapshotObjectFiles(root);
+  await assert.rejects(saver.put(config, checkpoint('cp-3', { packet }), metadata), /object hash mismatch/);
+  await assert.rejects(saver.putWrites(config, [['packet', packet]], 'new-task'), /object hash mismatch/);
+  assert.deepEqual(readFileSync(refPath), latestRef);
+  assert.equal(existsSync(join(thread, 'manifests', '__root__', 'cp-3.json')), false);
+  assert.equal(existsSync(join(thread, 'writes', '__root__', 'cp-2.json')), false);
+  await assert.rejects(saver.collectThreadGarbage('thread-1'), /object hash mismatch/);
+  await assert.rejects(saver.runHostStartupMaintenance(), /object hash mismatch/);
+  assert.throws(() => new FileSaver(join(root, 'checkpoints.json')), /object hash mismatch/);
+  assert.deepEqual(readFileSync(childPath), childManifest);
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values, { status: 'updated' });
+
+  writeFileSync(objectPath, objectBytes);
+  const recovered = await saver.put(config, checkpoint('cp-3', { packet }), metadata);
+  await saver.collectThreadGarbage('thread-1');
+  assert.deepEqual((await saver.getTuple(recovered))?.checkpoint.channel_values, { packet });
+});

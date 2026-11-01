@@ -638,6 +638,10 @@ export class FileSaver extends BaseCheckpointSaver {
     const path = objectPath(threadDir, hash);
     if (!existsSync(path)) {
       atomicWriteFile(path, bytes);
+    } else {
+      // Objects are shared by namespaces. Validate a reused object even when
+      // the namespace being advanced did not previously reference it.
+      readObject(threadDir, hash);
     }
     return hash;
   }
@@ -823,9 +827,11 @@ export class FileSaver extends BaseCheckpointSaver {
     checkpointId: string,
     tuple: SerializedCheckpointTuple,
   ) {
-    // A malformed older manifest or broken object reference must not be
-    // hidden by advancing the ref and pruning its only recovery evidence.
-    this.collectReachableObjectHashes(this.threadDir(threadId));
+    // Advancing this ref can prune only this namespace. Validate its existing
+    // manifests and objects before publishing, without rereading unrelated
+    // completed subgraphs on every checkpoint. Startup and GC still validate
+    // the entire thread before they mutate it.
+    this.collectReachableObjectHashes(this.threadDir(threadId), encodePathSegment(namespace));
     mkdirSync(this.casRootDir, { recursive: true });
     const manifest = this.buildCheckpointManifest(threadId, namespace, checkpointId, tuple);
     atomicWriteFile(this.manifestPath(threadId, namespace, checkpointId), JSON.stringify(manifest));
@@ -1135,10 +1141,11 @@ export class FileSaver extends BaseCheckpointSaver {
     });
   }
 
-  private collectReachableObjectHashes(threadDir: string) {
+  private collectReachableObjectHashes(threadDir: string, onlyNamespaceSegment?: string) {
     const hashes = new Set<string>();
     const manifestsDir = join(threadDir, 'manifests');
-    for (const namespaceSegment of readSubdirsForGc(manifestsDir)) {
+    for (const namespaceSegment of onlyNamespaceSegment === undefined
+      ? readSubdirsForGc(manifestsDir) : [onlyNamespaceSegment]) {
       const namespaceDir = join(manifestsDir, namespaceSegment);
       for (const fileName of readDirForGc(namespaceDir)) {
         if (!fileName.endsWith('.json')) continue;
@@ -1163,7 +1170,8 @@ export class FileSaver extends BaseCheckpointSaver {
       }
     }
     const writesDir = join(threadDir, 'writes');
-    for (const namespaceSegment of readSubdirsForGc(writesDir)) {
+    for (const namespaceSegment of onlyNamespaceSegment === undefined
+      ? readSubdirsForGc(writesDir) : [onlyNamespaceSegment]) {
       const namespaceDir = join(writesDir, namespaceSegment);
       for (const fileName of readDirForGc(namespaceDir)) {
         if (!fileName.endsWith('.json')) continue;
@@ -1178,7 +1186,7 @@ export class FileSaver extends BaseCheckpointSaver {
         }
       }
     }
-    // Validate all reachable objects before any pruning or sweep starts. A
+    // Validate the selected objects before any pruning or sweep starts. A
     // syntactically valid but missing/corrupt reference cannot mark the real
     // object as garbage and then delete it.
     for (const hash of hashes) readObject(threadDir, hash);

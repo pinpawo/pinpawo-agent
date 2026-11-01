@@ -38,14 +38,14 @@ run_iteration_limit @ orchestrator.delegation_outcome_iteration
 
 ### Nouns: guard names and positions
 
-Guard names and positions are closed enums per domain, and they are the stable
+Guard names and positions form a closed vocabulary per domain, and they are the stable
 identifiers of the language. They survive any refactor of the execution
 mechanics:
 
 - Orchestrator: `ORCHESTRATOR_GUARD_NAME`, `ORCHESTRATOR_GUARD_POSITION`
   (`packages/pet-agent/src/agent/orchestrator/guardDefinitions/types.ts`)
-- Subagent: `SUBAGENT_GUARD_NAME`, `SUBAGENT_GUARD_POSITION`
-  (`packages/pet-agent/src/subagent/guardDefinitions/types.ts`)
+- Subagent: `subagent_iteration_limit` at `subagent.before_model_iteration`,
+  projected from the official model-call limiter in `subagent/createSubagent.ts`.
 
 A position answers "where"; a guard name answers "which rule".
 
@@ -84,7 +84,7 @@ Rules for the verb layer:
 
 ## Rule Contract
 
-Each guard's rule is a **pure function**:
+Each application-owned guard's rule is a **pure function**:
 
 ```ts
 check(input: { state; config; position }): GuardOutcome
@@ -118,13 +118,13 @@ Shared logic lives in two places only:
   `checkProviderInputWatermark(...)` in `agent/tokenUsage.ts`. When two domains
   share a decision, they share the helper — not a guard object across
   registries.
-- **Effect helpers**: e.g. `buildSubagentGuardStopNotice(...)` in
-  `subagent/guardStop.ts`. Positions call them when applying an outcome.
+- **Effect helpers**: e.g. `markSubagentGuardStop(...)` in `subagent/guardStop.ts`
+  marks the framework's stopping message without replacing its text or fields.
 
 ## Decision Records
 
 Every guard evaluation produces a **decision record** — the sentence this
-language exists to speak. Evaluation goes through one choke point so records
+language exists to speak. Application-owned rules use one choke point so records
 cannot be silently dropped (the failure mode of the previous design, where
 block reasons and details were computed and discarded):
 
@@ -144,8 +144,10 @@ function evaluateGuard(guard, input, emit): GuardOutcome {
 }
 ```
 
-`evaluateGuard` is the entire engine. It exists to emit, not to abstract
-execution.
+`evaluateGuard` is the entire engine for application-owned rules. It exists to
+emit, not to abstract execution. Framework-owned decisions are mapped directly
+into this record shape from the framework's result; they do not run a second
+application predicate.
 
 Records have two lifetimes, following the context-governance principle that
 results cross boundaries and private control detail does not:
@@ -160,8 +162,8 @@ results cross boundaries and private control detail does not:
   Debugging "where did it go wrong" is filtering this log by position; the TUI
   can surface `maintain` records ("context compacted at 78% watermark") and
   `stop` records ("subagent hit iteration limit 25/25") without bespoke
-  plumbing. Emission is advisory at every layer: `evaluateGuard` swallows
-  emitter failures — a record must never fail the decision.
+  plumbing. Emission is advisory at every layer: `evaluateGuard` and the shared
+  stream writer contain emitter failures — a record must never fail the decision.
 - **Private durable form**: a position may keep a marked stop notice when its
   own execution or recovery mechanism needs it. That notice remains private
   control data and is not part of a Delegation Announce or Supervisor Boundary.
@@ -175,9 +177,10 @@ results cross boundaries and private control detail does not:
 | `run_iteration_limit` | `orchestrator.supervisor_boundary_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
 | `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
 
-Subagent context summarization uses LangChain middleware and is not a custom
-guard. Capability discovery and delegation acceptance likewise have no guard
-definitions in the current implementation.
+Subagent context summarization and model-call limiting use LangChain middleware,
+with no custom guard predicates. The model-call limiter's native decision is
+projected into the existing guard vocabulary. Capability discovery and delegation
+acceptance likewise have no guard definitions in the current implementation.
 
 Fresh-run initialization now belongs exclusively to `buildOrchestratorRunInput`;
 `prepare` validates the supplied identity and current-run user message instead of
@@ -246,7 +249,7 @@ for summarization.
 
 A `stop` outcome is applied by its position:
 
-- Subagent `iteration_limit`: `wrapModelCall` appends the marked stop notice
+- Subagent `iteration_limit`: `wrapModelCall` marks the framework's stopping message
   and returns `Command({ goto: END })`. `createSubagent` treats the final
   message as a guard stop only if it carries the closed marker from
   `subagent/guardStop.ts`. A stop with a new deliverable emits an ordinary
@@ -262,8 +265,9 @@ checkpoint state. Its counter records a logical model round before Toolkit
 Review can interrupt; rebuilding the saver and runtime, invalid review responses,
 Approve, and Respond retain that count. Each fresh delegation invocation has its
 own budget. Provider HTTP retries within a model round are not separate rounds.
-The adapter keeps the project's guard records and marked stop notice, and calls
-the official budget check from `wrapModelCall`: Review Respond can route directly
+The adapter maps the official result into the project's guard record and marks
+the native stopping message, preserving its text and metadata. It calls the
+official budget check from `wrapModelCall`: Review Respond can route directly
 to the model without running `beforeModel` hooks. The counter's `afterModel` hook
 runs before Review, while the check wraps caller-supplied model middleware too.
 Nonpositive or nonfinite limits remain disabled; positive fractions keep their

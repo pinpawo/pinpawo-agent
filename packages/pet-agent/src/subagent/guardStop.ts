@@ -1,4 +1,5 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { AIMessage, BaseMessage } from '@langchain/core/messages';
+import { setAgentMessageMetadata } from '../agent/messages/metadata';
 
 export const SUBAGENT_GUARD_STOP_MARKER_KEY = 'subagentGuardStop' as const;
 
@@ -8,30 +9,13 @@ const SUBAGENT_GUARD_STOP_REASONS: readonly SubagentGuardStopReason[] = [
   'subagent_iteration_limit_reached',
 ];
 
-export function buildSubagentGuardStopNotice(
+/** Keep the framework's stopping message distinct from a task deliverable. */
+export function markSubagentGuardStop(
+  message: AIMessage,
   reason: SubagentGuardStopReason,
-  text: string,
 ): AIMessage {
-  return new AIMessage({
-    content: text,
-    additional_kwargs: {
-      pinpawo: { [SUBAGENT_GUARD_STOP_MARKER_KEY]: reason },
-    },
-  });
-}
-
-/**
- * Effect helper for the `subagent_iteration_limit` guard's stop outcome: the
- * marked notice the middleware position appends before ending the run.
- */
-export function buildSubagentIterationLimitStopNotice(
-  attemptedIteration: number,
-  maxIterations: number,
-): AIMessage {
-  return buildSubagentGuardStopNotice('subagent_iteration_limit_reached', [
-    `Subagent loop reached its iteration limit: attempted ${attemptedIteration}, limit ${maxIterations}.`,
-    'Stop the loop and report the current progress instead of waiting for LangGraph recursionLimit.',
-  ].join('\n'));
+  setAgentMessageMetadata(message, { [SUBAGENT_GUARD_STOP_MARKER_KEY]: reason });
+  return message;
 }
 
 function isSubagentGuardStopReason(value: unknown): value is SubagentGuardStopReason {

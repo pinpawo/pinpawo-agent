@@ -195,7 +195,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         tool_calls: [{
           id: 'production-toolkit-plan-request',
           name: 'plan_request',
-          args: { goal: messageText([...messages].reverse().find(message => message._getType() === 'human')!) },
+          args: { goal: [...messages].reverse().find(message => message._getType() === 'human')!.text },
         }],
       }),
     }),
@@ -298,7 +298,7 @@ class ProductionToolkitToolCallingModel extends BaseChatModel {
         text: '',
         message: new AIMessage({
           content: hasToolResult && latestMessage
-            ? messageText(latestMessage)
+            ? latestMessage.text
             : '',
           tool_calls: toolCalls,
         }),
@@ -313,26 +313,14 @@ function readInputRecord(input: unknown) {
     : null;
 }
 
-function messageText(message: BaseMessage) {
-  return typeof message.content === 'string'
-    ? message.content
-    : message.content.flatMap((item) => (
-        typeof item === 'string'
-          ? [item]
-          : item && typeof item === 'object' && 'text' in item
-            ? [String(item.text)]
-            : []
-      )).join('\n');
-}
-
 function messagesContain(messages: readonly BaseMessage[], value: string) {
-  return messages.some((message) => messageText(message).includes(value));
+  return messages.some((message) => message.text.includes(value));
 }
 
 function readAttachmentPath(messages: BaseMessage[]) {
   for (const message of [...messages].reverse()) {
     const match = /<local_attachments>\s*([\s\S]*?)\s*<\/local_attachments>/
-      .exec(messageText(message));
+      .exec(message.text);
     if (!match?.[1]) continue;
     try {
       const attachments = JSON.parse(match[1]) as unknown;

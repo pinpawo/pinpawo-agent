@@ -14,10 +14,16 @@ import {
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
+import { isToolCallContentBlock } from '../../../../utils/messages';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
+import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
+import { createCapabilityRoutingManifest } from '../../runSupervisor/routingManifest';
+import { buildCapabilityRoutingManifest } from '../../prompts/capabilityRoutingManifest';
+import { getInvokeOptions, getInvokeRegistry } from '../config';
+import { getAgentRuntimeContext } from '../../../../runtime/context';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -205,7 +211,7 @@ function withoutRepeatedCalls(message: AIMessage, kept: ToolCall[]) {
   return new AIMessage({
     ...message,
     content: Array.isArray(message.content)
-      ? message.content.filter((block) => (block as { type?: string }).type !== 'tool_call' || !isDropped(block))
+      ? message.content.filter((block) => !isToolCallContentBlock(block) || !isDropped(block))
       : message.content,
     additional_kwargs: Array.isArray(rawCalls)
       ? { ...message.additional_kwargs, tool_calls: rawCalls.filter((call) => !isDropped(call)) }
@@ -223,8 +229,8 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   }
   // Ask for one routing call. A provider that still returns several distinct
   // calls fails the protocol check below; the hint is not paired with a repair turn.
-  const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1]
-    & { parallel_tool_calls: boolean } = { parallel_tool_calls: false };
+  const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1] =
+    config.entryAnswerToolOptions ?? { parallel_tool_calls: false };
   const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
   const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 
@@ -238,7 +244,22 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
+    // Only caller-supplied sections select role-aware goal resolution. The
+    // framework's workdir section is independent; empty/absent sections keep
+    // the original Entry system prompt on every invocation. Tool descriptions
+    // stay neutral in both modes; role boundaries belong to the system prompt.
+    const hasExternalContext = getAgentRuntimeContext(runnableConfig).systemPromptSections.length > 0;
+    const prompt = [buildEntryAnswerSystemPrompt(hasExternalContext)];
+    if (hasExternalContext) {
+      const catalog = createCapabilityCatalog({
+        registry: getInvokeRegistry(runnableConfig),
+        allowedCapabilityNames: getInvokeOptions(runnableConfig).allowedCapabilityNames,
+      });
+      const manifest = createCapabilityRoutingManifest({ catalog, defaultCapabilityName: config.defaultCapabilityName });
+      // Read this invocation's registry without adding summaries to history.
+      prompt.push(buildCapabilityRoutingManifest(manifest));
+    }
+    const systemMessage = new SystemMessage(prompt.join('\n\n'));
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
     const response = await invokeOrchestratorModel(model, {
       systemMessage,

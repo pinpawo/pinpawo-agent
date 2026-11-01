@@ -16,7 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { createSubagent } from '@pinpawo/pet-agent';
-import { buildHostModels } from '../src/agent/agentModels';
+import { buildModel } from '../src/agent/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/config/llmConfig';
 import { parsePatch } from '../src/toolkits/files/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/files/fileTools';
@@ -134,7 +134,7 @@ function recordPatchCalls(messages: BaseMessage[]): RecordedPatchCall[] {
 const profileRegistry = buildLocalModelProfileRegistry();
 const profileId = process.env.PINPAWO_APPLY_PATCH_EVAL_PROFILE?.trim() || undefined;
 const llmConfig = profileRegistry.resolve(profileId);
-const model = buildHostModels(llmConfig).subagent;
+const model = buildModel(llmConfig);
 const repeats = readPositiveInteger(process.env.PINPAWO_APPLY_PATCH_EVAL_REPEATS, 1);
 const results = [];
 const originalCwd = process.cwd();

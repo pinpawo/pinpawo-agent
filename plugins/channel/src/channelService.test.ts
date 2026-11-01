@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { sql } from 'kysely';
 import {
   KyselyClientStore, StudioClients, clientMigrations, createStudioStorage, type ClientDatabase, type StudioStorageConfig,
 } from '@pinpawo/studio-core';
@@ -30,6 +31,64 @@ for (const [backend, config] of backends) {
       await run(new ChannelService({ store: wrap(store), pets, humans }), store);
     } finally { await storage.close(); }
   }
+
+  test(`${backend}: Channel prompt is owned by the Channel, visible to members and can be replaced or cleared`, () => withService(async (service) => {
+    const { channel } = await service.createChannel(owner, {
+      title: 'Team', description: 'Purpose', prompt: '  Work together.\nAsk when uncertain.  ', pets: ['executor'],
+    }, { studio: true });
+    assert.equal(channel.prompt, 'Work together.\nAsk when uncertain.');
+    assert.equal((await service.readContext(executor, channel.channelId)).channel.prompt, channel.prompt);
+    assert.equal((await service.listChannels(owner)).channels[0]?.prompt, channel.prompt);
+    await assert.rejects(service.readContext(guest, channel.channelId), ChannelAccessError);
+    await assert.rejects(service.updateChannel(guest, channel.channelId, { prompt: 'forged' }), ChannelAccessError);
+    const updated = await service.updateChannel(owner, channel.channelId, { prompt: 'Updated instructions' }, { studio: true });
+    assert.equal(updated.prompt, 'Updated instructions');
+    assert.equal(updated.description, 'Purpose');
+    assert.equal((await service.updateChannel(owner, channel.channelId, { prompt: null }, { studio: true })).prompt, undefined);
+    assert.equal((await service.updateChannel(owner, channel.channelId, { prompt: '   ' }, { studio: true })).prompt, undefined);
+    await assert.rejects(service.updateChannel(owner, channel.channelId, { prompt: 'x'.repeat(50_001) }));
+  }));
+
+  test(`${backend}: only Studio authority can set or change a Channel prompt`, () => withService(async (service) => {
+    await assert.rejects(service.createChannel(owner, { title: 'Team', prompt: 'Forged', pets: ['executor'] }), ChannelAccessError);
+    const { channelId } = (await service.createChannel(owner, { title: 'Team', prompt: 'Original', pets: ['executor'] }, { studio: true })).channel;
+    await service.addMember(owner, channelId, guest);
+    assert.equal((await service.updateChannel(guest, channelId, { title: 'Renamed', description: 'Updated' })).title, 'Renamed');
+    await assert.rejects(service.updateChannel(guest, channelId, { title: 'Should not apply', prompt: 'Forged' }), ChannelAccessError);
+    await assert.rejects(service.updateChannel(guest, channelId, { prompt: null }), ChannelAccessError);
+    await assert.rejects(service.updateChannel(executor, channelId, { prompt: 'Forged' }), ChannelAccessError);
+    assert.equal((await service.readContext(owner, channelId)).channel.title, 'Renamed');
+    assert.equal((await service.readContext(owner, channelId)).channel.prompt, 'Original');
+    await assert.rejects(service.updateChannel(owner, channelId, { prompt: 'Creator update' }), ChannelAccessError);
+    await service.removeMember(guest, channelId, owner);
+    await assert.rejects(service.updateChannel(owner, channelId, { prompt: 'Former member' }), ChannelAccessError);
+    const admin: MemberRef = { kind: 'human', id: 'local' };
+    await assert.rejects(service.updateChannel(admin, channelId, { prompt: 'No authority' }), ChannelAccessError);
+    assert.equal((await service.updateChannel(admin, channelId, { prompt: 'Studio update' }, { studio: true })).prompt, 'Studio update');
+    assert.equal((await service.updateChannel(admin, channelId, { prompt: null }, { studio: true })).prompt, undefined);
+    await assert.rejects(service.updateChannel(admin, channelId, { title: 'Other metadata', prompt: 'Mixed' }, { studio: true }), ChannelAccessError);
+  }));
+
+  test(`${backend}: upgrading an existing Channel keeps its messages and does not invent a prompt`, async () => {
+    const storage = createStudioStorage(config());
+    try {
+      const migrations = channelMigrations(storage.dialect);
+      const legacy = await storage.open('channel', { '0001_channels': migrations['0001_channels']! });
+      await sql`insert into channels (channel_id, title, description, created_by_kind, created_by_id, created_at, updated_at)
+        values ('old', 'Existing', 'Preserved', 'human', 'owner', 'then', 'then')`.execute(legacy);
+      await sql`insert into channel_members (channel_id, member_kind, member_id, joined_at)
+        values ('old', 'human', 'owner', 'then')`.execute(legacy);
+      await sql`insert into channel_messages (message_id, channel_id, author_kind, author_id, occurred_at, data)
+        values ('old-msg', 'old', 'human', 'owner', 'then', ${JSON.stringify({ body: 'Keep this', mentions: [], artifacts: [] })})`.execute(legacy);
+      const db = await storage.open<ChannelDatabase>('channel', migrations);
+      const service = new ChannelService({ store: new KyselyChannelStore(db), pets, humans });
+      const context = await service.readContext(owner, 'old');
+      assert.equal(context.channel.description, 'Preserved');
+      assert.equal(context.channel.prompt, undefined);
+      assert.equal(context.messages[0]?.body, 'Keep this');
+      assert.equal((await service.updateChannel(owner, 'old', { prompt: 'New prompt' }, { studio: true })).prompt, 'New prompt');
+    } finally { await storage.close(); }
+  });
 
   test(`${backend}: a Channel starts with its creator and the Pets it names, and lists only for its members`, () => withService(async (service) => {
     const { channel, members } = await service.createChannel(owner, { title: 'Release', description: 'Ship 1.0', pets: ['executor', 'executor'] });

@@ -13,6 +13,7 @@ test('a Pet works in a Channel only while its run there is running, and context 
   const plugin = createChannelPlugin();
   const context: StudioPluginContext = {
     dispatch: async () => { throw new Error('not used'); },
+    registerContextProvider: () => () => undefined,
     allocateSessionId: () => 'unused',
     notify: (event) => { notified.push(event); },
     subscribe: (listener) => { listeners.push(listener); return () => undefined; },
@@ -40,6 +41,18 @@ test('a Pet works in a Channel only while its run there is running, and context 
   const owner = { kind: 'human' as const, id: 'local' };
   const { channel: { channelId } } = await plugin.service.createChannel(owner, { title: 'Release', pets: ['writer'] });
   const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: ['writer'] })).channel.channelId;
+  const protectedChannel = (await plugin.service.createChannel(owner, { title: 'Protected', prompt: 'Original', pets: [] }, { studio: true })).channel.channelId;
+  await plugin.service.addMember(owner, protectedChannel, { kind: 'human', id: 'guest' });
+  const update = (clientId: string, scope: 'studio' | 'client', patch: Record<string, unknown>) => routes.get('POST /channels/update')!.handle({
+    url: new URL('http://studio/channels/update'), headers: {}, readText: async () => '',
+    readJson: async () => ({ channelId: protectedChannel, ...patch }), principal: { clientId, scope },
+  });
+  assert.equal((await update('guest', 'client', { prompt: 'Forged' })).status, 403);
+  assert.equal((await update('local', 'client', { prompt: 'Forged by creator' })).status, 403);
+  assert.equal((await update('guest', 'client', { title: 'Allowed' })).status ?? 200, 200);
+  assert.equal((await update('admin', 'client', { prompt: 'Forged' })).status, 403);
+  assert.equal((await update('admin', 'studio', { prompt: 'Recovered' })).status ?? 200, 200);
+  assert.equal((await plugin.service.readContext(owner, protectedChannel)).channel.prompt, 'Recovered');
   let at = 0;
   const lifecycle = async (state: string, invocationId: string, petId = 'writer', scope: unknown = { namespace: 'channel', id: channelId }) => {
     const event: StudioEvent = {

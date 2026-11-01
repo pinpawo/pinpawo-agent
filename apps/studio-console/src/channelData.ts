@@ -1,7 +1,7 @@
 export type ChannelMemberKind = 'human' | 'pet';
 export type ChannelAuthor = { kind: string; id: string };
 export type ChannelRow = {
-  channelId: string; title: string; description?: string;
+  channelId: string; title: string; description?: string; prompt?: string;
   createdBy: ChannelAuthor; createdAt: string; updatedAt: string;
 };
 type ArtifactReference = { uri: string; label?: string; version?: string };
@@ -45,6 +45,11 @@ export type ChannelPet = { petId: string; name: string };
 export function channelParticipantId(author: ChannelAuthor): string {
   const encoded = encodeURIComponent(author.id).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   return `${author.kind}:${encoded}`;
+}
+
+/** Channel instructions are authored by the Studio authority, not ordinary clients. */
+export function channelCanEditPrompt(clientMode: boolean): boolean {
+  return !clientMode;
 }
 
 /** Reply preselects the author while it is a current member; former members never route. */

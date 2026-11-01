@@ -9,10 +9,10 @@
 
 One workdir has one Studio configuration at
 `<workdir>/.pinpawo/studio.json`. Pet files live beside it in
-`<workdir>/.pinpawo/pets/<petId>.json`. Each Pet owns a conventional
+`<workdir>/.pinpawo/pets/<definitionId>.json`. Each Pet owns a conventional
 Capability collection at
-`<workdir>/.pinpawo/pets/<petId>/capabilities/`. A Pet can also define stable,
-cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
+`<workdir>/.pinpawo/pets/<definitionId>/capabilities/`. A Pet can also define stable,
+cross-Capability behavior in `<workdir>/.pinpawo/pets/<definitionId>/PET.md`.
 
 ## `studio.json`
 
@@ -21,8 +21,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
   "studioId": "content-studio",
   "name": "Content Studio",
   "description": "A drafting and review workflow",
-  "entryPetId": "writer",
-  "pets": ["writer", "reviewer"],
+  "definitions": ["writer", "reviewer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
     { "id": "@pinpawo-plugin/channel" },
@@ -34,8 +33,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
 | Field | Required | Meaning |
 |---|---:|---|
 | `studioId` | Yes | Stable name for this Studio instance. |
-| `entryPetId` | Yes | Default target for an external request. It has no other privilege. |
-| `pets` | Yes | Non-empty ordered list of referenced pet IDs. |
+| `definitions` | Yes | Non-empty ordered list of Pet definition IDs available for instance creation. |
 | `name`, `description` | No | Display metadata. |
 | `plugins` | No | Explicit plugin list; order is plugin start order. |
 | `plugins[].id` | When a Plugin is listed | Installed Plugin package name resolved by `StudioPluginResolver`. |
@@ -43,8 +41,8 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
 | `storage` | No | Where Plugins keep data. Default `{ "kind": "sqlite", "path": ".pinpawo/studio/studio.sqlite" }` (path relative to the workdir). Postgres: `{ "kind": "postgres", "urlEnv": "PINPAWO_STUDIO_DATABASE_URL" }` or `{ "kind": "postgres", "url": "postgres://…" }`. See [Studio storage](../design/studio/storage.md). |
 | `credentials` | No | `{ "keyFile": "/abs/path/credentials.key" }`: the key (32 bytes, base64, mode 0600) that encrypts Pet credentials. `pinpawo-studio init` creates it in the Studio data directory. Without it Pet credentials are locked. See [Pet credentials](../design/studio/pet-credentials.md). |
 
-The configuration rejects an empty or duplicate `pets` list, an entry pet that
-is not listed, or a referenced pet file that is missing. A configured Plugin
+The configuration rejects an empty or duplicate `definitions` list or a missing
+referenced definition. Legacy `pets` and `entryPetId` fields are rejected. A configured Plugin
 fails fast when no resolver is installed or the resolver cannot resolve it.
 `plugins` may be omitted for manual host dispatch, but no plugin will then drive
 workflow progress. Extra legacy fields are not a migration mechanism and should
@@ -59,17 +57,18 @@ is its lifecycle and event-source identity inside Studio.
 
 ```json
 {
-  "petId": "writer",
+  "definitionId": "writer",
   "name": "Writer",
   "modelProfileId": "qwen-max",
   "defaultCapabilityName": "drafting"
 }
 ```
 
-`petId` and `name` are required. `petId` must be one safe path segment because
-it also identifies the Pet's Capability directory. `general` is the default
-Capability only when `defaultCapabilityName` is omitted; an explicit default
-selects from that Pet's Capability directory instead.
+`definitionId` and `name` are required. `definitionId` must be one safe path
+segment because it identifies the definition's directory. `general` is included
+when `defaultCapabilityName` is omitted or set to `general`; a dedicated default
+must exist in the Pet's private collection or explicitly selected shared definitions.
+`sharedCapabilities` names shared definitions to load; see the directory section below.
 `modelProfileId` selects a host model profile when present. The old inline
 `model` field and the old `capabilities` name list are rejected explicitly.
 `defaultCapabilityName` marks one available Capability as the preferred default
@@ -105,22 +104,47 @@ still come from the compiled registry, and framework security remains authoritat
 
 ## Per-Pet Capability directory
 
-Directory membership is the Pet's Capability selection. No additional directory
-configuration or name allowlist is required:
+The Pet directory selects its private Capabilities. Shared definitions live in
+`.pinpawo/capabilities/<directory>/CAPABILITY.md`; a Pet explicitly selects them
+by their frontmatter `name` in `sharedCapabilities`:
 
-```text
-<workdir>/.pinpawo/pets/writer/capabilities/
-├── explore/
-│   └── CAPABILITY.md
-└── drafting/
-    └── CAPABILITY.md
+```json
+{
+  "definitionId": "reviewer",
+  "name": "Reviewer",
+  "defaultCapabilityName": "studio_review",
+  "sharedCapabilities": ["channel_context"]
+}
 ```
 
-Every immediate child must be a valid Capability directory. Invalid documents
-or duplicate Capability names fail Host startup. Directory symlinks are allowed,
-so multiple Pets can select one shared Capability without copying it. Capability
-names are scoped per Pet: two Pets may load different definitions with the same
-name, while duplicates inside one Pet remain an error.
+```text
+<workdir>/.pinpawo/
+├── capabilities/channel-context/CAPABILITY.md
+└── pets/
+    ├── reviewer.json
+    └── reviewer/capabilities/studio-review/CAPABILITY.md
+```
+
+`sharedCapabilities` supplements the Pet's private directory; omission or an empty
+list selects no shared capabilities. References are Capability names, not paths
+or Toolkit names. With a custom `petsDir`, the shared root is the sibling
+`capabilities` directory. The default Capability may come from either selected
+source, but `defaultCapabilityName` does not itself select a shared definition.
+
+The existing HostCapabilityCatalog loads the directories, resolves explicit
+references and creates each Pet's snapshot. Missing references, duplicate names,
+a private/shared name collision, and replacement of the required Host `general`
+Capability fail startup. There is no silent override. The shared directory is
+read only when a Pet references it, and reused within that Host catalog load.
+Restart the Host after editing definitions or references.
+
+Installing a Plugin does not select Capabilities. Plugins provide Toolkits;
+the Agent still compiles and executes each selected Capability through its normal
+`uses` binding and review policy. An explicitly selected Channel capability can
+be visible in that Pet's ordinary chat, but its Channel tools still require a
+trusted Channel invocation and membership. This setting does not add Channel
+access or change membership. Standalone Chat keeps its existing configured Host
+catalog; these per-Pet directory and shared references are assembled by Studio.
 
 The Host merges normal Toolkits and Toolkits defined by configured Studio Plugins
 into its unified Toolkit inventory. Each loaded Capability's `uses` declaration
@@ -134,6 +158,21 @@ If the default is inside a workdir, use `--studio-data-root <directory>` to choo
 parent outside it. The selected absolute Wiki path is stored in the configuration; the
 option is only needed at initialization. The package ships its source template under
 `packages/studio/templates/default/`; it is not itself a runnable workdir.
+
+The default template includes Issuer, Executor, Reviewer and Wiki definitions in
+`studio.json`'s `definitions` list. Their JSON files use the existing
+`pets/<definitionId>.json` layout; each role's PET.md and dedicated Capabilities
+live in `pets/<definitionId>/`. Issuer uses `studio_issue` as its default and
+retains the shared files, shell, web, git, github and channel Toolkits.
+
+Loading a definition on Host startup does not create a new Pet instance.
+`init` seeds one instance per default template definition; adding a definition to
+an existing workdir requires explicit instance creation, for example
+`pinpawo-studio pets create issuer --definition issuer --name Issuer`. Add the
+instance to the intended Channel separately. Existing workdirs are not upgraded by initialization;
+copy missing definitions and merge the `definitions` list while preserving local
+customizations, then restart the Host. Role definitions do not grant Issue write
+permissions or configure a polling schedule.
 
 ## Plugin assembly
 
@@ -153,9 +192,55 @@ Channels stored by earlier versions in `channels.sqlite` or `channels-v2.sqlite`
 `databasePath` option; schedules in an earlier `scheduler.sqlite` are not migrated.
 Its [current design](../design/studio/channel-addressing-and-execution.md) specifies
 unified message addressing, Reply defaults, server-assigned source envelopes and limits.
-Default PET.md and Capability templates contain the runtime protocol; existing
-workdirs must compare and update those files manually, preserving local instructions.
-A link to a design document does not replace the instructions loaded by the Host.
+A Channel may have a public collaboration prompt, separate from its description.
+Configure it through the Channel create/update API or Console. Current members can
+read it. Only Studio authority can set a non-empty prompt on creation or modify
+or clear it later; ordinary clients can create Channels without a prompt. A
+non-member Studio authority can update the prompt alone, without gaining access
+to messages or permission to edit other metadata. Each Channel-scoped
+Pet run receives the Plugin's common instructions, Channel title and description,
+and any configured announcement in its system prompt. This does not change
+the Pet's `PET.md`; a prompt
+edit applies to a subsequent dispatch, not to a run already in progress or its
+approval continuation. Use it to describe the current team's roles and how members
+collaborate. The routing model can also see it; routing still only considers human
+messages with no @. It does not grant permissions or override Host / PET safety
+rules, and does not guarantee model compliance. A Pet can still use `channel_read_context`
+to inspect messages; the prompt does not automatically include conversation history.
+Existing workdir templates are not rewritten by this setting. See the
+[Channel prompt design](../design/studio/channel-collaboration-prompt.md).
+
+For example, a Channel that coordinates project issues and delivery could use the
+following instructions. This is an example, not a default: it is never applied
+automatically. Adapt the purpose and roles to the actual Channel members.
+
+```text
+本 Channel 围绕项目事项协调进度和交付，帮助人类和成员对齐意图与结果。
+
+Issuer 关注 Issue 的意图、状态和与人类的沟通；Executor 负责实现和自验；
+Reviewer 独立判断交付是否符合意图；Wiki 关注项目知识与实际变化是否一致。
+
+结合当前上下文和事实判断如何协作，不预设固定顺序。优先处理自己职责和能力
+范围内的事；即使具备工具，也不要默认代替其他角色承担其主要工作。可以适度
+协助，但不替代其他角色的判断或人类授权。需要其他成员行动时，明确接收人并
+说明事项和必要背景；超出能力范围、缺少信息或涉及未确定的产品、架构和权限
+取舍时，说明情况并向合适的参与者或人类寻求帮助与决定。
+```
+
+The Channel Plugin owns the common context-reading and addressing instructions.
+The default template ships one shared `channel_context` Capability, explicitly
+referenced by its four Pet configurations. It performs a separate analysis subtask
+and returns a summary to the main Pet. PET.md defines only the Pet's own
+role and boundaries; the Channel announcement defines team roles and collaboration.
+The Host still saves and delivers public replies through its existing event path.
+
+Existing workdirs are not rewritten. A Pet without `sharedCapabilities` continues
+to use its private directory. To migrate, preserve local customizations, place
+one shared definition in `.pinpawo/capabilities/`, remove the same-named private
+copy for each migrating Pet and add its explicit reference. Keeping both produces
+a conflict rather than replacing either one. Compare PET.md and dedicated
+Capabilities for duplicated Channel rules. Restart the Host after changing these
+files; editing a Channel announcement uses the next-run behavior described above.
 
 A human's message that addresses nobody is stored and wakes no Pet. Setting the Channel
 Plugin option `routing.enabled` to `true` lets one model call choose a single Pet, or

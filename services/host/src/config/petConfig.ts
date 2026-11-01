@@ -22,6 +22,8 @@ export type PetConfig = {
   modelProfileId?: string;
   /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
   defaultCapabilityName?: string;
+  /** Explicit names from the shared Capability collection beside the pets directory. */
+  sharedCapabilities?: string[];
 };
 
 export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
@@ -29,6 +31,13 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
   parse: (reader) => {
     const modelProfileId = reader.optionalString('modelProfileId');
     const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
+    const sharedCapabilities = reader.optionalStringArray('sharedCapabilities')?.map((name) => name.trim());
+    if (sharedCapabilities?.some((name) => !/^[a-z0-9][a-z0-9_-]*$/.test(name))) {
+      reader.fail('"sharedCapabilities" must contain non-empty Capability names using lowercase letters, numbers, "_" or "-"', 'sharedCapabilities');
+    }
+    if (sharedCapabilities && new Set(sharedCapabilities).size !== sharedCapabilities.length) {
+      reader.fail('"sharedCapabilities" must not contain duplicate names', 'sharedCapabilities');
+    }
 
     // `model` 曾是内联的模型名,已被稳定的 profile id 取代。显式报错,
     // 否则旧配置会被静默忽略、pet 悄悄跑在默认 profile 上。
@@ -63,6 +72,7 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
       name: reader.requiredString('name'),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
       ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
+      ...(sharedCapabilities !== undefined ? { sharedCapabilities } : {}),
     };
   },
 });
@@ -96,6 +106,11 @@ function resolvePetDirectory(dir: string, definitionId: string): string {
 /** Capability collection root derived only from the validated definition id. */
 export function resolvePetCapabilityDirectory(dir: string, definitionId: string): string {
   return path.join(resolvePetDirectory(dir, definitionId), 'capabilities');
+}
+
+/** Shared definitions are siblings of pets, not supplied by installed Plugins. */
+export function resolveSharedCapabilityDirectory(petsDir: string): string {
+  return path.resolve(petsDir, '..', 'capabilities');
 }
 
 /** Conventional authored root document for one validated definition id. */

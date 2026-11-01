@@ -22,8 +22,10 @@
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
  */
 
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { JsonObject } from '@pinpawo/agent-contracts';
-import type { AgentToolkit } from '@pinpawo/pet-agent';
+import type { AgentToolkit, SystemPromptSection } from '@pinpawo/pet-agent';
+import type { PetInvocationScope } from 'pinpawo/host-runtime';
 
 import type { StudioPetRegistration } from './types';
 import type { StudioPets } from './pets/studioPets';
@@ -85,6 +87,13 @@ export type StudioPluginHooks = {
   ) => () => void;
 };
 
+/** Resolve domain context for one admitted, scoped Pet invocation. */
+export type StudioContextProvider = (target: Readonly<{
+  petId: string;
+  sessionId?: string;
+  scope: PetInvocationScope;
+}>) => readonly SystemPromptSection[] | undefined | Promise<readonly SystemPromptSection[] | undefined>;
+
 /* ─────────────── 插件 ─────────────── */
 
 /**
@@ -94,6 +103,8 @@ export type StudioPluginHooks = {
 export type StudioPluginContext = {
   /** 单向派活。Promise 只覆盖 Studio/Pet 的接纳，不代表 Agent 执行完成。 */
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
+  /** Register the current Plugin as the owner of a scope's invocation context. */
+  registerContextProvider: (namespace: string, provider: StudioContextProvider) => () => void;
   /**
    * A new session id for `dispatch({ session: { id, create: true } })`.
    * It only reserves the name: nothing is created or selected until dispatch.
@@ -136,13 +147,24 @@ export type StudioPluginContext = {
   models: StudioModels;
 };
 
-/** An OpenAI-compatible endpoint from one of the Host's model profiles. */
+/** A Host model endpoint; consumers must check which protocols they support. */
 export type StudioModelEndpoint = {
+  /** Omission preserves the legacy OpenAI-compatible transport. */
+  protocol?: 'openai-compatible' | 'anthropic-compatible';
   profileId: string;
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Routing defaults to legacy jsonMode; native custom resolvers should set their supported method. */
   structuredOutputMethod?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+  /** Creates a model from the complete Host-resolved profile. */
+  createChatModel?: (options: {
+    maxOutputTokens: number;
+    maxRetries: number;
+    preferDeterministic: boolean;
+    streaming?: boolean;
+    forceChatCompletions?: boolean;
+  }) => BaseChatModel;
 };
 export type StudioModels = {
   /** The named profile, or the Host default; throws for an unknown profile or when the Studio has none. */
@@ -201,11 +223,13 @@ export type StudioDispatchQueue = {
  * };
  * ```
  *
- * Plugin 可以定义零个或多个 Toolkit；`toolkits` 是明确的定义出口，不是把
- * Plugin 伪装成 Toolkit。Capability 完全属于 Agent，不由 Plugin 或 Studio 注册。
+ * Plugin 可以提供 Toolkit 定义。Capability 由 Host 根据 Pet 配置独立装配；
+ * Plugin 不注册或隐式附带 Capability，Studio core 不解释或执行 Capability。
  */
 export type StudioPlugin = {
   name: string;
+  /** Scope namespaces for which this Plugin must register invocation context providers. */
+  contextNamespaces?: readonly string[];
   /** Toolkit definitions owned by this Plugin and consumed only by Agent runtimes. */
   toolkits: readonly AgentToolkit[];
   start: (context: StudioPluginContext) => Promise<void> | void;

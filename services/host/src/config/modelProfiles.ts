@@ -4,13 +4,15 @@ import { inferLlmContextWindowTokens } from './llmContextWindow';
 import {
   findLlmModelPresetByKey,
   inferLlmModelPreset,
-  inferLlmStructuredOutputMethod,
+  resolveLlmStructuredOutputMethod,
   type LlmModelPreset,
 } from './llmModelPresets';
 import type { StoredConfig } from '../storage';
 
 export const MODEL_PROFILES_VERSION = 1 as const;
 export const LEGACY_DEFAULT_MODEL_PROFILE_ID = 'legacy-default';
+
+export type ModelProtocol = 'openai-compatible' | 'anthropic-compatible';
 
 export type ModelInputModality = 'text' | 'image';
 
@@ -32,6 +34,7 @@ export type ModelProfileV1 = Readonly<{
   id: string;
   label: string;
   provider: string;
+  protocol?: ModelProtocol;
   sourcePreset?: string;
   model: string;
   baseUrl: string;
@@ -262,6 +265,10 @@ export function parseModelProfile(
     });
   }
 
+  const protocol = value.protocol === undefined ? 'openai-compatible' : value.protocol;
+  if (protocol !== 'openai-compatible' && protocol !== 'anthropic-compatible') {
+    issues.push({ code: 'invalid_profile', message: 'protocol must be openai-compatible or anthropic-compatible' });
+  }
   const label = readNonEmptyString(value.label, 'label', issues);
   const model = readNonEmptyString(value.model, 'model', issues);
   const baseUrl = normalizeBaseUrl(value.baseUrl, issues);
@@ -308,6 +315,7 @@ export function parseModelProfile(
       id,
       label,
       provider,
+      ...(protocol === 'anthropic-compatible' ? { protocol } : {}),
       ...(sourcePreset ? { sourcePreset } : {}),
       model,
       baseUrl,
@@ -338,6 +346,7 @@ export function createModelProfile(input: {
   model: string;
   contextWindowTokens?: number;
   sourcePreset?: string;
+  protocol?: ModelProtocol;
   inputModalities?: readonly ModelInputModality[];
 }): ModelProfileV1 {
   const preset = input.sourcePreset
@@ -350,6 +359,7 @@ export function createModelProfile(input: {
     );
   }
   const result = parseModelProfile({
+    protocol: input.protocol,
     id: input.id,
     label: input.label,
     provider: inferProvider(input.model, input.baseUrl, preset),
@@ -566,13 +576,12 @@ export function fingerprintModelProfile(profile: ModelProfileV1): ModelProfileFi
     : undefined;
   const sanitized = {
     provider: profile.provider,
+    ...(profile.protocol === 'anthropic-compatible' ? { protocol: profile.protocol } : {}),
     model: profile.model,
     endpoint: sanitizeEndpoint(profile.baseUrl).endpoint,
     contextWindowTokens: profile.contextWindowTokens,
     maxOutputTokens: profile.maxOutputTokens ?? preset?.maxOutputTokens ?? null,
-    structuredOutputMethod: profile.structuredOutputMethod
-      ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl)
-      ?? null,
+    structuredOutputMethod: resolveLlmStructuredOutputMethod(profile) ?? null,
     inputModalities: [...profile.inputModalities].sort(),
   };
   return Object.freeze({

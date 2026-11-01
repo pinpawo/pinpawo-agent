@@ -43,6 +43,15 @@ Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens.
 
 `inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image support from a model name.
 
+`protocol` is optional: `openai-compatible` (the backward-compatible default) or
+`anthropic-compatible` (Anthropic Messages API). Unknown values make the profile unavailable.
+`structuredOutputMethod` accepts `functionCalling`, `jsonMode`, or `jsonSchema`.
+Native profiles default to `functionCalling`; an explicit method is preserved
+in runtime configuration and its fingerprint. LangChain and the selected
+endpoint validate method capabilities when structured output is invoked;
+profile validation does not deny model IDs. See the
+[native configuration example](../../guides/model-profiles.md#native-anthropic).
+
 `provider` is display/provenance metadata. When omitted, it is derived from a known `sourcePreset` or the endpoint host.
 
 ## Resolution
@@ -66,7 +75,7 @@ Runtime consumers may use:
 - the stable profile ID; and
 - a SHA-256 fingerprint of the resolved, non-secret behavior configuration.
 
-The fingerprint covers provider, model, sanitized endpoint, context/output limits, structured-output behavior, and input modalities. It excludes API keys, URL credentials, query parameters, and fragments.
+The fingerprint covers native protocol selection, provider, model, sanitized endpoint, context/output limits, structured-output behavior, and input modalities. It excludes API keys, URL credentials, query parameters, and fragments.
 
 ## Runtime and session ownership
 

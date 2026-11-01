@@ -49,6 +49,7 @@ const DEFAULT_TEMPLATE_ROOT = fileURLToPath(
 const TEMPLATE_DESTINATIONS = [
   { source: 'studio.json', destination: '.pinpawo/studio.json' },
   { source: 'pets', destination: '.pinpawo/pets' },
+  { source: 'capabilities', destination: '.pinpawo/capabilities', optional: true },
   { source: 'wiki', destination: 'wiki' },
 ] as const;
 
@@ -114,7 +115,10 @@ async function listTemplateFiles(templateRoot: string): Promise<TemplateFile[]> 
     const absolute = path.join(templateRoot, root.source);
     const entries = await readdir(path.dirname(absolute), { withFileTypes: true });
     const entry = entries.find(({ name }) => name === path.basename(absolute));
-    if (!entry) throw new Error(`Studio workdir template is missing ${root.source}.`);
+    if (!entry) {
+      if ('optional' in root && root.optional) continue;
+      throw new Error(`Studio workdir template is missing ${root.source}.`);
+    }
     if (entry.isDirectory()) {
       const children = await listFiles(templateRoot, root.source);
       files.push(...children.map((source) => ({

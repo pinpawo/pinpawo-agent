@@ -23,6 +23,7 @@ import { readRunDelegationSummaries, routeModeFromResult } from '../orchestrator
 import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval-writer.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
+import { readMessageText } from '../../../../packages/pet-agent/src/utils/messages.ts';
 
 const generalToolkit = defineToolkit({
   name: 'multi_task_eval_general',
@@ -133,7 +134,7 @@ function buildScriptedSupervisorRunner() {
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
         input.messages.filter((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability')
-          .map((message) => String(message.content)).join('\n'),
+          .map((message) => readMessageText(message)).join('\n'),
       );
       const objective = input.state.plan.find((task) => task.status === 'pending')?.objective ?? '';
       plannedObjectives.push(objective);
@@ -183,7 +184,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
         registry,
       },
     },
-  ) as Record<string, unknown>;
+  );
   const summaries = readRunDelegationSummaries(result);
   const tasks = summaries.map((summary) => summary.task);
   const statuses = summaries.map((summary) => summary.status);
@@ -193,8 +194,9 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
   const stats = {
     ...supervisor.stats(),
   };
-  const messages = Array.isArray(result.messages) ? result.messages : [];
-  const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
+  const messages = result.messages;
+  const finalMessage = messages.at(-1);
+  const finalText = finalMessage ? readMessageText(finalMessage) : '';
   const remainingLaneMessageCount = messages.filter((message) => getAgentMessageLane(message as never) !== null).length;
   const expected = testCase.expected;
   const scores: LangfuseEvalScore[] = [

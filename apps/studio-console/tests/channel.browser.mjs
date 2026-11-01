@@ -78,11 +78,12 @@ try {
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
-  const create = async (title, petNames) => {
+  const create = async (title, petNames, instructions = '') => {
     await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Create Channel' });
     await dialog.getByLabel('Channel title').fill(title);
     await dialog.getByLabel('Channel description').fill('Auditable public messages between members.');
+    if (instructions) await dialog.getByLabel('Channel instructions', { exact: true }).fill(instructions);
     for (const name of petNames) await dialog.getByRole('checkbox', { name, exact: true }).check();
     await dialog.evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
     await page.getByRole('heading', { name: title, exact: true }).waitFor();
@@ -91,12 +92,29 @@ try {
   assert.equal(await page.getByRole('checkbox', { checked: true }).count(), 0, 'no Pet joins without an explicit choice');
   assert.equal(await page.getByLabel('Channel goal').count(), 0, 'no goal or scope is asked for');
   await page.keyboard.press('Escape');
-  await create('Customer records', ['Alpha', 'Beta']);
+  await create('Customer records', ['Alpha', 'Beta'], 'Discuss records together.');
   let listed = await api('/channels');
   assert.equal(listed.channels.length, 1, 'duplicate form submission creates one Channel');
   const firstId = listed.channels[0].channelId;
   assert.equal(listed.channels[0].description, 'Auditable public messages between members.');
   const context = () => api(`/channels/context?channelId=${firstId}&limit=200`);
+  const instructions = page.getByRole('region', { name: 'Channel instructions' });
+  assert.equal(listed.channels[0].prompt, 'Discuss records together.');
+  await instructions.getByText('Discuss records together.', { exact: true }).waitFor();
+  await instructions.getByRole('button', { name: 'Edit', exact: true }).click();
+  await instructions.getByLabel('Edit Channel instructions').fill('Coordinate the work and report results.');
+  await instructions.getByRole('button', { name: 'Save instructions', exact: true }).click();
+  await waitFor(async () => (await context()).channel.prompt === 'Coordinate the work and report results.', 'updated Channel instructions');
+  await instructions.getByText('Coordinate the work and report results.', { exact: true }).waitFor();
+  await instructions.getByRole('button', { name: 'Edit', exact: true }).click();
+  await instructions.getByLabel('Edit Channel instructions').fill('This edit will be cancelled.');
+  await instructions.getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal((await context()).channel.prompt, 'Coordinate the work and report results.', 'cancel leaves persisted instructions intact');
+  await instructions.getByRole('button', { name: 'Edit', exact: true }).click();
+  await instructions.getByLabel('Edit Channel instructions').fill('');
+  await instructions.getByRole('button', { name: 'Save instructions', exact: true }).click();
+  await waitFor(async () => !(await context()).channel.prompt, 'cleared Channel instructions');
+  await instructions.getByText('No shared instructions yet.', { exact: true }).waitFor();
   const publicMessages = async () => (await context()).messages.filter(item => item.author.kind === 'pet');
   assert.deepEqual((await context()).members.map(item => item.participantId), ['human:local', 'pet:alpha', 'pet:beta']);
   const memberPanel = page.getByRole('region', { name: 'Channel members' });
@@ -130,6 +148,7 @@ try {
   assert.equal((await publicMessages())[0].externalRef !== undefined, true, 'a Pet message keeps its session message id');
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
   assert.deepEqual(await composerMentions(), ['pet:alpha'], 'Reply preselects the original author without manual selection');
+  await waitFor(() => input.evaluate(element => document.activeElement === element), 'reply focuses the message editor');
   await page.keyboard.type('Continue with the same evidence.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 2, 'reply completed');
@@ -164,6 +183,7 @@ try {
   assert.ok(saved.replyTo); assert.deepEqual(saved.mentions, []);
   await page.locator(`[data-message-id="${saved.messageId}"]`).getByRole('button', { name: 'Reply to Me', exact: true }).click();
   assert.deepEqual(await composerMentions(), ['human:local']);
+  await waitFor(() => input.evaluate(element => document.activeElement === element), 'human reply focuses the message editor');
   await page.keyboard.type('Human author reply stays public.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Human author reply stays public.').waitFor();
@@ -171,6 +191,7 @@ try {
   assert.equal((await publicMessages()).length, 4, 'cleared and human recipients wake no Pet');
 
   await create('Separate investigation', ['Alpha']);
+  await page.getByRole('region', { name: 'Channel instructions' }).getByText('No shared instructions yet.', { exact: true }).waitFor();
   assert.deepEqual(await composerMentions(), [], 'new Channel requires a fresh explicit recipient');
   assert.deepEqual(await mentionable(), ['human:local', 'pet:alpha'], 'only members can be addressed');
   await page.screenshot({ path: resolve(screenshotDir, '06-channel-mention-autocomplete.png') });
@@ -298,6 +319,20 @@ try {
   await bob.locator('.connection-state.connected').getByText('bob', { exact: false }).waitFor();
   assert.deepEqual(await bob.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))), ['Channel']);
   await bob.getByRole('heading', { name: 'Participant loop', exact: true }).waitFor();
+  const bobInstructions = bob.getByRole('region', { name: 'Channel instructions' });
+  await bobInstructions.getByText('Only the Studio owner can edit these instructions.', { exact: true }).waitFor();
+  assert.equal(await bobInstructions.getByRole('button', { name: 'Edit', exact: true }).count(), 0, 'a client cannot edit Channel instructions');
+  await bob.getByRole('button', { name: '+ New Channel', exact: true }).click();
+  const bobCreate = bob.getByRole('dialog', { name: 'Create Channel' });
+  assert.equal(await bobCreate.getByLabel('Channel instructions', { exact: true }).count(), 0, 'a client cannot set instructions on a new Channel');
+  await bobCreate.getByLabel('Channel title').fill('Bob created Channel');
+  await bobCreate.getByRole('button', { name: 'Create Channel', exact: true }).click();
+  await bob.getByRole('heading', { name: 'Bob created Channel', exact: true }).waitFor();
+  const bobCreatedInstructions = bob.getByRole('region', { name: 'Channel instructions' });
+  await bobCreatedInstructions.getByText('Only the Studio owner can edit these instructions.', { exact: true }).waitFor();
+  assert.equal(await bobCreatedInstructions.getByRole('button', { name: 'Edit', exact: true }).count(), 0, 'a client cannot edit instructions even on a Channel they created');
+  await bob.getByRole('button', { name: 'Participant loop', exact: false }).click();
+  await bob.getByRole('heading', { name: 'Participant loop', exact: true }).waitFor();
   assert.equal(await bob.getByRole('button', { name: 'Separate investigation', exact: false }).count(), 0, 'a client lists only its own Channels');
   assert.equal(await bob.getByRole('button', { name: 'View session', exact: true }).count(), 0, 'Pet sessions stay with the local token');
   assert.equal(await bob.locator('.channel-queue').count(), 0, 'dispatch queues stay with the local token');
@@ -386,7 +421,7 @@ try {
   await page.getByText('History 0', { exact: true }).waitFor();
   assert.equal(await shown(), 110, 'nothing is missing between the pages');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['Channel instructions create, edit, cancel, clear and isolation', 'explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

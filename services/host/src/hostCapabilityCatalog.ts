@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
@@ -11,7 +12,7 @@ import { loadStoredConfig, type StoredConfig } from './storage';
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
 
-type CapabilityCatalogSource = 'host' | 'configured' | 'directory';
+type CapabilityCatalogSource = 'host' | 'configured' | 'directory' | 'shared';
 
 type CapabilityCatalogEntry = Readonly<{
   capability: AgentCapability;
@@ -89,7 +90,7 @@ function hostEntry(capability: AgentCapability): Omit<CapabilityCatalogEntry, 'e
 
 function loadedEntry(
   loaded: LoadedCapability,
-  source: Extract<CapabilityCatalogSource, 'configured' | 'directory'>,
+  source: Exclude<CapabilityCatalogSource, 'host'>,
   sourceId: string,
 ): Omit<CapabilityCatalogEntry, 'enabled'> {
   return {
@@ -130,6 +131,7 @@ export class HostCapabilityCatalog {
   private readonly deps: HostCapabilityCatalogDeps;
   private hostCapabilities: readonly AgentCapability[] = [];
   private configuredCapabilities: readonly LoadedCapability[] = [];
+  private readonly sharedDirectories = new Map<string, Promise<LoadedCapability[]>>();
 
   constructor(options: HostCapabilityCatalogOptions = {}) {
     this.deps = { ...defaultDeps, ...options };
@@ -141,6 +143,7 @@ export class HostCapabilityCatalog {
     this.assertConfiguredCapabilities(hostCapabilities, configuredCapabilities);
     this.hostCapabilities = Object.freeze([...hostCapabilities]);
     this.configuredCapabilities = Object.freeze([...configuredCapabilities]);
+    this.sharedDirectories.clear();
   }
 
   /** Resolve the configured Host snapshot using the current Chat configuration. */
@@ -160,22 +163,41 @@ export class HostCapabilityCatalog {
 
   /**
    * Resolve one explicit directory through the same catalog contract.
-   * Studio uses this to load each Pet's CAPABILITY.md collection; its assembly
+   * Studio uses this to load each Pet's own collection and explicit shared references; its assembly
    * decides whether that Pet uses the general fallback or an explicit default.
    */
   async createDirectorySnapshot(options: {
     rootDir: string;
     sourceId: string;
+    shared?: { rootDir: string; names: readonly string[] };
   }): Promise<CapabilityCatalogSnapshot> {
     const loaded = await loadCapabilityDirectory(options.rootDir);
+    let shared: LoadedCapability[] = [];
+    if (options.shared?.names.length) {
+      const root = resolve(options.shared.rootDir);
+      let pending = this.sharedDirectories.get(root);
+      if (!pending) {
+        pending = loadCapabilityDirectory(root);
+        this.sharedDirectories.set(root, pending);
+      }
+      const byName = new Map((await pending).map((entry) => [entry.capability.name, entry]));
+      shared = options.shared.names.map((name) => {
+        const entry = byName.get(name);
+        if (!entry) {
+          throw new Error(`Shared Capability "${name}" requested by ${options.sourceId} was not found in "${root}"`);
+        }
+        return entry;
+      });
+    }
     const hostEntries = this.hostCapabilities.map(hostEntry).filter((entry) => entry.required);
     return createSnapshot(
       [
         ...hostEntries,
         ...loaded.map((entry) => loadedEntry(entry, 'directory', options.sourceId)),
+        ...shared.map((entry) => loadedEntry(entry, 'shared', options.shared!.rootDir)),
       ],
       { capabilities: Object.fromEntries(
-        loaded.map(({ activation }) => [activation.id, true]),
+        [...loaded, ...shared].map(({ activation }) => [activation.id, true]),
       ) },
     );
   }

@@ -1,0 +1,8 @@
+{
+  "definitionId": "issuer",
+  "name": "Issuer",
+  "defaultCapabilityName": "studio_issue",
+  "sharedCapabilities": [
+    "channel_context"
+  ]
+}

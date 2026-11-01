@@ -19,6 +19,7 @@ import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/t
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -85,7 +86,9 @@ for (const decision of ['reject', 'cancel'] as const) {
           : buildOrchestratorRunInput(setup.input.messages), { ...config(setup), version: 'v3' });
       },
     };
+    const contextBridge = createInvocationContextBridge();
     const host = await createResidentPetHost({ petId: 'one', petName: 'One', runtimeConfig,
+      resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
       capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
@@ -94,6 +97,7 @@ for (const decision of ['reject', 'cancel'] as const) {
     });
     const channel = createChannelPlugin({ httpRoute: false });
     const studio = await createStudioWithPets({ studioId: 'review-stop', plugins: [channel],
+      onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
     });

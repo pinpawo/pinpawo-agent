@@ -79,16 +79,7 @@ function collectJsonSchemaReferences(value: unknown): string[] {
 }
 
 function readMessageText(message: BaseMessage): string {
-  if (typeof message.content === 'string') {
-    return message.content;
-  }
-  return message.content.map((item) => {
-    if (typeof item === 'string') return item;
-    return typeof item === 'object' && item !== null && 'text' in item
-      && typeof item.text === 'string'
-      ? item.text
-      : '';
-  }).join('');
+  return message.text;
 }
 
 class ScriptedSupervisorModel extends BaseChatModel {

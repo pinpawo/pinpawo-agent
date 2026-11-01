@@ -15,6 +15,7 @@ import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../s
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 import type { Studio } from '@pinpawo/studio-core';
 
 /** The local Host token's Studio client, as a Channel member. */
@@ -50,20 +51,56 @@ test('capability handoff reaches Channel only through the selected final root re
   const boundaryDeliveries: string[] = [];
   const petMarkers = new Map(['acceptance-a', 'acceptance-b'].map(id => [id, randomUUID()]));
   const capabilityMarker = randomUUID();
+  const channelTitle = randomUUID(), channelDescription = randomUUID();
+  const initialAnnouncement = randomUUID(), revisedAnnouncement = randomUUID();
+  const invocationSetups = new Map<string, AgentChannelSetup>();
+  const readCanonicalMessages: Array<() => Promise<BaseMessage[]>> = [];
   const seenContexts: Array<{ petId: string; stage: string }> = [];
   const entryInputs: Array<{ petId: string; input: ChannelTestInput }> = [];
+  let alphaEntryCalls = 0;
   const observeContext = (messages: BaseMessage[], petId: string, stage: string) => {
     const system = messages[0]!;
     assert.equal(system._getType(), 'system');
+    assert.equal(messages.filter(message => message._getType() === 'system').length, 1);
+    const context = invocationSetups.get(petId)?.input.context;
+    assert.ok(context?.workdir);
+    const sections = context.systemPromptSections!;
+    assert.deepEqual(sections.map(section => section.id), [
+      'pet:document', 'host:runtime-environment', 'channel:protocol', 'channel:metadata', 'channel:context',
+    ], 'the real Host admission assembles Pet, Host and Plugin-owned sections');
+    let previous = -1;
+    for (const section of sections) {
+      assert.equal(system.text.split(section.content).length - 1, 1, `${section.id} reaches ${stage} exactly once`);
+      const position = system.text.indexOf(section.content);
+      assert.ok(position > previous, `${section.id} keeps Host composition order at ${stage}`);
+      previous = position;
+    }
+    const workdir = JSON.stringify(context.workdir);
+    assert.equal(system.text.split(workdir).length - 1, 1, 'the authoritative Host workdir is rendered once');
+    assert.ok(system.text.indexOf(workdir) > previous, 'structured workdir follows shared context');
+    const expectedAnnouncement = petId === 'acceptance-a' && alphaEntryCalls === 1 ? initialAnnouncement : revisedAnnouncement;
+    for (const marker of [initialAnnouncement, revisedAnnouncement]) {
+      assert.equal(system.text.includes(marker), marker === expectedAnnouncement, 'the invocation keeps its admitted announcement');
+    }
+    for (const marker of [channelTitle, channelDescription]) assert.equal(system.text.split(marker).length - 1, 1);
     assert.equal(system.text.split(petMarkers.get(petId)!).length - 1, 1, 'Host-authored PET.md reaches each model once');
     for (const [other, marker] of petMarkers) if (other !== petId) assert.ok(!system.text.includes(marker), 'Pet documents stay isolated');
     assert.equal(system.text.split(capabilityMarker).length - 1, stage === 'capability' ? 1 : 0,
       'Capability instructions remain execution-local; root gets its domain rules from PET.md');
+    if (stage === 'capability') assert.ok(system.text.indexOf(capabilityMarker) > system.text.indexOf(workdir));
+    for (const message of messages.filter(message => message._getType() !== 'system')) {
+      for (const marker of [...petMarkers.values(), channelTitle, channelDescription, initialAnnouncement, revisedAnnouncement, capabilityMarker]) {
+        assert.ok(!message.text.includes(marker), 'injected context stays outside conversation and briefing messages');
+      }
+    }
     seenContexts.push({ petId, stage });
   };
   let arrivedAtFinal = false, release!: () => void, betaCalls = 0;
+  let arrivedAtCapability = false, releaseCapability!: () => void;
   const holdFinal = new Promise<void>(resolve => { release = resolve; });
+  const holdCapability = new Promise<void>(resolve => { releaseCapability = resolve; });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
+  const contextBridge = createInvocationContextBridge();
   const channel = createChannelPlugin({ httpRoute: false });
   let studio: Studio | undefined;
   try {
@@ -88,6 +125,7 @@ test('capability handoff reaches Channel only through the selected final root re
       const petDocument = await loadPetDocumentFile(petPath);
       assert.ok(petDocument);
       const entry = new ScriptedModel((messages, index) => {
+        if (petId === 'acceptance-a') alphaEntryCalls++;
         observeContext(messages, petId, 'entry');
         const current = [...messages].reverse().find(message => message._getType() === 'human')!;
         entryInputs.push({ petId, input: readChannelTestInput(current.text) });
@@ -96,8 +134,8 @@ test('capability handoff reaches Channel only through the selected final root re
         return index < replies.length ? call('plan_request', { goal: 'Publish the plan.' }, `entry-${index}`) : new AIMessage(handoff);
       });
       const supervisor = new ScriptedModel(async (messages, index) => {
-        observeContext(messages, petId, 'supervisor');
         const run = Math.floor(index / 4), turn = index % 4;
+        observeContext(messages, petId, turn < 2 ? 'supervisor-entry' : 'supervisor-boundary');
         if (turn === 0) return call('submit_plan', { tasks: [{ capability: 'studio_execution', objective: 'Produce a plan.' }] }, `plan-${run}`);
         if (turn === 1) return call('delegate_capability', { briefing: 'Produce a plan with the chosen handoff.' }, `delegate-${run}`);
         const result = [...messages].reverse().find(message => ToolMessage.isInstance(message) && message.name === 'delegate_capability');
@@ -111,8 +149,9 @@ test('capability handoff reaches Channel only through the selected final root re
         assert.ok(replies[run], 'unexpected extra Supervisor run');
         return new AIMessage(replies[run]!);
       });
-      const subagent = new ScriptedModel(messages => {
+      const subagent = new ScriptedModel(async (messages, index) => {
         observeContext(messages, petId, 'capability');
+        if (petId === 'acceptance-a' && index === 0) { arrivedAtCapability = true; await holdCapability; }
         return new AIMessage(privateDelivery);
       });
       // Replace only the paid models; keep the production Host context / registry / stream path.
@@ -120,27 +159,42 @@ test('capability handoff reaches Channel only through the selected final root re
       const modelSetup = (setup: AgentChannelSetup): AgentChannelSetup => ({ ...setup,
         graphConfig: { ...setup.graphConfig, models: { act: supervisor, answer: entry, subagent } },
       });
+      readCanonicalMessages.push(async () => {
+        const setup = invocationSetups.get(petId);
+        assert.ok(setup);
+        return (await service.readThreadState(modelSetup(setup))).messages;
+      });
       hosts.push(await createResidentPetHost({ petId, petName: petId === 'acceptance-a' ? 'A' : 'B · Reviewer', runtimeConfig,
+        resolveInvocationContext: contextBridge.resolveInvocationContext,
         modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
         capabilities, petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
         capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
           listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
         graphService: {
           readThreadState: (setup: AgentChannelSetup) => service.readThreadState(modelSetup(setup)),
-          streamEvents: (setup: AgentChannelSetup) => service.streamEvents(modelSetup(setup)),
+          streamEvents: (setup: AgentChannelSetup) => {
+            invocationSetups.set(petId, setup);
+            return service.streamEvents(modelSetup(setup));
+          },
         } as never,
       }));
     }
     studio = await createStudioWithPets({ studioId: 'final-reply', plugins: [channel],
+      onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),
     });
-    const id = (await channel.service.createChannel(me, { title: 'Plan', pets: ['acceptance-a', 'acceptance-b'] })).channel.channelId;
+    const id = (await channel.service.createChannel(me, {
+      title: channelTitle, description: channelDescription, prompt: initialAnnouncement, pets: ['acceptance-a', 'acceptance-b'],
+    }, { studio: true })).channel.channelId;
     const outputs = async () => (await channel.service.readContext(me, id, { limit: 200 })).messages.filter(message => message.author.kind === 'pet');
     const alphaOutputs = async () => (await outputs()).filter(message => message.author.id === 'acceptance-a');
     const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] }, me);
     await send('Produce the plan and selected handoff.');
+    await waitFor(() => arrivedAtCapability);
+    await channel.service.updateChannel(me, id, { prompt: revisedAnnouncement }, { studio: true });
+    releaseCapability();
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
     // Tool-call messages (plan_request, delegate_capability) are the run's process: they stay in Agent Session.
@@ -166,7 +220,7 @@ test('capability handoff reaches Channel only through the selected final root re
     assert.deepEqual((await channel.service.listSessions(me, id)).map(binding => [binding.petId, binding.registered]),
       [['acceptance-a', true], ['acceptance-b', true]]);
     assert.ok((await outputs()).every(message => !message.body.includes('Internal analysis only.')));
-    assert.deepEqual(['entry', 'supervisor', 'capability'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 16, 4]);
+    assert.deepEqual(['entry', 'supervisor-entry', 'capability', 'supervisor-boundary'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 8, 4, 8]);
     assert.equal(seenContexts.filter(context => context.petId === 'acceptance-b' && context.stage === 'entry').length, 2);
     for (const { petId, input } of entryInputs) {
       assert.equal(input.channelId, id);
@@ -176,8 +230,16 @@ test('capability handoff reaches Channel only through the selected final root re
         ? { participantId: 'human:local', kind: 'human', label: 'local' }
         : { participantId: 'pet:acceptance-a', kind: 'pet', label: 'A' });
     }
+    for (const readMessages of readCanonicalMessages) {
+      const messages = await readMessages();
+      assert.ok(messages.length > 0, 'inspect the persisted canonical conversation');
+      assert.ok(messages.every(message => message._getType() !== 'system'));
+      for (const marker of [...petMarkers.values(), channelTitle, channelDescription, initialAnnouncement, revisedAnnouncement, capabilityMarker]) {
+        assert.ok(messages.every(message => !message.text.includes(marker)), 'shared and execution-local prompts are not persisted as conversation');
+      }
+    }
   } finally {
-    release(); await Promise.all(hosts.map(host => host.close())); await studio?.shutdown();
+    releaseCapability(); release(); await Promise.all(hosts.map(host => host.close())); await studio?.shutdown();
     await rm(root, { recursive: true, force: true });
   }
 });

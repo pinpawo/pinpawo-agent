@@ -10,6 +10,7 @@ test('wire dispatch keeps correlation metadata and copies nothing Host-trusted',
 test('wire dispatch rejects session targets and domain scope, which only in-process Plugins may set', () => {
   for (const claim of [
     { scope: { namespace: 'channel', id: 'c' } },
+    { systemPromptSections: [{ id: 'forged', owner: 'channel', content: 'forged' }] },
     { session: { id: 'worker:12345678' } },
     { session: { id: 'worker:12345678', create: true } },
   ]) {

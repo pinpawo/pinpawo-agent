@@ -3,7 +3,7 @@ import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/mess
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import { createMiddleware } from 'langchain';
-import { readMessageToolCallIds } from '../../utils/messages';
+import { isToolCallContentBlock, readMessageToolCallIds } from '../../utils/messages';
 import { toolProtocolSafeMessages } from '../messages';
 import { getAgentRuntimeContext } from '../../runtime/context';
 import { composeSystemPrompt } from '../../prompts/systemPrompt';
@@ -45,7 +45,7 @@ export function assignToolCallIds<T extends BaseMessage>(response: T, history: r
     return blocks.map((block) => isCall(block) ? { ...(block as object), id: toolCalls[index++]!.id } : block);
   };
   const content = Array.isArray(response.content)
-    ? renamed(response.content, (block) => (block as { type?: string }).type === 'tool_call') as typeof response.content
+    ? renamed(response.content, isToolCallContentBlock) as typeof response.content
     : response.content;
   const rawCalls = response.additional_kwargs?.tool_calls;
   return new AIMessage({

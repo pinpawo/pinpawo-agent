@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 
-import { prepareStudio, type CreateStudioInput } from './createStudio';
+import { prepareStudio, type CreateStudioInput, type PreparedStudio } from './createStudio';
 import { StudioPetError } from './pets/studioPets';
 import { StudioPetUnavailableError, type StudioPlugin, type StudioPluginContext } from './studioContract';
 import type { StudioPetRuntime } from './types';
@@ -16,12 +16,21 @@ type StudioPetBinding = {
 /** A Studio whose Pets are the given live ports, each its own definition, created before Plugins start. */
 async function createStudio(input: Omit<CreateStudioInput, 'definitions' | 'assemblePet'> & { pets: StudioPetBinding[] }) {
   const { pets, ...rest } = input;
-  const prepared = prepareStudio({
+  let prepared: PreparedStudio;
+  prepared = prepareStudio({
     ...rest,
     definitions: pets.map(({ registration }) => ({ definitionId: registration.petId, name: registration.name })),
     assemblePet: async ({ petId }) => {
       const pet = pets.find(({ registration }) => registration.petId === petId)!;
-      return { dispatch: pet.dispatch, ...(pet.sessions ? { sessions: pet.sessions } : {}), close: async () => undefined };
+      // A real resident Host resolves its admitted invocation context through
+      // the composition port. This fake exercises that same boundary.
+      const dispatch: PetDispatchPort = { ...pet.dispatch, dispatch: async (request) => {
+        if (request.scope) await prepared.resolveInvocationContext({
+          petId, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
+        });
+        return pet.dispatch.dispatch(request);
+      } };
+      return { dispatch, ...(pet.sessions ? { sessions: pet.sessions } : {}), close: async () => undefined };
     },
   });
   await prepared.restorePets();
@@ -198,6 +207,87 @@ test('receipt echoes producer metadata while the Pet sees request text only', as
   await studio.shutdown();
 });
 
+test('scoped context providers resolve from the snapshotted target and do not change idempotency', async () => {
+  const seen: Array<Parameters<PetDispatchPort['dispatch']>[0]> = [];
+  const targets: unknown[] = [];
+  let resolves = 0;
+  const worker = binding('worker');
+  worker.dispatch = { ...worker.dispatch, dispatch: async (request) => { seen.push(request); } };
+  const sections = [{ id: 'channel:collaboration', owner: 'channel', content: 'original A' }];
+  const plugin: StudioPlugin = { name: 'channel', toolkits: [], contextNamespaces: ['channel'], start(context) {
+    context.registerContextProvider('channel', async (target) => { targets.push(target); resolves++; return sections; });
+  } };
+  const studio = await createStudio({ studioId: 's1', pets: [worker], plugins: [plugin] });
+  try {
+    const scope = { namespace: 'channel', id: 'a' };
+    const session = { id: 'worker:00000001', create: true };
+    const metadata = { nested: { value: 'original correlation' } };
+    const request = { petId: 'worker', request: 'work', idempotencyKey: 'key-a', metadata, scope, session };
+    const admitted = studio.dispatch(request);
+    request.petId = 'other-pet';
+    request.request = 'another message';
+    request.idempotencyKey = 'key-b';
+    metadata.nested.value = 'mutated correlation';
+    scope.id = 'b';
+    session.id = 'worker:00000002';
+    session.create = false;
+    const receipt = await admitted;
+    assert.deepEqual(receipt.metadata, { nested: { value: 'original correlation' } });
+    assert.equal(seen[0]?.request, 'work');
+    assert.equal(Object.hasOwn(seen[0]!, 'systemPromptSections'), false);
+    assert.deepEqual(targets, [{ petId: 'worker', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' } }]);
+    assert.deepEqual(seen[0]?.scope, { namespace: 'channel', id: 'a' });
+    assert.deepEqual(seen[0]?.session, { id: 'worker:00000001', create: true });
+    const retried = await studio.dispatch({ petId: 'worker', request: 'ignored', idempotencyKey: 'key-a' });
+    assert.equal(retried.invocationId, receipt.invocationId);
+    assert.equal(seen.length, 1, 'the original idempotency key was reserved');
+    assert.equal(resolves, 1);
+    sections[0]!.content = 'updated';
+    await studio.dispatch({ petId: 'worker', request: 'next', scope: { namespace: 'channel', id: 'a' }, session: { id: 'worker:00000001' } });
+    assert.equal(resolves, 2, 'a new scoped invocation resolves context');
+    assert.equal(Object.hasOwn(seen[1]!, 'systemPromptSections'), false);
+    await studio.dispatch({ petId: 'worker', request: 'ordinary', session: { id: 'worker:00000001' } });
+    assert.equal(resolves, 2, 'an unscoped invocation does not resolve Plugin context');
+    assert.equal(Object.hasOwn(seen[2]!, 'systemPromptSections'), false);
+  } finally {
+    await studio.shutdown();
+  }
+});
+
+test('provider registration has scoped ownership, cleanup and retryable errors', async () => {
+  let channel!: StudioPluginContext;
+  let other!: StudioPluginContext;
+  let remove!: () => void;
+  let calls = 0;
+  const plugin: StudioPlugin = { name: 'channel', toolkits: [], contextNamespaces: ['channel'], start(context) {
+    channel = context;
+    remove = context.registerContextProvider('channel', async () => {
+      calls++;
+      if (calls === 1) throw new Error('temporarily unavailable');
+      return [{ id: 'channel:test', content: 'owned' }];
+    });
+    assert.throws(() => context.registerContextProvider('channel', () => []), /already registered/);
+  } };
+  const foreign: StudioPlugin = { name: 'other', toolkits: [], start(context) { other = context; } };
+  const studio = await createStudio({ studioId: 's1', pets: [binding('worker')], plugins: [plugin, foreign] });
+  try {
+    assert.throws(() => other.registerContextProvider('channel', () => []), /reserved/);
+    const request = { petId: 'worker', request: 'work', idempotencyKey: 'retry', scope: { namespace: 'channel', id: 'a' }, session: { id: 'worker:00000001' } };
+    await assert.rejects(other.dispatch(request), /cannot dispatch/);
+    await assert.rejects(channel.dispatch(request), /temporarily unavailable/);
+    await Promise.all([channel.dispatch(request), channel.dispatch(request)]);
+    assert.equal(calls, 2, 'concurrent retry shares one provider resolution');
+    remove();
+    await assert.rejects(channel.dispatch({ ...request, idempotencyKey: 'new' }), /unavailable/);
+    assert.throws(() => other.registerContextProvider('channel', () => []), /reserved/);
+    const restore = channel.registerContextProvider('channel', () => []);
+    await channel.dispatch({ ...request, idempotencyKey: 'after-restore' });
+    restore();
+  } finally {
+    await studio.shutdown();
+  }
+});
+
 test('idempotency returns the same receipt and invokes the port once', async () => {
   let calls = 0;
   let acceptedEvents = 0;
@@ -301,6 +391,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'notify',
     'petSessions',
     'pets',
+    'registerContextProvider',
     'storage',
     'subscribe',
   ]);

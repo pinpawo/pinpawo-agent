@@ -34,6 +34,7 @@ import type { ResidentPetInteraction } from 'pinpawo/host-runtime';
 import {
   loadPetDocument,
   resolvePetCapabilityDirectory,
+  resolveSharedCapabilityDirectory,
 } from 'pinpawo/host-runtime';
 
 export type StudioHostOptions = {
@@ -137,11 +138,17 @@ export class StudioHost {
       });
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();
-      for (const { definitionId } of configuration.resolved.definitions) {
+      for (const { definitionId, sharedCapabilities } of configuration.resolved.definitions) {
         const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, definitionId);
         const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
           rootDir: capabilityDir,
           sourceId: `studio-pet:${definitionId}`,
+          ...(sharedCapabilities?.length ? {
+            shared: {
+              rootDir: resolveSharedCapabilityDirectory(configuration.petsDir),
+              names: sharedCapabilities,
+            },
+          } : {}),
         });
         petCapabilities.set(
           definitionId,

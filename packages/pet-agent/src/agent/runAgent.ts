@@ -1,5 +1,6 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext, type AgentRuntimeContext } from '../runtime/context';
+import { readMessageText } from '../utils/messages';
 import type { AgentCapability } from '../types/capability';
 import {
   filterAvailableToolkits,
@@ -37,9 +38,20 @@ export type AgentRunResult = {
 
 function readReply(messages: BaseMessage[]): string {
   const last = messages.at(-1);
-  return typeof last?.content === 'string' ? last.content.trim() : '';
+  if (!last) return '';
+  if (typeof last.content === 'string') return readMessageText(last);
+  // Expand blocks only for an AI reply without pending tool calls.
+  return AIMessage.isInstance(last) && !last.tool_calls?.length
+    ? readMessageText(last)
+    : '';
 }
 
+/**
+ * Public SDK convenience entry: invoke a graph once and project its final reply.
+ * Production Host turns use the graph's streaming API instead of this wrapper.
+ * AgentInvokeInput and buildAgentRunnableConfig are shared with that Host path;
+ * removing this entry would not remove those helpers or model/protocol handling.
+ */
 export async function runAgent(
   graph: OrchestratorGraph,
   input: AgentInvokeInput,

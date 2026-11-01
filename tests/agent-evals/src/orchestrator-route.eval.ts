@@ -1,5 +1,7 @@
 // @ts-nocheck — eval script, types from langsmith barrel are incomplete
 import { readFixtureDelivery } from '../../../packages/pet-agent/src/testing/capabilityDelivery';
+import { readMessageText } from '../../../packages/pet-agent/src/utils/messages';
+import type { OrchestratorStateType } from '../../../packages/pet-agent/src/agent/orchestrator/state';
 import { buildRouteEvalInput } from './orchestrator-eval-fixtures';
 /**
  * LangSmith evaluation: orchestrator route decision
@@ -272,13 +274,12 @@ function latestAnnounceFromResult(result: Record<string, unknown>) {
   }).at(-1) ?? null;
 }
 
-function extractResult(result: Record<string, unknown>): Record<string, unknown> {
+function extractResult(result: OrchestratorStateType): Record<string, unknown> {
   const routeMode = routeModeFromResult(result);
   const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
   const latestAnnounce = latestAnnounceFromResult(result);
-  const messages = result.messages as { content?: unknown; _getType?: () => string }[] | undefined;
-  const lastMsg = messages?.at(-1);
-  const reply = lastMsg && typeof lastMsg.content === 'string' ? lastMsg.content : '';
+  const lastMsg = result.messages.at(-1);
+  const reply = lastMsg ? readMessageText(lastMsg) : '';
   const activeCapability = activeCapabilityFromResult(result);
   return {
     route: finalRoute,

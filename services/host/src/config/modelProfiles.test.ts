@@ -391,3 +391,70 @@ test('fingerprint changes with endpoint behavior but not API key', () => {
     fingerprintModelProfile(otherEndpoint).fingerprint,
   );
 });
+
+test('native protocol is explicit, validated, resolved and included in identity', () => {
+  const gateway = parseModelProfile(storedProfile({ model: 'claude-sonnet-4-5', provider: 'Anthropic' })).profile!;
+  assert.equal(gateway.protocol, undefined);
+  const native = parseModelProfile({ ...gateway, protocol: 'anthropic-compatible' }).profile!;
+  assert.equal(native.protocol, 'anthropic-compatible');
+  assert.notEqual(fingerprintModelProfile(native).fingerprint, fingerprintModelProfile(gateway).fingerprint);
+  for (const protocol of ['anthropic', 'unknown', '', null, false]) {
+    assert.equal(parseModelProfile({ ...gateway, protocol }).profile, undefined);
+  }
+  const explicitGateway = parseModelProfile({ ...gateway, protocol: 'openai-compatible' }).profile!;
+  assert.equal(fingerprintModelProfile(explicitGateway).fingerprint, fingerprintModelProfile(gateway).fingerprint);
+  assert.equal(parseModelProfile({ ...native, structuredOutputMethod: 'other' }).profile, undefined);
+  const snapshot = buildModelProfileRegistry({ stored: storedConfig({ primary: native }), env: {} });
+  const resolved = createLocalModelProfileRegistry({ snapshot }).resolve();
+  assert.equal(resolved.protocol, 'anthropic-compatible');
+  assert.equal(resolved.structuredOutputMethod, 'functionCalling');
+});
+
+test('resolved profile uses the structured-output method represented by its fingerprint', () => {
+  const inferred = storedProfile({ model: 'claude-sonnet-4-6' });
+  const explicit = storedProfile({ id: 'explicit', model: 'claude-sonnet-4-6', structuredOutputMethod: 'jsonMode' });
+  const unknown = storedProfile({ id: 'unknown' });
+  const snapshot = buildModelProfileRegistry({ stored: storedConfig({ primary: inferred, explicit, unknown }), env: {} });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+  assert.equal(registry.resolve().structuredOutputMethod, 'functionCalling');
+  assert.equal(registry.resolve('explicit').structuredOutputMethod, 'jsonMode');
+  assert.equal(registry.resolve('unknown').structuredOutputMethod, undefined);
+  assert.equal(registry.resolve().modelProfileFingerprint, fingerprintModelProfile(resolveModelProfile(snapshot, 'primary')).fingerprint);
+});
+
+
+test('native profiles accept model IDs without imposing a local endpoint capability list', () => {
+  for (const model of [
+    'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-mythos-5-1',
+    'claude-sonnet-5-5-20261001', 'custom-future-model',
+  ]) {
+    for (const method of [undefined, 'functionCalling', 'jsonSchema']) {
+      const result = parseModelProfile(storedProfile({ model, baseUrl: 'https://api.anthropic.com', protocol: 'anthropic-compatible', structuredOutputMethod: method }));
+      assert.ok(result.profile, model);
+      assert.deepEqual(result.issues, []);
+    }
+  }
+});
+
+test('native explicit methods survive resolution and contribute to profile identity', () => {
+  const native = storedProfile({ protocol: 'anthropic-compatible', model: 'claude-opus-5-5', baseUrl: 'https://api.anthropic.com' });
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: native,
+      schema: { ...native, id: 'schema', structuredOutputMethod: 'jsonSchema' },
+      mode: { ...native, id: 'mode', structuredOutputMethod: 'jsonMode' },
+    }),
+    env: {},
+  });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+  const resolvedDefault = registry.resolve();
+  assert.equal(resolvedDefault.structuredOutputMethod, 'functionCalling');
+  for (const [id, method] of [['schema', 'jsonSchema'], ['mode', 'jsonMode']] as const) {
+    const resolved = registry.resolve(id);
+    assert.equal(resolved.protocol, 'anthropic-compatible');
+    assert.equal(resolved.structuredOutputMethod, method);
+    assert.equal(resolved.modelProfileFingerprint, fingerprintModelProfile(resolveModelProfile(snapshot, id)).fingerprint);
+    assert.notEqual(resolved.modelProfileFingerprint, resolvedDefault.modelProfileFingerprint);
+  }
+  assert.notEqual(registry.resolve('schema').modelProfileFingerprint, registry.resolve('mode').modelProfileFingerprint);
+});

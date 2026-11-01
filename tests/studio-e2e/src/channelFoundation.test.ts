@@ -16,6 +16,7 @@ import {
 } from '@pinpawo-plugin/channel';
 import { readChannelTestInput, readChannelTestTask } from '../../support/channelDispatchInput';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
 const me = { kind: 'human' as const, id: 'local' };
@@ -161,6 +162,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
 
 test('real resident queue binds tools to current Channel and Pet, rejects spoofing, non-members and metadata fallback', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'channel-resident-'));
+  const contextBridge = createInvocationContextBridge();
   const runtimeConfig = buildHostRuntimeConfig(root);
   const channel = createChannelPlugin({ httpRoute: false });
   assert.deepEqual(channel.toolkits[0]!.tools.map((entry) => entry.tool.name), ['channel_read_context']);
@@ -173,6 +175,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const host = await createResidentPetHost({
     petId: 'executor', petName: 'Not the author ID', modelProfiles: createTestModelProfiles(),
+    resolveInvocationContext: contextBridge.resolveInvocationContext,
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: {
@@ -192,6 +195,7 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     },
   });
   const studio = await createStudioWithPets({ studioId: 's',
+    onPreparedContextResolver: contextBridge.onPreparedContextResolver,
     pets: [{ registration: { petId: 'executor', name: 'Executor' }, dispatch: host.resident.dispatch }], plugins: [channel],
   });
   try {
@@ -200,23 +204,27 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     const b = (await channel.service.createChannel(owner, { title: 'B', description: 'B before', pets: ['executor'] })).channel.channelId;
     const outside = (await channel.service.createChannel(owner, { title: 'Not joined', pets: [] })).channel.channelId;
     await assert.rejects(read.invoke({}), /Host-admitted/);
+    // A Channel scope must name its persisted Pet/session binding. Reserve
+    // separate sessions before exercising the queue and tool context.
+    const aBinding = await channel.service.reserveSession(a, 'executor', () => 'executor:11111111');
+    const bBinding = await channel.service.reserveSession(b, 'executor', () => 'executor:22222222');
+    const outsideBinding = await channel.service.reserveSession(outside, 'executor', () => 'executor:33333333');
     const scope: PetInvocationScope = { namespace: 'channel', id: a };
-    await studio.dispatch({ petId: 'executor', request: 'first', scope });
+    await studio.dispatch({ petId: 'executor', request: 'first', session: { id: aBinding.sessionId, create: true }, scope });
     await waitFor(() => started);
-    await studio.dispatch({ petId: 'executor', request: 'second', scope: { namespace: 'channel', id: b } });
+    await studio.dispatch({ petId: 'executor', request: 'second', session: { id: bBinding.sessionId, create: true }, scope: { namespace: 'channel', id: b } });
     await studio.dispatch({ petId: 'executor', request: 'unscoped', metadata: { channelId: a } });
-    await studio.dispatch({ petId: 'executor', request: 'not a member', scope: { namespace: 'channel', id: outside } });
+    await assert.rejects(studio.dispatch({ petId: 'executor', request: 'not a member', session: { id: outsideBinding.sessionId, create: true }, scope: { namespace: 'channel', id: outside } }), ChannelAccessError);
     (scope as { id: string }).id = b;
     await channel.service.updateChannel(owner, b, { description: 'B revised while queued' });
     release();
-    await waitFor(() => snapshots.length + failures.length === 4);
+    await waitFor(() => snapshots.length + failures.length === 3);
     assert.deepEqual(snapshots.map(item => item.channel.channelId), [a, b]);
     assert.equal(snapshots[1]?.channel.description, 'B revised while queued');
     assert.deepEqual(snapshots[0]?.members.map(member => member.participantId), ['human:owner', 'pet:executor']);
-    assert.equal(new Set(threads).size, 1, 'same Session serves distinct Channel scopes');
-    assert.equal(failures.length, 2);
+    assert.equal(new Set(threads.slice(0, 2)).size, 2, 'Channel scopes use separate sessions');
+    assert.equal(failures.length, 1);
     assert.match(String(failures[0]), /Host-admitted/);
-    assert.ok(failures[1] instanceof ChannelAccessError, 'a Pet reads only Channels it belongs to');
     await assert.rejects(read.invoke({}), /Host-admitted/);
     for (const id of [a, b]) assert.equal((await channel.service.readContext(owner, id)).messages.length, 0);
   } finally { release(); await host.close(); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }

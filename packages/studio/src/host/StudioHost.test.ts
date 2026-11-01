@@ -11,6 +11,7 @@ import {
 } from '@pinpawo/pet-agent';
 import {
   buildHostRuntimeConfig,
+  HostCapabilityCatalog,
   loadCapabilityDirectory,
   type HostCapabilityAssembly,
   type HostCapabilityAssemblyInitOptions,
@@ -309,6 +310,51 @@ Complete the work assigned to this Pet.
 
   await host.init();
   await host.shutdown();
+});
+
+test('StudioHost resolves shared capabilities through the Host catalog only for Pets that reference them', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shared-capabilities-'));
+  const petsDir = path.join(root, '.pinpawo', 'pets');
+  const sharedDir = path.join(root, '.pinpawo', 'capabilities', 'channel-context');
+  await mkdir(sharedDir, { recursive: true });
+  await writeFile(path.join(sharedDir, 'CAPABILITY.md'), `---
+name: channel_context
+description: Read shared context.
+uses: []
+version: 1
+---
+Read and summarize context.
+`);
+  const catalog = new HostCapabilityCatalog({
+    createHostCapabilities: () => [agentCapability('general')],
+    loadConfiguredCapabilities: async () => [],
+  });
+  const assembly = fakeCapabilityAssembly([]);
+  const initialize = assembly.init.bind(assembly);
+  assembly.init = async (options) => {
+    await initialize(options);
+    await catalog.load();
+  };
+  assembly.getCapabilityCatalog = () => catalog;
+  const configured = {
+    ...configuration([], ['reader', 'other']),
+    workdir: root,
+    studioConfigPath: path.join(root, '.pinpawo', 'studio.json'),
+    petsDir,
+  };
+  configured.resolved.definitions[0]!.sharedCapabilities = ['channel_context'];
+  const host = new StudioHost({
+    capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => configured,
+    buildStudio: async (input) => {
+      assert.deepEqual(input.petCapabilities.get('reader')?.map(({ name }) => name), ['channel_context']);
+      assert.deepEqual(input.petCapabilities.get('other'), []);
+      return result(fakeStudio(() => undefined));
+    },
+  });
+  try {
+    await host.init();
+  } finally { await host.shutdown(); }
 });
 
 test('StudioHost claims writer ownership before resolving executable extensions', async () => {

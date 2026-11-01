@@ -1,5 +1,8 @@
 {
   "definitionId": "wiki",
   "name": "Wiki",
-  "defaultCapabilityName": "wiki_maintenance"
+  "defaultCapabilityName": "wiki_maintenance",
+  "sharedCapabilities": [
+    "channel_context"
+  ]
 }

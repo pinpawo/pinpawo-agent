@@ -1,5 +1,5 @@
 import type { StructuredOutputMethod } from '@pinpawo/pet-agent';
-import type { ModelInputModality } from './modelProfiles';
+import type { ModelInputModality, ModelProfileV1 } from './modelProfiles';
 
 export type LlmThinkingControl =
   | 'extra_body_enable_thinking'
@@ -339,6 +339,16 @@ export function inferLlmStructuredOutputMethod(
   return STRUCTURED_OUTPUT_FALLBACK_MODEL_RULES.find((rule) =>
     rule.contains.some((fragment) => normalizedModel.includes(fragment)),
   )?.method;
+}
+
+/** Keep the resolved method and profile fingerprint on the same defaults. */
+export function resolveLlmStructuredOutputMethod(
+  config: Pick<ModelProfileV1, 'protocol' | 'model' | 'baseUrl' | 'structuredOutputMethod'>,
+): StructuredOutputMethod | undefined {
+  return config.structuredOutputMethod
+    ?? (config.protocol === 'anthropic-compatible'
+      ? 'functionCalling'
+      : inferLlmStructuredOutputMethod(config.model, config.baseUrl));
 }
 
 export function inferLlmAdditionalThinkingReserveTokens(model: string): number {

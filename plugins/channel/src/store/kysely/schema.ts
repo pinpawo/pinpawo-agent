@@ -8,6 +8,7 @@ export type ChannelDatabase = {
     channel_id: string;
     title: string;
     description: string | null;
+    prompt: string | null;
     created_by_kind: MemberRef['kind'];
     created_by_id: string;
     created_at: string;

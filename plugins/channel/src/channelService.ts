@@ -15,12 +15,14 @@ export const artifactReferenceSchema = z.object({
 export const channelCreateSchema = z.object({
   title: z.string().trim().min(1).max(160),
   description: z.string().trim().max(50_000).optional(),
+  prompt: z.string().trim().max(50_000).optional(),
   /** The Pets that join with the creator. Required: no Pet joins implicitly. */
   pets: z.array(identifier).max(100),
 }).strict();
 export const channelUpdateSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
   description: z.string().trim().max(50_000).nullable().optional(),
+  prompt: z.string().trim().max(50_000).nullable().optional(),
 }).strict();
 export const channelMessageSchema = z.object({
   body: z.string().trim().min(1).max(100_000),
@@ -44,8 +46,8 @@ export type ChannelSessionBinding = ChannelSessionRow;
 export type ChannelMember = ChannelParticipant & { joinedAt: string };
 /**
  * `studio`: the caller holds the Studio's own authority (the local Host
- * token). It may list every Channel and manage any Channel's members without
- * being a member, so a Channel can always be recovered.
+ * token). It may list every Channel and manage any Channel's members or
+ * prompt without being a member, so a Channel can always be recovered.
  */
 export type ChannelManageAccess = { studio?: boolean };
 export type ChannelEvent =
@@ -151,8 +153,9 @@ export class ChannelService {
     return rows.map(row => this.memberView(row, labels));
   }
 
-  async createChannel(actor: MemberRef, input: unknown): Promise<{ channel: ChannelRow; members: ChannelMember[] }> {
+  async createChannel(actor: MemberRef, input: unknown, access: ChannelManageAccess = {}): Promise<{ channel: ChannelRow; members: ChannelMember[] }> {
     const value = channelCreateSchema.parse(input);
+    if (value.prompt && !access.studio) throw new ChannelAccessError('Only Studio authority may set a Channel prompt.');
     const creator = memberRefSchema.parse(actor);
     const pets = [...new Set(value.pets)];
     for (const petId of pets) this.requirePet(petId);
@@ -160,6 +163,7 @@ export class ChannelService {
     const now = new Date().toISOString();
     const channel: ChannelRow = {
       channelId: randomUUID(), title: value.title, ...(value.description ? { description: value.description } : {}),
+      ...(value.prompt ? { prompt: value.prompt } : {}),
       createdBy: creator, createdAt: now, updatedAt: now,
     };
     const result = await this.store.transaction(async (store) => {
@@ -173,13 +177,19 @@ export class ChannelService {
     return result;
   }
 
-  async updateChannel(actor: MemberRef, channelId: string, input: unknown): Promise<ChannelRow> {
+  async updateChannel(actor: MemberRef, channelId: string, input: unknown, access: ChannelManageAccess = {}): Promise<ChannelRow> {
     const patch = channelUpdateSchema.parse(input);
     const channel = await this.store.transaction(async (store) => {
-      const current = await this.requireMemberIn(store, channelId, actor);
+      // Studio authority may recover the shared prompt without membership.
+      // Editing other metadata still requires membership, including mixed patches.
+      const current = access.studio && patch.prompt !== undefined && patch.title === undefined && patch.description === undefined
+        ? await this.requireChannel(store, channelId)
+        : await this.requireMemberIn(store, channelId, actor);
+      if (patch.prompt !== undefined && !access.studio) throw new ChannelAccessError('Only Studio authority may update a Channel prompt.');
       await store.updateChannel(current.channelId, {
         ...(patch.title !== undefined ? { title: patch.title } : {}),
         ...(patch.description !== undefined ? { description: patch.description || null } : {}),
+        ...(patch.prompt !== undefined ? { prompt: patch.prompt || null } : {}),
         updatedAt: new Date().toISOString(),
       });
       return (await store.getChannel(current.channelId))!;

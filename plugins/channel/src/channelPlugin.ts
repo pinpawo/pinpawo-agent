@@ -4,6 +4,7 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
+import { channelSystemContext } from './channelSystemContext';
 import { channelParticipantId } from './channelParticipants';
 import {
   channelRoutingOptionsSchema, createChannelRouter, routeInput,
@@ -100,6 +101,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHost: (() => void) | undefined;
   let removeHttp: (() => void) | undefined;
+  let removeContextProvider: (() => void) | undefined;
   let unexposeInputs: (() => void) | undefined;
   let router: ChannelRouter | undefined;
   /** Pet runs in a Channel that are executing now, by invocation. */
@@ -112,6 +114,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   /** Run a Pet in its session for this Channel. */
   async function dispatchPet(channelId: string, petId: string, request: string, idempotencyKey?: string): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
+    await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
     const receipt = await host().dispatch({
       petId, request,
@@ -264,7 +267,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   });
   const toolkit: AgentToolkit = {
     name: 'channel',
-    description: '读取所属 Channel 的上下文；本轮不调用工具的公开答复由 Host 作为你在 Channel 里的消息保存。',
+    description: '读取本次执行所属 Channel 的说明、成员和消息。',
     tools: [
       { tool: readContext, operation: { title: '读取 Channel' } },
     ],
@@ -272,7 +275,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   const inputs: ChannelInputsHook = { run };
 
   return {
-    name: 'channel', sendMessage, run, toolkits: [toolkit],
+    name: 'channel', contextNamespaces: ['channel'], sendMessage, run, toolkits: [toolkit],
     get service() { return channelService(); },
     start: async (studio) => {
       const store = options.store
@@ -287,6 +290,16 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       });
       const service = current;
       context = studio;
+      // A provider is scoped to a persisted (Pet, session) binding, not to the
+      // Pet globally. The Studio resolves it when preparing a run.
+      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope }) => {
+        const binding = await service.getSession(scope.id, petId);
+        if (!sessionId || !binding || binding.sessionId !== sessionId) {
+          throw new ChannelAccessError('Channel scope does not match the Pet session binding.');
+        }
+        const channel = await service.requireMember(binding.channelId, { kind: 'pet', id: petId });
+        return channelSystemContext(channel);
+      });
       router = createChannelRouter(options.routing, {
         ...(options.routeDecider ? { decider: options.routeDecider } : {}),
         resolveModel: studio.models.resolve,
@@ -336,10 +349,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           }),
           register('GET', '/channels/members', async ({ url }, actor, access) => ({ kind: 'json', body: { members: await service.listMembers(actor, channelOf(url), access) } })),
           register('GET', '/channels/sessions', async ({ url }, actor) => ({ kind: 'json', body: { sessions: await service.listSessions(actor, channelOf(url)) } })),
-          register('POST', '/channels', async ({ readJson }, actor) => ({ kind: 'json', status: 201, body: await service.createChannel(actor, await readJson()) })),
-          register('POST', '/channels/update', async ({ readJson }, actor) => {
+          register('POST', '/channels', async ({ readJson }, actor, access) => ({ kind: 'json', status: 201, body: await service.createChannel(actor, await readJson(), access) })),
+          register('POST', '/channels/update', async ({ readJson }, actor, access) => {
             const { channelId, ...patch } = withChannel.parse(await readJson());
-            return { kind: 'json', body: await service.updateChannel(actor, channelId, patch) };
+            return { kind: 'json', body: await service.updateChannel(actor, channelId, patch, access) };
           }),
           register('POST', '/channels/members', async ({ readJson }, actor, access) => {
             const { channelId, ...member } = withChannel.parse(await readJson());
@@ -360,6 +373,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       });
     },
     stop: () => {
+      removeContextProvider?.(); removeContextProvider = undefined;
       removeHttp?.(); removeHttp = undefined;
       unexposeInputs?.(); unexposeInputs = undefined;
       unsubscribe?.(); unsubscribe = undefined;

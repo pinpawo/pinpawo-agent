@@ -24,6 +24,7 @@ CREATE TABLE channels (
   channel_id      TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
   description     TEXT,
+  prompt          TEXT,                            -- 可选的 Channel 协作提示词
   created_by_kind TEXT NOT NULL CHECK(created_by_kind IN ('human','pet')),
   created_by_id   TEXT NOT NULL,
   created_at      TEXT NOT NULL,
@@ -70,14 +71,16 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 
 ## 规则
 
-- **访问**：请求必须带 Studio 认证后的 principal。不是当前成员的请求返回 403。
+- **访问**：请求必须带 Studio 认证后的 principal。不是当前成员的请求返回 403；下述 Studio authority 管理例外不授予读消息或发言权限。
+- **协作提示词**：当前成员可读；仅 Studio authority 可在创建时设置非空提示词，或在之后修改、清空提示词。普通客户端可以创建无提示词的 Channel，但创建者仍不可修改提示词。Studio authority 不在成员中时仅可单独修改提示词；同时修改标题或说明仍要求成员身份。它只表达协作意图，不改变 Host / PET 安全边界、工具权限或用户授权，也不保证模型遵循。
 - **发言**：作者来自 principal，请求正文不能指定作者。
 - **寻址**：只能 @ 当前成员；Pet 回复里的 @ 也按当前 Channel 的成员解析。
 - **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 要求操作者是成员。
   不能移除最后一个人类成员（返回 409），所以 Channel 不会只剩 Pet。持本机 token（`studio` 范围）的调用方
   不是成员也能列出所有 Channel（`GET /channels?all=true`）、查看和增删任何 Channel 的成员，但读消息、发言仍要先加入。
   创建时必须明确列出要加入的 Pet（`pets: [...]`），它们和创建者一起成为初始成员；不会自动加入所有 Pet。之后仍可增删。
-- **Pet 视角**：`channel_read_context` 返回 Channel 的标题、说明、成员和分页消息。
+- **Pet 视角**：`channel_read_context` 返回 Channel 的标题、说明、可选协作提示词、成员和分页消息。
+  协作提示词按运行作用域注入，启用路由时分配模型也可看到；路由仍仅处理无 @ 的人类消息。设计见 [Channel 协作提示词草案](channel-collaboration-prompt.md)。
 
 ## Pet 在 Channel 里
 
@@ -148,7 +151,7 @@ Channel 只向 Studio 的全局事件总线发布事件（新消息、投递结�
 interface ChannelStore {
   transaction<T>(run: () => T): T;
   createChannel(row: ChannelRow): void;
-  updateChannel(channelId: string, patch: { title?: string; description?: string | null }): void;
+  updateChannel(channelId: string, patch: { title?: string; description?: string | null; prompt?: string | null }): void;
   getChannel(channelId: string): ChannelRow | undefined;
   listChannels(filter: { member?: MemberRef }, page: Page): PageOf<ChannelRow>;
   listMembers(channelId: string): ChannelMemberRow[];

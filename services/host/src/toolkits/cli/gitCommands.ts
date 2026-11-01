@@ -81,7 +81,7 @@ const GIT_READ_FORMS: Record<string, (args: readonly string[]) => boolean> = {
         '--get-color', '--get-colorbool', '--list', '-l'].includes(arg));
   },
   worktree: (args) => args[0] === 'list',
-  reflog: (args) => !['expire', 'delete', 'drop'].includes(args[0] ?? ''),
+  reflog: (args) => !['expire', 'delete', 'drop', 'write'].includes(args[0] ?? ''),
   notes: (args) => args.length === 0 || ['list', 'show'].includes(args[0]),
   submodule: (args) => args.length === 0 || ['status', 'summary'].includes(args[0]),
 };

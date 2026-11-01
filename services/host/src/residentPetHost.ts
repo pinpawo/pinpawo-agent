@@ -324,6 +324,7 @@ export async function createResidentPetRuntime(
     runtimeDeps,
     graphService,
     runAgentTurn,
+    ...(options.resolveInvocationContext ? { resolveInvocationContext: options.resolveInvocationContext } : {}),
     loadContext,
     sessions,
     coordinator,

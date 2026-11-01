@@ -210,13 +210,15 @@ try {
   await page.keyboard.press('Escape');
   await sessionViewer.waitFor({ state: 'detached' });
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
+  await until(() => input.evaluate(node => document.activeElement === node), 'reply focuses the editor');
   await page.keyboard.type('Keep this draft when cancelling the reply.');
   assert.deepEqual(await composerMentions(), ['pet:alpha'], 'duplicate labels preserve the exact original author');
   await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
   assert.equal(await draft(), '@Analyst Keep this draft when cancelling the reply.');
   assert.deepEqual(await composerMentions(), ['pet:alpha']);
-  assert.equal(await input.evaluate(node => document.activeElement === node), true);
+  await until(() => input.evaluate(node => document.activeElement === node), 'cancel reply restores editor focus');
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
+  await until(() => input.evaluate(node => document.activeElement === node), 'second reply focuses the editor');
   await page.keyboard.type('Continue from the public reply.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await until(async () => (await context()).messages.some(item => item.replyTo === output.messageId), 'persisted reply');

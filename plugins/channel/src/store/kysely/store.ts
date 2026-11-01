@@ -10,6 +10,7 @@ function channelRow(record: Record<'channels'>): ChannelRow {
   return {
     channelId: record.channel_id, title: record.title,
     ...(record.description === null ? {} : { description: record.description }),
+    ...(record.prompt === null ? {} : { prompt: record.prompt }),
     createdBy: { kind: record.created_by_kind, id: record.created_by_id },
     createdAt: record.created_at, updatedAt: record.updated_at,
   };
@@ -48,15 +49,16 @@ export class KyselyChannelStore implements ChannelStore {
 
   async createChannel(row: ChannelRow): Promise<void> {
     await this.db.insertInto('channels').values({
-      channel_id: row.channelId, title: row.title, description: row.description ?? null,
+      channel_id: row.channelId, title: row.title, description: row.description ?? null, prompt: row.prompt ?? null,
       created_by_kind: row.createdBy.kind, created_by_id: row.createdBy.id, created_at: row.createdAt, updated_at: row.updatedAt,
     }).execute();
   }
 
-  async updateChannel(channelId: string, patch: { title?: string; description?: string | null; updatedAt: string }): Promise<void> {
+  async updateChannel(channelId: string, patch: { title?: string; description?: string | null; prompt?: string | null; updatedAt: string }): Promise<void> {
     const result = await this.db.updateTable('channels').set({
       ...(patch.title !== undefined ? { title: patch.title } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
       updated_at: patch.updatedAt,
     }).where('channel_id', '=', channelId).executeTakeFirst();
     if (Number(result.numUpdatedRows) !== 1) throw new Error(`Unknown Channel "${channelId}".`);

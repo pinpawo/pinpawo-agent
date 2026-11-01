@@ -553,7 +553,6 @@ test('main tool calls reach the conversation as messages and settle, including c
   } }, new Map()), null);
 });
 
-
 test('protocol content-block-start emits initial text but never reasoning text', () => {
   const state: RootStreamAdapterState = new Map();
   const namespace = ['entryAnswer:task'];
@@ -587,4 +586,25 @@ test('committed message fallback and tool call projections exclude private text 
   for await (const event of adaptRootStream(events())) results.push(event);
   const text = results.filter(event => event.type === 'assistant.delta' || event.type === 'tool_calls.message');
   assert.deepEqual(text.map(event => event.text), ['Public text', 'Public text']);
+});
+
+test('committed native reply publishes the same text as the live stream without thinking blocks', async () => {
+  const reply = setAgentMessageMetadata(new AIMessage({ id: 'native-reply', content: [
+    { type: 'text', text: 'Hello' },
+    { type: 'thinking', thinking: 'private reasoning', signature: 'signature' },
+    { type: 'text', text: ' world' },
+  ] }), { runId: 'current' });
+  async function* protocolEvents(): AsyncGenerator<RootProtocolEvent> {
+    yield { type: 'event', seq: 0, method: 'values', params: { namespace: [], data: { runId: 'current', messages: [] } } };
+    yield { type: 'event', seq: 1, method: 'messages', params: { namespace: ['entryAnswer:1', 'model:2'], data: { event: 'message-start', id: 'native-reply' } } };
+    yield { type: 'event', seq: 2, method: 'messages', params: { namespace: ['entryAnswer:1', 'model:2'], data: { event: 'content-block-delta', delta: { type: 'text-delta', text: 'Hello' } } } };
+    yield { type: 'event', seq: 3, method: 'messages', params: { namespace: ['entryAnswer:1', 'model:2'], data: { event: 'content-block-delta', delta: { type: 'reasoning-delta', reasoning: 'private reasoning' } } } };
+    yield { type: 'event', seq: 4, method: 'messages', params: { namespace: ['entryAnswer:1', 'model:2'], data: { event: 'content-block-delta', delta: { type: 'text-delta', text: ' world' } } } };
+    yield { type: 'event', seq: 5, method: 'values', params: { namespace: [], data: { runId: 'current', messages: [reply] } } };
+  }
+  const events: RootStreamChatEvent[] = [];
+  for await (const event of adaptRootStream(protocolEvents())) events.push(event);
+  assert.deepEqual(events.filter(event => event.type === 'assistant.delta'), [
+    { type: 'assistant.delta', node: null, messageId: 'native-reply', text: 'Hello world' },
+  ]);
 });

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
+import { ensureActiveTuiSession, loadTuiSessionState, saveTuiSessionState, setTuiSessionPendingDispatch } from '../session/tuiSessionRegistry';
 import type { TuiSessionPendingDispatch } from '../session/tuiSessionRegistry';
 import type { PetDispatchLifecycleEvent } from './contracts';
 import { continueSuspendedDispatch } from './dispatchContinuation';
@@ -72,11 +76,13 @@ test('answering the recorded review continues the dispatch under its original id
 
 test('a continuation that stops on another review stays suspended on it', async () => {
   const h = harness();
+  h.session.pendingDispatch!.systemPromptSections = [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }];
   await h.continueWith(async () => ({ status: 'waiting' }), 'review-2')(h.turn('review-1'));
   assert.equal(h.events.at(-1)?.state, 'waiting');
   assert.equal(h.events.at(-1)?.pendingInterrupt?.interruptId, 'review-2');
   assert.equal(h.session.pendingDispatch?.interruptId, 'review-2');
   assert.equal(h.session.pendingDispatch?.dispatchId, 'dispatch-1');
+  assert.deepEqual(h.session.pendingDispatch?.systemPromptSections, [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }]);
 });
 
 test('a stop that leaves the review pending keeps the dispatch waiting', async () => {
@@ -136,4 +142,45 @@ test('the continued run reply reports under the original dispatch', async () => 
     ['message', 'dispatch-1', 'ch-1', 'message.completed'],
     ['completed', 'dispatch-1', 'ch-1', undefined],
   ]);
+});
+
+
+test('resuming a persisted dispatch after restart restores its original prompt snapshot', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dispatch-prompt-'));
+  const filePath = join(directory, 'sessions.json');
+  const state = loadTuiSessionState(filePath);
+  const original = ensureActiveTuiSession(state, 'pet', 'test-profile');
+  setTuiSessionPendingDispatch(state, original.id, {
+    interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it',
+    scope: { namespace: 'channel', id: 'ch-1' },
+    systemPromptSections: [{ id: 'channel:collaboration', owner: 'channel', content: 'before restart' }],
+  });
+  saveTuiSessionState(state, filePath);
+
+  // Loading a fresh registry models a Host restart, including its serialized snapshot.
+  const restarted = loadTuiSessionState(filePath);
+  const session = restarted.sessions[original.id]!;
+  const h = harness();
+  let observed: unknown;
+  const resume = continueSuspendedDispatch({
+    petId: 'pet',
+    sessions: {
+      findSessionByThread: () => session,
+      setPendingDispatch: (id: string, value: TuiSessionPendingDispatch | null) => setTuiSessionPendingDispatch(restarted, id, value),
+    } as never,
+    publishLifecycle: () => {},
+    run: async (options) => {
+      observed = options.setup.input.context?.systemPromptSections;
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  await resume({
+    ...h.turn('review-1'),
+    setup: { input: { threadId: session.threadId, context: { systemPromptSections: [{ id: 'pet:document', content: 'pet identity' }] } } },
+  } as never);
+  assert.deepEqual(observed, [
+    { id: 'pet:document', content: 'pet identity' },
+    { id: 'channel:collaboration', owner: 'channel', content: 'before restart' },
+  ]);
+  assert.equal(restarted.sessions[session.id]?.pendingDispatch, undefined);
 });

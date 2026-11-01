@@ -3,16 +3,18 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { parseConfigValue } from '@pinpawo/pet-agent';
 
 import {
   loadPetDocument,
   loadPetConfigs,
+  petConfigSchema,
   resolvePetCapabilityDirectory,
+  resolveSharedCapabilityDirectory,
   resolvePetDocumentPath,
 } from './petConfig';
 
-// 本文件只覆盖**文件入口**:去哪读、读哪些、目录级一致性。
-// schema 与字段校验的测试在上层 configSchema.test.ts。
+// File entry conventions plus shared-reference configuration at the Host boundary.
 
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -93,6 +95,18 @@ test('resolvePetCapabilityDirectory derives the conventional per-Pet root', () =
     () => resolvePetCapabilityDirectory('/workspace/.pinpawo/pets', ''),
     /safe path segment/,
   );
+});
+
+test('shared Capability configuration selects unique names without treating them as paths', () => {
+  const base = { definitionId: 'worker', name: 'Worker' };
+  assert.deepEqual(parseConfigValue({ ...base, sharedCapabilities: [' channel_context ', 'lookup-v2'] }, petConfigSchema, 'pet.json').sharedCapabilities,
+    ['channel_context', 'lookup-v2']);
+  assert.deepEqual(parseConfigValue({ ...base, sharedCapabilities: [] }, petConfigSchema, 'pet.json').sharedCapabilities, []);
+  assert.equal(parseConfigValue(base, petConfigSchema, 'pet.json').sharedCapabilities, undefined);
+  for (const sharedCapabilities of [null, 'channel_context', [1], [''], [' '], ['../escape'], ['UpperCase'], ['a/b'], ['context', ' context ']]) {
+    assert.throws(() => parseConfigValue({ ...base, sharedCapabilities }, petConfigSchema, 'pet.json'), /sharedCapabilities/);
+  }
+  assert.equal(resolveSharedCapabilityDirectory('/workspace/.pinpawo/pets'), path.resolve('/workspace/.pinpawo/capabilities'));
 });
 
 test('loadPetDocument reads the conventional optional PET.md document', async () => {

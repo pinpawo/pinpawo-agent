@@ -82,6 +82,33 @@ test('compaction includes completed main tool results in the summary input', asy
   assert.ok(!compacted.messages.includes(result));
 });
 
+test('compaction retains standard message text without reasoning in input or output', async () => {
+  let summaryInput = '';
+  const model = {
+    invoke: async (messages: BaseMessage[]) => {
+      summaryInput = String(messages.at(-1)?.content);
+      return new AIMessage({ content: [
+        { type: 'thinking', thinking: 'PRIVATE_SUMMARY_THOUGHT', signature: 'sig' },
+        { type: 'text', text: 'safe summary' },
+      ] });
+    },
+  } as unknown as BaseChatModel;
+  const result = await compactOrchestratorMessages({
+    messages: [new HumanMessage({ content: [{ type: 'text', text: 'human context' }] }),
+      new AIMessage({ content: [
+        { type: 'thinking', thinking: 'PRIVATE_HISTORY_THOUGHT', signature: 'sig' },
+        { type: 'text', text: 'public history' },
+      ] }), new HumanMessage('latest')],
+    model,
+    options: { keepMessages: 1 },
+  });
+  assert.match(summaryInput, /human context/);
+  assert.match(summaryInput, /public history/);
+  assert.doesNotMatch(summaryInput, /PRIVATE_HISTORY_THOUGHT/);
+  assert.ok(result.messages.some(message => String(message.content).includes('safe summary')));
+  assert.ok(result.messages.every(message => !String(message.content).includes('PRIVATE_SUMMARY_THOUGHT')));
+});
+
 function usageMessage(content: string, inputTokens: number) {
   return new AIMessage({
     content,

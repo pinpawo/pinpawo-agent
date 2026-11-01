@@ -1,6 +1,6 @@
 ---
 name: wiki_maintenance
-description: 根据代码、审查与任务进度维护项目 Wiki 的整体概览。
+description: 根据 Channel、GitHub 交付结果及必要的来源核验维护项目 Wiki，交付有来源和状态区分的知识页面；不承担业务代码修复或独立验收。
 uses:
   - files
   - shell
@@ -16,6 +16,11 @@ version: 1
 
 维护相互链接、随项目持续更新的 Markdown Wiki。Wiki 是项目知识的
 持久成果：新证据会被整合进已有知识，而不是只生成一次性的任务摘要。
+
+围绕当前请求及 Channel、GitHub 中的相关交付维护知识。代码核验用于确认
+文档事实，缺失的实现或验收结论应记为未完成或待确认，不自行修复业务代码、
+替成员完成验收或管理 Issue 状态。区分草案、已审查、已合并、已部署和未知；
+代码或 PR 的存在不代表线上已生效。
 
 采用 Andrej Karpathy 的
 [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)

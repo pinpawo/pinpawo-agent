@@ -45,7 +45,7 @@ test('any git write, program-running option or unknown form is not read-only', (
     'push --force origin HEAD', 'push -f', 'push --force-with-lease', 'push --delete origin x',
     'push origin :x', 'push origin +HEAD:main',
     'push origin -- :refs/heads/main', 'push origin -- +HEAD:refs/heads/main', 'rm -f file', 'reflog expire --all',
-    'gc --prune=now', 'update-ref -d refs/heads/x', 'worktree remove --force ../x',
+    'reflog write refs/heads/main old new message', 'gc --prune=now', 'update-ref -d refs/heads/x', 'worktree remove --force ../x',
     '-c core.pager=sh status', '--exec-path=/tmp log', 'my-alias', 'filter-branch', '',
   ], false);
 });

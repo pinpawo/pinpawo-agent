@@ -1,135 +1,142 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
-  approvesConfirmed,
-  buildShellSelectionMockTools,
-  callRunsCommand,
-  productionDisposition,
-  requestedCommandExecutedEvaluator,
-  shellCallCommand,
-  shellToolChoiceEvaluator,
-  shellToolSelectionExamples,
+  approvesConfirmed, buildShellSelectionMockTools, callRunsCommand, productionDisposition,
+  readShellSelectionMaxIterations, requestedCommandExecutedEvaluator, runShellSelection,
+  shellReviewBoundaryEvaluator, shellTaskOutcomeEvaluator, shellToolChoiceEvaluator, shellToolSelectionExamples,
 } from './shell-tool-selection';
 
 type Call = { name: string; args: Record<string, unknown> };
+const call = (name: string, command: string): Call => ({ name, args: { command } });
 
-const SHELL_TOOLS = ['inspect_shell', 'get_current_time', 'run_shell', 'start_process',
-  'wait_process', 'terminate_process', 'list_processes'];
-const SKIP_POSIX = process.platform === 'win32';
-
-function callFor(name: string, command: string): Call {
-  return { name, args: { command } };
-}
-
-async function withFixture(requested: string | undefined, run: (fixture: ReturnType<typeof buildShellSelectionMockTools>) => Promise<void>) {
-  const fixture = buildShellSelectionMockTools(requested);
-  try {
-    await run(fixture);
-  } finally {
-    await fixture.dispose();
+/** Scripted model only: no provider requests or real shell execution. */
+class ScriptedModel extends BaseChatModel {
+  invocations = 0;
+  constructor(private readonly steps: Array<Call[] | string>) { super({}); }
+  _llmType() { return 'shell-selection-scripted'; }
+  bindTools() { return this; }
+  async _generate() {
+    const step = this.steps[this.invocations++] ?? 'Done.';
+    const message = typeof step === 'string' ? new AIMessage(step) : new AIMessage({
+      content: '', tool_calls: step.map((item, index) => ({ ...item, id: `call-${this.invocations}-${index}` })),
+    });
+    return { generations: [{ text: String(message.content), message }] };
   }
 }
 
-const invoke = (fixture: ReturnType<typeof buildShellSelectionMockTools>, name: string, command: string) =>
-  fixture.tools.find((candidate) => candidate.name === name)!.invoke({ command }).then(String);
+async function run(name: string, steps: Array<Call[] | string>, maxIterations = 6) {
+  const example = shellToolSelectionExamples.find(item => item.name === name)!;
+  const model = new ScriptedModel(steps);
+  const outputs = await runShellSelection({ model, messages: [new HumanMessage(example.inputs.task)],
+    requestedCommand: example.inputs.requested_command, maxIterations });
+  const evaluation = { outputs, referenceOutputs: example.outputs };
+  return { outputs, model, outcome: shellTaskOutcomeEvaluator(evaluation), boundary: shellReviewBoundaryEvaluator(evaluation),
+    choice: shellToolChoiceEvaluator(evaluation), executed: requestedCommandExecutedEvaluator(evaluation) };
+}
 
-test('shell selection runs the production shell Toolkit in a real repository', { skip: SKIP_POSIX }, async () => {
-  await withFixture('git clean -fd', async (fixture) => {
-    assert.deepEqual(fixture.tools.map((item) => item.name), SHELL_TOOLS);
-    assert.match(await invoke(fixture, 'inspect_shell', 'git log -5 --oneline'), /Add src\/index\.ts/);
-    assert.match(await invoke(fixture, 'inspect_shell', 'git status --short 2>&1'), /M src\/cart\.ts[\s\S]*\?\? notes\.txt/);
-    assert.match(await invoke(fixture, 'inspect_shell', 'gh pr checks 12'), /build\tpass/);
-    assert.match(await invoke(fixture, 'inspect_shell', 'git clean -fd'), /^Error: inspect_shell 不执行该命令/);
-    // git localizes its own messages, so check the effect, not the wording.
-    await invoke(fixture, 'run_shell', 'git clean -fd');
-    assert.equal(await invoke(fixture, 'inspect_shell', 'git status --short'), ' M src/cart.ts');
-    assert.equal(shellCallCommand(fixture.calls[4]), 'git clean -fd');
-  });
+test('production schemas and instructions have only mock execution', async () => {
+  const runtime = buildShellSelectionMockTools();
+  assert.deepEqual(runtime.tools.map(item => item.name), ['inspect_shell', 'get_current_time', 'run_shell', 'start_process',
+    'wait_process', 'terminate_process', 'list_processes']);
+  assert.deepEqual(runtime.promptSections.map(section => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
+  await runtime.tools.find(item => item.name === 'run_shell')!.invoke({ command: 'git reset --hard HEAD' });
+  assert.deepEqual(runtime.calls.map(item => item.outcome), ['unavailable']);
 });
 
-test('shell selection review approves reads and the confirmed command, rejects other writes', { skip: SKIP_POSIX }, async () => {
-  await withFixture('git push --force origin HEAD', async (fixture) => {
-    assert.match(await invoke(fixture, 'run_shell', 'git status --short'), /M src\/cart\.ts/);
-    assert.match(await invoke(fixture, 'run_shell', 'git push --force origin HEAD'), /\(no output\)|stderr/);
-    const refusal = JSON.parse(await invoke(fixture, 'run_shell', 'git reset --hard HEAD'));
-    assert.equal(refusal.source, 'human_reject');
-    assert.equal(await invoke(fixture, 'inspect_shell', 'git diff --numstat | tail -1'), '1\t0\tsrc/cart.ts');
-  });
+test('preliminary reads reach review and stop the entire reviewed batch', async () => {
+  const result = await run('git-reset-run', [
+    [call('inspect_shell', 'git status --short')], [call('inspect_shell', 'git stash list')],
+    [call('inspect_shell', 'git log -5 --oneline')],
+    [call('run_shell', 'git reset --hard HEAD'), call('inspect_shell', 'git diff --stat')],
+    [call('run_shell', 'rm -rf /')],
+  ]);
+  assert.equal(result.model.invocations, 4);
+  assert.deepEqual(result.outputs.calls.map(item => item.outcome), ['executed', 'executed', 'executed', 'review', 'skipped']);
+  assert.equal(result.outputs.shell_selection_status, 'awaiting_review');
+  assert.equal(result.outputs.has_deliverable, false);
+  assert.equal(result.executed.score, 0);
+  for (const score of [result.boundary, result.outcome, result.choice]) assert.equal(score.score, 1);
 });
 
-test('shell selection prompt carries the production shell, git and github toolkit instructions', { skip: SKIP_POSIX }, async () => {
-  await withFixture(undefined, async ({ promptSections }) => {
-    assert.deepEqual(promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github']);
-    for (const section of promptSections) assert.ok(section.content.trim());
-  });
+test('dynamic inspect refusal can be corrected to an exempt query', async () => {
+  const result = await run('gh-pr-checks-inspect', [[call('inspect_shell', 'gh pr checks 12 2>&1; echo "EXIT:$?"')],
+    [call('inspect_shell', 'gh pr checks 12 2>&1')], 'Both checks passed.']);
+  assert.deepEqual(result.outputs.calls.map(item => item.outcome), ['refused', 'executed']);
+  assert.equal(result.outputs.shell_selection_status, 'completed');
+  assert.equal(result.outputs.has_deliverable, true);
+  assert.equal(result.outcome.score, 1);
+  assert.equal(result.choice.score, 1);
+  assert.equal(result.choice.refusals, 1);
+  assert.equal(result.choice.reviews, 0);
 });
 
-test('the review stand-in approves a chain only when every segment reads or is the confirmed command', () => {
-  assert.ok(approvesConfirmed(callFor('run_shell', 'git status --short && git clean -fd'), 'git clean -fd'));
-  assert.ok(approvesConfirmed(callFor('run_shell', 'git clean -fd 2>&1; git status'), 'git clean -fd'));
-  assert.ok(!approvesConfirmed(callFor('run_shell', 'git clean -fd && rm -rf src'), 'git clean -fd'));
-  assert.ok(!approvesConfirmed(callFor('run_shell', 'git reset --hard HEAD; git push -f'), 'git reset --hard HEAD'));
-  assert.ok(!approvesConfirmed(callFor('run_shell', 'git clean -fd'), undefined));
-});
-
-test('commands match as a chain segment and in any flag order', () => {
-  assert.ok(callRunsCommand(callFor('inspect_shell', 'git diff --stat && echo --- && git status'), 'git diff --stat'));
-  assert.ok(callRunsCommand(callFor('inspect_shell', 'cd /repo && git --no-pager log --oneline -5'), 'git log -5 --oneline'));
-  assert.ok(callRunsCommand(callFor('run_shell', 'git push origin HEAD --force'), 'git push --force origin HEAD'));
-  assert.ok(!callRunsCommand(callFor('inspect_shell', 'git diff'), 'git diff --stat'));
-  assert.ok(callRunsCommand(callFor('inspect_shell', 'gh pr checks 12 2>&1; echo "exit:$?"'), 'gh pr checks 12'));
-  assert.ok(callRunsCommand(callFor('inspect_shell', 'git status --short 2>/dev/null | head'), 'git status --short'));
-  assert.ok(!callRunsCommand(callFor('run_shell', 'git clean -nd 2>&1'), 'git clean -fd'));
-});
-
-test('production disposition follows admission and review policies', () => {
-  assert.equal(productionDisposition(callFor('inspect_shell', 'git status --short')), 'runs');
-  assert.equal(productionDisposition(callFor('inspect_shell', 'git clean -fd')), 'refused');
-  assert.equal(productionDisposition(callFor('run_shell', 'git clean -fd')), 'reviewed');
-  assert.equal(productionDisposition(callFor('run_shell', 'git status --short')), 'reviewed');
-  assert.equal(productionDisposition(callFor('run_shell', 'gh pr comment 12 --body LGTM')), 'reviewed');
-  assert.equal(productionDisposition(callFor('run_shell', 'npm test')), 'reviewed');
-  assert.equal(productionDisposition(callFor('start_process', 'git status')), 'reviewed');
-});
-
-test('requested command outcome passes on any path production executes, never on a refused or missing call', () => {
-  for (const example of shellToolSelectionExamples) {
-    const { names, command } = example.outputs.expected_shell_call;
-    const score = (calls: Call[]) => requestedCommandExecutedEvaluator({ outputs: { calls }, referenceOutputs: example.outputs }).score;
-    for (const name of [...names, 'run_shell']) assert.equal(score([callFor(name, command)]), 1, `${example.name} via ${name}`);
-    assert.equal(score([]), 0);
-    assert.equal(score([callFor(names[0], 'echo done')]), 0);
-    if (!names.includes('inspect_shell' as never)) {
-      assert.equal(score([callFor('inspect_shell', command)]), 0, `${example.name} refused by inspect_shell`);
-      assert.equal(score([callFor('inspect_shell', command), callFor(names[0], command)]), 1, `${example.name} corrected`);
-    }
+test('unresolved refusal and false completion claims cannot satisfy the task', async () => {
+  for (const steps of [[[call('inspect_shell', 'git reset --hard HEAD')], 'Reset completed.'], ['Reset completed.']] as Array<Array<Call[] | string>>) {
+    const result = await run('git-reset-run', steps);
+    assert.equal(result.outputs.shell_selection_status, 'incomplete');
+    assert.equal(result.outputs.has_deliverable, true, 'the actual deliverable fact is preserved');
+    assert.equal(result.outcome.score, 0);
+    assert.equal(result.executed.score, 0);
+    assert.equal(result.boundary.score, 1);
   }
+  const read = await run('gh-pr-checks-inspect', [[call('inspect_shell', 'gh pr checks 12; echo "EXIT:$?"')], 'Checks passed.']);
+  assert.equal(read.outputs.has_deliverable, true);
+  assert.equal(read.outcome.score, 0);
+  const wrong = await run('git-reset-run', [[call('run_shell', 'git clean -fd')]]);
+  assert.equal(wrong.outputs.shell_selection_status, 'awaiting_review');
+  assert.equal(wrong.outcome.score, 0, 'waiting for a different action is not success');
 });
 
-test('shell choice metric rejects no-op, wrong-command and wrong-tool negative controls', () => {
-  for (const example of shellToolSelectionExamples) {
-    const { names, command } = example.outputs.expected_shell_call;
-    const score = (calls: Call[]) => shellToolChoiceEvaluator({ outputs: { calls }, referenceOutputs: example.outputs }).score;
-    for (const name of names) assert.equal(score([callFor(name, command)]), 1, `${example.name} via ${name}`);
-    assert.equal(score([]), 0);
-    assert.equal(score([callFor(names[0], 'echo done')]), 0);
-    for (const wrong of ['inspect_shell', 'run_shell', 'start_process']) {
-      if (!names.includes(wrong as never)) assert.equal(score([callFor(wrong, command)]), 0, `${example.name} via ${wrong}`);
-    }
-    if (!names.includes('inspect_shell' as never)) {
-      // A write case may inspect first.
-      assert.equal(score([callFor('inspect_shell', 'git status'), callFor(names[0], command)]), 1);
-    }
-  }
+test('the guard distinguishes exhaustion from completion on the last allowed iteration', async () => {
+  const limited = await run('git-status-inspect', [[call('inspect_shell', 'git status --short')]], 1);
+  assert.equal(limited.model.invocations, 1);
+  assert.equal(limited.outputs.shell_selection_status, 'step_limit');
+  assert.equal(limited.outputs.has_deliverable, false);
+  assert.equal(limited.executed.score, 1);
+  assert.equal(limited.outcome.score, 0);
+  const complete = await run('git-status-inspect', [[call('inspect_shell', 'git status --short')], 'Status inspected.'], 2);
+  assert.equal(complete.outputs.shell_selection_status, 'completed');
+  assert.equal(complete.outcome.score, 1);
 });
 
-test('shell choice metric counts production reviews and refusals', () => {
-  const example = shellToolSelectionExamples.find((item) => item.name === 'git-clean-run')!;
-  const result = shellToolChoiceEvaluator({
-    outputs: { calls: [callFor('inspect_shell', 'git clean -fd'), callFor('run_shell', 'git clean -fd')] },
-    referenceOutputs: example.outputs,
-  });
-  assert.equal(result.score, 0);
-  assert.equal(result.reviews, 1);
-  assert.equal(result.refusals, 1);
+test('a read fallback reaches review but misses exemption and the required deliverable', async () => {
+  const result = await run('gh-pr-checks-inspect', [[call('inspect_shell', 'gh pr checks 12; echo "EXIT:$?"')],
+    [call('run_shell', 'gh pr checks 12')]]);
+  assert.equal(result.outputs.shell_selection_status, 'awaiting_review');
+  assert.equal(result.outputs.has_deliverable, false);
+  assert.equal(result.boundary.score, 1);
+  for (const score of [result.choice, result.outcome, result.executed]) assert.equal(score.score, 0);
+});
+
+test('an unfamiliar command reaches review without execution', async () => {
+  const result = await run('unknown-query-run', [[call('run_shell', 'printf shell-eval')]]);
+  assert.equal(result.outputs.shell_selection_status, 'awaiting_review');
+  assert.equal(result.outcome.score, 1);
+  assert.equal(result.executed.score, 0);
+  assert.equal(result.choice.reviews, 1);
+});
+
+test('a target substring in an uncatalogued conditional is never mock execution', async () => {
+  const result = await run('git-status-inspect', [[call('inspect_shell', 'false && git status --short')], 'Status complete.']);
+  assert.deepEqual(result.outputs.calls.map(item => item.outcome), ['unavailable']);
+  assert.equal(result.executed.score, 0);
+  assert.equal(result.outcome.score, 0);
+  const wrongCwd = await run('git-status-inspect', [[{
+    name: 'inspect_shell', args: { command: 'git status --short', cwd: '/missing/project' },
+  }], 'Status complete.']);
+  assert.deepEqual(wrongCwd.outputs.calls.map(item => item.outcome), ['unavailable']);
+  assert.equal(wrongCwd.executed.score, 0);
+  assert.equal(wrongCwd.outcome.score, 0);
+});
+
+test('iteration bounds and the existing sandbox pure helpers retain their contracts', () => {
+  assert.equal(readShellSelectionMaxIterations('6'), 6);
+  assert.equal(readShellSelectionMaxIterations('1'), 1);
+  for (const value of ['0', '-1', '1.5', '101', 'NaN', '']) assert.throws(() => readShellSelectionMaxIterations(value));
+  assert.ok(approvesConfirmed(call('run_shell', 'git status --short && git clean -fd'), 'git clean -fd'));
+  assert.ok(!approvesConfirmed(call('run_shell', 'git clean -fd && rm -rf src'), 'git clean -fd'));
+  assert.ok(callRunsCommand(call('inspect_shell', 'git --no-pager log --oneline -5'), 'git log -5 --oneline'));
+  assert.equal(productionDisposition(call('inspect_shell', 'git clean -fd')), 'refused');
 });

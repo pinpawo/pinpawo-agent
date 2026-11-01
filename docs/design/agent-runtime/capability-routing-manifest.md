@@ -50,8 +50,14 @@ Every allowed Capability appears once. No model rewrites descriptions, invents
 search cues, or drops Toolkit metadata.
 
 The model-facing manifest excludes complete instructions, individual tool schemas,
-Toolkit instructions, paths, digests, and provenance. Dynamic registry facts enter
-invocation context, not the stable system prompt or canonical root messages.
+Toolkit instructions, paths, digests, and provenance. Supervisor receives these
+registry facts in its invocation context, not its stable system prompt.
+
+Entry Answer uses the same catalog, manifest and renderer to include the current
+Capability summary in its system prompt before resolving the goal. The summary
+is rebuilt from the current invocation's registry and Host allowlist; shared
+PET.md and Channel system sections retain their existing injection path. Neither
+projection is appended to canonical root messages.
 
 ## Disclosure and lifetime
 

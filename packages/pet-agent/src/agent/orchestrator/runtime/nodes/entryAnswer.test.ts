@@ -430,7 +430,6 @@ function routingScript(turns: AIMessage[], entryAnswerToolOptions?: Record<strin
 
 test('Entry routing asks the provider for a single routing call when invoked', async () => {
   const { graph, bindOptions } = routingScript([new AIMessage(randomUUID())]);
-  assert.deepEqual(bindOptions, []);
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage(randomUUID())]), invokeConfig());
   assert.deepEqual(bindOptions, [{ parallel_tool_calls: false }]);
 });
@@ -438,14 +437,13 @@ test('Entry routing asks the provider for a single routing call when invoked', a
 test('Entry routing forwards host-selected tool binding options in both context modes', async () => {
   const options = { tool_choice: { type: 'auto', disable_parallel_tool_use: true } };
   const { graph, bindOptions } = routingScript([new AIMessage(randomUUID()), new AIMessage(randomUUID())], options);
-  assert.deepEqual(bindOptions, []);
   for (const hasExternalContext of [false, true]) await graph.invoke(
     buildOrchestratorRunInput([new HumanMessage(randomUUID())]), {
       ...invokeConfig(),
       ...(hasExternalContext ? { context: { workdir: null, systemPromptSections: [{ id: randomUUID(), content: randomUUID() }] } } : {}),
     },
   );
-  assert.deepEqual(bindOptions, [options, options]);
+  assert.deepEqual(bindOptions, [options]);
 });
 
 test('Entry hands off once when a streamed turn also carries its call as a content block', async () => {
@@ -561,34 +559,21 @@ test('root invocation context reaches direct Entry replies and final Answer with
   }
 });
 
-test('Entry tool variants preserve their schemas while selecting different goal guidance', () => {
+test('Entry routing goals retain validation and optional continuation semantics', () => {
   const goal = randomUUID();
   for (const makeTool of [createPlanRequestTool, createContinueTool]) {
-    const defaults = makeTool();
-    const plain = makeTool(false);
-    const scoped = makeTool(true);
-    assert.deepEqual(entryToolDescriptions([defaults]), entryToolDescriptions([plain]));
-    assert.notEqual(plain.schema.shape.goal.description, scoped.schema.shape.goal.description);
-    assert.deepEqual(Object.keys(plain.schema.shape), ['goal']);
-    assert.deepEqual(Object.keys(scoped.schema.shape), Object.keys(plain.schema.shape));
-    assert.equal(scoped.name, plain.name);
-    assert.equal(scoped.schema.shape.goal.isOptional(), plain.schema.shape.goal.isOptional());
-    for (const input of [{ goal }, { goal: `  ${goal}\n` }, {}, { goal: '' }, { goal: ' \n ' },
+    const routingTool = makeTool();
+    assert.deepEqual(Object.keys(routingTool.schema.shape), ['goal']);
+    assert.deepEqual(routingTool.schema.parse({ goal: `  ${goal}\n` }), { goal });
+    assert.equal(routingTool.schema.safeParse({}).success, routingTool.name === 'continue');
+    for (const input of [{ goal: '' }, { goal: ' \n ' },
       { goal: 7 }, { goal: null }, { goal, unexpected: true }, { goal: goal.repeat(100) }]) {
-      const summarize = (result: ReturnType<typeof plain.schema.safeParse>) => result.success
-        ? { success: true, data: result.data }
-        : { success: false, issues: result.error.issues.map(({ code, path }) => ({ code, path })) };
-      assert.deepEqual(summarize(scoped.schema.safeParse(input)), summarize(plain.schema.safeParse(input)));
+      assert.equal(routingTool.schema.safeParse(input).success, false);
     }
-    assert.deepEqual(scoped.schema.parse({ goal: `  ${goal}\n` }), { goal });
-    assert.equal(scoped.schema.safeParse({}).success, scoped.name === 'continue');
-    assert.equal(scoped.schema.safeParse({ goal, unexpected: true }).success, false);
   }
-  assert.equal(buildEntryAnswerSystemPrompt(), buildEntryAnswerSystemPrompt(false));
-  assert.notEqual(buildEntryAnswerSystemPrompt(false), buildEntryAnswerSystemPrompt(true));
 });
 
-test('only external system sections select role-aware Entry input and bound tools', async t => {
+test('external system sections select role-aware Entry input while sharing the same tools', async t => {
   const workdir = `/tmp/${randomUUID()}`;
   const section = (id: string) => ({ id, content: randomUUID() });
   const cases: Array<{ name: string; context?: AgentRuntimeContext; scoped: boolean }> = [
@@ -620,7 +605,7 @@ test('only external system sections select role-aware Entry input and bound tool
     const { messages, tools, options } = observed.invocations[0];
     assert.deepEqual(options, { parallel_tool_calls: false });
     assert.deepEqual(entryToolDescriptions(tools), entryToolDescriptions([
-      createPlanRequestTool(scenario.scoped), createContinueTool(scenario.scoped),
+      createPlanRequestTool(), createContinueTool(),
     ]));
     const systems = messages.filter(message => message._getType() === 'system');
     assert.equal(systems.length, 1);
@@ -651,7 +636,7 @@ test('only external system sections select role-aware Entry input and bound tool
   });
 });
 
-test('one Entry graph switches external context on, off and on without retaining summaries or bound guidance', async () => {
+test('one Entry graph switches external context on, off and on without retaining summaries or changing tools', async () => {
   const capabilities = [entryCapability(), entryCapability(), entryCapability()];
   const firstSection = { id: randomUUID(), content: randomUUID() };
   const nextSection = { id: randomUUID(), content: randomUUID() };
@@ -670,7 +655,7 @@ test('one Entry graph switches external context on, off and on without retaining
     const system = messages[0].text;
     const scoped = index !== 1;
     assert.deepEqual(entryToolDescriptions(tools), entryToolDescriptions([
-      createPlanRequestTool(scoped), createContinueTool(scoped),
+      createPlanRequestTool(), createContinueTool(),
     ]));
     if (scoped) {
       assert.deepEqual(readCapabilityManifest(system).capabilities, [{
@@ -686,7 +671,7 @@ test('one Entry graph switches external context on, off and on without retaining
     assert.equal(system.includes(firstSection.content), index === 0);
     assert.equal(system.includes(nextSection.content), index === 2);
   }
-  assert.notDeepEqual(entryToolDescriptions(observed.invocations[0].tools), entryToolDescriptions(observed.invocations[1].tools));
+  assert.deepEqual(entryToolDescriptions(observed.invocations[0].tools), entryToolDescriptions(observed.invocations[1].tools));
   assert.deepEqual(entryToolDescriptions(observed.invocations[0].tools), entryToolDescriptions(observed.invocations[2].tools));
 });
 

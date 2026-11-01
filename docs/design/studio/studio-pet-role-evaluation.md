@@ -50,14 +50,17 @@ Channel protocol, metadata, and an optional announcement. The shared
 appends these sections after the internal stage prompt, followed by the structured
 workdir and any execution-local sections.
 
-Entry selects its identity-aware system instructions, Capability manifest and
-matching `plan_request`/`continue` descriptions only when the invocation's
-`context.systemPromptSections` array is non-empty after schema validation. This
-fixture exercises that form through real Host and Channel assembly. The condition
+Entry selects its identity-aware system instructions and Capability manifest only
+when the invocation's `context.systemPromptSections` array is non-empty after
+schema validation. This fixture exercises that form through real Host and Channel
+assembly. The condition
 is generic: it does not depend on Studio or a particular section ID, and Host
 runtime-environment sections also qualify. Missing sections or `[]` retain the
-original Entry system instructions and tool descriptions without a manifest;
+original Entry system instructions without a manifest;
 typed workdir alone does not enable the new form. Invalid sections fail validation.
+Both forms share neutral `plan_request` and `continue` tool descriptions. The
+system prompt carries responsibility boundaries; tool descriptions explain the
+planning operation and goal parameter without repeating those boundaries.
 Supervisor's existing prompt, routing summaries and optional detail-reading
 mechanism remain unchanged.
 

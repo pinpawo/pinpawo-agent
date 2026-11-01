@@ -112,16 +112,19 @@ Routes the request: reply directly, ask a question, or hand off via
 
 Entry selects the new goal-definition instructions only when the current
 `AgentRuntimeContext.systemPromptSections` is non-empty after schema validation.
-In that form, the system prompt and the `plan_request` and `continue` tool
-descriptions ask it to consider the current Agent's identity, available Capabilities
-and the main conversation. The user's overall request provides the context and
-constraints; the goal should state the work this Agent is responsible for in this
-turn. Available tools do not expand that responsibility.
+In that form, the system prompt asks it to consider the current Agent's identity,
+available Capabilities and the main conversation. The user's overall request
+provides the context and constraints; the goal should state the work this Agent
+is responsible for in this turn. Available tools do not expand that responsibility.
 
-Absent sections or `[]` retain the original system instructions and tool
-descriptions, with no Entry Capability manifest. A typed `workdir` alone does not
-count as external system sections. Invalid sections are rejected rather than
-treated as absent. Selection uses the current invocation, not earlier messages
+Both forms share neutral `plan_request` and `continue` tool descriptions. These
+describe the planning operation and goal parameter; responsibility boundaries
+remain in the system prompt. Tool binding does not vary with injected sections.
+
+Absent sections or `[]` retain the original system instructions, with no Entry
+Capability manifest. A typed `workdir` alone does not count as external system
+sections. Invalid sections are rejected rather than treated as absent. Selection
+uses the current invocation, not earlier messages
 or a cached graph's first invocation; it does not inspect Pet, Channel, or owner
 identifiers. Supervisor's existing context and optional detail reading are unchanged.
 

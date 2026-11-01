@@ -108,7 +108,7 @@ function entryHandoff(
   });
 }
 
-export function createContinueTool(hasExternalContext = false) {
+export function createContinueTool() {
   return tool(async ({ goal }: { goal?: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
     const saved = runtime.state.runSupervisorState;
     if (!saved.plan.some((task) => !['completed', 'superseded'].includes(task.status))) {
@@ -132,15 +132,13 @@ export function createContinueTool(hasExternalContext = false) {
     description: 'Continue the unfinished tasks in the current plan. Do not use it when the plan has no unfinished tasks; use plan_request for a new request.',
     schema: z.object({
       goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS).optional()
-        .describe(hasExternalContext
-          ? 'Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with the new requirements to state the complete updated goal for the current Agent, within its identity, responsibilities and available Capabilities. Use the output language the user asked for if they named one. Omit it to keep the original goal.'
-          : 'Fill in only when the user adjusted the goal or scope while continuing: combine the original goal with what the user said this time and write the complete updated goal, in the output language the user asked for if they named one. Omit it to keep the original goal.'),
+        .describe('The complete updated goal when the user changes the goal or scope while continuing. Omit to keep the original goal.'),
     }).strict(),
   });
 }
 
 /** Shared by runtime and evaluations. */
-export function createPlanRequestTool(hasExternalContext = false) {
+export function createPlanRequestTool() {
   return tool(
     async ({ goal }: { goal: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
       // Commit the resolved request with the routing messages before Supervisor runs.
@@ -153,14 +151,10 @@ export function createPlanRequestTool(hasExternalContext = false) {
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
-      description: hasExternalContext
-        ? 'Request planning for the current Agent\'s goal in this turn.'
-        : 'Create an execution plan for the user\'s current goal.',
+      description: 'Create an execution plan for the user\'s current goal.',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
-          .describe(hasExternalContext
-            ? 'The outcome the current Agent should undertake in this turn, based on its identity, responsibilities, available Capabilities and the conversation. Retain the relevant user requirements and constraints without taking over work belonging to others or widening the request. Write it in the output language the user asked for if they named one; otherwise, in the language of their request.'
-            : 'The goal the user currently wants to achieve. State it clearly using the conversation context, keep the user\'s requirements, and do not widen the task scope yourself. Write it in the output language the user asked for if they named one; otherwise, in the language of their request.'),
+          .describe('The goal to plan for this turn.'),
       }).strict(),
     },
   );
@@ -237,6 +231,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   // calls fails the protocol check below; the hint is not paired with a repair turn.
   const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1] =
     config.entryAnswerToolOptions ?? { parallel_tool_calls: false };
+  const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
   const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 
   const invokeModel = async (
@@ -251,7 +246,8 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     );
     // Only caller-supplied sections select role-aware goal resolution. The
     // framework's workdir section is independent; empty/absent sections keep
-    // the original Entry prompt and tool guidance on every invocation.
+    // the original Entry system prompt on every invocation. Tool descriptions
+    // stay neutral in both modes; role boundaries belong to the system prompt.
     const hasExternalContext = getAgentRuntimeContext(runnableConfig).systemPromptSections.length > 0;
     const prompt = [buildEntryAnswerSystemPrompt(hasExternalContext)];
     if (hasExternalContext) {
@@ -264,9 +260,6 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       prompt.push(buildCapabilityRoutingManifest(manifest));
     }
     const systemMessage = new SystemMessage(prompt.join('\n\n'));
-    const model = answerModel.bindTools!(hasExternalContext
-      ? [createPlanRequestTool(true), createContinueTool(true)]
-      : [planRequest, continuePlan], routingOptions);
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
     const response = await invokeOrchestratorModel(model, {
       systemMessage,

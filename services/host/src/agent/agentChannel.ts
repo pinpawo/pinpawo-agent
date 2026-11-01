@@ -47,7 +47,8 @@ export function buildReviewStructuredOutput(
   llmConfig: AgentLlmConfig,
 ): GlobalReviewPolicyStructuredOutputConfig | undefined {
   const method = resolveLlmStructuredOutputMethod(llmConfig);
-  if (!method) return undefined;
+  if (!method && llmConfig.structuredOutputAutoRepair === undefined
+    && llmConfig.structuredOutputRepairMaxRetries === undefined) return undefined;
 
   const autoRepairEnabled = llmConfig.structuredOutputAutoRepair
     ?? true;
@@ -57,10 +58,10 @@ export function buildReviewStructuredOutput(
           maxRetries: llmConfig.structuredOutputRepairMaxRetries ?? 1,
         },
       }
-    : {};
+    : { autoRepair: false as const };
 
   return {
-    method,
+    ...(method ? { method } : {}),
     ...autoRepair,
   };
 }

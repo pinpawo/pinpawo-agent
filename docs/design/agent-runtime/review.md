@@ -113,6 +113,25 @@ orchestrator 负责模式选择、授权持久化与执行/人工交互；Review
 
 模型对待评估动作评分，程序按 strict ≤ 2、relaxed ≤ 9 放行。
 模型失败、10 分或完整证据超出预算时转人工，不裁掉执行参数后放行。
+
+结构化输出的 `autoRepair` 只处理 schema 校验失败、LangChain 的
+`OutputParserException` 及 provider 原生 parser 抛出的 `ZodError`，通过原生
+`Runnable.withRetry` 做有限修复。默认允许一次额外调用，配置最多三次；
+修复请求保留原始证据，并追加一条有长度上限的校验反馈，
+只携带字段路径和错误代码，或通用解析失败标记，不回传非法输出、provider 错误正文。
+后续失败替换这条反馈，不累积新的上下文。显式关闭适用于推断和默认结构化方法，
+不改变兼容端点的 `jsonMode` 例外及显式 `method` / `strict`。
+
+transport 重试由模型 SDK 的 `maxRetries` 和 backoff 负责；SDK 最终抛出的网络、
+限流、认证或配置错误不会再进入 schema 修复；没有明确 parser 类型的
+`SyntaxError` / `TypeError` 也不推测为非法响应。若额外修复次数为 R、SDK 额外重试
+次数为 T，一次逻辑评估最多发起 `(1 + R) × (1 + T)` 个 provider 请求；默认
+R=1、Host 默认 T=2，最多六个（只有每个逻辑调用都用完 transport 重试后又得到
+非法结构时才达到此上限）。取消会结束等待，并在每次实际调用前检查同一 signal，
+禁止 backoff 结束后再发起模型请求。私有审批及修复继续使用 `callbacks: []`，
+保留继承的 signal、metadata 和 configurable；修复耗尽仍走转人工结果，
+不改变 policy task 的检查点边界和 strict / relaxed 阈值。
+
 具体风险边界见[系统提示](../../../packages/pet-agent/src/autoReview/prompts/templates.ts)，
 由 [auto-review eval](../../../tests/agent-evals/src/auto-review-risk.eval.ts) 验证。
 

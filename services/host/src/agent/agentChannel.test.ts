@@ -318,7 +318,12 @@ test('buildReviewStructuredOutput selects structured output strategy by provider
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen3.7-max',
     structuredOutputAutoRepair: false,
-  }), { method: 'jsonMode' });
+  }), { method: 'jsonMode', autoRepair: false });
+
+  assert.deepEqual(buildReviewStructuredOutput({
+    apiKey: 'test-key', baseUrl: 'https://example.test/v1', model: 'gpt-4o',
+    structuredOutputAutoRepair: false,
+  }), { autoRepair: false });
 });
 
 test('buildReviewStructuredOutput honors the resolved profile strategy before inference', () => {

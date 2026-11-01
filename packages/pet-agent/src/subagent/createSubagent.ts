@@ -20,7 +20,7 @@ import {
 } from '../guards';
 import {
   createAgent,
-  createMiddleware,
+  modelCallLimitMiddleware,
   summarizationMiddleware,
   type AnyAgentMiddleware,
 } from 'langchain';
@@ -199,28 +199,47 @@ function createSubagentIterationGuardMiddleware(
   maxIterations: number,
   emitGuardDecision?: GuardDecisionEmitter,
 ) {
-  let iterationCount = 0;
+  // Preserve the existing disabled/fractional-limit contract. The framework
+  // owns the counter in checkpoint state, scoped to this child invocation.
+  const runLimit = Number.isFinite(maxIterations) && maxIterations > 0
+    ? Math.floor(maxIterations) : undefined;
+  const limiter = modelCallLimitMiddleware({ runLimit, exitBehavior: 'end' });
+  const beforeModel = limiter.beforeModel!;
+  const checkBudget = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
 
-  return createMiddleware({
-    name: 'SubagentIterationGuard',
-    wrapModelCall: async (request, handler) => {
-      iterationCount += 1;
-      const outcome = evaluateGuard(subagentIterationLimitGuard, {
-        state: { iterationCount, maxIterations },
-        config: {},
-        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
-      }, { emit: emitGuardDecision, iteration: iterationCount });
-      if (outcome.kind === 'stop') {
-        return new Command({
-          goto: END,
-          update: {
-            messages: [buildSubagentIterationLimitStopNotice(iterationCount, maxIterations)],
-          },
-        });
-      }
-      return handler(request);
-    },
-  });
+  limiter.name = 'SubagentIterationGuard';
+  // maxIterations owns this budget; unrelated caller context keys must not
+  // override it or add a thread-wide limit.
+  limiter.contextSchema = undefined;
+  limiter.beforeModel = undefined;
+  // afterModel hooks run in reverse order. Install the framework's counter
+  // separately at the end, before Review can interrupt or jump to the model.
+  const counter = { ...limiter, name: 'SubagentIterationCounter', afterAgent: undefined };
+  limiter.afterModel = undefined;
+  limiter.wrapModelCall = async (request, handler) => {
+    // Review Respond jumps straight to the model node, skipping beforeModel
+    // hooks. Run the official check at the model-call boundary for every path.
+    const update = await checkBudget(request.state, {
+      ...request.runtime,
+      context: { runLimit, threadLimit: undefined, exitBehavior: 'end' },
+    });
+    const iterationCount = request.state.runModelCallCount + 1;
+    evaluateGuard(subagentIterationLimitGuard, {
+      state: { iterationCount, maxIterations },
+      config: {},
+      position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
+    }, { emit: emitGuardDecision, iteration: iterationCount });
+    if (update?.jumpTo === 'end') {
+      return new Command({
+        goto: END,
+        update: {
+          messages: [buildSubagentIterationLimitStopNotice(iterationCount, maxIterations)],
+        },
+      });
+    }
+    return handler(request);
+  };
+  return { guard: limiter, counter };
 }
 
 function writeSubagentRuntimeEvent(name: string, data: unknown) {
@@ -267,12 +286,13 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
   };
   const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
-  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
+  const iterationBudget = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
   const middleware: AnyAgentMiddleware[] = [
     contextSummaryMiddleware,
-    iterationGuardMiddleware,
+    iterationBudget.guard,
     ...(input.middleware ?? []),
     createSystemPromptMiddleware(inputState.promptSections),
+    iterationBudget.counter,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   // No checkpointer here: the child inherits the parent's through the runnable

@@ -257,6 +257,24 @@ A `stop` outcome is applied by its position:
   finalization while keeping the active delegation available to the root
   continuation contract.
 
+The subagent model-call budget uses LangChain's `modelCallLimitMiddleware`
+checkpoint state. Its counter records a logical model round before Toolkit
+Review can interrupt; rebuilding the saver and runtime, invalid review responses,
+Approve, and Respond retain that count. Each fresh delegation invocation has its
+own budget. Provider HTTP retries within a model round are not separate rounds.
+The adapter keeps the project's guard records and marked stop notice, and calls
+the official budget check from `wrapModelCall`: Review Respond can route directly
+to the model without running `beforeModel` hooks. The counter's `afterModel` hook
+runs before Review, while the check wraps caller-supplied model middleware too.
+Nonpositive or nonfinite limits remain disabled; positive fractions keep their
+existing whole-call allowance. Arbitrary runtime-context limit keys do not
+override `maxIterations`.
+
+Checkpoints created before this counter was introduced contain no durable count
+for earlier rounds. This change does not infer that count from a transcript or
+migrate older pending delegations. Finish or cancel pending delegations with
+the existing runtime before upgrading when their original budget must be retained.
+
 ## Future: When A Registry Earns Its Way Back
 
 Two cross-cutting needs would justify reintroducing shared execution

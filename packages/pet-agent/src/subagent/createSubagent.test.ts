@@ -610,6 +610,49 @@ test('createSubagent reports no output when a limited run has no AI text deliver
   assert.equal(result.output, null);
 });
 
+test('model budget preserves fractional and disabled limits without accepting context overrides', async () => {
+  const noop = tool(async () => 'x', { name: 'noop', description: 'no-op', schema: z.object({}) });
+  class FiniteModel extends NeverConvergingModel {
+    async _generate() {
+      if (this.callCount < 2) return super._generate();
+      this.callCount++;
+      return { generations: [{ message: new AIMessage('done'), text: 'done' }] };
+    }
+  }
+  for (const maxIterations of [2.5, 0, Number.NaN]) {
+    const model = new FiniteModel({});
+    const result = await createSubagent({ model, tools: [noop], promptSections: [],
+      messages: [new HumanMessage('go')], maxIterations,
+    });
+    assert.equal(model.callCount, maxIterations === 2.5 ? 2 : 3);
+    assert.equal(readSubagentGuardStopReason(result.messages.at(-1)!),
+      maxIterations === 2.5 ? 'subagent_iteration_limit_reached' : null);
+  }
+  const model = new NeverConvergingModel({});
+  const result = await createSubagent({ model, tools: [noop], promptSections: [],
+    messages: [new HumanMessage('go')], maxIterations: 1,
+    runtimeContext: { runLimit: 99, threadLimit: 0, exitBehavior: 'error' },
+  });
+  assert.equal(model.callCount, 1);
+  assert.equal(readSubagentGuardStopReason(result.messages.at(-1)!), 'subagent_iteration_limit_reached');
+});
+
+test('the model budget also limits responses supplied by caller middleware', async () => {
+  const noop = tool(async () => 'x', { name: 'noop', description: 'no-op', schema: z.object({}) });
+  let responses = 0;
+  const model = new NeverConvergingModel({});
+  const result = await createSubagent({ model, tools: [noop], promptSections: [],
+    messages: [new HumanMessage('go')], maxIterations: 1,
+    middleware: [createMiddleware({ name: 'CachedResponse', wrapModelCall: () => {
+      responses++;
+      return new AIMessage({ content: '', tool_calls: [{ id: `cached-${responses}`, name: 'noop', args: {} }] });
+    } })],
+  });
+  assert.equal(responses, 1);
+  assert.equal(model.callCount, 0);
+  assert.equal(readSubagentGuardStopReason(result.messages.at(-1)!), 'subagent_iteration_limit_reached');
+});
+
 
 test('invocation output and token usage exclude the supplied history', async () => {
   class UsageModel extends BaseChatModel {

@@ -10,7 +10,7 @@ export type {
 } from './readPendingInterrupt';
 export { settleAbortedRun } from './settleAbortedRun';
 export type { AbortSettlementGraph } from './settleAbortedRun';
-export { ReviewInterrupt } from './reviewInterrupt';
+export { ReviewInterrupt, withInvalidReviewResponseNotice } from './reviewInterrupt';
 export type {
   ReviewInterruptOptions,
   ReviewInterruptResolution,

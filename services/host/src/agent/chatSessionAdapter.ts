@@ -5,7 +5,9 @@ import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
+  isValidHumanReviewResume,
   isPublicConversationMessage,
+  withInvalidReviewResponseNotice,
   NamespacedProtocolToolEventReader,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
@@ -312,6 +314,20 @@ export async function runAgentSessionTurn(
 
   if (isResumeRequest && !initialThreadState.acceptsResume) {
     throw new AgentNoticeError({ code: 'interrupt_closed' });
+  }
+
+  if (request.kind === 'resume'
+    && initialThreadState.pendingInterrupt?.interruptId === request.resume.interruptId
+    && !isValidHumanReviewResume(request.resume.value)) {
+    // LangGraph records an addressed resume map before the interrupt consumes
+    // and validates it. Reject malformed input before constructing that map;
+    // the Runtime owns its schema and the existing invalid-decision view.
+    emitInterruptRequested({
+      pendingInterrupt: withInvalidReviewResponseNotice(initialThreadState.pendingInterrupt),
+      requestId,
+      emitEvent,
+    });
+    return { status: 'waiting' };
   }
 
   // The reply stays structured all the way down; the LangGraph `Command` is

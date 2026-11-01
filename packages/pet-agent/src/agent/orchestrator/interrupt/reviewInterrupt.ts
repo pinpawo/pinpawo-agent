@@ -5,7 +5,7 @@ import {
   type BaseMessage,
   type ToolCall,
 } from '@langchain/core/messages';
-import { REMOVE_ALL_MESSAGES, interrupt } from '@langchain/langgraph';
+import { REMOVE_ALL_MESSAGES, interrupt, isInvalidResume } from '@langchain/langgraph';
 import {
   applyReviewEffects,
   ReviewEffectApplicationError,
@@ -22,8 +22,11 @@ import {
   type HumanReviewBatchInterruptPayload,
   type HumanReviewInterruptPayload,
   type ReviewResponseResolution,
+  type ReviewSpec,
 } from '../../../types/reviewSpec';
+import { humanReviewResumeSchema } from '../review/reviewResponseSchema';
 import type { AgentInterrupt } from './agentInterrupt';
+import type { PendingInterrupt } from './readPendingInterrupt';
 import { buildReviewStopMessage } from './reviewStop';
 
 export type ReviewInterruptReview = {
@@ -138,16 +141,31 @@ function replaceMessageInState(
   ];
 }
 
+function appendInvalidDecisionReview(review: ReviewSpec): ReviewSpec {
+  const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
+  return { ...review, view: appendReviewViewMessage(review.view, message) };
+}
+
 function appendInvalidDecisionMessage(
   payload: HumanReviewInterruptPayload,
 ): HumanReviewInterruptPayload {
-  const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
   return {
     ...payload,
     error: 'invalid_decision',
-    review: {
-      ...payload.review,
-      view: appendReviewViewMessage(payload.review.view, message),
+    review: appendInvalidDecisionReview(payload.review),
+  };
+}
+
+/**
+ * The pending action remains valid; only the submitted response was rejected.
+ * Return a temporary display copy with the existing notice, without writing storage.
+ */
+export function withInvalidReviewResponseNotice(pending: PendingInterrupt): PendingInterrupt {
+  return {
+    ...pending,
+    payload: {
+      ...pending.payload,
+      reviews: pending.payload.reviews.map(appendInvalidDecisionReview),
     },
   };
 }
@@ -333,16 +351,22 @@ export class ReviewInterrupt implements AgentInterrupt<
   async run(): Promise<ReviewInterruptTransition> {
     let payload = this.interaction();
     while (true) {
-      const value = interrupt(payload);
       try {
+        const value = interrupt<HumanReviewBatchInterruptPayload, unknown>(payload, {
+          responseSchema: humanReviewResumeSchema,
+        });
         return this.materialize(await this.resume(value));
       } catch (error) {
         if (
-          !(error instanceof ReviewResponseResolutionError)
+          !isInvalidResume(error)
+          && !(error instanceof ReviewResponseResolutionError)
           && !(error instanceof ReviewEffectApplicationError)
         ) {
+          // GraphInterrupt is control flow and must reach LangGraph unchanged.
           throw error;
         }
+        // Native validation does not consume invalid input. This also skips
+        // malformed slots saved by the old loop before reaching its pending slot.
         payload = buildInvalidDecisionRequest(payload);
       }
     }

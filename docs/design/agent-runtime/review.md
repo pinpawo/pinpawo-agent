@@ -192,6 +192,42 @@ FileSaver retains only the latest checkpoint in each namespace; a pruned older
 root checkpoint cannot be retrieved for time travel. No resume or replay mode
 here promises exactly-once side effects across crashes.
 
+## Resume input validation
+
+Toolkit Review uses one strict Zod schema for the canonical ordered
+`{ decisions: [...] }` response and `{ action: 'cancel' | 'interrupt_run' }`.
+Identifiers retain their existing whitespace normalization. The schema validates
+the transport shape; matching the current review and option, validating inputs
+and authorization effects, and requiring every approval before executing a batch
+remain Runtime policy.
+
+`ReviewInterrupt` passes this schema to LangGraph's
+`interrupt(payload, { responseSchema })`. Native validation rejects malformed
+values before adding them to the node's consumed resume history. The Runtime
+catches `isInvalidResume()` and uses the existing `invalid_decision` interaction,
+while letting `GraphInterrupt` propagate unchanged. This also permits an old
+checkpoint's already-recorded malformed slots to replay through the invalid
+decision loop before consuming a corrected response at its pending slot; no
+private Pregel access or checkpoint rewrite is required.
+
+LangGraph records an interrupt-addressed `Command` routing map before running the
+node, so native validation alone does not keep malformed command envelopes out
+of storage. Agent Session turns in the Host preflight the response against the
+same Runtime schema when its interrupt ID matches the pending review. Malformed
+input re-presents that review with the existing invalid-decision view and leaves
+the run waiting, without invoking the graph, writing a resume, or reevaluating
+policy. This feedback is a view projection; the stored review remains unchanged.
+Stale and closed interrupt handling retains its existing owner and behavior.
+Direct LangGraph callers can still retain the upstream addressed routing entry;
+they should preflight through `isValidHumanReviewResume()` when that storage
+boundary matters. Native validation still prevents consuming it as a valid slot.
+
+Direct graph clients receive the native `response_schema` metadata. Agent
+Session and UI contracts continue to render `ReviewSpec`, which already owns
+the view, options and form input; they do not gain a second JSON-schema form
+contract. Approve, Respond, Reject, Cancel, whole-batch stopping and thread grants
+retain their existing semantics.
+
 ## LangGraph 1.5.1 saver and message compatibility
 
 The locked `langchain` 1.5.14 `createAgent` uses `MessagesValue`, a

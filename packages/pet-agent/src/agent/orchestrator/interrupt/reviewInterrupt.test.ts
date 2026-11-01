@@ -143,10 +143,12 @@ test('ReviewInterrupt re-interrupts after an invalid resume before accepting a v
   const config = { configurable: { thread_id: 'review-invalid-resume' } };
 
   const initial = await graph.invoke({ outcome: null }, config) as {
-    __interrupt__?: Array<{ value?: { kind?: string; error?: string } }>;
+    __interrupt__?: Array<{ response_schema?: unknown; value?: { kind?: string; error?: string } }>;
   };
   assert.equal(initial.__interrupt__?.[0]?.value?.kind, 'review_batch');
   assert.equal(initial.__interrupt__?.[0]?.value?.error, undefined);
+  assert.ok(initial.__interrupt__?.[0]?.response_schema,
+    'direct graph clients receive the native resume schema');
 
   const invalid = await graph.invoke(
     new Command({ resume: { decisions: [] } }),

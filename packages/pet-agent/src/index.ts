@@ -124,6 +124,7 @@ export {
   ORCHESTRATOR_RECURSION_LIMIT,
   HUMAN_REVIEW_INTERRUPT_KIND,
   readPendingInterrupt,
+  withInvalidReviewResponseNotice,
   settleAbortedRun,
   UnknownInterruptPayloadError,
   streamOrchestratorGraph,
@@ -242,6 +243,7 @@ export {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './agent/orchestrator/review/reviewResponseResolver';
+export { isValidHumanReviewResume } from './agent/orchestrator/review/reviewResponseSchema';
 export type {
   ReviewResponseResolutionErrorCode,
 } from './agent/orchestrator/review/reviewResponseResolver';

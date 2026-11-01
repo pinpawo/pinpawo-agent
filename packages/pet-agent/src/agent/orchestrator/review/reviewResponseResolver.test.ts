@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isHumanReviewCancelResume,
+  resolveHumanReviewBatchResume,
   resolveHumanReviewBatchResponse,
   ReviewResponseResolutionError,
 } from './reviewResponseResolver';
+import { isValidHumanReviewResume } from './reviewResponseSchema';
 import type { ReviewResolutionContext, ReviewBatchResponse, ReviewSpec } from '../../../types/reviewSpec';
 
 function reviewSpec(id: string): ReviewSpec {
@@ -71,4 +73,40 @@ test('resolveHumanReviewBatchResponse rejects mismatched decision order', () => 
     () => resolveHumanReviewBatchResponse(pendingReviews, response),
     (error) => error instanceof ReviewResponseResolutionError && error.code === 'stale_review',
   );
+});
+
+test('review resume schemas reject malformed canonical responses and normalize identifiers', () => {
+  for (const response of [
+    null,
+    [],
+    { decisions: [] },
+    { decisions: [{ reviewId: '', selectedOptionId: 'approve' }] },
+    { decisions: [{ reviewId: 'review-1', selectedOptionId: '   ' }] },
+    { decisions: [{ reviewId: 'review-1', selectedOptionId: 'approve', extra: true }] },
+    { decisions: [{ reviewId: 'review-1', selectedOptionId: 'approve', input: [] }] },
+    { decisions: [{ reviewId: 'review-1', selectedOptionId: 'approve' }], extra: true },
+    { action: 'reject' },
+    { action: 'cancel', decisions: [] },
+  ]) {
+    assert.equal(isValidHumanReviewResume(response), false, JSON.stringify(response));
+  }
+  const resolutions = resolveHumanReviewBatchResume([{ reviewSpec: reviewSpec('review-1') }], {
+    decisions: [{ reviewId: ' review-1 ', selectedOptionId: ' approve ' }],
+  });
+  assert.equal(resolutions[0]?.decision.type, 'approve');
+  assert.equal(resolutions[0]?.reviewId, 'review-1');
+});
+
+test('well-shaped review responses still require the declared option and input policy', () => {
+  const pendingReviews = [{ reviewSpec: reviewSpec('review-1') }];
+  for (const { response, code } of [
+    { response: { reviewId: 'stale', selectedOptionId: 'approve' }, code: 'stale_review' },
+    { response: { reviewId: 'review-1', selectedOptionId: 'other' }, code: 'unknown_option' },
+    { response: { reviewId: 'review-1', selectedOptionId: 'approve', input: { message: 'extra' } }, code: 'unexpected_input' },
+  ]) {
+    const resume = { decisions: [response] };
+    assert.equal(isValidHumanReviewResume(resume), true);
+    assert.throws(() => resolveHumanReviewBatchResume(pendingReviews, resume),
+      (error) => error instanceof ReviewResponseResolutionError && error.code === code);
+  }
 });

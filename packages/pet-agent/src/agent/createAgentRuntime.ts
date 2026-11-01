@@ -31,6 +31,7 @@ export {
 export {
   HUMAN_REVIEW_INTERRUPT_KIND,
   readPendingInterrupt,
+  withInvalidReviewResponseNotice,
   settleAbortedRun,
   UnknownInterruptPayloadError,
 } from './orchestrator/interrupt';

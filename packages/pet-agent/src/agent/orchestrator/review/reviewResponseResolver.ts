@@ -6,6 +6,11 @@ import type {
   ReviewResponseResolution,
   ReviewResolutionContext,
 } from '../../../types/reviewSpec';
+import {
+  humanReviewBatchResponseSchema,
+  humanReviewCancelResumeSchema,
+  type HumanReviewCancelResume,
+} from './reviewResponseSchema';
 
 export type ReviewResponseResolutionErrorCode =
   | 'stale_review'
@@ -15,17 +20,6 @@ export type ReviewResponseResolutionErrorCode =
   | 'invalid_input'
   | 'invalid_effect'
   | 'invalid_response';
-
-const HUMAN_REVIEW_RUN_CONTROL_ACTION = {
-  CANCEL: 'cancel',
-  INTERRUPT_RUN: 'interrupt_run',
-} as const;
-
-type HumanReviewCancelResume = {
-  action:
-    | typeof HUMAN_REVIEW_RUN_CONTROL_ACTION.CANCEL
-    | typeof HUMAN_REVIEW_RUN_CONTROL_ACTION.INTERRUPT_RUN;
-};
 
 export class ReviewResponseResolutionError extends Error {
   readonly code: ReviewResponseResolutionErrorCode;
@@ -94,55 +88,10 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
-  const allowed = new Set(allowedKeys);
-  return Object.keys(record).every((key) => allowed.has(key));
-}
-
 export function isHumanReviewCancelResume(
   value: unknown,
 ): value is HumanReviewCancelResume {
-  const record = readRecord(value);
-  return Boolean(
-    record
-      && hasOnlyKeys(record, ['action'])
-      && (
-        record.action === HUMAN_REVIEW_RUN_CONTROL_ACTION.CANCEL
-        || record.action === HUMAN_REVIEW_RUN_CONTROL_ACTION.INTERRUPT_RUN
-      ),
-  );
-}
-
-function readReviewResponse(value: unknown): ReviewResponse | null {
-  const record = readRecord(value);
-  if (!record) return null;
-  if (!hasOnlyKeys(record, ['reviewId', 'selectedOptionId', 'input'])) return null;
-  const reviewId = typeof record.reviewId === 'string' && record.reviewId.trim()
-    ? record.reviewId.trim()
-    : null;
-  const selectedOptionId = typeof record.selectedOptionId === 'string' && record.selectedOptionId.trim()
-    ? record.selectedOptionId.trim()
-    : null;
-  const input = readRecord(record.input);
-  if (record.input !== undefined && !input) return null;
-  return reviewId && selectedOptionId
-    ? {
-        reviewId,
-        selectedOptionId,
-        ...(input ? { input } : {}),
-      }
-    : null;
-}
-
-function readReviewBatchResponse(value: unknown): ReviewBatchResponse | null {
-  const record = readRecord(value);
-  if (!record || !hasOnlyKeys(record, ['decisions'])) return null;
-  if (!Array.isArray(record.decisions)) return null;
-  const decisions = record.decisions.map(readReviewResponse);
-  if (decisions.some((decision) => !decision)) return null;
-  return {
-    decisions: decisions as ReviewResponse[],
-  };
+  return humanReviewCancelResumeSchema.safeParse(value).success;
 }
 
 function hasCanonicalReviewBatchResponseFields(value: unknown) {
@@ -248,9 +197,9 @@ export function resolveHumanReviewBatchResume(
   pendingReviews: ReviewResolutionContext[],
   resume: unknown,
 ): ReviewResponseResolution[] {
-  const response = readReviewBatchResponse(resume);
-  if (response) {
-    return resolveHumanReviewBatchResponse(pendingReviews, response);
+  const response = humanReviewBatchResponseSchema.safeParse(resume);
+  if (response.success) {
+    return resolveHumanReviewBatchResponse(pendingReviews, response.data);
   }
 
   throw new ReviewResponseResolutionError(

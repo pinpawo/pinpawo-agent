@@ -291,6 +291,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       <button className="channel-new" type="button" disabled={!connected || pending || unavailable} onClick={() => { setNavigationOpen(false); setCreating(true); }}>+ New Channel</button>
       <div className="channel-list">
         {channels.map(item => <button key={item.channelId} disabled={pending} className={item.channelId === selected ? 'active' : ''} aria-current={item.channelId === selected ? 'page' : undefined}
+          title={item.description ? `${item.title} — ${item.description}` : item.title}
           onClick={() => selectChannel(item.channelId)}><strong><span aria-hidden="true">#</span> {item.title}</strong>{item.description && <span>{item.description}</span>}</button>)}
         {!channels.length && <div className="compact-empty">{connected ? 'No Channels yet.' : 'Connect to read your Channels.'}</div>}
       </div>

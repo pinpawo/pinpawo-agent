@@ -4407,3 +4407,97 @@ for (const decision of ['reject', 'cancel'] as const) {
       stopped.runSupervisorState.plan.map(item => ({ id: item.id, objective: item.objective, status: item.status })));
   });
 }
+
+for (const { decision, resumeAtHead } of [false, true].flatMap((resumeAtHead) =>
+  (['approve', 'respond', 'reject', 'cancel'] as const).map((decision) => ({ decision, resumeAtHead })),
+)) {
+  test(`nested toolkit review checkpoints the policy model across ${decision} resume (${resumeAtHead ? 'explicit head' : 'thread head'}, #749)`, async () => {
+    let policyCalls = 0;
+    let toolRuns = 0;
+    let supervisorCalls = 0;
+    const rawTool = tool(async () => {
+      toolRuns++;
+      return 'executed once';
+    }, { name: 'reviewed_action', description: 'Reviewed action.', schema: z.object({}) });
+    const registry = compileAgentRegistry({
+      toolkits: [{ name: 'local', description: 'Local tools.', tools: [reviewedTool(rawTool, {
+        request: () => buildReviewSpec({
+          view: { kind: 'plain', body: 'Authorize action?' },
+          options: [
+            { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
+            { id: 'reject', label: 'Reject', decision: { type: 'reject', message: 'Do not execute.' } },
+            { id: 'respond', label: 'Respond', input: { kind: 'text', key: 'message' },
+              decision: { type: 'respond', messageInputKey: 'message' } },
+          ],
+        }),
+      })] }],
+      capabilities: [capability('general', 'General work.', ['local'])],
+    });
+    const entry = { bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
+      id: 'review-entry', name: 'plan_request', args: { goal: 'Inspect.' },
+    }] }) }) } as unknown as AgentModels['act'];
+    const policyModel = { withStructuredOutput: () => ({ invoke: async () => {
+      policyCalls++;
+      // A second evaluation would authorize the action. Replay must restore
+      // the first decision, never silently bypass the pending human review.
+      return { riskScore: policyCalls === 1 ? 10 : 1, reason: 'Needs human authorization.' };
+    } }) } as unknown as AgentModels['act'];
+    const subagent = new FakeToolCallingModel({ toolCalls: [[{
+      id: 'reviewed-action', name: 'reviewed_action', args: {},
+    }], []] });
+    const checkpoint = new MemorySaver();
+    const makeGraph = () => createRuntimeOrchestratorGraph({
+      models: { act: entry, answer: entry, decision: policyModel, subagent },
+      checkpoint,
+      runSupervisorRunner: withScriptedDelegation({ invoke: async () => {
+        supervisorCalls++;
+        if (supervisorCalls === 1) return { name: 'submit_plan', args: { tasks: [
+          { capability: 'general', objective: 'Inspect.' },
+        ] } };
+        return { reply: 'Execution finished.' };
+      } }),
+    });
+    const config = { configurable: { thread_id: `review-task-replay-${decision}-${resumeAtHead}`, registry,
+      reviewCapabilities: { humanReview: true, sessionAuthorization: false },
+      globalReviewPolicy: { mode: 'auto_authorization' as const },
+    } };
+    const initial = await makeGraph().invoke(
+      buildOrchestratorRunInput([new HumanMessage('Inspect.')]), config,
+    ) as OrchestratorStateType & { __interrupt__?: Array<{ id?: string }> };
+    assert.equal(policyCalls, 1);
+    assert.equal(toolRuns, 0);
+    assert.ok(initial.__interrupt__?.[0]?.id);
+
+    // Reconstruct the runtime, retaining only the saver. No closure-local cache
+    // can satisfy the policy replay assertion. Resume at the latest explicit
+    // checkpoint ID, as a checkpoint-backed client may do.
+    const graph = makeGraph();
+    const head = await graph.getState(config);
+    const resumeConfig = { ...config, configurable: {
+      ...config.configurable, ...(resumeAtHead ? { checkpoint_id: head.config.configurable?.checkpoint_id } : {}),
+    } };
+    const invalid = await graph.invoke(new Command({ resume: {
+      [initial.__interrupt__[0].id]: { decisions: [] },
+    } }), resumeConfig) as { __interrupt__?: Array<{ id?: string; value?: { error?: string } }> };
+    assert.equal(policyCalls, 1, 'invalid response must reuse the recorded policy decision');
+    assert.equal(invalid.__interrupt__?.[0]?.value?.error, 'invalid_decision');
+    assert.equal(toolRuns, 0);
+    const interruptId = invalid.__interrupt__?.[0]?.id;
+    assert.ok(interruptId);
+    const result = await graph.invoke(new Command({ resume: {
+      [interruptId]: decision === 'cancel' ? { action: 'cancel' } : { decisions: [{
+        reviewId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId: decision,
+        ...(decision === 'respond' ? { input: { message: 'Use the read-only alternative.' } } : {}),
+      }] },
+    } }), config) as OrchestratorStateType & { __interrupt__?: unknown };
+    assert.equal(result.__interrupt__, undefined);
+    assert.deepEqual((await graph.getState(config)).next, []);
+    assert.equal(policyCalls, 1, 'nested resume must restore the checkpointed model result');
+    assert.equal(toolRuns, decision === 'approve' ? 1 : 0);
+    if (decision === 'reject' || decision === 'cancel') {
+      assert.equal(readCapabilityExecutions(result.messages).at(-1)?.result?.reviewDecision, decision);
+      assert.equal(supervisorCalls, 1, 'declining must retain the delegation without another planning call');
+      assert.equal(currentSupervisorTask(result.runSupervisorState)?.status, 'pending');
+    }
+  });
+}

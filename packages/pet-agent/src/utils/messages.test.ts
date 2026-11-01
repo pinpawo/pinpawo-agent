@@ -23,6 +23,18 @@ test('message text reads normalized AI text without reasoning or tool data', () 
   assert.equal(readMessageText(message), 'Hello world');
 });
 
+test('message text excludes legacy reasoning and thinking blocks with text fields', () => {
+  const message = new AIMessage({ content: [
+    { type: 'reasoning', text: 'private reasoning' },
+    { type: 'thinking', text: 'private thought' },
+    { type: 'redacted_thinking', text: 'private redaction' },
+    { type: 'analysis', text: 'private analysis' },
+    { type: 'reasoning_content', text: 'private provider reasoning' },
+    { type: 'text', text: 'visible response' },
+  ] });
+  assert.equal(readMessageText(message), 'visible response');
+});
+
 test('message text reads standard Human and Tool text blocks around images', () => {
   const messages = [
     new HumanMessage({ content: [

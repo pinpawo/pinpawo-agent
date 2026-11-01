@@ -89,7 +89,12 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function readTextDelta(data: Record<string, unknown>): string | null {
+function readStreamText(data: Record<string, unknown>): string | null {
+  if (data.event === 'content-block-start') {
+    const content = readRecord(data.content);
+    return content?.type === 'text' && typeof content.text === 'string' && content.text.length > 0
+      ? content.text : null;
+  }
   if (data.event !== 'content-block-delta') {
     return null;
   }
@@ -208,7 +213,7 @@ export function readRootStreamChatEvent(
           return null;
         }
         // Subagent scope: buffer deltas, emit the whole message on finish.
-        const text = readTextDelta(data);
+        const text = readStreamText(data);
         if (text) {
           current.buffer += text;
           return null;
@@ -235,7 +240,7 @@ export function readRootStreamChatEvent(
         return null;
       }
 
-      const text = readTextDelta(data);
+      const text = readStreamText(data);
       if (!text) {
         return null;
       }

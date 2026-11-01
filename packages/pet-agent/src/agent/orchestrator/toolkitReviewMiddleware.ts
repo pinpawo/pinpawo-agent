@@ -1,5 +1,5 @@
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
-import { REMOVE_ALL_MESSAGES, getConfig } from '@langchain/langgraph';
+import { REMOVE_ALL_MESSAGES, task } from '@langchain/langgraph';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -106,38 +106,6 @@ function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
 
 function runtimeCanCollectHumanReview(ctx: ToolkitReviewRuntimeContext) {
   return ctx.reviewCapabilities?.humanReview !== false;
-}
-
-/**
- * Temporary compatibility tracked by pinpawo-agent#749 for
- * langchain-ai/langgraphjs#2667. A completed
- * task() is currently re-executed when an interrupted nested graph resumes, so
- * detect the pending value for this exact interrupt slot and skip repeating the
- * global Review policy. Remove this when the upstream fix is released.
- */
-function hasPendingReviewInterruptResume() {
-  try {
-    const configurable = getConfig().configurable as Record<string, unknown> | undefined;
-    const scratchpad = configurable?.__pregel_scratchpad;
-    if (!scratchpad || typeof scratchpad !== 'object') {
-      return false;
-    }
-    const record = scratchpad as {
-      interruptCounter?: unknown;
-      nullResume?: unknown;
-      resume?: unknown;
-    };
-    const interruptCounter = typeof record.interruptCounter === 'number'
-      ? record.interruptCounter
-      : -1;
-    const nextInterruptIndex = interruptCounter + 1;
-    return (
-      Array.isArray(record.resume)
-      && nextInterruptIndex < record.resume.length
-    ) || record.nullResume !== undefined;
-  } catch {
-    return false;
-  }
 }
 
 function toolAuthorizationsForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
@@ -715,27 +683,27 @@ async function reviewToolkitToolCalls(params: {
     return buildAllowedToolkitReviewResult();
   }
 
-  const hasPendingResume = hasPendingReviewInterruptResume();
-  const unresolvedReviews = hasPendingResume ? prepared.reviews
-    : await selectUnresolvedReviews({
-      ctx: params.ctx,
-      reviews: prepared.reviews,
-    });
-  const policyResolution = hasPendingResume
-    ? { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION } as const
-    : unresolvedReviews.length === 0
+  const unresolvedReviews = await selectUnresolvedReviews({
+    ctx: params.ctx,
+    reviews: prepared.reviews,
+  });
+  // Persist the non-deterministic policy decision before interrupting. Nested
+  // graph resume restores this task's result instead of calling the model again.
+  const policyResolution = await task('toolkitReviewPolicy', async () =>
+    unresolvedReviews.length === 0
       ? {
           type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
           reason: 'Every action passed its deterministic toolkit auto-authorization policy.',
         } as const
-      : await resolveGlobalReviewBatchPolicy({
+      : resolveGlobalReviewBatchPolicy({
           policy: params.ctx.globalReviewPolicy,
           models: params.ctx.models,
           messages: params.ctx.messages,
           task: params.ctx.reviewContext?.task,
           workdir: params.ctx.reviewContext?.workdir,
           reviews: unresolvedReviews,
-        });
+        }),
+  )();
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
     const sessionAuthorizations = await buildAutoReviewSessionAuthorizations({

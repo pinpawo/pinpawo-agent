@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Checkpoint } from '@langchain/langgraph-checkpoint';
-import { Annotation, END, START, StateGraph, interrupt } from '@langchain/langgraph';
+import { Annotation, END, START, StateGraph, MemorySaver, interrupt } from '@langchain/langgraph';
 import { FileSaver } from './fileSaver';
 
 function createTempDir(t: TestContext) {
@@ -878,4 +878,306 @@ test('FileSaver startup GC handles a fresh root and ignores stray files in store
   const tuple = await new FileSaver(filePath).getTuple(config);
   assert.deepEqual(tuple?.checkpoint.channel_values.messages, [{ role: 'human', content: 'keep me' }]);
   assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);
+});
+
+test('FileSaver persists task paths and sorts getTuple/list by the official writes key', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  const numericWrites = Array.from({ length: 12 }, (_, idx) => ['items', idx] as [string, unknown]);
+  await Promise.all([
+    saver.putWrites(config, numericWrites, 'task-a', 'z'),
+    saver.putWrites(config, [['items', 'early-path']], 'task-z', 'a'),
+    saver.putWrites(config, [['items', 'astral']], 'astral', '\u{10000}'),
+    saver.putWrites(config, [['items', 'BMP']], 'BMP', '\uE000'),
+    saver.putWrites(config, [['items', 'input']], 'input'),
+  ]);
+  const expected = [
+    ['input', 'items', 'input'],
+    ['task-z', 'items', 'early-path'],
+    ...numericWrites.map(([, value]) => ['task-a', 'items', value]),
+    ['BMP', 'items', 'BMP'],
+    ['astral', 'items', 'astral'],
+  ];
+  const restored = new FileSaver(filePath);
+  assert.deepEqual((await restored.getTuple(config))?.pendingWrites, expected);
+  const tuples = [];
+  for await (const tuple of restored.list(config)) tuples.push(tuple);
+  assert.deepEqual(tuples[0]?.pendingWrites, expected);
+});
+
+test('FileSaver reads pathless legacy writes and preserves their indices when appending', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, Array.from({ length: 12 }, (_, idx) => ['items', idx]), 'legacy,task');
+  const writesPath = join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '__root__', 'cp-1.json');
+  const manifest = JSON.parse(readFileSync(writesPath, 'utf8'));
+  for (const record of Object.values(manifest.writes) as Array<Record<string, unknown>>) {
+    delete record.taskPath;
+    delete record.writeIndex;
+  }
+  // Legacy insertion order must not be mistaken for numeric index order.
+  manifest.writes = Object.fromEntries(Object.entries(manifest.writes).reverse());
+  writeFileSync(writesPath, JSON.stringify(manifest));
+  const legacyBytes = readFileSync(writesPath, 'utf8');
+  const restored = new FileSaver(filePath);
+  const expected = Array.from({ length: 12 }, (_, idx) => ['legacy,task', 'items', idx]);
+  assert.deepEqual((await restored.getTuple(config))?.pendingWrites, expected);
+  assert.equal(readFileSync(writesPath, 'utf8'), legacyBytes, 'reading does not rewrite legacy data');
+  await restored.putWrites(config, [['items', 'new']], 'new-task', 'new-path');
+  assert.deepEqual((await new FileSaver(filePath).getTuple(config))?.pendingWrites,
+    [...expected, ['new-task', 'items', 'new']]);
+});
+
+
+test('FileSaver rejects replay-dependent Delta checkpoints without replacing the last valid state', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { items: ['preserved'] }), { source: 'loop', step: 1, parents: {} });
+  const deltaCheckpoint = checkpoint('cp-2', {});
+  deltaCheckpoint.channel_versions.items = 2;
+  await assert.rejects(saver.put(config, deltaCheckpoint, {
+    source: 'loop', step: 2, parents: {}, counters_since_delta_snapshot: { items: [1, 1] },
+  }), /latest-only retention cannot persist DeltaChannel/);
+  assert.equal((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.id, 'cp-1');
+  assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values.items, ['preserved']);
+});
+
+
+test('FileSaver propagates unreadable pending writes and never replaces them', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const saver = new FileSaver(path);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['items', 'first']], 'task-a', 'a');
+  const writesPath = join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '__root__', 'cp-1.json');
+  const valid = readFileSync(writesPath, 'utf8');
+  for (const damaged of ['{damaged', '{}', JSON.stringify({ version: 1, writes: {} })]) {
+    writeFileSync(writesPath, damaged);
+    await assert.rejects(saver.getTuple(config), /checkpoint writes manifest is unreadable/);
+    await assert.rejects(saver.putWrites(config, [['items', 'second']], 'task-b', 'b'),
+      /checkpoint writes manifest is unreadable/);
+    await assert.rejects(saver.collectThreadGarbage('thread-1'), /checkpoint writes manifest is unreadable/);
+    assert.equal(readFileSync(writesPath, 'utf8'), damaged);
+  }
+  writeFileSync(writesPath, valid);
+  await saver.putWrites(config, [['items', 'second']], 'task-b', 'b');
+  assert.deepEqual((await new FileSaver(path).getTuple(config))?.pendingWrites,
+    [['task-a', 'items', 'first'], ['task-b', 'items', 'second']]);
+});
+
+
+test('FileSaver matches official special-write ordering and overwrite semantics after restart', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const file = new FileSaver(path);
+  const memory = new MemorySaver();
+  const initial = { configurable: { thread_id: 'thread-1' } };
+  const cp = checkpoint('cp-1', {});
+  const metadata = { source: 'loop' as const, step: 1, parents: {} };
+  const fileConfig = await file.put(initial, cp, metadata);
+  const memoryConfig = await memory.put(initial, cp, metadata);
+  for (const [saver, config] of [[file, fileConfig], [memory, memoryConfig]] as const) {
+    await saver.putWrites(config, [
+      ['ordinary', 'initial'], ['__error__', 'old-error'],
+      ['__interrupt__', 'old-interrupt'], ['__resume__', 'old-resume'],
+    ], 'task', 'path');
+    await saver.putWrites(config, [
+      ['ordinary', 'replacement'], ['__error__', 'new-error'],
+      ['__interrupt__', 'new-interrupt'], ['__resume__', 'new-resume'],
+    ], 'task', 'path');
+  }
+  const actual = (await new FileSaver(path).getTuple(fileConfig))?.pendingWrites;
+  assert.deepEqual(actual, (await memory.getTuple(memoryConfig))?.pendingWrites);
+  assert.deepEqual(actual, [
+    ['task', '__resume__', 'new-resume'], ['task', '__interrupt__', 'new-interrupt'],
+    ['task', '__error__', 'new-error'], ['task', 'ordinary', 'initial'],
+  ]);
+});
+
+for (const damage of ['invalid', 'missing', 'mismatch'] as const) {
+  test(`FileSaver fails closed on ${damage} pending-write object references`, async (t) => {
+    const root = createTempDir(t);
+    const path = join(root, 'checkpoints.json');
+    const saver = new FileSaver(path);
+    const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+      checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+    await saver.putWrites(config, [['items', 'recoverable']], 'task-a', 'a');
+    const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+    const writesPath = join(thread, 'writes', '__root__', 'cp-1.json');
+    const original = readFileSync(writesPath, 'utf8');
+    const manifest = JSON.parse(original);
+    const record = Object.values(manifest.writes)[0] as { valueHash: string };
+    const oldHash = record.valueHash;
+    const oldPath = join(thread, 'objects', oldHash.slice(0, 2), oldHash.slice(2));
+    const oldBytes = readFileSync(oldPath);
+    if (damage === 'invalid') record.valueHash = 'bad';
+    else if (damage === 'missing') record.valueHash = 'f'.repeat(64);
+    else writeFileSync(oldPath, 'corrupt');
+    writeFileSync(writesPath, JSON.stringify(manifest));
+    const damagedManifest = readFileSync(writesPath, 'utf8');
+    const damagedObject = readFileSync(oldPath);
+    const before = snapshotObjectFiles(root);
+    const checkpointManifest = readFileSync(join(thread, 'manifests', '__root__', 'cp-1.json'));
+    const latestRef = readFileSync(join(thread, 'refs', '__root__'));
+    await assert.rejects(saver.getTuple(config));
+    await assert.rejects(saver.putWrites(config, [['items', 'new']], 'task-b', 'b'));
+    await assert.rejects(saver.collectThreadGarbage('thread-1'));
+    assert.equal(readFileSync(writesPath, 'utf8'), damagedManifest);
+    assert.deepEqual(readFileSync(oldPath), damagedObject);
+    assert.deepEqual(snapshotObjectFiles(root), before);
+    assert.deepEqual(readFileSync(join(thread, 'manifests', '__root__', 'cp-1.json')), checkpointManifest);
+    assert.deepEqual(readFileSync(join(thread, 'refs', '__root__')), latestRef);
+    if (damage === 'mismatch') writeFileSync(oldPath, oldBytes);
+    writeFileSync(writesPath, original);
+    assert.deepEqual((await new FileSaver(path).getTuple(config))?.pendingWrites,
+      [['task-a', 'items', 'recoverable']]);
+  });
+}
+
+test('checkpoint advance and startup maintenance preserve invalid older writes before pruning', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const saver = new FileSaver(path);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { items: ['saved'] }), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['items', 'pending']], 'task-a', 'a');
+  saver.acquireHostWriterLease('prune-test');
+  t.after(() => saver.releaseHostWriterLease());
+  const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+  const writesPath = join(thread, 'writes', '__root__', 'cp-1.json');
+  const refPath = join(thread, 'refs', '__root__');
+  const oldWrites = readFileSync(writesPath, 'utf8');
+  const oldRef = readFileSync(refPath, 'utf8');
+  const before = snapshotObjectFiles(root);
+  writeFileSync(writesPath, JSON.stringify({ checkpointId: 'cp-1' }));
+  const damaged = readFileSync(writesPath, 'utf8');
+  await assert.rejects(saver.put(config, checkpoint('cp-2', { items: ['new'] }),
+    { source: 'loop', step: 2, parents: {} }), /checkpoint writes manifest is unreadable/);
+  await assert.rejects(saver.runHostStartupMaintenance(), /checkpoint writes manifest is unreadable/);
+  assert.equal(readFileSync(refPath, 'utf8'), oldRef);
+  assert.equal(readFileSync(writesPath, 'utf8'), damaged);
+  assert.equal(existsSync(join(thread, 'manifests', '__root__', 'cp-2.json')), false);
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  writeFileSync(writesPath, oldWrites);
+  await saver.put(config, checkpoint('cp-2', { items: ['new'] }), { source: 'loop', step: 2, parents: {} });
+  await saver.runHostStartupMaintenance();
+  assert.equal((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.id, 'cp-2');
+});
+
+test('checkpoint maintenance rejects a well-formed manifest stored at the wrong identity', async (t) => {
+  const root = createTempDir(t);
+  const path = join(root, 'checkpoints.json');
+  const saver = new FileSaver(path);
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', {}), { source: 'loop', step: 1, parents: {} });
+  await saver.putWrites(config, [['items', 'pending']], 'task', 'path');
+  const writesPath = join(root, 'checkpoints', 'threads', 'thread-1', 'writes', '__root__', 'cp-1.json');
+  const original = readFileSync(writesPath, 'utf8');
+  const manifest = JSON.parse(original);
+  manifest.checkpointId = 'cp-other';
+  writeFileSync(writesPath, JSON.stringify(manifest));
+  const before = snapshotObjectFiles(root);
+  await assert.rejects(saver.collectThreadGarbage('thread-1'), /identity does not match its path/);
+  await assert.rejects(saver.put(config, checkpoint('cp-2', {}), { source: 'loop', step: 2, parents: {} }),
+    /identity does not match its path/);
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  writeFileSync(writesPath, original);
+  assert.equal((await saver.getTuple(config))?.pendingWrites?.length, 1);
+});
+
+test('advancing a checkpoint does not reread unrelated subgraph manifests or payloads', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const metadata = { source: 'loop' as const, step: 1, parents: {} };
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { status: 'initial' }), metadata);
+  const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+  const unrelatedPaths = new Set<string>();
+  for (let i = 0; i < 12; i++) {
+    const namespace = `completed-child-${i}`;
+    const child = await saver.put({ configurable: { thread_id: 'thread-1', checkpoint_ns: namespace } },
+      checkpoint('cp-1', { packet: { content: `${i}:` + 'x'.repeat(65_536) } }), metadata);
+    await saver.putWrites(child, [['result', { child: i }]], `task-${i}`);
+    const manifestPath = join(thread, 'manifests', namespace, 'cp-1.json');
+    const writesPath = join(thread, 'writes', namespace, 'cp-1.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const writes = JSON.parse(readFileSync(writesPath, 'utf8'));
+    unrelatedPaths.add(resolve(manifestPath));
+    unrelatedPaths.add(resolve(writesPath));
+    for (const hash of [manifest.channelValueRefs.packet.hash,
+      ...Object.values(writes.writes).map((record) => (record as { valueHash: string }).valueHash)]) {
+      unrelatedPaths.add(resolve(join(thread, 'objects', hash.slice(0, 2), hash.slice(2))));
+    }
+  }
+
+  const unrelatedReads: string[] = [];
+  const original = fs.readFileSync;
+  fs.readFileSync = ((path: Parameters<typeof fs.readFileSync>[0], ...rest: unknown[]) => {
+    if (typeof path === 'string' && unrelatedPaths.has(resolve(path))) unrelatedReads.push(path);
+    return (original as (...args: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync;
+  syncBuiltinESMExports();
+  try {
+    await saver.put(config, checkpoint('cp-2', { status: 'updated' }), metadata);
+  } finally {
+    fs.readFileSync = original;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(unrelatedReads, [], 'a small root update must not read completed child history');
+  assert.deepEqual((await saver.getTuple({ configurable: { thread_id: 'thread-1' } }))?.checkpoint.channel_values,
+    { status: 'updated' });
+  await saver.collectThreadGarbage('thread-1');
+  assert.equal((await saver.getTuple({ configurable: {
+    thread_id: 'thread-1', checkpoint_ns: 'completed-child-0',
+  } }))?.pendingWrites?.length, 1);
+});
+
+test('namespace-scoped checkpoint advancement validates reused objects and global maintenance still fails closed', async (t) => {
+  const root = createTempDir(t);
+  const saver = new FileSaver(join(root, 'checkpoints.json'));
+  const metadata = { source: 'loop' as const, step: 1, parents: {} };
+  let config = await saver.put({ configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { status: 'initial' }), metadata);
+  const packet = { content: 'shared child object' };
+  await saver.put({ configurable: { thread_id: 'thread-1', checkpoint_ns: 'child' } },
+    checkpoint('cp-1', { packet }), metadata);
+  saver.acquireHostWriterLease('namespace-preflight-test');
+  t.after(() => saver.releaseHostWriterLease());
+  const thread = join(root, 'checkpoints', 'threads', 'thread-1');
+  const childPath = join(thread, 'manifests', 'child', 'cp-1.json');
+  const childManifest = readFileSync(childPath);
+  const hash = JSON.parse(childManifest.toString()).channelValueRefs.packet.hash as string;
+  const objectPath = join(thread, 'objects', hash.slice(0, 2), hash.slice(2));
+  const objectBytes = readFileSync(objectPath);
+  writeFileSync(objectPath, 'corrupt');
+
+  // This namespace cannot prune the damaged child and does not reuse its data.
+  config = await saver.put(config, checkpoint('cp-2', { status: 'updated' }), metadata);
+  const refPath = join(thread, 'refs', '__root__');
+  const latestRef = readFileSync(refPath);
+  const before = snapshotObjectFiles(root);
+  await assert.rejects(saver.put(config, checkpoint('cp-3', { packet }), metadata), /object hash mismatch/);
+  await assert.rejects(saver.putWrites(config, [['packet', packet]], 'new-task'), /object hash mismatch/);
+  assert.deepEqual(readFileSync(refPath), latestRef);
+  assert.equal(existsSync(join(thread, 'manifests', '__root__', 'cp-3.json')), false);
+  assert.equal(existsSync(join(thread, 'writes', '__root__', 'cp-2.json')), false);
+  await assert.rejects(saver.collectThreadGarbage('thread-1'), /object hash mismatch/);
+  await assert.rejects(saver.runHostStartupMaintenance(), /object hash mismatch/);
+  assert.throws(() => new FileSaver(join(root, 'checkpoints.json')), /object hash mismatch/);
+  assert.deepEqual(readFileSync(childPath), childManifest);
+  assert.deepEqual(snapshotObjectFiles(root), before);
+  assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values, { status: 'updated' });
+
+  writeFileSync(objectPath, objectBytes);
+  const recovered = await saver.put(config, checkpoint('cp-3', { packet }), metadata);
+  await saver.collectThreadGarbage('thread-1');
+  assert.deepEqual((await saver.getTuple(recovered))?.checkpoint.channel_values, { packet });
 });

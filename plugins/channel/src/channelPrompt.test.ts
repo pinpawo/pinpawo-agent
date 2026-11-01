@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { StudioContextProvider } from '@pinpawo/studio-core';
 import { createStudioWithPets } from '../../../tests/support/livePets';
+import { readChannelTestInput, readChannelTestTask } from '../../../tests/support/channelDispatchInput';
 import { createChannelPlugin } from './channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -19,11 +20,12 @@ type Sections = Awaited<ReturnType<StudioContextProvider>>;
 test('each Channel dispatch supplies only its own current prompt to the same Pet', async () => {
   const dispatched: Dispatched[] = [];
   const resolved: Sections[] = [];
+  const routingReason = randomUUID();
   let resolver!: StudioContextProvider;
   const channel = createChannelPlugin({
     httpRoute: false,
     routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:one', confidence: 1 }),
+    routeDecider: async () => ({ target: 'pet:one', confidence: 1, reason: routingReason }),
   });
   const studio = await createStudioWithPets({
     studioId: 'channel-prompt', plugins: [channel],
@@ -46,6 +48,8 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     assert.equal(first.deliveries[0]?.state, 'accepted');
     await channel.sendMessage(b, { body: 'hello', mentions: [{ participantId: 'pet:one' }] }, human);
     assert.equal(dispatched.length, 2);
+    assert.equal(Object.hasOwn(readChannelTestInput(dispatched[0]!.request), 'contextHint'), false);
+    assert.equal(Object.hasOwn(readChannelTestInput(dispatched[1]!.request), 'contextHint'), false);
     const aSection = resolved[0]?.find(section => section.id === 'channel:context');
     assert.deepEqual([aSection?.id, aSection?.owner], ['channel:context', 'channel']);
     assert.match(aSection!.content, /Alpha \]\]\]\]><!\[CDATA\[> collaboration/);
@@ -62,6 +66,8 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     await channel.run(a, 'one', 'scheduled', { kind: 'scheduler', id: 's' });
     await channel.run(b, 'one', 'triggered', { kind: 'trigger', id: 't' });
     assert.equal(dispatched.length, 4);
+    assert.equal(Object.hasOwn(readChannelTestTask(dispatched[2]!.request), 'contextHint'), false);
+    assert.equal(Object.hasOwn(readChannelTestTask(dispatched[3]!.request), 'contextHint'), false);
     assert.match(resolved[2]!.find(section => section.id === 'channel:context')!.content, /Updated A/);
     assert.doesNotMatch(resolved[2]!.find(section => section.id === 'channel:context')!.content, /Beta/);
     assert.match(resolved[3]!.find(section => section.id === 'channel:context')!.content, /Beta/);
@@ -78,7 +84,15 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     await channel.sendMessage(b, { body: 'route this' }, human);
     for (let i = 0; i < 200 && dispatched.length < 6; i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(dispatched.length, 6);
+    const routed = readChannelTestInput(dispatched[5]!.request);
+    assert.equal(routed.addressedBy, 'routing');
+    assert.equal(routed.contextHint?.source, 'channel-routing');
+    assert.equal(routed.contextHint?.action, 'read-latest-channel');
+    assert.equal(routed.body, 'route this');
+    assert.equal(dispatched[5]!.request.includes(routingReason), false, 'the decision reason remains outside the Pet request');
+    assert.equal(dispatched[5]!.request.includes('Beta'), false, 'the announcement remains in the provider context');
     assert.match(resolved[5]!.find(section => section.id === 'channel:context')!.content, /Beta/);
+    assert.deepEqual(resolved[5]?.map(section => section.id), ['channel:protocol', 'channel:metadata', 'channel:context']);
     assert.equal(dispatched[5]!.session?.id, dispatched[1]!.session?.id);
   } finally { await studio.shutdown(); }
 });

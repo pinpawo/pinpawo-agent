@@ -45,7 +45,11 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession }) => {
+    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, delivery }) => {
+      if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
+      if (delivery === 'interrupt' && (!suppliedSession?.id || !suppliedScope)) {
+        throw new Error('Interrupt delivery requires an explicit session and scope.');
+      }
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
       const session = suppliedSession ? { ...suppliedSession } : undefined;
@@ -166,6 +170,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
       });
       publishLifecycle({ dispatchId, request, state: 'queued' });
+      if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });
     },
   };
 

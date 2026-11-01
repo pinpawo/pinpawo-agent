@@ -254,6 +254,37 @@ test('scoped context providers resolve from the snapshotted target and do not ch
   }
 });
 
+test('trusted interrupt delivery snapshots its explicit target and idempotency admits it only once', async () => {
+  const seen: Array<Parameters<PetDispatchPort['dispatch']>[0]> = [];
+  const worker = binding('worker');
+  worker.dispatch = { ...worker.dispatch, dispatch: async request => { seen.push(request); } };
+  const studio = await createStudio({ studioId: 'interrupt', pets: [worker] });
+  try {
+    for (const request of [
+      { petId: 'worker', request: 'missing both', delivery: 'interrupt' as const },
+      { petId: 'worker', request: 'missing scope', delivery: 'interrupt' as const, session: { id: 'worker:00000001' } },
+      { petId: 'worker', request: 'missing session', delivery: 'interrupt' as const, scope: { namespace: 'channel', id: 'one' } },
+    ]) await assert.rejects(studio.dispatch(request), /explicit session and scope/);
+    assert.equal(seen.length, 0);
+    const request: Parameters<typeof studio.dispatch>[0] = {
+      petId: 'worker', request: 'new evidence', idempotencyKey: 'once', delivery: 'interrupt',
+      session: { id: 'worker:00000001' }, scope: { namespace: 'channel', id: 'one' },
+    };
+    const pending = studio.dispatch(request);
+    request.delivery = undefined;
+    request.session!.id = 'worker:00000002';
+    request.scope = { namespace: 'channel', id: 'two' };
+    const receipt = await pending;
+    const repeated = await studio.dispatch({ petId: 'worker', request: 'ignored retry', idempotencyKey: 'once' });
+    assert.equal(repeated.invocationId, receipt.invocationId);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]!.delivery, 'interrupt');
+    assert.deepEqual(seen[0]!.session, { id: 'worker:00000001' });
+    assert.deepEqual(seen[0]!.scope, { namespace: 'channel', id: 'one' });
+    assert.equal(seen[0]!.request, 'new evidence');
+  } finally { await studio.shutdown(); }
+});
+
 test('provider registration has scoped ownership, cleanup and retryable errors', async () => {
   let channel!: StudioPluginContext;
   let other!: StudioPluginContext;

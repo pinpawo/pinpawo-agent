@@ -29,6 +29,8 @@ export type AgentInvokeInput = {
   allowedCapabilityNames?: string[];
   /** Optional stable task identity supplied by a host that owns task lifecycle. */
   taskId?: string;
+  /** Host may interrupt this invocation at the committed delegation boundary. */
+  onDelegationComplete?: () => void | Promise<void>;
 };
 
 export type AgentRunResult = {
@@ -98,6 +100,9 @@ export function buildAgentRunnableConfig(
       ...(options.reviewCapabilities ? { reviewCapabilities: options.reviewCapabilities } : {}),
       ...(input.allowedCapabilityNames !== undefined
         ? { allowedCapabilityNames: input.allowedCapabilityNames }
+        : {}),
+      ...(input.onDelegationComplete !== undefined
+        ? { onDelegationComplete: input.onDelegationComplete }
         : {}),
     },
     // The soft iteration guard is the normal stop; this is the final loop breaker.

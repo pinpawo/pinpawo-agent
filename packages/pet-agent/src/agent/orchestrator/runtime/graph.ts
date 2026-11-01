@@ -23,6 +23,7 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterCapability } from './routes/afterCapability';
+import { delegationBoundary } from './nodes/delegationBoundary';
 import { createRunTerminationHandlers } from './runTermination';
 import { validateCheckpointInterrupts } from '../interrupt/validateCheckpointInterrupts';
 
@@ -57,6 +58,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       ends: ['runSupervisor', 'throwRunFailure'],
       errorHandler: (state: typeof OrchestratorState.State, error) => recoverCapabilityError(state, error) ?? runTermination.onNodeError(state, error),
     })
+    .addNode('delegationBoundary', delegationBoundary, {
+      ends: ['throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
+    })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addEdge(START, 'prepare')
     // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
@@ -65,8 +70,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addEdge('entryAnswer', END)
     .addConditionalEdges('capability', afterCapability, {
       [END]: END,
-      runSupervisor: 'runSupervisor',
-    });
+      delegationBoundary: 'delegationBoundary',
+    })
+    .addEdge('delegationBoundary', 'runSupervisor');
 
   return graph.compile({
     checkpointer: config.checkpoint ? validateCheckpointInterrupts(config.checkpoint) : undefined,

@@ -27,6 +27,8 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
       ? undefined : readGlobalReviewPolicy(cfg.globalReviewPolicy),
     allowedCapabilityNames: cfg.allowedCapabilityNames === undefined
       ? undefined : readAllowedCapabilityNames(cfg.allowedCapabilityNames),
+    onDelegationComplete: cfg.onDelegationComplete === undefined
+      ? undefined : readDelegationCompleteHook(cfg.onDelegationComplete),
   };
 }
 
@@ -43,6 +45,13 @@ function readAllowedCapabilityNames(value: unknown): string[] {
     invalidInvokeOption('allowedCapabilityNames', 'an array of non-empty Capability names');
   }
   return value;
+}
+
+function readDelegationCompleteHook(value: unknown): NonNullable<OrchestratorInvokeOptions['onDelegationComplete']> {
+  if (typeof value !== 'function') {
+    invalidInvokeOption('onDelegationComplete', 'a function');
+  }
+  return value as NonNullable<OrchestratorInvokeOptions['onDelegationComplete']>;
 }
 
 export function getInvokeRegistry(runnableConfig?: RunnableConfig): CompiledAgentRegistry {

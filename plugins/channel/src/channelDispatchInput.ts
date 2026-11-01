@@ -4,6 +4,13 @@ import type { ChannelMessageRow } from './store/channelStore';
 /** Who started a Pet's spontaneous run in a Channel. */
 export type ChannelRunOrigin = { kind: 'scheduler' | 'trigger'; id: string };
 
+// Plugin-owned guidance, not the decider's free-form reason or message content.
+const routingContextHint = {
+  source: 'channel-routing',
+  action: 'read-latest-channel',
+  instruction: '请通过可用的 channel_read_context 工具，或 Pet 已配置的 channel_context Capability，读取最新相关 Channel 消息；结合已有完成结果与后续更正，判断当前是否仍需行动，再继续。缺少读取能力时说明所缺背景，不猜测。',
+} as const;
+
 function fenced(input: Record<string, unknown>): string {
   const text = JSON.stringify(input, null, 2);
   // A copied envelope is quoted data, not another active handoff. Body content
@@ -36,7 +43,7 @@ export function channelDispatchInput(
     channelId: message.channelId, messageId: message.messageId,
     author: author(message), body: message.body,
     ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
-    ...(addressedBy ? { addressedBy } : {}),
+    ...(addressedBy ? { addressedBy, contextHint: routingContextHint } : {}),
   });
 }
 

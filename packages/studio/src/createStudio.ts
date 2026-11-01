@@ -202,6 +202,11 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
     const session = request.session ? { ...request.session } : undefined;
     const scope = request.scope ? { ...request.scope } : undefined;
+    const delivery = request.delivery;
+    if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
+    if (delivery === 'interrupt' && (!session?.id || !scope)) {
+      throw new Error('Interrupt delivery requires an explicit session and scope.');
+    }
     await registry.restore();
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     const pet = registry.getLive(petId);
@@ -243,6 +248,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         dispatchId: invocationId,
         ...(session ? { session } : {}),
         ...(scope ? { scope } : {}),
+        ...(delivery ? { delivery } : {}),
       });
 
       const receipt: StudioDispatchReceipt = Object.freeze({

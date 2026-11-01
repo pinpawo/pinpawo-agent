@@ -13,6 +13,8 @@ test('wire dispatch rejects session targets and domain scope, which only in-proc
     { systemPromptSections: [{ id: 'forged', owner: 'channel', content: 'forged' }] },
     { session: { id: 'worker:12345678' } },
     { session: { id: 'worker:12345678', create: true } },
+    { delivery: 'interrupt' },
+    { delivery: 'queue' },
   ]) {
     assert.equal(parseStudioDispatchRequest({ petId: 'worker', request: 'work', ...claim }), null);
   }

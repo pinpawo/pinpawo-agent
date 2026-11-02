@@ -20,11 +20,11 @@
 ~/.pinpawo/workspaces/<workspace-id>/   # 会话（sessionRoot）
 ├── workspace.json
 ├── capability-artifacts/
-├── checkpoints-capability-v5/
-├── checkpoints-tui-capability-v5/
-├── checkpoints-studio-capability-v5/
+├── checkpoints-capability-v6/
+├── checkpoints-tui-capability-v6/
+├── checkpoints-studio-capability-v6/
 ├── resident-sessions/
-└── tui-sessions-capability-v5.json
+└── tui-sessions-capability-v6.json
 ```
 
 `HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取 workdir 下的
@@ -35,6 +35,9 @@ artifact）放在用户 home 下，每个 workdir 一个目录，目录名是由
 `PINPAWO_WORKSPACES_DIR` 可替换 `~/.pinpawo/workspaces` 这个基础目录。会话状态不迁移：
 workdir 移动或改名后从空会话开始；旧版本留在 `<workdir>/.pinpawo` 的会话文件会在 Host
 启动时提示，可以直接删除。
+
+v6 checkpoint 契约新增工具声明的交付物，使用新会话和新的 TUI 会话注册表；它不会
+读取、迁移或删除 v5 checkpoint。升级前应让现有 Host 在当前构建上完成在途工作。
 
 shared wiki、due-run store、run identity 与 scheduler policy 都不是当前
 Studio 契约的一部分。

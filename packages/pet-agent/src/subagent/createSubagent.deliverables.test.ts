@@ -92,7 +92,8 @@ test('context summarization can remove an older tool deliverable declaration fro
   assert.equal(result.messages.some(message => message.id === publication.id), false);
   assert.equal(result.messages.some(message => ToolMessage.isInstance(message)
     && message.tool_call_id === publication.tool_call_id), false);
-  // This is the existing transcript boundary, not a durable deliverable collector.
+  // A new invocation does not rebuild collector state from historical messages.
+  assert.deepEqual(result.deliverables, []);
   assert.deepEqual(result.artifacts, []);
 });
 

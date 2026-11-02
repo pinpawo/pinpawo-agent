@@ -20,11 +20,11 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 ~/.pinpawo/workspaces/<workspace-id>/   # sessions (sessionRoot)
 ├── workspace.json
 ├── capability-artifacts/
-├── checkpoints-capability-v5/
-├── checkpoints-tui-capability-v5/
-├── checkpoints-studio-capability-v5/
+├── checkpoints-capability-v6/
+├── checkpoints-tui-capability-v6/
+├── checkpoints-studio-capability-v6/
 ├── resident-sessions/
-└── tui-sessions-capability-v5.json
+└── tui-sessions-capability-v6.json
 ```
 
 `HostRuntimeConfig` derives these paths before runtime assembly. Studio
@@ -38,6 +38,11 @@ replaces `~/.pinpawo/workspaces` as the base. Session state is not migrated:
 moving or renaming a workdir starts with no sessions, and session files that
 an older version left in `<workdir>/.pinpawo` are reported at Host start and
 can be deleted.
+
+The v6 checkpoint contract adds tool-declared deliverables. It starts new
+sessions and a new TUI registry; it does not read, migrate or delete v5
+checkpoints. Existing Hosts should finish in-flight work on their current build
+before upgrading.
 
 A Studio shared wiki, due-run store, run identity, and scheduler policy are not
 part of the current Studio contract.

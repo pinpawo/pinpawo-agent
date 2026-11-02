@@ -1,4 +1,5 @@
 import type { ProviderTokenUsage } from '../agent/tokenUsage';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
@@ -93,6 +94,8 @@ export type SubagentResult = {
   tokenUsage?: ProviderTokenUsage | null;
   messages: BaseMessage[];
   artifacts: CapabilityArtifactRef[];
+  /** Tool-declared references retained independently of transcript compaction. */
+  deliverables: Deliverable[];
   /** This invocation's textual output for the parent tool result, not a history-message reference. */
   output: string | null;
 };

@@ -56,7 +56,7 @@ function messageScope(request: CapabilityExecutionInput) {
 
 function deliver(run: SubagentRunInput, text = 'Delivered') {
   const message = new AIMessage({ id: `result:${run.runtimeContext?.executionScope?.delegationId}`, content: text });
-  return { messages: [...run.messages, message], artifacts: run.artifacts ?? [], output: message.text };
+  return { messages: [...run.messages, message], artifacts: run.artifacts ?? [], deliverables: [], output: message.text };
 }
 
 function artifact(id: string): CapabilityArtifactRef {
@@ -100,13 +100,24 @@ test('executor uses main history and briefing without replaying child transcript
 
 test('executor returns explicit output without copying subagent messages', async () => {
   const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
-    messages: run.messages, artifacts: [], output: 'Final output independent of private history.',
+    messages: run.messages, artifacts: [], deliverables: [], output: 'Final output independent of private history.',
   }) });
   const first = await execute(input(), hostContext());
   const second = await execute(input(), hostContext());
   assert.equal(first.status, 'returned');
   assert.equal(first.delivery?.text, 'Final output independent of private history.');
   assert.notEqual(first.delivery?.id, second.delivery?.id);
+});
+
+test('executor keeps collected references when finalize replaces the transcript and clears output', async () => {
+  const deliverables = [{ uri: 'artifact://workspace/report', title: 'Report' }];
+  const result = await createCapabilityExecutor({ models, runSubagent: async run => ({
+    ...deliver(run), deliverables,
+  }) })(input('d1', [], { finalize: () => ({ messages: [], output: null }) }), hostContext());
+
+  assert.equal(result.status, 'missing_deliverable');
+  assert.equal(result.delivery, null);
+  assert.deepEqual(result.deliverables, deliverables);
 });
 
 for (const output of [null, '', '  ']) {
@@ -150,7 +161,7 @@ for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'abor
         run.signal?.throwIfAborted();
       }
       const messages = [...run.messages, new AIMessage({ id: 'partial', content: 'Partial work' })];
-      return { messages, artifacts: [artifact('d1')], output: null,
+      return { messages, artifacts: [artifact('d1')], deliverables: [{ uri: 'artifact://partial-report' }], output: null,
         ...(outcome === 'reject' || outcome === 'cancel' ? { reviewDecision: outcome } : {}),
       };
     } });
@@ -162,6 +173,7 @@ for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'abor
       assert.equal(result.reviewDecision, outcome === 'reject' || outcome === 'cancel' ? outcome : undefined);
       assert.equal(result.delivery, null);
       assert.equal(result.artifacts.length, 1);
+      assert.deepEqual(result.deliverables, [{ uri: 'artifact://partial-report' }]);
     }
     assert.equal(finalized, outcome === 'missing_deliverable');
   });
@@ -301,6 +313,7 @@ test('real Capability tools preserve deliverable declarations alongside ordinary
   assert.equal(result.status, 'returned');
   assert.ok(result.delivery?.text);
   assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.deliverables, declared);
 });
 
 test('real subagent execution accepts frozen history with stable IDs without changing it', async () => {

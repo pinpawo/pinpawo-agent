@@ -56,7 +56,7 @@ async function delivered() {
   const delivery = { id: 'delivery', task: call.task, text: 'Draft saved; publication has not run.', scope: {
     lane: 'capability:general' as const, runId: planned.runId, taskId: planned.taskId, delegationId: call.delegationId,
   } };
-  return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery, artifacts: [] })] };
+  return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery, artifacts: [], deliverables: [] })] };
 }
 
 test('control handoff goes straight to Capability with separate main and work records', async () => {

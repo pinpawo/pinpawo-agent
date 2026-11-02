@@ -203,6 +203,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       delivery,
       tokenUsage: result.tokenUsage ?? null,
       artifacts: result.artifacts,
+      deliverables: result.deliverables,
       toolAuthorizations: [...authorizationRecorder.active],
     };
   };

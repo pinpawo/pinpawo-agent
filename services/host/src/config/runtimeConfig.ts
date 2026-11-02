@@ -33,9 +33,11 @@ export type HostRuntimeConfig = Readonly<{
  * contract change starts a new durable namespace rather than interpreting older
  * checkpoints through the new graph. v3 made the Supervisor snapshot's `runId`
  * required; v4 stores delegation results as typed execution records; v5 keeps
- * FileSaver objects inside each thread directory. Capability artifacts keep their existing thread-scoped root.
+ * FileSaver objects inside each thread directory; v6 adds tool-declared deliverables
+ * to delegation results and child checkpoint state. Capability artifacts keep
+ * their existing thread-scoped root.
  */
-export const HOST_CHECKPOINT_CONTRACT = 'capability-v5';
+export const HOST_CHECKPOINT_CONTRACT = 'capability-v6';
 
 /** Independent local Hosts must use distinct FileSaver writer roots. */
 export function resolveHostCheckpointPath(

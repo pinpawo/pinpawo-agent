@@ -1,4 +1,5 @@
 import type { ProviderTokenUsage } from '../../tokenUsage';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
@@ -58,6 +59,7 @@ export type CapabilityExecutionResult = {
   /** Provider usage reported by this invocation. */
   readonly tokenUsage: ProviderTokenUsage | null;
   readonly artifacts: CapabilityArtifactRef[];
+  readonly deliverables: Deliverable[];
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */
   readonly toolAuthorizations: ToolAuthorizationRecord[];
 };

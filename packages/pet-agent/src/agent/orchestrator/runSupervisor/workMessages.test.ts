@@ -34,7 +34,7 @@ function resultFor(input: SupervisorControlContext, dispatch: AIMessage) {
   const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!);
   const metadata = getAgentMessageMetadata(dispatch);
   return createCapabilityExecutionMessage({ callId: dispatch.tool_calls![0].id!, execution, metadata,
-    result: { status: 'returned', artifacts: [], delivery: {
+    result: { status: 'returned', artifacts: [], deliverables: [], delivery: {
       id: 'delivery', task: execution.task, text: 'Verified execution evidence.', scope: {
         runId: metadata.runId as string, taskId: metadata.taskId as string, delegationId: execution.delegationId, lane: `capability:${execution.capability}`,
       },
@@ -77,7 +77,7 @@ test('acceptance ignores results that are not this call\'s main record and rejec
   for (const status of ['missing_deliverable'] as const) {
     const failure = createCapabilityExecutionMessage({ callId: dispatch.tool_calls![0].id!,
       execution: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!),
-      result: { status, delivery: null, artifacts: [] }, metadata: getAgentMessageMetadata(dispatch) });
+      result: { status, delivery: null, artifacts: [], deliverables: [] }, metadata: getAgentMessageMetadata(dispatch) });
     const input = { ...first, messages: [...first.messages, ...retry.messages, failure] };
     assert.throws(() => reviewCurrent(input, { completed: true, reason: 'Old evidence' }), /returned delivery/);
     assert.ok(buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, 'next-call'));

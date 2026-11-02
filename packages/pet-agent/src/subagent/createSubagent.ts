@@ -1,6 +1,8 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
 import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext } from '../runtime/context';
+import { assertToolDeliverables } from '@pinpawo/agent-contracts';
+import { createToolDeliverablesCollector } from './toolDeliverables';
 import {
   composeSystemPrompt,
   createSystemPromptMiddleware,
@@ -278,10 +280,12 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   const systemPrompt = composeSystemPrompt(new SystemMessage(''), {}, frameworkSections);
   const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
   const iterationBudget = createSubagentModelCallBudget(maxIterations);
+  const collector = createToolDeliverablesCollector(input.tools, input.middleware ?? []);
   const middleware: AnyAgentMiddleware[] = [
+    collector.middleware,
     contextSummaryMiddleware,
     iterationBudget.guard,
-    ...(input.middleware ?? []),
+    ...collector.toolMiddleware,
     createSystemPromptMiddleware(inputState.promptSections),
     iterationBudget.counter,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -291,7 +295,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   // bare Command({ resume }) against the parent re-enters the child (#322).
   const agent = createAgent({
     model: input.model,
-    tools: input.tools,
+    tools: collector.tools,
     systemPrompt,
     contextSchema: subagentRuntimeContextSchema,
     ...(middleware.length > 0 ? { middleware } : {}),
@@ -327,13 +331,14 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     },
   );
   latestMessages = readResultMessages(result) ?? latestMessages;
+  assertToolDeliverables(result);
   ensureSubagentMessageIds(latestMessages);
   const artifacts = inputState.artifacts ?? [];
   const invocationMessages = latestMessages.filter(message => !inputMessageIds.has(message.id!));
   const tokenUsage = readMessagesTokenUsage(invocationMessages);
   const reviewDecision = readReviewStopDecision(invocationMessages.at(-1));
   return {
-    messages: latestMessages, artifacts, tokenUsage,
+    messages: latestMessages, artifacts, deliverables: result.deliverables, tokenUsage,
     output: reviewDecision ? null : readInvocationOutput(invocationMessages),
     ...(reviewDecision ? { reviewDecision } : {}),
   };

@@ -1,5 +1,6 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { assertToolDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { getAgentMessageMetadata, setAgentMessageMetadata, type AgentMessageMetadata } from '../messages';
 import { capabilityExecutionSnapshotSchema, type CapabilityExecutionInput } from './runSupervisor/protocol';
 
@@ -16,6 +17,14 @@ const executionResultSchema = z.object({
     }).strict(),
   }).strict().nullable(),
   artifacts: z.array(z.record(z.string(), z.unknown())),
+  deliverables: z.custom<Deliverable[]>((value) => {
+    try {
+      assertToolDeliverables({ deliverables: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }),
 }).strict().refine(result => !result.reviewDecision
   || (result.status === 'missing_deliverable' && result.delivery === null), {
   message: 'A declined review cannot be a returned delivery.',

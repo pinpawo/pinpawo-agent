@@ -50,6 +50,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       callId: runtime.toolCallId,
       execution: input,
       result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts,
+        deliverables: execution.deliverables,
         ...(execution.reviewDecision ? { reviewDecision: execution.reviewDecision } : {}) },
       metadata: { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
         sourceCapability: input.capability, runtimeGenerated: true,

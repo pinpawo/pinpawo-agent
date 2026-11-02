@@ -173,3 +173,24 @@ Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链�
 4. artifacts Toolkit 与 Host `local` adapter、source reader。
 5. HTTP 打开引用。
 6. `cos` adapter。
+
+## 实现进展
+
+工具声明的类型和校验已在 `agent-contracts` 定义。Capability 子 Agent 在工具结果
+产生时把声明写入自己的 checkpoint 状态，同一 URI 保留首次声明；这份累计数据不
+依赖仍留在上下文中的工具消息。它随 `SubagentResult` 返回，并写入
+`delegate_capability` 的执行记录，即使正文为空或审核被拒绝、取消也保留。
+
+当前收集覆盖普通工具消息及同图 `Command` 中的工具消息。跨图 `Command` 是控制
+转移，必须原样保留；当前框架无法在同一返回中同时提交子图累计状态与跨图更新，
+因此不保证这种控制转移中的声明被本收集器记录。现有跨图控制工具属于 Entry /
+Supervisor，不是这里的 Capability 业务工具；不能据此声称任意第三方跨图工具都已
+获得采集保证。
+
+该执行记录与子 Agent 状态使用新的 `capability-v6` Host checkpoint 命名空间。旧
+checkpoint 文件不会被删除或迁移，但新版 Host 默认不能恢复 v5 会话；TUI 也使用
+新的会话注册表。现有运行部署不会因源代码变更自动切换命名空间。
+
+旧 Capability Artifact Pipeline 暂时保留。这里的收集尚不包含最终回复的交付物
+筛选、Channel 历史字段迁移、artifact 发布存储或 HTTP 下载；它们继续按上文范围
+分步实施。

@@ -11,7 +11,7 @@
 - 存储可以替换：本地目录是默认，也要能换成腾讯云 COS 这类对象存储。
 - Chat、TUI、Studio 都是 Host，不经过 Studio 也必须能用；pet-agent 在服务器上复用时同样适用。
 
-旧的 Capability Artifact Pipeline 不满足这个需求：它只有 Capability `lifecycle.finalize` 一个写入口，没有任何 Capability 实现过，store 从未写入；引用只在 graph state 里，模型和人都看不到。本设计不以它为前提。
+旧的 Capability Artifact Pipeline 不满足这个需求：它只有 Capability `lifecycle.finalize` 一个写入口，仓库内没有 Capability 使用该写入口；引用只在 graph state 里，模型和人都看不到。本设计不以它为前提。仓库内的调用情况不能证明外部 Capability 或已有 store 没有数据，删除前需要核实兼容影响。
 
 ## 第一阶段范围
 
@@ -85,10 +85,10 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
   -> Console / TUI 渲染
 ```
 
-- `readReplyDeliverables` 和 `readReplyResultReferences` 用同一个判定：回复所属的 run，执行状态为 `returned`。被 Supervisor 打回、之后重做的那次执行，已发布的文件留在 store 里，但不跟着回复走。
-- 合并本 run 所有 returned 执行的交付物，同一 uri 去重，保持发布顺序。
-- Channel 现有的 `artifacts: [{ uri, label?, version? }]` 改名为 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"。人发的消息也可以带。Console 现有的渲染改用新字段名。
-- 不新增事件、存储表或投影逻辑，每一跳只多一个字段。
+- 目标是让被 Supervisor 打回、之后重做的那次执行的文件留在 store，但不跟着回复走。现有 `readReplyResultReferences` 只按回复所属 run 和 `returned` 筛选；`returned` 表示执行已返回，不代表 Supervisor 已接受。如何可靠识别应随回复交付的执行，需在实现链路前明确，不能直接复用这一筛选并假定它排除了打回的结果。
+- 合并本 run 中选定执行的交付物，同一 uri 去重，保持发布顺序；执行的选取规则待明确。
+- Channel 现有的 `artifacts: [{ uri, label?, version? }]` 拟改为 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"。人发的消息也可以带。Console 现有的渲染改用新字段名。Channel 已持久化人发消息的 `artifacts`，实施字段变更前须明确旧消息和 `label` / `version` 的处理，避免历史附件丢失或不可见。
+- 尽量沿用现有事件和存储路径；执行选取规则与历史数据处理确定后，再确认是否需要额外投影或迁移。
 
 ## artifacts Toolkit
 
@@ -157,7 +157,7 @@ Adapter 在 Host 配置里选：
 
 ## 移除的旧实现
 
-不需要旧数据兼容，因为从未写入过：
+计划移除以下旧实现；删除前须核实外部 Capability、已有 store、checkpoint 和执行记录的兼容影响。仓库内没有写入口的调用，并不能证明所有部署中都没有旧数据：
 
 - pet-agent：`types/artifact.ts`、`orchestrator/capabilityArtifacts.ts`、`orchestrator/artifacts/discovery.ts`、`sessionCapabilityArtifacts`、`SubagentResult.artifacts`、finalize context 中的 `artifactStore` / `recordCapabilityArtifact` / `artifactRefs`；`delegate_capability` 结果里的 `artifacts` 改为 `deliverables`。
 - Host：`FileCapabilityArtifactStore`、`artifact_discovery` Toolkit、`capabilityArtifactRoot`、各处旧 store 注入；TUI 对 `artifact_discovery_context` 信封的解析。

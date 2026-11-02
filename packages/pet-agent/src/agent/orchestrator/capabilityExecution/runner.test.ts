@@ -4,6 +4,7 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
+import { createToolDeliverables } from '@pinpawo/agent-contracts';
 import { z } from 'zod';
 import type { AgentModels } from '../../../types/agent';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
@@ -244,6 +245,62 @@ test('static tools and finalize share the host config identity', async () => {
   assert.equal(result.status, 'returned');
   assert.equal(called, true);
   assert.equal(finalized, true);
+});
+
+test('real Capability tools preserve deliverable declarations alongside ordinary tool results', async () => {
+  const declared = [
+    { uri: 'artifact://workspace/report', title: 'Report' },
+    { uri: 'https://example.com/pull/1' },
+  ];
+  const declaration = { ...createToolDeliverables(declared), source: 'report-tool' };
+  const calls: string[] = [];
+  const publish = tool(() => {
+    calls.push('publish');
+    return ['Published report.', declaration];
+  }, {
+    name: 'publish_report', description: 'Publish a report.', schema: z.object({}),
+    responseFormat: 'content_and_artifact',
+  });
+  const plain = tool(() => {
+    calls.push('plain');
+    return 'Plain probe result.';
+  }, { name: 'plain_probe', description: 'Read a plain result.', schema: z.object({}) });
+  const metadata = tool(() => {
+    calls.push('metadata');
+    return ['Metadata probe result.', { fileCount: 1 }];
+  }, {
+    name: 'metadata_probe', description: 'Read unrelated tool metadata.', schema: z.object({}),
+    responseFormat: 'content_and_artifact',
+  });
+  const toolkit = defineToolkit({
+    name: 'reports', description: 'Prepare reports and inspect evidence.',
+    tools: [{ tool: publish }, { tool: plain }, { tool: metadata }],
+  });
+  let finalized = false;
+  const result = await createCapabilityExecutor({
+    models: { act: new FakeToolCallingModel({ toolCalls: [[
+      { id: 'publish-call', name: 'publish_report', args: {} },
+      { id: 'plain-call', name: 'plain_probe', args: {} },
+      { id: 'metadata-call', name: 'metadata_probe', args: {} },
+    ], []] }) },
+  })(input('d1', [toolkit], { finalize: (execution) => {
+    finalized = true;
+    const results = new Map(execution.messages.filter(ToolMessage.isInstance)
+      .map(message => [message.tool_call_id, message]));
+    assert.equal(results.size, 3);
+    assert.equal(results.get('publish-call')?.content, 'Published report.');
+    assert.deepEqual(results.get('publish-call')?.artifact, declaration);
+    assert.equal(results.get('plain-call')?.content, 'Plain probe result.');
+    assert.equal(results.get('plain-call')?.artifact, undefined);
+    assert.equal(results.get('metadata-call')?.content, 'Metadata probe result.');
+    assert.deepEqual(results.get('metadata-call')?.artifact, { fileCount: 1 });
+  } }), hostContext());
+
+  assert.equal(finalized, true);
+  assert.deepEqual(calls.sort(), ['metadata', 'plain', 'publish']);
+  assert.equal(result.status, 'returned');
+  assert.ok(result.delivery?.text);
+  assert.deepEqual(result.artifacts, []);
 });
 
 test('real subagent execution accepts frozen history with stable IDs without changing it', async () => {

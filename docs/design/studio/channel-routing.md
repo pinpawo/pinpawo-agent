@@ -103,8 +103,17 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 - 派发输入仍是 `channel_message` 封装，额外带 `addressedBy: 'routing'`，让 Pet 知道这条消息没有点名找它：
   不是自己的事时，可以简短说明并 @ 更合适的成员。
 - 消息本身不改写：不补 mentions，正文原样保存。
-- `contextHint.instruction` 保留插件固定的读取最新 Channel 提示，`contextHint.focus` 可带模型生成的关注方向。
+- `contextHint` 保留自动分配来源与可选模型 `focus`，固定读取说明不再重复写入消息正文。
+  Channel 通过既有 scoped context provider 提供独立的 invocation `hint`：固定 `instruction` 提醒
+  先委派已配置的 `channel_context` 读取最新背景，`focus` 单独标为模型建议。provider 只从完整、
+  匹配当前 Channel 的外层 routing envelope 提取关注建议，不从 body 或 replyTo 取指令。
+  显式 @ 与 schedule/trigger 的 Channel 执行也有准备提示，但不沿用上次 routing focus。
   分配 `reason` 仍只用于审计；关注建议不写入 system prompt，也不替 Pet 设定 goal 或计划。
+- Host 在排队前快照 provider 的公告与 hint，后者经本次 Agent runtime context 原样送到 Entry、
+  Supervisor。hint 与 goal 分开呈现，不由模型重写，不改 `plan_request`、`continue` 参数。
+  临时提示不追加到 canonical 对话历史；没有 hint 的调用不新增提示块，也不继承上次 hint。
+  原生审批继续使用原 invocation 保存的 hint，不能由新输入替换。读取与后续安排仍由模型选择，
+  提示字段到达不等于已经完成读取。
 - 投递结果照常发布 `channel.delivery` 事件，多带 `via: 'routing'`、`confidence`、`reason`。
   自动分配事件还提供传给模型的所选 `runtime` 观察，区别于派发后可能变化的真实运行状态。
 - 不派发时发布 `channel.routing.skipped`（channelId、messageId、原因 `none | low_confidence | error | invalid`、分数），

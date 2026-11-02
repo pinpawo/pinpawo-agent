@@ -55,15 +55,26 @@ Hook 不取出消息、不追加用户正文、不写 checkpoint，也不构造 
 ## Channel 的提示
 
 Channel decision LLM 可为没有 @ 的人类消息或 Pet 公开回复选择一个其他 Pet，或选择
-`none`。选中接收者后，在已有的 dispatch JSON envelope 中提供 `contextHint`：固定
-提示建议通过 `channel_read_context` 或显式配置的 `channel_context` Capability 读取
-最新相关消息；可选的 `focus` 由分配模型指出与接收者相关的关注方向。Pet 结合原消息、
-最新上下文、自身身份和能力判断是否仍需行动。
+`none`。选中接收者后，既有 dispatch JSON envelope 的 `contextHint` 保留来源与模型
+关注方向。Channel 通过 scoped context provider 另外提供 invocation `hint`，提醒先
+委派显式配置的 `channel_context` Capability 读取最新相关消息，再判断本轮工作。
+可选的 `focus` 由分配模型指出与接收者相关的关注方向，与固定 instruction 分开保留。
 
 固定读取提示来自 Channel 插件代码；`focus` 是模型基于公开对话的建议，不代表原作者
 指令、已确认事实、目标或新授权，不写入 system prompt 或强制生成计划。路由的审计
 `reason` 不进入 Pet 输入，原始消息作者和正文保持不变。公告仍使用原有 system context
-provider。显式 @ 和 schedule/trigger 保持各自已有输入形式。
+provider。provider 兼容原来的 section 数组，也可返回公告与 hint；它收到本次请求快照，
+由领域插件解释请求，pet-agent 不解析 Channel envelope。Studio dispatch 不增加 hint 参数。
+
+Host 在 admission 前冻结本次 hint，通过 invocation runtime context 传递。Entry 的 goal
+与外部 hint 分开，`plan_request`、`continue` 参数不变；Supervisor 在 request 旁读取准备
+提示，可按已有 Capability 边界安排上下文分析，再根据返回证据推进或校准剩余工作。
+Entry 不增加业务读取工具。没有 hint 时不新增提示段落，沿用原来行为。子任务继承原始
+runtime hint，但不重复渲染整轮准备提示，避免业务子任务再次启动准备工作。
+
+显式 @ 和 schedule/trigger 保持各自已有消息形式，也通过 provider 获得 Channel 准备提示。
+hint 不写入 canonical 对话历史；原生审批等待状态保存原 invocation hint，恢复时不查询
+新 provider 或采用新输入的提示。普通新输入用自己的 hint，缺省时不沿用旧值。
 
 分配入口、作者候选排除、非法 @ 与重复公开回传的边界见
 [Channel 路由](../studio/channel-routing.md)。分配模型不读取 Pet 私有执行结果。

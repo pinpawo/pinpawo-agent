@@ -25,6 +25,7 @@ export function buildRunSupervisorInput(params: {
   root: OrchestratorStateType;
   catalog: RunSupervisorInput['catalog'];
   capabilityDisclosure: RunSupervisorInput['capabilityDisclosure'];
+  hint?: RunSupervisorInput['hint'];
 }): RunSupervisorInput {
   const { root, catalog, capabilityDisclosure } = params;
   if (!root.runUserRequest) throw new Error('Supervisor requires the current user request.');
@@ -33,6 +34,7 @@ export function buildRunSupervisorInput(params: {
     mode,
     inputId: `${mode}:${root.runId}:${root.runIterationCount}`,
     runId: root.runId, taskId: root.taskId, userRequest: root.runUserRequest,
+    ...(params.hint === undefined ? {} : { hint: params.hint }),
     state: root.runSupervisorState, messages: root.messages, catalog, capabilityDisclosure,
   };
 }

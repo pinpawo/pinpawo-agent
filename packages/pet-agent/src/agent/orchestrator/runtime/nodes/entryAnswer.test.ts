@@ -1,6 +1,7 @@
 import { createDeliveryResult, withDeliveryCalls } from '../../../../testing/capabilityDelivery';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { MemorySaver } from '@langchain/langgraph';
 import { runAgent } from '../../../runAgent';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
@@ -220,6 +221,49 @@ test('plan_request commits its routing pair to Root before Supervisor reads it',
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), true);
   assert.equal(result.messages.at(-1)?.content, '当前没有可用的 Capability。');
+});
+
+test('Entry routes the goal while runtime hints reach Supervisor independently and expire on the next run', async () => {
+  const hints = [
+    { source: randomUUID(), instruction: randomUUID(), focus: randomUUID() },
+    undefined,
+    { source: randomUUID(), instruction: randomUUID() },
+  ];
+  const goals = hints.map(() => randomUUID());
+  let index = 0;
+  const observed = observeEntryBindings(() => new AIMessage({ content: '', tool_calls: [{
+    id: randomUUID(), name: PLAN_REQUEST_TOOL_NAME, args: { goal: goals[index] },
+  }] }));
+  const supervisorInputs: RunSupervisorInput[] = [];
+  const graph = createOrchestratorGraph({
+    models: { act: observed.model, answer: observed.model }, checkpoint: new MemorySaver(),
+    runSupervisorRunner: { async invoke(input) { supervisorInputs.push(input); return { reply: randomUUID() }; } },
+  });
+  for (; index < hints.length; index += 1) {
+    const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(randomUUID())]), {
+      ...invokeConfig(), ...(hints[index] ? { context: { hint: hints[index] } } : {}),
+    });
+    const input = supervisorInputs[index];
+    assert.deepEqual(input.hint, hints[index]);
+    assert.equal('hint' in input, hints[index] !== undefined);
+    assert.equal(input.userRequest, goals[index]);
+    assert.equal(result.runUserRequest, goals[index]);
+    const invocation = observed.invocations[index];
+    assert.deepEqual(entryToolDescriptions(invocation.tools), entryToolDescriptions([
+      createPlanRequestTool(), createContinueTool(),
+    ]));
+    assert.equal(invocation.messages[0].text, buildEntryAnswerSystemPrompt(false));
+    const hintMessages = invocation.messages.filter(message => message.text.startsWith('<invocation_hint '));
+    assert.equal(hintMessages.length, hints[index] ? 1 : 0);
+    for (const [hintIndex, hint] of hints.entries()) {
+      if (!hint) continue;
+      for (const value of Object.values(hint)) {
+        assert.equal(invocation.messages.some(message => message.text.includes(value)), hintIndex === index);
+        assert.equal(result.messages.some(message => message.text.includes(value)), false);
+        assert.equal(input.userRequest.includes(value), false);
+      }
+    }
+  }
 });
 
 test('plan_request retires the saved plan so Supervisor plans the new request from empty', async () => {

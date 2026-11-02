@@ -12,6 +12,8 @@ import { studioPetRoleCases, type StudioPetRoleCase } from './datasets/studio-pe
 import { buildStudioPetBoundaryInput, defaultStudioPetTemplateRoot, loadStudioPetRoleContext, runStudioPetRoleCase, StudioPetRoleInvocationError } from './studio-pet-role-evaluation.ts';
 import type { StudioPetModelObservation } from './studio-pet-model-observer.ts';
 import type { PromptEvalJudge } from './prompt-goal-evaluator.ts';
+import { channelDispatchInput } from '../../../plugins/channel/src/channelDispatchInput.ts';
+import { studioPetEvalChannelId } from './studio-pet-invocation-fixture.ts';
 
 class ScriptedModel extends BaseChatModel {
   readonly inputs: BaseMessage[][] = [];
@@ -84,6 +86,26 @@ test('template assembly honors explicit shared references and fails on missing r
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('the real Channel provider supplies the role fixture hint without putting it in system sections', async () => {
+  const focus = randomUUID();
+  const request = channelDispatchInput({ channelId: studioPetEvalChannelId, messageId: randomUUID(), sequence: 1,
+    author: { kind: 'human', id: 'owner' }, body: randomUUID(), occurredAt: '2026-01-01T00:00:00.000Z',
+    artifacts: [], mentions: [],
+  }, undefined, undefined, 'routing', focus);
+  const routed = await loadStudioPetRoleContext('reviewer', undefined, undefined, request);
+  const hint = routed.runtimeContext.hint;
+  assert.ok(hint);
+  assert.equal(hint.source, 'channel');
+  assert.equal(hint.focus, focus);
+  assert.ok(hint.instruction.trim());
+  assert.ok(Object.isFrozen(hint));
+  assert.ok(routed.systemPromptSections.every(section => !section.content.includes(hint.instruction) && !section.content.includes(focus)));
+  assert.equal(routed.messages[0]?.text, request);
+  const fresh = await loadStudioPetRoleContext('reviewer');
+  assert.equal(fresh.runtimeContext.hint?.focus, undefined);
+  assert.equal(fresh.runtimeContext.hint?.instruction, hint.instruction);
+});
+
 test('real Entry goal and full Supervisor briefing reach the judge without executing a Capability', async () => {
   const testCase = example('issuer', 'entry');
   const goal = randomUUID();
@@ -110,10 +132,12 @@ test('real Entry goal and full Supervisor briefing reach the judge without execu
   assert.ok(result.scores.some(item => item.evaluator === 'llm-judge'));
   // Dynamic source boundaries, not a test of fixed prompt wording.
   const context = await loadStudioPetRoleContext('issuer');
+  assert.ok(context.runtimeContext.hint);
   assert.deepEqual(context.systemPromptSections.map(section => section.id), [
     'pet:document', 'host:runtime-environment', 'channel:protocol', 'channel:metadata', 'channel:context',
   ]);
   for (const messages of model.inputs) {
+    assert.equal(messages.filter(message => message.text.includes(context.runtimeContext.hint!.instruction)).length, 1);
     const systems = messages.filter(message => message._getType() === 'system');
     assert.equal(systems.length, 1);
     const system = systems[0]!.text;
@@ -173,6 +197,11 @@ test('Boundary uses a valid native delivery and can finish its own review despit
   const { judge, received } = recordingJudge();
   const result = await runStudioPetRoleCase({ testCase, model, judge });
   assert.equal(model.inputs.length, 2);
+  assert.ok(context.runtimeContext.hint);
+  for (const messages of model.inputs) {
+    assert.equal(messages.filter(message => message.text.includes(context.runtimeContext.hint!.instruction)).length, 1);
+    assert.equal(messages[0]!.text.includes(context.runtimeContext.hint.instruction), false);
+  }
   assert.ok(model.inputs[0]!.some(message => message.text.includes(delivery)));
   const capabilityBody = context.catalog.entries.find(entry => entry.capabilityName === testCase.boundary.capability)!.content;
   assert.ok(model.inputs.every(messages => messages.some(message =>

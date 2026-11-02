@@ -1,8 +1,8 @@
+import type { InvocationContextResult } from './invocationSystemContext';
 import type {
   AgentCapability,
   CapabilityArtifactStore,
   PetDocument,
-  SystemPromptSection,
 } from '@pinpawo/pet-agent';
 import type { AgentRuntimeEvent, AgentServerMessage } from '@pinpawo/agent-session';
 
@@ -67,7 +67,9 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
     petId: string;
     sessionId?: string;
     scope: PetInvocationScope;
-  }>) => Promise<readonly SystemPromptSection[] | undefined>;
+    /** The admitted request, before any queue wait or model processing. */
+    request?: string;
+  }>) => Promise<InvocationContextResult>;
 };
 
 export type CreateResidentPetHostOptions = CreateResidentPetRuntimeOptions;

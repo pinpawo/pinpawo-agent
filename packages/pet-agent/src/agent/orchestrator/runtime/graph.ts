@@ -1,4 +1,5 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
+import type { InteropZodObject } from '@langchain/core/utils/types';
 import { agentRuntimeContextSchema } from '../../../runtime/context';
 import {
   OrchestratorState,
@@ -42,7 +43,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   const entryAnswer = createEntryAnswerSubgraph(config);
 
-  const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
+  // LangGraph maps a Zod context object's optional keys to required properties
+  // whose values may be undefined. Keep the runtime schema, without making a
+  // newly optional invocation field mandatory for every graph caller.
+  const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema as InteropZodObject)
     .addNode('prepare', prepare, { ends: ['compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('compactContext', compactContext, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('captureUserRequest', captureRunUserRequest, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })

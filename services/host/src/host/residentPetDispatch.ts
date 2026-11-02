@@ -1,7 +1,7 @@
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
-import { snapshotInvocationSections, withInvocationSections } from './invocationSystemContext';
+import { snapshotInvocationContext, withInvocationContext } from './invocationSystemContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
@@ -55,10 +55,10 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       const session = suppliedSession ? { ...suppliedSession } : undefined;
       const petId = runtime.petId;
       const resolved = scope && resolveInvocationContext
-        ? await resolveInvocationContext(Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }) }))
+        ? await resolveInvocationContext(Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }), request }))
         : undefined;
       if (context.isClosing()) throw new Error('Resident Pet is closing.');
-      const systemPromptSections = resolved === undefined ? undefined : snapshotInvocationSections(resolved);
+      const invocationContext = snapshotInvocationContext(resolved);
       // Resolve and persist before admission; neither queue time nor a TUI switch
       // may change the target. Legacy callers retain active-session behavior.
       const target = session
@@ -80,7 +80,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         if (!session) throw new Error('A waiting dispatch has no session to resume from.');
         sessions.setPendingDispatch(session.id, {
           interruptId: pending.interruptId, dispatchId, request, ...(scope ? { scope } : {}),
-          ...(systemPromptSections?.length ? { systemPromptSections } : {}),
+          ...invocationContext,
         });
       };
 
@@ -107,7 +107,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                   turnSetup = turn.setup;
                   const result = await runAgentTurn({
                     ...turn,
-                    setup: withInvocationSections(turn.setup, systemPromptSections),
+                    setup: withInvocationContext(turn.setup, invocationContext),
                     emitEvent: (event) => {
                       if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
                       // Dispatch observers follow the conversation whichever session is on screen.

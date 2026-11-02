@@ -24,7 +24,7 @@
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { JsonObject } from '@pinpawo/agent-contracts';
-import type { AgentToolkit, SystemPromptSection } from '@pinpawo/pet-agent';
+import type { AgentInvocationHint, AgentToolkit, SystemPromptSection } from '@pinpawo/pet-agent';
 import type { PetInvocationScope } from 'pinpawo/host-runtime';
 
 import type { StudioPetRegistration } from './types';
@@ -87,12 +87,21 @@ export type StudioPluginHooks = {
   ) => () => void;
 };
 
+/** Trusted, invocation-local context; independent from the dispatch message and goal. */
+export type StudioInvocationContext = Readonly<{
+  systemPromptSections?: readonly SystemPromptSection[];
+  hint?: AgentInvocationHint;
+}>;
+
 /** Resolve domain context for one admitted, scoped Pet invocation. */
 export type StudioContextProvider = (target: Readonly<{
   petId: string;
   sessionId?: string;
   scope: PetInvocationScope;
-}>) => readonly SystemPromptSection[] | undefined | Promise<readonly SystemPromptSection[] | undefined>;
+  /** Present for Host dispatches; optional for older composition callers. */
+  request?: string;
+}>) => readonly SystemPromptSection[] | StudioInvocationContext | undefined
+  | Promise<readonly SystemPromptSection[] | StudioInvocationContext | undefined>;
 
 /* ─────────────── 插件 ─────────────── */
 

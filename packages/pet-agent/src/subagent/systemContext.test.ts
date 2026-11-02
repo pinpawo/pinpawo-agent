@@ -44,6 +44,8 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
   const invocations = new Map<string, BaseMessage[][]>();
   const runtimeContexts: SubagentRuntimeContext[] = [];
   const executionSection = { id: 'execution:test', content: randomUUID() };
+  const invocationHint = { source: randomUUID(), instruction: randomUUID(), focus: randomUUID() };
+  const childHint = { source: randomUUID(), instruction: randomUUID() };
   const inspect = tool(async (_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     runtimeContexts.push(runtime.context);
     return 'inspected';
@@ -60,6 +62,7 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
         hostMarker: { id: key },
         workdir: '/forbidden-child-override',
         systemPromptSections: [{ id: 'host:forbidden-child-override', content: 'override' }],
+        hint: childHint,
       },
     });
     return { messages: result.messages };
@@ -69,7 +72,9 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
     const key = `pet-${index}`;
     const callbackInputs: BaseMessage[][] = [];
     const run = await graph.streamEvents({ messages: [new HumanMessage(key)] }, {
-      version: 'v3', context: { workdir: `/workspace/${key}`, systemPromptSections: sections, parentMarker: key },
+      version: 'v3', context: { workdir: `/workspace/${key}`, systemPromptSections: sections, parentMarker: key,
+        ...(index === 0 ? { hint: invocationHint } : {}),
+      },
       callbacks: [{ handleChatModelStart: async (_model, messages) => { callbackInputs.push(...messages); } }],
     });
     const events = [];
@@ -83,6 +88,11 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
       assert.equal(messages[0].text.split(`/workspace/${key}`).length - 1, 1);
       assert.equal(messages[0].text.includes('/forbidden-child-override'), false);
       assert.equal(JSON.stringify(messages).includes(inputs[1 - index][0].content), false);
+      // Preparation is orchestrated by the parent; the child gets its current
+      // task and briefing, not a second rendering of the invocation-wide hint.
+      for (const value of [...Object.values(invocationHint), ...Object.values(childHint)]) {
+        assert.equal(JSON.stringify(messages).includes(value), false);
+      }
     }
     assert.equal(output.messages.some(SystemMessage.isInstance), false);
     assert.equal(JSON.stringify(output).includes(sections[0].content), false);
@@ -101,6 +111,8 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
     assert.deepEqual(context.hostMarker, { id: key });
     const index = key === 'pet-0' ? 0 : 1;
     assert.deepEqual(context.systemPromptSections, inputs[index]);
+    assert.deepEqual(context.hint, index === 0 ? invocationHint : undefined);
+    assert.equal('hint' in context, index === 0);
   }
 });
 

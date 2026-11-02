@@ -4,8 +4,8 @@ import type { AgentInputModality } from '@pinpawo/agent-session';
 import { atomicWriteFile } from '../atomicFile';
 import { buildTuiChatThreadId } from '../chatInterface';
 import type { PetInvocationScope } from '../host/petInvocationContext';
-import type { SystemPromptSection } from '@pinpawo/pet-agent';
-import { snapshotInvocationSections } from '../host/invocationSystemContext';
+import type { AgentInvocationHint, SystemPromptSection } from '@pinpawo/pet-agent';
+import { snapshotInvocationContext } from '../host/invocationSystemContext';
 
 export type TuiSessionRecord = {
   id: string;
@@ -33,6 +33,7 @@ export type TuiSessionPendingDispatch = {
   request: string;
   scope?: PetInvocationScope;
   systemPromptSections?: readonly SystemPromptSection[];
+  hint?: AgentInvocationHint;
 };
 
 export type TuiSessionState = {
@@ -364,16 +365,19 @@ function readPendingDispatch(value: unknown): TuiSessionPendingDispatch | null {
     || (scope && (!namespace || !scopeId))) {
     return null;
   }
-  let systemPromptSections: readonly SystemPromptSection[] | undefined;
+  let invocationContext;
   try {
-    if (record.systemPromptSections !== undefined) systemPromptSections = snapshotInvocationSections(record.systemPromptSections);
+    invocationContext = snapshotInvocationContext({
+      ...(record.systemPromptSections !== undefined ? { systemPromptSections: record.systemPromptSections } : {}),
+      ...(record.hint !== undefined ? { hint: record.hint } : {}),
+    });
   } catch { return null; }
   return {
     interruptId,
     dispatchId,
     request,
     ...(namespace && scopeId ? { scope: { namespace, id: scopeId } } : {}),
-    ...(systemPromptSections?.length ? { systemPromptSections } : {}),
+    ...invocationContext,
   };
 }
 

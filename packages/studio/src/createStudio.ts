@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { allocatePetSessionId, type PetCredentialSource } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -181,13 +181,14 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     if (!provider) return undefined;
     const snapshot = Object.freeze({
       petId: target.petId,
+      ...(target.request !== undefined ? { request: target.request } : {}),
       ...(target.sessionId ? { sessionId: target.sessionId } : {}),
       scope: Object.freeze({ ...target.scope }),
     });
     const sections = await provider.provide(snapshot);
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     if (contextProviders.get(namespace) !== provider) throw new Error(`Context provider for "${namespace}" is unavailable.`);
-    return sections;
+    return snapshotInvocationContextResult(sections);
   };
 
   async function dispatch(

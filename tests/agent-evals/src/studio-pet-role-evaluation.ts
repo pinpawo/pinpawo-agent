@@ -248,6 +248,9 @@ export async function runStudioPetRoleCase(params: {
       entryMessages = input ? [...input.messages] : result.messages;
     } else if (testCase.phase === 'boundary') {
       input = buildStudioPetBoundaryInput(testCase, context.catalog, context.messages);
+      // This probe enters Supervisor directly; mirror the Root node's separate
+      // invocation-context projection without rewriting the fixture's goal.
+      if (runtimeContext.hint !== undefined) input = { ...input, hint: runtimeContext.hint };
     } else {
       if (!testCase.flow) throw new Error('Flow case requires controlled Capability deliveries.');
       const flow = await runStudioPetFlow({ model: params.model, registry: context.registry,

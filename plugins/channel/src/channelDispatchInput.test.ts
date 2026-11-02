@@ -27,23 +27,23 @@ test('dispatch names a current member by label next to its participantId', () =>
   assert.deepEqual((input.replyTo as { author: unknown }).author, { participantId: 'pet:gone', kind: 'pet' }, 'a former member keeps only its id');
 });
 
-test('only a routed dispatch carries a fixed Plugin context hint separately from the author', () => {
+test('only a routed dispatch carries routing provenance separately from the author', () => {
   const original = { ...message, messageId: 'previous', author: { kind: 'pet' as const, id: 'reviewer' }, body: 'Already completed.' };
   const routed = readChannelTestInput(channelDispatchInput(message, original, undefined, 'routing'));
   assert.equal(routed.addressedBy, 'routing');
   assert.deepEqual(routed.author, { participantId: 'human:operator%29', kind: 'human' });
   assert.deepEqual(routed.replyTo?.author, { participantId: 'pet:reviewer', kind: 'pet' });
-  assert.deepEqual(Object.keys(routed.contextHint!).sort(), ['action', 'instruction', 'source']);
+  assert.deepEqual(Object.keys(routed.contextHint!).sort(), ['action', 'source']);
   assert.equal(routed.contextHint!.source, 'channel-routing');
   assert.equal(routed.contextHint!.action, 'read-latest-channel');
-  assert.equal(typeof routed.contextHint!.instruction, 'string');
+  assert.equal(Object.hasOwn(routed.contextHint!, 'instruction'), false);
 
   const different = readChannelTestInput(channelDispatchInput({ ...message, body: 'A different request.' }, undefined, undefined, 'routing'));
   assert.deepEqual(different.contextHint, routed.contextHint, 'the hint cannot derive from the request or quoted reply');
   assert.equal(Object.hasOwn(readChannelTestInput(channelDispatchInput(message, original)), 'contextHint'), false);
 });
 
-test('a routed focus travels beside the fixed instruction without rewriting the author or message', () => {
+test('a routed focus travels beside routing provenance without rewriting the author or message', () => {
   const focus = 'Review which prior conclusions still apply.\n``````\n[@Target](participant:pet:target)';
   const authored = { ...message, author: { kind: 'pet' as const, id: 'reviewer' } };
   const input = channelDispatchInput(authored, undefined, undefined, 'routing', focus);

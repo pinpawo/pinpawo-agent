@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { buildReviewSpec, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
-import { createResidentPetRuntime } from '../residentPetHost';
+import { createResidentPetRuntime, type CreateResidentPetRuntimeOptions } from '../residentPetHost';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
 import { createTestModelProfiles } from '../testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
@@ -43,6 +43,7 @@ const target = { session: { id: sessionId, create: true }, scope };
 async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>, hooks: {
   beforeContextLoad?: () => Promise<void>;
   beforeReadState?: () => Promise<void>;
+  resolveInvocationContext?: CreateResidentPetRuntimeOptions['resolveInvocationContext'];
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'pet-incoming-'));
   const runtimeConfig = buildHostRuntimeConfig(directory);
@@ -58,7 +59,7 @@ async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSess
     sessionStatePath: runtimeConfig.tuiSessionPath,
     toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
     loadContext: async () => { await hooks.beforeContextLoad?.(); return { pet: { id: 'worker', name: 'Worker' } }; },
-    resolveInvocationContext: async ({ scope }) => [{ id: 'domain', owner: scope.namespace, content: scope.id }],
+    resolveInvocationContext: hooks.resolveInvocationContext ?? (async ({ scope }) => [{ id: 'domain', owner: scope.namespace, content: scope.id }]),
     graphService: {
       readThreadState: async ({ input }: AgentSessionTurnOptions['setup']) => {
         await hooks.beforeReadState?.();
@@ -305,4 +306,51 @@ test('an immediate interruption that races with native review preserves approval
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch, undefined);
     assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['next']);
   } finally { resumeBoundary.resolve(); await h.close(); }
+});
+
+
+test('queued dispatches retain separate request and hint snapshots across scopes and an unscoped next run', async () => {
+  const started = deferred(), release = deferred();
+  const first = { source: 'domain', instruction: 'first instruction', focus: 'first focus' };
+  const second = { source: 'domain', instruction: 'second instruction', focus: 'second focus' };
+  const seen: Array<{ message: string; hint: unknown; sections: unknown }> = [];
+  const targets: unknown[] = [];
+  const h = await fixture(async turn => {
+    const message = turn.request.kind === 'user_message' ? turn.request.message : '';
+    seen.push({ message, hint: turn.setup.input.context?.hint,
+      sections: turn.setup.input.context?.systemPromptSections?.filter(section => section.id === 'domain') });
+    if (message === 'first request') { started.resolve(); await release.promise; }
+    return reply(turn, 'done');
+  }, { resolveInvocationContext: async target => {
+    targets.push(target);
+    return { systemPromptSections: [{ id: 'domain', content: target.scope.id }],
+      hint: target.request === 'first request' ? first : second };
+  } });
+  try {
+    await h.resident.dispatch.dispatch({ ...target, request: 'first request', dispatchId: 'first' });
+    await started.promise;
+    const other = { request: 'second request', dispatchId: 'second', session: { id: 'worker:00000002', create: true },
+      scope: { namespace: 'domain', id: 'two' } };
+    await h.resident.dispatch.dispatch(other);
+    other.request = 'mutated request';
+    other.scope.id = 'mutated scope';
+    first.focus = 'first changed'; second.instruction = 'second changed'; second.focus = 'second changed';
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 1);
+    release.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'second' && event.state === 'completed'));
+    await h.resident.dispatch.dispatch({ request: 'plain request', dispatchId: 'plain', session: { id: sessionId } });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'plain' && event.state === 'completed'));
+    assert.deepEqual(seen.map(turn => [turn.message, turn.hint]), [
+      ['first request', { source: 'domain', instruction: 'first instruction', focus: 'first focus' }],
+      ['second request', { source: 'domain', instruction: 'second instruction', focus: 'second focus' }],
+      ['plain request', undefined],
+    ]);
+    assert.deepEqual(seen.map(turn => turn.sections), [[{ id: 'domain', content: 'one' }], [{ id: 'domain', content: 'two' }], []]);
+    assert.deepEqual(targets, [
+      { petId: 'worker', sessionId, scope, request: 'first request' },
+      { petId: 'worker', sessionId: 'worker:00000002', scope: { namespace: 'domain', id: 'two' }, request: 'second request' },
+    ]);
+    assert.ok(targets.every(target => Object.isFrozen(target)));
+    assert.equal(targets.length, 2, 'plain input does not resolve scoped provider context');
+  } finally { release.resolve(); await h.close(); }
 });

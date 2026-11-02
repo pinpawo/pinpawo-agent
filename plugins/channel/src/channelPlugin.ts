@@ -5,6 +5,7 @@ import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } fro
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
+import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
 import { collectChannelRoutingState, type RoutePetRuntime } from './channelRoutingState';
 import {
@@ -326,13 +327,16 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       context = studio;
       // A provider is scoped to a persisted (Pet, session) binding, not to the
       // Pet globally. The Studio resolves it when preparing a run.
-      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope }) => {
+      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope, request }) => {
         const binding = await service.getSession(scope.id, petId);
         if (!sessionId || !binding || binding.sessionId !== sessionId) {
           throw new ChannelAccessError('Channel scope does not match the Pet session binding.');
         }
         const channel = await service.requireMember(binding.channelId, { kind: 'pet', id: petId });
-        return channelSystemContext(channel);
+        return {
+          systemPromptSections: channelSystemContext(channel),
+          hint: channelInvocationHint(channel.channelId, request),
+        };
       });
       router = createChannelRouter(options.routing, {
         ...(options.routeDecider ? { decider: options.routeDecider } : {}),

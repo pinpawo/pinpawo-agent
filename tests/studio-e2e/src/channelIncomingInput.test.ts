@@ -150,7 +150,7 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
       studio = await createStudioWithPets({ studioId: 'incoming', plugins: [channel],
         onPreparedContextResolver: bridge.onPreparedContextResolver,
         storage: { kind: 'sqlite', path: join(root, 'studio.sqlite') },
-        pets: [{ registration: { petId: 'worker', name: 'Worker' }, dispatch: host.resident.dispatch },
+        pets: [{ registration: { petId: 'worker', name: 'Worker' }, dispatch: host.resident.dispatch, sessions: host.sessions },
           { registration: { petId: 'reviewer', name: 'Reviewer' }, dispatch: {
             getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
             onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
@@ -160,6 +160,8 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
         pets: ['worker', 'reviewer'] }, { studio: true })).channel.channelId;
       await channel.sendMessage(cid, { body: 'Start the controlled work.' }, me);
       await waitFor(() => started);
+      assert.ok(routing[0]!.pets.every(pet => pet.runtime?.sessionState === 'unbound'),
+        'the initial decision observes absent Channel bindings before any session is created');
       if (delivery === 'boundary') {
         const reviewer = await channel.run(cid, 'reviewer', 'Return the controlled review.', { kind: 'trigger', id: 'test-review' });
         studio.notify({ source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
@@ -168,6 +170,13 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
             message: { type: 'message.completed', messageId: 'review-result', role: 'assistant', text: update } },
         });
         await waitFor(() => host!.resident.dispatch.getQueueSnapshot().queuedDispatches === 1);
+        const decision = routing.filter(input => input.message.body === update);
+        assert.equal(decision.length, 1, 'the incoming reply makes one decision after sampling state');
+        const sampled = decision[0]!.pets.find(pet => pet.participantId === 'pet:worker')!.runtime!;
+        assert.equal(sampled.sessionState, 'running');
+        assert.equal(sampled.admissionState, 'busy');
+        assert.equal(sampled.activeScope, 'current-channel');
+        assert.equal(sampled.queuedInSession, 0, 'the state was sampled before the new input was admitted');
         assert.equal(aborted, false, 'ordinary input waits for the delegation');
         assert.equal(entryCalls, 1);
         release();

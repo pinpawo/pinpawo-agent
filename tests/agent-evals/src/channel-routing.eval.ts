@@ -3,7 +3,8 @@
  *
  * Each case is an unaddressed human or Pet message with its recent public history
  * in a Channel of Executor, Reviewer, Wiki and Issuer. The production routeInput
- * adapter derives identity and eligible candidates from stored member metadata.
+ * adapter derives identity and eligible candidates from stored member metadata;
+ * selected cases then attach synthetic Host runtime observations to candidates.
  * The routing threshold applies as in the
  * Channel plugin. A Pet run costs far more than a missed route, so the report
  * counts false wakes (routed when nobody should answer) apart from misses.
@@ -24,7 +25,7 @@
 import { chmodSync, existsSync, mkdirSync, openSync, closeSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildModel } from '../../../services/host/src/agent/agentModels.ts';
-import { createChannelRouter, routeInput, type RouteInput, type RouteOutcome } from '../../../plugins/channel/src/channelRouting.ts';
+import { createChannelRouter, routeInput, type RouteCandidate, type RouteInput, type RouteOutcome } from '../../../plugins/channel/src/channelRouting.ts';
 import type { ChannelMember } from '../../../plugins/channel/src/channelService.ts';
 import type { ChannelMessageRow } from '../../../plugins/channel/src/store/channelStore.ts';
 import { readResolvedProfile } from './scripts/decision-eval-model.ts';
@@ -45,6 +46,12 @@ const notes = {
 };
 type AuthorIdentity = NonNullable<RouteInput['message']['authorIdentity']>;
 type FixtureMessage = { authorIdentity: AuthorIdentity; body: string };
+type CandidateRuntime = NonNullable<RouteCandidate['runtime']>;
+type PetParticipantId = 'pet:executor' | 'pet:reviewer' | 'pet:wiki' | 'pet:issuer';
+const runtime = (overrides: Partial<CandidateRuntime> = {}): CandidateRuntime => ({
+  sampledAt: '2026-01-01T00:00:00.000Z', sessionState: 'idle', admissionState: 'open',
+  activeScope: 'none', queuedInSession: 0, ...overrides,
+});
 const identity = (participantId: string): AuthorIdentity => {
   const member = members.find(item => item.participantId === participantId);
   if (!member) throw new Error(`Unknown fixture participant: ${participantId}`);
@@ -67,6 +74,7 @@ type Case = {
   history?: FixtureMessage[];
   channelPrompt?: string;
   replyTo?: FixtureMessage;
+  petRuntime?: Partial<Record<PetParticipantId, CandidateRuntime>>;
 };
 const collaborationPrompt = 'Issuer 负责 Issue 状态和进度；Executor 负责实现与自测；Reviewer 负责独立审查交付；Wiki 维护项目知识。依据实际差异协作，复用已有结论。需要人类决定时说明待决事项，没有新问题时收口。草稿、已审查、已合并和已部署是不同状态。';
 const cases: Case[] = [
@@ -144,6 +152,58 @@ const cases: Case[] = [
     body: 'Wiki 导出页已依据 main 的 abc1234 更新为空 CSV 含表头，并保留生产部署未知。来源和状态已标明，本轮完成，无未解决问题。',
     expected: 'none',
   },
+  {
+    id: 'runtime-busy-issuer-needs-review-correction', authorIdentity: identity('pet:reviewer'),
+    channelPrompt: collaborationPrompt,
+    history: [
+      message('pet:issuer', '正在为人类汇总 Issue #120 的最新进度，目前手头记录仍是 PR #410 待审查。'),
+      message('pet:executor', 'PR #410 abc1234 已完成修复和自测，等待独立结论，不需要重复开发。'),
+    ],
+    body: '新的独立审查结论已确认：PR #410 abc1234 通过，未发现需修复项。正在形成的 Issue #120 摘要不能继续写“待审查”，请负责进度的成员采纳这条更正；PR 仍未合并。',
+    petRuntime: {
+      'pet:issuer': runtime({ sessionState: 'running', admissionState: 'busy', activeScope: 'current-channel', queuedInSession: 1 }),
+      'pet:executor': runtime(), 'pet:wiki': runtime(),
+    },
+    expected: 'pet:issuer',
+  },
+  {
+    id: 'runtime-other-channel-busy-preserves-review-role', authorIdentity: identity('pet:executor'),
+    channelPrompt: collaborationPrompt,
+    history: [message('human:barry', '导出修复需要独立代码审查，其他角色不替代 Reviewer 作出审查结论。')],
+    body: 'PR #410 abc1234 已交付，自测通过；请独立审查空列表与正常导出行为，尚无审查结论。没有新开发任务，也不需要更新 Wiki 或整理 Issue 台账。',
+    petRuntime: {
+      'pet:reviewer': runtime({ admissionState: 'busy', activeScope: 'other-channel' }),
+      'pet:issuer': runtime(), 'pet:wiki': runtime(),
+    },
+    expected: 'pet:reviewer',
+  },
+  {
+    id: 'runtime-waiting-human-review-is-not-handoff', authorIdentity: identity('pet:issuer'),
+    channelPrompt: collaborationPrompt,
+    history: [
+      message('pet:reviewer', '本轮仓库内审查已完成；生产只读核对需要人类批准，审批尚未决定。'),
+      message('human:barry', '生产核对先暂停，由我决定是否批准，其他成员不要代批或接手这项核对。'),
+    ],
+    body: '状态已记录：仓库内审查完成，生产核对等待人类决定。没有新增证据或任务，其他成员无需接手；人类尚未给出批准。',
+    petRuntime: {
+      'pet:reviewer': runtime({ sessionState: 'waiting', admissionState: 'waiting', activeScope: 'current-channel', waitingKind: 'human_review' }),
+      'pet:executor': runtime(), 'pet:wiki': runtime(),
+    },
+    expected: 'none',
+  },
+  {
+    // This request explicitly conditions dispatch on confirmed availability;
+    // unknown is not a general prohibition on routing useful work.
+    id: 'runtime-unknown-does-not-establish-idle', authorIdentity: identity('human:barry'),
+    channelPrompt: collaborationPrompt,
+    history: [],
+    body: '有一份非紧急的交付说明想请 Reviewer 核对。这次仅在能确认 Reviewer 当前空闲时才派发；如果状态无法确认，先不派发，也不需要其他角色接手或回复，我稍后再安排。',
+    petRuntime: {
+      'pet:reviewer': runtime({ sessionState: 'unknown', admissionState: 'unknown', activeScope: 'unknown', queuedInSession: null }),
+      'pet:issuer': runtime(), 'pet:executor': runtime(), 'pet:wiki': runtime(),
+    },
+    expected: 'none',
+  },
 ];
 
 function inputFor(item: Case): RouteInput {
@@ -163,11 +223,25 @@ function inputFor(item: Case): RouteInput {
   if (item.replyTo && !original) throw new Error(`Reply target missing from history in ${item.id}`);
   const current = toRow({ body: item.body, authorIdentity: item.authorIdentity ?? identity('human:barry') }, recent.length + 1);
   if (original) current.replyTo = original.messageId;
-  return routeInput({
+  const input = routeInput({
     channelId, title: 'pinpawo-agent', description: '日常开发协作',
     ...(item.channelPrompt !== undefined ? { prompt: item.channelPrompt } : {}),
     createdBy: { kind: 'human', id: 'barry' }, createdAt: '', updatedAt: '',
   }, current, original, recent, members);
+  // Synthetic Host observations are attached only after the production adapter
+  // has established message identity and excluded the Pet author from candidates.
+  for (const participantId of Object.keys(item.petRuntime ?? {})) {
+    if (!input.pets.some(pet => pet.participantId === participantId)) {
+      throw new Error(`Runtime fixture is not an eligible candidate in ${item.id}: ${participantId}`);
+    }
+  }
+  return {
+    ...input,
+    pets: input.pets.map(pet => {
+      const sampled = item.petRuntime?.[pet.participantId as PetParticipantId];
+      return sampled ? { ...pet, runtime: sampled } : pet;
+    }),
+  };
 }
 
 const requestedIds = process.env.ROUTING_EVAL_CASE_IDS?.split(',').map(id => id.trim()).filter(Boolean);
@@ -262,7 +336,7 @@ const summary = {
 console.log(JSON.stringify(summary, null, 2));
 if (outputDirectory) {
   writeFileSync(resolve(outputDirectory, 'report.json'), `${JSON.stringify({
-    scope: 'Real-model routing decisions over synthetic stored Channel messages; no Pet execution, Channel delivery, or domain actions are exercised. Focus presence is observational, not a quality judgment.',
+    scope: 'Real-model routing decisions over synthetic stored Channel messages and optional synthetic runtime observations; no live runtime sampling, Pet execution, Channel delivery, or domain actions are exercised. Focus presence is observational, not a quality judgment.',
     routingNotes: notes, summary, rows,
   }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
 }

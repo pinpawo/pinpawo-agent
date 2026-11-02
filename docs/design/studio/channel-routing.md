@@ -21,9 +21,10 @@ Channel 不加兜底 Pet，也不加特殊成员。
 - **默认关闭。** 关闭时不调用任何模型，无 @ 消息只存不派发，和现在一样。
 - **不发言。** 路由只决定交给谁，被选中的 Pet 按普通交接收到消息，由它自己回答。
   Channel 的作者仍然只有 `human | pet`，4 张表不变。
-- **不看过程。** 输入包括 Channel 信息、可选协作提示词、成员和公开消息，不读 Pet session、operation 或运行状态。
-  "#1003 谁在处理"这类问题，路由只需要从公开消息里认出是 Executor 提过 #1003，然后交给 Executor；
-  Executor 的 session 里有这件事的上下文，由它回答。
+- **只观察运行概况。** 输入包括 Channel 信息、可选协作提示词、成员、公开消息与精简状态快照。
+  Channel 在触发模型前通过现有 Host 端口观察候选 Pet，从绑定会话快照中仅投影状态，
+  不向分配模型转发私人消息、计划正文、交付与审批内容。
+  "#1003 谁在处理"仍主要依据公开讨论与职责判断，所选 Pet 再结合自己的上下文回答。
 - **与 Agent runtime 无关。** 不经过 pet-agent、Supervisor 或 Toolkit，只做一次决策调用，没有工具、没有多轮。
 
 ## 触发条件
@@ -45,7 +46,19 @@ Pet 的非法 @ 会保留消息并报告投递失败，不把清空后的 mentio
 - 当前消息：作者 label、存储确认的 `authorIdentity`（participantId 与 kind）、正文、`replyTo` 的作者和正文；历史消息也保留作者身份。显示名与正文自称不能更改来源。
 - Channel 标题、说明和可选协作提示词。该提示词是协作意图，不能授予权限，也不能保证模型按预期路由。
 - Pet 成员：`participantId`、名称，以及路由设置里该 Pet 的一句话说明（见“配置”）。
+- 每个候选 Pet 的 `runtime` 观察：`sampledAt`、当前绑定会话的 `sessionState`、整个 Pet 执行入口的
+  `admissionState`、活动所在的 `activeScope` 类别，以及匹配当前 Channel 与会话的 `queuedInSession`。
+  挂起时只提供 `waitingKind`，不传递审批载荷；不暴露其他 Channel 的标识或工作内容。
 - 最近 N 条公开消息（默认 20）：作者、正文截断到固定长度。
+
+状态采集不创建、选择或恢复会话。没有绑定为 `unbound`，未完成注册、读取失败或超时为 `unknown`，
+两者都不假装为空闲。队列观察缺少完整的目标信息时，`queuedInSession` 为 `null`，不是零。
+候选并行采集，单次读取预算有界；状态不可用仍可依据消息与职责进行分配。
+
+会话状态与 Pet 的全局执行入口分别表达：全局 `busy` 可能属于其他 Channel，全局 `waiting` 也不代表
+本 Channel 正在等审批。`activeScope` 只表达确认过的范围类别；无法归属的活动保留未知。
+这些不是原子快照，也不会锁定运行状态。忙碌或等待不改变职责归属，相关更新仍可送给正在工作的 Pet；
+后续排队、会话准入与审批继续由 Host 处理。本轮不让分配模型选择立即打断或恢复审批。
 
 ### 输出
 
@@ -93,7 +106,9 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 - `contextHint.instruction` 保留插件固定的读取最新 Channel 提示，`contextHint.focus` 可带模型生成的关注方向。
   分配 `reason` 仍只用于审计；关注建议不写入 system prompt，也不替 Pet 设定 goal 或计划。
 - 投递结果照常发布 `channel.delivery` 事件，多带 `via: 'routing'`、`confidence`、`reason`。
-- 不派发时发布 `channel.routing.skipped`（channelId、messageId、原因 `none | low_confidence | error | invalid`、分数）。
+  自动分配事件还提供传给模型的所选 `runtime` 观察，区别于派发后可能变化的真实运行状态。
+- 不派发时发布 `channel.routing.skipped`（channelId、messageId、原因 `none | low_confidence | error | invalid`、分数），
+  并提供 `candidateStates` 以便核对本次决策使用的精简状态。
 
 路由是异步的：`POST /channels/messages` 不等模型决策，响应里的 `deliveries` 只含 mention 交付；路由结果通过事件到达 Console。
 
@@ -150,7 +165,7 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 
 ## 不做的事
 
-- 路由不回答问题、不写 Channel 消息、不读 Pet session 或运行状态。
+- 路由不回答问题、不写 Channel 消息，不读取 Pet 私人执行内容。状态由 Channel 在调用前采集，模型不自行调用工具。
 - 不给 Channel 加默认 Pet 字段或成员角色。
 - 不做多目标派发和重试。
 - 不读取或公开 Pet 的私有执行结果；公开发言遗漏的事实不会由路由补造。
@@ -159,8 +174,10 @@ type RouteDecider = (input: RouteInput, signal: AbortSignal) => Promise<RouteDec
 ## 待定
 
 - 默认用哪家的 Jev，以及各家请求格式是否一致。实现前用真实调用确认格式和延迟。
-- eval：`npm run eval:channel-routing -w @pinpawo-tests/agent-evals`（`ROUTING_EVAL_MODEL_PROFILE_ID=<profile>`）跑 20 个带标注的
-  片段，包括原有 14 个人类消息案例，以及 Pet 公开交付、状态对齐、知识变化和收口。分别统计误唤醒、漏派、派错、错误与延迟，记录 `focus` 和存在率，不按固定措辞评分。
+- eval：`npm run eval:channel-routing -w @pinpawo-tests/agent-evals`（`ROUTING_EVAL_MODEL_PROFILE_ID=<profile>`）跑 24 个带标注的
+  片段，包括原有 14 个人类消息案例、6 个 Pet 交接与收口案例，以及 4 个运行状态案例。状态案例使用合成
+  观察，检验忙碌不导致错派、等待审批不被绕过、未知不被当作确认空闲；不能代替实际 Host 状态采集验收。
+  分别统计误唤醒、漏派、派错、错误与延迟，记录 `focus` 和存在率，不按固定措辞评分。
   `ROUTING_EVAL_CASE_IDS` 可选择案例，`ROUTING_EVAL_OUTPUT_DIR` 可保存私有逐例输入与结果；已有结果不覆盖。
   `jev` 实现后用同一组片段比较，决定默认 `kind`。
 

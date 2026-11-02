@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { type StudioEvent } from '@pinpawo/studio-core';
-import type { PetInvocationScope } from 'pinpawo/host-runtime';
+import type { PetDispatchQueueSnapshot, PetInvocationScope, PetSessionPort } from 'pinpawo/host-runtime';
 import { createChannelPlugin, type RouteDecision, type RouteInput } from '@pinpawo-plugin/channel';
 import { readChannelTestInput } from '../../support/channelDispatchInput';
 import { createStudioWithPets } from '../../../tests/support/livePets';
@@ -188,6 +188,113 @@ test('Pet self-selection is rejected and an acknowledgement with none stops with
     .map(event => (event.payload as Record<string, unknown>).reason), ['invalid', 'none']);
   assert.ok(seen.every(input => input.pets.every(pet => pet.participantId !== 'pet:reviewer')));
   assert.deepEqual(dispatched.map(item => item.petId), ['reviewer']);
+});
+
+test('one routing decision observes only bound Channel sessions and cannot resume a review or create a session', async (t) => {
+  const dispatched: Dispatched[] = [], seen: RouteInput[] = [];
+  const reads: Array<{ petId: string; sessionId: string; options: unknown }> = [];
+  const queueReads: string[] = [];
+  const queues = new Map<string, PetDispatchQueueSnapshot>();
+  const snapshots = new Map<string, Awaited<ReturnType<PetSessionPort['snapshot']>>>();
+  const privateMarker = `private-session-content-${randomUUID()}`;
+  let observations = 0, reviews = 0, failExecutorRead = false;
+  const channel = createChannelPlugin({ httpRoute: false, routing: { enabled: true }, routeDecider: async input => {
+    seen.push(input);
+    return { target: 'none', confidence: 1 };
+  } });
+  const studio = await createStudioWithPets({ studioId: 'routing-state', plugins: [channel],
+    pets: ['executor', 'reviewer', 'wiki'].map(petId => {
+      const pet = fakePet(petId, dispatched);
+      const sessions: PetSessionPort = {
+        snapshot: async (sessionId, options) => {
+          reads.push({ petId, sessionId, options });
+          if (petId === 'executor' && failExecutorRead) throw new Error(privateMarker);
+          const snapshot = snapshots.get(sessionId);
+          assert.ok(snapshot, 'no unrelated or unbound session may be sampled');
+          return snapshot;
+        },
+        observe: async () => { observations++; return () => {}; },
+        review: async () => { reviews++; },
+      };
+      return { ...pet, sessions, dispatch: { ...pet.dispatch, getQueueSnapshot: (): PetDispatchQueueSnapshot => {
+        queueReads.push(petId);
+        return queues.get(petId) ?? { state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0, entries: [] };
+      } } };
+    }),
+  });
+  t.after(() => studio.shutdown());
+  const events: StudioEvent[] = [];
+  studio.subscribe(event => { if (event.type === 'channel.routing.skipped') events.push(event); });
+  const cid = (await channel.service.createChannel(me, { title: 'Current', pets: ['executor', 'reviewer', 'wiki'] })).channel.channelId;
+  const otherCid = (await channel.service.createChannel(me, { title: 'Other', pets: ['executor'] })).channel.channelId;
+  const executor = await channel.service.reserveSession(cid, 'executor', () => 'executor:00000001');
+  const otherExecutor = await channel.service.reserveSession(otherCid, 'executor', () => 'executor:00000002');
+  const reviewer = await channel.service.reserveSession(cid, 'reviewer', () => 'reviewer:00000001');
+  for (const binding of [executor, otherExecutor, reviewer]) await channel.service.confirmSession(binding);
+  const pending = { interruptId: `private-review-${randomUUID()}`, payload: { kind: 'human_review' as const, interactions: [{
+    interactionId: privateMarker, schemaVersion: 2 as const, view: { kind: 'plain' as const, body: privateMarker },
+    options: [{ id: 'approve', label: 'Approve', batchSubmission: 'immediate' as const }],
+  }] } };
+  for (const binding of [executor, reviewer]) snapshots.set(binding.sessionId, { version: 5, session: {
+    sessionId: binding.sessionId, kind: 'chat', activeRun: null,
+    timeline: [{ id: 'private-message', type: 'message', role: 'user', text: privateMarker, status: 'completed' }],
+    currentPlan: { items: [{ id: 'private-task', capability: 'inspect', task: privateMarker, status: 'pending' }] },
+    pendingInterrupt: binding === reviewer ? pending : null,
+  } });
+  const enqueuedAt = new Date().toISOString();
+  queues.set('executor', { state: 'busy', activeOperation: 'dispatch', queuedConversations: 0, queuedDispatches: 4,
+    activeDispatch: { dispatchId: 'other-active', enqueuedAt, sessionId: otherExecutor.sessionId, scope: { namespace: 'channel', id: otherCid } },
+    entries: [
+      { dispatchId: 'exact-target', enqueuedAt, sessionId: executor.sessionId, scope: { namespace: 'channel', id: cid } },
+      { dispatchId: 'same-session-other-scope', enqueuedAt, sessionId: executor.sessionId, scope: { namespace: 'channel', id: otherCid } },
+      { dispatchId: 'same-channel-other-session', enqueuedAt, sessionId: otherExecutor.sessionId, scope: { namespace: 'channel', id: cid } },
+      { dispatchId: 'other-target', enqueuedAt, sessionId: otherExecutor.sessionId, scope: { namespace: 'channel', id: otherCid } },
+    ],
+  });
+  queues.set('reviewer', { state: 'waiting', activeOperation: null, queuedConversations: 0, queuedDispatches: 0, entries: [],
+    activeDispatch: { dispatchId: 'pending-review', enqueuedAt, sessionId: reviewer.sessionId, scope: { namespace: 'channel', id: cid } },
+  });
+  queueReads.length = 0;
+  const before = Date.now();
+  await channel.sendMessage(cid, { body: 'No follow-up is needed.' }, me);
+  await waitFor(() => events.length === 1);
+  assert.equal(seen.length, 1, 'sampling still leads to one decider call');
+  const runtime = (petId: string) => seen[0]!.pets.find(pet => pet.participantId === `pet:${petId}`)!.runtime!;
+  const stateOf = (petId: string) => { const { sampledAt, ...state } = runtime(petId); return state; };
+  assert.deepEqual(stateOf('executor'), { sessionState: 'idle', admissionState: 'busy', activeScope: 'other-channel', queuedInSession: 1 });
+  assert.deepEqual(stateOf('reviewer'), { sessionState: 'waiting', admissionState: 'waiting', activeScope: 'current-channel', queuedInSession: 0, waitingKind: 'human_review' });
+  assert.deepEqual(stateOf('wiki'), { sessionState: 'unbound', admissionState: 'open', activeScope: 'none', queuedInSession: 0 });
+  for (const pet of seen[0]!.pets) {
+    const sampled = Date.parse(pet.runtime!.sampledAt);
+    assert.ok(sampled >= before && sampled <= Date.now());
+  }
+  assert.deepEqual(reads.sort((a, b) => a.petId.localeCompare(b.petId)), [
+    { petId: 'executor', sessionId: executor.sessionId, options: { timelineLimit: 1 } },
+    { petId: 'reviewer', sessionId: reviewer.sessionId, options: { timelineLimit: 1 } },
+  ]);
+  assert.deepEqual(queueReads.sort(), ['executor', 'reviewer', 'wiki']);
+  assert.equal(await channel.service.getSession(cid, 'wiki'), undefined, 'an observation never reserves the unbound Pet session');
+  assert.equal(observations, 0);
+  assert.equal(reviews, 0, 'sampling a pending review never approves or resumes it');
+  assert.equal(dispatched.length, 0);
+  assert.equal(snapshots.get(reviewer.sessionId)!.session.pendingInterrupt, pending);
+  for (const hidden of [privateMarker, pending.interruptId, otherCid, otherExecutor.sessionId]) {
+    assert.ok(!JSON.stringify(seen[0]).includes(hidden), 'private payloads and unrelated scope identities do not reach the model');
+  }
+
+  failExecutorRead = true;
+  reads.length = 0;
+  await channel.sendMessage(cid, { body: 'The status read is unavailable; no work is requested.' }, me);
+  await waitFor(() => events.length === 2);
+  assert.equal(seen.length, 2, 'a failed read does not retry the decider');
+  const unavailable = seen[1]!.pets.find(pet => pet.participantId === 'pet:executor')!.runtime!;
+  assert.equal(unavailable.sessionState, 'unknown');
+  assert.equal(unavailable.admissionState, 'busy');
+  assert.equal(unavailable.activeScope, 'other-channel');
+  assert.equal(unavailable.queuedInSession, 1);
+  assert.ok(!JSON.stringify(seen[1]).includes(privateMarker), 'read failures do not become model input');
+  assert.equal(reviews, 0);
+  assert.equal(dispatched.length, 0);
 });
 
 test('without routing an unaddressed message wakes no Pet', async (t) => {

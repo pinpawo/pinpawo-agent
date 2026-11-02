@@ -6,6 +6,7 @@ import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } fr
 import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
 import { channelParticipantId } from './channelParticipants';
+import { collectChannelRoutingState, type RoutePetRuntime } from './channelRoutingState';
 import {
   channelRoutingOptionsSchema, createChannelRouter, routeInput,
   type ChannelRouter, type ChannelRoutingOptions, type RouteDecider,
@@ -44,6 +45,8 @@ export type ChannelDelivery = {
   reason?: string;
   /** The routing model's suggested focus, delivered as context rather than an instruction from the author. */
   focus?: string;
+  /** Observation supplied to the routing model, not the target's later admission state. */
+  runtime?: RoutePetRuntime;
   invocationId?: string;
   sessionId?: string;
   error?: string;
@@ -173,8 +176,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   /** Let routing choose one other Pet to attend to an unaddressed public message. */
   async function route(active: ChannelRouter, message: ChannelMessage): Promise<void> {
     const studio = host();
+    let candidateStates: Array<{ participantId: string; runtime: RoutePetRuntime | undefined }> | undefined;
     const skip = (payload: Record<string, unknown>) => studio.notify({
-      type: 'channel.routing.skipped', payload: { channelId: message.channelId, messageId: message.messageId, ...payload },
+      type: 'channel.routing.skipped', payload: {
+        channelId: message.channelId, messageId: message.messageId,
+        ...(candidateStates ? { candidateStates } : {}), ...payload,
+      },
     });
     try {
       const service = channelService();
@@ -184,7 +191,14 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         active.historyLimit > 0 ? { before: message.sequence, limit: active.historyLimit } : { limit: 1 });
       const history = active.historyLimit > 0 ? context.messages : [];
       const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
-      const outcome = await active.decide(routeInput(context.channel, message, original, history, members));
+      const input = routeInput(context.channel, message, original, history, members);
+      const eligible = new Set(input.pets.map(pet => pet.participantId));
+      const candidateMembers = members.filter(member => member.kind === 'pet' && eligible.has(member.participantId));
+      const states = await collectChannelRoutingState(message.channelId, candidateMembers.map(member => member.id), { host: studio, channels: service });
+      const petIds = new Map(candidateMembers.map(member => [member.participantId, member.id]));
+      const pets = input.pets.map(pet => ({ ...pet, runtime: states[petIds.get(pet.participantId)!] }));
+      candidateStates = pets.map(({ participantId, runtime }) => ({ participantId, runtime }));
+      const outcome = await active.decide({ ...input, pets });
       if (outcome.kind === 'skip') {
         const { kind: _kind, ...rest } = outcome;
         return skip(rest);
@@ -198,6 +212,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         via: 'routing' as const, confidence: outcome.confidence,
         ...(outcome.reason ? { reason: outcome.reason } : {}),
         ...(outcome.focus ? { focus: outcome.focus } : {}),
+        runtime: pets.find(pet => pet.participantId === target.participantId)?.runtime,
       };
       let delivery: ChannelDelivery;
       try {

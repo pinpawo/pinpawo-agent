@@ -28,9 +28,11 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
 
 ## 实现状态
 
-当前仓库已实现第一、二阶段的最小闭环：
+第一、二阶段的最小闭环由 Kanban 领域插件提供；该插件已在 `1e4f3938`
+（retire Kanban runtime and default workflow）中从本仓库移除。下面描述的是它
+退役前的最小闭环：
 
-- `plugins/kanban/src/kanbanTaskService.ts` 提供独立的 SQLite repository、service、
+- `kanbanTaskService` 提供独立的 SQLite repository、service、
   transaction、history cursor 和 `doing -> blocked` recovery；
 - `migrateKanbanSnapshotToSqlite()` 提供从旧 JSON snapshot 到空 SQLite target 的显式、
   一次性迁移；原文件会保留；

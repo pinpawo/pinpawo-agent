@@ -66,8 +66,9 @@ Some current contracts remain at accepted design paths, including
 [Resident Pet Host ports](design/agent-runtime/resident-pet-host-ports.md) and
 [Channel](design/studio/channel-addressing-and-execution.md). Read their explicit
 status rather than inferring authority from the directory alone. Historical
-Kanban records also retain their old paths. Old-path summaries and section links
-point to successors when a page is reorganized.
+records for the Kanban domain, retired in `1e4f3938`, likewise retain their old
+paths. Old-path summaries and section links point to successors when a page is
+reorganized.
 
 ## Documentation maintenance
 

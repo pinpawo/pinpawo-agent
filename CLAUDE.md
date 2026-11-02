@@ -16,7 +16,7 @@ The architectural boundary is enforced by convention: anything that touches the 
 
 ## Wiki ingest
 
-- Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to ingest.
+- The synthesized wiki under `docs/wiki/` was removed as unmaintained; do not recreate it in normal development. Do not modify `docs/log.md` unless the user explicitly asks to ingest.
 - During normal development, update raw documents under `docs/` instead. Keep incomplete designs there until ingest is explicitly requested.
 
 ## Commands
@@ -26,7 +26,7 @@ Run from repo root:
 - `npm install` — install all workspaces.
 - `npm run typecheck` — typecheck every workspace.
 - `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: channel, scheduler, notice, trigger, project-files, studio-http; then studio-e2e and agent-evals) and ends with host `test:unit`.
-- `npm run build` — tsup-bundles `pinpawo` into `services/host/dist/` and generates manifest.
+- `npm run build` — builds every workspace in dependency order: `agent-contracts` → `agent-session` → `pet-agent` → `pinpawo` (Host) → `studio-core` → the six Plugins → `studio` → `studio-console`. Host's own `build` runs `tsup` (bundling `pinpawo` into `services/host/dist/` and generating its manifest) plus the TUI distribution build.
 
 Per-workspace (use `-w <pkg>` or `cd`):
 

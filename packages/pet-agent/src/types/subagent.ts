@@ -69,6 +69,7 @@ export type SubagentInputState = {
   promptSections: readonly SubagentPromptSection[];
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
+  /** Logical model rounds for this invocation, retained across review resumes. */
   maxIterations?: number;
   contextWindowTokens?: number;
   generationReserveTokens?: number;

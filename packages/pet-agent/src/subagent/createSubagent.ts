@@ -14,22 +14,15 @@ import type {
   SubagentRunInput,
   SubagentRuntimeContext,
 } from '../types/subagent';
-import {
-  evaluateGuard,
-  type GuardDecisionEmitter,
-} from '../guards';
+import type { GuardDecisionRecord } from '../guards';
 import {
   createAgent,
-  createMiddleware,
+  modelCallLimitMiddleware,
   summarizationMiddleware,
   type AnyAgentMiddleware,
 } from 'langchain';
 import {
-  SUBAGENT_GUARD_POSITION,
-  subagentIterationLimitGuard,
-} from './guardDefinitions';
-import {
-  buildSubagentIterationLimitStopNotice,
+  markSubagentGuardStop,
   readSubagentGuardStopReason,
 } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
@@ -195,32 +188,53 @@ function createSubagentSummarizationMiddleware(
   }));
 }
 
-function createSubagentIterationGuardMiddleware(
-  maxIterations: number,
-  emitGuardDecision?: GuardDecisionEmitter,
-) {
-  let iterationCount = 0;
+function createSubagentModelCallBudget(maxIterations: number) {
+  // Preserve the existing disabled/fractional-limit contract. The framework
+  // owns the counter in checkpoint state, scoped to this child invocation.
+  const runLimit = Number.isFinite(maxIterations) && maxIterations > 0
+    ? Math.floor(maxIterations) : undefined;
+  const limiter = modelCallLimitMiddleware({ runLimit, exitBehavior: 'end' });
+  const beforeModel = limiter.beforeModel!;
+  const checkBudget = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
 
-  return createMiddleware({
-    name: 'SubagentIterationGuard',
-    wrapModelCall: async (request, handler) => {
-      iterationCount += 1;
-      const outcome = evaluateGuard(subagentIterationLimitGuard, {
-        state: { iterationCount, maxIterations },
-        config: {},
-        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
-      }, { emit: emitGuardDecision, iteration: iterationCount });
-      if (outcome.kind === 'stop') {
-        return new Command({
-          goto: END,
-          update: {
-            messages: [buildSubagentIterationLimitStopNotice(iterationCount, maxIterations)],
-          },
-        });
-      }
-      return handler(request);
-    },
-  });
+  limiter.name = 'SubagentIterationGuard';
+  // maxIterations owns this budget; unrelated caller context keys must not
+  // override it or add a thread-wide limit.
+  limiter.contextSchema = undefined;
+  limiter.beforeModel = undefined;
+  // afterModel hooks run in reverse order. Install the framework's counter
+  // separately at the end, before Review can interrupt or jump to the model.
+  const counter = { ...limiter, name: 'SubagentIterationCounter', afterAgent: undefined };
+  limiter.afterModel = undefined;
+  limiter.wrapModelCall = async (request, handler) => {
+    // Review Respond jumps straight to the model node, skipping beforeModel
+    // hooks. Run the official check at the model-call boundary for every path.
+    const update = await checkBudget(request.state, {
+      ...request.runtime,
+      context: { runLimit, threadLimit: undefined, exitBehavior: 'end' },
+    });
+    const iterationCount = request.state.runModelCallCount + 1;
+    const stopped = update?.jumpTo === 'end';
+    writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, {
+      guard: 'subagent_iteration_limit',
+      position: 'subagent.before_model_iteration',
+      outcome: stopped
+        ? { kind: 'stop', reason: 'subagent_iteration_limit_reached', details: { iterationCount, maxIterations } }
+        : { kind: 'proceed' },
+      iteration: iterationCount,
+    } satisfies GuardDecisionRecord);
+    if (stopped) {
+      const notice = update.messages?.find(AIMessage.isInstance);
+      if (!notice) throw new Error('LangChain model-call limit returned no AI stop message.');
+      markSubagentGuardStop(notice, 'subagent_iteration_limit_reached');
+      return new Command({
+        goto: END,
+        update: { messages: update.messages },
+      });
+    }
+    return handler(request);
+  };
+  return { guard: limiter, counter };
 }
 
 function writeSubagentRuntimeEvent(name: string, data: unknown) {
@@ -262,17 +276,14 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   ];
   validateSystemPromptSections(systemPromptSections);
   const systemPrompt = composeSystemPrompt(new SystemMessage(''), {}, frameworkSections);
-  // Decision records must never fail the run.
-  const emitGuardDecision: GuardDecisionEmitter = (record) => {
-    writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
-  };
   const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
-  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
+  const iterationBudget = createSubagentModelCallBudget(maxIterations);
   const middleware: AnyAgentMiddleware[] = [
     contextSummaryMiddleware,
-    iterationGuardMiddleware,
+    iterationBudget.guard,
     ...(input.middleware ?? []),
     createSystemPromptMiddleware(inputState.promptSections),
+    iterationBudget.counter,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   // No checkpointer here: the child inherits the parent's through the runnable

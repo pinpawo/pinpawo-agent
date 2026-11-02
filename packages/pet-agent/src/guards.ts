@@ -96,10 +96,10 @@ export function guardAppliesToPosition<Position extends string>(
 }
 
 /**
- * The sentence this language exists to speak: one record per evaluation,
- * emitted through the `evaluateGuard` choke point so records cannot be
- * silently dropped. Ephemeral by design — only `stop` outcomes have a durable
- * form (marked stop notices), owned by their positions.
+ * One record per decision. Application-owned rules emit through `evaluateGuard`;
+ * framework-owned decisions map the native result into the same record shape.
+ * Ephemeral by design — only `stop` outcomes have a durable form (marked stop
+ * notices), owned by their positions.
  */
 export type GuardDecisionRecord = {
   guard: string;

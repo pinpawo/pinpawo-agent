@@ -22,6 +22,9 @@
       "@pinpawo-toolkit/browser": [
         "../../toolkits/browser/src/index.ts"
       ],
+      "@pinpawo-toolkit/artifacts": [
+        "../../toolkits/artifacts/src/index.ts"
+      ],
       "@pinpawo/studio-core": [
         "../../packages/studio/src/index.ts"
       ],

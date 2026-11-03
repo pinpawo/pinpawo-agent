@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@pinpawo-toolkit/artifacts": ["../../toolkits/artifacts/src/index.ts"],
       "@pinpawo/agent-contracts": ["../../packages/agent-contracts/src/index.ts"],
       "@pinpawo/studio-core": ["../../packages/studio/src/index.ts"],
       "pinpawo/host-runtime": ["../../services/host/src/hostRuntime.ts"],

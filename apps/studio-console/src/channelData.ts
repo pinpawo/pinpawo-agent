@@ -1,14 +1,14 @@
+import type { Deliverable } from '@pinpawo/agent-contracts';
 export type ChannelMemberKind = 'human' | 'pet';
 export type ChannelAuthor = { kind: string; id: string };
 export type ChannelRow = {
   channelId: string; title: string; description?: string; prompt?: string;
   createdBy: ChannelAuthor; createdAt: string; updatedAt: string;
 };
-type ArtifactReference = { uri: string; label?: string; version?: string };
 export type ChannelMessage = {
   sequence: number; messageId: string; channelId: string; author: ChannelAuthor; occurredAt: string;
   externalRef?: string; body: string; replyTo?: string;
-  mentions: { participantId: string; label?: string }[]; artifacts: ArtifactReference[];
+  mentions: { participantId: string; label?: string }[]; deliverables: Deliverable[];
 };
 /** A current member, as messages address it. */
 export type ChannelMember = { participantId: string; kind: ChannelMemberKind | string; id: string; label: string; joinedAt?: string };

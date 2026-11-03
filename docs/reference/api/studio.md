@@ -128,7 +128,13 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
-| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
+| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `deliverables`; message plus per-target deliveries. |
+
+`deliverables: [{ uri, title? }]` is the structured reference field for human and
+Pet messages. New writes accept 100 references, 4096 characters per URI and 500
+per title. Historical `artifacts` are converted by migration 0003, preserving
+labels and versions in display titles and retaining the old raw JSON. New
+clients use only `deliverables`; see [the reference](../deliverables.md#channel-contract).
 
 `prompt` is an optional Channel collaboration instruction, separate from its
 human-facing description. It is trimmed, limited to 50,000 characters, and an
@@ -165,7 +171,7 @@ Delivery acceptance is not execution completion.
 Every HTTP request is authenticated as a Studio client. The local Host token is
 the client `local` and may use every route; other clients authenticate with a
 key and may use only routes registered with `client` authorization (the Channel
-routes) plus `GET /me` and `GET /pets`. Keys are `pps_…`, shown once, stored as
+routes and `GET /agent-session/artifacts`) plus `GET /me` and `GET /pets`. Keys are `pps_…`, shown once, stored as
 SHA-256 hashes.
 
 | Route | Input / result |
@@ -212,9 +218,17 @@ policy, protocol parser and runtime handlers.
 
 | Route | Result |
 | --- | --- |
+| `GET /agent-session/artifacts?uri=...` | Published file stream or COS signed-URL 302; no Pet session lookup |
 | `GET /agent-session/pets/:petId/snapshot` | Existing `session.snapshot.result` envelope plus `queue` state |
 | `GET /agent-session/pets/:petId/events` | Live SSE, `event: message`, JSON `AgentServerMessage` data |
 | `POST /agent-session/pets/:petId/messages` | Existing `AgentClientMessage` with `requestId`; JSON body, 1 MiB limit; `202 {requestId}` |
+
+The artifact route is also available through Studio HTTP with `client`
+authorization. It shares the Host-configured adapter with the artifacts Toolkit;
+references can address published files across sessions and workspaces without
+exposing their runtime state. Browser downloads use authenticated fetch followed
+by a Blob download. COS redirects require object-store CORS configuration; see
+[Artifacts HTTP and clients](../artifacts/index.md#http-and-clients).
 
 HTTP commands and SSE readers do not claim the exclusive TUI connection. The
 Host owns submitted commands, so disconnecting HTTP/SSE does not stop execution.

@@ -23,7 +23,7 @@ test('one current message carries separately attributed quoted material without 
   const encoded = buildStudioPetChannelRequest(testCase);
   const current = readChannelTestInput(encoded);
   assert.equal(typeof encoded, 'string');
-  assert.deepEqual(Object.keys(current).sort(), ['author', 'body', 'channelId', 'messageId', 'type', 'version']);
+  assert.deepEqual(Object.keys(current).sort(), ['author', 'body', 'channelId', 'deliverables', 'messageId', 'type', 'version']);
   assert.deepEqual(current.author, { participantId: 'human:owner', kind: 'human', label: 'Human' });
   assert.equal(current.messageId, 'synthetic-message:6');
   const body = JSON.parse(current.body);
@@ -47,6 +47,7 @@ test('a Pet request and its reply target retain distinct real envelope authors',
   assert.deepEqual(current.author, { participantId: 'pet:reviewer', kind: 'pet', label: 'Reviewer' });
   assert.deepEqual(current.replyTo, {
     messageId: 'synthetic-message:3', body: original.body,
+    deliverables: [],
     author: { participantId: 'pet:executor', kind: 'pet', label: 'Executor' },
   });
   assert.equal(JSON.parse(current.body).request, testCase.request);

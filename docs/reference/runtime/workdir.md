@@ -19,17 +19,17 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 ~/.pinpawo/workspaces/<workspace-id>/   # sessions (sessionRoot)
 ├── workspace.json
-├── capability-artifacts/
-├── checkpoints-capability-v5/
-├── checkpoints-tui-capability-v5/
-├── checkpoints-studio-capability-v5/
+├── artifacts/
+├── checkpoints-capability-v6/
+├── checkpoints-tui-capability-v6/
+├── checkpoints-studio-capability-v6/
 ├── resident-sessions/
-└── tui-sessions-capability-v5.json
+└── tui-sessions-capability-v6.json
 ```
 
 `HostRuntimeConfig` derives these paths before runtime assembly. Studio
 uses `studio.json` and `pets/` from the workdir state root. Session state
-(checkpoints of every Host, session registries and capability artifacts) lives
+(checkpoints of every Host, session registries and published artifacts) lives
 under the user's home, one directory per workdir named by its derived workspace
 id (`local-` plus a hash of the path); `workspace.json` records the workdir it
 belongs to. One directory per workdir keeps Hosts running in different projects
@@ -38,6 +38,14 @@ replaces `~/.pinpawo/workspaces` as the base. Session state is not migrated:
 moving or renaming a workdir starts with no sessions, and session files that
 an older version left in `<workdir>/.pinpawo` are reported at Host start and
 can be deleted.
+
+The project persistence label `capability-v6` reflects the execution-record change
+from legacy artifacts to deliverables. It is not a LangGraph checkpoint-format
+version. New default paths and the TUI registry do not read or migrate v5
+sessions; existing store and checkpoint files are retained. Source changes do
+not switch a running deployment. Published files use the independent
+[Artifacts store](../artifacts/index.md#host-configuration) and are not deleted
+as part of session cleanup.
 
 A Studio shared wiki, due-run store, run identity, and scheduler policy are not
 part of the current Studio contract.

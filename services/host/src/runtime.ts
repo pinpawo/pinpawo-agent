@@ -1,6 +1,7 @@
 import type { PetDocument } from '@pinpawo/pet-agent';
 import { FileSaver } from './fileSaver';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
+import { resolveHostArtifactAddress } from './artifactAddress';
 import {
   buildHostRuntimeConfig,
   type HostRuntimeConfig,
@@ -119,10 +120,6 @@ export class AgentHost {
     return this.caps.getCapabilityCatalog();
   }
 
-  getCapabilityArtifactStore() {
-    return this.caps.getCapabilityArtifactStore();
-  }
-
   getPetConfig(): PetConfig {
     return this.petConfig;
   }
@@ -142,8 +139,8 @@ export class AgentHost {
       ...this.caps.getExecutionConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),
       capabilityCatalog: this.getCapabilityCatalog(),
+      resolveArtifactAddress: (uri) => resolveHostArtifactAddress(this.caps.getArtifactStore(), uri),
       ...(this.petDocument ? { petDocument: this.petDocument } : {}),
-      capabilityArtifactStore: this.getCapabilityArtifactStore(),
     };
   }
 

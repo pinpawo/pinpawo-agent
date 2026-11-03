@@ -19,9 +19,6 @@ import {
   type AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import {
-  FileCapabilityArtifactStore,
-} from '../../host/src/capabilityArtifactStore';
-import {
   buildAgentContext,
 } from '../../host/src/contextLoader';
 import {
@@ -98,9 +95,6 @@ test('production host handlers drive the v2 host vertical slice', async () => {
       contextWindowTokens: 32_000,
     }),
     toolkitInventory: createTestHostToolkitInventory(REQUIRED_TOOLKITS),
-    capabilityArtifactStore: new FileCapabilityArtifactStore(
-      runtimeConfig.capabilityArtifactRoot,
-    ),
   }), {
     chatGraphService: graphFixture.service,
     loadContext: async (petId) => buildAgentContext(petId),

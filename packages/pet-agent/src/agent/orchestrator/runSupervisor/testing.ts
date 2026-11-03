@@ -11,7 +11,8 @@ import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
 import { supervisorWorkMessages } from './workMessages';
-import { createCapabilityExecutionMessage, type CapabilityExecutionResultRecord } from '../executionMessages';
+import { createCapabilityExecutionMessage, executionsForPlanItem, type CapabilityExecutionResultRecord } from '../executionMessages';
+import { currentSupervisorTask } from './state';
 import { supervisorControlContext } from './input';
 import { submitPlan, submitPlanSchema } from './submitPlanTool';
 import { adjustPlan, adjustPlanSchema } from './adjustPlanTool';
@@ -74,6 +75,9 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
   const call = (control: ScriptedSupervisorControl) => {
     const callId = `${id}:${messages.length}`;
     const current = { ...context, state };
+    const planItem = currentSupervisorTask(state);
+    const accepted = control.name === 'review_current' && control.args.completed && planItem
+      ? executionsForPlanItem(current, planItem.id).at(-1) : undefined;
     const execution = control.name === 'delegate_capability' ? buildCapabilityExecutionInput(current, control.args, callId) : undefined;
     if (control.name === 'submit_plan') state = submitPlan(current, control.args, callId);
     else if (control.name === 'adjust_plan') state = adjustPlan(current, control.args, callId);
@@ -82,7 +86,12 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
       tool_calls: [{ id: callId, name: control.name, args: control.args, type: 'tool_call' }] });
     dispatching = Boolean(execution);
     if (execution) messages.push(request);
-    else messages.push(request, new ToolMessage({ name: control.name, tool_call_id: callId, content: 'Scenario tool result.' }));
+    else messages.push(request, new ToolMessage({ name: control.name, tool_call_id: callId, content: 'Scenario tool result.',
+      ...(accepted ? { artifact: { acceptedExecution: {
+        delegationId: accepted.execution.delegationId,
+        deliverables: accepted.result.deliverables.map(reference => ({ ...reference })),
+      } } } : {}),
+    }));
 
   };
   let reply: string | undefined;
@@ -153,7 +162,7 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
 /** Fixture for an actual returned execution, matching the native tool's result artifact. */
 export function capabilityResultMessage(state: { runId: string; taskId: string },
   call: { id: string; planItemId: string; delegationId: string; capability: string; task: string; briefing?: string },
-  result: { status: string; delivery: unknown; artifacts: unknown[] }) {
+  result: { status: string; delivery: unknown; deliverables: unknown[] }) {
   const { id, ...input } = call;
   return createCapabilityExecutionMessage({ callId: id,
     execution: { ...input, briefing: input.briefing ?? 'Execute the current objective.' },

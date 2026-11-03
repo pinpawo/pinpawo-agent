@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ArtifactStore } from '@pinpawo-toolkit/artifacts';
+import { readArtifactHttpResult, writeArtifactHttpResult } from '../artifactHttp';
 import { parseAgentClientMessage } from '@pinpawo/agent-session';
 import type { ResidentPetInteraction } from '../residentPetHost';
 import { isAllowedWireOrigin, isAuthorizedWireRequest } from './auth';
@@ -9,6 +11,7 @@ export async function handleAgentSessionHttp(
   response: ServerResponse,
   interactions: ReadonlyMap<string, ResidentPetInteraction>,
   authToken: string,
+  fetchArtifact?: ArtifactStore['fetch'],
 ): Promise<void> {
   const json = (status: number, body: unknown) => {
     response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -20,7 +23,13 @@ export async function handleAgentSessionHttp(
   if (!isAuthorizedWireRequest(request, authToken)) {
     json(401, { error: 'Unauthorized' }); return;
   }
-  const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+  const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+  const pathname = url.pathname;
+  if (pathname === '/agent-session/artifacts') {
+    if (request.method !== 'GET') { json(405, { error: 'Method not allowed' }); return; }
+    await writeArtifactHttpResult(response, await readArtifactHttpResult(url.searchParams.get('uri'), fetchArtifact));
+    return;
+  }
   const match = /^\/agent-session\/pets\/([^/]+)\/(snapshot|events|messages)$/.exec(pathname);
   let petId: string;
   try { petId = match ? decodeURIComponent(match[1]!) : ''; } catch {
@@ -68,6 +77,9 @@ export async function handleAgentSessionHttp(
   const message = parseAgentClientMessage(Buffer.concat(chunks).toString('utf8'));
   if (!message || !('requestId' in message) || !message.requestId?.trim()) {
     json(400, { error: 'Expected an AgentClientMessage with requestId' }); return;
+  }
+  if (message.type === 'artifact.address.get') {
+    json(400, { error: 'Use GET /agent-session/artifacts for HTTP artifact access.' }); return;
   }
   // The Host owns this operation, independently of either HTTP connection.
   const operation = interaction.request(message);

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage } from 'node:http';
+import type { ArtifactStore } from '@pinpawo-toolkit/artifacts';
 import {
   agentErrorEvent,
   buildAgentEventEnvelope,
@@ -113,6 +114,7 @@ function attachConnection(
 }
 
 export type ResidentPetAgentSessionTransportOptions = {
+  fetchArtifact?: ArtifactStore['fetch'];
   authToken?: string;
   log?: (message: string) => void;
   logError?: (message: string, error: unknown) => void;
@@ -130,7 +132,7 @@ export async function startResidentPetAgentSessionTransport(
     console.error(message, error instanceof Error ? error.message : error);
   });
   const server = createServer((request, response) => {
-    void handleAgentSessionHttp(request, response, interactions, authToken).catch((error) => {
+    void handleAgentSessionHttp(request, response, interactions, authToken, options.fetchArtifact).catch((error) => {
       logError('[agent-session] HTTP request failed:', error);
       if (response.headersSent) { response.destroy(); return; }
       response.writeHead(500, { 'Content-Type': 'application/json' });

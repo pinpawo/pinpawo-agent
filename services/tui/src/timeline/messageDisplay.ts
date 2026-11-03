@@ -1,7 +1,7 @@
 import type { AgentMessageEntry, AgentMessageToolCall, AgentTimelineEntry } from '@pinpawo/agent-session';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
-import { truncateTerminalLine } from '../text/terminalText';
+import { normalizeTerminalLine, truncateTerminalLine } from '../text/terminalText';
 import { noticeText, tuiText } from '../i18n/text';
 
 export type MessageDisplayTone =
@@ -22,7 +22,7 @@ export type MessageDisplayLine = {
 
 export function buildMessageDisplayLines(
   entry: AgentMessageEntry,
-  options: { toolCallDetail?: boolean } = {},
+  options: { toolCallDetail?: boolean; artifactAddress?: (uri: string) => string } = {},
 ): MessageDisplayLine[] {
   const timestamp = entry.updatedAt ?? entry.createdAt;
   const timestampLabel = timestamp
@@ -57,11 +57,20 @@ export function buildMessageDisplayLines(
           text: `| ${line}`,
           tone: 'assistant' as const,
         })) : []),
+        ...buildDeliverableDisplayLines(entry, options.artifactAddress),
         ...(options.toolCallDetail ? buildToolCallDetailLines(entry) : buildToolCallDisplayLines(entry)),
       ];
     case 'subagent':
       return [];
   }
+}
+
+/** Structured references are visible even when the reply has no prose links. */
+export function buildDeliverableDisplayLines(entry: AgentMessageEntry, artifactAddress: (uri: string) => string = uri => uri): MessageDisplayLine[] {
+  return (entry.deliverables ?? []).map(reference => ({
+    text: `↳ ${normalizeTerminalLine(reference.title?.trim() ? reference.title : artifactAddress(reference.uri))}${reference.title?.trim() ? ` · ${normalizeTerminalLine(artifactAddress(reference.uri))}` : ''}`,
+    tone: 'assistant',
+  }));
 }
 
 /**

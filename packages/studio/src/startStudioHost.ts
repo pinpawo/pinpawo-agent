@@ -60,7 +60,7 @@ export async function startStudioHost(
       ?? startResidentPetAgentSessionTransport)(
       options.agentSessionPort ?? 0,
       host.getResidentPetInteractions(),
-      options.agentSessionTransport,
+      { fetchArtifact: (uri) => host.getArtifactStore().fetch(uri), ...options.agentSessionTransport },
     );
     const closed = transport.closed.finally(() => host.shutdown());
     try {

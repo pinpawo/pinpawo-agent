@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { parseArtifactUri } from '@pinpawo/agent-contracts';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './config/agentConfig';
 import { HostGraphService } from './agent/agentGraphService';
@@ -654,6 +655,24 @@ export function createChatHostHandlers(
   };
 
   const peerHandlers: AgentSessionPeerHandlers = {
+    onArtifactAddressGet: async (client, message) => {
+      try {
+        parseArtifactUri(message.uri);
+        const resolve = runtimeDeps.get().resolveArtifactAddress;
+        if (!resolve) {
+          sendAgentSessionPeerEvent(client, { type: 'error', requestId: message.requestId,
+            message: 'Artifact addresses are unavailable.' });
+          return;
+        }
+        const result = await resolve(message.uri);
+        client.send({ type: 'artifact.address.result', requestId: message.requestId, uri: message.uri, ...result });
+      } catch (error) {
+        sendAgentSessionPeerEvent(client, { type: 'error', requestId: message.requestId,
+          message: error instanceof TypeError ? 'Invalid artifact URI.'
+            : (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'Artifact not found.'
+              : 'Artifact address is unavailable.' });
+      }
+    },
     onChatRequest: (client, message) => {
       return admitHumanMessage(
         client,

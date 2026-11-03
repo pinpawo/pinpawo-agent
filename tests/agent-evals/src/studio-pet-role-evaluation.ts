@@ -125,7 +125,7 @@ export function buildStudioPetBoundaryInput(testCase: StudioPetRoleCase, catalog
       }] }), { ...metadata, source: 'supervisor' }),
       createCapabilityExecutionMessage({ callId, metadata,
         execution,
-        result: { status: 'returned', artifacts: [], delivery: {
+        result: { status: 'returned', deliverables: [], delivery: {
           id: `delivery:${runId}:${delegationId}:${opaque('delivery')}`, task: boundary.task, text: boundary.delivery,
           scope: { ...metadata, lane: `capability:${boundary.capability}`, delegationId },
         } },

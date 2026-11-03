@@ -1,4 +1,5 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { readToolDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import {
   isPublicConversationMessage,
   mainConversationMessages,
@@ -27,6 +28,7 @@ export type TuiCheckpointMessage = {
   id?: string;
   role: 'user' | 'assistant';
   resultReferences?: AgentResultReference[];
+  deliverables?: Deliverable[];
   /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
   toolCalls?: AgentMessageToolCall[];
   /** The orchestrator run that wrote this message, as stamped by the runtime. */
@@ -47,7 +49,9 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readMessageText(message);
     const toolCalls = readMessageToolCalls(message).map(call => ({ ...call, ...(results.get(call.id) ?? { status: 'running' as const }) }));
-    if (!text && !toolCalls.length) {
+    const deliverables = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
+      ? readReplyDeliverables(message) : [];
+    if (!text && !toolCalls.length && !deliverables.length) {
       return [];
     }
     const createdAt = readAgentMessageCreatedAt(message);
@@ -61,6 +65,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
+      ...(deliverables.length ? { deliverables } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(runId ? { runId } : {}),
       ...(createdAt ? { createdAt } : {}),
@@ -138,4 +143,9 @@ export function readReplyResultReferences(messages: BaseMessage[], reply: BaseMe
   return readCapabilityExecutions(messages.slice(0, index)).flatMap(({ metadata, result }) =>
     metadata.runId === runId && result?.status === 'returned' && result.delivery
       ? [{ id: result.delivery.id, title: result.delivery.task, text: result.delivery.text }] : []);
+}
+
+/** The core freezes accepted references on the reply; Host does not re-select executions. */
+export function readReplyDeliverables(reply: BaseMessage | undefined): Deliverable[] {
+  return readToolDeliverables(reply?.additional_kwargs?.pinpawo);
 }

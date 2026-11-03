@@ -7,6 +7,11 @@ import type { StoredModelProfilesV1 } from './config/modelProfiles';
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 
 export type StoredConfig = {
+  /** Global session-artifact adapter settings; never stored in a workdir. */
+  artifacts?: { adapter: 'local' } | {
+    adapter: 'cos'; bucket: string; region: string; prefix?: string;
+    secretId: string; secretKey: string; securityToken?: string;
+  };
   llm_api_key?: string;
   llm_model_preset?: string;
   llm_base_url?: string;

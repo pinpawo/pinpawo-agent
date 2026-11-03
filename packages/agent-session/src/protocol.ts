@@ -1,3 +1,4 @@
+import { parseDeliverables } from './deliverables';
 import {
   isOperationBlock,
   isToolAuthorizationMode,
@@ -76,6 +77,20 @@ export type RuntimeConfigUpdateMessage = {
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 };
 
+export type ArtifactAddressGetMessage = {
+  type: 'artifact.address.get';
+  requestId: string;
+  uri: string;
+};
+
+export type ArtifactAddressResultMessage = {
+  type: 'artifact.address.result';
+  requestId: string;
+  uri: string;
+  address: string;
+  expiresAt?: string;
+};
+
 export type SessionSnapshotGetMessage = {
   type: 'session.snapshot.get';
   requestId: string;
@@ -128,6 +143,7 @@ export type AgentClientMessage =
   | NewSessionMessage
   | RuntimeConfigUpdateMessage
   | SessionSnapshotGetMessage
+  | ArtifactAddressGetMessage
   | SessionListMessage
   | SessionNewMessage
   | SessionResumeMessage
@@ -230,7 +246,8 @@ export type AgentServerMessage =
   | AgentRuntimeEventEnvelope
   | AgentControlServerMessage
   | AgentSessionServerMessage
-  | AgentModelServerMessage;
+  | AgentModelServerMessage
+  | ArtifactAddressResultMessage;
 
 export type AgentClientMessageEnvelope = {
   type?: string;
@@ -587,6 +604,7 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       messageId,
       ...(usage ? { usage } : {}),
       ...(record.resultReferences !== undefined ? { resultReferences: parseResultReferences(record.resultReferences) } : {}),
+      ...(record.deliverables !== undefined ? { deliverables: parseDeliverables(record.deliverables) } : {}),
       role,
       text,
     };
@@ -709,6 +727,12 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     const requestId = readString(record, 'requestId');
     return requestId ? { type, requestId } : null;
   }
+  if (type === 'artifact.address.get') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'uri'])) return null;
+    const requestId = readString(record, 'requestId');
+    const uri = readString(record, 'uri');
+    return requestId && uri ? { type, requestId, uri } : null;
+  }
   if (type === 'session.snapshot.get') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'timelineLimit'])) return null;
     const requestId = readString(record, 'requestId');
@@ -818,6 +842,15 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
   if (type === 'pong') return { type };
   const requestId = readString(record, 'requestId');
   if (!requestId) return null;
+  if (type === 'artifact.address.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'uri', 'address', 'expiresAt'])) return null;
+    const uri = readString(record, 'uri');
+    const address = readString(record, 'address');
+    const expiresAt = record.expiresAt;
+    if (!uri || !address || (expiresAt !== undefined
+      && (typeof expiresAt !== 'string' || !Number.isFinite(Date.parse(expiresAt))))) return null;
+    return { type, requestId, uri, address, ...(typeof expiresAt === 'string' ? { expiresAt } : {}) };
+  }
   if (type === 'session.snapshot.result') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'snapshot'])) return null;
     const snapshot = parseAgentSessionSnapshot(record.snapshot);

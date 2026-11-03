@@ -19,6 +19,7 @@ behavior.
 
 - [Earlier Artifact designs](artifacts/capability-artifact-design.md) and
   [redesign](artifacts/capability-artifact-redesign.md)
+- [Retired Capability Artifact Pipeline](artifacts/pipeline/index.md)
 - [Legacy Studio overview](studio/architecture-overview.md),
   [interfaces](studio/interfaces.md), [orchestrator](studio/legacy-orchestrator.md),
   [run controller](studio/run-controller.md),

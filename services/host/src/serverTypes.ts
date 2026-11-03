@@ -1,5 +1,4 @@
 import type {
-  CapabilityArtifactStore,
   PetDocument,
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
@@ -39,12 +38,8 @@ export type ServerDeps = HostExecutionConfig & {
   defaultCapabilityName?: string;
   /** Host-loaded root document shared by every model role of this resident Pet. */
   petDocument?: PetDocument;
-  /**
-   * Required: every production Host supplies one, and an execution cannot be
-   * assembled without it. It was optional here while consumers re-checked it
-   * at runtime; the type now says what the code always assumed.
-   */
-  capabilityArtifactStore: CapabilityArtifactStore;
+  /** Read-only display lookup; never passed to Agent graph construction. */
+  resolveArtifactAddress?: (uri: string) => Promise<{ address: string; expiresAt?: string }>;
 };
 
 /**
@@ -77,8 +72,7 @@ export type ChatSetupDeps =
     | 'defaultCapabilityName'
     | 'petDocument'
   >
-  & HostExecutionConfig
-  & Pick<ServerDeps, 'capabilityArtifactStore'>;
+  & HostExecutionConfig;
 
 export type ServerRuntimeDepsStore = Readonly<{
   get: () => Readonly<ServerDeps>;

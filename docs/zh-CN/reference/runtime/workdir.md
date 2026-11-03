@@ -19,22 +19,26 @@
 
 ~/.pinpawo/workspaces/<workspace-id>/   # 会话（sessionRoot）
 ├── workspace.json
-├── capability-artifacts/
-├── checkpoints-capability-v5/
-├── checkpoints-tui-capability-v5/
-├── checkpoints-studio-capability-v5/
+├── artifacts/
+├── checkpoints-capability-v6/
+├── checkpoints-tui-capability-v6/
+├── checkpoints-studio-capability-v6/
 ├── resident-sessions/
-└── tui-sessions-capability-v5.json
+└── tui-sessions-capability-v6.json
 ```
 
 `HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取 workdir 下的
-`studio.json` 与 `pets/`。会话状态（各 Host 的 checkpoint、会话列表和 Capability
-artifact）放在用户 home 下，每个 workdir 一个目录，目录名是由路径派生的 workspace id
+`studio.json` 与 `pets/`。会话状态（各 Host 的 checkpoint、会话列表和显式发布的 artifact）放在用户 home 下，每个 workdir 一个目录，目录名是由路径派生的 workspace id
 （`local-` 加路径哈希），`workspace.json` 记录它对应的 workdir。按 workdir 分目录，
 是为了让不同项目里同时运行的 Host 不争同一个 checkpoint 写入租约。
 `PINPAWO_WORKSPACES_DIR` 可替换 `~/.pinpawo/workspaces` 这个基础目录。会话状态不迁移：
 workdir 移动或改名后从空会话开始；旧版本留在 `<workdir>/.pinpawo` 的会话文件会在 Host
 启动时提示，可以直接删除。
+
+`capability-v6` 是项目持久化路径标签，对应执行记录从旧 artifacts 改为 deliverables，
+不是 LangGraph checkpoint 格式版本。新默认路径和 TUI 注册表不读取或迁移 v5 会话；
+旧 store 与 checkpoint 文件保留，源代码变更不会切换运行部署。发布文件使用独立的
+[Artifacts store（英文）](../../../reference/artifacts/index.md#host-configuration)，不随 session 清理承诺删除。
 
 shared wiki、due-run store、run identity 与 scheduler policy 都不是当前
 Studio 契约的一部分。

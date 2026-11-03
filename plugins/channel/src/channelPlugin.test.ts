@@ -4,6 +4,46 @@ import { createStudioStorage, type StudioEvent, type StudioPluginContext } from 
 import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { createChannelPlugin, type ChannelWorking } from './channelPlugin';
 
+test('Pet references are stored as declared and invalid references notify a failed write', async (t) => {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  const notified: Array<{ type: string; payload?: unknown }> = [];
+  const listeners: Array<(event: StudioEvent) => unknown> = [];
+  const plugin = createChannelPlugin({ httpRoute: false });
+  const context = {
+    dispatch: async () => { throw new Error('Unexpected dispatch'); },
+    registerContextProvider: () => () => undefined,
+    allocateSessionId: () => 'unused', notify: (event: { type: string; payload?: unknown }) => notified.push(event),
+    subscribe: (listener: (event: StudioEvent) => unknown) => { listeners.push(listener); return () => undefined; },
+    listPets: () => [{ petId: 'writer', name: 'Writer', definitionId: 'writer' }],
+    hooks: { expose: () => () => undefined },
+    storage: { dialect: 'sqlite', open: (migrations: Parameters<typeof storage.open>[1]) => storage.open('channel', migrations) },
+    clients: { get: async (clientId: string) => ({ clientId, label: clientId }) },
+    models: { resolve: () => { throw new Error('Unexpected model call'); } },
+    listDispatchQueues: () => [],
+  } as unknown as StudioPluginContext;
+  await plugin.start!(context);
+  t.after(() => plugin.stop?.());
+  const owner = { kind: 'human' as const, id: 'local' };
+  const { channel } = await plugin.service.createChannel(owner, { title: 'Files', pets: ['writer'] });
+  const binding = await plugin.service.reserveSession(channel.channelId, 'writer', () => 'writer-session');
+  await plugin.service.confirmSession(binding);
+  const emit = async (id: string, deliverables: unknown) => {
+    const event: StudioEvent = { type: 'dispatch.message', eventId: id, source: 'resident-pet', occurredAt: new Date().toISOString(),
+      payload: { petId: 'writer', sessionId: binding.sessionId, scope: { namespace: 'channel', id: channel.channelId },
+        message: { type: 'message.completed', messageId: id, text: 'Done.', deliverables } } };
+    for (const listener of listeners) await listener(event);
+  };
+  const references = [{ uri: 'artifact://workspace/session/id/report.txt', title: 'Report' }];
+  await emit('valid', references);
+  assert.deepEqual((await plugin.service.readContext(owner, channel.channelId)).messages[0]?.deliverables, references);
+  for (const [index, invalid] of [Array.from({ length: 101 }, () => references[0]), [{ uri: 'u'.repeat(4097) }], [{ uri: 'u', title: 't'.repeat(501) }], 'invalid'].entries()) {
+    await emit(`invalid-${index}`, invalid);
+  }
+  assert.equal((await plugin.service.readContext(owner, channel.channelId)).messages.length, 1);
+  assert.equal(notified.filter(event => event.type === 'channel.message_failed').length, 4);
+});
+
 test('a Pet works in a Channel only while its run there is running, and context reads say so', async (t) => {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());

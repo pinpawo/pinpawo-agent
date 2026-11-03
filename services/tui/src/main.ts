@@ -6,12 +6,13 @@ import {
   createCliRenderer,
   type PasteEvent,
 } from '@opentui/core';
-import type { AgentLocalAttachment } from '@pinpawo/agent-session';
+import type { AgentLocalAttachment, AgentSession } from '@pinpawo/agent-session';
 import {
   formatAttachmentStrip,
   removeLastAttachment,
 } from './attachments/attachmentModel';
 import { handleAttachmentPasteEvent } from './attachments/attachmentPaste';
+import { artifactHttpAddress, createArtifactAddressCache } from './client/artifactAddress';
 import { createEmbeddedHostConnectionFactory } from './client/embeddedHostConnection';
 import { createEmbeddedHostDiagnosticsSink } from './client/embeddedHostDiagnostics';
 import {
@@ -324,7 +325,22 @@ const interruptPendingNoticeController =
       refreshNoticeOverlay();
     },
   });
-const timeline = new TimelineScrollback(renderer);
+const embeddedArtifactAddresses = embeddedHost ? createArtifactAddressCache({
+  read: (uri) => controller.readArtifactAddress(uri),
+  onChanged: () => {
+    timelineReplayPending = true;
+    if (!terminalHandoffOpen) reconcileTimelineAfterHandoff();
+  },
+}) : null;
+const artifactAddress = embeddedArtifactAddresses
+  ? (uri: string) => embeddedArtifactAddresses.display(uri)
+  : !launchOptions.useDemoConnection ? (uri: string) => artifactHttpAddress(uri, port) : undefined;
+let artifactConnectionReady = false;
+function ensureArtifactAddresses(session: AgentSession) {
+  return embeddedArtifactAddresses?.ensure(session.timeline.flatMap(entry =>
+    entry.type === 'message' ? (entry.deliverables ?? []).map(ref => ref.uri) : []));
+}
+const timeline = new TimelineScrollback(renderer, { artifactAddress });
 /**
  * A running operation's header carries its elapsed time, but the timeline only
  * redraws on canonical state changes — and a slow tool can leave seconds
@@ -458,6 +474,10 @@ const qaLifecycle = new QaLifecycleDriver(launchOptions, {
 });
 
 const unsubscribe = controller.subscribe((state) => {
+  const ready = state.connection === 'ready';
+  if (ready && !artifactConnectionReady) embeddedArtifactAddresses?.resetFailures();
+  artifactConnectionReady = ready;
+  if (ready) void ensureArtifactAddresses(state.session);
   if (timelineReplayPending && !terminalHandoffOpen) {
     timelineReplayPending = false;
     timeline.resetForReplay();
@@ -1899,10 +1919,12 @@ function openTranscriptPager() {
   refreshStatus();
 
   // A long session holds only its newest entries; the pager reads them all.
-  void controller.readTranscriptSession().then((transcript) => {
+  void controller.readTranscriptSession().then(async (transcript) => {
+    await ensureArtifactAddresses(transcript);
     localNotice = 'transcript pager active';
     return withRendererSuspended(renderer, () => pageSessionTranscript({
       session: transcript,
+      artifactAddress,
       cwd: process.cwd(),
       ...(smoke.transcript
         ? { env: { ...process.env, PAGER: 'cat' } }

@@ -28,7 +28,8 @@ surface to its package owner.
 ## Related current contracts
 
 - [Session projection](../runtime/session-projection.md) — checkpoint-to-client state.
-- [Capability artifacts](../artifacts/index.md) — durable Capability output.
+- [Artifacts](../artifacts/index.md) — session publishing, storage and authenticated downloads.
+- [Deliverables](../deliverables.md) — tool-declared references and accepted replies.
 - [Model profiles](../runtime/model-profiles.md) — identity, fields, and modality rules.
 - [Runtime contracts](../runtime/index.md) — authorization, guards, and context boundaries.
 

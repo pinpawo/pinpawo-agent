@@ -6,7 +6,7 @@ import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentModels } from '../../../types/agent';
-import type { CapabilityArtifactRef } from '../../../types/artifact';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import { defineInstructionDocument, type CapabilityLifecycle } from '../../../types/capability';
 import { defineToolkit, type AgentToolkit } from '../../../types/toolkit';
 import type { SubagentRunInput } from '../../../types/subagent';
@@ -55,15 +55,11 @@ function messageScope(request: CapabilityExecutionInput) {
 
 function deliver(run: SubagentRunInput, text = 'Delivered') {
   const message = new AIMessage({ id: `result:${run.runtimeContext?.executionScope?.delegationId}`, content: text });
-  return { messages: [...run.messages, message], artifacts: run.artifacts ?? [], output: message.text };
+  return { messages: [...run.messages, message], deliverables: [], output: message.text };
 }
 
-function artifact(id: string): CapabilityArtifactRef {
-  return {
-    id, threadId: 'thread1', capabilityId: 'general', delegationId: id, runId: 'r1',
-    kind: 'file', mimeType: 'text/plain', uri: `artifact:${id}`, sizeBytes: 1,
-    createdAt: '2026-09-10T00:00:00Z',
-  };
+function artifact(id: string): Deliverable {
+  return { uri: `artifact://${id}`, title: id };
 }
 
 function staticToolkit(): AgentToolkit {
@@ -99,7 +95,7 @@ test('executor uses main history and briefing without replaying child transcript
 
 test('executor returns explicit output without copying subagent messages', async () => {
   const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
-    messages: run.messages, artifacts: [], output: 'Final output independent of private history.',
+    messages: run.messages, deliverables: [], output: 'Final output independent of private history.',
   }) });
   const first = await execute(input(), hostContext());
   const second = await execute(input(), hostContext());
@@ -118,21 +114,19 @@ for (const output of [null, '', '  ']) {
   });
 }
 
-test('finalize can replace delivery and merge artifacts', async () => {
-  const toolkit = staticToolkit();
+test('finalize can replace delivery while preserving declared deliverables', async () => {
   const ref = artifact('d1');
-  const request = input('d1', [toolkit], { finalize: (result, context) => {
+  const request = input('d1', [staticToolkit()], { finalize: (result, context) => {
+    assert.deepEqual(result.deliverables, [ref]);
     assert.equal(context.delegationId, 'd1');
-    context.recordCapabilityArtifact?.(ref);
-    assert.equal(result.output, 'Delivered');
-    return { output: 'Finalized delivery', artifactRefs: [ref] };
+    return { output: 'Finalized delivery', messages: [new AIMessage('Finalized history')] };
   } });
-  const result = await createCapabilityExecutor({ models, runSubagent: async (run) => {
-    run.artifacts?.push(ref);
-    return deliver(run);
-  } })(request, hostContext());
+  const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
+    ...deliver(run), deliverables: [ref],
+  }) });
+  const result = await execute(request, hostContext());
   assert.equal(result.delivery?.text, 'Finalized delivery');
-  assert.deepEqual(result.artifacts, [ref]);
+  assert.deepEqual(result.deliverables, [ref]);
 });
 
 for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'aborted'] as const) {
@@ -149,7 +143,7 @@ for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'abor
         run.signal?.throwIfAborted();
       }
       const messages = [...run.messages, new AIMessage({ id: 'partial', content: 'Partial work' })];
-      return { messages, artifacts: [artifact('d1')], output: null,
+      return { messages, deliverables: [artifact('d1')], output: null,
         ...(outcome === 'reject' || outcome === 'cancel' ? { reviewDecision: outcome } : {}),
       };
     } });
@@ -160,13 +154,13 @@ for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'abor
       assert.equal(result.status, 'missing_deliverable');
       assert.equal(result.reviewDecision, outcome === 'reject' || outcome === 'cancel' ? outcome : undefined);
       assert.equal(result.delivery, null);
-      assert.equal(result.artifacts.length, 1);
+      assert.equal(result.deliverables.length, 1);
     }
     assert.equal(finalized, outcome === 'missing_deliverable');
   });
 }
 
-test('overlapping calls keep contexts, artifacts and authorizations separate', async () => {
+test('overlapping calls keep contexts, deliverables and authorizations separate', async () => {
   const toolkit = staticToolkit();
   let arrivals = 0;
   let release!: () => void;
@@ -175,12 +169,11 @@ test('overlapping calls keep contexts, artifacts and authorizations separate', a
   const execute = createCapabilityExecutor({ models, runSubagent: async (run) => {
     seen.push(run);
     const id = run.runtimeContext!.executionScope!.delegationId;
-    run.artifacts!.push(artifact(id));
     arrivals += 1;
     if (arrivals === 2) release();
     await barrier;
     assert.equal(run.runtimeContext?.executionScope?.delegationId, id);
-    return deliver(run, id);
+    return { ...deliver(run, id), deliverables: [artifact(id)] };
   } });
   const first = input('d1', [toolkit]);
   const second = input('d2', [toolkit]);
@@ -191,10 +184,10 @@ test('overlapping calls keep contexts, artifacts and authorizations separate', a
     execute(first, { ...hostContext(), review: { authorizations: grants } }), execute(second, hostContext()),
   ]);
   assert.notStrictEqual(seen[0].messages, seen[1].messages);
-  assert.notStrictEqual(seen[0].artifacts, seen[1].artifacts);
+  assert.notStrictEqual(a.deliverables, b.deliverables);
   assert.notEqual(seen[0].messages.at(-1)?.id, seen[1].messages.at(-1)?.id);
-  assert.deepEqual(a.artifacts.map(({ id }) => id), ['d1']);
-  assert.deepEqual(b.artifacts.map(({ id }) => id), ['d2']);
+  assert.deepEqual(a.deliverables.map(({ title }) => title), ['d1']);
+  assert.deepEqual(b.deliverables.map(({ title }) => title), ['d2']);
   assert.deepEqual(a.toolAuthorizations, grants);
   assert.notStrictEqual(a.toolAuthorizations, grants);
   assert.deepEqual(b.toolAuthorizations, []);

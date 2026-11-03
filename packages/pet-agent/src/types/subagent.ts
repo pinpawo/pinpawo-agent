@@ -4,7 +4,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
-import type { CapabilityArtifactRef } from './artifact';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { SystemPromptSection } from './systemPrompt';
 import type { AgentRuntimeContext } from '../runtime/context';
 import type { ToolOperationMetadata } from './toolkit';
@@ -73,7 +73,6 @@ export type SubagentInputState = {
   maxIterations?: number;
   contextWindowTokens?: number;
   generationReserveTokens?: number;
-  artifacts?: CapabilityArtifactRef[];
 };
 
 export type SubagentRunInput = SubagentInputState & {
@@ -92,7 +91,7 @@ export type SubagentResult = {
   /** Usage reported by this invocation, independent of transcript storage. */
   tokenUsage?: ProviderTokenUsage | null;
   messages: BaseMessage[];
-  artifacts: CapabilityArtifactRef[];
+  deliverables: Deliverable[];
   /** This invocation's textual output for the parent tool result, not a history-message reference. */
   output: string | null;
 };

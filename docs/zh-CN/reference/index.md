@@ -7,6 +7,7 @@ Reference 只描述当前契约。设计理由、已完成迁移和旧实现请�
 - [API 参考](api/index.md) — Pet runtime、Studio、事件与审核、CLI、错误处理。
 - [Capability / Toolkit 契约](extensions/capability-toolkit.md) — 任务权限与扩展模型。
 - [Session 与运行时](runtime/session-projection.md) — checkpoint、snapshot、timeline 与客户端状态边界。
-- [Artifact（英文）](../../reference/artifacts/index.md) — 持久化 Capability 输出。
+- [Artifact（英文）](../../reference/artifacts/index.md) — session 文件显式发布、存储与下载。
+- [交付物（英文）](../../reference/deliverables.md) — 工具声明的引用与验收后的回复链路。
 
 需要先建立心智模型时，请从[核心概念](../concepts/core-concepts.md)开始。

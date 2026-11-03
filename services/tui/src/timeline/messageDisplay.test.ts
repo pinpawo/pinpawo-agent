@@ -56,6 +56,17 @@ test('only the user\'s own messages carry a timestamp', () => {
   ]);
 });
 
+test('structured deliverables display the title and reference without relying on prose', () => {
+  const lines = buildMessageDisplayLines(message({ text: 'Done.', deliverables: [
+    { uri: 'artifact://workspace/session/id/report.txt', title: 'Report' },
+    { uri: 'https://example.com/pull/1' },
+    { uri: 'artifact://workspace/session/id/empty-title.txt', title: '' },
+  ] }));
+  assert.deepEqual(lines.map(line => line.text), ['| Done.',
+    '↳ Report · artifact://workspace/session/id/report.txt', '↳ https://example.com/pull/1',
+    '↳ artifact://workspace/session/id/empty-title.txt']);
+});
+
 function message(
   overrides: Partial<AgentMessageEntry>,
 ): AgentMessageEntry {

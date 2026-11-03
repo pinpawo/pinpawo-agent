@@ -254,6 +254,11 @@ export class TuiSessionController {
    * entries are read once and not kept. Falls back to the live session, whose
    * `timelineWindow` still says what is missing.
    */
+  /** Resolve a terminal-local display target without altering saved references. */
+  readArtifactAddress(uri: string) {
+    return this.transport.readArtifactAddress(uri);
+  }
+
   async readTranscriptSession(): Promise<AgentSession> {
     const live = this.state.session;
     if (!live.timelineWindow) return live;

@@ -1,11 +1,44 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import { FileSaver } from './fileSaver';
 import type { HostRuntimeConfig } from './config/runtimeConfig';
+import { compileAgentRegistry, type AgentToolkit } from '@pinpawo/pet-agent';
+import { createExploreCapability } from './capabilities/explore';
+import { loadGeneralCapability } from './capabilities/general';
+
+test('Host registers artifacts for General and Explore and preserves retired session files', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-host-artifacts-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runtimeConfig = buildTestConfig(root);
+  const oldFile = join(runtimeConfig.sessionRoot, 'capability-artifacts', 'old-report.md');
+  await mkdir(join(runtimeConfig.sessionRoot, 'capability-artifacts'), { recursive: true });
+  await writeFile(oldFile, 'historical file');
+  const caps = new HostCapabilityAssembly({ runtimeConfig, sourceId: 'artifacts-test', includeBrowser: false });
+  try {
+    const builtIns = (caps as unknown as { hostBuiltInToolkits: readonly AgentToolkit[] }).hostBuiltInToolkits;
+    const artifacts = builtIns.find(({ name }) => name === 'artifacts');
+    assert.ok(artifacts);
+    assert.deepEqual(artifacts.tools.map(({ tool }) => tool.name), ['publish_artifact', 'list_artifacts', 'download_artifact']);
+    assert.equal(builtIns.some(({ name }) => name === 'artifact_discovery'), false);
+    const general = loadGeneralCapability();
+    assert.ok(general);
+    const registry = compileAgentRegistry({ toolkits: builtIns, capabilities: [general, createExploreCapability()] });
+    assert.deepEqual(registry.unavailableCapabilities, []);
+    assert.deepEqual(registry.capabilities.map(({ capability }) => capability.name).sort(), ['explore', 'general']);
+    const ref = await caps.getArtifactStore().put({ threadId: 'session:one', name: 'report.txt', mimeType: 'text/plain',
+      body: new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('snapshot')); controller.close(); } }) });
+    const fetched = await caps.getArtifactStore().fetch(ref.uri);
+    assert.ok('body' in fetched);
+    assert.equal(await new Response(fetched.body).text(), 'snapshot');
+  } finally {
+    await caps.shutdown();
+  }
+  assert.equal(await readFile(oldFile, 'utf8'), 'historical file');
+});
 
 function buildTestConfig(root: string): HostRuntimeConfig {
   return {
@@ -16,7 +49,6 @@ function buildTestConfig(root: string): HostRuntimeConfig {
     tuiCheckpointPath: join(root, 'tui-checkpoints.json'),
     tuiSessionPath: join(root, 'tui-sessions.json'),
     petsDir: join(root, 'pets'),
-    capabilityArtifactRoot: join(root, 'capability-artifacts'),
   };
 }
 

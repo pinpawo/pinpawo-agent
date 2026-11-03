@@ -7,17 +7,27 @@ import { readChannelTestInput } from '../../../tests/support/channelDispatchInpu
 
 const message: ChannelMessageRow = {
   channelId: 'channel', messageId: 'current', sequence: 2,
-  author: { kind: 'human', id: 'operator)' }, body: 'Inspect this.', occurredAt: 'now', artifacts: [], mentions: [],
+  author: { kind: 'human', id: 'operator)' }, body: 'Inspect this.', occurredAt: 'now', deliverables: [], mentions: [],
 };
 
 test('dispatch carries stable server authors and message IDs separately from quoted context', () => {
   const original = { ...message, messageId: 'previous', author: { kind: 'pet' as const, id: 'a)b' }, body: 'Prior public result.' };
   assert.deepEqual(readChannelTestInput(channelDispatchInput(message, original)), {
     type: 'channel_message', version: 1, channelId: 'channel', messageId: 'current',
-    author: { participantId: 'human:operator%29', kind: 'human' }, body: 'Inspect this.',
-    replyTo: { messageId: 'previous', author: { participantId: 'pet:a%29b', kind: 'pet' }, body: 'Prior public result.' },
+    author: { participantId: 'human:operator%29', kind: 'human' }, body: 'Inspect this.', deliverables: [],
+    replyTo: { messageId: 'previous', author: { participantId: 'pet:a%29b', kind: 'pet' }, body: 'Prior public result.', deliverables: [] },
   });
   assert.equal(readChannelTestInput(channelDispatchInput(message)).replyTo, undefined);
+});
+
+test('both the new message and reply context carry declared references unchanged', () => {
+  const references = [{ uri: 'artifact://workspace/session/id/report.txt', title: 'Report' }];
+  const current = { ...message, deliverables: references };
+  const original = { ...message, messageId: 'previous', deliverables: [{ uri: 'https://example.com/pull/1' }] };
+  const input = readChannelTestInput(channelDispatchInput(current, original));
+  assert.deepEqual(input.deliverables, references);
+  assert.deepEqual(input.replyTo?.deliverables, original.deliverables);
+  assert.equal(input.body, 'Inspect this.');
 });
 
 test('dispatch names a current member by label next to its participantId', () => {

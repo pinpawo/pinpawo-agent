@@ -17,11 +17,53 @@ import { formatTimelineEntry } from './timelineModel';
 import {
   MAX_SETTLED_ENTRIES_PER_COMMIT,
   TimelineScrollback,
+  timelineFingerprint,
 } from './timelineScrollback';
 import { setTuiLocale } from '../i18n/locale';
+import { artifactHttpAddress, createArtifactAddressCache } from '../client/artifactAddress';
 
 // These expectations are written against the Chinese text table.
 setTuiLocale('zh');
+
+test('rich replies display structured deliverables and invalidate their snapshot fingerprint', async () => {
+  const setup = await createTimelineRenderer(100);
+  const timeline = new TimelineScrollback(setup.renderer, { artifactAddress: uri => artifactHttpAddress(uri, 3210) });
+  try {
+    const plain = assistantMessage('Done.', 'completed');
+    const saved = { ...plain, deliverables: [{ uri: 'artifact://workspace/session/id/report.txt', title: 'Report' }] };
+    assert.notEqual(timelineFingerprint(plain), timelineFingerprint(saved));
+    timeline.render(session([plain]));
+    setup.cellOutput.clear();
+    setup.externalOutput.clear();
+    timeline.render(session([saved]));
+    const rendered = setup.cellOutput.takeText().replace(/\s/g, '');
+    assert.ok(rendered.includes(artifactHttpAddress(saved.deliverables[0]!.uri, 3210)));
+  } finally { timeline.destroy(); setup.renderer.destroy(); }
+});
+
+test('a resolved stdio address replays rich output without changing canonical references', async () => {
+  const setup = await createTimelineRenderer(100);
+  await setup.renderer.setupTerminal();
+  let timeline!: TimelineScrollback;
+  const uri = 'artifact://workspace/session/id/report.txt';
+  const entry = { ...assistantMessage('Done.', 'completed'), deliverables: [{ uri, title: 'Report' }] };
+  const canonical = session([entry]);
+  const before = JSON.stringify(canonical);
+  const cache = createArtifactAddressCache({
+    read: async () => ({ address: '/tmp/published/report.txt' }),
+    onChanged: () => { timeline.resetForReplay(); timeline.render(canonical); },
+  });
+  timeline = new TimelineScrollback(setup.renderer, { artifactAddress: value => cache.display(value) });
+  try {
+    timeline.render(canonical);
+    setup.cellOutput.clear();
+    setup.externalOutput.clear();
+    await cache.ensure([uri]);
+    const output = setup.cellOutput.takeText() + setup.externalOutput.take().flatMap(commit => commit.rows).join('');
+    assert.ok(output.replace(/\s/g, '').includes('/tmp/published/report.txt'), JSON.stringify(output));
+    assert.equal(JSON.stringify(canonical), before);
+  } finally { timeline.destroy(); setup.renderer.destroy(); }
+});
 
 test('streaming assistant text remains mutable until completion', async () => {
   const setup = await createTimelineRenderer(20);

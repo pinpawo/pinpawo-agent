@@ -1,5 +1,7 @@
 # 持久化契约（Store Contract）
 
+> **Status: historical implementation.** The legacy Capability Artifact Pipeline is retired. See the current [Artifacts Toolkit](../../../reference/artifacts/index.md) and [Deliverables](../../../reference/deliverables.md) contracts.
+
 ## Ref 与类型
 
 ```ts

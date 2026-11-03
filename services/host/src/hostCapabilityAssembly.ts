@@ -12,15 +12,16 @@
  */
 import {
   type AgentToolkit,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
+import { createArtifactsToolkit, type ArtifactStore } from '@pinpawo-toolkit/artifacts';
+import { createHostArtifactStore } from './artifactStoreFactory';
+import { readLocalArtifactSource } from './artifactSourceReader';
 import {
   createBrowserCapability,
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
 import { join } from 'node:path';
 import { atomicWriteFile } from './atomicFile';
-import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import {
   createCapabilityCreatorCapability,
   createCapabilityCreatorToolkit,
@@ -146,7 +147,7 @@ export class HostCapabilityAssembly {
   private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityCatalog: HostCapabilityCatalog;
-  private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
+  private readonly artifactStore: ArtifactStore;
   private readonly checkpointer: FileSaver;
   private writerLeaseHeld = false;
   private initialized = false;
@@ -159,6 +160,7 @@ export class HostCapabilityAssembly {
     this.executionConfig = resolveHostExecutionConfig(options.runtimeConfig);
     this.sourceId = options.sourceId;
     const storedConfig = loadStoredConfig();
+    this.artifactStore = createHostArtifactStore(this.runtimeConfig, { stored: storedConfig });
     const officeSelected = officeEnabled(storedConfig, options.includeOffice);
     const browserSelected = options.includeBrowser
       ?? storedConfig.capabilities?.browser !== false;
@@ -176,6 +178,7 @@ export class HostCapabilityAssembly {
       : null;
     this.hostBuiltInToolkits = [
       createFilesToolkit(),
+      createArtifactsToolkit({ store: this.artifactStore, sourceReader: readLocalArtifactSource }),
       createWebToolkit(),
       this.rsInstances.assemble(createShellToolkit, { shell }),
       this.rsInstances.assemble(createGitToolkit, { shell }),
@@ -198,9 +201,6 @@ export class HostCapabilityAssembly {
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
-    this.capabilityArtifactStore = new FileCapabilityArtifactStore(
-      this.runtimeConfig.capabilityArtifactRoot,
-    );
     this.checkpointer = new FileSaver(
       options.checkpointPath ?? this.runtimeConfig.checkpointPath,
     );
@@ -323,8 +323,8 @@ export class HostCapabilityAssembly {
     return this.capabilityCatalog;
   }
 
-  getCapabilityArtifactStore(): CapabilityArtifactStore {
-    return this.capabilityArtifactStore;
+  getArtifactStore(): ArtifactStore {
+    return this.artifactStore;
   }
 
   async shutdown(): Promise<void> {

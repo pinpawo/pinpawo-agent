@@ -322,7 +322,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               }}>
               {held?.hasEarlier && <button className="channel-earlier" type="button" disabled={loadingEarlier || !connected}
                 onClick={() => { void loadEarlier(); }}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
-              <ChannelTimeline messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage}
+              <ChannelTimeline artifactAccess={{ url, token }} messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage}
                 members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)} routingSkips={routingSkips} working={working}
                 sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
                 onViewerChange={open => {

@@ -1,6 +1,6 @@
 # Session Artifacts
 
-状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
+状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
 
 ## 需求
 
@@ -173,3 +173,66 @@ Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链�
 4. artifacts Toolkit 与 Host `local` adapter、source reader。
 5. HTTP 打开引用。
 6. `cos` adapter。
+
+## 实现状态
+
+状态仍为 draft。本节记录本分支的实现与验证边界；上文保留原设计的目标、待明确项
+和原始实施顺序，不以实现说明替代设计依据。
+
+本轮第一步 [#1047](https://github.com/pinpawo/pinpawo-agent/pull/1047) 只移除无调用的
+helper，保留可复用能力。本分支基于该清理，接通目标后再统一退役旧 pipeline，
+不把已有路径、哈希或原子文件能力全部推倒重建。
+
+- `ToolMessage.artifact.deliverables` 是所有 Toolkit 共用的声明约定。工具校验，
+  Capability 在结果产生时按委派 checkpoint 状态累积并按 URI 去重；压缩私有消息
+  不会丢失已声明引用。已打回或取消执行的声明保留为执行证据。
+- 执行记录使用 `deliverables`。现有 `review_current(completed: true)` 成功结果
+  保存 `acceptedExecution`（delegation ID 与引用快照），公开回复只取本 run 的
+  成功验收回执并去重，不把 `returned` 当验收。Root 压缩保留 Supervisor work，
+  最终回复 metadata 固化引用，再沿 Host、session、Channel、Console / TUI 传递。
+  这复用审核记录，没有新增验收状态机或反查账本。
+- 独立 `@pinpawo-toolkit/artifacts` 提供 `publish_artifact` / `list_artifacts` /
+  `download_artifact`。Host 注入 streaming store 与 source reader；普通文件目标
+  使用 Files 的绝对/相对路径语义。默认或显式选定的本 session 受管临时路径免审核，其他
+  选定路径按 Files 写入语义精确审核。下载验证 size / SHA-256 后替换目标。
+- 本地 adapter 复用 Host 路径约束、SHA-256 和原子文件能力，每次发布用新 UUID
+  保存快照，上限 100,000,000 bytes。物理路径及稳定 key 的 session 段使用
+  base64url 编码，不限制 runtime 的 opaque ID。list 仅当前 workspace/session，
+  fetch 可从共享 workspaces base 解析收到的跨 workspace 引用。
+- COS adapter 使用官方 SDK `cos-nodejs-sdk-v5` 3.0.0 流式写入和临时签名 URL。
+  adapter 选择与凭据来自全局配置或 `PINPAWO_ARTIFACTS_*` 环境变量，不进 workdir；
+  详见 [Artifacts 配置](../../reference/artifacts/index.md#host-configuration)。
+- 已有认证 HTTP 增加 `GET /agent-session/artifacts?uri=...`：local 返回流，COS
+  返回 302，Studio HTTP 使用同一路径。Console 认证 fetch 后下载 Blob，支持正文
+  `artifact://` 链接及结构化引用。COS 跨源重定向需要 bucket 允许签名 GET 的实际
+  CORS origin；浏览器 fixture 观察到 `Origin: null`，仅配置 Console 固定 origin
+  不足以保证该链路。无 cookie 的签名 GET 可使用 `Access-Control-Allow-Origin: *`；
+  这不绕过 Host 认证。不能假定现有 bucket 无需配置即可使用。
+- TUI 已能显示标题与稳定引用，并在 snapshot 重绘后保留。可用地址接线正在验证：
+  WebSocket 使用真实连接端口显示需认证的 HTTP GET 地址；默认 stdio 不开新端口，
+  通过只读 `artifact.address.get/result` 控制消息解析现有本地快照路径或临时 COS
+  URL。这些地址不写入 Agent 历史、Channel 或 checkpoint，也不自动下载文件。
+  接口见 [Agent Session](../../reference/runtime/session-projection.md#artifact-display-addresses)。
+- Channel 人和 Pet 消息统一为 `deliverables`。迁移 0003 按 100 行分页，把旧
+  label/version 转成显示标题并保留原 JSON；不做双字段读取。新写入恢复 100 条、
+  URI 4096 字符、title 500 字符限制；历史长标题可读。
+- 接通新目标后，旧 store/discovery/finalize 写入口、session 索引与旧类型退役，
+  `finalize` 普通 output/messages 改写能力保留；旧磁盘文件不删除。执行记录字段
+  变更使用项目持久化路径标签 `capability-v6`，不是 LangGraph checkpoint 格式版本。
+  新默认路径与 TUI registry 不读取或自动迁移 v5 会话，本次不部署或切换运行态。
+
+不增加反查、统一删除、retention/GC 或管理平台。可选的 session 产物 system section
+未实现，不是引用传递的前置条件。
+
+验证边界：第一轮全量构建与类型检查已通过，新增地址 RPC 后仍需复验。本地文件交接
+E2E 使用脚本模型，实际执行两次文件发布、打回首版和验收终版，再经 Host 事件与
+snapshot、SQLite Channel 到另一 workspace/session 的 Pet 实际 list/download
+并校验二进制；删除源文件后认证 HTTP 仍读到已发布快照。它验证真实工具、存储和
+传输链路，不是外部模型验收。
+
+真实 SDK 对隔离 HTTP fixture 的流传输及离线签名已验证；Chromium fixture 已覆盖
+local binary、正文链接、COS 跨源 302 以及 Bearer 不泄漏。它们不是实际 COS bucket
+权限、外网和 CORS 配置的验收。真实模型评估在调用前因缺少默认 profile 配置文件
+`/home/agent/.pinpawo/config.json` 报 `ENOENT` 而未能启动，不是网络失败。真实 COS
+联调、TUI 地址接线及本分支最终 head 的整体检查仍需以最终结果更新，不能由模拟测试
+推定已完成。

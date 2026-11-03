@@ -13,11 +13,23 @@ import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
 const message: ChannelMessage = { channelId: 'a', sequence: 2, messageId: 'm', body: 'Full public delivery.\n\nMissing work remains.\n\n```ts\nconst evidence = 42;\n```',
   author: { kind: 'pet', id: 'worker' }, occurredAt: '2026-10-04T00:00:00Z', externalRef: 'session-message-1',
-  artifacts: [{ uri: 'javascript:alert(1)', label: 'unsafe' }], mentions: [] };
+  deliverables: [{ uri: 'javascript:alert(1)', title: 'unsafe' }], mentions: [] };
 const members: ChannelMember[] = [
   { participantId: 'human:studio-operator', kind: 'human', id: 'studio-operator', label: 'studio-operator' },
   { participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' },
 ];
+
+test('structured deliverables are visible and artifact links use the authenticated connection', () => {
+  const markup = renderToStaticMarkup(<ChannelTimeline messages={[{ ...message, body: 'Done.', deliverables: [
+    { uri: 'artifact://workspace/session/id/report.txt', title: 'Report' }, { uri: 'https://example.com/pull/1', title: 'Pull request' },
+    { uri: 'artifact://workspace/session/id/empty-title.txt', title: '' },
+  ] }]} artifactAccess={{ url: 'http://host', token: 'fixture-token' }} pending={false} onReply={() => undefined} />);
+  assert.ok(markup.includes('>Report</button>'));
+  assert.ok(markup.includes('>artifact://workspace/session/id/empty-title.txt</button>'));
+  assert.ok(markup.includes('href="https://example.com/pull/1"'));
+  assert.ok(!markup.includes('fixture-token'));
+  assert.ok(!markup.includes('href="artifact:'));
+});
 
 test('Channel instructions editing is limited to Studio authority', () => {
   assert.equal(channelCanEditPrompt(true), false, 'ordinary clients may not edit, even on Channels they created');

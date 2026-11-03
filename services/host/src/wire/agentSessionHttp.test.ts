@@ -67,3 +67,48 @@ test('HTTP authenticates, validates messages and streams without connecting an i
     await transport.closed;
   }
 });
+
+test('HTTP refuses the requester-only address RPC before dispatch, address lookup or shared SSE output', async () => {
+  const listeners = new Set<(message: AgentServerMessage) => void>();
+  let didUnsubscribe!: () => void;
+  const unsubscribed = new Promise<void>(resolve => { didUnsubscribe = resolve; });
+  let requests = 0;
+  let addressLookups = 0;
+  const interaction = {
+    request: async () => {
+      requests += 1;
+      for (const listener of listeners) listener({ type: 'artifact.address.result', requestId: 'address',
+        uri: 'artifact://workspace/session/object/report.txt', address: 'https://objects.example.test/?signature=private' });
+    },
+    subscribe: (listener: (message: AgentServerMessage) => void) => {
+      listeners.add(listener); return () => { listeners.delete(listener); didUnsubscribe(); };
+    },
+  } as unknown as ResidentPetInteraction;
+  const transport = await startResidentPetAgentSessionTransport(0, new Map([['executor', interaction]]), {
+    authToken: 'test-token', log: () => undefined,
+    fetchArtifact: async () => { addressLookups += 1; throw new Error('Must not look up an address.'); },
+  });
+  const controller = new AbortController();
+  const base = `http://127.0.0.1:${transport.port}/agent-session/pets/executor`;
+  const headers = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' };
+  try {
+    const stream = await fetch(`${base}/events`, { headers, signal: controller.signal });
+    const reader = stream.body!.getReader();
+    await reader.read();
+    const pending = reader.read().then(value => ({ kind: 'data', value }), () => ({ kind: 'aborted' }));
+    const response = await fetch(`${base}/messages`, { method: 'POST', headers,
+      body: JSON.stringify({ type: 'artifact.address.get', requestId: 'address', uri: 'artifact://workspace/session/object/report.txt' }) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json() as { error: string }).error, /GET \/agent-session\/artifacts/);
+    assert.equal(requests, 0, 'the query must never reach the Host peer or session history');
+    assert.equal(addressLookups, 0);
+    const result = await Promise.race([pending, new Promise<{ kind: string }>(resolve => setTimeout(() => resolve({ kind: 'silent' }), 25))]);
+    assert.equal(result.kind, 'silent', 'the observer must not receive the requester-only response');
+  } finally {
+    controller.abort();
+    transport.close();
+    await transport.closed;
+    await unsubscribed;
+  }
+  assert.equal(listeners.size, 0);
+});

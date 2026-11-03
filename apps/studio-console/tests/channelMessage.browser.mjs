@@ -20,7 +20,7 @@ const originalBody = '# Public evidence\n\n[Analyst](participant:pet:analyst) ·
   Array.from({ length: 70 }, (_, i) => 'Reading paragraph ' + i + '. ' + 'Public evidence remains read-only. '.repeat(4)).join('\n\n') +
   '\n\n[Unsafe](javascript:alert(1))\n\n<script>window.bad = true</script>';
 const makeMessage = (id, sequence, body) => ({ channelId: channel.channelId, messageId: id, sequence, body,
-  author: { kind: 'pet', id: 'analyst' }, occurredAt: date, mentions: [], artifacts: [] });
+  author: { kind: 'pet', id: 'analyst' }, occurredAt: date, mentions: [], deliverables: [] });
 const messages = Array.from({ length: 20 }, (_, i) => makeMessage('older-' + i, i + 2, 'Older evidence ' + i + '. '.repeat(40)));
 messages.push(makeMessage('long', 22, originalBody));
 for (let i = 0; i < 20; i++) messages.push(makeMessage('newer-' + i, 23 + i, 'Newer evidence ' + i + '. '.repeat(40)));

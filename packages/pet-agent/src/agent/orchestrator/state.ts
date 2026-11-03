@@ -7,8 +7,6 @@ import type {
   CapabilityMessageLane,
   UserRequest,
 } from './types';
-import type { CapabilityArtifactRef } from '../../types/artifact';
-import { mergeCapabilityArtifactRefs } from './capabilityArtifacts';
 import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
@@ -46,10 +44,6 @@ const orchestratorStateChannels = {
   runUserRequest: Annotation<UserRequest | null>({
     reducer: (_prev, next) => next,
     default: () => null,
-  }),
-  sessionCapabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
-    reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
-    default: () => [],
   }),
   runIterationCount: Annotation<number>({
     reducer: (_prev, next) => next,

@@ -244,11 +244,12 @@ test('runAgentSessionTurn sources tool operations from the root protocol stream,
 
 test('runAgentSessionTurn falls back to checkpoint reply and its result references when stream values omit messages', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
+  const deliverables = [{ uri: 'artifact://workspace/session/artifact/report.md', title: 'Accepted report' }];
   const finalMessages = [
     new HumanMessage('hello'),
     ...withDeliveryCalls([createDeliveryResult({ sourceLane: 'capability:general', delegationId: 'd1',
       runId: 'r1', deliveryId: 'delivery', task: 'Inspect', result: 'Evidence', createdAt: '2026-09-27T00:00:00Z' })]),
-    new AIMessage({ content: 'checkpoint answer', additional_kwargs: { pinpawo: { runId: 'r1' } } }),
+    new AIMessage({ content: 'checkpoint answer', additional_kwargs: { pinpawo: { runId: 'r1', deliverables } } }),
   ];
   const setup = {
     graphConfig: {},
@@ -294,6 +295,7 @@ test('runAgentSessionTurn falls back to checkpoint reply and its result referenc
   ) ?? null;
   assert.equal(completed?.text, 'checkpoint answer');
   assert.deepEqual(completed?.resultReferences, [{ id: 'delivery', title: 'Inspect', text: 'Evidence' }]);
+  assert.deepEqual(completed?.deliverables, deliverables);
 });
 
 test('runAgentSessionTurn replaces the current plan from root values and clears it at settlement', async () => {

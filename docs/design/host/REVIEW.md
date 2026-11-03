@@ -1,5 +1,7 @@
 # 本分支 review 指南：按 domain 概念组织
 
+> 本文中的旧 artifact store / discovery 服务是当时核对的基线，现已退役。当前 session 发布与下载见 [Artifacts](../../reference/artifacts/index.md)，引用传递见 [Deliverables](../../reference/deliverables.md)。
+
 分支：`claude/local-agent-module-boundaries-0a8310`（30 个提交，相对 `main`）
 更新至：`da8822bb`
 

@@ -36,7 +36,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
+import { buildDeliverableDisplayLines, buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
 
 const USER_MESSAGE_BACKGROUND = '#303842';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
@@ -74,7 +74,7 @@ export class TimelineScrollback {
   private readonly assistantMarkdownStyle = createAssistantMarkdownStyle();
   private assistantMarkdownStyleDestroyed = false;
 
-  constructor(private readonly renderer: CliRenderer) {}
+  constructor(private readonly renderer: CliRenderer, private readonly options: { artifactAddress?: (uri: string) => string } = {}) {}
 
   renderWelcome(lines: readonly string[]) {
     if (this.welcomeRendered || lines.length === 0) return;
@@ -259,6 +259,7 @@ export class TimelineScrollback {
       previous,
       width: this.renderer.width,
       assistantMarkdownStyle: this.assistantMarkdownStyle,
+      artifactAddress: this.options.artifactAddress,
     });
     try {
       surface.root.add(root);
@@ -306,6 +307,7 @@ export class TimelineScrollback {
         entries: [],
         width: this.renderer.width,
         assistantMarkdownStyle: this.assistantMarkdownStyle,
+        artifactAddress: this.options.artifactAddress,
       });
       surface.root.add(root);
       active = {
@@ -326,6 +328,7 @@ export class TimelineScrollback {
         this.renderer.width,
         this.assistantMarkdownStyle,
         previous,
+        this.options.artifactAddress,
       );
       active.surface.render();
       const stableRows = completed
@@ -566,6 +569,7 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       entry.role,
       normalizeText(entry.text),
       entry.status,
+      entry.deliverables ?? [],
       // A committed call line holds its title alone; only an outcome row,
       // written once the call has ended, carries the outcome.
       ...(entry.toolCalls ?? []).map(call => normalizeText(toolCallTitle(call))
@@ -640,6 +644,7 @@ function createTimelineRoot(
     previous?: AgentTimelineEntry;
     width: number;
     assistantMarkdownStyle: ReturnType<typeof createAssistantMarkdownStyle>;
+    artifactAddress?: (uri: string) => string;
   },
 ) {
   const root = new BoxRenderable(context, {
@@ -655,6 +660,7 @@ function createTimelineRoot(
     options.width,
     options.assistantMarkdownStyle,
     options.previous,
+    options.artifactAddress,
   );
   return root;
 }
@@ -666,6 +672,7 @@ function populateTimelineRoot(
   width: number,
   assistantMarkdownStyle?: ReturnType<typeof createAssistantMarkdownStyle>,
   previous?: AgentTimelineEntry,
+  artifactAddress?: (uri: string) => string,
 ) {
   for (const child of root.getChildren()) {
     root.remove(child);
@@ -707,6 +714,7 @@ function populateTimelineRoot(
     const lines = buildTimelineDisplayLines(entry, {
       now,
       width,
+      artifactAddress,
     });
     if (delegationScope && !isDelegationScopeChild(entry)) {
       delegationScope = null;
@@ -745,6 +753,7 @@ function populateTimelineRoot(
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);
+      buildDeliverableDisplayLines(entry, artifactAddress).forEach(line => addLine(line, detailSurface));
       if (isToolCallMessageEntry(entry)) {
         buildToolCallDisplayLines(entry).forEach(line => addLine(line, detailSurface));
         openToolCallScope(entry);

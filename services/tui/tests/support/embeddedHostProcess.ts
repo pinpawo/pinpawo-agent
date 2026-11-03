@@ -1,3 +1,6 @@
+import { join } from 'node:path';
+import { FileArtifactStore } from '../../../host/src/artifactStore';
+import { resolveHostArtifactAddress } from '../../../host/src/artifactAddress';
 /**
  * Deterministic stdio Host fixture for the embedded transport test.
  *
@@ -7,9 +10,6 @@
  *
  * stdout carries protocol messages only; diagnostics go to stderr.
  */
-import {
-  FileCapabilityArtifactStore,
-} from '../../../host/src/capabilityArtifactStore';
 import {
   buildAgentContext,
 } from '../../../host/src/contextLoader';
@@ -57,6 +57,7 @@ const handlers = createChatHostHandlers(
     petId: 'pet-embedded-host',
     petName: 'PinPawo',
     runtimeConfig,
+    resolveArtifactAddress: uri => resolveHostArtifactAddress(new FileArtifactStore(join(workdir, 'objects'), 'workspace'), uri),
     ...createTestModelServerDeps({
       apiKey: 'offline-embedded-host-key',
       baseUrl: 'http://127.0.0.1:1/v1',
@@ -66,9 +67,6 @@ const handlers = createChatHostHandlers(
     toolkitInventory: createTestHostToolkitInventory([
       createFilesToolkit(), createShellToolkit({ shell: sharedShell }), createWebToolkit(), createGitToolkit({ shell: sharedShell }), createGithubToolkit({ shell: sharedShell }),
     ]),
-    capabilityArtifactStore: new FileCapabilityArtifactStore(
-      runtimeConfig.capabilityArtifactRoot,
-    ),
   }),
   {
     chatGraphService: graphFixture.service,

@@ -208,7 +208,7 @@ helper，保留可复用能力。本分支基于该清理，接通目标后再�
   CORS origin；浏览器 fixture 观察到 `Origin: null`，仅配置 Console 固定 origin
   不足以保证该链路。无 cookie 的签名 GET 可使用 `Access-Control-Allow-Origin: *`；
   这不绕过 Host 认证。不能假定现有 bucket 无需配置即可使用。
-- TUI 已能显示标题与稳定引用，并在 snapshot 重绘后保留。可用地址接线正在验证：
+- TUI 已能显示标题与稳定引用，并在 snapshot 重绘后保留。可用地址已接通：
   WebSocket 使用真实连接端口显示需认证的 HTTP GET 地址；默认 stdio 不开新端口，
   通过只读 `artifact.address.get/result` 控制消息解析现有本地快照路径或临时 COS
   URL。这些地址不写入 Agent 历史、Channel 或 checkpoint，也不自动下载文件。
@@ -224,8 +224,9 @@ helper，保留可复用能力。本分支基于该清理，接通目标后再�
 不增加反查、统一删除、retention/GC 或管理平台。可选的 session 产物 system section
 未实现，不是引用传递的前置条件。
 
-验证边界：第一轮全量构建与类型检查已通过，新增地址 RPC 后仍需复验。本地文件交接
-E2E 使用脚本模型，实际执行两次文件发布、打回首版和验收终版，再经 Host 事件与
+验证边界：全量构建与所有 workspace 类型检查已通过；地址 RPC、新增原生 TUI 显示
+及实际 stdio/HTTP 传输测试已通过。30 项 Studio E2E 已通过，其中本地文件交接
+使用脚本模型，实际执行两次文件发布、打回首版和验收终版，再经 Host 事件与
 snapshot、SQLite Channel 到另一 workspace/session 的 Pet 实际 list/download
 并校验二进制；删除源文件后认证 HTTP 仍读到已发布快照。它验证真实工具、存储和
 传输链路，不是外部模型验收。
@@ -234,5 +235,6 @@ snapshot、SQLite Channel 到另一 workspace/session 的 Pet 实际 list/downlo
 local binary、正文链接、COS 跨源 302 以及 Bearer 不泄漏。它们不是实际 COS bucket
 权限、外网和 CORS 配置的验收。真实模型评估在调用前因缺少默认 profile 配置文件
 `/home/agent/.pinpawo/config.json` 报 `ENOENT` 而未能启动，不是网络失败。真实 COS
-联调、TUI 地址接线及本分支最终 head 的整体检查仍需以最终结果更新，不能由模拟测试
-推定已完成。
+联调与外部模型验收仍未完成，不能由隔离 fixture 推定已完成。完整原生 TUI renderer
+套件未作为本次全通过结论；本次验证包含新增的两项原生显示用例、实际传输用例和
+251 项 TUI Node 测试。CI 结果以 PR 最终提交上的检查为准。

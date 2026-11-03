@@ -24,7 +24,7 @@ test('body-only references use the real authenticated connection and download Ho
   await writeFile(source, bytes);
   const store = new FileArtifactStore(hostRoot, 'workspace');
   const sourceBytes = await readFile(source);
-  const ref = await store.put({ threadId: 'session', name: 'published report.bin', mimeType: 'application/octet-stream',
+  const ref = await store.put({ threadId: 'session', name: "published owner's*report*(1)!.bin", mimeType: 'application/octet-stream',
     body: new ReadableStream({ start(controller) { controller.enqueue(sourceBytes); controller.close(); } }) });
   await rm(source);
   const hostPath = await store.resolvePath(ref.uri);

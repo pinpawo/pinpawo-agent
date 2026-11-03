@@ -20,8 +20,8 @@ test('body display deduplicates structured references and preserves their title 
   assert.deepEqual(messageDisplayReferences({ text: '[bad](artifact://workspace/../file)' }), []);
 });
 
-test('bare published names retain apostrophes and exclamation marks', () => {
-  for (const name of ["owner's%2Etxt", 'report!', 'report(part)%2Etxt']) {
+test('bare published names retain punctuation that Markdown would otherwise treat as formatting', () => {
+  for (const name of ["owner's%2Etxt", 'report!', 'report(part)%2Etxt', 'report*part*%2Etxt', '*report*', 'report_part_%2Etxt']) {
     const uri = `artifact://workspace/session/id/${name}`;
     assert.deepEqual(messageDisplayReferences({ text: uri }), [{ uri }]);
   }

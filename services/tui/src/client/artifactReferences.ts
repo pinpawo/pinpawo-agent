@@ -1,6 +1,23 @@
 import { parseArtifactUri, type Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentMessageEntry } from '@pinpawo/agent-session';
-import { lexer, walkTokens } from 'marked';
+import { Marked } from 'marked';
+
+// Consume bare artifact URIs before Markdown interprets valid filename characters as emphasis.
+const markdown = new Marked({ extensions: [{
+  name: 'artifactUrl', level: 'inline',
+  start: text => text.indexOf('artifact://'),
+  tokenizer(text) {
+    const match = /^artifact:\/\/[^\s<>"`]+/u.exec(text);
+    if (!match) return;
+    // URI segment encoding leaves apostrophes and exclamation marks intact.
+    let uri = match[0].replace(/[.,;:?，。；：？]+$/u, '');
+    for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+      while (uri.endsWith(close) && uri.split(close).length > uri.split(open).length) uri = uri.slice(0, -1);
+    }
+    try { parseArtifactUri(uri); } catch { return; }
+    return { type: 'artifactUrl', raw: uri, uri };
+  },
+}] });
 
 /** Display-only links; never infer canonical deliverables from reply prose. */
 export function messageDisplayReferences(entry: Pick<AgentMessageEntry, 'text' | 'deliverables'>): Deliverable[] {
@@ -9,20 +26,10 @@ export function messageDisplayReferences(entry: Pick<AgentMessageEntry, 'text' |
     try { parseArtifactUri(uri); } catch { return; }
     if (!references.has(uri)) references.set(uri, { uri, ...(title ? { title } : {}) });
   };
-  walkTokens(lexer(entry.text), token => {
+  markdown.walkTokens(markdown.lexer(entry.text), token => {
     if ((token.type === 'link' || token.type === 'image') && typeof token.href === 'string') {
       add(token.href, typeof token.text === 'string' ? token.text : undefined);
-    } else if (token.type === 'text' && !token.tokens && typeof token.text === 'string') {
-      for (const match of token.text.matchAll(/artifact:\/\/[^\s<>"`]+/gu)) {
-        // URI segment encoding leaves apostrophes and exclamation marks intact.
-        let uri = match[0].replace(/[.,;:?，。；：？]+$/u, '');
-        // Bare links may have surrounding punctuation; balanced filename parentheses remain part of the key.
-        for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
-          while (uri.endsWith(close) && uri.split(close).length > uri.split(open).length) uri = uri.slice(0, -1);
-        }
-        add(uri);
-      }
-    }
+    } else if (token.type === 'artifactUrl' && typeof token.uri === 'string') add(token.uri);
   });
   return [...references.values()];
 }

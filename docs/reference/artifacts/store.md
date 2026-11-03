@@ -98,7 +98,7 @@ type CapabilityArtifactStore = {
 ## 4. 架构价值（为什么要单独拿出一层）
 
 - **可复用性**：lane 可被裁剪/重写；store ref 不会随着 context compression 丢失关键资产。
-- **跨任务传递**：`state.sessionCapabilityArtifacts` 让后续 capability/pet 在同一 thread 下复用历史产物。
+- **历史产物读取**：后续 Capability 通过声明的 `artifact_discovery` Toolkit 按当前 thread 直接查询 store。`state.sessionCapabilityArtifacts` 当前只累积 refs，没有生产读取路径，不是自动复用机制。
 - **恢复与幂等**：store 重放基于稳定 ref，支持重试、恢复和离线读取，不依赖当前上下文全部原文。
 - **安全与权限边界分离**：store 提供统一读取入口和命名空间约束，避免临时工具消息直接承载可共享内容。
 

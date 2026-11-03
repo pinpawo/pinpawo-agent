@@ -9,7 +9,8 @@
 - lane/delegation/run 标识
 - LangChain summarization 来源标记（`lc_source: summarization`）
 
-它们只影响当前/当前 turn 的行为。
+它们用于消息归属和来源识别，也会随消息保留，在上下文压缩、执行记录关联和
+Host 历史投影时被读取；不应把它们当作产物内容的存储入口。
 
 ## `ToolMessage.artifact` 的边界
 

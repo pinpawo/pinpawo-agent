@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -18,6 +18,31 @@ function buildTestConfig(root: string): HostRuntimeConfig {
     petsDir: join(root, 'pets'),
   };
 }
+
+test('checkpoint maintenance and thread deletion leave historical artifact files intact', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-history-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runtimeConfig = buildTestConfig(root);
+  const oldThreadRoot = join(runtimeConfig.sessionRoot, 'capability-artifacts', 'threads', 'thread-1');
+  const oldReport = join(oldThreadRoot, 'report.md');
+  await mkdir(oldThreadRoot, { recursive: true });
+  await writeFile(oldReport, '# Historical report\n');
+  const caps = new HostCapabilityAssembly({ runtimeConfig, sourceId: 'cleanup-test', includeBrowser: false });
+  const saver = caps.getCheckpointer();
+  caps.acquireWriterLease();
+  try {
+    await saver.put({ configurable: { thread_id: 'thread-1' } }, {
+      v: 4, id: 'old-checkpoint', ts: new Date().toISOString(),
+      channel_values: { messages: [] }, channel_versions: { messages: '1' }, versions_seen: {},
+    }, { source: 'loop', step: 1, parents: {} });
+    await saver.runHostStartupMaintenance();
+    await saver.deleteThread('thread-1');
+    assert.equal(await saver.getTuple({ configurable: { thread_id: 'thread-1' } }), undefined);
+  } finally {
+    await caps.shutdown();
+  }
+  assert.equal(await readFile(oldReport, 'utf8'), '# Historical report\n');
+});
 
 test('HostCapabilityAssembly refuses early ownership when another Host owns its checkpoint root', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-owner-'));

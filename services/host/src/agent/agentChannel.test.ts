@@ -23,6 +23,7 @@ import {
   createCapabilityCreatorToolkit,
 } from '../capabilities/capabilityCreator';
 import { loadGeneralCapability } from '../capabilities/general';
+import { createExploreCapability } from '../capabilities/explore';
 import { createTestModelProfiles } from '../testing/modelProfiles';
 
 function createContext(): AgentContext {
@@ -77,6 +78,26 @@ test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   });
 
   assert.ok(setup.input.toolkits);
+});
+
+test('Explore compiles from ordinary Host Toolkits without an artifact store or discovery Toolkit', () => {
+  const explore = createExploreCapability();
+  const toolkits: AgentToolkit[] = explore.uses.map(name => ({
+    name,
+    description: `${name} Toolkit`,
+    tools: [{ tool: tool(() => 'ok', {
+      name: `${name}_probe`, description: 'Probe.', schema: z.object({}),
+    }) }],
+  }));
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(), userMessage: 'Explore this project.',
+    capabilities: [explore], toolkits,
+  });
+  const compiled = setup.registry.capabilities.find(({ capability }) => capability.name === 'explore');
+  assert.ok(compiled);
+  assert.deepEqual(compiled.toolNames, toolkits.map(({ name }) => `${name}_probe`));
+  assert.equal(setup.registry.unavailableCapabilities.some(({ capability }) => capability.name === 'explore'), false);
+  assert.deepEqual(setup.input.toolkits?.map(({ name }) => name), ['capability_creator', ...explore.uses]);
 });
 
 test('buildLocalChatAgentInput passes the generation reserve to main and subagent contexts', () => {

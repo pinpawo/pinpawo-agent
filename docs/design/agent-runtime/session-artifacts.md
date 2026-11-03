@@ -164,7 +164,7 @@ Adapter 在 Host 配置里选：
 - Host：`FileCapabilityArtifactStore`、`artifact_discovery` Toolkit、`capabilityArtifactRoot`、各处旧 store 注入；TUI 对 `artifact_discovery_context` 信封的解析。
 - 文档：`docs/reference/artifacts/` 移入 history。
 
-Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链路](#交付物链路)）。`lifecycle.finalize` 删除写入接口后仍可改写 output / messages，是否保留另行决定。
+Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链路](#交付物链路)）。`lifecycle.finalize` 保留改写 output / messages 的能力，仅移除产物写入接口。
 
 ## 实现顺序
 
@@ -177,6 +177,8 @@ Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链�
 
 ## 实现进展
 
+新增能力分支依赖先行的清理分支 [`codex/remove-legacy-artifacts`](https://github.com/pinpawo/pinpawo-agent/tree/codex/remove-legacy-artifacts)。清理阶段保留了 v5 执行记录和 Channel 人工附件；本分支再统一为 `deliverables` 并迁移 Channel 字段。旧 pipeline 的停用不是 v6 引入的：外部 Capability 若仍声明 `artifact_discovery` 或调用旧 finalize 写接口，需要更新；普通 `finalize` 的 `output` / `messages` 改写能力保留。
+
 已实现工具声明、按委派累积去重、统一执行记录、模型说明，以及最终回复到 Host、
 snapshot、Channel、Console / TUI 的引用传递。现有 GitHub PR 创建工具使用同一约定
 声明成功创建的 PR 链接；没有 Toolkit 名称特判。无声明的工具保持普通结果行为。
@@ -185,9 +187,7 @@ snapshot、Channel、Console / TUI 的引用传递。现有 GitHub PR 创建工�
 `Command` 语义。跨图 `Command` 是控制转移，原样传递，不在当前采集保证内；仓库内
 当前跨图出口为 Entry / Supervisor 控制工具，没有声明交付物的业务路径。
 
-新的运行时持久化契约使用项目路径标签 `capability-v6`，不是 LangGraph checkpoint
-格式版本。旧文件不删除或迁移，新 Host 默认不读取 v5 会话；源代码改动不会切换
-现有运行部署。
+本分支才将默认运行时持久化路径标签从 `capability-v5` 升为 `capability-v6`；先行清理分支保持 v5 不变。它是项目路径标签，不是 LangGraph checkpoint 格式版本。旧 store 与 checkpoint 文件不删除或迁移，新 Host 默认不读取 v5 会话，并使用新的 TUI 会话注册表；源代码改动不会切换现有运行部署。
 
 旧 Capability Artifact Pipeline、finalize 写接口和 discovery 注入已删除。
 artifacts Toolkit、文件发布存储、HTTP 下载与 COS adapter 仍是后续范围，本次引用

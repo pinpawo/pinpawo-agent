@@ -1,6 +1,6 @@
 # 架构概览：Capability V2 Artifact 流程
 
-> Archived: this pipeline has been removed. See the current [Deliverables contract](../../../reference/deliverables.md).
+> Archived: the legacy store and discovery pipeline has been removed. See the current [Deliverables contract](../../../reference/deliverables.md) and [Session Artifacts implementation status](../../../design/agent-runtime/session-artifacts.md#实现进展).
 
 > 状态：Archived
 > 更新：2026-07-27

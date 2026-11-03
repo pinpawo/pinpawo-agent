@@ -106,6 +106,7 @@ for (const [backend, config] of backends) {
         { uri: 'https://example.com/file', version: '2' },
         { uri: 'repo:plain', label: 'Plain' },
         { uri: 'repo:untitled' },
+        { uri: 'repo:long-title', label: 'L'.repeat(500), version: 'V'.repeat(500) },
       ];
       const original = { body: 'Keep this', mentions: [], artifacts, otherMetadata: { source: 'old' } };
       await sql`insert into channel_messages (message_id, channel_id, author_kind, author_id, occurred_at, data)
@@ -118,8 +119,11 @@ for (const [backend, config] of backends) {
         { uri: artifacts[1]!.uri, title: 'https://example.com/file · 2' },
         { uri: artifacts[2]!.uri, title: 'Plain' },
         { uri: artifacts[3]!.uri },
+        { uri: artifacts[4]!.uri, title: `${artifacts[4]!.label} · ${artifacts[4]!.version}` },
       ];
       assert.deepEqual(migrated?.deliverables, deliverables);
+      assert.equal(migrated?.deliverables[4]?.title?.length, 1003, 'historical labels and versions remain readable without truncation');
+      assert.deepEqual((await service.readContext(owner, 'old')).messages[0]?.deliverables, deliverables);
       assert.equal(Object.hasOwn(migrated!, 'artifacts'), false);
       assert.equal(Object.hasOwn(migrated!, 'otherMetadata'), false);
       const stored = await db.selectFrom('channel_messages').select('data').where('message_id', '=', 'old-msg').executeTakeFirstOrThrow();
@@ -145,6 +149,32 @@ for (const [backend, config] of backends) {
     await assert.rejects(service.postMessage(owner, id, { body: 'Old field', artifacts: [] }));
     for (const value of [null, {}, [{ uri: '' }], [{ uri: 1 }], [{ uri: 'x', title: 2 }]]) {
       await assert.rejects(service.postMessage(owner, id, { body: 'Malformed', deliverables: value }));
+    }
+  }));
+
+  test(`${backend}: human and Pet writes enforce Channel reference limits without changing valid references`, () => withService(async (service) => {
+    const id = (await service.createChannel(owner, { title: 'Reports', pets: ['executor'] })).channel.channelId;
+    const deliverables = Array.from({ length: 100 }, (_, index) => ({
+      uri: index === 0 ? ` ${'u'.repeat(4094)} ` : `repo:report-${index}`,
+      title: 'T'.repeat(500),
+      metadata: { index },
+    }));
+    const invalid = [
+      [...deliverables, { uri: 'repo:extra', title: 'Extra', metadata: { index: 100 } }],
+      [{ uri: ` ${'u'.repeat(4095)} ` }],
+      [{ uri: 'repo:title', title: 'T'.repeat(501) }],
+    ];
+    for (const author of [owner, executor]) {
+      const sent = await service.postMessage(author, id, { body: 'Ready.', deliverables });
+      assert.deepEqual(sent.message.deliverables, deliverables);
+      assert.deepEqual((await service.getMessage(id, sent.message.messageId))?.deliverables, deliverables);
+      const plain = await service.postMessage(author, id, { body: 'Ordinary message.' });
+      assert.deepEqual(plain.message.deliverables, []);
+      const before = (await service.readContext(owner, id)).messages;
+      for (const value of invalid) {
+        await assert.rejects(service.postMessage(author, id, { body: 'Too large.', deliverables: value }));
+        assert.deepEqual((await service.readContext(owner, id)).messages, before, 'rejected references do not write a message');
+      }
     }
   }));
 

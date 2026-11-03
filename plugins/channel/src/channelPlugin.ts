@@ -11,7 +11,7 @@ import {
   type ChannelRouter, type ChannelRoutingOptions, type RouteDecider,
 } from './channelRouting';
 import {
-  ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelDeliverablesSchema, channelMessagePageSchema,
+  ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelMessagePageSchema,
   memberRefSchema, type ChannelMessage, type ChannelSessionBinding,
 } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';
@@ -83,7 +83,8 @@ const petMessageEventSchema = z.object({
   sessionId: z.string().min(1),
   scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }),
   message: z.object({ type: z.literal('message.completed'), messageId: z.string().min(1), text: z.string(),
-    deliverables: channelDeliverablesSchema.optional(),
+    // postMessage validates references inside the write failure notification path.
+    deliverables: z.unknown().optional(),
   }).passthrough(),
 });
 

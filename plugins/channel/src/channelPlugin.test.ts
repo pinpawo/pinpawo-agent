@@ -101,3 +101,78 @@ test('a Pet works in a Channel only while its run there is running, and context 
     { channelId, participantId: 'pet:reviewer', working: true },
   ]);
 });
+
+test('Pet replies keep boundary references and report invalid Channel references without saving a message', async (t) => {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  const notified: Array<{ type: string; payload?: unknown }> = [];
+  const listeners: Array<(event: StudioEvent) => unknown> = [];
+  const plugin = createChannelPlugin({ httpRoute: false });
+  const context: StudioPluginContext = {
+    dispatch: async () => { throw new Error('not used'); },
+    registerContextProvider: () => () => undefined,
+    allocateSessionId: () => 'unused',
+    notify: (event) => { notified.push(event); },
+    subscribe: (listener) => { listeners.push(listener); return () => undefined; },
+    listPets: () => [{ petId: 'writer', name: 'Writer', definitionId: 'writer' }],
+    pets: {} as StudioPluginContext['pets'],
+    listDispatchQueues: () => [],
+    petSessions: {
+      snapshot: async () => { throw new Error('not used'); },
+      observe: async () => { throw new Error('not used'); },
+      review: async () => { throw new Error('not used'); },
+    },
+    hooks: { expose: () => () => undefined, contribute: () => () => undefined },
+    storage: { dialect: 'sqlite', open: (migrations) => storage.open('channel', migrations) },
+    clients: { get: async (clientId: string) => ({ clientId, label: clientId }) } as unknown as StudioPluginContext['clients'],
+    models: { resolve: () => { throw new Error('not used'); } },
+  };
+  await plugin.start!(context);
+  t.after(() => plugin.stop?.());
+  const owner = { kind: 'human' as const, id: 'local' };
+  const { channel: { channelId } } = await plugin.service.createChannel(owner, { title: 'Reports', pets: ['writer'] });
+  const sessionId = 'writer:reports';
+  await plugin.service.reserveSession(channelId, 'writer', () => sessionId);
+  const emit = async (messageId: string, deliverables?: unknown) => {
+    const event: StudioEvent = {
+      eventId: messageId, type: 'dispatch.message', source: 'resident-pet', occurredAt: new Date().toISOString(),
+      payload: {
+        invocationId: 'writer:run', petId: 'writer', sessionId, scope: { namespace: 'channel', id: channelId },
+        message: { type: 'message.completed', messageId, text: 'Ready.', ...(deliverables === undefined ? {} : { deliverables }) },
+      },
+    };
+    for (const listener of listeners) await listener(event);
+  };
+  const deliverables = Array.from({ length: 100 }, (_, index) => ({
+    uri: index === 0 ? ` ${'u'.repeat(4094)} ` : `repo:report-${index}`,
+    title: 'T'.repeat(500),
+    metadata: { index },
+  }));
+  await emit('boundary', deliverables);
+  await emit('ordinary');
+  const messages = (await plugin.service.readContext(owner, channelId)).messages;
+  assert.equal(messages.length, 2);
+  assert.deepEqual(messages[0]?.deliverables, deliverables);
+  assert.deepEqual(messages[1]?.deliverables, []);
+  const invalid = [
+    [...deliverables, { uri: 'repo:extra', title: 'Extra', metadata: { index: 100 } }],
+    [{ uri: ` ${'u'.repeat(4095)} ` }],
+    [{ uri: 'repo:title', title: 'T'.repeat(501) }],
+    [{ uri: 'repo:malformed', title: 1 }],
+  ];
+  for (const [index, value] of invalid.entries()) {
+    await emit(`invalid-${index}`, value);
+    assert.deepEqual((await plugin.service.readContext(owner, channelId)).messages, messages);
+  }
+  const failures = notified.filter(event => event.type === 'channel.message_failed').map(event => event.payload as {
+    channelId: string; petId: string; sessionId: string; externalRef: string; error: string;
+  });
+  assert.deepEqual(failures.map(failure => failure.externalRef), invalid.map((_, index) => `invalid-${index}`));
+  for (const failure of failures) {
+    assert.equal(failure.channelId, channelId);
+    assert.equal(failure.petId, 'writer');
+    assert.equal(failure.sessionId, sessionId);
+    assert.equal(typeof failure.error, 'string');
+    assert.ok(failure.error.length > 0);
+  }
+});

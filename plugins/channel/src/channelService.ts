@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { assertToolDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
   ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
@@ -8,14 +7,10 @@ import type {
 
 const identifier = z.string().trim().min(1).max(256);
 export const memberRefSchema = z.object({ kind: z.enum(['human', 'pet']), id: identifier }).strict();
-export const channelDeliverablesSchema = z.custom<Deliverable[]>((value) => {
-  try {
-    assertToolDeliverables({ deliverables: value });
-    return true;
-  } catch {
-    return false;
-  }
-});
+export const channelDeliverablesSchema = z.array(z.object({
+  uri: z.string().max(4096).refine(value => value.trim().length > 0),
+  title: z.string().max(500).optional(),
+}).passthrough()).max(100);
 export const channelCreateSchema = z.object({
   title: z.string().trim().min(1).max(160),
   description: z.string().trim().max(50_000).optional(),

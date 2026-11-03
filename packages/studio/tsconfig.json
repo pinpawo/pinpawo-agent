@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@pinpawo-toolkit/artifacts": ["../../toolkits/artifacts/src/index.ts"],
       "@pinpawo/agent-contracts": ["../agent-contracts/src/index.ts"],
       "@pinpawo/agent-session": ["../agent-session/src/index.ts"],
       "@pinpawo/pet-agent": ["../pet-agent/src/index.ts"],

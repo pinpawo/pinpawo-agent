@@ -32,6 +32,49 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   }
 
+  test(`${backend}: human and Pet references keep input limits without trimming or partial writes`, () => withService(async (service) => {
+    const { channelId } = (await service.createChannel(owner, { title: 'Files', pets: ['executor'] })).channel;
+    const references = Array.from({ length: 100 }, () => ({ uri: ` ${'u'.repeat(4094)} `, title: 't'.repeat(500), source: 'tool' }));
+    for (const author of [owner, executor]) {
+      const saved = await service.postMessage(author, channelId, { body: 'Attached.', deliverables: references });
+      assert.deepEqual(saved.message.deliverables, references);
+      for (const deliverables of [[...references, references[0]], [{ uri: 'u'.repeat(4097) }], [{ uri: 'u', title: 't'.repeat(501) }], [{ uri: '   ' }]]) {
+        await assert.rejects(service.postMessage(author, channelId, { body: 'Invalid.', deliverables }));
+      }
+    }
+    assert.equal((await service.readContext(owner, channelId)).messages.length, 2);
+    assert.deepEqual((await service.postMessage(owner, channelId, { body: 'Plain.' })).message.deliverables, []);
+  }));
+
+  test(`${backend}: attachment migration spans pages and keeps long historical titles intact`, async () => {
+    const storage = createStudioStorage(config());
+    try {
+      const migrations = channelMigrations(storage.dialect);
+      const legacy = await storage.open('channel', { '0001_channels': migrations['0001_channels']!, '0002_channel_prompt': migrations['0002_channel_prompt']! });
+      await sql`insert into channels (channel_id, title, created_by_kind, created_by_id, created_at, updated_at)
+        values ('old', 'Existing', 'human', 'owner', 'then', 'then')`.execute(legacy);
+      await sql`insert into channel_members (channel_id, member_kind, member_id, joined_at) values ('old', 'human', 'owner', 'then')`.execute(legacy);
+      const attachments = [{ uri: 'artifact://old/ref', label: 'l'.repeat(500), version: 'v'.repeat(500) },
+        { uri: 'u'.repeat(4096), version: 'v'.repeat(500) }];
+      for (let index = 0; index < 205; index++) {
+        await sql`insert into channel_messages (message_id, channel_id, author_kind, author_id, occurred_at, data)
+          values (${`old-${index}`}, 'old', 'human', 'owner', 'then', ${JSON.stringify({ body: 'Saved.', mentions: [], artifacts: attachments })})`.execute(legacy);
+      }
+      const db = await storage.open<ChannelDatabase>('channel', migrations);
+      const store = new KyselyChannelStore(db);
+      for (const id of ['old-0', 'old-100', 'old-204']) {
+        const message = await store.getMessage('old', id);
+        assert.deepEqual(message?.deliverables, [{ uri: attachments[0]!.uri, title: `${attachments[0]!.label} · ${attachments[0]!.version}` },
+          { uri: attachments[1]!.uri, title: `${attachments[1]!.uri} · ${attachments[1]!.version}` }]);
+        assert.equal(Object.hasOwn(message!, 'artifacts'), false);
+      }
+      const raw = JSON.parse((await db.selectFrom('channel_messages').select('data').where('message_id', '=', 'old-204').executeTakeFirstOrThrow()).data);
+      assert.deepEqual(raw.artifacts, attachments);
+      await storage.open<ChannelDatabase>('channel', migrations);
+      assert.equal((await store.getMessage('old', 'old-204'))?.deliverables[1]?.title?.length, 4599);
+    } finally { await storage.close(); }
+  });
+
   test(`${backend}: Channel prompt is owned by the Channel, visible to members and can be replaced or cleared`, () => withService(async (service) => {
     const { channel } = await service.createChannel(owner, {
       title: 'Team', description: 'Purpose', prompt: '  Work together.\nAsk when uncertain.  ', pets: ['executor'],

@@ -1,5 +1,4 @@
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   defineCapability,
   defineInstructionDocument,
   type AgentCapability,
@@ -11,7 +10,7 @@ const DEFAULT_EXPLORE_TOOLKITS = [
   'web',
   'git',
   'github',
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
+  'artifacts',
 ] as const;
 
 export type ExploreCapabilityOptions = {
@@ -25,7 +24,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       '通用探索、调查、资料检索和代码库理解 capability。',
       '适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
       '代码 review、代码审查、PR review、pull request review、diff 审查和仓库变更评审也走这个 capability，即使请求里包含 GitHub URL 或网页链接。',
-      '只做只读调查和总结，不修改文件、不执行外部真实副作用。',
+      '只做调查和总结，不修改调查对象、不执行外部业务副作用；可以读取共享文件引用或按明确要求交付已有文件快照。',
     ].join(' '),
     uses: options.uses ?? DEFAULT_EXPLORE_TOOLKITS,
     instructions: defineInstructionDocument({
@@ -47,8 +46,13 @@ GitHub PR 页面、diff 或评论。
 
 ## 约束与边界
 
-不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行
-任何外部真实副作用。
+不要修改调查对象或仓库文件，不要提交、推送、删除、发送业务消息、发布
+业务内容，或执行其他外部业务副作用。
+
+需要读取已分享的 artifact 引用时，可用 \`download_artifact\` 默认下载到
+当前 session 临时目录，再用文件工具读取；不要把它写入 workdir。
+仅在用户明确要求交付已有文件时，用 \`publish_artifact\` 发布该文件的快照。
+这不授权修改或生成调查对象文件；需要创作新的报告文件时交由 General。
 
 重要发现必须保留精确来源。运行时可能把较早执行上下文总结为摘要，需要
 细节时用 \`view_file_chunk\` 等工具按来源回查。

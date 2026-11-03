@@ -68,8 +68,6 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
       resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
-      capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-        listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: graphService as never,
     }));
   }
@@ -128,6 +126,7 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
     assert.equal((await outputs(f, a)).at(-1)!.body, 'Answer 2: staging');
     assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
       messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet', label: 'one' }, body: question.body,
+      deliverables: [],
     });
     assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:local', kind: 'human', label: 'local' });
     assert.deepEqual((await f.channel.sendMessage(a, { body: 'no recipient', replyTo: question.messageId }, me)).deliveries, []);

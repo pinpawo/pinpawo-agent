@@ -1391,3 +1391,31 @@ test('a refresh window that shares no entry with the live session is read whole 
   assert.equal(controller.getState().session.timelineWindow, undefined);
   controller.stop();
 });
+
+test('display address reads correlate responses and errors without changing session state', async () => {
+  let connection!: FakeConnection;
+  let index = 0;
+  const controller = new TuiSessionController({
+    connectionFactory: handlers => (connection = new FakeConnection(handlers)),
+    requestIdFactory: () => `request-${++index}`,
+  });
+  controller.start();
+  connection.open();
+  connection.receive({ type: 'session.snapshot.result', requestId: 'request-1',
+    snapshot: createAgentSessionSnapshot({ sessionId: 'test', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null }) });
+  const before = controller.getState();
+  const uri = 'artifact://workspace/session/id/report.txt';
+  const pending = controller.readArtifactAddress(uri);
+  assert.deepEqual(connection.sent.at(-1), { type: 'artifact.address.get', requestId: 'request-2', uri });
+  const result = { type: 'artifact.address.result' as const, requestId: 'request-2', uri, address: '/tmp/report.txt' };
+  connection.receive(result);
+  assert.deepEqual(await pending, result);
+  assert.strictEqual(controller.getState(), before);
+  const failure = controller.readArtifactAddress(uri);
+  connection.receive(eventMessage({ type: 'error', requestId: 'request-3', message: 'Artifact address is unavailable.' }));
+  assert.equal(await failure, null);
+  assert.strictEqual(controller.getState(), before);
+  const interrupted = controller.readArtifactAddress(uri);
+  controller.stop();
+  assert.equal(await interrupted, null);
+});

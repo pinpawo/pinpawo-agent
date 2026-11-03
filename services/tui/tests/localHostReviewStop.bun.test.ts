@@ -11,7 +11,6 @@ import { attachHostWebSocketTransport } from '../../host/src/serverWsTransport';
 import { buildHostRuntimeConfig } from '../../host/src/config/runtimeConfig';
 import { createTestModelServerDeps } from '../../host/src/testing/modelProfiles';
 import { createTestHostToolkitInventory } from '../../host/src/testing/toolkitInventory';
-import { FileCapabilityArtifactStore } from '../../host/src/capabilityArtifactStore';
 import { LocalHostConnection } from '../src/client/localHostConnection';
 import { TuiSessionController } from '../src/session/sessionController';
 import { ASSISTANT_MESSAGE, createHostGraphFixture, REVIEW_CANCEL_MESSAGE, REVIEW_REJECTED_REPLY } from './support/hostGraphFixture';
@@ -29,7 +28,6 @@ test('real Host transport completes cancelled review and accepts the next ordina
     petId: 'one', petName: 'One', runtimeConfig,
     ...createTestModelServerDeps({ apiKey: 'offline', baseUrl: 'http://127.0.0.1:1/v1', model: 'test', contextWindowTokens: 32_000 }),
     toolkitInventory: createTestHostToolkitInventory([]),
-    capabilityArtifactStore: new FileCapabilityArtifactStore(runtimeConfig.capabilityArtifactRoot),
   }), { chatGraphService: fixture.service, loadContext: async petId => buildAgentContext(petId) });
   const server = createServer((_request, response) => { response.writeHead(404); response.end(); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

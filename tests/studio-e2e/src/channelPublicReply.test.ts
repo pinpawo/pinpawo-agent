@@ -168,8 +168,6 @@ test('capability handoff reaches Channel only through the selected final root re
         resolveInvocationContext: contextBridge.resolveInvocationContext,
         modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
         capabilities, petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
-        capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-          listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
         graphService: {
           readThreadState: (setup: AgentChannelSetup) => service.readThreadState(modelSetup(setup)),
           streamEvents: (setup: AgentChannelSetup) => {

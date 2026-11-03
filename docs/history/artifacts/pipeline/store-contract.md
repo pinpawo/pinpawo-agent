@@ -1,5 +1,7 @@
 # 持久化契约（Store Contract）
 
+> **Status: historical implementation.** The legacy Capability Artifact Pipeline is retired. See the current [Artifacts Toolkit](../../../reference/artifacts/index.md) and [Deliverables](../../../reference/deliverables.md) contracts.
+
 ## Ref 与类型
 
 ```ts
@@ -75,7 +77,7 @@ ref 的 URI 不包含本地绝对路径。
 - Host 根目录：`<sessionRoot>/capability-artifacts/`，默认是
   `~/.pinpawo/workspaces/<derived-workspace-id>/capability-artifacts/`。
   `PINPAWO_WORKSPACES_DIR` 可替换 workspaces 基目录，workspace id 由规范化的
-  workdir 派生；它不是项目内的 `.pinpawo` 目录。见 [Workdir Configuration](../runtime/workdir.md)。
+  workdir 派生；它不是项目内的 `.pinpawo` 目录。见 [Workdir Configuration](../../../reference/runtime/workdir.md)。
 - 组织结构：`threads/<encoded-thread-id>/<encoded-delegation-id>/manifest.json + artifact files`
 - `writeArtifacts` 会做分组加锁，保证同 delegation 的并发安全。
 - 同一输入条件下（能力、delegation、`content/externalUri`）是幂等写入。

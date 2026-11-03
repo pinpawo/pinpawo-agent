@@ -30,6 +30,7 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": {
+    "@pinpawo/agent-contracts": "^1.0.0",
     "@langchain/core": "^1.2.1",
     "@pinpawo/agent-session": "^1.0.0",
     "@pinpawo/pet-agent": "^1.0.1",

@@ -56,6 +56,16 @@ function snapshotMessage(value: AgentSession): AgentServerMessage {
   return { type: 'session.snapshot.result', requestId: 'first', snapshot: createAgentSessionSnapshot(value) };
 }
 
+test('saved session replies display structured deliverables separately from execution evidence', () => {
+  const value = session({ timeline: [{ id: 'reply', type: 'message', role: 'assistant', text: 'Done.', status: 'completed',
+    deliverables: [{ uri: 'artifact://workspace/session/id/report.txt', title: 'Published report' }],
+    resultReferences: [{ id: 'execution', title: 'Inspect', text: 'Evidence body.' }] }] });
+  const markup = renderToStaticMarkup(<PetSessionTranscript session={value} petName="Worker" artifactAccess={{ url: 'http://host', token: 'fixture-token' }} />);
+  assert.ok(markup.includes('>Published report</button>'));
+  assert.ok(markup.includes('Evidence body.'));
+  assert.ok(!markup.includes('fixture-token'));
+});
+
 test('a session is rebuilt from its snapshot and then follows that session\'s events', () => {
   let state = applyPetSessionMessage(null, snapshotMessage(session({ pendingInterrupt: review })), target, 1);
   assert.equal(state?.pendingInterrupt?.interruptId, 'interrupt-1');

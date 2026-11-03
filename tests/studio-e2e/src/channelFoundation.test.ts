@@ -74,7 +74,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     assert.deepEqual(plain.author, { kind: 'human', id: 'local' });
     assert.deepEqual([plain.mentions, plain.deliveries], [[], []]);
     const reply = await post('/channels/messages', { channelId, body: 'Review this', replyTo: plain.messageId,
-      mentions: [{ participantId: 'pet:reviewer' }], artifacts: [{ uri: 'repo:commit-a', version: 'a' }] });
+      mentions: [{ participantId: 'pet:reviewer' }], deliverables: [{ uri: 'repo:commit-a', title: 'a' }] });
     assert.equal(reply.status, 201);
     const { deliveries } = await reply.json() as { deliveries: ChannelDelivery[] };
     assert.deepEqual(deliveries.map(delivery => [delivery.participantId, delivery.state]), [['pet:reviewer', 'accepted']]);
@@ -178,10 +178,6 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     resolveInvocationContext: contextBridge.resolveInvocationContext,
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: {
-      writeArtifact: async () => { throw new Error('unused'); }, readArtifact: async () => { throw new Error('unused'); },
-      listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async (uri) => uri,
-    },
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
     runAgentTurn: async ({ request, setup }) => {

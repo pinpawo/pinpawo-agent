@@ -25,7 +25,10 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
       getSnapshot: () => ({ effectiveToolkits: [] }),
     }) as never,
     getCheckpointer: () => ({}) as never,
-    getCapabilityArtifactStore: () => ({}) as never,
+    getArtifactStore: () => ({ fetch: async (uri: string) => ({
+      ref: { uri, name: 'report.txt', mimeType: 'text/plain', size: 0, sha256: 'a'.repeat(64), createdAt: '2026-01-01T00:00:00Z' },
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+    }) }),
   } as unknown as HostCapabilityAssembly;
 }
 
@@ -75,10 +78,13 @@ test('top-level entry starts only the Pet Agent Session transport and owns shutd
       };
     },
     agentSessionPort: 0,
-    startAgentSessionTransport: async (port, interactions) => {
+    startAgentSessionTransport: async (port, interactions, options) => {
       events.push('agent-session:start');
       assert.equal(port, 0);
       assert.equal(interactions.size, 0);
+      const artifact = await options!.fetchArtifact!('artifact://workspace/session/id/report.txt');
+      assert.equal(artifact.ref.name, 'report.txt');
+      if ('body' in artifact) await artifact.body.cancel();
       return {
         port: 43123,
         close: closeTransport,

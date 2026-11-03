@@ -85,6 +85,7 @@ export function formatTimelineEntry(
   options: {
     now?: number;
     width?: number;
+    artifactAddress?: (uri: string) => string;
   } = {},
 ) {
   return buildTimelineDisplayLines(entry, options)
@@ -97,6 +98,7 @@ export function buildTimelineDisplayLines(
   options: {
     now?: number;
     width?: number;
+    artifactAddress?: (uri: string) => string;
   } = {},
 ): TimelineDisplayLine[] {
   if (entry.type === 'operation') {
@@ -125,7 +127,7 @@ export function buildTimelineDisplayLines(
           }
     ));
   }
-  return buildMessageDisplayLines(entry);
+  return buildMessageDisplayLines(entry, { artifactAddress: options.artifactAddress });
 }
 
 export function formatLiveSession(

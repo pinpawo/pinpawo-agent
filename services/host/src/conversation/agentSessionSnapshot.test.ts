@@ -7,6 +7,19 @@ import type { ServerDeps } from '../serverTypes';
 import { createTestModelServerDeps } from '../testing/modelProfiles';
 import type { TuiCheckpointMessage } from './transcriptProjection';
 
+test('snapshots retain reply deliverables through protocol serialization even without reply prose', () => {
+  const deliverables = [{ uri: 'artifact://workspace/session/artifact/report.md', title: 'Report' }];
+  const snapshot = buildHostSessionSnapshot({ sessionId: 'session', kind: 'chat',
+    messages: [{ id: 'reply', role: 'assistant', text: '', deliverables }],
+    deps: { petId: 'pet', ...createTestModelServerDeps(), runtimeConfig: { workdir: '/tmp/work' } } as ServerDeps,
+  });
+  const parsed = parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot)));
+  assert.ok(parsed);
+  const entry = parsed.session.timeline[0];
+  assert.equal(entry?.type, 'message');
+  assert.deepEqual(entry?.type === 'message' ? entry.deliverables : undefined, deliverables);
+});
+
 test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
   const snapshot = buildHostSessionSnapshot({
     sessionId: 'chat:pet-a',
@@ -29,7 +42,6 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
-        capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as ServerDeps,
     requiredInputModalities: ['text', 'image'],
@@ -139,7 +151,6 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
-        capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as ServerDeps,
     activeRun: {

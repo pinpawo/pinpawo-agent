@@ -7,6 +7,9 @@ import {
   type MarkdownOptions,
   type RenderContext,
 } from '@opentui/core';
+import { isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { walkTokens } from 'marked';
 
 /** Shared ground for blocks that used to be marked by a drawn left rule. */
 const MARKDOWN_BLOCK_BACKGROUND = '#272c33';
@@ -40,6 +43,7 @@ export function createAssistantMarkdownSurface(
     id: string;
     content: string;
     syntaxStyle: SyntaxStyle;
+    artifactAddress?: (uri: string) => string;
   },
 ): AssistantMarkdownSurface {
   const container = new BoxRenderable(context, {
@@ -62,6 +66,16 @@ export function createAssistantMarkdownSurface(
     `${options.id}:${kind}:${renderedNodeSequence++}`
   );
   const renderNode: NonNullable<MarkdownOptions['renderNode']> = (token) => {
+    // These are renderer-owned tokens. Canonical message text keeps its stable references.
+    walkTokens([token], child => {
+      if ((child.type !== 'link' && child.type !== 'image') || !child.href?.startsWith('artifact://')) return;
+      const address = options.artifactAddress?.(child.href);
+      try {
+        if (address && /^https?:\/\//.test(address)) { child.href = new URL(address).href; return; }
+        if (address && !address.startsWith('/download ') && isAbsolute(address)) { child.href = pathToFileURL(address).href; return; }
+      } catch { /* An unavailable address stays text with the download action below. */ }
+      Object.assign(child, { type: 'text', text: child.text, tokens: undefined });
+    });
     if (token.type === 'heading') {
       return new TextRenderable(context, {
         id: nextNodeId('heading'),

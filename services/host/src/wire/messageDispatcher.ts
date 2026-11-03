@@ -14,6 +14,7 @@ import {
   type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
+  type HostClientMessage,
 } from './protocol';
 import { sendAgentSessionPeerEvent, type ServerPeer } from './peer';
 import type { ServerWireHandlers } from './framing';
@@ -23,6 +24,10 @@ export type ServerLogError = (message: string, error: unknown) => void;
 export type ServerLogWarn = (message: string) => void;
 
 export type AgentSessionPeerHandlers = {
+  onArtifactAddressGet?: (
+    peer: ServerPeer,
+    message: Extract<HostClientMessage, { type: 'artifact.address.get' }>,
+  ) => MaybePromise<void>;
   onChatRequest: (peer: ServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
   /** Continue any pending interrupt by id. */
   onInterruptResume: (
@@ -165,7 +170,9 @@ export function dispatchAgentSessionMessage(
       return Promise.resolve();
     }
 
-    if (msg.type === 'chat_request') {
+    if (msg.type === 'artifact.address.get') {
+      return dispatchOptional(peer, msg, handlers.onArtifactAddressGet, 'handleArtifactAddressGet', logError, logWarn);
+    } else if (msg.type === 'chat_request') {
       return dispatchOptional(peer, msg, handlers.onChatRequest, 'handleChatRequest', logError, logWarn);
     } else if (msg.type === 'interrupt.resume') {
       return dispatchOptional(peer, msg, handlers.onInterruptResume, 'handleInterruptResume', logError, logWarn);

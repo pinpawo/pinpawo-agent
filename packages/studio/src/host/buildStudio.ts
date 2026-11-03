@@ -2,7 +2,6 @@ import path from 'node:path';
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
-  type CapabilityArtifactStore,
   type PetDocument,
 } from '@pinpawo/pet-agent';
 import { prepareStudio, type PreparedStudio } from '../createStudio';
@@ -47,7 +46,6 @@ export type BuildStudioInput = HostExecutionConfig & {
   /** Optional PET.md root-document snapshot keyed by definition id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
-  capabilityArtifactStore: CapabilityArtifactStore;
   checkpoint: FileSaver;
   /** Host composition defers Plugin listeners until Agent Session transport is ready. */
   deferPluginActivation?: boolean;
@@ -249,7 +247,6 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       resolveInvocationContext: async (target) => prepared.resolveInvocationContext(target),
       capabilities: definition.capabilities,
       toolkitInventory: input.toolkitInventory,
-      capabilityArtifactStore: input.capabilityArtifactStore,
       checkpointer: input.checkpoint,
       runtimeConfig: input.runtimeConfig,
       toolAuthorizationMode: input.toolAuthorizationMode,

@@ -2,6 +2,7 @@ import type {
   AgentClientMessage,
   AgentServerMessage,
   AgentSessionSnapshot,
+  ArtifactAddressResultMessage,
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
@@ -17,7 +18,7 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 export type SessionApplicationServerMessage = Exclude<
   AgentServerMessage,
-  { type: 'session.snapshot.result' }
+  { type: 'session.snapshot.result' | 'artifact.address.result' }
 >;
 
 export type SessionTransportCoordinatorOptions = {
@@ -54,6 +55,8 @@ export class SessionTransportCoordinator {
   private readonly snapshotRequests = new Map<string, SessionSnapshotReason>();
   /** Whole snapshots read for a caller; never applied to the session. */
   private readonly wholeSnapshotReads = new Map<string, (snapshot: AgentSessionSnapshot | null) => void>();
+  private readonly artifactAddressReads = new Map<string, (result: ArtifactAddressResultMessage | null) => void>();
+  private readonly artifactAddressRequestIds = new Set<string>();
   private started = false;
   private reconnectAttempt = 0;
   private reconnectTimer: TimerHandle | null = null;
@@ -136,9 +139,35 @@ export class SessionTransportCoordinator {
     });
   }
 
+  /** A display-only address read; never applied to canonical session state. */
+  readArtifactAddress(uri: string): Promise<ArtifactAddressResultMessage | null> {
+    if (!this.connection.isConnected()) return Promise.resolve(null);
+    const requestId = this.options.requestIdFactory();
+    return new Promise((resolve) => {
+      let timer: TimerHandle | null = null;
+      this.artifactAddressRequestIds.add(requestId);
+      this.artifactAddressReads.set(requestId, (result) => {
+        if (timer) this.options.clearTimer(timer);
+        this.artifactAddressReads.delete(requestId);
+        resolve(result?.uri === uri ? result : null);
+      });
+      if (!this.connection.send({ type: 'artifact.address.get', requestId, uri })) {
+        this.artifactAddressReads.get(requestId)?.(null);
+        return;
+      }
+      if (!this.artifactAddressReads.has(requestId)) return;
+      timer = this.options.setTimer(
+        () => this.artifactAddressReads.get(requestId)?.(null),
+        this.options.snapshotTimeoutMs ?? 30_000,
+      );
+    });
+  }
+
   clearSnapshotRequests() {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
+    for (const finish of [...this.artifactAddressReads.values()]) finish(null);
+    this.artifactAddressRequestIds.clear();
     for (const finish of [...this.wholeSnapshotReads.values()]) finish(null);
   }
 
@@ -158,6 +187,16 @@ export class SessionTransportCoordinator {
   }
 
   private handleMessage(message: AgentServerMessage) {
+    if (message.type === 'artifact.address.result') {
+      this.artifactAddressReads.get(message.requestId)?.(message);
+      return;
+    }
+    if (message.type === 'event' && message.event.type === 'error') {
+      if (this.artifactAddressRequestIds.has(message.requestId)) {
+        this.artifactAddressReads.get(message.requestId)?.(null);
+        return;
+      }
+    }
     const wholeRead = (message.type === 'session.snapshot.result' || message.type === 'session.error')
       ? this.wholeSnapshotReads.get(message.requestId)
       : undefined;

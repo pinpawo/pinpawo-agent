@@ -6,12 +6,15 @@ import {
   createCliRenderer,
   type PasteEvent,
 } from '@opentui/core';
-import type { AgentLocalAttachment } from '@pinpawo/agent-session';
+import type { AgentLocalAttachment, AgentSession } from '@pinpawo/agent-session';
 import {
   formatAttachmentStrip,
   removeLastAttachment,
 } from './attachments/attachmentModel';
 import { handleAttachmentPasteEvent } from './attachments/attachmentPaste';
+import { createArtifactAddressCache } from './client/artifactAddress';
+import { downloadArtifact } from './client/artifactDownload';
+import { messageDisplayReferences } from './client/artifactReferences';
 import { createEmbeddedHostConnectionFactory } from './client/embeddedHostConnection';
 import { createEmbeddedHostDiagnosticsSink } from './client/embeddedHostDiagnostics';
 import {
@@ -324,7 +327,25 @@ const interruptPendingNoticeController =
       refreshNoticeOverlay();
     },
   });
-const timeline = new TimelineScrollback(renderer);
+const downloadedArtifactPaths = new Map<string, string>();
+const artifactAddresses = !launchOptions.useDemoConnection ? createArtifactAddressCache({
+  sharedFilesystem: Boolean(embeddedHost),
+  read: (uri) => controller.readArtifactAddress(uri),
+  onChanged: () => {
+    timelineReplayPending = true;
+    if (!terminalHandoffOpen) reconcileTimelineAfterHandoff();
+  },
+}) : null;
+const artifactAddress = artifactAddresses
+  ? (uri: string) => downloadedArtifactPaths.get(uri) ?? artifactAddresses.display(uri)
+  : undefined;
+let artifactConnectionReady = false;
+function ensureArtifactAddresses(session: AgentSession) {
+  return artifactAddresses?.ensure(session.timeline.flatMap(entry =>
+    entry.type === 'message' && (entry.role === 'assistant' || entry.role === 'user')
+      ? messageDisplayReferences(entry).map(ref => ref.uri) : []));
+}
+const timeline = new TimelineScrollback(renderer, { artifactAddress });
 /**
  * A running operation's header carries its elapsed time, but the timeline only
  * redraws on canonical state changes — and a slow tool can leave seconds
@@ -458,6 +479,10 @@ const qaLifecycle = new QaLifecycleDriver(launchOptions, {
 });
 
 const unsubscribe = controller.subscribe((state) => {
+  const ready = state.connection === 'ready';
+  if (ready && !artifactConnectionReady) artifactAddresses?.resetFailures();
+  artifactConnectionReady = ready;
+  if (ready) void ensureArtifactAddresses(state.session);
   if (timelineReplayPending && !terminalHandoffOpen) {
     timelineReplayPending = false;
     timeline.resetForReplay();
@@ -1731,6 +1756,27 @@ function submitComposerInput(input = composer.plainText) {
     case 'export-transcript':
       exportCurrentTranscript(intent.path);
       return;
+    case 'download-artifact':
+      clearComposerPreservingNotice();
+      if (launchOptions.useDemoConnection) {
+        showErrorNotice('Artifact downloads are unavailable in demo mode.');
+        return;
+      }
+      localNotice = 'downloading artifact…';
+      refreshStatus();
+      void (async () => {
+        const resolved = embeddedHost ? await controller.readArtifactAddress(intent.uri) : null;
+        if (embeddedHost && !resolved) throw new Error('Artifact address is unavailable.');
+        const path = resolved && !/^https?:\/\//.test(resolved.address)
+          ? resolved.address
+          : await downloadArtifact(intent.uri, { port, ...(resolved ? { sourceUrl: resolved.address } : {}) });
+        downloadedArtifactPaths.set(intent.uri, path);
+        timelineReplayPending = true;
+        if (!terminalHandoffOpen) reconcileTimelineAfterHandoff();
+        localNotice = `artifact saved · ${path}`;
+        refreshStatus();
+      })().catch(error => showErrorNotice(errorMessage(error)));
+      return;
     case 'open-editor':
       openExternalEditor(intent.text);
       return;
@@ -1899,10 +1945,12 @@ function openTranscriptPager() {
   refreshStatus();
 
   // A long session holds only its newest entries; the pager reads them all.
-  void controller.readTranscriptSession().then((transcript) => {
+  void controller.readTranscriptSession().then(async (transcript) => {
+    await ensureArtifactAddresses(transcript);
     localNotice = 'transcript pager active';
     return withRendererSuspended(renderer, () => pageSessionTranscript({
       session: transcript,
+      artifactAddress,
       cwd: process.cwd(),
       ...(smoke.transcript
         ? { env: { ...process.env, PAGER: 'cat' } }

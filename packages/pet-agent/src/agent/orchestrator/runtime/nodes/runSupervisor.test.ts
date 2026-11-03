@@ -30,7 +30,7 @@ function state(): OrchestratorStateType {
       new AIMessage({ content: '', tool_calls: [{ id: 'entry', name: 'plan_request', args: { goal: 'Prepare and publish.' } }] }),
       new ToolMessage({ name: 'plan_request', tool_call_id: 'entry', content: 'Handed off.' }),
     ].map((message) => setAgentMessageMetadata(message, { runId: 'r1', taskId: 't1' })),
-    sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
+    sessionToolAuthorizations: { generation: '', records: [] },
   };
 }
 function node(decision: import('../../runSupervisor/testing').ScriptedSupervisorDecision) {
@@ -56,7 +56,7 @@ async function delivered() {
   const delivery = { id: 'delivery', task: call.task, text: 'Draft saved; publication has not run.', scope: {
     lane: 'capability:general' as const, runId: planned.runId, taskId: planned.taskId, delegationId: call.delegationId,
   } };
-  return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery, artifacts: [] })] };
+  return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery, deliverables: [] })] };
 }
 
 test('control handoff goes straight to Capability with separate main and work records', async () => {

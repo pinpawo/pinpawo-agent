@@ -10,6 +10,7 @@ import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../ca
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
 import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME } from '../executionMessages';
 import { createCapabilityCatalog } from './capabilityCatalog';
+import { readAcceptedRunDeliverables } from '../executionReviews';
 
 export const delegateCapabilitySchema = z.object({
   briefing: z.string().refine(text => text.trim().length > 0).describe('Execution instructions for the current plan item only. From the user\'s requirements and the deliveries returned so far, state the work to do, reusable conclusions and necessary constraints; do not copy earlier deliveries in full or expand into later tasks.'),
@@ -49,7 +50,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const result = createCapabilityExecutionMessage({
       callId: runtime.toolCallId,
       execution: input,
-      result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts,
+      result: { status: execution.status, delivery: execution.delivery, deliverables: execution.deliverables,
         ...(execution.reviewDecision ? { reviewDecision: execution.reviewDecision } : {}) },
       metadata: { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
         sourceCapability: input.capability, runtimeGenerated: true,
@@ -58,8 +59,8 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     return new Command({ update: {
       messages: [result, ...(execution.reviewDecision ? [buildReviewStopMessage(execution.reviewDecision, {
         runId: state.runId, taskId: state.taskId,
+        deliverables: readAcceptedRunDeliverables(state.messages, state.runId),
       })] : [])],
-      sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
     } });

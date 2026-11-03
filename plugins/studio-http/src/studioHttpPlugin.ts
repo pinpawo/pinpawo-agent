@@ -20,6 +20,7 @@ import {
   type StudioPluginContext,
 } from '@pinpawo/studio-core';
 import { readWireAuthToken } from 'pinpawo/wire';
+import { buildHostRuntimeConfig, createHostArtifactStore, readArtifactHttpResult } from 'pinpawo/host-runtime';
 import { parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
 
 import { createJwtVerifier, looksLikeJwt, type StudioHttpJwtIssuer, type StudioHttpJwtOptions } from './jwtIssuers';
@@ -75,7 +76,9 @@ export type StudioHttpRouteRequest = {
 
 export type StudioHttpRouteResult =
   | { kind: 'json'; body: unknown; status?: number }
-  | { kind: 'text'; body: string; contentType?: string; status?: number };
+  | { kind: 'text'; body: string; contentType?: string; status?: number }
+  | { kind: 'stream'; body: ReadableStream<Uint8Array>; headers?: Record<string, string>; status?: number }
+  | { kind: 'redirect'; url: string; status?: 301 | 302 | 303 | 307 | 308 };
 
 export type StudioHttpRoute = {
   method: string;
@@ -100,6 +103,8 @@ export type StudioHttpPluginAddress = {
 };
 
 export type CreateStudioHttpPluginOptions = {
+  /** Host adapter shared with the artifacts Toolkit; absent for embedded Hosts without storage. */
+  fetchArtifact?: Parameters<typeof readArtifactHttpResult>[1];
   /** `0` asks the OS for an ephemeral port. */
   port: number;
   /** The local Host token. It authenticates as the local client, with `studio` scope. */
@@ -444,6 +449,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       };
     },
   };
+  routesHook.register({
+    method: 'GET', path: '/agent-session/artifacts', authorization: 'client',
+    handle: ({ url }) => readArtifactHttpResult(url.searchParams.get('uri'), options.fetchArtifact),
+  });
 
   async function authenticate(token: string | null): Promise<StudioHttpPrincipal | undefined> {
     if (!token) return undefined;
@@ -503,6 +512,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       origin: (origin) => allowedOrigins.has(origin) ? origin : undefined,
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       allowHeaders: ['Authorization', 'Content-Type'],
+      exposeHeaders: ['Content-Disposition'],
       maxAge: 600,
     }));
     app.use('*', async (requestContext, next) => {
@@ -642,6 +652,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           eventClients.delete(client);
         }
       });
+      requestContext.header('Cache-Control', 'no-cache, no-transform');
+      requestContext.header('X-Accel-Buffering', 'no');
       response.headers.set('Cache-Control', 'no-cache, no-transform');
       response.headers.set('X-Accel-Buffering', 'no');
       return response;
@@ -712,6 +724,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           sessionObservers -= 1;
         }
       });
+      requestContext.header('Cache-Control', 'no-cache, no-transform');
+      requestContext.header('X-Accel-Buffering', 'no');
       response.headers.set('Cache-Control', 'no-cache, no-transform');
       response.headers.set('X-Accel-Buffering', 'no');
       return response;
@@ -799,6 +813,16 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
             result.body,
             result.contentType ?? 'text/plain; charset=utf-8',
           );
+        }
+        if (result.kind === 'stream') {
+          const headers = new Headers(requestContext.res.headers);
+          for (const [key, value] of Object.entries(result.headers ?? {})) headers.set(key, value);
+          return new Response(result.body, { status, headers });
+        }
+        if (result.kind === 'redirect') {
+          const headers = new Headers(requestContext.res.headers);
+          headers.set('Location', result.url);
+          return new Response(null, { status: result.status ?? 302, headers });
         }
         throw new Error('Studio HTTP route returned an invalid result.');
       }
@@ -954,14 +978,16 @@ function readInstalledJwt(value: unknown): StudioHttpJwtOptions {
 /** Installed-package entry used by the standalone Studio Plugin resolver. */
 export function createStudioPlugin(
   options: Record<string, unknown> | undefined,
-  _environment: InstalledStudioHttpPluginEnvironment,
+  environment: InstalledStudioHttpPluginEnvironment,
 ): StudioHttpPlugin {
   const authToken = readWireAuthToken();
   if (!authToken) {
     throw new Error('Studio HTTP Plugin requires the Host local auth token.');
   }
+  const store = createHostArtifactStore(buildHostRuntimeConfig(environment.workdir));
   return createStudioHttpPlugin({
     ...readInstalledHttpOptions(options),
     authToken,
+    fetchArtifact: (uri) => store.fetch(uri),
   });
 }

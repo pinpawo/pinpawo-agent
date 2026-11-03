@@ -82,7 +82,10 @@ const petMessageEventSchema = z.object({
   petId: z.string().min(1),
   sessionId: z.string().min(1),
   scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }),
-  message: z.object({ type: z.literal('message.completed'), messageId: z.string().min(1), text: z.string() }).passthrough(),
+  message: z.object({ type: z.literal('message.completed'), messageId: z.string().min(1), text: z.string(),
+    // The service validates references inside the observable write failure path.
+    deliverables: z.unknown().optional(),
+  }).passthrough(),
 });
 
 const channelRunEventSchema = z.object({
@@ -218,7 +221,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         throw new Error('Pet message session does not match its Channel binding.');
       }
       const { message: saved, created, mentionError } = await service.postMessage(
-        { kind: 'pet', id: petId }, channelId, { body: message.text }, { externalRef: message.messageId },
+        { kind: 'pet', id: petId }, channelId, { body: message.text, deliverables: message.deliverables }, { externalRef: message.messageId },
       );
       if (mentionError) {
         studio.notify({ type: 'channel.delivery', payload: { channelId, messageId: saved.messageId, state: 'failed', error: mentionError } });

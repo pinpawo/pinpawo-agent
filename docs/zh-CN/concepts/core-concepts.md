@@ -26,19 +26,20 @@ PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理�
 | **Human review** | 需要用户授权或补充输入时的暂停与继续边界。 | 审批是运行时契约，而不是提示词约定。 |
 | **Checkpoint** | LangGraph 的持久状态，保存消息与待继续执行。 | resume 与恢复的权威来源。 |
 | **Session projection** | checkpoint 与当前运行事实的客户端无关表示。 | 客户端不需要各自重建状态。 |
-| **Artifact** | 要跨越 lane 或在清理后继续存在的结果引用。 | 避免把聊天消息当作长期存储。 |
+| **Artifact** | Agent session 显式发布的文件快照。 | 用稳定引用共享文件，不共享运行上下文。 |
+| **Deliverable** | 工具显式声明、随执行记录保留的结果引用。 | 验收后随结构化回复传递，不依赖正文链接。 |
 | **Studio** | 多 Pet 的 dispatch 底座：Pet registry、只读的每 Pet dispatch-admission 队列观测与 Plugin 事件总线。 | 在不破坏 worker 边界的前提下协作。 |
 | **Workdir** | 运行时配置、Studio 状态和相对工具路径的本地作用域。 | 防止不同项目误共享状态。 |
 
-## 三个扩展边界
+## Capability、Toolkit 与发布结果
 
 ```text
 用户请求 → Pet agent → Capability（意图 + Toolkit allowlist）
                          → Toolkit（typed 工具 + 审核策略）
-                         → Artifact（需要长期或跨边界保存时）
+                         → Artifact 或结果引用（工具显式声明）
 ```
 
-Capability 描述“完成什么任务”；Toolkit 描述“哪些行为可以执行、如何审核”；Artifact 只承担持久结果。这样 Markdown 保持易审查，而副作用留在 typed code。
+Capability 描述“完成什么任务”；Toolkit 描述“哪些行为可以执行、如何审核”；Artifact 是已发布文件快照，Deliverable 是工具声明的结果引用，验收后随公开回复交付。这样 Markdown 保持易审查，而副作用留在 typed code。
 
 Host 与 Agent 是所有权边界，不是新的扩展格式：Host 创建并持有一个或多个 Agent runtime；Agent 执行 Capability；Capability 通过 `uses` 引用 Toolkit；Toolkit Runtime 始终从属于 Toolkit。跨 Host 的 accepted constraints 见[领域关系设计（中文）](../../design/host-agent-capability-toolkit.md)。
 
@@ -49,12 +50,12 @@ Host 与 Agent 是所有权边界，不是新的扩展格式：Host 创建并持
 | Capability 与 Toolkit 权限 | [扩展契约](../reference/extensions/capability-toolkit.md) |
 | 审核与授权复用 | [事件与人工审核（英文）](../../reference/api/events-and-review.md) 与 [授权匹配器（英文）](../../reference/runtime/authorization-matcher.md) |
 | checkpoint、session、snapshot 与 timeline | [Session projection（英文）](../../reference/runtime/session-projection.md) |
-| 跨 lane 的持久结果 | [Artifact Pipeline（英文）](../../reference/artifacts/index.md) |
+| 发布文件与结果引用 | [Artifacts（英文）](../../reference/artifacts/index.md) 与 [Deliverables（英文）](../../reference/deliverables.md) |
 | workdir 与运行时配置 | [Workdir 配置](../reference/runtime/workdir.md) |
 | 多 Agent 协调 | [Studio](../studio/index.md) |
 
 ## 执行模型
 
-一次用户请求不会自动获得全部工具权限。运行时通常依次：选择直接回答、通用任务或 Capability；在隔离 lane 中执行；按照 Toolkit policy 继续、审核或阻止；把完成结果交回主对话；只有需要长期保存时才写 Artifact。
+一次用户请求不会自动获得全部工具权限。运行时通常依次：选择直接回答、通用任务或 Capability；在隔离 lane 中执行；按照 Toolkit policy 继续、审核或阻止；把完成结果交回主对话；验收后的工具声明引用随结构化回复传递。
 
 主对话接收完成结果，而不是完整私有 scratchpad 与工具过程，因此既能控制上下文增长，也能让最终答案基于真实完成的工作。

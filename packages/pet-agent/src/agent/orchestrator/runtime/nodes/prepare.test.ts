@@ -7,7 +7,7 @@ import { createPrepareNode } from './prepare';
 
 function state(): OrchestratorStateType {
   return { ...buildOrchestratorRunInput([new HumanMessage({ id: 'human', content: 'Inspect.' })]),
-    runSupervisorState: { runId: null, goal: null, plan: [] }, sessionCapabilityArtifacts: [],
+    runSupervisorState: { runId: null, goal: null, plan: [] },
     sessionToolAuthorizations: { generation: '', records: [] } };
 }
 

@@ -60,6 +60,19 @@ test('composer intent copies the latest completed assistant reply', () => {
   }), { type: 'notice', message: 'usage: /copy' });
 });
 
+test('artifact downloads are explicit client actions and malformed requests never become chat', () => {
+  const uri = 'artifact://workspace/session/object/report.txt';
+  assert.deepEqual(resolveComposerIntent({ text: `/download ${uri}`, attachmentCount: 0, mode: 'chat' }),
+    { type: 'download-artifact', uri });
+  // Keys remain opaque; the download client does not invent a stricter key schema.
+  assert.deepEqual(resolveComposerIntent({ text: '/download artifact://opaque-key', attachmentCount: 0, mode: 'chat' }),
+    { type: 'download-artifact', uri: 'artifact://opaque-key' });
+  for (const text of ['/download', '/download https://example.test/file', '/download artifact://a/../file', `/download ${uri} extra`]) {
+    assert.equal(resolveComposerIntent({ text, attachmentCount: 0, mode: 'chat' }).type, 'notice');
+  }
+  assert.equal(resolveComposerIntent({ text: `/download ${uri}`, attachmentCount: 1, mode: 'chat' }).type, 'notice');
+});
+
 test('composer intent treats the removed continuation command as unknown', () => {
   assert.deepEqual(resolveComposerIntent({
     text: '/continue',

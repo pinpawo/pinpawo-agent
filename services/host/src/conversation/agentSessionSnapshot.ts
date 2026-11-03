@@ -134,7 +134,7 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[], runOpe
   const currentRunId = runOpen ? [...messages].reverse().find(message => message.role === 'user' && message.runId)?.runId : undefined;
   return messages.flatMap((message, index) => {
     const text = message.text.trim();
-    if (!text && !message.toolCalls?.length) {
+    if (!text && !message.toolCalls?.length && !message.deliverables?.length) {
       return [];
     }
     const toolCalls = message.toolCalls?.map(call => call.status === 'running' && !(currentRunId && message.runId === currentRunId)
@@ -145,6 +145,7 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[], runOpe
       role: message.role,
       text,
       ...(message.resultReferences?.length ? { resultReferences: message.resultReferences } : {}),
+      ...(message.deliverables?.length ? { deliverables: message.deliverables } : {}),
       ...(toolCalls?.length ? { toolCalls } : {}),
       status: 'completed',
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),

@@ -30,6 +30,7 @@ export type TranscriptPagerOptions = {
   spawnPager?: TranscriptPagerSpawn;
   tmpRoot?: string;
   fallbackCommand?: string;
+  artifactAddress?: (uri: string) => string;
 };
 
 export function resolveTranscriptPagerCommand(
@@ -56,7 +57,7 @@ export async function pageSessionTranscript(
   const filePath = path.join(dir, 'transcript.txt');
   await writeFile(
     filePath,
-    formatTranscriptPagerText(options.session),
+    formatTranscriptPagerText(options.session, options.artifactAddress),
     'utf8',
   );
 
@@ -73,7 +74,7 @@ export async function pageSessionTranscript(
   }
 }
 
-export function formatTranscriptPagerText(session: AgentSession) {
+export function formatTranscriptPagerText(session: AgentSession, artifactAddress?: (uri: string) => string) {
   const actor = sessionActorLabel(session);
   const lines = [
     'PinPawo Transcript',
@@ -103,8 +104,8 @@ export function formatTranscriptPagerText(session: AgentSession) {
       sanitizePagerText(entry.type === 'operation'
         ? buildOperationDetailText(entry)
         : isToolCallMessageEntry(entry)
-          ? buildMessageDisplayLines(entry, { toolCallDetail: true }).map(line => line.text).join('\n')
-          : formatTimelineEntry(entry)),
+          ? buildMessageDisplayLines(entry, { toolCallDetail: true, artifactAddress }).map(line => line.text).join('\n')
+          : formatTimelineEntry(entry, { artifactAddress })),
       '',
     );
     if (entry.type === 'message') {

@@ -34,8 +34,8 @@ export function channelDispatchInput(
   return fenced({
     type: 'channel_message', version: 1,
     channelId: message.channelId, messageId: message.messageId,
-    author: author(message), body: message.body,
-    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
+    author: author(message), body: message.body, deliverables: message.deliverables,
+    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body, deliverables: original.deliverables } } : {}),
     ...(addressedBy ? { addressedBy } : {}),
   });
 }

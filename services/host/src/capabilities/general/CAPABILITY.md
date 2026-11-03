@@ -7,6 +7,7 @@ uses:
   - web
   - git
   - github
+  - artifacts
 version: 1
 ---
 

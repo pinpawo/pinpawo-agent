@@ -77,7 +77,7 @@
 | `toolkitInventory` | ❌ | 扫描派生 |
 | `chatCheckpointer` | ❌ | 服务对象 |
 | `toolkitRuntimeManager` | ❌ | 服务对象 |
-| `capabilityArtifactStore` | ❌ | 服务对象 |
+| `artifactStore` | ❌ | Host 注入的产物存储 port |
 | `serverMode` | ❌ | 启动参数，不持久化 |
 | `runtimeConfig` 的派生路径 | ❌ | 由 `workdir` 计算 |
 

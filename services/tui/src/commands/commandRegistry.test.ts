@@ -16,6 +16,7 @@ test('command registry exposes only implemented OpenTUI commands', () => {
       'policy',
       'transcript',
       'export',
+      'download',
       'edit',
       'copy',
       'refresh',

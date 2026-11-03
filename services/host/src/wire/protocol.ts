@@ -53,6 +53,7 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'model.list.result': true,
   'model.select.result': true,
   'model.select.error': true,
+  'artifact.address.result': true,
 } as const satisfies Record<AgentServerMessage['type'], true>;
 
 export function readHostClientMessageEnvelope(raw: unknown) {

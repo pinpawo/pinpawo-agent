@@ -6,7 +6,7 @@
 > 日期：2026-06-16
 > 关联：`PET_AGENT_API_CAPABILITY_TOOLKIT.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`
 > 状态补充：Historical draft。当前实现以
-> `capability-artifact-pipeline/architecture.md` 和
+> [已退役 Pipeline](pipeline/architecture.md) 和
 > `PET_AGENT_API_CAPABILITY_TOOLKIT.md` 为准。本文保留为设计背景；
 > 其中 `resultSchema`、Capability write tool、旧 discovery tool 名称和
 > orchestrator 读取 artifact 全文均不是 V2 接口。

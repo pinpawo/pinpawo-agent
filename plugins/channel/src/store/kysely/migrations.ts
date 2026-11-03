@@ -1,5 +1,7 @@
 import { sql, type Kysely } from 'kysely';
+import { assertToolDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio-core';
+import type { ChannelDatabase } from './schema';
 
 /** The Channel schema. Data from the earlier Channel model is not carried over. */
 export function channelMigrations(dialect: StudioStorageDialect): StudioMigrations {
@@ -55,6 +57,40 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
       async up(db: Kysely<unknown>) {
         // Nullable so existing Channels keep their messages and have no prompt by default.
         await db.schema.alterTable('channels').addColumn('prompt', 'text').execute();
+      },
+    },
+    '0003_channel_deliverables': {
+      async up(db: Kysely<unknown>) {
+        const messages = db as Kysely<ChannelDatabase>;
+        // Bound memory by a page of complete messages, including on an upgrade
+        // with years of history. Converted rows can be skipped after a retry.
+        let after = 0;
+        while (true) {
+          const page = await messages.selectFrom('channel_messages').select(['sequence', 'message_id', 'data'])
+            .where('sequence', '>', after).orderBy('sequence').limit(100).execute();
+          if (!page.length) break;
+          for (const row of page) {
+            const data: unknown = JSON.parse(row.data);
+            if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(`Invalid Channel message ${row.message_id}.`);
+            if ('deliverables' in data) { assertToolDeliverables(data); continue; }
+            const old = 'artifacts' in data ? data.artifacts : [];
+            if (!Array.isArray(old)) throw new Error(`Invalid Channel attachments on ${row.message_id}.`);
+            const deliverables: Deliverable[] = old.map(reference => {
+              if (!reference || typeof reference !== 'object' || Array.isArray(reference)
+                || typeof reference.uri !== 'string' || !reference.uri.trim()
+                || (reference.label !== undefined && typeof reference.label !== 'string')
+                || (reference.version !== undefined && typeof reference.version !== 'string')) {
+                throw new Error(`Invalid Channel attachment on ${row.message_id}.`);
+              }
+              const title = reference.version === undefined ? reference.label
+                : `${reference.label ?? reference.uri} · ${reference.version}`;
+              return { uri: reference.uri, ...(title === undefined ? {} : { title }) };
+            });
+            await messages.updateTable('channel_messages').set({ data: JSON.stringify({ ...data, deliverables }) })
+              .where('message_id', '=', row.message_id).execute();
+          }
+          after = page.at(-1)!.sequence;
+        }
       },
     },
   };

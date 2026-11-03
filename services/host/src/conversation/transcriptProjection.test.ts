@@ -10,9 +10,23 @@ import {
   readTuiCheckpointInputModalities,
   readTuiCheckpointMessages,
   readTuiCheckpointTokenUsage,
+  readReplyDeliverables,
   summarizeTuiCheckpointMessages,
 } from './transcriptProjection';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
+
+test('reply deliverables come from frozen reply metadata without scanning execution evidence or prose', () => {
+  const references = [{ uri: 'artifact://workspace/session/artifact/report.md', title: 'Accepted report' },
+    { uri: 'https://github.com/example/repo/pull/1', title: 'PR' }];
+  const reply = new AIMessage({ id: 'reply', content: 'Completed.',
+    additional_kwargs: { pinpawo: { runId: 'run', deliverables: references } } });
+  assert.deepEqual(readReplyDeliverables(reply), references);
+  assert.deepEqual(readTuiCheckpointMessages([reply])[0]?.deliverables, references);
+  assert.deepEqual(readReplyDeliverables(new AIMessage('See https://example.test/unpublished.')), []);
+  assert.deepEqual(readReplyDeliverables(undefined), []);
+  const emptyReply = new AIMessage({ id: 'files-only', content: '', additional_kwargs: { pinpawo: { deliverables: references } } });
+  assert.deepEqual(readTuiCheckpointMessages([emptyReply]), [{ id: 'files-only', role: 'assistant', text: '', deliverables: references }]);
+});
 
 test('readTuiCheckpointMessages keeps visible conversation and delegations without replaying Capability deliveries', () => {
   const userMessage = stampAgentMessageCreatedAt(
@@ -51,7 +65,7 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
     id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
   }] }), { ...metadata, source: 'supervisor' });
   const result = createCapabilityExecutionMessage({ callId: 'dispatch-1', execution, metadata,
-    result: { status: 'returned', artifacts: [], delivery: { id: 'delivery-1', task: execution.task,
+    result: { status: 'returned', deliverables: [], delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } } });
   // The delegation is the call itself; its delivery never replays as text.
   const delegation = (status: 'running' | 'completed') => ({ role: 'assistant', text: '', runId: 'run-1', toolCalls: [{

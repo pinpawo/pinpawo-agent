@@ -24,6 +24,7 @@ import { createCapabilityRoutingManifest } from '../../runSupervisor/routingMani
 import { buildCapabilityRoutingManifest } from '../../prompts/capabilityRoutingManifest';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { getAgentRuntimeContext } from '../../../../runtime/context';
+import { readAcceptedRunDeliverables } from '../../executionReviews';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -285,7 +286,10 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }
     const committed = toolCalls?.length === response.tool_calls?.length ? response : withoutRepeatedCalls(response, toolCalls!);
     return {
-      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), {
+        taskId: state.taskId, runId: state.runId,
+        ...(!toolCalls?.length ? { deliverables: readAcceptedRunDeliverables(state.messages, state.runId) } : {}),
+      })],
     };
   };
 

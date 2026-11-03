@@ -1,8 +1,9 @@
 import type { AgentMessageEntry, AgentMessageToolCall, AgentTimelineEntry } from '@pinpawo/agent-session';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
-import { truncateTerminalLine } from '../text/terminalText';
+import { normalizeTerminalLine, truncateTerminalLine } from '../text/terminalText';
 import { noticeText, tuiText } from '../i18n/text';
+import { messageDisplayReferences } from '../client/artifactReferences';
 
 export type MessageDisplayTone =
   | 'assistant'
@@ -22,7 +23,7 @@ export type MessageDisplayLine = {
 
 export function buildMessageDisplayLines(
   entry: AgentMessageEntry,
-  options: { toolCallDetail?: boolean } = {},
+  options: { toolCallDetail?: boolean; artifactAddress?: (uri: string) => string } = {},
 ): MessageDisplayLine[] {
   const timestamp = entry.updatedAt ?? entry.createdAt;
   const timestampLabel = timestamp
@@ -46,6 +47,7 @@ export function buildMessageDisplayLines(
           text: `  ${line}`,
           tone: 'user' as const,
         })),
+        ...buildMessageReferenceDisplayLines(entry, options.artifactAddress),
       ];
     case 'assistant':
       return [
@@ -57,11 +59,20 @@ export function buildMessageDisplayLines(
           text: `| ${line}`,
           tone: 'assistant' as const,
         })) : []),
+        ...buildMessageReferenceDisplayLines(entry, options.artifactAddress),
         ...(options.toolCallDetail ? buildToolCallDetailLines(entry) : buildToolCallDisplayLines(entry)),
       ];
     case 'subagent':
       return [];
   }
+}
+
+/** Structured references and body-only artifact links share the same usable display path. */
+export function buildMessageReferenceDisplayLines(entry: AgentMessageEntry, artifactAddress: (uri: string) => string = uri => uri): MessageDisplayLine[] {
+  return messageDisplayReferences(entry).map(reference => ({
+    text: `↳ ${normalizeTerminalLine(reference.title?.trim() ? reference.title : artifactAddress(reference.uri))}${reference.title?.trim() ? ` · ${normalizeTerminalLine(artifactAddress(reference.uri))}` : ''}`,
+    tone: 'assistant',
+  }));
 }
 
 /**

@@ -4,14 +4,6 @@ export type {
   AgentModels,
 } from './types/agent';
 
-export type {
-  CapabilityArtifactKind,
-  CapabilityArtifactRef,
-  CapabilityArtifactSchemaRef,
-  CapabilityArtifactStore,
-  CapabilityArtifactWriteInput,
-  CapabilityArtifactWritePayload,
-} from './types/artifact';
 
 export type {
   AgentCapability,
@@ -165,11 +157,6 @@ export type {
   CapabilityDocumentFrontmatter,
 } from './types/capabilityDocument';
 export {
-  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
-} from './agent/orchestrator/artifacts/discovery';
-export {
   PROVIDER_INPUT_WATERMARK_RATIO,
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
@@ -211,7 +198,6 @@ export type {
   StructuredOutputMethod,
   StructuredOutputOptions,
 } from './utils/structuredOutput';
-export { mergeCapabilityArtifactRefs } from './agent/orchestrator/capabilityArtifacts';
 export {
   getAgentMessageRunId,
   isMainConversationMessage,
@@ -361,3 +347,5 @@ export { clipForPrompt } from './agent/orchestrator/utils';
 export { readContentText, readMessageText } from './utils/messages';
 export { createAutoReviewer } from './autoReview';
 export type { AutoReviewer, AutoReviewInput, AutoReviewAction, AutoReviewResult, ReviewAssessment } from './autoReview';
+
+export { readAcceptedRunDeliverables } from './agent/orchestrator/executionReviews';

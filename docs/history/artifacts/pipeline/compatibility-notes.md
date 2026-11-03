@@ -1,5 +1,7 @@
 # 兼容与边界说明
 
+> **Status: historical implementation.** The legacy Capability Artifact Pipeline is retired. See the current [Artifacts Toolkit](../../../reference/artifacts/index.md) and [Deliverables](../../../reference/deliverables.md) contracts.
+
 ## `additional_kwargs` 不是主协议
 
 当前设计要求不要把持久化协议放进模型 prompt 或 `additional_kwargs`。

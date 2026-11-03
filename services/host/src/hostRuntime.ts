@@ -47,6 +47,9 @@ export type {
 } from './hostCapabilityCatalog';
 export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';
+export { createHostArtifactStore } from './artifactStoreFactory';
+export { readArtifactHttpResult } from './artifactHttp';
+export { resolveHostArtifactAddress } from './artifactAddress';
 export { loadPetDocumentFile } from './config/petDocument';
 export type {
   HostCapabilityAssemblyInitOptions,

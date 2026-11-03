@@ -1,5 +1,5 @@
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
-import { readReplyResultReferences } from '../conversation/transcriptProjection';
+import { readReplyDeliverables, readReplyResultReferences } from '../conversation/transcriptProjection';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
@@ -544,9 +544,10 @@ export async function runAgentSessionTurn(
   const finalMessage = finalMessages.at(-1) ?? finalThreadState.messages.at(-1);
   const isOldMessage = finalMessage && initialThreadState.messages.some(message =>
     message === finalMessage || (!!message.id && message.id === finalMessage.id));
-  const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
+  const publicFinalMessage = finalMessage && AIMessage.isInstance(finalMessage)
     && !finalMessage.tool_calls?.length && isPublicConversationMessage(finalMessage) && !isOldMessage
-    ? readMessageText(finalMessage) : '';
+    ? finalMessage : undefined;
+  const finalReply = publicFinalMessage ? readMessageText(publicFinalMessage) : '';
   // FileSaver reloads different objects. Resolve the same reply by stable ID
   // inside the checkpoint collection before projecting its preceding deliveries.
   const checkpointReply = finalThreadState.messages.find(message =>
@@ -561,6 +562,7 @@ export async function runAgentSessionTurn(
       checkpointReply ? finalThreadState.messages : finalMessages,
       checkpointReply ?? finalMessage,
     ) : [],
+    deliverables: publicFinalMessage ? readReplyDeliverables(checkpointReply ?? publicFinalMessage) : [],
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
 

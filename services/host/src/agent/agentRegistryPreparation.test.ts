@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   defineInstructionDocument,
   type AgentCapability,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import {
   createCapabilityDiagnosticReporter,
@@ -13,11 +13,11 @@ import {
 } from './agentRegistryPreparation';
 import type { ToolkitInventoryEntry } from '../toolkits/toolkitInventory';
 
-function artifactCapability(name: string): AgentCapability {
+function toolkitCapability(name: string): AgentCapability {
   return {
     name,
     description: `${name} capability`,
-    uses: [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
+    uses: ['provided_toolkit'],
     instructions: defineInstructionDocument({
       content: `# ${name}`,
     }),
@@ -27,7 +27,7 @@ function artifactCapability(name: string): AgentCapability {
 test('prepareAgentRegistry keeps missing run-scoped Toolkits as compiler diagnostics', () => {
   const prepared = prepareAgentRegistry({
     toolkits: [],
-    capabilities: [artifactCapability('scope_required_test')],
+    capabilities: [toolkitCapability('scope_required_test')],
   });
 
   assert.equal(prepared.registry.capabilities.length, 0);
@@ -37,17 +37,17 @@ test('prepareAgentRegistry keeps missing run-scoped Toolkits as compiler diagnos
   );
 });
 
-test('prepareAgentRegistry compiles artifact discovery once run scope is complete', () => {
+test('prepareAgentRegistry compiles caller-supplied Toolkits', () => {
   const prepared = prepareAgentRegistry({
-    toolkits: [],
-    capabilities: [artifactCapability('scope_ready_test')],
-    threadId: 'thread-1',
-    capabilityArtifactStore: {} as CapabilityArtifactStore,
+    toolkits: [{ name: 'provided_toolkit', description: 'Provided.', tools: [{ tool: tool(() => 'ok', {
+      name: 'probe', description: 'Probe.', schema: z.object({}),
+    }) }] }],
+    capabilities: [toolkitCapability('scope_ready_test')],
   });
 
   assert.deepEqual(
     prepared.toolkits.map(({ name }) => name),
-    [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
+    ['provided_toolkit'],
   );
   assert.equal(
     prepared.registry.capabilities[0]?.capability.name,
@@ -58,13 +58,13 @@ test('prepareAgentRegistry compiles artifact discovery once run scope is complet
 test('capability diagnostics report state transitions without module-global suppression', () => {
   const unavailable = prepareAgentRegistry({
     toolkits: [],
-    capabilities: [artifactCapability('warning_state_test')],
+    capabilities: [toolkitCapability('warning_state_test')],
   });
   const available = prepareAgentRegistry({
-    toolkits: [],
-    capabilities: [artifactCapability('warning_state_test')],
-    threadId: 'thread-warning-state',
-    capabilityArtifactStore: {} as CapabilityArtifactStore,
+    toolkits: [{ name: 'provided_toolkit', description: 'Provided.', tools: [{ tool: tool(() => 'ok', {
+      name: 'probe', description: 'Probe.', schema: z.object({}),
+    }) }] }],
+    capabilities: [toolkitCapability('warning_state_test')],
   });
   const warnings: string[] = [];
   const report = createCapabilityDiagnosticReporter((message) => warnings.push(message));
@@ -75,8 +75,8 @@ test('capability diagnostics report state transitions without module-global supp
   report(unavailable.registry);
 
   assert.equal(warnings.length, 2);
-  assert.match(warnings[0] ?? '', /warning_state_test.*unknown Toolkit "artifact_discovery"/);
-  assert.match(warnings[1] ?? '', /warning_state_test.*unknown Toolkit "artifact_discovery"/);
+  assert.match(warnings[0] ?? '', /warning_state_test.*unknown Toolkit "provided_toolkit"/);
+  assert.match(warnings[1] ?? '', /warning_state_test.*unknown Toolkit "provided_toolkit"/);
 });
 
 test('capability diagnostics preserve a known unavailable Toolkit reason', async () => {
@@ -105,7 +105,7 @@ test('capability diagnostics preserve a known unavailable Toolkit reason', async
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [{
-      ...artifactCapability('offline_capability'),
+      ...toolkitCapability('offline_capability'),
       uses: [toolkit.name],
     }],
   });

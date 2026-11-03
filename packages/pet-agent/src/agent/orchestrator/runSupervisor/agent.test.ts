@@ -1845,6 +1845,30 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
     assert.equal(message.text.includes((index === 0 ? second : first)[0].content), false);
   }
 });
+
+test('Supervisor model sees external hints once beside the request without persisting or reusing them', async () => {
+  const catalog = createTestCatalog({ explore: 'Execute repository exploration.' });
+  const model = new ScriptedSupervisorModel([
+    { content: 'No execution requested.' },
+    { content: 'No execution requested.' },
+  ]);
+  const runner = createRunSupervisorAgent({ model });
+  const hint = { source: randomUUID(), instruction: randomUUID(), focus: randomUUID() };
+  const userRequest = randomUUID();
+  const config = { context: { hint }, tags: [] };
+  const first = await runner.invoke({ ...supervisorInput(catalog), userRequest, hint }, config);
+  await runner.invoke({ ...supervisorInput(catalog), userRequest });
+  for (const [index, messages] of model.invocations.entries()) {
+    const context = messages.find(message => message.id?.startsWith('supervisor-context:'));
+    assert.ok(context);
+    assert.ok(context.text.includes(userRequest));
+    for (const value of Object.values(hint)) {
+      assert.equal(messages.map(message => message.text).join('\n').split(value).length - 1, index === 0 ? 1 : 0);
+      assert.equal(messages[0].text.includes(value), false);
+      assert.equal(first.messages.some(message => message.text.includes(value)), false);
+    }
+  }
+});
 test('conflicting controls return tool errors without changing state and allow correction', async (t) => {
   const catalog = createTestCatalog({ general: capabilityDocument({
     name: 'general', description: 'Execute work.', instructions: 'Execute work.',

@@ -209,8 +209,8 @@ test('buildStudio wires a Plugin context provider into new and restored resident
       scope: { namespace: 'project', id: 'second' },
     }), /observed real Host context resolution/);
     assert.deepEqual(targets, [
-      { petId: 'planner', sessionId: 'planner:00000001', scope: { namespace: 'project', id: 'first' } },
-      { petId: 'planner', sessionId: 'planner:00000002', scope: { namespace: 'project', id: 'second' } },
+      { petId: 'planner', sessionId: 'planner:00000001', scope: { namespace: 'project', id: 'first' }, request: 'new resident' },
+      { petId: 'planner', sessionId: 'planner:00000002', scope: { namespace: 'project', id: 'second' }, request: 'restored resident' },
     ]);
   } finally {
     await restored.studio.shutdown();

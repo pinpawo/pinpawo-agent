@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { allocatePetSessionId, type PetCredentialSource } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -181,13 +181,14 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     if (!provider) return undefined;
     const snapshot = Object.freeze({
       petId: target.petId,
+      ...(target.request !== undefined ? { request: target.request } : {}),
       ...(target.sessionId ? { sessionId: target.sessionId } : {}),
       scope: Object.freeze({ ...target.scope }),
     });
     const sections = await provider.provide(snapshot);
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     if (contextProviders.get(namespace) !== provider) throw new Error(`Context provider for "${namespace}" is unavailable.`);
-    return sections;
+    return snapshotInvocationContextResult(sections);
   };
 
   async function dispatch(
@@ -202,6 +203,11 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
     const session = request.session ? { ...request.session } : undefined;
     const scope = request.scope ? { ...request.scope } : undefined;
+    const delivery = request.delivery;
+    if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
+    if (delivery === 'interrupt' && (!session?.id || !scope)) {
+      throw new Error('Interrupt delivery requires an explicit session and scope.');
+    }
     await registry.restore();
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     const pet = registry.getLive(petId);
@@ -243,6 +249,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         dispatchId: invocationId,
         ...(session ? { session } : {}),
         ...(scope ? { scope } : {}),
+        ...(delivery ? { delivery } : {}),
       });
 
       const receipt: StudioDispatchReceipt = Object.freeze({

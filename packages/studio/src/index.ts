@@ -21,6 +21,7 @@ export type {
   StudioPlugin,
   StudioPluginContext,
   StudioContextProvider,
+  StudioInvocationContext,
   StudioPluginHookInstaller,
   StudioPluginHooks,
   StudioModelEndpoint,

@@ -3,6 +3,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityCatalog } from './capabilityCatalog';
 import type { CapabilityDisclosureState } from './capabilityDisclosure';
 import type { RunSupervisorState } from './state';
+import type { AgentInvocationHint } from '../../../types/invocationHint';
 
 export type RunSupervisorMode = 'entry' | 'boundary';
 
@@ -12,6 +13,7 @@ export type RunSupervisorInput = {
   readonly taskId: string;
   readonly runId: string;
   readonly userRequest: string;
+  readonly hint?: AgentInvocationHint;
   readonly state: RunSupervisorState;
   /** Canonical records; the adapter selects main + this run's work lane. */
   readonly messages: readonly BaseMessage[];

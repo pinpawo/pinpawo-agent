@@ -5,7 +5,7 @@ import { channelMigrations, KyselyChannelStore, type ChannelDatabase } from '../
 import { createStudioStorage } from '../../../packages/studio/src/storage/studioStorage.ts';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from '../../../services/host/src/agent/agentChannel.ts';
 import { buildHostRuntimeConfig } from '../../../services/host/src/config/runtimeConfig.ts';
-import { snapshotInvocationSections, withInvocationSections } from '../../../services/host/src/host/invocationSystemContext.ts';
+import { snapshotInvocationContext, withInvocationContext } from '../../../services/host/src/host/invocationSystemContext.ts';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles.ts';
 import { createStudioWithPets } from '../../support/livePets.ts';
 
@@ -14,7 +14,7 @@ const occurredAt = '2026-01-01T00:00:00.000Z';
 
 /**
  * Reuse the real scoped provider and Host assembly, rather than reconstructing
- * their prompt sections. Only the dispatch execution port is replaced: it
+ * their prompt sections or invocation hint. Only the dispatch execution port is replaced: it
  * captures a setup without running a model, queue, checkpoint, or domain tool.
  * Resident admission/resume and the full execution chain have separate e2e tests.
  */
@@ -42,8 +42,8 @@ export async function assembleStudioPetInvocation(params: {
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async input => {
           if (!input.scope || !input.session) throw new Error('Role eval requires a bound Channel invocation.');
-          const sections = snapshotInvocationSections(await resolver({
-            petId: params.role, sessionId: input.session.id, scope: input.scope,
+          const invocationContext = snapshotInvocationContext(await resolver({
+            petId: params.role, sessionId: input.session.id, scope: input.scope, request: input.request,
           }));
           const setup = buildLocalChatAgentInput({
             context: { pet: { id: params.role, name: params.role } }, userMessage: input.request,
@@ -62,7 +62,7 @@ export async function assembleStudioPetInvocation(params: {
               listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri,
             },
           });
-          captured = withInvocationSections(setup, sections);
+          captured = withInvocationContext(setup, invocationContext);
         },
       } }],
     });

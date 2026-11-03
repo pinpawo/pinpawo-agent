@@ -181,11 +181,18 @@ test('tui session registry persists a suspended dispatch across restart and summ
   const filePath = path.join(dir, 'sessions.json');
   const state = loadTuiSessionState(filePath);
   const session = ensureActiveTuiSession(state, 'pet', 'test-profile');
-  const pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it', scope: { namespace: 'channel', id: 'ch-1' }, systemPromptSections: [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }] };
+  const pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it', scope: { namespace: 'channel', id: 'ch-1' }, systemPromptSections: [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }], hint: { source: 'channel', instruction: 'original instruction', focus: 'original focus' } };
   setTuiSessionPendingDispatch(state, session.id, pendingDispatch);
   updateTuiSessionSummary(state, session.id, { title: 'renamed' });
   saveTuiSessionState(state, filePath);
   assert.deepEqual(loadTuiSessionState(filePath).sessions[session.id]?.pendingDispatch, pendingDispatch);
+
+  const { hint: _hint, ...legacyPending } = pendingDispatch;
+  setTuiSessionPendingDispatch(state, session.id, legacyPending);
+  saveTuiSessionState(state, filePath);
+  const legacy = loadTuiSessionState(filePath).sessions[session.id]?.pendingDispatch;
+  assert.deepEqual(legacy, legacyPending);
+  assert.equal(Object.hasOwn(legacy!, 'hint'), false);
 
   setTuiSessionPendingDispatch(state, session.id, null);
   saveTuiSessionState(state, filePath);

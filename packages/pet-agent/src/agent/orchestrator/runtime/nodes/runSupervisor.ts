@@ -11,6 +11,7 @@ import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { runIterationBudgetReached } from '../guards/runIterationBudget';
+import { getAgentRuntimeContext } from '../../../../runtime/context';
 
 export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapabilityTool?: StructuredTool) {
   const runner = config.runSupervisorRunner ?? createRunSupervisorAgent({
@@ -29,6 +30,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
     });
     const input = buildRunSupervisorInput({ root, catalog,
       capabilityDisclosure: resolveCapabilityDisclosureState({ current: root.runCapabilityDisclosure, catalog }),
+      hint: getAgentRuntimeContext(runnableConfig).hint,
     });
     const result = await runner.invoke(input, runnableConfig);
     // Execution leaves through native Command.PARENT; normal return is the final reply.

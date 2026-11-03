@@ -145,7 +145,7 @@ test('the continued run reply reports under the original dispatch', async () => 
 });
 
 
-test('resuming a persisted dispatch after restart restores its original prompt snapshot', async () => {
+test('resuming a persisted dispatch after restart restores its original prompt and hint snapshot', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dispatch-prompt-'));
   const filePath = join(directory, 'sessions.json');
   const state = loadTuiSessionState(filePath);
@@ -154,6 +154,7 @@ test('resuming a persisted dispatch after restart restores its original prompt s
     interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it',
     scope: { namespace: 'channel', id: 'ch-1' },
     systemPromptSections: [{ id: 'channel:collaboration', owner: 'channel', content: 'before restart' }],
+    hint: { source: 'channel', instruction: 'original instruction', focus: 'original focus' },
   });
   saveTuiSessionState(state, filePath);
 
@@ -162,6 +163,7 @@ test('resuming a persisted dispatch after restart restores its original prompt s
   const session = restarted.sessions[original.id]!;
   const h = harness();
   let observed: unknown;
+  let observedHint: unknown;
   const resume = continueSuspendedDispatch({
     petId: 'pet',
     sessions: {
@@ -171,16 +173,19 @@ test('resuming a persisted dispatch after restart restores its original prompt s
     publishLifecycle: () => {},
     run: async (options) => {
       observed = options.setup.input.context?.systemPromptSections;
+      observedHint = options.setup.input.context?.hint;
       return { status: 'completed', reply: 'done' };
     },
   });
   await resume({
     ...h.turn('review-1'),
-    setup: { input: { threadId: session.threadId, context: { systemPromptSections: [{ id: 'pet:document', content: 'pet identity' }] } } },
+    setup: { input: { threadId: session.threadId, context: { systemPromptSections: [{ id: 'pet:document', content: 'pet identity' }], hint: { source: 'other', instruction: 'unrelated resume hint' } } } },
   } as never);
   assert.deepEqual(observed, [
     { id: 'pet:document', content: 'pet identity' },
     { id: 'channel:collaboration', owner: 'channel', content: 'before restart' },
   ]);
+  assert.deepEqual(observedHint, { source: 'channel', instruction: 'original instruction', focus: 'original focus' });
+  assert.ok(Object.isFrozen(session.pendingDispatch?.hint));
   assert.equal(restarted.sessions[session.id]?.pendingDispatch, undefined);
 });

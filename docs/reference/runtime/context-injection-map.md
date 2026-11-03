@@ -63,7 +63,7 @@ START
       entryAnswer ─(plan_request / continue)─> runSupervisor ─┬─> capability
                                                             └─> answer ─> END
       entryAnswer ─(direct reply)─> END
-      capability ─(result)─> runSupervisor
+      capability ─(result)─> delegationBoundary ─> runSupervisor
       capability ─(review reject/cancel)─> explicit terminal reply ─> END
 ```
 
@@ -127,6 +127,13 @@ sections. Invalid sections are rejected rather than treated as absent. Selection
 uses the current invocation, not earlier messages
 or a cached graph's first invocation; it does not inspect Pet, Channel, or owner
 identifiers. Supervisor's existing context and optional detail reading are unchanged.
+
+After a delegation result commits, the optional invocation-scoped
+`onDelegationComplete` hook lets a Host cancel at a separate Root boundary.
+The hook does not inject messages or consume a queue. The Host admits subsequent
+input through a fresh Entry invocation; the existing `continue` tool can retain
+the saved plan and returned deliveries. Native review resume keeps its separate
+contract. See [incoming input boundaries](../../design/agent-runtime/incoming-input-boundary.md).
 
 The Capability summary is rebuilt from the current invocation's compiled
 registry and `allowedCapabilityNames`. Entry reuses the catalog, manifest and

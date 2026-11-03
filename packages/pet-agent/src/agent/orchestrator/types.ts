@@ -69,4 +69,6 @@ export type OrchestratorInvokeOptions = {
    * compiled registry.
    */
   allowedCapabilityNames?: string[];
+  /** Host-owned invocation hook after a delegation result commits, before Supervisor resumes. */
+  onDelegationComplete?: () => void | Promise<void>;
 };

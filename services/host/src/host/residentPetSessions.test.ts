@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { AgentServerMessage } from '@pinpawo/agent-session';
-import { buildReviewSpec } from '@pinpawo/pet-agent';
+import { buildReviewSpec, type AgentInvocationHint } from '@pinpawo/pet-agent';
 
 import {
   createResidentPetHost,
@@ -46,7 +46,7 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
   const runtimeConfig = buildHostRuntimeConfig(root);
   const threads = new Map<string, { messages: AIMessage[]; reviewing: boolean }>();
   const turns: string[] = [];
-  const promptSnapshots: Array<{ threadId: string; kind: string; sections: readonly { id: string; owner?: string; content: string }[] }> = [];
+  const promptSnapshots: Array<{ threadId: string; kind: string; sections: readonly { id: string; owner?: string; content: string }[]; hint?: AgentInvocationHint }> = [];
   // Tests hold a resumed run, or one checkpoint read, open on these.
   const gates: { resume?: Promise<void>; read?: Promise<void> } = {};
   const host = await createResidentPetHost({
@@ -81,7 +81,7 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
     runAgentTurn: async ({ request, setup, emitEvent }) => {
       const threadId = setup.input.threadId ?? '';
       turns.push(`${threadId}:${request.kind}`);
-      promptSnapshots.push({ threadId, kind: request.kind, sections: [...(setup.input.context?.systemPromptSections ?? [])] });
+      promptSnapshots.push({ threadId, kind: request.kind, sections: [...(setup.input.context?.systemPromptSections ?? [])], ...(setup.input.context?.hint ? { hint: setup.input.context.hint } : {}) });
       if (request.kind === 'user_message') {
         threads.set(threadId, { messages: [new AIMessage('needs approval')], reviewing: true });
         emitEvent({
@@ -174,6 +174,7 @@ test('an exact session is read, followed and reviewed without changing the activ
 test('provider snapshots stay scoped across dispatch, mutation, resume and ordinary chat', async () => {
   const id = 'channel:collaboration';
   const original = [{ id, owner: 'channel', content: 'Channel A original' }];
+  const originalHint = { source: 'channel', instruction: 'A original instruction', focus: 'A original focus' };
   const sections = new Map([
     ['A', original],
     ['B', [{ id, owner: 'channel', content: 'Channel B' }]],
@@ -181,7 +182,7 @@ test('provider snapshots stay scoped across dispatch, mutation, resume and ordin
   const resolvedTargets: Array<{ petId: string; sessionId?: string; scope: { namespace: string; id: string } }> = [];
   const { host, lifecycle, promptSnapshots } = await createWaitingHost(async (target) => {
     resolvedTargets.push(target);
-    return sections.get(target.scope.id);
+    return { systemPromptSections: sections.get(target.scope.id), hint: target.scope.id === 'A' ? originalHint : { source: 'channel', instruction: 'B instruction' } };
   });
   const tuiPeer: AgentSessionPeer = { isConnected: () => true, send: () => true };
   const onlyChannel = (sections: readonly { id: string; content: string }[]) => sections.filter((section) => section.id === id);
@@ -194,6 +195,7 @@ test('provider snapshots stay scoped across dispatch, mutation, resume and ordin
       scope: { namespace: 'channel', id: 'A' },
     });
     original[0]!.content = 'Channel A edited after admission';
+    originalHint.focus = 'A edited focus';
     await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-a' && event.state === 'waiting'), 'A did not suspend');
     await host.resident.dispatch.dispatch({
       request: 'B', dispatchId: 'dispatch-b', session: { id: b, create: true },
@@ -209,13 +211,19 @@ test('provider snapshots stay scoped across dispatch, mutation, resume and ordin
       requestId: 'resume-a', interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
     });
     await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-a' && event.state === 'completed'), 'A did not resume');
+    assert.deepEqual(starts.map(entry => entry.hint), [
+      { source: 'channel', instruction: 'A original instruction', focus: 'A original focus' },
+      { source: 'channel', instruction: 'B instruction' },
+    ]);
     const resume = promptSnapshots.find((entry) => entry.kind === 'resume');
+    assert.deepEqual(resume?.hint, { source: 'channel', instruction: 'A original instruction', focus: 'A original focus' });
     assert.deepEqual(onlyChannel(resume?.sections ?? []), [{ id, owner: 'channel', content: 'Channel A original' }]);
     await host.interaction.handle(tuiPeer, { type: 'chat_request', requestId: 'plain-chat', message: 'ordinary chat' });
     assert.deepEqual(onlyChannel(promptSnapshots.at(-1)?.sections ?? []), [], 'ordinary chat does not inherit a Channel prompt');
+    assert.equal(Object.hasOwn(promptSnapshots.at(-1)!, 'hint'), false);
     assert.deepEqual(resolvedTargets, [
-      { petId: 'pet', sessionId: a, scope: { namespace: 'channel', id: 'A' } },
-      { petId: 'pet', sessionId: b, scope: { namespace: 'channel', id: 'B' } },
+      { petId: 'pet', sessionId: a, scope: { namespace: 'channel', id: 'A' }, request: 'A' },
+      { petId: 'pet', sessionId: b, scope: { namespace: 'channel', id: 'B' }, request: 'B' },
     ]);
   } finally {
     await host.close();
@@ -249,7 +257,7 @@ test('provider receives a stable target while admission waits, and a closed Host
   const admission = host.resident.dispatch.dispatch({ request: 'work', session, scope });
   session.id = 'pet:0000000e';
   scope.id = 'B';
-  assert.deepEqual(targetSeen, { petId: 'pet', sessionId: 'pet:0000000d', scope: { namespace: 'channel', id: 'A' } });
+  assert.deepEqual(targetSeen, { petId: 'pet', sessionId: 'pet:0000000d', scope: { namespace: 'channel', id: 'A' }, request: 'work' });
   await host.close();
   release();
   await assert.rejects(admission, /closing/);

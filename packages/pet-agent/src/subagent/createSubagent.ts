@@ -255,9 +255,11 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
   const parentRuntimeContext = input.runnableConfig?.context;
+  // Preparation hints belong to the parent invocation, never to a child override.
+  const { hint: _childHint, ...childRuntimeContext } = input.runtimeContext ?? {};
   const runtimeContext: SubagentRuntimeContext = {
     ...parentRuntimeContext,
-    ...input.runtimeContext,
+    ...childRuntimeContext,
     // Common context belongs to the root invocation, never to a child override.
     ...getAgentRuntimeContext(input.runnableConfig),
   };

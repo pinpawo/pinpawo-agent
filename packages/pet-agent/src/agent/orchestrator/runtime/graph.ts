@@ -1,4 +1,5 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
+import type { InteropZodObject } from '@langchain/core/utils/types';
 import { agentRuntimeContextSchema } from '../../../runtime/context';
 import {
   OrchestratorState,
@@ -23,6 +24,7 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterCapability } from './routes/afterCapability';
+import { delegationBoundary } from './nodes/delegationBoundary';
 import { createRunTerminationHandlers } from './runTermination';
 import { validateCheckpointInterrupts } from '../interrupt/validateCheckpointInterrupts';
 
@@ -41,7 +43,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   const entryAnswer = createEntryAnswerSubgraph(config);
 
-  const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
+  // LangGraph maps a Zod context object's optional keys to required properties
+  // whose values may be undefined. Keep the runtime schema, without making a
+  // newly optional invocation field mandatory for every graph caller.
+  const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema as InteropZodObject)
     .addNode('prepare', prepare, { ends: ['compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('compactContext', compactContext, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('captureUserRequest', captureRunUserRequest, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
@@ -57,6 +62,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       ends: ['runSupervisor', 'throwRunFailure'],
       errorHandler: (state: typeof OrchestratorState.State, error) => recoverCapabilityError(state, error) ?? runTermination.onNodeError(state, error),
     })
+    .addNode('delegationBoundary', delegationBoundary, {
+      ends: ['throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
+    })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addEdge(START, 'prepare')
     // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
@@ -65,8 +74,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addEdge('entryAnswer', END)
     .addConditionalEdges('capability', afterCapability, {
       [END]: END,
-      runSupervisor: 'runSupervisor',
-    });
+      delegationBoundary: 'delegationBoundary',
+    })
+    .addEdge('delegationBoundary', 'runSupervisor');
 
   return graph.compile({
     checkpointer: config.checkpoint ? validateCheckpointInterrupts(config.checkpoint) : undefined,

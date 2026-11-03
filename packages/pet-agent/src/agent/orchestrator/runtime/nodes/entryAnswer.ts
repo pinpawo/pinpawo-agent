@@ -24,6 +24,7 @@ import { createCapabilityRoutingManifest } from '../../runSupervisor/routingMani
 import { buildCapabilityRoutingManifest } from '../../prompts/capabilityRoutingManifest';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { getAgentRuntimeContext } from '../../../../runtime/context';
+import { buildInvocationHintContext } from '../../../../prompts/invocationHint';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -248,7 +249,8 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     // framework's workdir section is independent; empty/absent sections keep
     // the original Entry system prompt on every invocation. Tool descriptions
     // stay neutral in both modes; role boundaries belong to the system prompt.
-    const hasExternalContext = getAgentRuntimeContext(runnableConfig).systemPromptSections.length > 0;
+    const runtimeContext = getAgentRuntimeContext(runnableConfig);
+    const hasExternalContext = runtimeContext.systemPromptSections.length > 0;
     const prompt = [buildEntryAnswerSystemPrompt(hasExternalContext)];
     if (hasExternalContext) {
       const catalog = createCapabilityCatalog({
@@ -263,7 +265,9 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
     const response = await invokeOrchestratorModel(model, {
       systemMessage,
-      messages: [snapshot, ...mainSelection.messages],
+      messages: [snapshot,
+        ...(runtimeContext.hint ? [new HumanMessage(buildInvocationHintContext(runtimeContext.hint, 'entry'))] : []),
+        ...mainSelection.messages],
       history: state.messages,
     }, runnableConfig);
     if (!AIMessage.isInstance(response)) {

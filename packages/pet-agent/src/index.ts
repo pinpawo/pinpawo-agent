@@ -49,6 +49,8 @@ export type {
   SubagentToolOperationMetadata,
 } from './types/subagent';
 export type { SystemPromptSection } from './types/systemPrompt';
+export { agentInvocationHintSchema } from './types/invocationHint';
+export type { AgentInvocationHint } from './types/invocationHint';
 export { getAgentRuntimeContext } from './runtime/context';
 export type { AgentRuntimeContext } from './runtime/context';
 

@@ -2,6 +2,7 @@ import { createDeliveryResult } from '../../testing/capabilityDelivery';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import {
   buildRunSupervisorAgentSystemPrompt,
   buildRunSupervisorContextInput,
@@ -84,6 +85,30 @@ test('run context carries only run-stable facts; the turn carries plan and invoc
   const later = { ...input, state: { ...input.state, plan: [{ ...input.state.plan[0], status: 'completed' as const }] } };
   assert.equal(buildRunSupervisorContextInput(later, disclosedDocuments, routingManifest), context);
   assert.notEqual(buildRunSupervisorTurnInput(later), turn);
+});
+
+test('Supervisor projects an optional hint beside the unchanged request and omits it entirely by default', () => {
+  const userRequest = randomUUID();
+  const hint = { source: randomUUID(), instruction: randomUUID(), focus: randomUUID() };
+  const input: RunSupervisorInput = {
+    mode: 'entry', inputId: randomUUID(), taskId: randomUUID(), runId: randomUUID(),
+    catalog: plannerPromptCatalog, userRequest, messages: [],
+    state: { runId: null, goal: null, plan: [] }, capabilityDisclosure: plannerDisclosure,
+  };
+  const baseline = buildRunSupervisorContextInput(input, [], routingManifest);
+  assert.equal(buildRunSupervisorContextInput({ ...input, hint: undefined }, [], routingManifest), baseline);
+  const projected = buildRunSupervisorContextInput({ ...input, hint }, [], routingManifest);
+  const requestBlock = (text: string) => text.match(/<run_user_request\b[\s\S]*?<\/run_user_request>/)?.[0];
+  assert.equal(requestBlock(projected), requestBlock(baseline));
+  assert.equal(projected.split(userRequest).length - 1, 1);
+  for (const value of Object.values(hint)) {
+    assert.equal(baseline.includes(value), false);
+    assert.equal(projected.split(value).length - 1, 1);
+    assert.equal(requestBlock(projected)?.includes(value), false);
+    assert.equal(buildRunSupervisorTurnInput({ ...input, hint }).includes(value), false);
+  }
+  assert.ok(projected.indexOf('<invocation_hint ') > projected.indexOf('</run_user_request>'));
+  assert.ok(projected.indexOf('</invocation_hint>') < projected.indexOf('<capability_routing_manifest'));
 });
 
 test('Run Supervisor entry input represents an empty disclosure explicitly', () => {

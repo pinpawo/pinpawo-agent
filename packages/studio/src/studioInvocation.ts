@@ -14,10 +14,12 @@ export type StudioDispatchRequest = {
    * caller cannot claim it, or it could publish into another Plugin's domain.
    */
   scope?: PetInvocationScope;
+  /** In-process only: interrupt this same scoped session after the input is queued. */
+  delivery?: 'interrupt';
 };
 
 /** The public wire form: Host-trusted targeting fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope'>;
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'delivery'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {

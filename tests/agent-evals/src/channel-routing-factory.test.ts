@@ -13,7 +13,7 @@ const input: RouteInput = {
 const endpoint = { profileId: 'p', baseUrl: 'https://models.test/v1/', apiKey: 'k', model: 'small' };
 
 type Method = 'functionCalling' | 'jsonMode' | 'jsonSchema';
-const decision = { target: 'pet:executor', confidence: 0.8, reason: 'It opened #1003.' };
+const decision = { target: 'pet:executor', confidence: 0.8, reason: 'It opened #1003.', focus: 'Consider whether its current state changes the release decision.' };
 const openAIReply = (method: Method, value: unknown = decision) => {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   const message = method === 'functionCalling'
@@ -60,7 +60,8 @@ for (const method of ['jsonSchema', 'jsonMode', 'functionCalling'] as const) {
       if (method === 'jsonSchema') {
         assert.equal(body.response_format.type, 'json_schema');
         assert.equal(body.response_format.json_schema.strict, true);
-        assert.deepEqual(body.response_format.json_schema.schema.required, ['target', 'confidence', 'reason']);
+        assert.deepEqual(body.response_format.json_schema.schema.required, ['target', 'confidence', 'reason', 'focus']);
+        assert.equal(body.response_format.json_schema.schema.properties.focus.maxLength, 500);
         assert.deepEqual(body.response_format.json_schema.schema.properties.target.enum, user.targets);
       } else if (method === 'jsonMode') {
         assert.equal(body.response_format.type, 'json_object');
@@ -81,6 +82,26 @@ test('jsonMode routing accepts a decision without the optional reason', async ()
   const fetcher = (async () => Response.json(openAIReply('jsonMode', value))) as typeof fetch;
   const result = await createLlmRouteDecider(modelEndpoint('openai-compatible', fetcher, 'jsonMode'))(input, AbortSignal.timeout(1_000));
   assert.deepEqual(result, value);
+});
+
+test('the single routing request includes each candidate runtime observation', async () => {
+  const runtime = {
+    sampledAt: '2026-01-01T00:00:00.000Z', sessionState: 'waiting' as const,
+    admissionState: 'busy' as const, activeScope: 'other-channel' as const,
+    queuedInSession: 0, waitingKind: 'human_review',
+  };
+  const observed: RouteInput = { ...input, pets: input.pets.map(pet => ({ ...pet, runtime })) };
+  let calls = 0;
+  const fetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls++;
+    const body = JSON.parse(String(init?.body));
+    const received = JSON.parse(body.messages[1].content);
+    assert.deepEqual(received.pets, observed.pets);
+    assert.deepEqual(received.message, input.message, 'runtime observation does not rewrite the author or body');
+    return Response.json(openAIReply('jsonMode'));
+  }) as typeof fetch;
+  assert.deepEqual(await createLlmRouteDecider(modelEndpoint('openai-compatible', fetcher, 'jsonMode'))(observed, AbortSignal.timeout(1_000)), decision);
+  assert.equal(calls, 1, 'reading runtime does not add another model or tool round');
 });
 
 test('routing remains non-streaming even for an OpenAI-compatible model that usually streams', async () => {

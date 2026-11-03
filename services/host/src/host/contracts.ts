@@ -41,6 +41,9 @@ export type PetDispatchQueueEntry = {
   scope?: PetInvocationScope;
 };
 
+/** A continuation is only eligible for this exact, explicitly addressed domain session. */
+export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope };
+
 /**
  * An opaque caller correlation key. The resident runtime does not interpret it;
  * it only returns the same key in lifecycle observations.
@@ -52,6 +55,8 @@ export type PetDispatchRequest = {
   session?: { id: string; create?: boolean };
   /** Explicit Host-admitted domain scope, independent of the Agent Session. */
   scope?: PetInvocationScope;
+  /** Trusted Host caller only: interrupt the same scoped session after admission. */
+  delivery?: 'interrupt';
 };
 
 export type PetDispatchLifecycleState =

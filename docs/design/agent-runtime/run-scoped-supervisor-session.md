@@ -150,6 +150,12 @@ Entry Answer 使用 `plan_request` 发起规划，使用 `continue` 表达继续
 `continue` 不是原生 resume，也不是 snapshot 采用工具。Entry Answer 可以直接回复，
 无需因为有旧计划就进入 Supervisor；直接回复不抹掉已有业务进度。
 
+执行期间收到输入时，Host 可使用 invocation 的 `onDelegationComplete` hook，
+在 delegation 结果提交后的独立 Root 边界取消旧 turn，再将队列中的新输入送入上述
+Entry / `continue` 路径。立即 system interrupt 也复用现有取消入口。两种方式均保留
+真实审批和已提交交付，不构造原生 resume 或重放子任务；队列消费与来源校验仍由
+Host 负责。接入与限制见[执行期间的新输入](incoming-input-boundary.md)。
+
 Boundary 不以独立 active delegation 非空作为前提。例如 A 已验收、B 尚未执行，
 等待用户后正常结束，新 run 可以经 Entry Answer 进入 Boundary 安排 B，
 不复活 A、不重复验收 A，也不重交整份计划。

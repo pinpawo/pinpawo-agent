@@ -1,7 +1,7 @@
+import type { InvocationContextResult } from './invocationSystemContext';
 import type {
   AgentCapability,
   PetDocument,
-  SystemPromptSection,
 } from '@pinpawo/pet-agent';
 import type { AgentRuntimeEvent, AgentServerMessage } from '@pinpawo/agent-session';
 
@@ -22,6 +22,7 @@ import type { LocalModelProfileRegistry } from '../config/llmConfig';
 import type {
   AgentSessionPeer,
   PetDispatchLifecycleEvent,
+  PetDispatchTarget,
 } from './contracts';
 import type { ResidentPetCoordinator } from './residentPetCoordinator';
 import type { PetInvocationScope } from './petInvocationContext';
@@ -64,7 +65,9 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
     petId: string;
     sessionId?: string;
     scope: PetInvocationScope;
-  }>) => Promise<readonly SystemPromptSection[] | undefined>;
+    /** The admitted request, before any queue wait or model processing. */
+    request?: string;
+  }>) => Promise<InvocationContextResult>;
 };
 
 export type CreateResidentPetHostOptions = CreateResidentPetRuntimeOptions;
@@ -111,6 +114,8 @@ export type ResidentPetRuntimeContext = {
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
   /** Shared with the local handlers: conversation and dispatch claim one register. */
   activeRuns: ActiveRunRegister;
+  /** Called only after the new dispatch has been accepted into this runtime's queue. */
+  interruptDispatchForInput: (target: PetDispatchTarget) => void;
   close: () => Promise<void>;
   isClosing: () => boolean;
 };

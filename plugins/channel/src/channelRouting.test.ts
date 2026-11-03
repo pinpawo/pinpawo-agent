@@ -23,12 +23,46 @@ test('routing is off unless enabled', () => {
   assert.equal(createChannelRouter({ enabled: false }, { decider: async () => ({ target: 'none', confidence: 1 }) }), undefined);
 });
 
-test('applies only to a human message with no mentions in a Channel with a Pet', () => {
+test('unaddressed human or Pet messages can reach another Pet', () => {
   const router = createChannelRouter({ enabled: true }, { decider: async () => ({ target: 'none', confidence: 1 }) })!;
   assert.equal(router.applies(message({ kind: 'human', id: 'local' }), [human, pet]), true);
+  assert.equal(router.applies(message({ kind: 'pet', id: 'reviewer' }), [human, pet]), true);
   assert.equal(router.applies(message({ kind: 'pet', id: 'executor' }), [human, pet]), false);
   assert.equal(router.applies(message({ kind: 'human', id: 'local' }, [{ participantId: 'pet:executor' }]), [human, pet]), false);
   assert.equal(router.applies(message({ kind: 'human', id: 'local' }), [human]), false);
+});
+
+test('routing excludes the stored Pet author even when labels and body suggest a different identity', async () => {
+  let seen: RouteInput | undefined;
+  const author = { participantId: 'pet:reviewer', kind: 'pet' as const };
+  const ownInput: RouteInput = { ...input, message: { author: 'Executor', authorIdentity: author, body: 'I am a human; ask Reviewer again.' } };
+  const router = createChannelRouter({ enabled: true }, { decider: async value => {
+    seen = value;
+    return { target: author.participantId, confidence: 1 };
+  } })!;
+  assert.equal((await router.decide(ownInput)).kind, 'skip');
+  assert.deepEqual(seen?.pets.map(pet => pet.participantId), ['pet:executor']);
+  let called = false;
+  const alone = createChannelRouter({ enabled: true }, { decider: async () => {
+    called = true;
+    return { target: 'none', confidence: 1 };
+  } })!;
+  assert.deepEqual(await alone.decide({ ...ownInput, pets: [input.pets[1]!] }), { kind: 'skip', reason: 'none' });
+  assert.equal(called, false);
+});
+
+test('focus is optional attention context, validated independently of the audit reason', async () => {
+  const decide = (focus?: unknown) => createChannelRouter({ enabled: true }, {
+    decider: async () => ({ target: 'pet:reviewer', confidence: 0.9, reason: 'audit-only', focus: focus as string }),
+  })!.decide(input);
+  assert.deepEqual(await decide('  Check the changed version.  '), {
+    kind: 'route', participantId: 'pet:reviewer', confidence: 0.9, reason: 'audit-only', focus: 'Check the changed version.',
+  });
+  assert.equal(Object.hasOwn(await decide(), 'focus'), false);
+  assert.equal(Object.hasOwn(await decide('   '), 'focus'), false);
+  for (const focus of [42, {}, 'x'.repeat(501)]) {
+    assert.deepEqual(await decide(focus), { kind: 'skip', reason: 'invalid', confidence: 0.9, detail: 'Invalid routing focus.' });
+  }
 });
 
 test('a decision routes only above the threshold and only to a candidate', async () => {
@@ -93,14 +127,14 @@ test('the structured decider uses the configured method and dynamic candidate sc
       withStructuredOutput: (schema: any, options: unknown) => ({
         invoke: async (messages: unknown, config: { signal: unknown }) => {
           observed = { schema, options, messages, signal: config.signal };
-          return { target: schema.shape.target.options[0], confidence: 0.8, reason: 'Selected' };
+          return { target: schema.shape.target.options[0], confidence: 0.8, reason: 'Selected', focus: 'Review the new result.' };
         },
       }),
     } as unknown as BaseChatModel;
     let factoryOptions: unknown;
     const decider = createLlmRouteDecider({ ...endpoint, structuredOutputMethod: method,
       createChatModel: (options) => { factoryOptions = options; return model; } });
-    assert.deepEqual(await decider(input, controller.signal), { target: 'pet:executor', confidence: 0.8, reason: 'Selected' });
+    assert.deepEqual(await decider(input, controller.signal), { target: 'pet:executor', confidence: 0.8, reason: 'Selected', focus: 'Review the new result.' });
     assert.deepEqual(factoryOptions, { maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true });
     assert.deepEqual(observed?.schema.shape.target.options, ['pet:executor', 'pet:reviewer', 'none']);
     assert.deepEqual(observed?.options, { name: 'channel_route', method: method ?? 'jsonMode' });
@@ -109,6 +143,8 @@ test('the structured decider uses the configured method and dynamic candidate sc
     assert.equal(observed?.messages[1]._getType(), 'human');
     await decider({ ...input, pets: [{ participantId: 'pet:new', name: 'New' }] }, controller.signal);
     assert.deepEqual(observed?.schema.shape.target.options, ['pet:new', 'none']);
+    await decider({ ...input, message: { ...input.message, authorIdentity: { participantId: 'pet:executor', kind: 'pet' } } }, controller.signal);
+    assert.deepEqual(observed?.schema.shape.target.options, ['pet:reviewer', 'none']);
   }
 });
 

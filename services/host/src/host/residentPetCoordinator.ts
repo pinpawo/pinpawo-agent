@@ -2,6 +2,7 @@ import {
   ResidentPetOperationCancelledError,
   type PetDispatchQueueSnapshot,
   type PetDispatchQueueEntry,
+  type PetDispatchTarget,
   type PetDispatchSettledState,
   type PetDispatchState,
   type QueuedOperation,
@@ -29,6 +30,7 @@ export class ResidentPetCoordinator {
   private closing = false;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
   private schedulingVersion = 0;
+  private preferredDispatch: QueuedOperation | undefined;
 
   constructor(options: ResidentPetCoordinatorOptions) {
     this.state = options.initialState ?? 'open';
@@ -64,6 +66,19 @@ export class ResidentPetCoordinator {
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void {
     this.queueListeners.add(listener);
     return () => this.queueListeners.delete(listener);
+  }
+
+  /** Select, but do not consume, the next input for an executing scoped turn. */
+  prioritizePendingDispatch(target: PetDispatchTarget): boolean {
+    const matching = this.dispatchQueue.find(({ observation }) => observation
+      && observation.sessionId === target.sessionId
+      && observation.scope?.namespace === target.scope.namespace
+      && observation.scope.id === target.scope.id);
+    if (!matching) return false;
+    // An immediate input may wake the turn, but earlier inputs to this same
+    // session still come first. Unrelated sessions retain their relative order.
+    this.preferredDispatch = matching;
+    return true;
   }
 
   /**
@@ -204,9 +219,11 @@ export class ResidentPetCoordinator {
       let ran = false;
       let blocked = false;
       const active = Promise.resolve().then(async () => {
-        for (let index = 0; index < this.dispatchQueue.length;) {
+        const candidates = [...this.dispatchQueue];
+        const preferred = this.preferredDispatch && candidates.indexOf(this.preferredDispatch);
+        if (preferred !== undefined && preferred > 0) candidates.unshift(...candidates.splice(preferred, 1));
+        for (const candidate of candidates) {
           if (this.closing || this.conversations > 0) return;
-          const candidate = this.dispatchQueue[index]!;
           let ready: boolean;
           try { ready = candidate.ready ? await candidate.ready() : (await this.readNextSettledState()) === 'open'; }
           catch (error) {
@@ -215,12 +232,12 @@ export class ResidentPetCoordinator {
             // next admission or refresh scans again.
             blocked = true;
             this.logError('[resident-pet] failed to read dispatch readiness:', error);
-            index++;
             continue;
           }
           if (this.closing || this.conversations > 0) return;
-          if (!ready) { index++; continue; }
-          this.dispatchQueue.splice(index, 1);
+          if (!ready) continue;
+          this.dispatchQueue.splice(this.dispatchQueue.indexOf(candidate), 1);
+          if (this.preferredDispatch === candidate) this.preferredDispatch = undefined;
           ran = true;
           this.activeOperation = candidate.kind;
           this.activeDispatch = candidate.observation;
@@ -238,8 +255,10 @@ export class ResidentPetCoordinator {
       });
       return;
     }
-    const entry = this.state === 'open' ? this.dispatchQueue.shift() : undefined;
+    const index = this.preferredDispatch ? this.dispatchQueue.indexOf(this.preferredDispatch) : -1;
+    const entry = this.state === 'open' ? this.dispatchQueue.splice(index < 0 ? 0 : index, 1)[0] : undefined;
     if (!entry) return;
+    if (this.preferredDispatch === entry) this.preferredDispatch = undefined;
     this.activeOperation = entry.kind;
     this.activeDispatch = entry.observation;
     const active = Promise.resolve().then(() => this.run(entry));

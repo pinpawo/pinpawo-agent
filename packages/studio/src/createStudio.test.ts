@@ -26,7 +26,7 @@ async function createStudio(input: Omit<CreateStudioInput, 'definitions' | 'asse
       // the composition port. This fake exercises that same boundary.
       const dispatch: PetDispatchPort = { ...pet.dispatch, dispatch: async (request) => {
         if (request.scope) await prepared.resolveInvocationContext({
-          petId, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
+          petId, request: request.request, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
         });
         return pet.dispatch.dispatch(request);
       } };
@@ -235,7 +235,7 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     assert.deepEqual(receipt.metadata, { nested: { value: 'original correlation' } });
     assert.equal(seen[0]?.request, 'work');
     assert.equal(Object.hasOwn(seen[0]!, 'systemPromptSections'), false);
-    assert.deepEqual(targets, [{ petId: 'worker', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' } }]);
+    assert.deepEqual(targets, [{ petId: 'worker', request: 'work', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' } }]);
     assert.deepEqual(seen[0]?.scope, { namespace: 'channel', id: 'a' });
     assert.deepEqual(seen[0]?.session, { id: 'worker:00000001', create: true });
     const retried = await studio.dispatch({ petId: 'worker', request: 'ignored', idempotencyKey: 'key-a' });
@@ -252,6 +252,37 @@ test('scoped context providers resolve from the snapshotted target and do not ch
   } finally {
     await studio.shutdown();
   }
+});
+
+test('trusted interrupt delivery snapshots its explicit target and idempotency admits it only once', async () => {
+  const seen: Array<Parameters<PetDispatchPort['dispatch']>[0]> = [];
+  const worker = binding('worker');
+  worker.dispatch = { ...worker.dispatch, dispatch: async request => { seen.push(request); } };
+  const studio = await createStudio({ studioId: 'interrupt', pets: [worker] });
+  try {
+    for (const request of [
+      { petId: 'worker', request: 'missing both', delivery: 'interrupt' as const },
+      { petId: 'worker', request: 'missing scope', delivery: 'interrupt' as const, session: { id: 'worker:00000001' } },
+      { petId: 'worker', request: 'missing session', delivery: 'interrupt' as const, scope: { namespace: 'channel', id: 'one' } },
+    ]) await assert.rejects(studio.dispatch(request), /explicit session and scope/);
+    assert.equal(seen.length, 0);
+    const request: Parameters<typeof studio.dispatch>[0] = {
+      petId: 'worker', request: 'new evidence', idempotencyKey: 'once', delivery: 'interrupt',
+      session: { id: 'worker:00000001' }, scope: { namespace: 'channel', id: 'one' },
+    };
+    const pending = studio.dispatch(request);
+    request.delivery = undefined;
+    request.session!.id = 'worker:00000002';
+    request.scope = { namespace: 'channel', id: 'two' };
+    const receipt = await pending;
+    const repeated = await studio.dispatch({ petId: 'worker', request: 'ignored retry', idempotencyKey: 'once' });
+    assert.equal(repeated.invocationId, receipt.invocationId);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]!.delivery, 'interrupt');
+    assert.deepEqual(seen[0]!.session, { id: 'worker:00000001' });
+    assert.deepEqual(seen[0]!.scope, { namespace: 'channel', id: 'one' });
+    assert.equal(seen[0]!.request, 'new evidence');
+  } finally { await studio.shutdown(); }
 });
 
 test('provider registration has scoped ownership, cleanup and retryable errors', async () => {
@@ -794,4 +825,35 @@ test('a Studio refuses to start when a Pet names a definition it no longer lists
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test('trusted provider context snapshots request, sections and hint without changing legacy results', async () => {
+  const supplied = { systemPromptSections: [{ id: 'shared', content: 'announcement marker' }],
+    hint: { source: 'domain', instruction: 'instruction marker', focus: 'focus marker' } };
+  const targets: unknown[] = [];
+  const prepared = prepareStudio({ studioId: 'provider-snapshot', definitions: [],
+    assemblePet: async () => { throw new Error('unused'); },
+    plugins: [{ name: 'domain', toolkits: [], contextNamespaces: ['domain'], start(context) {
+      context.registerContextProvider('domain', target => { targets.push(target); return supplied; });
+    } }],
+  });
+  try {
+    await prepared.activatePlugins();
+    const target = { petId: 'worker', sessionId: 'worker:00000001', scope: { namespace: 'domain', id: 'one' }, request: 'request marker' };
+    const pending = prepared.resolveInvocationContext(target);
+    target.request = 'later request';
+    target.scope.id = 'later scope';
+    const snapshot = await pending;
+    supplied.hint.focus = 'later focus';
+    supplied.systemPromptSections[0]!.content = 'later announcement';
+    assert.deepEqual(targets[0], { petId: 'worker', sessionId: 'worker:00000001', scope: { namespace: 'domain', id: 'one' }, request: 'request marker' });
+    assert.ok(Object.isFrozen(targets[0]) && Object.isFrozen((targets[0] as typeof target).scope));
+    assert.deepEqual(snapshot, { systemPromptSections: [{ id: 'shared', content: 'announcement marker' }],
+      hint: { source: 'domain', instruction: 'instruction marker', focus: 'focus marker' } });
+    assert.ok(Object.isFrozen(snapshot));
+    // Composition callers predating request-aware providers remain valid.
+    await prepared.resolveInvocationContext({ petId: 'worker', scope: { namespace: 'domain', id: 'one' } });
+    assert.equal(Object.hasOwn(targets[1] as object, 'request'), false);
+  } finally { await prepared.studio.shutdown(); }
 });

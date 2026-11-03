@@ -1,4 +1,5 @@
-import { withoutPetInvocationContext } from './host/petInvocationContext';
+import { readPetInvocationContext, withoutPetInvocationContext } from './host/petInvocationContext';
+import type { PetDispatchTarget } from './host/contracts';
 import { withPetExecutionIdentity } from './host/petCredentials';
 import { continueSuspendedDispatch } from './host/dispatchContinuation';
 import { ActiveRunRegister } from './agent/activeRunRegister';
@@ -269,9 +270,52 @@ export async function createResidentPetRuntime(
     }
   };
   const executeTurn = options.runAgentTurn ?? runAgentSessionTurn;
-  const runAgentTurn: typeof executeTurn = (input) => withPetExecutionIdentity(
-    deps.petId, () => executeTurn(input),
+  let scopedTurn: { target: PetDispatchTarget; interrupt: () => void } | undefined;
+  const matchesTarget = (left: { sessionId?: string; scope?: PetDispatchTarget['scope'] }, right: PetDispatchTarget) => (
+    left.sessionId === right.sessionId && left.scope?.namespace === right.scope.namespace && left.scope.id === right.scope.id
   );
+  const interruptDispatchForInput = (target: PetDispatchTarget) => {
+    if (scopedTurn && matchesTarget(scopedTurn.target, target)) {
+      scopedTurn.interrupt();
+      return;
+    }
+    // The run register also covers setup before the Agent wrapper starts.
+    // Interrupt that concrete request; never save a flag that could later
+    // cancel a human-review resume under the same dispatch identity.
+    const active = coordinator.getQueueSnapshot().activeDispatch;
+    const run = activeRuns.read(target.sessionId);
+    if (active && run && matchesTarget(active, target) && coordinator.prioritizePendingDispatch(target)) {
+      localHandlers.interruptRun(run.requestId);
+    }
+  };
+  const runAgentTurn: typeof executeTurn = (input) => withPetExecutionIdentity(deps.petId, async () => {
+    const invocation = readPetInvocationContext();
+    if (!invocation?.sessionId || !invocation.scope) return executeTurn(input);
+    const target = { sessionId: invocation.sessionId, scope: invocation.scope };
+    const interrupt = () => {
+      if (!input.setup.input.signal?.aborted && coordinator.prioritizePendingDispatch(target)) {
+        localHandlers.interruptRun(input.request.requestId);
+      }
+    };
+    const current = { target, interrupt };
+    scopedTurn = current;
+    try {
+      input.setup.input.signal?.throwIfAborted();
+      return await executeTurn({
+        ...input,
+        setup: { ...input.setup, input: {
+          ...input.setup.input,
+          onDelegationComplete: async () => {
+            await input.setup.input.onDelegationComplete?.();
+            input.setup.input.signal?.throwIfAborted();
+            interrupt();
+          },
+        } },
+      });
+    } finally {
+      if (scopedTurn === current) scopedTurn = undefined;
+    }
+  });
   const runConversationTurn = continueSuspendedDispatch({
     petId: deps.petId, sessions, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
   });
@@ -338,6 +382,7 @@ export async function createResidentPetRuntime(
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
     activeRuns,
+    interruptDispatchForInput,
     close,
     isClosing: () => closing !== null,
   };

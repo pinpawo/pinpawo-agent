@@ -14,7 +14,7 @@ function withContextResolver(
   return { ...port, dispatch: async request => {
     if (request.scope) {
       const resolved = await getPrepared().resolveInvocationContext({
-        petId: 'worker', ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
+        petId: 'worker', request: request.request, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
       });
       onResolved?.(resolved);
     }

@@ -4212,6 +4212,7 @@ for (const decision of ['reject', 'cancel'] as const) {
     let entryCalls = 0;
     let supervisorCalls = 0;
     let finalizes = 0;
+    let delegationBoundaryCalls = 0;
     const rawTool = tool(async () => { toolRuns++; return 'executed'; }, {
       name: 'reviewed_action', description: 'Reviewed action.', schema: z.object({}),
     });
@@ -4251,6 +4252,7 @@ for (const decision of ['reject', 'cancel'] as const) {
       } }),
     });
     const config = { configurable: { thread_id: `review-stop-${decision}`, registry,
+      onDelegationComplete: () => { delegationBoundaryCalls++; },
       reviewCapabilities: { humanReview: true, sessionAuthorization: false },
       globalReviewPolicy: { mode: 'require_authorization' },
     } };
@@ -4264,6 +4266,7 @@ for (const decision of ['reject', 'cancel'] as const) {
     assert.equal((stopped as { __interrupt__?: unknown }).__interrupt__, undefined);
     assert.deepEqual((await graph.getState(config)).next, []);
     assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [1, 1, 0, 0]);
+    assert.equal(delegationBoundaryCalls, 0, 'review stop takes priority over the Host hook');
     assert.equal(readCapabilityExecutions(stopped.messages).at(-1)?.result?.reviewDecision, decision);
     assert.equal(getAgentMessageMetadata(stopped.messages.at(-1)!).reviewDecision, decision);
     assert.ok(AIMessage.isInstance(stopped.messages.at(-1)));
@@ -4271,6 +4274,7 @@ for (const decision of ['reject', 'cancel'] as const) {
     const continued = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Continue with the new constraints.')]), config);
     assert.notEqual(continued.runId, stopped.runId);
     assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 3, 0, 1]);
+    assert.equal(delegationBoundaryCalls, 1);
     assert.deepEqual(continued.runSupervisorState.plan.map(item => ({ id: item.id, objective: item.objective, status: item.status })),
       stopped.runSupervisorState.plan.map(item => ({ id: item.id, objective: item.objective, status: item.status })));
   });

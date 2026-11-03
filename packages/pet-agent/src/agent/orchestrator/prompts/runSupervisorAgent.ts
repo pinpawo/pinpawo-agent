@@ -10,6 +10,7 @@ import {
 import { buildRunUserRequestContext } from './context';
 import { buildCapabilityRoutingManifest } from './capabilityRoutingManifest';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
+import { buildInvocationHintContext } from '../../../prompts/invocationHint';
 
 function buildCapabilityContext(
   documents: readonly RunSupervisorCapabilityDocument[],
@@ -46,7 +47,9 @@ export function buildRunSupervisorContextInput(
   routingManifest: CapabilityRoutingManifest,
 ) {
   return RUN_SUPERVISOR_CONTEXT_PROMPT.render({
-    userRequest: buildRunUserRequestContext(input.userRequest),
+    userRequest: [buildRunUserRequestContext(input.userRequest),
+      ...(input.hint ? [buildInvocationHintContext(input.hint, 'supervisor')] : []),
+    ].join('\n\n'),
     routingContext: buildCapabilityRoutingManifest(routingManifest),
     capabilityContext: buildCapabilityContext(disclosedCapabilities),
   });

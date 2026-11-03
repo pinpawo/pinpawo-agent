@@ -167,7 +167,6 @@ export type {
 export {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
   ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-  ARTIFACT_DISCOVERY_TOOL_NAMES,
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 } from './agent/orchestrator/artifacts/discovery';
 export {
@@ -212,13 +211,7 @@ export type {
   StructuredOutputMethod,
   StructuredOutputOptions,
 } from './utils/structuredOutput';
-export {
-  filterCapabilityArtifacts,
-  matchesCapabilityArtifact,
-  mergeCapabilityArtifactRefs,
-  selectCapabilityResultArtifact,
-  selectLatestCapabilityArtifact,
-} from './agent/orchestrator/capabilityArtifacts';
+export { mergeCapabilityArtifactRefs } from './agent/orchestrator/capabilityArtifacts';
 export {
   getAgentMessageRunId,
   isMainConversationMessage,
@@ -228,9 +221,6 @@ export {
   readAgentMessageCreatedAt,
   stampAgentMessageCreatedAt,
 } from './agent/messages';
-export type {
-  CapabilityArtifactSelector,
-} from './agent/orchestrator/capabilityArtifacts';
 export type {
   OrchestratorConfig,
   OrchestratorInvokeOptions,

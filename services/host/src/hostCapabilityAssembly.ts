@@ -327,10 +327,6 @@ export class HostCapabilityAssembly {
     return this.capabilityArtifactStore;
   }
 
-  async deleteThreadArtifacts(threadId: string): Promise<void> {
-    await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
-  }
-
   async shutdown(): Promise<void> {
     try {
       await this.rsInstances.dispose();

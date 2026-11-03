@@ -3,6 +3,7 @@ import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
 import { normalizeTerminalLine, truncateTerminalLine } from '../text/terminalText';
 import { noticeText, tuiText } from '../i18n/text';
+import { messageDisplayReferences } from '../client/artifactReferences';
 
 export type MessageDisplayTone =
   | 'assistant'
@@ -46,6 +47,7 @@ export function buildMessageDisplayLines(
           text: `  ${line}`,
           tone: 'user' as const,
         })),
+        ...buildMessageReferenceDisplayLines(entry, options.artifactAddress),
       ];
     case 'assistant':
       return [
@@ -57,7 +59,7 @@ export function buildMessageDisplayLines(
           text: `| ${line}`,
           tone: 'assistant' as const,
         })) : []),
-        ...buildDeliverableDisplayLines(entry, options.artifactAddress),
+        ...buildMessageReferenceDisplayLines(entry, options.artifactAddress),
         ...(options.toolCallDetail ? buildToolCallDetailLines(entry) : buildToolCallDisplayLines(entry)),
       ];
     case 'subagent':
@@ -65,9 +67,9 @@ export function buildMessageDisplayLines(
   }
 }
 
-/** Structured references are visible even when the reply has no prose links. */
-export function buildDeliverableDisplayLines(entry: AgentMessageEntry, artifactAddress: (uri: string) => string = uri => uri): MessageDisplayLine[] {
-  return (entry.deliverables ?? []).map(reference => ({
+/** Structured references and body-only artifact links share the same usable display path. */
+export function buildMessageReferenceDisplayLines(entry: AgentMessageEntry, artifactAddress: (uri: string) => string = uri => uri): MessageDisplayLine[] {
+  return messageDisplayReferences(entry).map(reference => ({
     text: `↳ ${normalizeTerminalLine(reference.title?.trim() ? reference.title : artifactAddress(reference.uri))}${reference.title?.trim() ? ` · ${normalizeTerminalLine(artifactAddress(reference.uri))}` : ''}`,
     tone: 'assistant',
   }));

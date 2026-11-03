@@ -258,6 +258,15 @@ treated as a directory. Without an argument, the file is written under the
 session runtime working directory. Windows drive paths and `~\` home paths use
 win32 resolution rather than POSIX path rules.
 
+`/download <artifact-uri>` retrieves a published snapshot on explicit request.
+A connected Host's path may be remote, so the client authenticates the existing
+artifact HTTP endpoint and saves bytes in a private temporary directory on the
+TUI machine. Embedded stdio can use its existing local snapshot path directly;
+COS temporary URLs download without Host credentials. Body-only artifact links
+and structured deliverables display the same address or download action. No
+file is downloaded just because it appears in a message, and Bearer tokens are
+never placed in URLs.
+
 `/transcript` is intentionally different from `/export`: it snapshots every
 ordered canonical timeline entry, including operations, system rows, and
 subagent messages, into a temporary plain-text file and opens `$PAGER`

@@ -160,14 +160,19 @@ downloads. It fetches with the connection's Bearer token, follows the redirect
 without cookies, then downloads a Blob. The token is not part of the saved URI
 or forwarded to the cross-origin object store.
 
-TUI reference projection renders titles and stable references, including after
-a snapshot redraw. Address wiring is under verification: an existing WebSocket
-connection uses its actual Host port to display the authenticated HTTP GET
-address. Default stdio does not start an HTTP listener; the read-only
-`artifact.address.get` / `artifact.address.result` control exchange resolves an
-existing local snapshot path or a temporary COS URL for display. These addresses
-stay out of Agent history, Channel messages and checkpoints. Address resolution
-does not automatically download the file or add a TUI command. See the
+TUI renders structured references and body-only Markdown or bare `artifact://`
+links, including after a snapshot redraw. Both transports use the read-only
+`artifact.address.get` / `artifact.address.result` exchange. Embedded stdio shares
+the Host filesystem and can display an existing local snapshot path. A WebSocket
+connection may be a tunnel to a remote Host: its filesystem paths are not treated
+as client files, and Bearer-only HTTP endpoints are not presented as browser links.
+Instead, `/download <artifact-uri>` streams the authenticated GET into a private
+temporary directory on the TUI machine and displays that local path. Downloads
+are explicit, capped at 100 MB, and do not overwrite a user-selected file. COS
+temporary URLs can be displayed directly or downloaded with the same command.
+Redirects and direct temporary-URL downloads carry no Host Bearer or cookies.
+Address lookup alone never downloads a file. Default stdio starts no HTTP listener.
+Paths and temporary URLs stay out of Agent history, Channel and checkpoints. See the
 [Agent Session address contract](../runtime/session-projection.md#artifact-display-addresses).
 The control result goes only to the requesting stdio/WebSocket peer. HTTP
 message POST rejects that request type; HTTP readers use the authenticated
@@ -188,6 +193,9 @@ This implementation does not add owner lookup, deletion APIs, retention rules,
 garbage collection or an administration platform. Old pipeline files remain on
 disk; removing a session does not promise to remove its published files. The
 optional artifact-inventory system section in the design is not implemented.
+The execution-record change uses the project's `capability-v6` persistence path
+label. New defaults and the TUI registry do not resume or automatically migrate
+v5 sessions; their old files remain on disk. This is not a LangGraph format version.
 
 Tests cover port behavior, local streams and snapshots, signed-URL handling,
 authenticated HTTP and cross-Pet delivery. Real SDK tests use an isolated HTTP

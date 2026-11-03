@@ -67,6 +67,17 @@ test('structured deliverables display the title and reference without relying on
     '↳ artifact://workspace/session/id/empty-title.txt']);
 });
 
+test('body-only artifact links expose a usable display path in ordinary output without mutating the message', () => {
+  const uri = 'artifact://workspace/session/id/report.txt';
+  const entry = message({ text: `[Report](${uri})` });
+  const before = JSON.stringify(entry);
+  const lines = buildMessageDisplayLines(entry, { artifactAddress: value => `/download ${value}` });
+  assert.equal(lines.at(-1)?.text, `↳ Report · /download ${uri}`);
+  assert.equal(JSON.stringify(entry), before);
+  const user = message({ role: 'user', text: uri });
+  assert.equal(buildMessageDisplayLines(user, { artifactAddress: () => '/tmp/report.txt' }).at(-1)?.text, '↳ /tmp/report.txt');
+});
+
 function message(
   overrides: Partial<AgentMessageEntry>,
 ): AgentMessageEntry {

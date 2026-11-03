@@ -1,4 +1,4 @@
-/** Display address for a connected Host. Credentials stay on its connection. */
+/** Authenticated download endpoint; it is not a browser-openable display address. */
 export function artifactHttpAddress(uri: string, port: number): string {
   if (!uri.startsWith('artifact://')) return uri;
   return `http://127.0.0.1:${port}/agent-session/artifacts?${new URLSearchParams({ uri })}`;
@@ -10,6 +10,8 @@ export type ArtifactDisplayAddress = { address: string; expiresAt?: string };
 export function createArtifactAddressCache(options: {
   read: (uri: string) => Promise<ArtifactDisplayAddress | null>;
   onChanged: () => void;
+  /** Only an embedded stdio child is known to share the TUI's filesystem. */
+  sharedFilesystem?: boolean;
   now?: () => number;
 }) {
   const addresses = new Map<string, ArtifactDisplayAddress>();
@@ -20,7 +22,8 @@ export function createArtifactAddressCache(options: {
   return {
     display(uri: string): string {
       const value = addresses.get(uri);
-      return value && valid(value) ? value.address : uri;
+      if (value && valid(value) && (options.sharedFilesystem || /^https?:\/\//.test(value.address))) return value.address;
+      return uri.startsWith('artifact://') && !options.sharedFilesystem ? `/download ${uri}` : uri;
     },
     resetFailures() { failed.clear(); },
     async ensure(uris: readonly string[]): Promise<void> {

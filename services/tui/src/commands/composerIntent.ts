@@ -1,4 +1,5 @@
 import { parseTuiCommand } from './commandRegistry';
+import { parseArtifactUri } from '@pinpawo/agent-contracts';
 
 export type ComposerMode = 'chat';
 
@@ -14,6 +15,7 @@ export type ComposerIntent =
   | { type: 'open-policy' }
   | { type: 'open-transcript' }
   | { type: 'export-transcript'; path?: string }
+  | { type: 'download-artifact'; uri: string }
   | { type: 'open-editor'; text: string }
   | { type: 'copy-latest-reply' }
   | { type: 'enter-chat' }
@@ -25,8 +27,9 @@ export function resolveComposerIntent(input: {
   attachmentCount: number;
   mode: ComposerMode;
 }): ComposerIntent {
-  const parsed = input.attachmentCount === 0
-    ? parseTuiCommand(input.text)
+  const command = parseTuiCommand(input.text);
+  const parsed = input.attachmentCount === 0 || (command.type === 'command' && command.name === 'download')
+    ? command
     : { type: 'text' as const, text: input.text };
 
   if (parsed.type === 'empty') return { type: 'none' };
@@ -62,6 +65,14 @@ export function resolveComposerIntent(input: {
         type: 'export-transcript',
         ...(parsed.args ? { path: parsed.args } : {}),
       };
+    case 'download':
+      if (input.attachmentCount) return { type: 'notice', message: 'Remove attachments before downloading an artifact.' };
+      try {
+        parseArtifactUri(parsed.args);
+        return { type: 'download-artifact', uri: parsed.args };
+      } catch {
+        return { type: 'notice', message: 'usage: /download <artifact-uri>' };
+      }
     case 'edit':
       return { type: 'open-editor', text: parsed.args };
     case 'copy':

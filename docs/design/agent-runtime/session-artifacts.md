@@ -208,10 +208,14 @@ helper，保留可复用能力。本分支基于该清理，接通目标后再�
   CORS origin；浏览器 fixture 观察到 `Origin: null`，仅配置 Console 固定 origin
   不足以保证该链路。无 cookie 的签名 GET 可使用 `Access-Control-Allow-Origin: *`；
   这不绕过 Host 认证。不能假定现有 bucket 无需配置即可使用。
-- TUI 已能显示标题与稳定引用，并在 snapshot 重绘后保留。可用地址已接通：
-  WebSocket 使用真实连接端口显示需认证的 HTTP GET 地址；默认 stdio 不开新端口，
-  通过只读 `artifact.address.get/result` 控制消息解析现有本地快照路径或临时 COS
-  URL。这些地址不写入 Agent 历史、Channel 或 checkpoint，也不自动下载文件。
+- TUI 已能显示结构化交付物及正文独立引用，并在 snapshot 重绘后保留。两种连接
+  均通过只读 `artifact.address.get/result` 解析地址；仅 embedded stdio 的 Host
+  路径视为本机路径。WebSocket 返回的 Host 路径显示为 `/download <artifact-uri>`，
+  由用户显式操作，经已有认证 HTTP GET 保存到 TUI 本机私有临时目录；不再展示
+  裸浏览器无法打开的 Bearer-only URL。COS 可直接使用临时 URL，或同样按需下载。
+  正文的原生链接只使用已解析的本机 file URL 或 COS URL，未解析时显示下载操作。
+  默认 stdio 不开新端口；地址和下载路径不进消息、Channel 或 checkpoint，
+  查询本身不下载文件，重定向不携带 Host Bearer。
   接口见 [Agent Session](../../reference/runtime/session-projection.md#artifact-display-addresses)。
 - Channel 人和 Pet 消息统一为 `deliverables`。迁移 0003 按 100 行分页，把旧
   label/version 转成显示标题并保留原 JSON；不做双字段读取。新写入恢复 100 条、
@@ -236,5 +240,5 @@ local binary、正文链接、COS 跨源 302 以及 Bearer 不泄漏。它们不
 权限、外网和 CORS 配置的验收。真实模型评估在调用前因缺少默认 profile 配置文件
 `/home/agent/.pinpawo/config.json` 报 `ENOENT` 而未能启动，不是网络失败。真实 COS
 联调与外部模型验收仍未完成，不能由隔离 fixture 推定已完成。完整原生 TUI renderer
-套件未作为本次全通过结论；本次验证包含新增的两项原生显示用例、实际传输用例和
-251 项 TUI Node 测试。CI 结果以 PR 最终提交上的检查为准。
+套件未作为本次全通过结论；本次验证包含新增原生显示用例、真实 Host/WS/HTTP
+下载用例和 TUI Node 测试。CI 结果以 PR 最终提交上的检查为准。

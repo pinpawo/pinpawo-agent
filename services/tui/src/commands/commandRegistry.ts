@@ -6,6 +6,7 @@ export type TuiCommandName =
   | 'policy'
   | 'transcript'
   | 'export'
+  | 'download'
   | 'edit'
   | 'copy'
   | 'refresh'
@@ -67,6 +68,10 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'export',
   usage: '/export [path]',
   description: 'Export this session transcript as Markdown',
+}, {
+  name: 'download',
+  usage: '/download <artifact-uri>',
+  description: 'Download a published artifact to a local temporary file',
 }, {
   name: 'edit',
   usage: '/edit [text]',

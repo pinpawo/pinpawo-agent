@@ -36,7 +36,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { buildDeliverableDisplayLines, buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
+import { buildMessageReferenceDisplayLines, buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
 
 const USER_MESSAGE_BACKGROUND = '#303842';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
@@ -750,10 +750,11 @@ function populateTimelineRoot(
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
         content: entry.text,
+        artifactAddress,
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);
-      buildDeliverableDisplayLines(entry, artifactAddress).forEach(line => addLine(line, detailSurface));
+      buildMessageReferenceDisplayLines(entry, artifactAddress).forEach(line => addLine(line, detailSurface));
       if (isToolCallMessageEntry(entry)) {
         buildToolCallDisplayLines(entry).forEach(line => addLine(line, detailSurface));
         openToolCallScope(entry);

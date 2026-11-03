@@ -191,14 +191,9 @@ corresponding snapshot message field. These retain stable `artifact://` URIs;
 temporary download addresses and local filesystem paths are connection-owned
 display information, not conversation history.
 
-The TUI address wiring is being validated separately from reference projection.
-For an existing WebSocket Host connection, the display address uses that
-connection's actual HTTP port and `/agent-session/artifacts?uri=...`. That
-endpoint still requires the existing Bearer authority. No token is embedded in
-the displayed URI.
-
-The default stdio Host does not acquire an HTTP listener. A read-only control
-request resolves a reference for display over the existing JSONL connection:
+Both TUI transports resolve structured and body-only artifact references with
+the same read-only control request. Default stdio does not acquire an HTTP
+listener; it carries the request over its existing JSONL connection:
 
 ```ts
 type ArtifactAddressGetMessage = {
@@ -216,19 +211,28 @@ temporary signed download URL with its expiry. The local resolver closes the
 validation file handle. It does not stream or download the file. Resolution
 failures use the existing correlated error response.
 
+Only an embedded stdio child is known to share the TUI filesystem. A WebSocket
+Host path may belong to a remote machine, even when a loopback port is used.
+The TUI displays `/download <artifact-uri>` for that case, rather than a remote
+path or a Bearer-only browser URL. That explicit client action streams the
+existing authenticated HTTP GET into a private local temporary file. A COS URL
+is already browser-usable and is downloaded without Host credentials when the
+command is used. No token is embedded in a displayed URL; address lookup does
+not download files. The TUI keeps resolved addresses only in client memory.
+
 The Host replies only to the requesting stdio/WebSocket peer; it does not
 broadcast the address through session events. The HTTP message POST route
 rejects this control request with 400. HTTP consumers use the existing
 authenticated `GET /agent-session/artifacts?uri=...` instead. This keeps
 temporary URLs out of shared SSE event streams.
 
-This is a display lookup, not a model tool, new TUI command or run admission.
+The control request is a display lookup, not a model tool or run admission.
 It does not change the selected session, mutate the Agent timeline, write a
 checkpoint, or add addresses to Agent messages or Channel storage. The public
 ArtifactStore port remains `put` / `list` / `fetch`; local-path resolution is a
-concrete Host adapter facility. Reference projection, controller/stdio tests
-and complete visible address wiring must be verified separately; this API
-description is not a statement of completed acceptance testing.
+concrete Host adapter facility. Tests cover the actual authenticated WebSocket
+lookup, body-only references, client-side HTTP download and snapshot replay;
+they do not establish real-model or live COS acceptance.
 
 See [Artifacts HTTP and clients](../artifacts/index.md#http-and-clients) for
 authentication, downloads and COS browser CORS.

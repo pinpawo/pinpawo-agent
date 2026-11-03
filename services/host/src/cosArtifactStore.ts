@@ -109,7 +109,7 @@ export class CosArtifactStore implements ArtifactStore {
     const metadata = `${this.workspace}/${thread}/.metadata/${id}.json`;
     const hash = createHash('sha256');
     let size = 0;
-    const source = Readable.fromWeb(input.body as import('node:stream/web').ReadableStream<Uint8Array>);
+    const source = Readable.fromWeb(input.body as unknown as import('node:stream/web').ReadableStream<Uint8Array>);
     const measured = new Transform({ transform(chunk: Buffer, _encoding, callback) {
       size += chunk.byteLength;
       if (size > MAX_ARTIFACT_BYTES) {

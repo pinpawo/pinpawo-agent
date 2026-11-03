@@ -9,6 +9,7 @@ import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
 import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME } from '../executionMessages';
+import { readAcceptedRunDeliverables } from '../executionReviews';
 import { createCapabilityCatalog } from './capabilityCatalog';
 
 export const delegateCapabilitySchema = z.object({
@@ -49,7 +50,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const result = createCapabilityExecutionMessage({
       callId: runtime.toolCallId,
       execution: input,
-      result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts,
+      result: { status: execution.status, delivery: execution.delivery,
         deliverables: execution.deliverables,
         ...(execution.reviewDecision ? { reviewDecision: execution.reviewDecision } : {}) },
       metadata: { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
@@ -59,8 +60,8 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     return new Command({ update: {
       messages: [result, ...(execution.reviewDecision ? [buildReviewStopMessage(execution.reviewDecision, {
         runId: state.runId, taskId: state.taskId,
+        deliverables: readAcceptedRunDeliverables(state.messages, state.runId),
       })] : [])],
-      sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
     } });

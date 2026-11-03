@@ -4,7 +4,6 @@ import { isAbsolute } from 'node:path';
 import { assertCapabilityDocumentMatches } from './capabilityDocument';
 import type { AgentModels } from './agent';
 import type { SubagentResult } from './subagent';
-import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
 import type { DelegationScope } from './scope';
 
 export type CapabilityDocumentSource = {
@@ -23,18 +22,15 @@ export type InstructionDocument = {
 
 export type CapabilityFinalizeContext = {
   models: AgentModels;
-  /** Read-only capability-lane history captured before this subagent run. */
+  /** Read-only execution input captured before this subagent run. */
   messages: readonly BaseMessage[];
-  artifactStore?: CapabilityArtifactStore;
-  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
   capabilityId: string;
 } & DelegationScope;
 
 export type CapabilityFinalizeResult = {
   messages?: BaseMessage[];
-  /** Replace the tool output directly; null explicitly means no deliverable. */
+  /** Replace the textual report; null explicitly means no delivery body. */
   output?: string | null;
-  artifactRefs?: CapabilityArtifactRef[];
 };
 
 export type CapabilityFinalizeHook = (

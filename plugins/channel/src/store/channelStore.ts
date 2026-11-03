@@ -1,7 +1,8 @@
+import type { Deliverable } from '@pinpawo/agent-contracts';
+
 export type ChannelMemberKind = 'human' | 'pet';
 export type MemberRef = { kind: ChannelMemberKind; id: string };
 
-export type ArtifactReference = { uri: string; label?: string; version?: string };
 export type ChannelMention = { participantId: string; label?: string };
 
 export type ChannelRow = {
@@ -36,7 +37,7 @@ export type ChannelMessageRow = {
   body: string;
   replyTo?: string;
   mentions: ChannelMention[];
-  artifacts: ArtifactReference[];
+  deliverables: Deliverable[];
 };
 
 export type ChannelSessionRow = {

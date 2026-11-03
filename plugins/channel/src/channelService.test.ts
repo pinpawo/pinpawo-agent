@@ -90,6 +90,64 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   });
 
+  test(`${backend}: existing message attachments migrate once without losing their labels or versions`, async () => {
+    const storage = createStudioStorage(config());
+    try {
+      const migrations = channelMigrations(storage.dialect);
+      const legacy = await storage.open('channel', {
+        '0001_channels': migrations['0001_channels']!, '0002_channel_prompt': migrations['0002_channel_prompt']!,
+      });
+      await sql`insert into channels (channel_id, title, created_by_kind, created_by_id, created_at, updated_at)
+        values ('old', 'Existing', 'human', 'owner', 'then', 'then')`.execute(legacy);
+      await sql`insert into channel_members (channel_id, member_kind, member_id, joined_at)
+        values ('old', 'human', 'owner', 'then')`.execute(legacy);
+      const artifacts = [
+        { uri: 'artifact://old/report', label: 'Report', version: 'v1' },
+        { uri: 'https://example.com/file', version: '2' },
+        { uri: 'repo:plain', label: 'Plain' },
+        { uri: 'repo:untitled' },
+      ];
+      const original = { body: 'Keep this', mentions: [], artifacts, otherMetadata: { source: 'old' } };
+      await sql`insert into channel_messages (message_id, channel_id, author_kind, author_id, occurred_at, data)
+        values ('old-msg', 'old', 'human', 'owner', 'then', ${JSON.stringify(original)})`.execute(legacy);
+      const db = await storage.open<ChannelDatabase>('channel', migrations);
+      const service = new ChannelService({ store: new KyselyChannelStore(db), pets, humans });
+      const migrated = await service.getMessage('old', 'old-msg');
+      const deliverables = [
+        { uri: artifacts[0]!.uri, title: 'Report · v1' },
+        { uri: artifacts[1]!.uri, title: 'https://example.com/file · 2' },
+        { uri: artifacts[2]!.uri, title: 'Plain' },
+        { uri: artifacts[3]!.uri },
+      ];
+      assert.deepEqual(migrated?.deliverables, deliverables);
+      assert.equal(Object.hasOwn(migrated!, 'artifacts'), false);
+      assert.equal(Object.hasOwn(migrated!, 'otherMetadata'), false);
+      const stored = await db.selectFrom('channel_messages').select('data').where('message_id', '=', 'old-msg').executeTakeFirstOrThrow();
+      assert.deepEqual(JSON.parse(stored.data), { ...original, deliverables });
+      await migrations['0003_channel_deliverables']!.up(db);
+      assert.equal((await db.selectFrom('channel_messages').select('data').where('message_id', '=', 'old-msg').executeTakeFirstOrThrow()).data,
+        stored.data, 'running the conversion again leaves migrated data unchanged');
+      const sent = await service.postMessage(owner, 'old', { body: 'New message', deliverables: [{ uri: 'repo:new', title: 'New' }] });
+      const fresh = JSON.parse((await db.selectFrom('channel_messages').select('data')
+        .where('message_id', '=', sent.message.messageId).executeTakeFirstOrThrow()).data);
+      assert.deepEqual(fresh, { body: 'New message', mentions: [], deliverables: [{ uri: 'repo:new', title: 'New' }] });
+    } finally { await storage.close(); }
+  });
+
+  test(`${backend}: member messages retain declared references and reject malformed declarations`, () => withService(async (service) => {
+    const id = (await service.createChannel(owner, { title: 'Reports', pets: ['executor'] })).channel.channelId;
+    const deliverables = [{ uri: 'artifact://workspace/report', title: 'Report' }, { uri: 'https://example.com/pull/1' }];
+    const sent = await service.postMessage(owner, id, { body: 'Ready.', deliverables });
+    assert.deepEqual(sent.message.deliverables, deliverables);
+    assert.deepEqual((await service.getMessage(id, sent.message.messageId))?.deliverables, deliverables);
+    assert.deepEqual((await service.readContext(executor, id)).messages[0]?.deliverables, deliverables);
+    assert.deepEqual((await service.postMessage(executor, id, { body: 'Acknowledged.' })).message.deliverables, []);
+    await assert.rejects(service.postMessage(owner, id, { body: 'Old field', artifacts: [] }));
+    for (const value of [null, {}, [{ uri: '' }], [{ uri: 1 }], [{ uri: 'x', title: 2 }]]) {
+      await assert.rejects(service.postMessage(owner, id, { body: 'Malformed', deliverables: value }));
+    }
+  }));
+
   test(`${backend}: a Channel starts with its creator and the Pets it names, and lists only for its members`, () => withService(async (service) => {
     const { channel, members } = await service.createChannel(owner, { title: 'Release', description: 'Ship 1.0', pets: ['executor', 'executor'] });
     assert.equal(channel.title, 'Release');

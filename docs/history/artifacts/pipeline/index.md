@@ -1,6 +1,8 @@
 # Capability Artifact Pipeline
 
-> 状态：Current
+> Archived: this pipeline has been removed. See the current [Deliverables contract](../../../reference/deliverables.md).
+
+> 状态：Archived
 >
 > 用途：为 `capability` 能力产物从 `run` 到 `artifact store` 到主流程引用的完整链路提供单独说明。
 

@@ -12,8 +12,7 @@ proposals, and accepted contracts at retained paths; check each page's status.
   Toolkit, directory format, and Toolkit runtime lifecycle.
 - [Runtime contracts](runtime/index.md) — sessions, model profiles, authorization,
   guards, workdirs, and delegation announces.
-- [Artifacts](artifacts/index.md) — durable Capability output and store
-  contracts.
+- [Deliverables](deliverables.md) — tool-declared references and execution records.
 - Local-machine Toolkit operations: [Apply Patch](local-tools/apply-patch.md) and
   [Browser](local-tools/browser.md) — operation protocols and safety boundaries.
 - [Browser privacy notice](../guides/browser-extension-privacy.md) — policy

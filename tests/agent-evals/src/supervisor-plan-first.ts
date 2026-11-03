@@ -118,7 +118,7 @@ function priorRunMessages(run: PriorRun, index: number): BaseMessage[] {
     }] }), { ...metadata, source: 'supervisor' }),
     createCapabilityExecutionMessage({ callId: delegateCall, metadata,
       execution: { planItemId: `${runId}:task`, delegationId: `${runId}:delegation`, capability: 'general', task: run.task, briefing: run.task },
-      result: { status: 'returned', artifacts: [], deliverables: [], delivery: { id: `delivery:${runId}`, task: run.task, text: run.delivery,
+      result: { status: 'returned', deliverables: [], delivery: { id: `delivery:${runId}`, task: run.task, text: run.delivery,
         scope: { ...metadata, lane: 'capability:general', delegationId: `${runId}:delegation` } } } }),
     setAgentMessageMetadata(new AIMessage(run.reply), metadata),
   ];

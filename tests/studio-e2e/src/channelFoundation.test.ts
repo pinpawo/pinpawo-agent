@@ -70,16 +70,19 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     ]) assert.equal((await post('/channels/messages', { channelId, body: 'spoof', ...forged })).status, 400);
     assert.equal((await post('/channels/messages', { channelId, body: 'not here', mentions: [{ participantId: 'pet:writer' }] })).status, 409,
       'only current members can be addressed');
-    const plain = await (await post('/channels/messages', { channelId, body: 'quoted @reviewer' })).json() as ChannelMessage & { deliveries: ChannelDelivery[] };
+    const sourceReferences = [{ uri: 'https://example.com/source', title: 'Source' }];
+    const plain = await (await post('/channels/messages', { channelId, body: 'quoted @reviewer', deliverables: sourceReferences })).json() as ChannelMessage & { deliveries: ChannelDelivery[] };
     assert.deepEqual(plain.author, { kind: 'human', id: 'local' });
     assert.deepEqual([plain.mentions, plain.deliveries], [[], []]);
     const reply = await post('/channels/messages', { channelId, body: 'Review this', replyTo: plain.messageId,
-      mentions: [{ participantId: 'pet:reviewer' }], artifacts: [{ uri: 'repo:commit-a', version: 'a' }] });
+      mentions: [{ participantId: 'pet:reviewer' }], deliverables: [{ uri: 'repo:commit-a', title: 'Commit a' }] });
     assert.equal(reply.status, 201);
     const { deliveries } = await reply.json() as { deliveries: ChannelDelivery[] };
     assert.deepEqual(deliveries.map(delivery => [delivery.participantId, delivery.state]), [['pet:reviewer', 'accepted']]);
     assert.deepEqual(dispatched.map(item => [item.session, item.scope]), [[{ id: deliveries[0]!.sessionId, create: true }, { namespace: 'channel', id: channelId }]]);
     const input = readChannelTestInput(dispatched[0]!.request);
+    assert.deepEqual(input.deliverables, [{ uri: 'repo:commit-a', title: 'Commit a' }]);
+    assert.deepEqual(input.replyTo?.deliverables, sourceReferences);
     assert.deepEqual([input.author, input.replyTo?.messageId], [{ participantId: 'human:local', kind: 'human', label: 'Local' }, plain.messageId]);
     const context = await (await get(`/channels/context?channelId=${channelId}&limit=1`)).json() as {
       channel: { description: string }; members: unknown[]; messages: unknown[]; hasMore: boolean; hasEarlier: boolean; viewerParticipantId: string;
@@ -178,10 +181,6 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     resolveInvocationContext: contextBridge.resolveInvocationContext,
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: {
-      writeArtifact: async () => { throw new Error('unused'); }, readArtifact: async () => { throw new Error('unused'); },
-      listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async (uri) => uri,
-    },
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
     runAgentTurn: async ({ request, setup }) => {
@@ -248,7 +247,8 @@ test('a Pet message is its Channel session public reply, written once, handed of
       source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
       payload: { petId: 'one', invocationId: delivery!.invocationId, sessionId, scope: { namespace: 'channel', id }, message, ...payload },
     });
-    const completed = (messageId: string, text: string) => ({ type: 'message.completed', messageId, role: 'assistant', text });
+    const references = [{ uri: 'artifact://workspace/report', title: 'Published report' }];
+    const completed = (messageId: string, text: string) => ({ type: 'message.completed', messageId, role: 'assistant', text, deliverables: references });
     const handoff = 'Over to [@Two](participant:pet:two).';
     emit({ type: 'message.tool_calls', messageId: 'tool-1', text: handoff, toolCalls: [{ id: 'c', name: 'plan_request', args: {} }] });
     emit({ type: 'tool_call.settled', messageId: 'tool-1', toolCallId: 'c', status: 'completed' });
@@ -258,6 +258,8 @@ test('a Pet message is its Channel session public reply, written once, handed of
     assert.deepEqual((await petMessages()).map(message => [message.author, message.externalRef, message.body, message.mentions]),
       [[{ kind: 'pet', id: 'one' }, 'reply-1', handoff, [{ participantId: 'pet:two', label: 'Two' }]]]);
     const input = readChannelTestInput(dispatched[1]!.request);
+    assert.deepEqual((await petMessages())[0]!.deliverables, references);
+    assert.deepEqual(input.deliverables, references);
     assert.deepEqual([input.author, input.messageId], [{ participantId: 'pet:one', kind: 'pet', label: 'One' }, (await petMessages())[0]!.messageId]);
     assert.deepEqual(dispatched[1]!.session, { id: (await channel.service.getSession(id, 'two'))!.sessionId, create: true });
     await waitFor(() => events.some(event => event.type === 'channel.delivery' && event.payload.participantId === 'pet:two'));

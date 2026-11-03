@@ -1,5 +1,5 @@
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
-import { readReplyResultReferences } from '../conversation/transcriptProjection';
+import { readReplyDeliverables, readReplyResultReferences } from '../conversation/transcriptProjection';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
@@ -558,6 +558,10 @@ export async function runAgentSessionTurn(
     role: 'assistant',
     text: finalReply,
     resultReferences: finalReply ? readReplyResultReferences(
+      checkpointReply ? finalThreadState.messages : finalMessages,
+      checkpointReply ?? finalMessage,
+    ) : [],
+    deliverables: finalReply ? readReplyDeliverables(
       checkpointReply ? finalThreadState.messages : finalMessages,
       checkpointReply ?? finalMessage,
     ) : [],

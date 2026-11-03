@@ -1,3 +1,5 @@
+export type { Deliverable } from '@pinpawo/agent-contracts';
+export * from './deliverables';
 export * from './domain';
 export * from './events';
 export * from './localAttachments';

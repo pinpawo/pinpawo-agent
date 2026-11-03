@@ -66,6 +66,7 @@
     "@langfuse/otel": "^5.10.0",
     "@opentelemetry/sdk-node": "^0.221.0",
     "@pinpawo-toolkit/browser": "^1.0.0",
+    "@pinpawo/agent-contracts": "^1.0.0",
     "@pinpawo/agent-session": "^1.0.0",
     "@pinpawo/pet-agent": "^1.0.1",
     "@tavily/core": "^0.7.1",

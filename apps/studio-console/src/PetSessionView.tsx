@@ -12,7 +12,7 @@ import type {
   ReceivedOperationBlock,
   HumanReviewPendingInterruptProjection,
 } from '@pinpawo/agent-session';
-import { ChannelCopy } from './ChannelConversation';
+import { ChannelCopy, MessageDeliverables } from './ChannelConversation';
 import { channelPetIdentity, type ChannelPet } from './channelData';
 import {
   applyPetSessionMessage,
@@ -82,6 +82,7 @@ function SessionMessage({ entry, petName }: { entry: AgentMessageEntry; petName:
       {entry.status === 'streaming' && <span className="pet-session-streaming">Streaming…</span>}
       {entry.createdAt && <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>}</div>
     {entry.text.trim() && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown></div>}
+    <MessageDeliverables deliverables={entry.deliverables} />
     {entry.toolCalls?.length ? <SessionToolCalls calls={entry.toolCalls} /> : null}
     {entry.resultReferences?.map(reference => <details className="pet-session-reference" key={reference.id}>
       <summary>Result · {reference.title}</summary>

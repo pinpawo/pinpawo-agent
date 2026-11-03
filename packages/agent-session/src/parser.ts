@@ -1,3 +1,4 @@
+import { parseDeliverables } from './deliverables';
 import { parseResultReferences } from './resultReferences';
 import { parseAgentNotice } from './notice';
 import {
@@ -306,6 +307,7 @@ function parseAgentTimelineEntry(
       text: value.text,
       ...(toolCalls ? { toolCalls } : {}),
       ...(value.resultReferences !== undefined ? { resultReferences: parseResultReferences(value.resultReferences) } : {}),
+      ...(value.deliverables !== undefined ? { deliverables: parseDeliverables(value.deliverables) } : {}),
       ...(notice ? { notice } : {}),
       status: value.status,
       ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),

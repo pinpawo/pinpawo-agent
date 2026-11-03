@@ -9,7 +9,6 @@
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
-  type CapabilityArtifactStore,
   type PetDocument,
 } from '@pinpawo/pet-agent';
 import {
@@ -169,7 +168,6 @@ export class StudioHost {
         petCapabilities,
         petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),
-        capabilityArtifactStore: this.caps.getCapabilityArtifactStore(),
         checkpoint: this.getCheckpointer(),
         ...this.caps.getExecutionConfig(),
         deferPluginActivation: true,
@@ -269,9 +267,4 @@ export class StudioHost {
   getToolkitInventoryStore(): HostToolkitInventoryStore {
     return this.caps.getToolkitInventoryStore();
   }
-
-  getCapabilityArtifactStore(): CapabilityArtifactStore {
-    return this.caps.getCapabilityArtifactStore();
-  }
-
 }

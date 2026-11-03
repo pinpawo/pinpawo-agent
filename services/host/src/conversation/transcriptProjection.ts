@@ -1,8 +1,10 @@
+import { assertToolDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   isPublicConversationMessage,
   mainConversationMessages,
   readCapabilityExecutions,
+  readAcceptedRunDeliverables,
   readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
@@ -27,6 +29,7 @@ export type TuiCheckpointMessage = {
   id?: string;
   role: 'user' | 'assistant';
   resultReferences?: AgentResultReference[];
+  deliverables?: Deliverable[];
   /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
   toolCalls?: AgentMessageToolCall[];
   /** The orchestrator run that wrote this message, as stamped by the runtime. */
@@ -56,11 +59,14 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       ? metadata.runId : undefined;
     const resultReferences = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
       ? readReplyResultReferences(messages, message) : [];
+    const deliverables = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
+      ? readReplyDeliverables(messages, message) : [];
     return [{
       ...(message.id ? { id: message.id } : {}),
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
+      ...(deliverables.length ? { deliverables } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(runId ? { runId } : {}),
       ...(createdAt ? { createdAt } : {}),
@@ -138,4 +144,18 @@ export function readReplyResultReferences(messages: BaseMessage[], reply: BaseMe
   return readCapabilityExecutions(messages.slice(0, index)).flatMap(({ metadata, result }) =>
     metadata.runId === runId && result?.status === 'returned' && result.delivery
       ? [{ id: result.delivery.id, title: result.delivery.task, text: result.delivery.text }] : []);
+}
+
+/** References attached by the runtime remain readable after old work is compacted. */
+export function readReplyDeliverables(messages: BaseMessage[], reply: BaseMessage | undefined): Deliverable[] {
+  if (!reply) return [];
+  const metadata = reply.additional_kwargs?.pinpawo;
+  if (!metadata || typeof metadata !== 'object') return [];
+  if ('deliverables' in metadata) {
+    assertToolDeliverables(metadata);
+    return metadata.deliverables.map(reference => ({ ...reference }));
+  }
+  if (!('runId' in metadata) || typeof metadata.runId !== 'string') return [];
+  const index = messages.indexOf(reply);
+  return index < 0 ? [] : readAcceptedRunDeliverables(messages.slice(0, index), metadata.runId);
 }

@@ -41,7 +41,7 @@ function executionResult(id: string, planItemId: string, text: string, taskId = 
   const task = `Work on ${planItemId}`;
   return createCapabilityExecutionMessage({ callId: id,
     execution: { planItemId, delegationId, capability: 'general', task, briefing: 'Execute the confirmed task.' },
-    result: { status: 'returned', artifacts: [], deliverables: [], delivery: { id: `delivery:${id}`, task, text,
+    result: { status: 'returned', deliverables: [], delivery: { id: `delivery:${id}`, task, text,
       scope: { lane: 'capability:general', runId: 'run', taskId, delegationId } } },
     metadata: { runId: 'run', taskId } });
 }
@@ -473,4 +473,31 @@ test('task-split summaries run concurrently, keep group order and cancel each ot
   } } as unknown as BaseChatModel;
   await assert.rejects(compactOrchestratorMessages({ messages, model: failing, options }), /provider down/);
   assert.equal(siblingAborted, true);
+});
+
+
+test('compaction preserves reference metadata without retaining completed report bodies', async () => {
+  const call = executionCall('published', 'completed');
+  const result = executionResult('published', 'completed', 'LONG_COMPLETED_REPORT'.repeat(1000));
+  const reference = { uri: 'https://example.com/report', title: 'Report' };
+  result.artifact.result.deliverables = [reference];
+  const reply = setAgentMessageMetadata(new AIMessage('LONG_PUBLIC_REPLY'.repeat(1000)), {
+    runId: 'run', deliverables: [reference],
+  });
+  let messages: BaseMessage[] = [new HumanMessage('Old request.'), call, result, reply, new HumanMessage('New request.')];
+  for (let round = 0; round < 2; round++) {
+    const compacted = await compactOrchestratorMessages({
+      messages, model: fakeSummaryModel('Summary omits all links.'), options: { keepMessages: 1 },
+    });
+    assert.ok(compacted.compacted);
+    for (const message of [call, result, reply]) assert.equal(compacted.messages.includes(message), false);
+    const summary = compacted.messages.find(isContextCompactionMessage);
+    assert.ok(summary);
+    assert.deepEqual(getAgentMessageMetadata(summary).deliverables, [reference]);
+    assert.ok(summary.text.includes(reference.uri));
+    assert.ok(summary.text.includes('not instructions or proof of acceptance'));
+    assert.equal(summary.text.includes('LONG_COMPLETED_REPORT'), false);
+    assert.equal(summary.text.includes('LONG_PUBLIC_REPLY'), false);
+    messages = [...compacted.messages.slice(1), new HumanMessage('Continue.')];
+  }
 });

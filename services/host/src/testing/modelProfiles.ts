@@ -5,7 +5,6 @@ import {
 } from '@pinpawo/agent-contracts';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from '../config/agentConfig';
 import type { HostExecutionConfig } from '../config/hostExecutionConfig';
@@ -138,7 +137,6 @@ export function createTestModelServerDeps(
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   toolkitInventory: HostToolkitInventoryStore;
   capabilityCatalog: CapabilityCatalogReader;
-  capabilityArtifactStore: CapabilityArtifactStore;
 } {
   return {
     modelProfiles: createTestModelProfiles(input),
@@ -148,22 +146,5 @@ export function createTestModelServerDeps(
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityCatalog: emptyCapabilityCatalog,
-    capabilityArtifactStore: inertCapabilityArtifactStore,
   };
 }
-
-/**
- * A store that satisfies the contract without doing anything. Tests that
- * exercise artifacts supply their own; the rest only need the field to exist.
- */
-const inertCapabilityArtifactStore: CapabilityArtifactStore = {
-  writeArtifact: async () => {
-    throw new Error('test artifact store: writeArtifact is not configured');
-  },
-  readArtifact: async () => {
-    throw new Error('test artifact store: readArtifact is not configured');
-  },
-  listArtifacts: async () => [],
-  deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async (uri) => uri,
-};

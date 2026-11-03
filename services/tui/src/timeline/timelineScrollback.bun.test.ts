@@ -829,3 +829,22 @@ test('subagent results stay out of scrollback after streamed answer completion',
     setup.renderer.destroy();
   }
 });
+
+test('completed public deliverables appear beside rich assistant prose without repeating commits', async () => {
+  const setup = await createTimelineRenderer(100);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const completed = { ...assistantMessage('Report complete.', 'completed'), deliverables: [
+      { uri: 'artifact://workspace/report', title: 'Report' },
+    ] };
+    timeline.render(session([completed]));
+    const output = setup.externalOutput.take().flatMap(commit => commit.rows).join('\n');
+    assert.match(output, /Report complete\./);
+    assert.match(output, /Report · artifact:\/\/workspace\/report/);
+    timeline.render(session([completed]));
+    assert.deepEqual(setup.externalOutput.take(), []);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});

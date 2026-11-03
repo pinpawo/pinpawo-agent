@@ -152,7 +152,8 @@ button { color: #bdebed; background: #153438; }
 .channel-tool-call-state { flex: none; font-size: var(--text-xs); color: #9fb8ae; }
 .channel-tool-call-state.running { color: #73c9c9; }
 .channel-tool-call-state.failed, .channel-tool-call-state.interrupted { color: #e09a8a; }
-.channel-artifact { margin-top: 8px; color: #9fb8ae; overflow-wrap: anywhere; font-size: var(--text-xs); }
+.channel-deliverables { margin: 8px 0 0; padding: 0; list-style: none; }
+.channel-deliverable { color: #9fb8ae; overflow-wrap: anywhere; font-size: var(--text-xs); }
 .channel-jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); height: 28px; color: #c4e5df; border-color: #4a7d7b; border-radius: 16px; background: #193234; box-shadow: 0 3px 14px #0005; font-size: var(--text-xs); }
 .channel-composer-quote { display: flex; align-items: start; gap: 8px; }
 .channel-composer-quote .channel-quote { min-width: 0; margin: 0; }

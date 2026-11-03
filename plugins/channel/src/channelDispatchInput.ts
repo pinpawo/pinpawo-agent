@@ -35,7 +35,10 @@ export function channelDispatchInput(
     type: 'channel_message', version: 1,
     channelId: message.channelId, messageId: message.messageId,
     author: author(message), body: message.body,
-    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
+    ...(message.deliverables.length ? { deliverables: message.deliverables } : {}),
+    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body,
+      ...(original.deliverables.length ? { deliverables: original.deliverables } : {}),
+    } } : {}),
     ...(addressedBy ? { addressedBy } : {}),
   });
 }

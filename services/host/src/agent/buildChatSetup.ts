@@ -58,7 +58,6 @@ export function buildChatSetup(options: BuildChatSetupOptions) {
     threadId: session.threadId,
     interfaceKind: 'tui',
     checkpoint: options.checkpointer,
-    capabilityArtifactStore: deps.capabilityArtifactStore,
     sessionStartedAt: session.startedAt,
   });
 }

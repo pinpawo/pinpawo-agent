@@ -12,7 +12,7 @@
 
 ## Context
 
-`workdir` is currently the lowest common denominator for local execution. It is passed into chat prompts, local-machine Toolkit execution scopes, checkpoints, Studio config, Studio wiki, due-run state, and capability artifacts. That made the local runtime workdir-scoped, but it still leaves two product-level gaps:
+`workdir` is currently the lowest common denominator for local execution. It is passed into chat prompts, local-machine Toolkit execution scopes, checkpoints, Studio config, Studio wiki, due-run state. That made the local runtime workdir-scoped, but it still leaves two product-level gaps:
 
 - Chat and Studio do not know which user-facing project they belong to. They only see a path.
 - App-driven flows cannot reliably focus a conversation on a specific project without starting a separate host process with a different `--workdir`.
@@ -107,7 +107,6 @@ directory per workdir (see [Workdir configuration](../../reference/runtime/workd
 ```text
 ~/.pinpawo/workspaces/<workspace-id>/
 ├── workspace.json
-├── capability-artifacts/
 ├── checkpoints-capability-v6/
 ├── checkpoints-tui-capability-v6/
 ├── checkpoints-studio-capability-v6/
@@ -157,7 +156,6 @@ type HostRuntimeConfig = {
   checkpointPath: string;
   tuiCheckpointPath: string;
   tuiSessionPath: string;
-  capabilityArtifactRoot: string;
 };
 ```
 

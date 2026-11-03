@@ -60,7 +60,7 @@ export function supervisorFixture(params: {
     }] }), { ...metadata, source: 'supervisor' }),
     createCapabilityExecutionMessage({ callId: id, metadata,
       execution: { planItemId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, briefing: 'Execute the confirmed task.' },
-      result: { status: 'returned', artifacts: [], deliverables: [], delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
+      result: { status: 'returned', deliverables: [], delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
         scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } } } }),
   ] };
 }

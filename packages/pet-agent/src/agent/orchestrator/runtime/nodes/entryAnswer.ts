@@ -285,7 +285,10 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }
     const committed = toolCalls?.length === response.tool_calls?.length ? response : withoutRepeatedCalls(response, toolCalls!);
     return {
-      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), {
+        taskId: state.taskId, runId: state.runId,
+        ...(!toolCalls?.length ? { deliverables: [] } : {}),
+      })],
     };
   };
 

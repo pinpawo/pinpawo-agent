@@ -174,3 +174,12 @@ test('pager preserves compacted commands, authorization reasons, and complete ou
   assert.ok(content.includes('unsafe�[31m'));
   assert.doesNotMatch(content, /\x1B/);
 });
+
+test('transcript pager includes structured public deliverables independently of prose links', () => {
+  const content = formatTranscriptPagerText(createSession([{
+    id: 'reply', type: 'message', role: 'assistant', text: 'Done.', status: 'completed',
+    deliverables: [{ uri: 'artifact://workspace/report', title: 'Report' }],
+  }]));
+  assert.match(content, /Done\./);
+  assert.match(content, /Report · artifact:\/\/workspace\/report/);
+});

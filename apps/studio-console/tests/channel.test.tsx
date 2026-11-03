@@ -13,7 +13,7 @@ import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
 const message: ChannelMessage = { channelId: 'a', sequence: 2, messageId: 'm', body: 'Full public delivery.\n\nMissing work remains.\n\n```ts\nconst evidence = 42;\n```',
   author: { kind: 'pet', id: 'worker' }, occurredAt: '2026-10-04T00:00:00Z', externalRef: 'session-message-1',
-  artifacts: [{ uri: 'javascript:alert(1)', label: 'unsafe' }], mentions: [] };
+  deliverables: [{ uri: 'javascript:alert(1)', title: 'unsafe' }], mentions: [] };
 const members: ChannelMember[] = [
   { participantId: 'human:studio-operator', kind: 'human', id: 'studio-operator', label: 'studio-operator' },
   { participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' },
@@ -100,6 +100,21 @@ test('timeline renders the stored body and safe references; every message offers
   assert.equal((markup.match(/aria-label="Reply to /g) ?? []).length, 2);
   assert.ok(!markup.includes('href="javascript:')); assert.ok(!markup.includes('<script>'));
   assert.ok(!markup.includes('Tool calls'), 'Channel messages carry no tool calls');
+});
+
+test('timeline renders structured deliverables without requiring links in the body', () => {
+  const value = { ...message, body: 'The review is ready.', deliverables: [
+    { uri: 'https://example.com/pull/42', title: 'Review PR' },
+    { uri: 'artifact://workspace/report', title: 'Report' },
+    { uri: 'javascript:alert(1)', title: 'Unsafe reference' },
+  ] };
+  const markup = renderToStaticMarkup(<ChannelTimeline messages={[value]} pending={false} onReply={() => undefined} />);
+  assert.match(markup, /The review is ready\./);
+  assert.match(markup, /aria-label="Deliverables"/);
+  assert.match(markup, /href="https:\/\/example.com\/pull\/42"[^>]*>Review PR<\/a>/);
+  assert.match(markup, /<code>artifact:\/\/workspace\/report<\/code>/);
+  assert.match(markup, /Unsafe reference/);
+  assert.doesNotMatch(markup, /href="javascript:/);
 });
 
 test('mentions and authors are named from current members; the viewer is Me', () => {

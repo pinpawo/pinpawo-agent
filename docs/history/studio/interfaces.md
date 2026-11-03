@@ -2,7 +2,7 @@
 
 > **Status: historical record.** This page preserves earlier design or implementation context; it does not define current behavior. Start with [the current documentation map](../../index.md).
 
-本文档描述 Studio 与 pet 之间，以及 pet 与 UI 之间的接口边界。Studio 的内部循环、wiki 维护和 turn 事件是编排实现细节；持久产物参见 `../../reference/artifacts/store.md`。
+本文档描述 Studio 与 pet 之间，以及 pet 与 UI 之间的接口边界。Studio 的内部循环、wiki 维护和 turn 事件是编排实现细节；持久产物参见 `../artifacts/pipeline/store.md`。
 
 ## Boundaries
 

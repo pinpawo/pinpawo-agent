@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { Deliverable } from '@pinpawo/agent-session';
 import { useChannelDialogFocus } from './channelFocus';
 import {
   channelDateKey, channelDeliveryLabel, channelParticipantId, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
@@ -37,8 +38,17 @@ export function ChannelMessageMarkdown({ body, members, viewerParticipantId }: M
       : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{body}</ReactMarkdown></div>;
 }
 
-function ChannelMessageViewer({ body, author, occurredAt, members, viewerParticipantId, onClose }: MessageMarkdownProps & {
-  author: string; occurredAt: string; onClose: () => void;
+/** References are shown independently of the message body. */
+export function MessageDeliverables({ deliverables }: { deliverables?: readonly Deliverable[] }) {
+  if (!deliverables?.length) return null;
+  return <ul className="channel-deliverables" aria-label="Deliverables">{deliverables.map((reference, index) =>
+    <li className="channel-deliverable" key={index}>{/^https?:\/\//i.test(reference.uri)
+      ? <a href={reference.uri} target="_blank" rel="noreferrer">{reference.title || reference.uri}</a>
+      : <>{reference.title && <span>{reference.title} · </span>}<code>{reference.uri}</code></>}</li>)}</ul>;
+}
+
+function ChannelMessageViewer({ body, author, occurredAt, members, viewerParticipantId, deliverables, onClose }: MessageMarkdownProps & {
+  author: string; occurredAt: string; deliverables: Deliverable[]; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useChannelDialogFocus(true, dialog, onClose);
@@ -66,6 +76,7 @@ function ChannelMessageViewer({ body, author, occurredAt, members, viewerPartici
     </header>
     <div className="channel-message-viewer-scroll" tabIndex={0} aria-label="Full message content">
       <ChannelMessageMarkdown body={body} members={members} viewerParticipantId={viewerParticipantId} />
+      <MessageDeliverables deliverables={deliverables} />
     </div>
   </dialog>;
 }
@@ -85,7 +96,7 @@ type TimelineProps = {
 
 export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
   members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession, working = [] }: TimelineProps) {
-  const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
+  const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string; deliverables: Deliverable[] }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const byId = new Map(messages.map(item => [item.messageId, item]));
   return <><div className="channel-timeline">{messages.map((item, index) => {
@@ -125,10 +136,7 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
         <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} />
-        {item.artifacts.map((artifact, artifactIndex) => <div className="channel-artifact" key={artifactIndex}>
-          {/^https?:\/\//i.test(artifact.uri) ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label ?? artifact.uri}</a> : <code>{artifact.label ?? artifact.uri}</code>}
-          {artifact.version && <span> · {artifact.version}</span>}
-        </div>)}
+        <MessageDeliverables deliverables={item.deliverables} />
         </div>
         {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
           <p className="channel-record-error" role="alert" key={failureIndex}>
@@ -139,7 +147,8 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
           <button type="button" aria-haspopup="dialog" aria-label="View full screen" onClick={() => {
             onViewerChange?.(true);
             setViewer({ body: item.body, author: identity.name, occurredAt: item.occurredAt,
-              members: members.map(member => ({ ...member })), viewerParticipantId });
+              members: members.map(member => ({ ...member })), viewerParticipantId,
+              deliverables: item.deliverables.map(reference => ({ ...reference })) });
           }}>Full screen</button>
           <ChannelTechnicalDetails message={item} />
         </div>

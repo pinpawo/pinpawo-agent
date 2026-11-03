@@ -43,8 +43,6 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
     resolveInvocationContext: contextBridge.resolveInvocationContext,
     modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
-    capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-      listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
     graphService: graphService as never,
   });
   const channel = createChannelPlugin({ httpRoute: false });

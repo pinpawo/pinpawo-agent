@@ -7,6 +7,7 @@ import { stampAgentMessageCreatedAt } from '@pinpawo/pet-agent';
 import { createContextCompactionMessage } from '../../../../packages/pet-agent/src/agent/orchestrator/contextCompaction';
 import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import {
+  readReplyDeliverables,
   readTuiCheckpointInputModalities,
   readTuiCheckpointMessages,
   readTuiCheckpointTokenUsage,
@@ -51,7 +52,7 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
     id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
   }] }), { ...metadata, source: 'supervisor' });
   const result = createCapabilityExecutionMessage({ callId: 'dispatch-1', execution, metadata,
-    result: { status: 'returned', artifacts: [], deliverables: [], delivery: { id: 'delivery-1', task: execution.task,
+    result: { status: 'returned', deliverables: [], delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } } });
   // The delegation is the call itself; its delivery never replays as text.
   const delegation = (status: 'running' | 'completed') => ({ role: 'assistant', text: '', runId: 'run-1', toolCalls: [{
@@ -210,4 +211,16 @@ test('checkpoint projection reads only normalized text from native multi-block a
   assert.deepEqual(readTuiCheckpointMessages([reply]), [
     { id: 'native-reply', role: 'assistant', text: 'Hello world' },
   ]);
+});
+
+
+test('public reply deliverables remain in checkpoint projection after execution records are compacted', () => {
+  const deliverables = [{ uri: 'artifact://workspace/report', title: 'Report' }];
+  const reply = setAgentMessageMetadata(new AIMessage({ id: 'reply-with-references', content: 'Done.' }), {
+    runId: 'run', deliverables,
+  });
+  assert.deepEqual(readReplyDeliverables([reply], reply), deliverables);
+  assert.deepEqual(readTuiCheckpointMessages([reply])[0]?.deliverables, deliverables);
+  assert.equal(reply.text, 'Done.');
+  assert.notStrictEqual(readReplyDeliverables([reply], reply), deliverables);
 });

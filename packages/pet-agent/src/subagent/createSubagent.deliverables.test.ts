@@ -94,7 +94,6 @@ test('context summarization can remove an older tool deliverable declaration fro
     && message.tool_call_id === publication.tool_call_id), false);
   // A new invocation does not rebuild collector state from historical messages.
   assert.deepEqual(result.deliverables, []);
-  assert.deepEqual(result.artifacts, []);
 });
 
 test('approval resume executes the publishing tool once and checkpoints its deliverable declaration', async () => {

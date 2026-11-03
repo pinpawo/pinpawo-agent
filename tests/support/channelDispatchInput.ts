@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 
 type Author = { participantId: string; kind: 'human' | 'pet'; label?: string };
 export type ChannelTestInput = {
   type: 'channel_message'; version: 1; channelId: string; messageId: string;
-  author: Author; body: string;
-  replyTo?: { messageId: string; author: Author; body: string };
+  author: Author; body: string; deliverables?: Deliverable[];
+  replyTo?: { messageId: string; author: Author; body: string; deliverables?: Deliverable[] };
   addressedBy?: 'routing';
 };
 export type ChannelTestTask = {

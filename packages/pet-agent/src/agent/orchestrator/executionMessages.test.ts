@@ -17,7 +17,7 @@ const execution = {
 };
 const metadata = { runId: 'run-1', taskId: 'task-1' };
 const returned: CapabilityExecutionResultRecord = {
-  status: 'returned', artifacts: [], deliverables,
+  status: 'returned', deliverables,
   delivery: { id: 'delivery-1', task: execution.task, text: 'Report ready.', scope: {
     ...metadata, delegationId: execution.delegationId, lane: 'capability:general',
   } },
@@ -39,13 +39,12 @@ test('execution records retain declared references through JSON storage independ
   assert.equal(record?.kind, 'executed');
   if (record?.kind !== 'executed') assert.fail('Expected an execution record.');
   assert.deepEqual(record.result.deliverables, deliverables);
-  assert.deepEqual(record.result.artifacts, []);
 });
 
 for (const reviewDecision of ['reject', 'cancel'] as const) {
   test(`execution records keep references after review ${reviewDecision}`, () => {
     const result: CapabilityExecutionResultRecord = {
-      status: 'missing_deliverable', delivery: null, reviewDecision, artifacts: [], deliverables,
+      status: 'missing_deliverable', delivery: null, reviewDecision, deliverables,
     };
     const original = message(result);
     const record = readCapabilityExecutionRecord(original);

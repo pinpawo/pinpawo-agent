@@ -22,12 +22,13 @@ function memberRow(record: Record<'channel_members'>): ChannelMemberRow {
   };
 }
 function messageRow(record: Record<'channel_messages'>): ChannelMessageRow {
-  const data = JSON.parse(record.data) as Pick<ChannelMessageRow, 'body' | 'replyTo' | 'mentions' | 'artifacts'>;
+  const data = JSON.parse(record.data) as Pick<ChannelMessageRow, 'body' | 'replyTo' | 'mentions' | 'deliverables'>;
   return {
     sequence: record.sequence, messageId: record.message_id, channelId: record.channel_id,
     author: { kind: record.author_kind, id: record.author_id }, occurredAt: record.occurred_at,
     ...(record.external_ref === null ? {} : { externalRef: record.external_ref }),
-    ...data,
+    body: data.body, ...(data.replyTo === undefined ? {} : { replyTo: data.replyTo }),
+    mentions: data.mentions, deliverables: data.deliverables,
   };
 }
 function sessionRow(record: Record<'channel_sessions'>): ChannelSessionRow {
@@ -103,11 +104,11 @@ export class KyselyChannelStore implements ChannelStore {
   }
 
   async appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow> {
-    const { body, replyTo, mentions, artifacts } = row;
+    const { body, replyTo, mentions, deliverables } = row;
     const inserted = await this.db.insertInto('channel_messages').values({
       message_id: row.messageId, channel_id: row.channelId, author_kind: row.author.kind, author_id: row.author.id,
       occurred_at: row.occurredAt, external_ref: row.externalRef ?? null,
-      data: JSON.stringify({ body, ...(replyTo ? { replyTo } : {}), mentions, artifacts }),
+      data: JSON.stringify({ body, ...(replyTo ? { replyTo } : {}), mentions, deliverables }),
     }).onConflict(conflict => conflict.columns(['author_kind', 'author_id', 'external_ref']).doNothing())
       .returning('sequence').executeTakeFirst();
     if (inserted) return { ...row, sequence: inserted.sequence };

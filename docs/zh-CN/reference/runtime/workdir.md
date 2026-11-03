@@ -19,7 +19,6 @@
 
 ~/.pinpawo/workspaces/<workspace-id>/   # 会话（sessionRoot）
 ├── workspace.json
-├── capability-artifacts/
 ├── checkpoints-capability-v6/
 ├── checkpoints-tui-capability-v6/
 ├── checkpoints-studio-capability-v6/
@@ -28,8 +27,7 @@
 ```
 
 `HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取 workdir 下的
-`studio.json` 与 `pets/`。会话状态（各 Host 的 checkpoint、会话列表和 Capability
-artifact）放在用户 home 下，每个 workdir 一个目录，目录名是由路径派生的 workspace id
+`studio.json` 与 `pets/`。会话状态（各 Host 的 checkpoint 和会话列表）放在用户 home 下，每个 workdir 一个目录，目录名是由路径派生的 workspace id
 （`local-` 加路径哈希），`workspace.json` 记录它对应的 workdir。按 workdir 分目录，
 是为了让不同项目里同时运行的 Host 不争同一个 checkpoint 写入租约。
 `PINPAWO_WORKSPACES_DIR` 可替换 `~/.pinpawo/workspaces` 这个基础目录。会话状态不迁移：

@@ -19,7 +19,6 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 ~/.pinpawo/workspaces/<workspace-id>/   # sessions (sessionRoot)
 ├── workspace.json
-├── capability-artifacts/
 ├── checkpoints-capability-v6/
 ├── checkpoints-tui-capability-v6/
 ├── checkpoints-studio-capability-v6/
@@ -29,7 +28,7 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 `HostRuntimeConfig` derives these paths before runtime assembly. Studio
 uses `studio.json` and `pets/` from the workdir state root. Session state
-(checkpoints of every Host, session registries and capability artifacts) lives
+(checkpoints of every Host and session registries) lives
 under the user's home, one directory per workdir named by its derived workspace
 id (`local-` plus a hash of the path); `workspace.json` records the workdir it
 belongs to. One directory per workdir keeps Hosts running in different projects

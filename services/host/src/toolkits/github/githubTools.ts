@@ -1,6 +1,7 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { createAbortError, type NamedStructuredTool, type ToolOperationMetadata } from '@pinpawo/pet-agent';
+import { createToolDeliverables } from '@pinpawo/agent-contracts';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import {
@@ -98,6 +99,18 @@ async function runGh(cli: CliRunner, args: string[], cwd?: string) {
   return output;
 }
 
+function createdPullRequestUri(stdout: unknown): string | null {
+  if (typeof stdout !== 'string') return null;
+  const uri = stdout.trim();
+  if (/\s/.test(uri)) return null;
+  try {
+    const url = new URL(uri);
+    return ['http:', 'https:'].includes(url.protocol) && /\/pull\/\d+\/?$/.test(url.pathname) ? uri : null;
+  } catch {
+    return null;
+  }
+}
+
 /** GitHub tools whose long free-text input is clumsy to quote on a shell command line. */
 export function createGithubTools(shell: ShellRS) {
   const cliFor = (runtime: ToolRuntime) => createCliRunner(shell, runtime);
@@ -118,13 +131,20 @@ export function createGithubTools(shell: ShellRS) {
         if (head?.trim()) args.push('--head', head.trim());
         if (repository?.trim()) args.push('--repo', repository.trim());
         if (draft) args.push('--draft');
-        return await runGh(cliFor(runtime), args, cwd);
+        const result = await executeGh(cliFor(runtime), args, cwd);
+        const output = formatCliResult(result);
+        if (output === '(no output)') throw new Error('gh command returned no output');
+        const uri = createdPullRequestUri(result.stdout);
+        // A successful create must not become an error solely because its URL
+        // was not recognized: retrying could create a second PR.
+        return [output, uri ? createToolDeliverables([{ uri, title: title.trim() }]) : undefined];
       } catch (error) {
-        return createGhToolError('gh_pr_create', error, runtime);
+        return [createGhToolError('gh_pr_create', error, runtime), undefined];
       }
     },
     {
       name: 'gh_pr_create',
+      responseFormat: 'content_and_artifact',
       description: '使用 GitHub CLI 创建 pull request。必须显式提供标题，正文可为空；默认使用当前仓库、当前分支和仓库默认 base。',
       schema: z.object({
         cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),

@@ -380,22 +380,17 @@ services/host/src/capabilities/general/
 把它作为 host baseline；内建文档缺失或无效时 registry 初始化失败。pet-agent
 core 仍允许显式受限 workspace 不包含 General，且不会凭空构造一个实现。
 
-## 7. Artifact
+## 7. Deliverables
 
-`CapabilityArtifactStore` 是 host 提供的持久化 port：
+任意 Toolkit 的工具都可以在 `ToolMessage.artifact.deliverables` 中声明
+`{ uri, title? }` 引用，使用 `@pinpawo/agent-contracts` 的同一校验约定。
+Capability 核心在工具结果产生时累积并去重，再写入既有委派执行记录；不按 Toolkit
+名称区分，也不从回复正文猜测交付物。没有声明的工具保持原有结果行为。
 
-- `lifecycle.finalize` 可以通过 context 中的 store 写入执行结果，并返回或记录
-  `CapabilityArtifactRef`。
-- orchestrator state 只保存 refs，不保存大 payload。
-- `artifact_discovery` Toolkit 按当前 thread 提供只读
-  `artifact_list` / `artifact_read`。
-- 空 thread 返回空列表，不代表 Toolkit 不可用。
-- 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明
-  `artifact_discovery`。
-
-本地 chat host 为需要历史产物的 Capability 提供稳定的 `threadId` 和
-`CapabilityArtifactStore`，以免通过缺失 scope 静默移除 Explore 等声明
-`artifact_discovery` 的 Capability。General 不依赖这项运行期 scope。
+`delivery.text` 是执行报告，`deliverables` 是工具已声明的引用。记录引用不等于
+Supervisor 已验收；公开消息按本 run 已验收的执行传递引用。见
+[交付物契约](../deliverables.md)。旧 finalize 产物写入口和 `artifact_discovery` 已移除，
+`finalize` 仍可改写正文或消息。
 
 ## 8. Host 组装顺序
 
@@ -404,10 +399,8 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 1. 构造所有 Toolkit definitions。
 2. 解析 Toolkit availability，得到本 generation 的有效 inventory。
 3. 加入所有内建、用户和调用级 Capability definitions。
-4. 添加需要 host scope 的 Toolkit，例如 thread-scoped
-   `artifact_discovery`。
-5. 调用 `compileAgentRegistry()`。
-6. 报告 `unavailableCapabilities`。
+4. 调用 `compileAgentRegistry()`。
+5. 报告 `unavailableCapabilities`。
 7. 把同一个 `CompiledAgentRegistry` 交给 Supervisor 与 executor。
 
 不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability

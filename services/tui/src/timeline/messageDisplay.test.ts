@@ -68,3 +68,13 @@ function message(
     ...overrides,
   };
 }
+
+test('public deliverables render separately without rewriting the assistant text', () => {
+  assert.deepEqual(buildMessageDisplayLines(message({ text: 'Done.', deliverables: [
+    { uri: 'artifact://workspace/report', title: 'Report' }, { uri: 'https://example.com/pull/1' },
+  ] })), [
+    { text: '| Done.', tone: 'assistant' },
+    { text: '| Report · artifact://workspace/report', tone: 'assistant' },
+    { text: '| https://example.com/pull/1', tone: 'assistant' },
+  ]);
+});

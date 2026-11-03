@@ -1,9 +1,11 @@
 # Capability Artifact Store 设计（文档版）
 
+> Archived: this pipeline has been removed. See the current [Deliverables contract](../../../reference/deliverables.md).
+
 > **状态：Current implementation notes。** 公共类型定义在
-> [`packages/pet-agent/src/types/artifact.ts`](../../../packages/pet-agent/src/types/artifact.ts)，
+> [`packages/pet-agent/src/types/artifact.ts`](https://github.com/pinpawo/pinpawo-agent/blob/93e50c3e/packages/pet-agent/src/types/artifact.ts)，
 > 本地文件实现位于
-> [`services/host/src/capabilityArtifactStore.ts`](../../../services/host/src/capabilityArtifactStore.ts)。
+> [`services/host/src/capabilityArtifactStore.ts`](https://github.com/pinpawo/pinpawo-agent/blob/93e50c3e/services/host/src/capabilityArtifactStore.ts)。
 
 本文档是 `Pet Agent` 体系里“产物持久化”层的单文件说明。
 目标：把可复用的持久内容和执行时日志明确分离，避免把 `lane` 级临时消息当成可长期依赖的存储。

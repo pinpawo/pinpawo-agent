@@ -6,7 +6,7 @@
  */
 
 export function formatSubagentProtocolMessage(text: string): string | null {
-  return formatDelegationBriefing(text) ?? formatArtifactDiscoveryContext(text);
+  return formatDelegationBriefing(text);
 }
 
 function formatDelegationBriefing(text: string): string | null {
@@ -26,19 +26,6 @@ function formatDelegationBriefing(text: string): string | null {
     task,
     context ? `**Context**\n\n${context}` : null,
   ].filter((part): part is string => part !== null).join('\n\n');
-}
-
-function formatArtifactDiscoveryContext(text: string): string | null {
-  const header = readEnvelopeHeader(text, 'artifact_discovery_context');
-  if (
-    !header
-    || readAttribute(header, 'role') !== 'fact'
-    || readAttribute(header, 'source') !== 'runtime'
-    || readAttribute(header, 'trust') !== 'non_authoritative'
-  ) return null;
-
-  const scope = readTextElement(text, 'scope');
-  return scope ? `Artifact context · ${scope}` : null;
 }
 
 function readEnvelopeHeader(text: string, tag: string): string | null {
@@ -83,9 +70,4 @@ function findMarkupOutsideCdata(
     cursor = cdataEnd + ']]>'.length;
   }
   return -1;
-}
-
-function readTextElement(text: string, tag: string): string | null {
-  const match = new RegExp(`<${tag}>\\s*([^<]+?)\\s*</${tag}>`).exec(text);
-  return match?.[1]?.trim() || null;
 }

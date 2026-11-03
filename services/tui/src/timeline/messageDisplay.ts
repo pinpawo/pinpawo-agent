@@ -1,7 +1,7 @@
 import type { AgentMessageEntry, AgentMessageToolCall, AgentTimelineEntry } from '@pinpawo/agent-session';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
-import { truncateTerminalLine } from '../text/terminalText';
+import { normalizeTerminalLine, truncateTerminalLine } from '../text/terminalText';
 import { noticeText, tuiText } from '../i18n/text';
 
 export type MessageDisplayTone =
@@ -46,6 +46,7 @@ export function buildMessageDisplayLines(
           text: `  ${line}`,
           tone: 'user' as const,
         })),
+        ...buildDeliverableDisplayLines(entry),
       ];
     case 'assistant':
       return [
@@ -57,11 +58,20 @@ export function buildMessageDisplayLines(
           text: `| ${line}`,
           tone: 'assistant' as const,
         })) : []),
+        ...buildDeliverableDisplayLines(entry),
         ...(options.toolCallDetail ? buildToolCallDetailLines(entry) : buildToolCallDisplayLines(entry)),
       ];
     case 'subagent':
       return [];
   }
+}
+
+/** Public references are separate from the assistant's prose and internal evidence. */
+export function buildDeliverableDisplayLines(entry: AgentMessageEntry): MessageDisplayLine[] {
+  return (entry.deliverables ?? []).map(reference => ({
+    text: `${entry.role === 'user' ? '  ' : '| '}${normalizeTerminalLine(reference.title ? `${reference.title} · ${reference.uri}` : reference.uri)}`,
+    tone: entry.role === 'user' ? 'user' : 'assistant',
+  }));
 }
 
 /**

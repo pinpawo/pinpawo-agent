@@ -16,7 +16,6 @@ const executionResultSchema = z.object({
       runId: z.string().min(1), taskId: z.string().min(1), delegationId: z.string().min(1),
     }).strict(),
   }).strict().nullable(),
-  artifacts: z.array(z.record(z.string(), z.unknown())),
   deliverables: z.custom<Deliverable[]>((value) => {
     try {
       assertToolDeliverables({ deliverables: value });

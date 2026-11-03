@@ -71,8 +71,6 @@ test('one member protocol drives a normal Pet loop, same-session inputs and actu
       resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: config.tuiSessionPath,
-      capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-        listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: {
         async readThreadState(setup: AgentChannelSetup) {
           const snapshot = await graph.getState(graphConfig(setup));

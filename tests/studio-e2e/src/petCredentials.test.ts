@@ -135,8 +135,6 @@ test('real graph review/resume injects the running Pet\'s credential only at She
       capabilities: [{ name: 'general', description: 'Credential check.', uses: ['shell'],
         instructions: defineInstructionDocument({ content: 'Run the local credential check and report success.' }) }],
       toolkitInventory: new HostToolkitInventoryStore(inventory), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
-      capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-        listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: {
         readThreadState: (setup: AgentChannelSetup) => graph.readThreadState(withModels(setup)),
         streamEvents: (setup: AgentChannelSetup, resume?: InterruptResume) => graph.streamEvents(withModels(setup), resume),

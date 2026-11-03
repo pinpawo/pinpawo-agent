@@ -36,7 +36,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
+import { buildDeliverableDisplayLines, buildToolCallDisplayLines, hasOpenToolCalls, isToolCallMessageEntry, isToolCallStep, toolCallTitle } from './messageDisplay';
 
 const USER_MESSAGE_BACKGROUND = '#303842';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
@@ -566,6 +566,7 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       entry.role,
       normalizeText(entry.text),
       entry.status,
+      entry.deliverables ?? [],
       // A committed call line holds its title alone; only an outcome row,
       // written once the call has ended, carries the outcome.
       ...(entry.toolCalls ?? []).map(call => normalizeText(toolCallTitle(call))
@@ -745,6 +746,7 @@ function populateTimelineRoot(
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);
+      buildDeliverableDisplayLines(entry).forEach(line => addLine(line, detailSurface));
       if (isToolCallMessageEntry(entry)) {
         buildToolCallDisplayLines(entry).forEach(line => addLine(line, detailSurface));
         openToolCallScope(entry);

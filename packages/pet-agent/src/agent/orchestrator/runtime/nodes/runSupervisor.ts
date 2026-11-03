@@ -11,6 +11,7 @@ import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { runIterationBudgetReached } from '../guards/runIterationBudget';
+import { readAcceptedRunDeliverables } from '../../executionReviews';
 
 export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapabilityTool?: StructuredTool) {
   const runner = config.runSupervisorRunner ?? createRunSupervisorAgent({
@@ -20,7 +21,8 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
     if (runIterationBudgetReached(root, runnableConfig)) return new Command({
       update: { messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(new AIMessage(
         '主流程循环已达到上限，任务尚未验收完成。你可以继续当前任务。',
-      )), { runId: root.runId, taskId: root.taskId })], runTerminalError: null },
+      )), { runId: root.runId, taskId: root.taskId,
+        deliverables: readAcceptedRunDeliverables(root.messages, root.runId) })], runTerminalError: null },
       goto: END,
     });
     const catalog = createCapabilityCatalog({
@@ -31,6 +33,12 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
       capabilityDisclosure: resolveCapabilityDisclosureState({ current: root.runCapabilityDisclosure, catalog }),
     });
     const result = await runner.invoke(input, runnableConfig);
+    const reply = result.messages.at(-1);
+    if (reply && AIMessage.isInstance(reply) && !reply.tool_calls?.length) {
+      setAgentMessageMetadata(reply, {
+        deliverables: readAcceptedRunDeliverables([...root.messages, ...result.messages], root.runId),
+      });
+    }
     // Execution leaves through native Command.PARENT; normal return is the final reply.
     return new Command({
       update: {

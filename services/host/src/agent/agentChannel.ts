@@ -6,7 +6,6 @@ import {
   type AgentCapability,
   type AgentInvokeInput,
   type AgentToolkit,
-  type CapabilityArtifactStore,
   type CompiledAgentRegistry,
   type PetDocument,
   type OrchestratorConfig,
@@ -76,14 +75,12 @@ export function buildLocalChatAgentInput(params: {
   toolkitInventoryEntries?: readonly ToolkitInventoryEntry[];
   /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
-  /** Stable thread scope required by artifact discovery and checkpoint routing. */
+  /** Stable thread scope required by checkpoint routing. */
   threadId: string;
   interfaceKind?: AgentInterfaceKind | null;
   checkpoint?: BaseCheckpointSaver;
   /** Already-resolved Capability snapshot supplied by the Host catalog. */
   capabilities?: readonly AgentCapability[];
-  /** Store handed to capabilities so they can deterministically persist result artifacts */
-  capabilityArtifactStore: CapabilityArtifactStore;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
   sessionStartedAt?: string;
   /** IANA timezone name for interpreting relative dates in this session. */
@@ -96,9 +93,6 @@ export function buildLocalChatAgentInput(params: {
   if (!params.threadId.trim()) {
     throw new Error('Local chat requires a non-empty threadId');
   }
-  if (!params.capabilityArtifactStore) {
-    throw new Error('Local chat requires a capability artifact store');
-  }
   const { llmConfig, hostConfig } = params;
   const reviewStructuredOutput = buildReviewStructuredOutput(llmConfig);
   const workdir = hostConfig.runtimeConfig.workdir;
@@ -108,8 +102,6 @@ export function buildLocalChatAgentInput(params: {
   const preparedRegistry = prepareAgentRegistry({
     toolkits: params.toolkits ?? [],
     capabilities,
-    threadId: params.threadId,
-    capabilityArtifactStore: params.capabilityArtifactStore,
   });
   params.reportCapabilityDiagnostics?.(
     preparedRegistry.registry,
@@ -128,8 +120,6 @@ export function buildLocalChatAgentInput(params: {
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
       generationReserveTokens,
       subagentGenerationReserveTokens: generationReserveTokens,
-      capabilityArtifactStore: params.capabilityArtifactStore,
-
       ...(params.defaultCapabilityName !== undefined
         ? { defaultCapabilityName: params.defaultCapabilityName }
         : {}),

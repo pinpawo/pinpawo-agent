@@ -1,6 +1,5 @@
 import type {
   AgentCapability,
-  CapabilityArtifactStore,
   PetDocument,
   SystemPromptSection,
 } from '@pinpawo/pet-agent';
@@ -49,7 +48,6 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   petDocument?: PetDocument;
   capabilities: readonly AgentCapability[];
   toolkitInventory: HostToolkitInventoryStore;
-  capabilityArtifactStore: CapabilityArtifactStore;
   checkpointer: TuiSessionCheckpointer;
   /** Pet-scoped Agent Session registry path owned by the composing Host. */
   sessionStatePath: string;

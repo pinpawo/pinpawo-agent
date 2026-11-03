@@ -1,4 +1,6 @@
 import { sql, type Kysely } from 'kysely';
+import { assertToolDeliverables } from '@pinpawo/agent-contracts';
+import type { ChannelDatabase } from './schema';
 import type { StudioMigrations, StudioStorageDialect } from '@pinpawo/studio-core';
 
 /** The Channel schema. Data from the earlier Channel model is not carried over. */
@@ -55,6 +57,38 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
       async up(db: Kysely<unknown>) {
         // Nullable so existing Channels keep their messages and have no prompt by default.
         await db.schema.alterTable('channels').addColumn('prompt', 'text').execute();
+      },
+    },
+    '0003_channel_deliverables': {
+      async up(db: Kysely<unknown>) {
+        const channelDb = db as Kysely<ChannelDatabase>;
+        const messages = await channelDb.selectFrom('channel_messages').select(['message_id', 'data']).execute();
+        for (const message of messages) {
+          const data = JSON.parse(message.data) as Record<string, unknown>;
+          if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid Channel message data.');
+          if ('deliverables' in data) {
+            assertToolDeliverables(data);
+            continue;
+          }
+          const artifacts = data.artifacts ?? [];
+          if (!Array.isArray(artifacts)) throw new Error('Invalid legacy Channel artifacts.');
+          const deliverables = artifacts.map((artifact: unknown) => {
+            if (!artifact || typeof artifact !== 'object' || !('uri' in artifact)
+              || typeof artifact.uri !== 'string' || !artifact.uri.trim()) throw new Error('Invalid legacy Channel artifact.');
+            const value = artifact as { uri: string; label?: unknown; version?: unknown };
+            if ((value.label !== undefined && typeof value.label !== 'string')
+              || (value.version !== undefined && typeof value.version !== 'string')) throw new Error('Invalid legacy Channel artifact metadata.');
+            // Preserve the old visible label and version in the new title. The
+            // original artifacts JSON remains on historical rows for fidelity;
+            // readers expose only deliverables and new writes omit artifacts.
+            const title = value.version === undefined ? value.label
+              : `${value.label ?? value.uri} · ${value.version}`;
+            return { uri: value.uri, ...(title === undefined ? {} : { title }) };
+          });
+          await channelDb.updateTable('channel_messages').set({
+            data: JSON.stringify({ ...data, deliverables }),
+          }).where('message_id', '=', message.message_id).execute();
+        }
       },
     },
   };

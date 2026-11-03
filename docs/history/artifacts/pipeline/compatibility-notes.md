@@ -1,5 +1,7 @@
 # 兼容与边界说明
 
+> Archived: this pipeline has been removed. See the current [Deliverables contract](../../../reference/deliverables.md).
+
 ## `additional_kwargs` 不是主协议
 
 当前设计要求不要把持久化协议放进模型 prompt 或 `additional_kwargs`。

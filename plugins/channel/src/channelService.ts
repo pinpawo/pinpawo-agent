@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { assertToolDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
   ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
@@ -7,11 +8,14 @@ import type {
 
 const identifier = z.string().trim().min(1).max(256);
 export const memberRefSchema = z.object({ kind: z.enum(['human', 'pet']), id: identifier }).strict();
-export const artifactReferenceSchema = z.object({
-  uri: z.string().trim().min(1).max(4096),
-  label: z.string().max(500).optional(),
-  version: z.string().min(1).max(500).optional(),
-}).strict();
+export const channelDeliverablesSchema = z.custom<Deliverable[]>((value) => {
+  try {
+    assertToolDeliverables({ deliverables: value });
+    return true;
+  } catch {
+    return false;
+  }
+});
 export const channelCreateSchema = z.object({
   title: z.string().trim().min(1).max(160),
   description: z.string().trim().max(50_000).optional(),
@@ -28,7 +32,7 @@ export const channelMessageSchema = z.object({
   body: z.string().trim().min(1).max(100_000),
   replyTo: identifier.optional(),
   mentions: z.array(channelMentionSchema).max(100).default([]),
-  artifacts: z.array(artifactReferenceSchema).max(100).default([]),
+  deliverables: channelDeliverablesSchema.default([]),
 }).strict();
 export const channelPageSchema = z.object({
   after: z.number().int().nonnegative().safe().default(0),
@@ -285,7 +289,7 @@ export class ChannelService {
       const message = await store.appendMessage({
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),
         ...(options.externalRef ? { externalRef: options.externalRef } : {}),
-        body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}), mentions, artifacts: value.artifacts,
+        body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}), mentions, deliverables: value.deliverables,
       });
       return { message, created: message.messageId === messageId };
     });

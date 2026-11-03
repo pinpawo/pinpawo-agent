@@ -13,11 +13,16 @@ export const reviewCurrentSchema = z.object({
 
 export function createReviewCurrentTool(context: SupervisorControlContext) {
   return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
-    const state = reviewCurrent({ ...context, state: runtime.state.runSupervisorState }, args);
+    const reviewContext = { ...context, state: runtime.state.runSupervisorState };
+    const state = reviewCurrent(reviewContext, args);
+    const current = currentSupervisorTask(reviewContext.state);
+    const accepted = args.completed && current
+      ? executionsForPlanItem(reviewContext, current.id).at(-1)?.execution.delegationId : undefined;
     return new Command({ update: {
       runSupervisorState: state,
       messages: [new ToolMessage({ name: 'review_current', tool_call_id: runtime.toolCallId,
         content: JSON.stringify({ plan: state }),
+        ...(accepted ? { artifact: { acceptedDelegationId: accepted } } : {}),
       })],
     } });
   }, {

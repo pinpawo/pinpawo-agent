@@ -7,7 +7,7 @@ import { readChannelTestInput } from '../../../tests/support/channelDispatchInpu
 
 const message: ChannelMessageRow = {
   channelId: 'channel', messageId: 'current', sequence: 2,
-  author: { kind: 'human', id: 'operator)' }, body: 'Inspect this.', occurredAt: 'now', artifacts: [], mentions: [],
+  author: { kind: 'human', id: 'operator)' }, body: 'Inspect this.', occurredAt: 'now', deliverables: [], mentions: [],
 };
 
 test('dispatch carries stable server authors and message IDs separately from quoted context', () => {
@@ -18,6 +18,17 @@ test('dispatch carries stable server authors and message IDs separately from quo
     replyTo: { messageId: 'previous', author: { participantId: 'pet:a%29b', kind: 'pet' }, body: 'Prior public result.' },
   });
   assert.equal(readChannelTestInput(channelDispatchInput(message)).replyTo, undefined);
+});
+
+test('dispatch carries current and quoted deliverables without rewriting message bodies', () => {
+  const current = { ...message, deliverables: [{ uri: 'artifact://workspace/current', title: 'Current report' }] };
+  const original = { ...message, messageId: 'previous', body: 'Earlier result.',
+    deliverables: [{ uri: 'https://example.com/pull/1', title: 'Change' }] };
+  const input = readChannelTestInput(channelDispatchInput(current, original));
+  assert.deepEqual(input.deliverables, current.deliverables);
+  assert.deepEqual(input.replyTo?.deliverables, original.deliverables);
+  assert.equal(input.body, current.body);
+  assert.equal(input.replyTo?.body, original.body);
 });
 
 test('dispatch names a current member by label next to its participantId', () => {

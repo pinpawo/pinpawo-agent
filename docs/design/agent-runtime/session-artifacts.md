@@ -1,6 +1,6 @@
 # Session Artifacts
 
-状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
+状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
 
 ## 需求
 
@@ -85,10 +85,11 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
   -> Console / TUI 渲染
 ```
 
-- 目标是让被 Supervisor 打回、之后重做的那次执行的文件留在 store，但不跟着回复走。现有 `readReplyResultReferences` 只按回复所属 run 和 `returned` 筛选；`returned` 表示执行已返回，不代表 Supervisor 已接受。如何可靠识别应随回复交付的执行，需在实现链路前明确，不能直接复用这一筛选并假定它排除了打回的结果。
-- 合并本 run 中选定执行的交付物，同一 uri 去重，保持发布顺序；执行的选取规则待明确。
-- Channel 现有的 `artifacts: [{ uri, label?, version? }]` 拟改为 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"。人发的消息也可以带。Console 现有的渲染改用新字段名。Channel 已持久化人发消息的 `artifacts`，实施字段变更前须明确旧消息和 `label` / `version` 的处理，避免历史附件丢失或不可见。
-- 尽量沿用现有事件和存储路径；执行选取规则与历史数据处理确定后，再确认是否需要额外投影或迁移。
+- `returned` 表示执行返回，不等于验收。`review_current(completed: true)` 沿现有规则验收当前计划项最近一次有效执行，成功回执记录该执行的 `acceptedDelegationId`；没有新增验收状态或账本。
+- 最终回复选取在本 run 成功验收的执行，按执行顺序合并声明、同一 URI 去重。`continue` 可以明确验收已保存的先前执行，但不会自动带入过去的验收。打回后重做的早次声明留在内部执行记录，不随回复公开。
+- 公开回复的消息 metadata 固化选定引用，Host 的实时事件和 checkpoint snapshot 读取同一份数据。Root 压缩继续保留未完成任务的实际执行记录；已完成历史中的引用确定性合并到既有摘要消息的 metadata，不依赖模型摘要重建引用，也不永久保留完整报告。历史引用是证据，不等于本轮验收或公开交付。
+- Channel 公共字段统一为 `deliverables: [{ uri, title? }]`，人和 Pet 消息都可携带。旧消息通过一次数据库迁移转换 `label` 为显示标题并保留 `version` 的原显示信息；原始旧 JSON 仅为历史数据保全，不作为双字段读取路径。新写入和客户端只使用 `deliverables`。
+- 复用现有 `message.completed`、snapshot 与 Channel 消息事件，不新增事件类型、存储表或独立投影账本。
 
 ## artifacts Toolkit
 
@@ -157,7 +158,7 @@ Adapter 在 Host 配置里选：
 
 ## 移除的旧实现
 
-计划移除以下旧实现；删除前须核实外部 Capability、已有 store、checkpoint 和执行记录的兼容影响。仓库内没有写入口的调用，并不能证明所有部署中都没有旧数据：
+以下旧运行时路径已由交付物引用替代；仅删除代码接口，不删除旧 store 或 checkpoint 的磁盘文件。使用旧 finalize 写接口的外部扩展需要随契约升级：
 
 - pet-agent：`types/artifact.ts`、`orchestrator/capabilityArtifacts.ts`、`orchestrator/artifacts/discovery.ts`、`sessionCapabilityArtifacts`、`SubagentResult.artifacts`、finalize context 中的 `artifactStore` / `recordCapabilityArtifact` / `artifactRefs`；`delegate_capability` 结果里的 `artifacts` 改为 `deliverables`。
 - Host：`FileCapabilityArtifactStore`、`artifact_discovery` Toolkit、`capabilityArtifactRoot`、各处旧 store 注入；TUI 对 `artifact_discovery_context` 信封的解析。
@@ -176,21 +177,18 @@ Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链�
 
 ## 实现进展
 
-工具声明的类型和校验已在 `agent-contracts` 定义。Capability 子 Agent 在工具结果
-产生时把声明写入自己的 checkpoint 状态，同一 URI 保留首次声明；这份累计数据不
-依赖仍留在上下文中的工具消息。它随 `SubagentResult` 返回，并写入
-`delegate_capability` 的执行记录，即使正文为空或审核被拒绝、取消也保留。
+已实现工具声明、按委派累积去重、统一执行记录、模型说明，以及最终回复到 Host、
+snapshot、Channel、Console / TUI 的引用传递。现有 GitHub PR 创建工具使用同一约定
+声明成功创建的 PR 链接；没有 Toolkit 名称特判。无声明的工具保持普通结果行为。
 
-当前收集覆盖普通工具消息及同图 `Command` 中的工具消息。跨图 `Command` 是控制
-转移，必须原样保留；当前框架无法在同一返回中同时提交子图累计状态与跨图更新，
-因此不保证这种控制转移中的声明被本收集器记录。现有跨图控制工具属于 Entry /
-Supervisor，不是这里的 Capability 业务工具；不能据此声称任意第三方跨图工具都已
-获得采集保证。
+工具结果捕获使用小范围框架适配，保留现有普通错误、interrupt、abort 和同图
+`Command` 语义。跨图 `Command` 是控制转移，原样传递，不在当前采集保证内；仓库内
+当前跨图出口为 Entry / Supervisor 控制工具，没有声明交付物的业务路径。
 
-该执行记录与子 Agent 状态使用新的 `capability-v6` Host checkpoint 命名空间。旧
-checkpoint 文件不会被删除或迁移，但新版 Host 默认不能恢复 v5 会话；TUI 也使用
-新的会话注册表。现有运行部署不会因源代码变更自动切换命名空间。
+新的运行时持久化契约使用项目路径标签 `capability-v6`，不是 LangGraph checkpoint
+格式版本。旧文件不删除或迁移，新 Host 默认不读取 v5 会话；源代码改动不会切换
+现有运行部署。
 
-旧 Capability Artifact Pipeline 暂时保留。这里的收集尚不包含最终回复的交付物
-筛选、Channel 历史字段迁移、artifact 发布存储或 HTTP 下载；它们继续按上文范围
-分步实施。
+旧 Capability Artifact Pipeline、finalize 写接口和 discovery 注入已删除。
+artifacts Toolkit、文件发布存储、HTTP 下载与 COS adapter 仍是后续范围，本次引用
+传递不构建新的文件存储或上传下载服务。

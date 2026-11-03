@@ -128,7 +128,12 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
-| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
+| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `deliverables`; message plus per-target deliveries. |
+
+`deliverables` is an array of `{ uri, title? }` references on a human or Pet
+message. Channel stores the references with the message and carries them to
+addressed Pets, including the references on a quoted `replyTo` message. It does
+not infer them from the body or rewrite the body to include links.
 
 `prompt` is an optional Channel collaboration instruction, separate from its
 human-facing description. It is trimmed, limited to 50,000 characters, and an

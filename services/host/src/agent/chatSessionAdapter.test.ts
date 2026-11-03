@@ -1346,8 +1346,9 @@ test('live reply references survive FileSaver deserialization in the production 
   const root = await mkdtemp(join(tmpdir(), 'reply-references-'));
   try {
     const checkpointPath = join(root, 'checkpoints');
+    const deliverables = [{ uri: 'artifact://workspace/report', title: 'Report' }];
     const reply = new AIMessage({ id: 'public-reply', content: 'Inspection complete.',
-      additional_kwargs: { pinpawo: { runId: 'reference-run' } } });
+      additional_kwargs: { pinpawo: { runId: 'reference-run', deliverables } } });
     const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({
       reducer: (previous, next) => [...previous, ...next], default: () => [],
     }) });
@@ -1380,6 +1381,7 @@ test('live reply references survive FileSaver deserialization in the production 
     const completed = events.find(event => event.type === 'message.completed');
     assert.deepEqual(completed?.type === 'message.completed' ? completed.resultReferences : undefined,
       [{ id: 'delivery', title: 'Inspect', text: 'Evidence' }]);
+    assert.deepEqual(completed?.type === 'message.completed' ? completed.deliverables : undefined, deliverables);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

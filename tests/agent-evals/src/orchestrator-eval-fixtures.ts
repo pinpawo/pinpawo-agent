@@ -31,7 +31,7 @@ export function buildRouteEvalInput(inputs: Record<string, unknown>) {
       callId: `call:${id}`,
       execution: { planItemId: item.id, delegationId: id, capability: item.capability,
         task: item.objective, briefing: 'Execute the fixture plan item.' },
-      result: { status: 'returned', artifacts: [], deliverables: [], delivery: { id: `delivery:${id}`,
+      result: { status: 'returned', deliverables: [], delivery: { id: `delivery:${id}`,
         task: item.objective, text, scope } },
       metadata: { runId: evidenceRunId, taskId: evidenceTaskId },
     }));

@@ -1,5 +1,7 @@
 # 持久化契约（Store Contract）
 
+> Archived: this pipeline has been removed. See the current [Deliverables contract](../../../reference/deliverables.md).
+
 ## Ref 与类型
 
 ```ts

@@ -187,6 +187,19 @@ test('the reader renders saved messages and calls, and offers no chat composer',
     'Status unknown · observation interrupted');
 });
 
+test('the session reader displays structured deliverables beside the reply', () => {
+  const value = session({ timeline: [{ id: 'delivered', type: 'message', role: 'assistant', text: 'Review complete.', status: 'completed',
+    deliverables: [
+      { uri: 'https://example.com/pull/42', title: 'Review PR' },
+      { uri: 'artifact://workspace/report', title: 'Report' },
+    ],
+  }] });
+  const html = renderToStaticMarkup(<PetSessionTranscript session={value} petName="Worker" />);
+  assert.match(html, /Review complete\./);
+  assert.match(html, /href="https:\/\/example.com\/pull\/42"[^>]*>Review PR<\/a>/);
+  assert.match(html, /<code>artifact:\/\/workspace\/report<\/code>/);
+});
+
 test('the current review shows the server view and options, disabled while not live', () => {
   const live = renderToStaticMarkup(<PetSessionReview review={review} draft={null} enabled submission={null} onChoose={() => null} />);
   assert.match(live, /Review 1 of 2/);

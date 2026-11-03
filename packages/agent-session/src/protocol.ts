@@ -1,3 +1,4 @@
+import { parseDeliverables } from './deliverables';
 import {
   isOperationBlock,
   isToolAuthorizationMode,
@@ -587,6 +588,7 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       messageId,
       ...(usage ? { usage } : {}),
       ...(record.resultReferences !== undefined ? { resultReferences: parseResultReferences(record.resultReferences) } : {}),
+      ...(record.deliverables !== undefined ? { deliverables: parseDeliverables(record.deliverables) } : {}),
       role,
       text,
     };

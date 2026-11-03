@@ -1,5 +1,7 @@
 # host domain 定义（2026-09-10 draft）
 
+> 本文中的旧 artifact store / discovery 服务属于当时核对的历史基线，现已移除；当前结果引用见[交付物契约](../../reference/deliverables.md)。
+
 关联：#790。核对基线：`badde03a`。
 本文定义 host 的 domain 切分，并在 §三 给出它的两个推论：
 准入归属，以及据此排出的实施顺序。

@@ -20,9 +20,10 @@ const originalBody = '# Public evidence\n\n[Analyst](participant:pet:analyst) ·
   Array.from({ length: 70 }, (_, i) => 'Reading paragraph ' + i + '. ' + 'Public evidence remains read-only. '.repeat(4)).join('\n\n') +
   '\n\n[Unsafe](javascript:alert(1))\n\n<script>window.bad = true</script>';
 const makeMessage = (id, sequence, body) => ({ channelId: channel.channelId, messageId: id, sequence, body,
-  author: { kind: 'pet', id: 'analyst' }, occurredAt: date, mentions: [], artifacts: [] });
+  author: { kind: 'pet', id: 'analyst' }, occurredAt: date, mentions: [], deliverables: [] });
 const messages = Array.from({ length: 20 }, (_, i) => makeMessage('older-' + i, i + 2, 'Older evidence ' + i + '. '.repeat(40)));
 messages.push(makeMessage('long', 22, originalBody));
+messages.at(-1).deliverables = [{ uri: 'https://example.com/pull/42', title: 'Review PR' }];
 for (let i = 0; i < 20; i++) messages.push(makeMessage('newer-' + i, 23 + i, 'Newer evidence ' + i + '. '.repeat(40)));
 const streams = new Set();
 const writes = [];
@@ -95,6 +96,7 @@ try {
     assert.equal(await dialog.locator('table').count(), 1);
     assert.equal(await dialog.locator('script').count(), 0);
     assert.equal(await dialog.locator('a[href^="javascript:"]').count(), 0);
+    assert.equal(await dialog.getByRole('link', { name: 'Review PR', exact: true }).getAttribute('href'), 'https://example.com/pull/42');
     assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'no overlay horizontal overflow');
     const box = await dialog.boundingBox();
     assert.deepEqual({ x: box.x, y: box.y, width: box.width, height: box.height }, { x: 0, y: 0, ...size });
@@ -135,16 +137,20 @@ try {
   const beforeUpdate = await readPosition();
   await expand.click(); await dialog.waitFor();
   messages.find(item => item.messageId === 'long').body = originalBody + '\n\nUpdated stored body.';
+  messages.find(item => item.messageId === 'long').deliverables = [{ uri: 'https://example.com/pull/43', title: 'Updated review PR' }];
   messages.push(makeMessage('incoming', 50, 'New message during full-screen reading.'));
   for (const stream of streams) stream.write('data: ' + JSON.stringify({ type: 'channel.message.created', source: 'channel', occurredAt: date, payload: messages.at(-1) }) + '\n\n');
   await page.locator('[data-message-id="incoming"]').waitFor({ state: 'attached' });
   assert.equal(await message.getByText('Updated stored body.', { exact: true }).count(), 1);
   assert.equal(await dialog.getByText('Updated stored body.', { exact: true }).count(), 0, 'open reader holds a stable snapshot');
+  assert.equal(await message.getByRole('link', { name: 'Updated review PR', exact: true }).count(), 1);
+  assert.equal(await dialog.getByRole('link', { name: 'Review PR', exact: true }).count(), 1, 'open reader retains its deliverable snapshot');
   assert.equal(await readPosition(), beforeUpdate, 'background refresh cannot move reading position');
   await close.click(); await dialog.waitFor({ state: 'hidden' });
   assert.equal(await readPosition(), beforeUpdate);
   await expand.click(); await dialog.waitFor();
   assert.equal(await dialog.getByText('Updated stored body.', { exact: true }).count(), 1, 'reopening shows latest stored body');
+  assert.equal(await dialog.getByRole('link', { name: 'Updated review PR', exact: true }).count(), 1);
   await close.click();
   assert.deepEqual(writes, [], 'reading never posts messages or dispatches');
   assert.deepEqual(errors, []);

@@ -23,7 +23,7 @@
 ## 关于 `runId` / `turnId`
 
 - `CapabilityArtifactRef` 当前字段是 `runId`。
-- 选择器里有兼容字段 `turnId`，仅用于旧调用兼容。
+- 本地 store 读取旧 manifest/ref 时仍把 `turnId` 归一为 `runId`；它不是公共查询参数。
 - 真正的 trace 以 `threadId + delegationId + runId + capabilityId + kind` 为主。
 
 ## 与旧字段的迁移原则

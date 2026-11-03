@@ -17,8 +17,8 @@ Capability subagent 运行
        ├─ context.recordCapabilityArtifact(ref)
        └─ 或返回 artifactRefs
   -> capability node 合并 SubagentResult.artifacts
-  -> state.sessionCapabilityArtifacts
-  -> accepted announce handoff 附带当前 delegation 的 bounded refs
+       ├─ delegate_capability 执行记录的 result.artifacts
+       └─ state.sessionCapabilityArtifacts
 ```
 
 Artifact payload 不进入 LangGraph state。需要完整内容时，消费者通过
@@ -33,8 +33,7 @@ Artifact payload 不进入 LangGraph state。需要完整内容时，消费者�
 - finalize context 提供稳定的 `threadId / capabilityId / delegationId / runId`、
   artifact store 和 ref recorder。
 - `sessionCapabilityArtifacts` 只保存 refs，并跨 turn 保留。
-- 当前 task 的 outcome context 可以读取当前 delegation 的 bounded refs；
-  entryDecision 不接收 session-wide artifact inventory。
+- 委派执行记录保存该次 `artifacts`，Supervisor 和 Host 通过执行记录读取结果。
 
 ### Capability
 
@@ -86,8 +85,8 @@ Capability 静默消失。
 - `SubagentResult.artifacts`：本次 subagent 运行返回的 refs。
 - `sessionCapabilityArtifacts`：orchestrator session 中跨 turn 的 ref 索引。
 - announce：给 orchestrator 和用户读取的自然语言交付。
-- handoff：验收后的 announce 主队列副本，可附带当前 delegation 的 bounded
-  artifact refs。
+- 委派执行记录：`delegate_capability` 结果消息中的 typed 记录，含交付文本和
+  该次 `artifacts`；执行返回本身不表示 Supervisor 已验收。
 - store content：长报告、结构化数据、图片、视频或其他不应进入 message/state
   的 payload。
 

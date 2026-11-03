@@ -13,4 +13,8 @@ Capability 是可委派的业务任务单元：它声明 instructions 与完整 
 3. `CAPABILITY.md` 承载 task metadata 与 Markdown instructions；可选 `entry` 只能实现确定性的 `lifecycle.finalize`。
 4. Toolkit runtime 不能改变静态 tool inventory、schema、description 或 review policy。
 
+旧 Artifact Pipeline 的 store/discovery 和 finalize 写入接口已退役，普通 finalize
+及 Channel 消息附件保留。扩展更新、旧文件与 checkpoint 读取边界见
+[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+
 阅读[完整 Capability / Toolkit V2 契约（中文）](../../../reference/extensions/capability-toolkit.md)，并使用[Capability 目录协议（中文）](../../../reference/extensions/capability-directory.md)创建本地扩展。

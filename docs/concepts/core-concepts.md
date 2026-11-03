@@ -42,7 +42,6 @@ PinPawo Agent helps you build agents with clear operational boundaries:
 | **Human review** | The interrupt-and-resume boundary for actions that require user authorization or input. | Approval is a runtime contract, not a convention hidden in an instruction. |
 | **Checkpoint** | Durable LangGraph state for messages and pending continuation. | It is the authority for resume and recovery. |
 | **Session projection** | The client-neutral view of a checkpoint plus current runtime facts. | TUI and remote clients share one presentation contract without each rebuilding state. |
-| **Artifact** | A durable reference to a Capability output that must outlive its private lane. | It moves files and structured results across boundaries without treating chat messages as storage. |
 | **Studio** | The multi-Pet dispatch substrate: a Pet registry, read-only per-Pet dispatch-queue observation, and an in-process plugin event bus. | It adds collaboration while preserving each worker's local execution boundary. |
 | **Workdir** | The local scope for runtime configuration, Studio state, and relative tool paths. | It prevents unrelated projects from sharing runtime state accidentally. |
 
@@ -56,11 +55,11 @@ following pages when you need a contract or implementation boundary:
 | Capability and Toolkit authority | [Capability / Toolkit contract](../reference/extensions/capability-toolkit.md) |
 | Review and authorization reuse | [Events and human review](../reference/api/events-and-review.md) and [Authorization matcher](../reference/runtime/authorization-matcher.md) |
 | Checkpoint, session, snapshot, and timeline | [Session projection](../reference/runtime/session-projection.md) |
-| Durable cross-lane results | [Capability Artifact Pipeline](../reference/artifacts/index.md) |
+| Legacy artifact extension changes | [Retirement notes](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) |
 | Workdir and runtime configuration | [Workdir configuration](../reference/runtime/workdir.md) |
 | Multi-agent coordination | [Studio](../studio/index.md) |
 
-## The three extension boundaries
+## The two extension boundaries
 
 ```mermaid
 flowchart LR
@@ -68,17 +67,19 @@ flowchart LR
   P --> C["Capability\nintent + Toolkit allowlist"]
   C --> T["Toolkit\ntyped tools + review policy"]
   T --> O["Local or external operation"]
-  C --> A["Artifact ref\nwhen output must persist"]
 ```
 
 1. A **Capability** describes the task and names the Toolkits it is allowed to
    use.
 2. A **Toolkit** provides the executable tools and their operational policy.
-3. An **Artifact** is used only when a result must cross an execution boundary
-   or survive lane cleanup.
 
 This separation is intentional: Markdown instructions are easy to review and
 ship, while executable tools and side effects remain in typed code.
+
+The old Capability Artifact Pipeline is retired. Explicit file publication and
+download remain a [Session Artifacts proposal](../design/agent-runtime/session-artifacts.md),
+not a capability supplied by this cleanup. Channel's independent message
+attachments retain their [existing API](../reference/api/studio.md#channel-messages-and-addressing).
 
 Host and Agent are ownership boundaries, not additional extension formats. A
 Host creates and retains one or more Agent runtimes; an Agent executes a
@@ -99,7 +100,6 @@ request
   -> Toolkit tools execute under their declared policy
   -> optional human review interrupts and resumes the run
   -> result is handed back to the main conversation
-  -> optional artifact reference preserves durable output
 ```
 
 The important invariant is that the main conversation receives the completed

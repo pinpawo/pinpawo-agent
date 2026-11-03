@@ -15,7 +15,8 @@ const executionResultSchema = z.object({
       runId: z.string().min(1), taskId: z.string().min(1), delegationId: z.string().min(1),
     }).strict(),
   }).strict().nullable(),
-  artifacts: z.array(z.record(z.string(), z.unknown())),
+  // Existing checkpoints may carry legacy refs; new executions no longer write them.
+  artifacts: z.array(z.record(z.string(), z.unknown())).optional(),
 }).strict().refine(result => !result.reviewDecision
   || (result.status === 'missing_deliverable' && result.delivery === null), {
   message: 'A declined review cannot be a returned delivery.',

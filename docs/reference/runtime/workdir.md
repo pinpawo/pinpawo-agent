@@ -19,7 +19,6 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 ~/.pinpawo/workspaces/<workspace-id>/   # sessions (sessionRoot)
 ├── workspace.json
-├── capability-artifacts/
 ├── checkpoints-capability-v5/
 ├── checkpoints-tui-capability-v5/
 ├── checkpoints-studio-capability-v5/
@@ -29,7 +28,7 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 `HostRuntimeConfig` derives these paths before runtime assembly. Studio
 uses `studio.json` and `pets/` from the workdir state root. Session state
-(checkpoints of every Host, session registries and capability artifacts) lives
+(checkpoints of every Host and session registries) lives
 under the user's home, one directory per workdir named by its derived workspace
 id (`local-` plus a hash of the path); `workspace.json` records the workdir it
 belongs to. One directory per workdir keeps Hosts running in different projects
@@ -38,6 +37,12 @@ replaces `~/.pinpawo/workspaces` as the base. Session state is not migrated:
 moving or renaming a workdir starts with no sessions, and session files that
 an older version left in `<workdir>/.pinpawo` are reported at Host start and
 can be deleted.
+
+The old Capability Artifact Pipeline is retired. Earlier versions may have left
+`capability-artifacts/` under `sessionRoot`; this cleanup does not read, migrate
+or delete that directory. It is no longer a `HostRuntimeConfig` field or a new
+write destination. Existing checkpoint artifact fields remain read-compatible;
+see the [retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
 
 A Studio shared wiki, due-run store, run identity, and scheduler policy are not
 part of the current Studio contract.

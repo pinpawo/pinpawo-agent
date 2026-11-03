@@ -1,5 +1,9 @@
 # 兼容与边界说明
 
+> **状态：历史实现。** 本页记录旧管线的兼容说明，基线为
+> [`b4f0430c`](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/docs/reference/artifacts/compatibility-notes.md)。
+> 旧管线已退役；当前保留的读取兼容见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+
 ## `additional_kwargs` 不是主协议
 
 当前设计要求不要把持久化协议放进模型 prompt 或 `additional_kwargs`。

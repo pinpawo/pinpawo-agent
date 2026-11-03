@@ -16,7 +16,6 @@ function buildTestConfig(root: string): HostRuntimeConfig {
     tuiCheckpointPath: join(root, 'tui-checkpoints.json'),
     tuiSessionPath: join(root, 'tui-sessions.json'),
     petsDir: join(root, 'pets'),
-    capabilityArtifactRoot: join(root, 'capability-artifacts'),
   };
 }
 

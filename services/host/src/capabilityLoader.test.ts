@@ -4,6 +4,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { delimiter } from 'node:path';
+import { HumanMessage } from '@langchain/core/messages';
+import { FakeListChatModel } from '@langchain/core/utils/testing';
 import {
   CAPABILITY_DOCUMENT_MAX_BYTES,
   loadCapabilityDirectory,
@@ -208,8 +210,8 @@ test('validateCapabilityPlugin accepts an entry that only exports lifecycle.fina
   const capabilityDir = await mkCapability(root, 'finalized_capability', { entry: './index.js' });
   await fs.writeFile(path.join(capabilityDir, 'index.js'), `
 export const lifecycle = {
-  finalize(result) {
-    return { output: result.output };
+  finalize(result, context) {
+    return { output: context.capabilityId + ': ' + result.output, messages: context.messages.slice() };
   },
 };
 `, 'utf8');
@@ -219,6 +221,12 @@ export const lifecycle = {
 
   assert.equal(result.ok, true, result.errors.join('\n'));
   assert.equal(typeof result.capability?.lifecycle?.finalize, 'function');
+  const message = new HumanMessage('earlier work');
+  const finalized = await result.capability!.lifecycle!.finalize!({ messages: [], output: 'delivery' }, {
+    capabilityId: 'finalized_capability', threadId: 'thread', taskId: 'task', runId: 'run', delegationId: 'delegation',
+    messages: [message], models: { act: new FakeListChatModel({ responses: ['unused'] }) },
+  });
+  assert.deepEqual(finalized, { output: 'finalized_capability: delivery', messages: [message] });
 });
 
 test('validateCapabilityPlugin rejects entry paths outside the capability root', async () => {

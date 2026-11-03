@@ -19,7 +19,6 @@ import {
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import type { StudioPlugin, StudioPluginContext } from '../studioContract';
 import {
@@ -82,19 +81,10 @@ test('an explicit Pet default excludes the general fallback Capability', () => {
   );
 });
 
-const artifactStore: CapabilityArtifactStore = {
-  writeArtifact: async () => { throw new Error('not used'); },
-  readArtifact: async () => { throw new Error('not used'); },
-  listArtifacts: async () => [],
-  deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async (uri) => uri,
-};
-
 function residentBuildResources(workdir: string) {
   const runtimeConfig = buildHostRuntimeConfig(workdir);
   return {
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: artifactStore,
     checkpoint: new FileSaver(path.join(runtimeConfig.stateRoot, 'test-checkpoints.json')),
     runtimeConfig,
     toolAuthorizationMode: 'require_authorization' as const,

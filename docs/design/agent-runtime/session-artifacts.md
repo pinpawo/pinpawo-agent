@@ -1,6 +1,6 @@
 # Session Artifacts
 
-状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
+状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
 
 ## 需求
 
@@ -173,3 +173,19 @@ Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链�
 4. artifacts Toolkit 与 Host `local` adapter、source reader。
 5. HTTP 打开引用。
 6. `cos` adapter。
+
+## 清理阶段实施状态
+
+本节记录 #1047 的清理范围，不改变上文的设计目标或将其视为已经实现。
+
+旧 Capability Artifact store、discovery Toolkit、专用 Host/Studio 注入和 finalize
+写入接口已退役。普通 finalize 仍可改写 `output/messages`，Channel 独立的
+`artifacts` 消息附件 API 保持不变。显式发布、交付物传递、下载与 local/COS
+adapter 尚未由本清理提供；新能力仍需另行实现与验证。
+
+本次保留已有 `sessionCapabilityArtifacts` channel、Ref 类型/reducer 和旧执行记录
+`artifacts` 的可选读取，只停止新的业务写入。它们用于保住旧 checkpoint 里的值，
+不是新管线。仍使用 `capability-v5` namespace，不切换 checkpoint 路径，不自动迁移
+或删除旧文件。外部扩展需要移除已退役的注入字段、Toolkit 依赖和 finalize 写入调用；
+旧文件不再能通过原 discovery 工具访问，更新前仍需评估其他部署的旧数据和导出需求。
+详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。

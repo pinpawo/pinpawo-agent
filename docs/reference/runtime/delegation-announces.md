@@ -98,8 +98,9 @@ result store is needed.
 - model and UI projections do not mutate graph state;
 - old untyped handoff messages are ordinary conversation history and are not
   upgraded through content heuristics;
-- artifacts remain separate Capability state and are not embedded in the
-  Announce contract.
+- legacy artifact fields remain only for checkpoint read compatibility and are
+  not embedded in the Announce contract; see the
+  [retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
 
 This page owns the currently implemented serialized payload. The cross-layer interaction and migration are documented in the
 [Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).

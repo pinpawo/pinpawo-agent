@@ -4,6 +4,11 @@
 > here are not a current contract. For shipped workdir behavior, see
 > [Workdir configuration](../../reference/runtime/workdir.md).
 >
+> **2026-11-03 implementation note:** the earlier `capabilityArtifactRoot`
+> field and artifact-directory examples below predate retirement of the old
+> pipeline. They are not current Host requirements; see the
+> [retirement boundary](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
+>
 > **2026-08-25 boundary correction:** the `studio_request` protocol addition
 > below is withdrawn. The TUI/host conversation protocol does not carry
 > Studio dispatch. Studio has its own dispatch contract, while Resident Pet

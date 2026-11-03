@@ -38,7 +38,7 @@ flowchart TB
   O --> C["Capability lane"]
   C --> K["Toolkit tools"]
   K --> L["Local filesystem, shell, browser, or configured services"]
-  O --> A["Checkpoint and artifact refs"]
+  O --> A["Checkpoint and execution records"]
   H --> ST["Optional Studio runtime\npackages/studio + plugins/channel"]
   ST --> O
 ```
@@ -61,7 +61,7 @@ layer. See the accepted
 | Area | Location | Responsibility |
 |---|---|---|
 | Contracts | `packages/agent-contracts/` | Shared request, event, review, and run contracts. |
-| Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and artifact references. |
+| Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and execution records. |
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
 | Collaboration | `packages/studio/` | Studio Host, dispatch, read-only per-Pet dispatch-queue observation (including admission state), and extension contracts (`@pinpawo/studio-core`). |
 | Studio distribution | `services/studio/` | Complete `@pinpawo/studio` CLI and six foundational Plugin dependencies. |
@@ -78,8 +78,7 @@ layer. See the accepted
 4. The lane can use only the Toolkits declared by its Capability.
 5. Tool policy may proceed, request human review, or block the operation.
 6. The completed result returns to the main conversation.
-7. A Capability writes an artifact reference only for output that must persist.
-8. The session projection reports durable and live state to connected clients.
+7. The session projection reports durable and live state to connected clients.
 ```
 
 This flow is designed to avoid two common failure modes: broad tool access
@@ -93,7 +92,7 @@ state from a transient tool-event stream.
 | Conversation messages and pending continuation | LangGraph checkpoint | Durable authority for resume and review. |
 | Current client view | Session projection | A materialized view; never a second conversation store. |
 | Capability scratch work | Subagent lane | Private to the selected unit of work. |
-| Cross-lane output | Artifact store | Passed as references, not copied through every message. |
+| Delegated result evidence | Checkpoint messages | Typed execution records preserve the delivery; private tool transcripts stay in the child graph. |
 | Local configuration | Local host and workdir | Resolved before a runtime is created. |
 | Studio dispatch delivery | Per-Pet invocation queue | Queue is process-local; active thread and checkpoint continuity belong to the resident Pet's Agent Session. |
 
@@ -127,8 +126,13 @@ for `lifecycle.finalize`. A Toolkit is always typed code. See the
 - Toolkits carry review guidance and tools may require human authorization.
 - Local configuration, credentials, and checkpoint storage stay outside client
   protocol payloads.
-- Artifact references prevent large files or private lane transcripts from
-  becoming ordinary conversation content.
+- Private Capability transcripts stay in their child graph; Root conversation
+  records the delegated result rather than copying the full tool history.
+
+The old Capability Artifact Pipeline is retired. Its
+[remaining compatibility fields](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)
+preserve older checkpoint data; they do not provide file publication or discovery.
+The proposed replacement remains in the [Session Artifacts draft](../design/agent-runtime/session-artifacts.md).
 
 For Browser-specific setup and limits, read
 [Chrome extension browser](../guides/browser-bridge.md).

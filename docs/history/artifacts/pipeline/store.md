@@ -1,9 +1,11 @@
 # Capability Artifact Store 设计（文档版）
 
-> **状态：Current implementation notes。** 公共类型定义在
-> [`packages/pet-agent/src/types/artifact.ts`](../../../packages/pet-agent/src/types/artifact.ts)，
+> **状态：历史实现记录。** 本页记录已退役的旧 store，源码基线为 `b4f0430c`。
+> 当前扩展与旧 checkpoint 读取边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+> 公共类型定义在
+> [`packages/pet-agent/src/types/artifact.ts`](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/packages/pet-agent/src/types/artifact.ts)，
 > 本地文件实现位于
-> [`services/host/src/capabilityArtifactStore.ts`](../../../services/host/src/capabilityArtifactStore.ts)。
+> [`services/host/src/capabilityArtifactStore.ts`](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/services/host/src/capabilityArtifactStore.ts)。
 
 本文档是 `Pet Agent` 体系里“产物持久化”层的单文件说明。
 目标：把可复用的持久内容和执行时日志明确分离，避免把 `lane` 级临时消息当成可长期依赖的存储。
@@ -149,8 +151,8 @@ await sink.recordCapabilityArtifact?.(ref);
   `~/.pinpawo/workspaces/<derived-workspace-id>/capability-artifacts`。
   `PINPAWO_WORKSPACES_DIR` 可替换 workspaces 基目录；workspace id 由规范化的
   workdir 派生，`PINPAWO_WORKDIR` 选择 workdir，不把 store 放进项目 `.pinpawo`。
-  目录解析见 [runtimeConfig.ts](../../../services/host/src/config/runtimeConfig.ts)
-  和 [Workdir Configuration](../runtime/workdir.md)。
+  目录解析见 [runtimeConfig.ts](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/services/host/src/config/runtimeConfig.ts)
+  和 [Workdir Configuration](../../../reference/runtime/workdir.md)。
 - 目录结构：`threads/<encoded-thread-id>/<encoded-delegation-id>/`，内含 `manifest.json` 与内容文件；路径 segment 使用 `encodeURIComponent` 并额外转义 `.` 为 `%2E`，没有额外的 `delegation/` 目录层。
 - URI 形态：`capability-artifact://thread/{threadId}/delegation/{delegationId}/artifact/{id}`（仅用于检索和鉴权映射，不要求客户端直接拼文件路径）。
 

@@ -65,7 +65,7 @@ type InstructionDocument = {
 - `instructions`：一个非空 Markdown 文档；digest 由
   `defineInstructionDocument()` 生成并校验。
 - `lifecycle.finalize`：可选的确定性收尾 hook，用于整理已有执行结果、
-  调整本次 output 或持久化 artifact。
+  调整本次 `output` 或 `messages`。
 
 `uses` 可以是空数组，此时 Capability 是 instructions-only，但仍然通过同一
 subagent 执行路径运行。V2 没有 optional Toolkit 依赖：声明在 `uses` 中就表示
@@ -380,22 +380,47 @@ services/host/src/capabilities/general/
 把它作为 host baseline；内建文档缺失或无效时 registry 初始化失败。pet-agent
 core 仍允许显式受限 workspace 不包含 General，且不会凭空构造一个实现。
 
-## 7. Artifact
+## 7. 旧 Artifact Pipeline 退役
 
-`CapabilityArtifactStore` 是 host 提供的持久化 port：
+旧 `CapabilityArtifactStore`、Host 本地 adapter 和 `artifact_discovery` Toolkit
+已移除。运行时不再注入 `artifact_list` / `artifact_read`，也不再通过 finalize
+保存或返回产物引用。旧实现保留为[历史资料](../../history/artifacts/pipeline/index.md)。
+显式发布与下载属于 [Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)，
+本次清理尚未实现该替代能力。
 
-- `lifecycle.finalize` 可以通过 context 中的 store 写入执行结果，并返回或记录
-  `CapabilityArtifactRef`。
-- orchestrator state 只保存 refs，不保存大 payload。
-- `artifact_discovery` Toolkit 按当前 thread 提供只读
-  `artifact_list` / `artifact_read`。
-- 空 thread 返回空列表，不代表 Toolkit 不可用。
-- 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明
-  `artifact_discovery`。
+普通 `lifecycle.finalize` 与目录 `entry` 继续保留：context 提供
+`models`、只读 `messages`、`capabilityId` 和 delegation scope；返回值可改写
+`output` 或 `messages`。工具审核返回 `reject` / `cancel` 决定时不运行 finalize。它不授予额外工具权限，
+需要执行的外部动作仍由 Capability 已声明的 Toolkit 工具承担。
 
-本地 chat host 为需要历史产物的 Capability 提供稳定的 `threadId` 和
-`CapabilityArtifactStore`，以免通过缺失 scope 静默移除 Explore 等声明
-`artifact_discovery` 的 Capability。General 不依赖这项运行期 scope。
+外部扩展需要同步更新这些已删除的接口：
+
+- 从 Capability 的 `uses` 删除 `artifact_discovery`，并调整依赖旧工具的 instructions。
+  未更新的声明仍走现有缺失 Toolkit 的不可用诊断，不会被静默取消依赖。
+- finalize context 不再提供 `artifactStore` / `recordCapabilityArtifact`，返回值
+  不再支持 `artifactRefs`；`SubagentResult` 不再携带产物数组。
+- Host/Studio 装配不再接收或暴露 `capabilityArtifactStore`，
+  `HostRuntimeConfig.capabilityArtifactRoot` 和旧 store getter 也已移除。
+
+TypeScript 扩展需要更新类型与装配代码；动态 JavaScript 扩展若仍调用已删除的
+context 成员会失败。只返回旧 `artifactRefs` 的 JavaScript hook，其多余字段会
+被忽略，不再触发产物收集；这不表示旧扩展的行为兼容，必须更新扩展。
+没有为这些旧写入接口提供兼容别名。
+
+既有数据与新能力分开处理：
+
+- 继续使用 `capability-v5` namespace，不因这次退役切换 checkpoint 根路径。
+- 旧执行记录的 `artifacts` 字段仍可读，新记录不再写入；
+  `sessionCapabilityArtifacts` channel、Ref 类型和 reducer 保留，
+  防止继续运行和 checkpoint GC 时丢掉旧值。它们不是新的产物入口。
+  这是新代码读取旧数据的单向兼容，不保证旧二进制能读取本版本新写入的记录。
+  清理前 `b4f0430c` 的 strict schema 要求 `artifacts` 必填，旧二进制读取省略该字段的
+  新执行记录时会判为损坏，不能承诺回滚后仍能恢复这些已写入会话。
+- 不删除或自动迁移旧 store 文件。移除 discovery 后，旧引用不再能通过原工具读取；
+  其他部署若仍需要旧文件，应在更新前使用旧版本导出。仓库内没有内置生产者，
+  不能据此推断所有外部扩展和历史目录都为空。
+- Channel 独立的 `artifacts: [{ uri, label?, version? }]` 消息附件接口、
+  历史读取与展示保持不变，见 [Studio API](../api/studio.md#channel-messages-and-addressing)。
 
 ## 8. Host 组装顺序
 
@@ -404,11 +429,9 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 1. 构造所有 Toolkit definitions。
 2. 解析 Toolkit availability，得到本 generation 的有效 inventory。
 3. 加入所有内建、用户和调用级 Capability definitions。
-4. 添加需要 host scope 的 Toolkit，例如 thread-scoped
-   `artifact_discovery`。
-5. 调用 `compileAgentRegistry()`。
-6. 报告 `unavailableCapabilities`。
-7. 把同一个 `CompiledAgentRegistry` 交给 Supervisor 与 executor。
+4. 调用 `compileAgentRegistry()`。
+5. 报告 `unavailableCapabilities`。
+6. 把同一个 `CompiledAgentRegistry` 交给 Supervisor 与 executor。
 
 不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability
 可用性；可用性必须来自同一次编译结果。

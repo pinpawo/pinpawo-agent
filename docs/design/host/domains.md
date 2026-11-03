@@ -1,5 +1,9 @@
 # host domain 定义（2026-09-10 draft）
 
+> **2026-11-03 状态补充：** 本文的基线分析包含旧 `capabilityArtifactStore`
+> 服务。它已随旧 Artifact Pipeline 退役，不再是当前 Host 装配要求；原分析与
+> 演进记录保留，当前边界见[退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+
 关联：#790。核对基线：`badde03a`。
 本文定义 host 的 domain 切分，并在 §三 给出它的两个推论：
 准入归属，以及据此排出的实施顺序。

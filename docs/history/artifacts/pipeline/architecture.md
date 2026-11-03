@@ -1,11 +1,13 @@
 # 架构概览：Capability V2 Artifact 流程
 
-> 状态：Current
+> **状态：历史实现。** 本页记录清理前的管线，基线为
+> [`b4f0430c`](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/docs/reference/artifacts/architecture.md)。
+> 旧 store/discovery 已退役；当前边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
 > 更新：2026-07-27
 
 当前实现把 Capability 的可持久化产出分成 **artifact ref** 与 **store
 content** 两层。Capability / Toolkit 的公共边界见
-[Capability / Toolkit V2 契约](../extensions/capability-toolkit.md)。
+[Capability / Toolkit V2 契约](../../../reference/extensions/capability-toolkit.md)。
 
 ## 一句话流程
 

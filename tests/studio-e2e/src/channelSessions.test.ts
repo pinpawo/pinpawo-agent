@@ -68,8 +68,6 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
       resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
-      capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-        listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: graphService as never,
     }));
   }

@@ -1,5 +1,9 @@
 # 本分支 review 指南：按 domain 概念组织
 
+> **历史 review 记录。** 下文对应所列分支和提交，不代表当前源码的完整状态。
+> 旧 `capabilityArtifactStore` 的强制注入已退役；当前边界见
+> [Artifact Pipeline 退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+
 分支：`claude/local-agent-module-boundaries-0a8310`（30 个提交，相对 `main`）
 更新至：`da8822bb`
 

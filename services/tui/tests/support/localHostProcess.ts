@@ -1,7 +1,4 @@
 import {
-  FileCapabilityArtifactStore,
-} from '../../../host/src/capabilityArtifactStore';
-import {
   buildAgentContext,
 } from '../../../host/src/contextLoader';
 import {
@@ -62,9 +59,6 @@ const transport = await startHostServer(requestedPort, {
     contextWindowTokens: 32_000,
   }),
   toolkitInventory: createTestHostToolkitInventory(toolkits),
-  capabilityArtifactStore: new FileCapabilityArtifactStore(
-    runtimeConfig.capabilityArtifactRoot,
-  ),
 }, {
   authToken,
   handlerOptions: {

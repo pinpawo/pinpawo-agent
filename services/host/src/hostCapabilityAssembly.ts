@@ -12,7 +12,6 @@
  */
 import {
   type AgentToolkit,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import {
   createBrowserCapability,
@@ -20,7 +19,6 @@ import {
 } from '@pinpawo-toolkit/browser';
 import { join } from 'node:path';
 import { atomicWriteFile } from './atomicFile';
-import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import {
   createCapabilityCreatorCapability,
   createCapabilityCreatorToolkit,
@@ -146,7 +144,6 @@ export class HostCapabilityAssembly {
   private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityCatalog: HostCapabilityCatalog;
-  private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
   private readonly checkpointer: FileSaver;
   private writerLeaseHeld = false;
   private initialized = false;
@@ -198,9 +195,6 @@ export class HostCapabilityAssembly {
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
-    this.capabilityArtifactStore = new FileCapabilityArtifactStore(
-      this.runtimeConfig.capabilityArtifactRoot,
-    );
     this.checkpointer = new FileSaver(
       options.checkpointPath ?? this.runtimeConfig.checkpointPath,
     );
@@ -321,10 +315,6 @@ export class HostCapabilityAssembly {
 
   getCapabilityCatalog(): HostCapabilityCatalog {
     return this.capabilityCatalog;
-  }
-
-  getCapabilityArtifactStore(): CapabilityArtifactStore {
-    return this.capabilityArtifactStore;
   }
 
   async shutdown(): Promise<void> {

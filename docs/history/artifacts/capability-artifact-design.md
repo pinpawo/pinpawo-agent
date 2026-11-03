@@ -5,9 +5,9 @@
 > 状态：Draft v1
 > 日期：2026-06-16
 > 关联：`PET_AGENT_API_CAPABILITY_TOOLKIT.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`
-> 状态补充：Historical draft。当前实现以
-> `capability-artifact-pipeline/architecture.md` 和
-> `PET_AGENT_API_CAPABILITY_TOOLKIT.md` 为准。本文保留为设计背景；
+> 状态补充：Historical draft。旧实现资料见
+> [Capability Artifact Pipeline](pipeline/architecture.md)，当前扩展边界见
+> [退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。本文保留为设计背景；
 > 其中 `resultSchema`、Capability write tool、旧 discovery tool 名称和
 > orchestrator 读取 artifact 全文均不是 V2 接口。
 > 2026-08-02：#532 删除了 Explore 的自动 post-run ingest 与 report artifact；

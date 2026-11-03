@@ -119,10 +119,6 @@ export class AgentHost {
     return this.caps.getCapabilityCatalog();
   }
 
-  getCapabilityArtifactStore() {
-    return this.caps.getCapabilityArtifactStore();
-  }
-
   getPetConfig(): PetConfig {
     return this.petConfig;
   }
@@ -143,7 +139,6 @@ export class AgentHost {
       toolkitInventory: this.getToolkitInventoryStore(),
       capabilityCatalog: this.getCapabilityCatalog(),
       ...(this.petDocument ? { petDocument: this.petDocument } : {}),
-      capabilityArtifactStore: this.getCapabilityArtifactStore(),
     };
   }
 

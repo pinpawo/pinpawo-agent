@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
-import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
 import {
   observeAgentMessageSelection,
@@ -10,12 +9,11 @@ import {
 import { materializeDelegation } from '../delegation';
 import { readCapabilityExecutions } from '../executionMessages';
 import { toolProtocolMiddleware } from '../modelInvocation';
-import { buildSubagentExecutionContext, collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
+import { collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
 import { emitRuntimeEventToStreamWriter } from '../../../utils/streamWriterEvents';
 import { createToolAuthorizationRecorder } from '../runtime/authorization';
 import { CAPABILITY_SUBAGENT_MAX_ITERATIONS } from '../runtime/constants';
 import { readThreadId } from '../runtime/config';
-import { hasArtifactDiscoveryToolkit } from '../artifacts/discovery';
 import type {
   CapabilityExecutionContext,
   CapabilityExecutionInput,
@@ -80,7 +78,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const authorizationRecorder = createToolAuthorizationRecorder(
       [...review.authorizations],
     );
-    const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
       models: options.models,
       modelInputModalities: options.modelInputModalities,
@@ -103,12 +100,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       undefined,
       toolkitContext,
     );
-    const canExploreArtifacts = hasArtifactDiscoveryToolkit(
-      usedResolvedToolkitExecution.toolkits,
-    );
-    const executionContext = buildSubagentExecutionContext({
-      artifactDiscovery: canExploreArtifacts,
-    });
     const subagentInput: SubagentRunInput = {
       model: options.models.subagent ?? options.models.act,
       tools: usedResolvedToolkitExecution.tools,
@@ -130,13 +121,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
           owner: capability.name,
           content: capability.instructions.content,
         },
-        ...(executionContext
-          ? [{
-              id: 'execution-context',
-              owner: 'framework',
-              content: executionContext,
-            }]
-          : []),
       ],
       operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
       messages: scopedMessages,
@@ -158,7 +142,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       },
       runnableConfig,
       signal: runnableConfig?.signal,
-      artifacts: artifactRefs,
     };
     let result = await runSubagent(subagentInput);
 
@@ -166,27 +149,18 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       const finalized = await capability.lifecycle.finalize(result, {
         models: options.models,
         messages: scopedMessages,
-        artifactStore: options.capabilityArtifactStore,
-        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-          artifactRefs.push(ref);
-        },
         threadId,
         taskId: scope.taskId,
         capabilityId: capability.name,
         delegationId: scope.delegationId,
         runId,
       });
-      const artifactsById = new Map(
-        [...result.artifacts, ...artifactRefs, ...(finalized?.artifactRefs ?? [])]
-          .map((ref) => [ref.id, ref]),
-      );
       result = {
         ...result,
         ...(finalized?.messages ? { messages: finalized.messages } : {}),
         ...(finalized?.output !== undefined
           ? { output: finalized.output }
           : {}),
-        artifacts: [...artifactsById.values()],
       };
     }
 
@@ -202,7 +176,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       ...(result.reviewDecision ? { reviewDecision: result.reviewDecision } : {}),
       delivery,
       tokenUsage: result.tokenUsage ?? null,
-      artifacts: result.artifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };
   };

@@ -49,7 +49,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const result = createCapabilityExecutionMessage({
       callId: runtime.toolCallId,
       execution: input,
-      result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts,
+      result: { status: execution.status, delivery: execution.delivery,
         ...(execution.reviewDecision ? { reviewDecision: execution.reviewDecision } : {}) },
       metadata: { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
         sourceCapability: input.capability, runtimeGenerated: true,
@@ -59,7 +59,6 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       messages: [result, ...(execution.reviewDecision ? [buildReviewStopMessage(execution.reviewDecision, {
         runId: state.runId, taskId: state.taskId,
       })] : [])],
-      sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
     } });

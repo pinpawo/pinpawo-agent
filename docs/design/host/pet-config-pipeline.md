@@ -77,7 +77,6 @@
 | `toolkitInventory` | ❌ | 扫描派生 |
 | `chatCheckpointer` | ❌ | 服务对象 |
 | `toolkitRuntimeManager` | ❌ | 服务对象 |
-| `capabilityArtifactStore` | ❌ | 服务对象 |
 | `serverMode` | ❌ | 启动参数，不持久化 |
 | `runtimeConfig` 的派生路径 | ❌ | 由 `workdir` 计算 |
 
@@ -170,7 +169,7 @@ Studio 模式下存在，所以这不是临时限制，而是 Chat Host 的固�
 PetConfig            ← 读自文件，可存可改
 HostExecutionConfig  ← 读自 config.json（#764 已抽出）
         +
-运行时服务（catalog / inventory / checkpointer / artifactStore / runtimeManager）
+运行时服务（catalog / inventory / checkpointer / runtimeManager）
         ↓ 装配
 ServerDeps           ← 内存产物，不可持久化
         ↓

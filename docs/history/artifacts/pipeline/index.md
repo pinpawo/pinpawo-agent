@@ -1,6 +1,8 @@
 # Capability Artifact Pipeline
 
-> 状态：Current
+> Archived: the legacy store and discovery pipeline has been removed. The [Session Artifacts design](../../../design/agent-runtime/session-artifacts.md) describes the planned replacement; its implementation status is recorded separately.
+
+> 状态：Archived
 >
 > 用途：为 `capability` 能力产物从 `run` 到 `artifact store` 到主流程引用的完整链路提供单独说明。
 

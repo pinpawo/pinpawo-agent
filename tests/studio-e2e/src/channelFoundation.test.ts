@@ -178,10 +178,6 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
     resolveInvocationContext: contextBridge.resolveInvocationContext,
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: {
-      writeArtifact: async () => { throw new Error('unused'); }, readArtifact: async () => { throw new Error('unused'); },
-      listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async (uri) => uri,
-    },
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
     runAgentTurn: async ({ request, setup }) => {

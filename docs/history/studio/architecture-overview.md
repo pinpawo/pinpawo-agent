@@ -8,7 +8,7 @@
 
 - `interfaces.md` —— Studio ↔ Agent 接口契约(invoke 签名、wiki middleware、HITL 边界等)。
 - `legacy-orchestrator.md` —— StudioOrchestrator 运行时设计。
-- `../../reference/artifacts/store.md` —— capability artifacts 的持久化 store 设计。
+- `../artifacts/pipeline/store.md` —— capability artifacts 的持久化 store 设计。
 
 ## TL;DR
 

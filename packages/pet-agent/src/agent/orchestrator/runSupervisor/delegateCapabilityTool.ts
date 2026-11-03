@@ -59,7 +59,6 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       messages: [result, ...(execution.reviewDecision ? [buildReviewStopMessage(execution.reviewDecision, {
         runId: state.runId, taskId: state.taskId,
       })] : [])],
-      sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
     } });

@@ -17,7 +17,7 @@ export type HostRuntimeConfig = Readonly<{
   stateRoot: string;
   /**
    * Session state of this workdir under the user's home: checkpoints, session
-   * registries and capability artifacts. See `resolveWorkspaceSessionRoot`.
+   * registries. See `resolveWorkspaceSessionRoot`.
    */
   sessionRoot: string;
   checkpointPath: string;
@@ -25,7 +25,6 @@ export type HostRuntimeConfig = Readonly<{
   tuiSessionPath: string;
   /** Pet configuration directory; Chat reads one Pet here, Studio reads many. */
   petsDir: string;
-  capabilityArtifactRoot: string;
 }>;
 
 /**
@@ -33,7 +32,7 @@ export type HostRuntimeConfig = Readonly<{
  * contract change starts a new durable namespace rather than interpreting older
  * checkpoints through the new graph. v3 made the Supervisor snapshot's `runId`
  * required; v4 stores delegation results as typed execution records; v5 keeps
- * FileSaver objects inside each thread directory. Capability artifacts keep their existing thread-scoped root.
+ * FileSaver objects inside each thread directory.
  */
 export const HOST_CHECKPOINT_CONTRACT = 'capability-v5';
 
@@ -120,7 +119,6 @@ export function buildHostRuntimeConfig(workdir = resolveDefaultWorkdir()): HostR
       `tui-sessions-${HOST_CHECKPOINT_CONTRACT}.json`,
     ),
     petsDir: resolve(stateRoot, 'pets'),
-    capabilityArtifactRoot: resolve(sessionRoot, 'capability-artifacts'),
   });
 }
 

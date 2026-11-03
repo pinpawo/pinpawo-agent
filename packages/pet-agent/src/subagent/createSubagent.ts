@@ -252,7 +252,6 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     maxIterations: input.maxIterations,
     contextWindowTokens: input.contextWindowTokens,
     generationReserveTokens: input.generationReserveTokens,
-    artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
   const parentRuntimeContext = input.runnableConfig?.context;
@@ -328,12 +327,11 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   );
   latestMessages = readResultMessages(result) ?? latestMessages;
   ensureSubagentMessageIds(latestMessages);
-  const artifacts = inputState.artifacts ?? [];
   const invocationMessages = latestMessages.filter(message => !inputMessageIds.has(message.id!));
   const tokenUsage = readMessagesTokenUsage(invocationMessages);
   const reviewDecision = readReviewStopDecision(invocationMessages.at(-1));
   return {
-    messages: latestMessages, artifacts, tokenUsage,
+    messages: latestMessages, artifacts: [], tokenUsage,
     output: reviewDecision ? null : readInvocationOutput(invocationMessages),
     ...(reviewDecision ? { reviewDecision } : {}),
   };

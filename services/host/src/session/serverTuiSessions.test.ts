@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import {
   stampAgentMessageCreatedAt,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import test from 'node:test';
 import { MemorySaver } from '@langchain/langgraph';
@@ -29,18 +28,6 @@ import {
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 
 const TEST_MODEL_PROFILE_ID = 'test-profile';
-
-const testArtifactStore: CapabilityArtifactStore = {
-  writeArtifact: async () => {
-    throw new Error('not implemented in this test');
-  },
-  readArtifact: async () => {
-    throw new Error('not implemented in this test');
-  },
-  listArtifacts: async () => [],
-  deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async (uri) => uri,
-};
 
 
 test('ServerTuiSessionService creates sessions without deleting earlier ones', () => {
@@ -196,7 +183,6 @@ test('ServerTuiSessionService injects active session createdAt into runtime envi
     petId: 'pet-a',
     ...createTestModelServerDeps(),
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-tui-workdir'),
-    capabilityArtifactStore: testArtifactStore,
   } as never, {
     pet: {
       id: 'pet-a',
@@ -206,23 +192,6 @@ test('ServerTuiSessionService injects active session createdAt into runtime envi
 
   assert.ok(setup.input.context?.systemPromptSections?.some(({ content }) => content.includes(session.createdAt)));
   assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-tui-workdir');
-});
-
-test('chat setup requires an artifact store at the type boundary', () => {
-  // This used to be a runtime throw. ServerDeps now declares
-  // capabilityArtifactStore required, so a Host that forgets one does not
-  // compile — the check moved from a thrown Error to the contract, which
-  // catches it earlier and cannot be reached in production anyway.
-  const deps = {
-    petId: 'pet-a',
-    ...createTestModelServerDeps(),
-    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-artifact-store'),
-  };
-  assert.ok(deps.capabilityArtifactStore, 'the contract supplies a store');
-
-  // @ts-expect-error capabilityArtifactStore is required by ServerDeps.
-  const missing: ServerDeps = { ...deps, capabilityArtifactStore: undefined };
-  assert.equal(missing.capabilityArtifactStore, undefined);
 });
 
 test('runtime config updates reach the next chat setup through the normalized deps store', () => {
@@ -239,7 +208,6 @@ test('runtime config updates reach the next chat setup through the normalized de
     autoAuthorizationSafetyLevel: 'strict',
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-policy-update'),
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     capabilityCatalog: createTestModelServerDeps().capabilityCatalog,
   });
   const context = {
@@ -305,7 +273,6 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
     petId: 'pet-a',
     ...createTestModelServerDeps(),
-    capabilityArtifactStore: testArtifactStore,
   } as never);
 
   assert.deepEqual(checkpoint.pendingInterrupt, {

@@ -4,7 +4,7 @@
 > Status: Historical (implemented by PR #140, superseded at the Capability
 > lifecycle boundary by Capability / Toolkit V2)
 >
-> Current flow: [Capability Artifact Pipeline](../../reference/artifacts/architecture.md).
+> Archived flow: [Capability Artifact Pipeline](pipeline/architecture.md).
 > The deterministic-write decision remains valid, but V2 replaces
 > `CapabilityContext` / `middleware.afterRun` / `resultSchema` with the static
 > Capability contract and optional `lifecycle.finalize`.

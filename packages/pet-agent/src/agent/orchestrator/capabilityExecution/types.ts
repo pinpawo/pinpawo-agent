@@ -3,7 +3,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
 import type { AgentModels } from '../../../types/agent';
-import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../../types/artifact';
+import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { ModelInputModality, ToolkitReviewCapabilities } from '../../../types/toolkit';
 import type { DelegationSpec } from '../delegation';
 import type { DelegationDelivery } from '../delegation/delivery';
@@ -44,7 +44,6 @@ export type CapabilityExecutionContext = {
 export type CapabilityExecutionOptions = {
   readonly models: AgentModels;
   readonly modelInputModalities?: readonly ModelInputModality[];
-  readonly capabilityArtifactStore?: CapabilityArtifactStore;
   readonly subagentContextWindowTokens?: number;
   readonly subagentGenerationReserveTokens?: number;
   /** Internal execution seam; production uses the existing createSubagent wrapper. */

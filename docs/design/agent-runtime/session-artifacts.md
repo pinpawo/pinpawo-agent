@@ -1,6 +1,23 @@
 # Session Artifacts
 
-状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../reference/artifacts/index.md)。
+状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
+
+## 实现状态
+
+本次先清理旧 Capability Artifact Pipeline，新增能力另一个 PR 承接。本节记录
+当前中间状态，不改变下文第一阶段目标与实现顺序：
+
+- 旧 store、discovery 工具、finalize 产物写入口和 session 累积索引已移除。
+  `lifecycle.finalize` 仍可改写 `output` / `messages`。外部 Capability 使用旧
+  `artifact_discovery` 或 finalize 写接口时需要更新，不能继续调用旧工具。
+- 执行记录的 `artifacts` 与最小引用类型暂时保留历史读取兼容，新执行返回空数组。
+  默认 checkpoint 和 TUI registry 仍使用 `capability-v5`，本次不做 checkpoint 迁移。
+  旧 Explore checkpoint 中尚未执行的 `artifact_list` / `artifact_read` 调用恢复后，
+  ToolNode 会按 unknown tool 返回 `status: error`，不执行旧动作；保留路径不代表旧工具仍能续跑。
+- Channel 人工附件仍为 `artifacts: [{ uri, label?, version? }]`，旧消息和显示路径不变。
+  `deliverables` 声明、收集、回复传递和 Channel 字段迁移由后续 PR 实现。
+- 删除实现不会删除磁盘上的历史 store 文件；当前 Host 不再提供旧 store 读写入口。
+  本次也不增加替代的文件发布、存储或下载服务。
 
 ## 需求
 

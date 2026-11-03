@@ -1,5 +1,7 @@
 # 本分支 review 指南：按 domain 概念组织
 
+> 本文中的旧 artifact store / discovery 服务属于当时核对的历史基线，现已移除；清理阶段及后续计划见 [Session Artifacts](../agent-runtime/session-artifacts.md#实现状态)。
+
 分支：`claude/local-agent-module-boundaries-0a8310`（30 个提交，相对 `main`）
 更新至：`da8822bb`
 

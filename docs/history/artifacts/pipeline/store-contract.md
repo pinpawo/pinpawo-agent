@@ -1,5 +1,7 @@
 # 持久化契约（Store Contract）
 
+> Archived: the legacy store and discovery pipeline has been removed. The [Session Artifacts design](../../../design/agent-runtime/session-artifacts.md) describes the planned replacement; its implementation status is recorded separately.
+
 ## Ref 与类型
 
 ```ts

@@ -71,14 +71,14 @@ test('ignores tag-shaped text inside the nested run request', () => {
   );
 });
 
-test('formats a canonical artifact discovery context compactly', () => {
+test('does not interpret the removed artifact discovery envelope', () => {
   assert.equal(
     formatSubagentProtocolMessage([
       '<artifact_discovery_context role="fact" source="runtime" trust="non_authoritative">',
       '  <scope>current_thread</scope>',
       '</artifact_discovery_context>',
     ].join('\n')),
-    'Artifact context · current_thread',
+    null,
   );
 });
 

@@ -1,11 +1,13 @@
 # 架构概览：Capability V2 Artifact 流程
 
-> 状态：Current
+> Archived: the legacy store and discovery pipeline has been removed. The [Session Artifacts design](../../../design/agent-runtime/session-artifacts.md) describes the planned replacement; its implementation status is recorded separately.
+
+> 状态：Archived
 > 更新：2026-07-27
 
 当前实现把 Capability 的可持久化产出分成 **artifact ref** 与 **store
 content** 两层。Capability / Toolkit 的公共边界见
-[Capability / Toolkit V2 契约](../extensions/capability-toolkit.md)。
+[Capability / Toolkit V2 契约](../../../reference/extensions/capability-toolkit.md)。
 
 ## 一句话流程
 

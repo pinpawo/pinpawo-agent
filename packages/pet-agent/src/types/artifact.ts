@@ -1,3 +1,4 @@
+/** Historical execution-reference shape retained while old records remain readable. */
 export type CapabilityArtifactKind =
   | 'result'
   | 'report'
@@ -30,41 +31,4 @@ export type CapabilityArtifactRef = {
   createdAt: string;
   schema?: CapabilityArtifactSchemaRef;
   metadata?: Record<string, unknown>;
-};
-
-export type CapabilityArtifactWritePayload = {
-  kind: CapabilityArtifactKind;
-  mimeType: string;
-  title?: string;
-  preview?: string;
-  schema?: CapabilityArtifactSchemaRef;
-  metadata?: Record<string, unknown>;
-  content?: unknown;
-  externalUri?: string;
-};
-
-export type CapabilityArtifactWriteInput = {
-  threadId: string;
-  capabilityId: string;
-  delegationId: string;
-  runId: string;
-  artifact: CapabilityArtifactWritePayload;
-};
-
-export type CapabilityArtifactStore = {
-  writeArtifact: (input: CapabilityArtifactWriteInput) => Promise<CapabilityArtifactRef>;
-  readArtifact: (params: {
-    uri: string;
-    maxBytes?: number;
-    threadId?: string;
-  }) => Promise<{ ref: CapabilityArtifactRef; content: string | null }>;
-  listArtifacts: (params: {
-    threadId: string;
-    capabilityId?: string;
-    kind?: string;
-    limit?: number;
-  }) => Promise<CapabilityArtifactRef[]>;
-  deleteThreadArtifacts: (threadId: string) => Promise<void>;
-  getDownloadUri: (uri: string) => Promise<string>;
-  writeArtifacts?: (inputs: CapabilityArtifactWriteInput[]) => Promise<CapabilityArtifactRef[]>;
 };

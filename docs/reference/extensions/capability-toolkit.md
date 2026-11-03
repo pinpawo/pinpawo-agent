@@ -380,22 +380,19 @@ services/host/src/capabilities/general/
 把它作为 host baseline；内建文档缺失或无效时 registry 初始化失败。pet-agent
 core 仍允许显式受限 workspace 不包含 General，且不会凭空构造一个实现。
 
-## 7. Artifact
+## 7. Finalize 与历史产物数据
 
-`CapabilityArtifactStore` 是 host 提供的持久化 port：
+`lifecycle.finalize` 仍可改写执行的 `output` / `messages`。它不再提供
+`artifactStore`、`recordCapabilityArtifact` 或 `artifactRefs` 写入口。
+Host 不再注入 `artifact_discovery` Toolkit，Explore 也不再依赖它；旧
+`artifact_list` / `artifact_read` 工具随此清理移除。外部 Capability 若使用这些
+接口，须先更新声明与实现。
 
-- `lifecycle.finalize` 可以通过 context 中的 store 写入执行结果，并返回或记录
-  `CapabilityArtifactRef`。
-- orchestrator state 只保存 refs，不保存大 payload。
-- `artifact_discovery` Toolkit 按当前 thread 提供只读
-  `artifact_list` / `artifact_read`。
-- 空 thread 返回空列表，不代表 Toolkit 不可用。
-- 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明
-  `artifact_discovery`。
-
-本地 chat host 为需要历史产物的 Capability 提供稳定的 `threadId` 和
-`CapabilityArtifactStore`，以免通过缺失 scope 静默移除 Explore 等声明
-`artifact_discovery` 的 Capability。General 不依赖这项运行期 scope。
+旧执行记录中的 `artifacts` 和对应引用类型保留读取兼容；新执行保留空数组，
+不再维护 session 级产物索引。已有 store 文件不会删除，但当前 Host 不再提供
+旧 store 的读写入口。Channel 的人工附件字段 `artifacts` 保持原契约。
+工具声明的交付物与 Channel 字段迁移属于后续改造，见
+[Session Artifacts 实现状态](../../design/agent-runtime/session-artifacts.md#实现状态)。
 
 ## 8. Host 组装顺序
 
@@ -404,11 +401,9 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 1. 构造所有 Toolkit definitions。
 2. 解析 Toolkit availability，得到本 generation 的有效 inventory。
 3. 加入所有内建、用户和调用级 Capability definitions。
-4. 添加需要 host scope 的 Toolkit，例如 thread-scoped
-   `artifact_discovery`。
-5. 调用 `compileAgentRegistry()`。
-6. 报告 `unavailableCapabilities`。
-7. 把同一个 `CompiledAgentRegistry` 交给 Supervisor 与 executor。
+4. 调用 `compileAgentRegistry()`。
+5. 报告 `unavailableCapabilities`。
+6. 把同一个 `CompiledAgentRegistry` 交给 Supervisor 与 executor。
 
 不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability
 可用性；可用性必须来自同一次编译结果。

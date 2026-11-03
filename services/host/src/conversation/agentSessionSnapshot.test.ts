@@ -29,7 +29,6 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
-        capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as ServerDeps,
     requiredInputModalities: ['text', 'image'],
@@ -139,7 +138,6 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
-        capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as ServerDeps,
     activeRun: {

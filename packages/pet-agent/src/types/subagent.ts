@@ -73,7 +73,6 @@ export type SubagentInputState = {
   maxIterations?: number;
   contextWindowTokens?: number;
   generationReserveTokens?: number;
-  artifacts?: CapabilityArtifactRef[];
 };
 
 export type SubagentRunInput = SubagentInputState & {
@@ -92,6 +91,7 @@ export type SubagentResult = {
   /** Usage reported by this invocation, independent of transcript storage. */
   tokenUsage?: ProviderTokenUsage | null;
   messages: BaseMessage[];
+  /** Legacy execution-record field; the retired pipeline no longer produces references. */
   artifacts: CapabilityArtifactRef[];
   /** This invocation's textual output for the parent tool result, not a history-message reference. */
   output: string | null;

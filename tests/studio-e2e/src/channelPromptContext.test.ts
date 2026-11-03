@@ -73,8 +73,6 @@ Pet identity marker: ${petMarker}
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory),
       checkpointer: new FileSaver(config.checkpointPath), sessionStatePath: config.tuiSessionPath,
-      capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-        listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: {
         readThreadState: (setup: AgentChannelSetup) => graph.readThreadState(modelSetup(setup)),
         streamEvents: (setup: AgentChannelSetup) => graph.streamEvents(modelSetup(setup)),

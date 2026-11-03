@@ -10,7 +10,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { HostGraphService } from './agent/agentGraphService';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { createChatHostHandlers as createProductionChatHostHandlers } from './serverHandlers';
@@ -37,18 +36,6 @@ function createChatHostHandlers(
     ...deps,
   }), options);
 }
-
-const testArtifactStore: CapabilityArtifactStore = {
-  writeArtifact: async () => {
-    throw new Error('not implemented in this test');
-  },
-  readArtifact: async () => {
-    throw new Error('not implemented in this test');
-  },
-  listArtifacts: async () => [],
-  deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async (uri) => uri,
-};
 
 function createPeer(sent: HostServerMessage[]): ServerPeer {
   return {
@@ -143,7 +130,6 @@ test('session.compact is a v2 session command and returns the authoritative snap
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
-    capabilityArtifactStore: testArtifactStore,
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
@@ -207,7 +193,6 @@ test('a snapshot may carry only the newest timeline entries', async () => {
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
-    capabilityArtifactStore: testArtifactStore,
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
@@ -278,7 +263,6 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     modelProfiles,
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
   });
@@ -395,7 +379,6 @@ test('model selection keeps the previous profile when checkpoint preparation fai
     ], 'primary'),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
@@ -454,7 +437,6 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     modelProfiles: initialProfiles,
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
 
   let sessionId = '';
@@ -489,7 +471,6 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     ], 'primary'),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
   try {
     await handlers.peerHandlers.onSessionSnapshotGet(peer, {
@@ -572,7 +553,6 @@ test('model selection is rejected while the active session is running', async ()
     ], 'primary'),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     runAgentTurn: async () => {
@@ -666,7 +646,6 @@ test('a run claims the register for the whole admitted turn', async () => {
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
-    capabilityArtifactStore: testArtifactStore,
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
@@ -741,7 +720,6 @@ test('completion snapshot does not reintroduce a settled active run', async () =
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
-    capabilityArtifactStore: testArtifactStore,
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
@@ -812,7 +790,6 @@ test('model selection blocks a chat admitted by another peer until the selection
     ], 'primary'),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
@@ -899,7 +876,6 @@ test('model selection is rejected while checkpoint state has pending review', as
     ], 'primary'),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
@@ -972,7 +948,6 @@ test('admitted images gate model selection through the transcript', async () => 
     ], 'vision-a'),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
@@ -1109,7 +1084,6 @@ test('text-only selected profile rejects image admission before graph invocation
     ]),
     toolAuthorizationMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     runAgentTurn: async (options) => {
@@ -1293,7 +1267,6 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
     petId: 'pet-a',
     runtimeConfig: buildHostRuntimeConfig(workdir),
     chatCheckpointer: checkpointer,
-    capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
     runAgentTurn: async ({ setup }) => {

@@ -55,7 +55,7 @@ function messageScope(request: CapabilityExecutionInput) {
 
 function deliver(run: SubagentRunInput, text = 'Delivered') {
   const message = new AIMessage({ id: `result:${run.runtimeContext?.executionScope?.delegationId}`, content: text });
-  return { messages: [...run.messages, message], artifacts: run.artifacts ?? [], output: message.text };
+  return { messages: [...run.messages, message], artifacts: [], output: message.text };
 }
 
 function artifact(id: string): CapabilityArtifactRef {
@@ -118,21 +118,19 @@ for (const output of [null, '', '  ']) {
   });
 }
 
-test('finalize can replace delivery and merge artifacts', async () => {
+test('finalize can replace delivery and messages without a retired artifact writer', async () => {
   const toolkit = staticToolkit();
-  const ref = artifact('d1');
+  const replacement = new AIMessage({ id: 'finalized', content: 'Rewritten execution report.' });
   const request = input('d1', [toolkit], { finalize: (result, context) => {
     assert.equal(context.delegationId, 'd1');
-    context.recordCapabilityArtifact?.(ref);
+    assert.equal('artifactStore' in context, false);
+    assert.equal('recordCapabilityArtifact' in context, false);
     assert.equal(result.output, 'Delivered');
-    return { output: 'Finalized delivery', artifactRefs: [ref] };
+    return { output: 'Finalized delivery', messages: [replacement] };
   } });
-  const result = await createCapabilityExecutor({ models, runSubagent: async (run) => {
-    run.artifacts?.push(ref);
-    return deliver(run);
-  } })(request, hostContext());
+  const result = await createCapabilityExecutor({ models, runSubagent: async run => deliver(run) })(request, hostContext());
   assert.equal(result.delivery?.text, 'Finalized delivery');
-  assert.deepEqual(result.artifacts, [ref]);
+  assert.deepEqual(result.artifacts, []);
 });
 
 for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'aborted'] as const) {
@@ -175,12 +173,11 @@ test('overlapping calls keep contexts, artifacts and authorizations separate', a
   const execute = createCapabilityExecutor({ models, runSubagent: async (run) => {
     seen.push(run);
     const id = run.runtimeContext!.executionScope!.delegationId;
-    run.artifacts!.push(artifact(id));
     arrivals += 1;
     if (arrivals === 2) release();
     await barrier;
     assert.equal(run.runtimeContext?.executionScope?.delegationId, id);
-    return deliver(run, id);
+    return { ...deliver(run, id), artifacts: [artifact(id)] };
   } });
   const first = input('d1', [toolkit]);
   const second = input('d2', [toolkit]);
@@ -191,7 +188,7 @@ test('overlapping calls keep contexts, artifacts and authorizations separate', a
     execute(first, { ...hostContext(), review: { authorizations: grants } }), execute(second, hostContext()),
   ]);
   assert.notStrictEqual(seen[0].messages, seen[1].messages);
-  assert.notStrictEqual(seen[0].artifacts, seen[1].artifacts);
+  assert.notStrictEqual(a.artifacts, b.artifacts);
   assert.notEqual(seen[0].messages.at(-1)?.id, seen[1].messages.at(-1)?.id);
   assert.deepEqual(a.artifacts.map(({ id }) => id), ['d1']);
   assert.deepEqual(b.artifacts.map(({ id }) => id), ['d2']);

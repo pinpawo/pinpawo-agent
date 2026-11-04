@@ -113,14 +113,19 @@ test('completed assistant markdown renders rich blocks without source markers', 
     ].join('\n'), 'completed')]));
 
     const text = setup.cellOutput.takeText();
-    assert.match(text, /^\| Result/m);
+    assert.match(text, /^  Result$/m);
     assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
     assert.match(text, /- first/);
     assert.match(text, /quoted/);
     assert.match(text, /code · ts/);
     assert.match(text, /const answer = 42;/);
-    assert.match(text, /Key\s+Value/);
-    assert.match(text, /mode\s+rich/);
+    assert.ok(text.includes([
+      '  ╭──────┬───────╮',
+      '  │ Key  │ Value │',
+      '  ├──────┼───────┤',
+      '  │ mode │ rich  │',
+      '  ╰──────┴───────╯',
+    ].join('\n')));
     assert.doesNotMatch(text, /\*\*|```|# Result|\| ---/);
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
@@ -162,6 +167,67 @@ test('completed subagent messages do not render in scrollback', async () => {
 
     const text = setup.cellOutput.takeText();
     assert.equal(text, '');
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('assistant tables preserve borders around empty cells', async () => {
+  const setup = await createTimelineRenderer(48);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.render(session([assistantMessage([
+      '| Key | Value |',
+      '| --- | --- |',
+      '| | |',
+      '| key | |',
+    ].join('\n'), 'completed')]));
+    assert.equal(setup.cellOutput.takeText(), [
+      '  ╭─────┬───────╮',
+      '  │ Key │ Value │',
+      '  ├─────┼───────┤',
+      '  │     │       │',
+      '  ├─────┼───────┤',
+      '  │ key │       │',
+      '  ╰─────┴───────╯',
+      '',
+    ].join('\n'));
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('narrow assistant tables wrap formatted Unicode cells within aligned borders', async () => {
+  const setup = await createTimelineRenderer(28);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.render(session([assistantMessage([
+      '| 名称 | Detail |',
+      '| :--- | ---: |',
+      '| **中文** | `alpha` beta gamma delta |',
+      '| a\\|b | 👋 |',
+    ].join('\n'), 'completed')]));
+    const text = setup.cellOutput.takeText();
+    assert.equal(text, [
+      '  ╭──────┬─────────────────╮',
+      '  │ 名称 │ Detail          │',
+      '  ├──────┼─────────────────┤',
+      '  │ 中文 │ alpha beta      │',
+      '  │      │ gamma delta     │',
+      '  ├──────┼─────────────────┤',
+      '  │ a|b  │ 👋              │',
+      '  ╰──────┴─────────────────╯',
+      '',
+    ].join('\n'));
+    for (const row of text.trimEnd().split('\n')) {
+      assert.equal(Bun.stringWidth(row), 28);
+    }
+    const spans = setup.styleOutput.take().flatMap(lines => lines.flatMap(line => line.spans));
+    assert.ok(spans.some(span => span.text.includes('中文') && (span.attributes & TextAttributes.BOLD) !== 0));
+    assert.ok(spans.some(span => span.text.includes('alpha') && span.fg.equals(RGBA.fromHex('#69c0c8'))));
+    assert.ok(spans.some(span => span.text.includes('╭') && span.fg.equals(RGBA.fromHex('#666666'))));
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
@@ -270,10 +336,18 @@ test('streaming markdown keeps a mutable table out of committed scrollback', asy
       status: 'completed' as const,
     }]));
     const completed = setup.cellOutput.takeText();
-    assert.match(completed, /Key\s+Value/);
-    assert.match(completed, /mode\s+initial/);
-    assert.match(completed, /detail\s+a wider value/);
+    assert.ok(completed.includes([
+      '  ╭────────┬───────────────╮',
+      '  │ Key    │ Value         │',
+      '  ├────────┼───────────────┤',
+      '  │ mode   │ initial       │',
+      '  ├────────┼───────────────┤',
+      '  │ detail │ a wider value │',
+      '  ╰────────┴───────────────╯',
+    ].join('\n')));
     assert.doesNotMatch(completed, /^PinPawo$/m);
+    timeline.render(session([{ ...grown, status: 'completed' as const }]));
+    assert.equal(setup.cellOutput.takeText(), '');
   } finally {
     timeline.destroy();
     setup.renderer.destroy();

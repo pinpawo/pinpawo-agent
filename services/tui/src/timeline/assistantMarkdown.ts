@@ -99,11 +99,13 @@ export function createAssistantMarkdownSurface(
     internalBlockMode: 'top-level',
     renderNode,
     tableOptions: {
-      style: 'columns',
+      style: 'grid',
       widthMode: 'content',
       columnFitter: 'proportional',
       wrapMode: 'word',
-      borders: false,
+      cellPaddingX: 1,
+      borders: true,
+      borderStyle: 'rounded',
       selectable: true,
     },
   });

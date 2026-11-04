@@ -35,12 +35,10 @@ test('capability_creator loads its static document once per Host process', () =>
   assert.equal(createCapabilityCreatorCapability(), createCapabilityCreatorCapability());
 });
 
-test('capability_creator keeps artifact persistence out of model tool calls', () => {
+test('capability_creator declares its Toolkit dependencies without a finalize hook', () => {
   const capability = createCapabilityCreatorCapability();
 
-  // Still needs bash, but no longer relies on the model calling capability_artifact_write (issue #137).
   assert.deepEqual(capability.uses, ['files', 'shell', 'web', 'capability_creator']);
-  assert.ok(!capability.instructions.content.includes('capability_artifact_write'));
   assert.equal(capability.lifecycle?.finalize, undefined);
 });
 

@@ -32,9 +32,12 @@ Studio core、HTTP 与 Plugin 装配边界见 [Host 设计](independent-host-run
 HTTP 请求的成员身份是认证出的 Studio 客户 `human:<clientId>`（本机 token 是 `human:local`），
 共享同一个 key 的浏览器共享此身份；不是成员的请求返回 403。也不隔离恶意进程内 Node Plugin。
 
-统一入口 `POST /channels/messages` 保存正文、可选 `replyTo`、artifacts 和
+统一入口 `POST /channels/messages` 保存正文、可选 `replyTo` 和
 `mentions: [{participantId}]`。正文直接链接 `[@Reviewer](participant:pet:reviewer)`
 表达同一目标。
+
+旧 `artifacts` 字段已从输入、API 投影和展示退役；已有消息 JSON 不改写，
+具体兼容边界见 [Studio API](../../reference/api/studio.md#channel-messages-and-addressing)。
 
 - 草稿、普通 `@label`、代码、引用和转述示例不寻址。
 - 有效目标须是当前成员，缺失/无效身份报错；同一消息的重复目标合并。Pet @ 自己同样派发（自我交接）。

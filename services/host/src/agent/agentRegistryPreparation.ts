@@ -1,14 +1,11 @@
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   compileAgentRegistry,
   formatExecutorCompilationIssues,
   type AgentCapability,
   type AgentToolkit,
-  type CapabilityArtifactStore,
   type CompiledAgentRegistry,
   type ExecutorCompilationIssue,
 } from '@pinpawo/pet-agent';
-import { createArtifactDiscoveryToolkit } from '../toolkits/artifactDiscovery';
 import type { ToolkitInventoryEntry } from '../toolkits/toolkitInventory';
 
 /**
@@ -33,24 +30,8 @@ export type CapabilityDiagnosticReporter = (
 export function prepareAgentRegistry(params: {
   toolkits: readonly AgentToolkit[];
   capabilities: readonly AgentCapability[];
-  threadId?: string;
-  capabilityArtifactStore?: CapabilityArtifactStore;
 }) {
   const toolkits = [...params.toolkits];
-  const hasArtifactDiscoveryToolkit = toolkits.some(
-    ({ name }) => name === ARTIFACT_DISCOVERY_TOOLKIT_NAME,
-  );
-
-  if (
-    !hasArtifactDiscoveryToolkit
-    && params.threadId
-    && params.capabilityArtifactStore
-  ) {
-    toolkits.push(createArtifactDiscoveryToolkit({
-      store: params.capabilityArtifactStore,
-      threadId: params.threadId,
-    }));
-  }
 
   return {
     registry: compileAgentRegistry({

@@ -17,6 +17,7 @@ behavior.
 
 ## Artifacts, Studio, and TUI
 
+- [Retired Capability Artifact Pipeline](artifacts/pipeline/index.md) — the old store, discovery and finalize write contract before cleanup
 - [Earlier Artifact designs](artifacts/capability-artifact-design.md) and
   [redesign](artifacts/capability-artifact-redesign.md)
 - [Legacy Studio overview](studio/architecture-overview.md),

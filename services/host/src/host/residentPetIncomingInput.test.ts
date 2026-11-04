@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { buildReviewSpec, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import { buildReviewSpec } from '@pinpawo/pet-agent';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
 import { createResidentPetRuntime, type CreateResidentPetRuntimeOptions } from '../residentPetHost';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
@@ -30,12 +30,6 @@ async function waitFor(predicate: () => boolean) {
   assert.fail('Expected Host state was not reached.');
 }
 
-const artifacts: CapabilityArtifactStore = {
-  writeArtifact: async () => { throw new Error('unused'); },
-  readArtifact: async () => { throw new Error('unused'); },
-  listArtifacts: async () => [], deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async uri => uri,
-};
 const sessionId = 'worker:00000001';
 const scope = { namespace: 'channel', id: 'one' };
 const target = { session: { id: sessionId, create: true }, scope };
@@ -54,7 +48,7 @@ async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSess
   const runtime = await createResidentPetRuntime({
     petId: 'worker', petName: 'Worker', runtimeConfig,
     modelProfiles: createTestModelProfiles(), capabilities: [],
-    toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: artifacts,
+    toolkitInventory: new HostToolkitInventoryStore(),
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     sessionStatePath: runtimeConfig.tuiSessionPath,
     toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',

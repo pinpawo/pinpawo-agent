@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { AgentServerMessage } from '@pinpawo/agent-session';
-import { buildReviewSpec, type AgentInvocationHint, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import { buildReviewSpec, type AgentInvocationHint } from '@pinpawo/pet-agent';
 
 import {
   createResidentPetHost,
@@ -18,14 +18,6 @@ import { FileSaver } from '../fileSaver';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
 import { createTestModelProfiles } from '../testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
-
-const testArtifactStore: CapabilityArtifactStore = {
-  writeArtifact: async () => { throw new Error('not used'); },
-  readArtifact: async () => { throw new Error('not used'); },
-  listArtifacts: async () => [],
-  deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async (uri) => uri,
-};
 
 async function waitFor(predicate: () => boolean, message: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -63,7 +55,6 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     toolAuthorizationMode: 'require_authorization',

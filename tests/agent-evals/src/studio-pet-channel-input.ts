@@ -24,7 +24,7 @@ function actorRef(author: StudioPetRoleActor): MemberRef {
 function row(sequence: number, author: StudioPetRoleActor, body: string): ChannelMessageRow {
   if (typeof body !== 'string') throw new Error('Synthetic Channel message body must be text.');
   return { sequence, messageId: `synthetic-message:${sequence}`, channelId,
-    author: actorRef(author), body, occurredAt, mentions: [], artifacts: [],
+    author: actorRef(author), body, occurredAt, mentions: [],
   };
 }
 

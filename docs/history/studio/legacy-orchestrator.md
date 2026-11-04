@@ -16,7 +16,7 @@
 - **Capability Artifact Store** 是 per-conversation durable 产物层,capability 完成时 sink 产物,Studio / UI / 后续 pet 通过 artifact refs 读取。
 - 终止时,Studio 输出 `finish` 标定 `finalDispatchId`,UI 把对应 pet 的 pet 返回结果 渲染为用户最终答复。
 
-Studio↔pet 的接口契约(invoke 签名、wiki middleware、HITL 边界等)见 `interfaces.md`。Capability artifacts 的 durable store 见 `../../reference/artifacts/store.md`。
+Studio↔pet 的接口契约(invoke 签名、wiki middleware、HITL 边界等)见 `interfaces.md`。Capability artifacts 的 durable store 见 `../artifacts/pipeline/store.md`。
 
 目标结构：
 
@@ -555,7 +555,7 @@ Capability Artifact Store 是与 Studio Whiteboard 并列的 durable 产物层�
 - wiki_curator 在 pet 返回后把 refs 整理进 wiki,但不复制大型本体。
 - 后续 pet 通过 wiki 发现 refs,必要时通过 artifact read tool/API 读取内容。
 
-`ToolMessage.artifact` 仅是 capability 内部临时回执桥,不是 durable store。详细 contract 见 `../../reference/artifacts/store.md`。
+`ToolMessage.artifact` 仅是 capability 内部临时回执桥,不是 durable store。详细 contract 见 `../artifacts/pipeline/store.md`。
 
 ### 调试与审计
 

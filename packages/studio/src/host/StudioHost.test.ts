@@ -75,7 +75,6 @@ function fakeCapabilityAssembly(
       getSnapshot: () => ({ effectiveToolkits: [] }),
     }) as never,
     getCheckpointer: () => ({}) as never,
-    getCapabilityArtifactStore: () => ({}) as never,
   } as unknown as HostCapabilityAssembly;
 }
 

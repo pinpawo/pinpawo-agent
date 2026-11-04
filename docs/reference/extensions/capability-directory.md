@@ -62,12 +62,17 @@ Capability 不需要代码入口。声明 `entry` 时，该模块只能导出：
 ```js
 export const lifecycle = {
   async finalize(result, context) {
-    // 只做确定性结果整理或 artifact 持久化。
+    // 只整理已有结果，可返回 output 的改写。
   },
 };
 ```
 
 不允许从 entry 导出 runtime、tools、模型调用或任意扩展对象。需要编码实现的动作必须进入 Toolkit，再由 `CAPABILITY.md` 的 `uses` 引用。
+
+通用 finalize 继续提供可选的 `output` 收尾接口，context 中的 `messages` 是只读输入。
+返回值中的 `messages` 原来没有后续消费者，本次已移除该输出字段和死赋值。
+旧 `artifactStore`、`recordCapabilityArtifact` 和 `artifactRefs` 写入接口也已退役，
+见[扩展更新与旧数据边界](capability-toolkit.md#7-旧-artifact-pipeline-退役)。
 
 ## 4. Studio 的 per-Pet 目录约定
 

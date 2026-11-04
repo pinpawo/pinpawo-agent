@@ -1,7 +1,6 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentModels } from '../../types/agent';
-import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type {
   AgentToolkit,
   ModelInputModality,
@@ -44,12 +43,6 @@ export type OrchestratorConfig = {
   subagentContextWindowTokens?: number;
   /** Defaults to `generationReserveTokens` when the same model serves subagents. */
   subagentGenerationReserveTokens?: number;
-  /**
-   * Artifact store (a port; the host supplies the concrete adapter). Injected
-   * into the selected capability's narrow `CapabilityFinalizeContext`.
-   * Optional — surfaces without a store (e.g. tests, studio) skip writes.
-   */
-  capabilityArtifactStore?: CapabilityArtifactStore;
   /**
    * Typed seam for the framework-internal Run Supervisor. Production
    * defaults to createRunSupervisorAgent(); graph tests may inject a

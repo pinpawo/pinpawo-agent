@@ -12,7 +12,6 @@ import {
 } from '@pinpawo/agent-session';
 import {
   buildReviewSpec,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 
 import { createResidentPet } from './host/residentPetDispatch';
@@ -236,14 +235,6 @@ test('Coordinator close cancels queued work and waits for the active operation',
   );
 });
 
-const testArtifactStore: CapabilityArtifactStore = {
-  writeArtifact: async () => { throw new Error('not used'); },
-  readArtifact: async () => { throw new Error('not used'); },
-  listArtifacts: async () => [],
-  deleteThreadArtifacts: async () => undefined,
-  getDownloadUri: async (uri) => uri,
-};
-
 function peer(messages: unknown[]): AgentSessionPeer {
   return {
     isConnected: () => true,
@@ -287,7 +278,6 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer,
     runtimeConfig,
     toolAuthorizationMode: 'require_authorization',
@@ -409,7 +399,6 @@ test('dispatch and conversation publish the same Agent Session event stream', as
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     toolAuthorizationMode: 'require_authorization',
@@ -593,7 +582,6 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     toolAuthorizationMode: 'require_authorization',
@@ -685,7 +673,6 @@ test('resident policy updates reach conversation and dispatch without changing a
       autoAuthorizationSafetyLevel: 'relaxed',
       capabilities: [],
       toolkitInventory: new HostToolkitInventoryStore(),
-      capabilityArtifactStore: testArtifactStore,
       checkpointer: new FileSaver(runtimeConfig.checkpointPath),
       sessionStatePath: runtimeConfig.tuiSessionPath,
       persistToolAuthorizationMode: (mode, safetyLevel) => { persisted.push({ mode, safetyLevel }); },
@@ -760,7 +747,6 @@ test('an aborted resident dispatch preserves a native review by id', async () =>
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-aborted-sessions.json'),
@@ -811,7 +797,6 @@ test('an aborted dispatch suspends on the review its settlement returned', async
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-abort-settled-sessions.json'),
@@ -855,7 +840,6 @@ test('a stopped dispatch whose settlement fails still reports a runtime failure'
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-abort-failed-sessions.json'),
@@ -922,7 +906,6 @@ test('a native review holds dispatch waiting without a resumability guess', asyn
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-paused-sessions.json'),
@@ -965,7 +948,6 @@ test('a refused connection cannot release the interactive client it was refused 
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     toolAuthorizationMode: 'require_authorization',
@@ -1022,7 +1004,7 @@ test('interactive roots never inherit another dispatch invocation context', asyn
   const host = await createResidentPetHost({
     petId: 'interactive-pet', petName: 'Interactive', modelProfiles: createTestModelProfiles(),
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
-    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
     runAgentTurn: async () => {
@@ -1138,7 +1120,6 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
     autoAuthorizationSafetyLevel: 'strict',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
-    capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-target-sessions.json'),
@@ -1223,7 +1204,7 @@ test('a dispatch reports its public reply as a non-terminal message, whichever s
   const host = await createResidentPetHost({
     petId: 'message-pet', petName: 'Message', modelProfiles: createTestModelProfiles(),
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
-    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
     runAgentTurn: async ({ request, emitEvent }) => {
@@ -1250,7 +1231,7 @@ test('a dispatch fails through the conversation pipeline: a broken tool history 
   const runtime = await createResidentPetRuntime({
     petId: 'failure-pet', petName: 'Failure', modelProfiles: createTestModelProfiles(),
     runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
-    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
     checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
     graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
     runAgentTurn: async () => {

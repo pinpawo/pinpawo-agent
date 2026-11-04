@@ -203,7 +203,7 @@ path both stamp it, because a rejected decision still spends the turn. Runtime
 code does not reconstruct Entry intent from a trailing routing tool pair.
 
 Entry initializes the run's Supervisor context. Capability returns a paired
-ToolMessage containing its delivery, artifacts and status; its artifact records
+ToolMessage containing its delivery and status; its artifact records
 the actual plan item and invocation identity. Supervisor reads those results to
 decide acceptance and the next action. Child transcripts remain in their native
 LangGraph namespace/checkpoints and are not copied to Root messages or the plan.
@@ -281,7 +281,7 @@ attempt itself runs in `capabilityExecution/runner.ts`.
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ artifactDiscovery })` |
+| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions and capability instructions |
 | history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().select()` — main conversation including paired Capability results |
 | boundary | `RUN-STABLE` / `BOUNDARY` | One `<delegation_briefing>` containing goal context, current task and Supervisor's next-step instructions; always last |
 
@@ -289,9 +289,10 @@ Each tool call gets a distinct delegation identity. Earlier findings are availab
 through paired ToolMessages and the Supervisor-authored briefing; internal child
 messages are not replayed. The briefing is input to the child and may be present
 in its native checkpoint, but is never appended to Root conversation history.
-Artifact-discovery availability, when enabled, is
-described by Capability prompt sections and bound tools rather than a synthetic
-history message.
+The retired artifact-discovery Toolkit contributes no tools or prompt section.
+Execution records use only the current schema; the old `artifacts` field and
+unused state index have been removed. The boundaries are described in the
+[retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
 
 Invocation input:
 

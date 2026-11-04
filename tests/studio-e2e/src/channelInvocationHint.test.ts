@@ -96,8 +96,6 @@ test('a separate Channel hint reaches planning and Channel context is read befor
       ],
       toolkitInventory: new HostToolkitInventoryStore(inventory), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       checkpointer: new FileSaver(config.checkpointPath), sessionStatePath: config.tuiSessionPath,
-      capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-        listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
       graphService: { readThreadState: (setup: AgentChannelSetup) => graph.readThreadState(setupModels(setup)),
         settleAbortedRun: (setup: AgentChannelSetup) => graph.settleAbortedRun(setupModels(setup)),
         streamEvents: (setup: AgentChannelSetup) => graph.streamEvents(setupModels(setup)) } as never,

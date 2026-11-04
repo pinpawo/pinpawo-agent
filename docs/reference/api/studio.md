@@ -128,7 +128,15 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
-| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
+| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; message plus per-target deliveries. |
+
+The former `artifacts` message input and response field have been removed. The
+strict message schema rejects that input with `400`; clients must omit it.
+Existing database message JSON is not rewritten or deleted: an old `artifacts`
+value can remain in the stored row, but is no longer projected by the message API
+or displayed by Console. Authors, body text, reply links and mentions remain
+readable. This API uses only the current message shape; no attachment migration
+or compatibility alias is added.
 
 `prompt` is an optional Channel collaboration instruction, separate from its
 human-facing description. It is trimmed, limited to 50,000 characters, and an

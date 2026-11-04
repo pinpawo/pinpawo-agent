@@ -90,7 +90,7 @@ test('the real Channel provider supplies the role fixture hint without putting i
   const focus = randomUUID();
   const request = channelDispatchInput({ channelId: studioPetEvalChannelId, messageId: randomUUID(), sequence: 1,
     author: { kind: 'human', id: 'owner' }, body: randomUUID(), occurredAt: '2026-01-01T00:00:00.000Z',
-    artifacts: [], mentions: [],
+    mentions: [],
   }, undefined, undefined, 'routing', focus);
   const routed = await loadStudioPetRoleContext('reviewer', undefined, undefined, request);
   const hint = routed.runtimeContext.hint;

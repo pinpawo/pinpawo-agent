@@ -13,7 +13,7 @@ import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
 const message: ChannelMessage = { channelId: 'a', sequence: 2, messageId: 'm', body: 'Full public delivery.\n\nMissing work remains.\n\n```ts\nconst evidence = 42;\n```',
   author: { kind: 'pet', id: 'worker' }, occurredAt: '2026-10-04T00:00:00Z', externalRef: 'session-message-1',
-  artifacts: [{ uri: 'javascript:alert(1)', label: 'unsafe' }], mentions: [] };
+  mentions: [] };
 const members: ChannelMember[] = [
   { participantId: 'human:studio-operator', kind: 'human', id: 'studio-operator', label: 'studio-operator' },
   { participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' },
@@ -93,12 +93,12 @@ test('a late read moves only its own edge of the window it was read for', () => 
   assert.equal(channelWindowAfterLater(reopened, held, 500), undefined);
 });
 
-test('timeline renders the stored body and safe references; every message offers reply', () => {
+test('timeline renders stored messages without an attachment field and offers reply', () => {
   const markup = renderToStaticMarkup(<ChannelTimeline messages={[message, { ...message, messageId: 'note', author: { kind: 'human', id: 'owner' }, body: '<script>bad()</script>' }]}
     pending={false} onReply={() => undefined} />);
   assert.ok(markup.includes('Missing work remains.')); assert.ok(markup.includes('evidence = 42'));
   assert.equal((markup.match(/aria-label="Reply to /g) ?? []).length, 2);
-  assert.ok(!markup.includes('href="javascript:')); assert.ok(!markup.includes('<script>'));
+  assert.ok(!markup.includes('<script>'));
   assert.ok(!markup.includes('Tool calls'), 'Channel messages carry no tool calls');
 });
 

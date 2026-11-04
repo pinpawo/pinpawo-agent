@@ -12,29 +12,6 @@ import {
   type ToolkitReviewBinding,
   type ToolkitReviewRuntimeContext,
 } from './toolkitReviewMiddleware';
-import {
-  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-} from './artifacts/discovery';
-/** Runtime facts and conditional interfaces available to this execution. */
-export function buildSubagentExecutionContext(params: {
-  artifactDiscovery: boolean;
-}): string | null {
-  const sections = [
-    ...(params.artifactDiscovery
-      ? [
-          [
-            '## Optional earlier artifacts',
-            `Use ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} and ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} to find and read earlier artifacts of the current thread.`,
-            'Artifacts are reference material that may be stale or incomplete; choose and verify them as the current task needs.',
-          ].join('\n'),
-        ]
-      : []),
-  ].filter((section): section is string => section !== null);
-
-  return sections.length > 0 ? sections.join('\n\n') : null;
-}
-
 export function collectToolkitOperations(
   toolkits: AgentToolkit[],
 ): Record<string, SubagentToolOperationMetadata> {

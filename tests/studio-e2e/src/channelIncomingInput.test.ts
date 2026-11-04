@@ -138,8 +138,6 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
         toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
         toolkitInventory: new HostToolkitInventoryStore(inventory), checkpointer: new FileSaver(config.checkpointPath),
         sessionStatePath: config.tuiSessionPath,
-        capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-          listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
         graphService: {
           readThreadState: (setup: AgentChannelSetup) => graph.readThreadState(modelSetup(setup)),
           settleAbortedRun: (setup: AgentChannelSetup) => graph.settleAbortedRun(modelSetup(setup)),

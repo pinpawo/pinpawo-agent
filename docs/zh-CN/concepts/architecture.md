@@ -20,7 +20,7 @@ PinPawo Agent 将编排、任务权限、工具执行、人工审核和持久状
 用户 / TUI / desktop / stdio client
   → Host
   → pet-agent orchestrator → Capability lane → Toolkit tools
-  → checkpoint + artifact refs
+  → checkpoint + execution records
   → 可选 Studio runtime（多 Pet 协调）
 ```
 
@@ -43,11 +43,17 @@ accepted constraints 见[领域关系设计](../../design/host-agent-capability-
 | 对话消息和待继续执行 | LangGraph checkpoint | resume 与审核的持久权威。 |
 | 当前客户端视图 | Session projection | 物化视图，不是第二份对话存储。 |
 | Capability 草稿与工具过程 | Subagent lane | 私有、短生命周期。 |
-| 跨 lane 输出 | Artifact store | 通过引用传递，不复制进每条消息。 |
+| 委派结果证据 | Checkpoint messages | typed 执行记录保存交付；私有工具过程留在子图。 |
 | 本地配置 | local host + workdir | 在创建 runtime 前解析。 |
 | Studio dispatch 投递 | per-Pet invocation queue | 队列仅在进程内；active thread 与 checkpoint 连续性属于 resident Pet 的 Agent Session。 |
 
 ## 下一步
+
+旧 Capability Artifact Pipeline、无生产用途的 state 索引和 Channel 附件 API 已退役。
+执行记录只支持现行 schema；自测阶段仅在用户明确要求时处理历史 checkpoint 兼容。
+详见[退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+本次清理不提供文件发布或发现能力；后续目标仍见
+[Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)。
 
 - [快速开始](../guides/getting-started.md)
 - [核心概念](core-concepts.md)

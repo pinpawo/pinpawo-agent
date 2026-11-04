@@ -79,7 +79,7 @@ function setup(responses: AIMessage[], review = false, useProductionExecutor = f
           history: [new HumanMessage({ id: 'executor-input', content: args.task })],
         }, { review: { authorizations: [] }, runnableConfig: config });
         assert.equal(result.status, 'returned');
-        return JSON.stringify({ status: result.status, delivery: result.delivery, artifacts: result.artifacts });
+        return JSON.stringify({ status: result.status, delivery: result.delivery });
       }
       const executor = createAgent({ name: 'experiment-executor', model: child, tools: [inspect] });
       const output = await executor.invoke({ messages: [new HumanMessage(args.task)] }, config);

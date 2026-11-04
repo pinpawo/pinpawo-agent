@@ -49,7 +49,7 @@ CREATE TABLE channel_messages (
   author_id   TEXT NOT NULL,
   occurred_at TEXT NOT NULL,
   external_ref TEXT,                              -- 来自外部系统的消息 id（如 Agent Session 消息 id），用于幂等写入
-  data        TEXT NOT NULL,                      -- body、replyTo、mentions、artifacts，原样保存
+  data        TEXT NOT NULL,                      -- body、replyTo、mentions
   UNIQUE(author_kind, author_id, external_ref)
 );
 CREATE INDEX channel_message_history ON channel_messages(channel_id, sequence);

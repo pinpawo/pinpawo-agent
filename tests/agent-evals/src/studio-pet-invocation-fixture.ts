@@ -56,11 +56,6 @@ export async function assembleStudioPetInvocation(params: {
             threadId: input.session.id, sessionStartedAt: occurredAt, timezone: 'Asia/Shanghai',
             petDocument: params.pet, defaultCapabilityName: params.defaultCapabilityName,
             capabilities: params.capabilities, toolkits: params.toolkits,
-            capabilityArtifactStore: {
-              writeArtifact: async () => { throw new Error('Decision eval cannot write artifacts.'); },
-              readArtifact: async () => { throw new Error('Decision eval cannot read artifacts.'); },
-              listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri,
-            },
           });
           captured = withInvocationContext(setup, invocationContext);
         },

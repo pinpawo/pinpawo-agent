@@ -12,7 +12,6 @@
  */
 import {
   type AgentToolkit,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import {
   createBrowserCapability,
@@ -20,7 +19,6 @@ import {
 } from '@pinpawo-toolkit/browser';
 import { join } from 'node:path';
 import { atomicWriteFile } from './atomicFile';
-import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import {
   createCapabilityCreatorCapability,
   createCapabilityCreatorToolkit,
@@ -35,10 +33,7 @@ import {
   createHostBaselineCapabilities,
 } from './hostCapabilityCatalog';
 import { HostCapabilityCatalog } from './hostCapabilityCatalog';
-import {
-  findLegacyHostState,
-  type HostRuntimeConfig,
-} from './config/runtimeConfig';
+import type { HostRuntimeConfig } from './config/runtimeConfig';
 import { resolveHostExecutionConfig, type HostExecutionConfig } from './config/hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
 import { createFilesToolkit } from './toolkits/files';
@@ -146,13 +141,12 @@ export class HostCapabilityAssembly {
   private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityCatalog: HostCapabilityCatalog;
-  private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
   private readonly checkpointer: FileSaver;
   private writerLeaseHeld = false;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
   private initOptions: NormalizedHostCapabilityAssemblyInitOptions | null = null;
-  private legacyStateNoticeReported = false;
+  private workspaceMetadataInitialized = false;
 
   constructor(options: HostCapabilityAssemblyOptions) {
     this.runtimeConfig = options.runtimeConfig;
@@ -198,9 +192,6 @@ export class HostCapabilityAssembly {
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
-    this.capabilityArtifactStore = new FileCapabilityArtifactStore(
-      this.runtimeConfig.capabilityArtifactRoot,
-    );
     this.checkpointer = new FileSaver(
       options.checkpointPath ?? this.runtimeConfig.checkpointPath,
     );
@@ -252,15 +243,8 @@ export class HostCapabilityAssembly {
   }
 
   private async initialize(options: NormalizedHostCapabilityAssemblyInitOptions) {
-    if (!this.legacyStateNoticeReported) {
-      this.legacyStateNoticeReported = true;
-      const legacyStatePaths = findLegacyHostState(this.runtimeConfig);
-      if (legacyStatePaths.length > 0) {
-        console.warn(
-          `[${this.sourceId}] Sessions now live in ${this.runtimeConfig.sessionRoot}. `
-          + `Older session state in the workdir is not loaded and can be deleted: ${legacyStatePaths.join(', ')}`,
-        );
-      }
+    if (!this.workspaceMetadataInitialized) {
+      this.workspaceMetadataInitialized = true;
       // Names the project of an otherwise opaque per-workdir session directory.
       atomicWriteFile(
         join(this.runtimeConfig.sessionRoot, 'workspace.json'),
@@ -321,14 +305,6 @@ export class HostCapabilityAssembly {
 
   getCapabilityCatalog(): HostCapabilityCatalog {
     return this.capabilityCatalog;
-  }
-
-  getCapabilityArtifactStore(): CapabilityArtifactStore {
-    return this.capabilityArtifactStore;
-  }
-
-  async deleteThreadArtifacts(threadId: string): Promise<void> {
-    await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
   }
 
   async shutdown(): Promise<void> {

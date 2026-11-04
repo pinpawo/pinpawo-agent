@@ -12,7 +12,7 @@ export function createDeliveryResult(data: {
   const message = createCapabilityExecutionMessage({
     callId: `call:${data.deliveryId}`,
     execution: { planItemId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, briefing: 'Fixture plan' },
-    result: { status: 'returned', delivery: { id: data.deliveryId, task, text: data.result, scope }, artifacts: [] },
+    result: { status: 'returned', delivery: { id: data.deliveryId, task, text: data.result, scope } },
     metadata: { runId: data.runId, taskId: data.runId, createdAt: data.createdAt },
   });
   if (data.id) message.id = data.id;

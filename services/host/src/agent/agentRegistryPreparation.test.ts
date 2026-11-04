@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   defineInstructionDocument,
   type AgentCapability,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import {
   createCapabilityDiagnosticReporter,
@@ -17,41 +15,25 @@ function artifactCapability(name: string): AgentCapability {
   return {
     name,
     description: `${name} capability`,
-    uses: [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
+    uses: ['artifact_discovery'],
     instructions: defineInstructionDocument({
       content: `# ${name}`,
     }),
   };
 }
 
-test('prepareAgentRegistry keeps missing run-scoped Toolkits as compiler diagnostics', () => {
+test('retired artifact discovery remains an explicit dependency diagnostic for external Capabilities', () => {
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('scope_required_test')],
   });
 
   assert.equal(prepared.registry.capabilities.length, 0);
+  assert.deepEqual(prepared.toolkits, []);
+  assert.deepEqual(prepared.registry.unavailableCapabilities[0]?.capability.uses, ['artifact_discovery']);
   assert.equal(
     prepared.registry.unavailableCapabilities[0]?.issues[0]?.code,
     'unknown_toolkit',
-  );
-});
-
-test('prepareAgentRegistry compiles artifact discovery once run scope is complete', () => {
-  const prepared = prepareAgentRegistry({
-    toolkits: [],
-    capabilities: [artifactCapability('scope_ready_test')],
-    threadId: 'thread-1',
-    capabilityArtifactStore: {} as CapabilityArtifactStore,
-  });
-
-  assert.deepEqual(
-    prepared.toolkits.map(({ name }) => name),
-    [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
-  );
-  assert.equal(
-    prepared.registry.capabilities[0]?.capability.name,
-    'scope_ready_test',
   );
 });
 
@@ -62,9 +44,7 @@ test('capability diagnostics report state transitions without module-global supp
   });
   const available = prepareAgentRegistry({
     toolkits: [],
-    capabilities: [artifactCapability('warning_state_test')],
-    threadId: 'thread-warning-state',
-    capabilityArtifactStore: {} as CapabilityArtifactStore,
+    capabilities: [{ ...artifactCapability('warning_state_test'), uses: [] }],
   });
   const warnings: string[] = [];
   const report = createCapabilityDiagnosticReporter((message) => warnings.push(message));

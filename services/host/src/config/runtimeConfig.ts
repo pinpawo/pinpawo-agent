@@ -1,6 +1,5 @@
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { readdirSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { loadStoredConfig, type StoredConfig } from '../storage';
 
@@ -16,8 +15,8 @@ export type HostRuntimeConfig = Readonly<{
   /** Project configuration (`<workdir>/.pinpawo`): Pets and Studio config. */
   stateRoot: string;
   /**
-   * Session state of this workdir under the user's home: checkpoints, session
-   * registries and capability artifacts. See `resolveWorkspaceSessionRoot`.
+   * Session state of this workdir under the user's home: checkpoints and session
+   * registries. See `resolveWorkspaceSessionRoot`.
    */
   sessionRoot: string;
   checkpointPath: string;
@@ -25,7 +24,6 @@ export type HostRuntimeConfig = Readonly<{
   tuiSessionPath: string;
   /** Pet configuration directory; Chat reads one Pet here, Studio reads many. */
   petsDir: string;
-  capabilityArtifactRoot: string;
 }>;
 
 /**
@@ -33,9 +31,10 @@ export type HostRuntimeConfig = Readonly<{
  * contract change starts a new durable namespace rather than interpreting older
  * checkpoints through the new graph. v3 made the Supervisor snapshot's `runId`
  * required; v4 stores delegation results as typed execution records; v5 keeps
- * FileSaver objects inside each thread directory. Capability artifacts keep their existing thread-scoped root.
+ * FileSaver objects inside each thread directory; v6 drops the retired artifact
+ * fields from execution records.
  */
-export const HOST_CHECKPOINT_CONTRACT = 'capability-v5';
+export const HOST_CHECKPOINT_CONTRACT = 'capability-v6';
 
 /** Independent local Hosts must use distinct FileSaver writer roots. */
 export function resolveHostCheckpointPath(
@@ -49,13 +48,6 @@ export function resolveHostCheckpointPath(
     runtimeConfig.sessionRoot,
     `checkpoints-${hostId}-${HOST_CHECKPOINT_CONTRACT}.json`,
   );
-}
-
-/** Session state names that older versions kept in `<workdir>/.pinpawo`. */
-function isLegacyWorkdirSessionState(name: string): boolean {
-  return /^(checkpoints|tui-sessions)([-.]|$)/.test(name)
-    || name === 'capability-artifacts'
-    || name === 'resident-sessions';
 }
 
 function freezeRuntimeConfig(input: HostRuntimeConfig): HostRuntimeConfig {
@@ -120,27 +112,7 @@ export function buildHostRuntimeConfig(workdir = resolveDefaultWorkdir()): HostR
       `tui-sessions-${HOST_CHECKPOINT_CONTRACT}.json`,
     ),
     petsDir: resolve(stateRoot, 'pets'),
-    capabilityArtifactRoot: resolve(sessionRoot, 'capability-artifacts'),
   });
-}
-
-/**
- * Session state is neither migrated nor read from the workdir. Report what an
- * older version left in `<workdir>/.pinpawo` so the user can delete it.
- */
-export function findLegacyHostState(
-  runtimeConfig: Pick<HostRuntimeConfig, 'stateRoot'>,
-): string[] {
-  let names: string[];
-  try {
-    names = readdirSync(runtimeConfig.stateRoot);
-  } catch {
-    return [];
-  }
-  return names
-    .filter(isLegacyWorkdirSessionState)
-    .sort()
-    .map((name) => resolve(runtimeConfig.stateRoot, name));
 }
 
 export type WorkspaceRuntimeConfigOptions = {

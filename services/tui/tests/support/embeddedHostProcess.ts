@@ -8,9 +8,6 @@
  * stdout carries protocol messages only; diagnostics go to stderr.
  */
 import {
-  FileCapabilityArtifactStore,
-} from '../../../host/src/capabilityArtifactStore';
-import {
   buildAgentContext,
 } from '../../../host/src/contextLoader';
 import {
@@ -66,9 +63,6 @@ const handlers = createChatHostHandlers(
     toolkitInventory: createTestHostToolkitInventory([
       createFilesToolkit(), createShellToolkit({ shell: sharedShell }), createWebToolkit(), createGitToolkit({ shell: sharedShell }), createGithubToolkit({ shell: sharedShell }),
     ]),
-    capabilityArtifactStore: new FileCapabilityArtifactStore(
-      runtimeConfig.capabilityArtifactRoot,
-    ),
   }),
   {
     chatGraphService: graphFixture.service,

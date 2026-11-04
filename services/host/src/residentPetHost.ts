@@ -16,7 +16,6 @@ import {
   ServerTuiSessionService,
   type TuiSessionCheckpointer,
 } from './session/serverTuiSessions';
-import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
   createChatHostDepsStore,
   type ServerDeps,
@@ -146,7 +145,6 @@ export async function createResidentPetRuntime(
   const modelProfiles = withDefaultModelProfile(options.modelProfiles, options.modelProfileId);
   const deps: ServerDeps & {
     chatCheckpointer: TuiSessionCheckpointer;
-    capabilityArtifactStore: CapabilityArtifactStore;
   } = {
     petId: options.petId,
     petName: options.petName,
@@ -163,7 +161,6 @@ export async function createResidentPetRuntime(
       ? { defaultCapabilityName: options.defaultCapabilityName }
       : {}),
     ...(options.petDocument ? { petDocument: options.petDocument } : {}),
-    capabilityArtifactStore: options.capabilityArtifactStore,
   };
   const runtimeDeps = createChatHostDepsStore(deps);
   const graphService = options.graphService ?? new HostGraphService();

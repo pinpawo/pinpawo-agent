@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
@@ -10,7 +9,6 @@ import {
   buildWorkspaceRuntimeConfig,
   deriveWorkspaceId,
   deriveWorkspaceName,
-  findLegacyHostState,
   resolveDefaultWorkdir,
   resolveUserDir,
   resolveWorkspaceSessionRoot,
@@ -31,16 +29,15 @@ test('buildHostRuntimeConfig keeps project config in the workdir and sessions un
     workdir: '/tmp/pinpawo-workdir',
     stateRoot: '/tmp/pinpawo-workdir/.pinpawo',
     sessionRoot,
-    checkpointPath: join(sessionRoot, 'checkpoints-capability-v5.json'),
-    tuiCheckpointPath: join(sessionRoot, 'checkpoints-tui-capability-v5.json'),
-    tuiSessionPath: join(sessionRoot, 'tui-sessions-capability-v5.json'),
+    checkpointPath: join(sessionRoot, 'checkpoints-capability-v6.json'),
+    tuiCheckpointPath: join(sessionRoot, 'checkpoints-tui-capability-v6.json'),
+    tuiSessionPath: join(sessionRoot, 'tui-sessions-capability-v6.json'),
     petsDir: '/tmp/pinpawo-workdir/.pinpawo/pets',
-    capabilityArtifactRoot: join(sessionRoot, 'capability-artifacts'),
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);
   assert.equal(
     resolveHostCheckpointPath(runtimeConfig, 'studio'),
-    join(sessionRoot, 'checkpoints-studio-capability-v5.json'),
+    join(sessionRoot, 'checkpoints-studio-capability-v6.json'),
   );
 });
 
@@ -102,24 +99,4 @@ test('attachWorkspaceConfig honors explicit workspace id and derives readable na
     name: deriveWorkspaceName('/tmp/pinpawo-readable-workspace'),
     rootPath: '/tmp/pinpawo-readable-workspace',
   });
-});
-
-test('findLegacyHostState reports session state left in the workdir but not project config', (t) => {
-  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-legacy-state-'));
-  t.after(() => rmSync(workdir, { recursive: true, force: true }));
-  const runtimeConfig = buildHostRuntimeConfig(workdir);
-  assert.deepEqual(findLegacyHostState(runtimeConfig), []);
-  for (const dir of ['checkpoints', 'checkpoints-tui-capability-v4', 'capability-artifacts', 'resident-sessions', 'pets', 'studio']) {
-    mkdirSync(join(runtimeConfig.stateRoot, dir), { recursive: true });
-  }
-  writeFileSync(join(runtimeConfig.stateRoot, 'tui-sessions-capability-v4.json'), '{}');
-  writeFileSync(join(runtimeConfig.stateRoot, 'studio.json'), '{}');
-
-  assert.deepEqual(findLegacyHostState(runtimeConfig), [
-    'capability-artifacts',
-    'checkpoints',
-    'checkpoints-tui-capability-v4',
-    'resident-sessions',
-    'tui-sessions-capability-v4.json',
-  ].map((name) => join(runtimeConfig.stateRoot, name)));
 });

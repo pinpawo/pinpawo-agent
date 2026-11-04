@@ -64,8 +64,6 @@ for (const petId of ['alpha', 'beta']) {
   hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,
     modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
-    capabilityArtifactStore: { writeArtifact: async () => { throw Error('unused'); }, readArtifact: async () => { throw Error('unused'); },
-      listArtifacts: async () => [], deleteThreadArtifacts: async () => {}, getDownloadUri: async uri => uri },
     graphService: {
       async readThreadState(setup: AgentChannelSetup) {
         const snapshot = await graph.getState(config(setup));
@@ -92,7 +90,7 @@ if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
   const joinedAt = new Date().toISOString();
   await channel.service.store.upsertMember({ channelId: seeded.channelId, kind: 'pet', id: 'retired-pet', joinedAt, leftAt: joinedAt });
   await channel.service.store.appendMessage({ messageId: 'retired-delivery', channelId: seeded.channelId, author: { kind: 'pet', id: 'retired-pet' },
-    occurredAt: joinedAt, body: 'Historical public delivery from a Pet that is no longer registered.', mentions: [], artifacts: [] });
+    occurredAt: joinedAt, body: 'Historical public delivery from a Pet that is no longer registered.', mentions: [] });
 }
 console.log(JSON.stringify({ ready: true, url: `http://127.0.0.1:${http.address()!.port}`, token }));
 let closing = false;

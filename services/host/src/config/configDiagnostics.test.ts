@@ -74,7 +74,6 @@ function runtimeConfigFor(workdir: string): HostRuntimeConfig {
     tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
     tuiSessionPath: join(stateRoot, 'tui-sessions.json'),
     petsDir: join(stateRoot, 'pets'),
-    capabilityArtifactRoot: join(stateRoot, 'capability-artifacts'),
   };
 }
 

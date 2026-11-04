@@ -29,7 +29,7 @@ export type ChannelDatabase = {
     author_id: string;
     occurred_at: string;
     external_ref: string | null;
-    /** body, replyTo, mentions and artifacts, as JSON text. */
+    /** body, replyTo and mentions, as JSON text. */
     data: string;
   };
   channel_sessions: {

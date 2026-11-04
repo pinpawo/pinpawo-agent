@@ -1,5 +1,9 @@
 # PetConfig 读写链路设计（2026-09-08 draft）
 
+> **2026-11-03 状态补充：** 本文保留所列基线的装配分析；其中旧
+> `capabilityArtifactStore` 服务已退役，不再是当前 Host 字段，见
+> [退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+
 基线：`ab6bb12e`（#780 合并后）。
 
 本文只回答四个问题：**定义什么、存在哪、谁来读、怎么被用到。**

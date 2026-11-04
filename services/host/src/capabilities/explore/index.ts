@@ -1,5 +1,4 @@
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   defineCapability,
   defineInstructionDocument,
   type AgentCapability,
@@ -11,7 +10,6 @@ const DEFAULT_EXPLORE_TOOLKITS = [
   'web',
   'git',
   'github',
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 ] as const;
 
 export type ExploreCapabilityOptions = {

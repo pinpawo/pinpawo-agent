@@ -37,8 +37,9 @@ workdir 移动或改名后从空会话开始；旧版本留在 `<workdir>/.pinpa
 
 旧 Capability Artifact Pipeline 已退役。早期版本可能在 `sessionRoot` 下留下
 `capability-artifacts/`；本次清理不读取、迁移或删除该目录。它不再是
-`HostRuntimeConfig` 字段或新写入目标。旧执行记录里的 `artifacts` 字段仍可读，
-独立旧索引 channel 已删除，继续运行后可能由 checkpoint GC 回收；不承诺所有旧 state 字段无损。
+`HostRuntimeConfig` 字段或新写入目标。旧执行记录字段与独立索引 channel 已删除；
+自测阶段仅在用户明确要求时处理历史 checkpoint 兼容，既有 FileSaver checkpoint/GC
+行为不变。本次清理不迁移或删除用户数据。
 具体边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
 
 shared wiki、due-run store、run identity 与 scheduler policy 都不是当前

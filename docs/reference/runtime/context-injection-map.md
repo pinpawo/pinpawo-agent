@@ -290,8 +290,8 @@ through paired ToolMessages and the Supervisor-authored briefing; internal child
 messages are not replayed. The briefing is input to the child and may be present
 in its native checkpoint, but is never appended to Root conversation history.
 The retired artifact-discovery Toolkit contributes no tools or prompt section.
-Only legacy execution-record `artifacts` fields retain their minimal reader;
-the unused state index has been removed. The boundaries are described in the
+Execution records use only the current schema; the old `artifacts` field and
+unused state index have been removed. The boundaries are described in the
 [retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
 
 Invocation input:

@@ -395,7 +395,7 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 已经在所查业务中使用。工具审核返回 `reject` / `cancel` 决定时不运行 finalize。
 它不授予额外工具权限，需要执行的外部动作仍由 Capability 已声明的 Toolkit 工具承担。
 
-外部扩展需要同步更新这些已删除的接口：
+当前契约已删除这些接口：
 
 - 从 Capability 的 `uses` 删除 `artifact_discovery`，并调整依赖旧工具的 instructions。
   未更新的声明仍走现有缺失 Toolkit 的不可用诊断，不会被静默取消依赖。
@@ -406,34 +406,19 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 - `sessionCapabilityArtifacts` state channel、旧 Ref 类型和合并 reducer 及其公开导出
   已删除；它们没有生产读写用途，不再作为会话索引保留。
 
-TypeScript 扩展需要更新类型与装配代码；动态 JavaScript 扩展若仍调用已删除的
-context 成员会失败。只返回旧 `artifactRefs` 或 `messages` 的 JavaScript hook，
-其多余字段会被忽略；前者不再触发产物收集，后者本来就没有对外消息投影效果。
-这不表示旧扩展的类型和行为兼容，必须更新扩展。
-没有为这些旧写入接口提供兼容别名。
+项目目前处于自测阶段。按仓库 [AGENTS.md](../../../AGENTS.md#compatibility-during-self-testing)，
+只有用户明确要求时才处理历史 checkpoint 或第三方 Capability 兼容；接口曾公开、
+字段曾持久化，不构成保留兼容实现的依据。执行记录只支持现行 schema，不再接受
+已删除的 `artifacts` 字段，也不提供旧格式适配或专门的兼容测试。
 
-既有数据与新能力分开处理：
+清理不迁移或删除用户数据。checkpoint 路径仍使用 `capability-v5`；旧 store 文件
+留在原处，已退役索引不再恢复，FileSaver 继续现有 checkpoint/GC 行为。此规则不
+改变文件权限、审核或其他安全边界。
 
-- 继续使用 `capability-v5` namespace，不因这次退役切换 checkpoint 根路径。
-- 普通旧委派也普遍写入 `artifacts: []`。旧执行记录 schema 继续以 optional 字段
-  接受 `artifacts`，包括已有的非空值；直接从 strict schema 删除它会让旧记录被判为
-  损坏。该读取槽不依赖旧 Ref 类型，新记录不再写入这个字段。
-  这是新代码读取旧数据的单向兼容，不保证旧二进制能读取本版本新写入的记录。
-  清理前 `b4f0430c` 的 strict schema 要求 `artifacts` 必填，旧二进制读取省略该字段的
-  新执行记录时会判为损坏，不能承诺回滚后仍能恢复这些已写入会话。
-- 独立的 `sessionCapabilityArtifacts` 索引不再恢复。新 checkpoint 只保存当前
-  schema 的 channels，FileSaver 继续使用原有最新快照及 GC 规则，因此继续运行后
-  旧索引值可能随旧 checkpoint 对象回收。这里没有索引迁移或额外保留框架，
-  也不承诺保住旧 checkpoint 的所有字段；旧执行消息的读取与这项索引退役是不同边界。
-- 不删除或自动迁移旧 store 文件。移除 discovery 后，旧引用不再能通过原工具读取；
-  其他部署若仍需要旧文件，应在更新前使用旧版本导出。仓库内没有内置生产者，
-  不能据此推断所有外部扩展和历史目录都为空。
-- Channel 的旧 `artifacts: [{ uri, label?, version? }]` 输入、消息类型和附件展示也已
-  移除；旧请求字段被 strict schema 拒绝。既有数据库 JSON 不被重写或删除，但这些
-  旧附件值不再通过 API 投影或 Console 显示。新写入 JSON 不带这个字段；旧 Console
-  假定消息中始终存在 `artifacts` 数组，可能无法显示新响应或新消息，客户端与服务端
-  需要配套更新，不能承诺旧客户端或回滚兼容。见
-  [Studio API](../api/studio.md#channel-messages-and-addressing)。
+Channel 的旧 `artifacts: [{ uri, label?, version? }]` 输入、消息类型和附件展示也已
+移除，strict schema 拒绝该请求字段。既有数据库 JSON 不被重写或删除，旧附件值
+不再通过 API 投影或 Console 显示；新写入 JSON 不带此字段。见
+[Studio API](../api/studio.md#channel-messages-and-addressing)。
 
 ## 8. Host 组装顺序
 

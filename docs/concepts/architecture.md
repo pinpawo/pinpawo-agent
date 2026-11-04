@@ -129,11 +129,11 @@ for `lifecycle.finalize`. A Toolkit is always typed code. See the
 - Private Capability transcripts stay in their child graph; Root conversation
   records the delegated result rather than copying the full tool history.
 
-The old Capability Artifact Pipeline is retired. Its
-[minimal execution-record reader](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)
-accepts the old `artifacts` field; the unused state index and Channel attachment
-API are removed. This does not promise preservation of every old checkpoint field
-or provide file publication and discovery.
+The old Capability Artifact Pipeline, unused state index and Channel attachment
+API are retired. Execution records use only the current schema; historical
+checkpoint compatibility is not retained during self-testing unless explicitly
+requested. See the [retirement notes](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
+This cleanup does not add file publication or discovery.
 The proposed replacement remains in the [Session Artifacts draft](../design/agent-runtime/session-artifacts.md).
 
 For Browser-specific setup and limits, read

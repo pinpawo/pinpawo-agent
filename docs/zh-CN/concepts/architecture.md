@@ -49,9 +49,10 @@ accepted constraints 见[领域关系设计](../../design/host-agent-capability-
 
 ## 下一步
 
-旧 Capability Artifact Pipeline 已退役。[最小执行记录读取](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)
-继续接受旧 `artifacts` 字段；无生产用途的 state 索引和 Channel 附件 API 已删除。
-这不承诺保留所有旧 checkpoint 字段，也不提供文件发布或发现能力；后续目标仍见
+旧 Capability Artifact Pipeline、无生产用途的 state 索引和 Channel 附件 API 已退役。
+执行记录只支持现行 schema；自测阶段仅在用户明确要求时处理历史 checkpoint 兼容。
+详见[退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+本次清理不提供文件发布或发现能力；后续目标仍见
 [Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)。
 
 - [快速开始](../guides/getting-started.md)

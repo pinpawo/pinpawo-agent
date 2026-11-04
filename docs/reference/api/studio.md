@@ -135,10 +135,8 @@ strict message schema rejects that input with `400`; clients must omit it.
 Existing database message JSON is not rewritten or deleted: an old `artifacts`
 value can remain in the stored row, but is no longer projected by the message API
 or displayed by Console. Authors, body text, reply links and mentions remain
-readable. No attachment migration or compatibility alias is added.
-Clients and server must be updated together. Older Console code assumes every
-message has an `artifacts` array and can fail on new responses or stored messages
-without it; retaining old JSON does not provide old-client or rollback compatibility.
+readable. This API uses only the current message shape; no attachment migration
+or compatibility alias is added.
 
 `prompt` is an optional Channel collaboration instruction, separate from its
 human-facing description. It is trimmed, limited to 50,000 characters, and an

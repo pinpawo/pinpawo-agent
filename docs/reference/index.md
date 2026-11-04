@@ -12,7 +12,7 @@ proposals, and accepted contracts at retained paths; check each page's status.
   Toolkit, directory format, and Toolkit runtime lifecycle.
 - [Runtime contracts](runtime/index.md) — sessions, model profiles, authorization,
   guards, workdirs, and delegation announces.
-- [Legacy artifact retirement](extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) — extension updates and retained checkpoint read fields.
+- [Legacy artifact retirement](extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) — removed APIs and the current execution-record contract.
 - Local-machine Toolkit operations: [Apply Patch](local-tools/apply-patch.md) and
   [Browser](local-tools/browser.md) — operation protocols and safety boundaries.
 - [Browser privacy notice](../guides/browser-extension-privacy.md) — policy

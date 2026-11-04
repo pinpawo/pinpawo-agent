@@ -14,7 +14,7 @@ Capability 是可委派的业务任务单元：它声明 instructions 与完整 
 4. Toolkit runtime 不能改变静态 tool inventory、schema、description 或 review policy。
 
 旧 Artifact Pipeline 的 store/discovery、旧 state 索引与 Channel 消息附件接口已退役。
-普通 finalize 仅保留 `output` 输出改写和只读 context `messages`；旧执行记录保留最小读取兼容。
+普通 finalize 仅保留 `output` 输出改写和只读 context `messages`；执行记录只支持现行契约。
 扩展更新、历史 JSON 和 checkpoint 回收边界见
 [退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
 

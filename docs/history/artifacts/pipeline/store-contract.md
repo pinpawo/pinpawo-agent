@@ -2,7 +2,7 @@
 
 > **状态：历史实现。** 本页记录已退役的旧 store 契约，基线为
 > [`b4f0430c`](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/docs/reference/artifacts/store-contract.md)。
-> 当前扩展及旧 checkpoint 读取边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+> 当前实施边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
 
 ## Ref 与类型
 

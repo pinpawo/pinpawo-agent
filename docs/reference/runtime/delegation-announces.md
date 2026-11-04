@@ -98,8 +98,8 @@ result store is needed.
 - model and UI projections do not mutate graph state;
 - old untyped handoff messages are ordinary conversation history and are not
   upgraded through content heuristics;
-- legacy artifact fields remain only for checkpoint read compatibility and are
-  not embedded in the Announce contract; see the
+- retired artifact fields are removed from execution records and are not part
+  of the Announce contract; see the
   [retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
 
 This page owns the currently implemented serialized payload. The cross-layer interaction and migration are documented in the

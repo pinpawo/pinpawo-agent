@@ -188,8 +188,9 @@ adapter 尚未由本清理提供；新能力仍需另行实现与验证。上文
 
 本次删除 `sessionCapabilityArtifacts` channel、旧 Ref 类型和 reducer，旧索引不再恢复，
 继续运行后可由既有 checkpoint GC 回收；不承诺旧 state 所有字段无损。
-只保留旧执行记录 `artifacts` 的最小可选读取，因为普通旧委派也写入了 `artifacts: []`。
-仍使用 `capability-v5` namespace，不切换 checkpoint 路径，不自动迁移或删除旧 store 文件。
-外部扩展需要移除已退役的注入字段、Toolkit 依赖和 finalize 写入调用；
-旧文件不再能通过原 discovery 工具访问，更新前仍需评估其他部署的旧数据和导出需求。
+按用户明确的自测阶段规则，本次也删除旧执行记录 `artifacts` 的兼容读取及专门测试，
+只支持现行契约；历史 checkpoint 和第三方 Capability 兼容仅在用户明确要求时处理。
+这项当前实施决定不改写上文原草稿的兼容影响核查要求。仍使用 `capability-v5`
+namespace，不切换 checkpoint 路径，不自动迁移或删除旧 store 文件；旧文件不再能
+通过原 discovery 工具访问。
 详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。

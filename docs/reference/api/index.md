@@ -28,7 +28,7 @@ surface to its package owner.
 ## Related current contracts
 
 - [Session projection](../runtime/session-projection.md) — checkpoint-to-client state.
-- [Legacy artifact retirement](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) — removed extension APIs and retained checkpoint read fields.
+- [Legacy artifact retirement](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) — removed APIs and the current execution-record contract.
 - [Model profiles](../runtime/model-profiles.md) — identity, fields, and modality rules.
 - [Runtime contracts](../runtime/index.md) — authorization, guards, and context boundaries.
 

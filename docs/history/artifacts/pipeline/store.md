@@ -1,7 +1,7 @@
 # Capability Artifact Store 设计（文档版）
 
 > **状态：历史实现记录。** 本页记录已退役的旧 store，源码基线为 `b4f0430c`。
-> 当前扩展与旧 checkpoint 读取边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+> 当前实施边界见[退役说明](../../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
 > 公共类型定义在
 > [`packages/pet-agent/src/types/artifact.ts`](https://github.com/pinpawo/pinpawo-agent/blob/b4f0430c7b79219e31980397ed7c0e2917b1592a/packages/pet-agent/src/types/artifact.ts)，
 > 本地文件实现位于

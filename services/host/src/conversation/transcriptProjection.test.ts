@@ -51,7 +51,7 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
     id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
   }] }), { ...metadata, source: 'supervisor' });
   const result = createCapabilityExecutionMessage({ callId: 'dispatch-1', execution, metadata,
-    result: { status: 'returned', artifacts: [], delivery: { id: 'delivery-1', task: execution.task,
+    result: { status: 'returned', delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } } });
   // The delegation is the call itself; its delivery never replays as text.
   const delegation = (status: 'running' | 'completed') => ({ role: 'assistant', text: '', runId: 'run-1', toolCalls: [{

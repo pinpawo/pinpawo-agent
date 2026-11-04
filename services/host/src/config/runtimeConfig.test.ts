@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
@@ -10,7 +9,6 @@ import {
   buildWorkspaceRuntimeConfig,
   deriveWorkspaceId,
   deriveWorkspaceName,
-  findLegacyHostState,
   resolveDefaultWorkdir,
   resolveUserDir,
   resolveWorkspaceSessionRoot,
@@ -101,24 +99,4 @@ test('attachWorkspaceConfig honors explicit workspace id and derives readable na
     name: deriveWorkspaceName('/tmp/pinpawo-readable-workspace'),
     rootPath: '/tmp/pinpawo-readable-workspace',
   });
-});
-
-test('findLegacyHostState reports session state left in the workdir but not project config', (t) => {
-  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-legacy-state-'));
-  t.after(() => rmSync(workdir, { recursive: true, force: true }));
-  const runtimeConfig = buildHostRuntimeConfig(workdir);
-  assert.deepEqual(findLegacyHostState(runtimeConfig), []);
-  for (const dir of ['checkpoints', 'checkpoints-tui-capability-v4', 'capability-artifacts', 'resident-sessions', 'pets', 'studio']) {
-    mkdirSync(join(runtimeConfig.stateRoot, dir), { recursive: true });
-  }
-  writeFileSync(join(runtimeConfig.stateRoot, 'tui-sessions-capability-v4.json'), '{}');
-  writeFileSync(join(runtimeConfig.stateRoot, 'studio.json'), '{}');
-
-  assert.deepEqual(findLegacyHostState(runtimeConfig), [
-    'capability-artifacts',
-    'checkpoints',
-    'checkpoints-tui-capability-v4',
-    'resident-sessions',
-    'tui-sessions-capability-v4.json',
-  ].map((name) => join(runtimeConfig.stateRoot, name)));
 });

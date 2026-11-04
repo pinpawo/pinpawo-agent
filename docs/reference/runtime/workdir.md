@@ -34,9 +34,7 @@ id (`local-` plus a hash of the path); `workspace.json` records the workdir it
 belongs to. One directory per workdir keeps Hosts running in different projects
 from contending for one checkpoint writer lease. `PINPAWO_WORKSPACES_DIR`
 replaces `~/.pinpawo/workspaces` as the base. Session state is not migrated:
-moving or renaming a workdir starts with no sessions, and session files that
-an older version left in `<workdir>/.pinpawo` are reported at Host start and
-can be deleted.
+moving or renaming a workdir starts with no sessions.
 
 The old Capability Artifact Pipeline is retired. Earlier versions may have left
 `capability-artifacts/` under `sessionRoot`; this cleanup does not read, migrate

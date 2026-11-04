@@ -32,8 +32,7 @@ home 下，每个 workdir 一个目录，目录名是由路径派生的 workspac
 （`local-` 加路径哈希），`workspace.json` 记录它对应的 workdir。按 workdir 分目录，
 是为了让不同项目里同时运行的 Host 不争同一个 checkpoint 写入租约。
 `PINPAWO_WORKSPACES_DIR` 可替换 `~/.pinpawo/workspaces` 这个基础目录。会话状态不迁移：
-workdir 移动或改名后从空会话开始；旧版本留在 `<workdir>/.pinpawo` 的会话文件会在 Host
-启动时提示，可以直接删除。
+workdir 移动或改名后从空会话开始。
 
 旧 Capability Artifact Pipeline 已退役。早期版本可能在 `sessionRoot` 下留下
 `capability-artifacts/`；本次清理不读取、迁移或删除该目录。它不再是

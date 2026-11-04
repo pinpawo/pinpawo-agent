@@ -1,6 +1,5 @@
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { readdirSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { loadStoredConfig, type StoredConfig } from '../storage';
 
@@ -48,13 +47,6 @@ export function resolveHostCheckpointPath(
     runtimeConfig.sessionRoot,
     `checkpoints-${hostId}-${HOST_CHECKPOINT_CONTRACT}.json`,
   );
-}
-
-/** Session state names that older versions kept in `<workdir>/.pinpawo`. */
-function isLegacyWorkdirSessionState(name: string): boolean {
-  return /^(checkpoints|tui-sessions)([-.]|$)/.test(name)
-    || name === 'capability-artifacts'
-    || name === 'resident-sessions';
 }
 
 function freezeRuntimeConfig(input: HostRuntimeConfig): HostRuntimeConfig {
@@ -120,25 +112,6 @@ export function buildHostRuntimeConfig(workdir = resolveDefaultWorkdir()): HostR
     ),
     petsDir: resolve(stateRoot, 'pets'),
   });
-}
-
-/**
- * Session state is neither migrated nor read from the workdir. Report what an
- * older version left in `<workdir>/.pinpawo` so the user can delete it.
- */
-export function findLegacyHostState(
-  runtimeConfig: Pick<HostRuntimeConfig, 'stateRoot'>,
-): string[] {
-  let names: string[];
-  try {
-    names = readdirSync(runtimeConfig.stateRoot);
-  } catch {
-    return [];
-  }
-  return names
-    .filter(isLegacyWorkdirSessionState)
-    .sort()
-    .map((name) => resolve(runtimeConfig.stateRoot, name));
 }
 
 export type WorkspaceRuntimeConfigOptions = {

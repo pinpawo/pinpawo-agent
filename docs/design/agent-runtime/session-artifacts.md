@@ -194,6 +194,6 @@ adapter 尚未由本清理提供；新能力仍需另行实现与验证。上文
 只支持现行契约；历史 checkpoint 和第三方 Capability 兼容仅在用户明确要求时处理。
 按现有版本隔离方式，checkpoint namespace 升至 `capability-v6`，新 runtime 不读取
 v5 checkpoint，不恢复旧 reader，也不迁移或删除旧 checkpoint 与 store 文件。TUI
-会话注册表随版本隔离；Studio 独立的 `resident-sessions` 注册表路径和记录不变，
-不能据此认为所有旧会话都已清空。旧文件不再能通过原 discovery 工具访问。
+会话注册表随版本隔离；Studio 独立的 `resident-sessions` 注册表路径不变，已有条目
+继续加载，不能据此认为所有旧会话都已清空。旧文件不再能通过原 discovery 工具访问。
 详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。

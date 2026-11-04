@@ -41,7 +41,7 @@ to form the directories shown above. `capability-v6` is the Host's storage
 namespace, not a LangGraph checkpoint format version. It isolates current
 execution records from v5 without reading or migrating the old checkpoint roots.
 The TUI session registry also uses the v6 suffix. Studio's separate
-`resident-sessions/<pet-id>.json` registry keeps its existing path and entries;
+`resident-sessions/<pet-id>.json` registry keeps its existing path and loads its existing entries;
 its sessions are not automatically cleared, but their v5 conversation and review
 checkpoints are not loaded from the new root.
 

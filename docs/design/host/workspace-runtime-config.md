@@ -113,11 +113,11 @@ directory per workdir (see [Workdir configuration](../../reference/runtime/workd
 ~/.pinpawo/workspaces/<workspace-id>/
 ├── workspace.json
 ├── capability-artifacts/
-├── checkpoints-capability-v5/
-├── checkpoints-tui-capability-v5/
-├── checkpoints-studio-capability-v5/
+├── checkpoints-capability-v6/
+├── checkpoints-tui-capability-v6/
+├── checkpoints-studio-capability-v6/
 ├── resident-sessions/
-└── tui-sessions-capability-v5.json
+└── tui-sessions-capability-v6.json
 ```
 
 The runtime config keeps `.json` checkpoint anchor names, while `FileSaver`
@@ -129,9 +129,10 @@ that namespace. Objects live inside each thread directory, so deleting a
 session removes its directory, and garbage collection reads only that thread:
 the Host collects a thread's unreferenced objects when a run on it settles, and
 startup maintenance prunes and collects every thread. Nothing reads checkpoint
-history (no time travel or state history). The `capability-v5` suffix is the explicit checkpoint contract boundary: a
+history (no time travel or state history). The `capability-v6` suffix is the explicit checkpoint contract boundary: a
 contract change (v2: unified `capability:<name>` lanes; v3: required Supervisor
-`runId`; v4: typed delegation execution records; v5: per-thread objects) starts a new namespace instead
+`runId`; v4: typed delegation execution records; v5: per-thread objects;
+v6: removal of legacy artifact result fields) starts a new namespace instead
 of migrating older checkpoints.
 
 `workspace.json` is optional at first. When present, it can hold display metadata and project background that should be injected into future chat/studio context.

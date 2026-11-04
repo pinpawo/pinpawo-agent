@@ -87,8 +87,8 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 
 - 目标是让被 Supervisor 打回、之后重做的那次执行的文件留在 store，但不跟着回复走。现有 `readReplyResultReferences` 只按回复所属 run 和 `returned` 筛选；`returned` 表示执行已返回，不代表 Supervisor 已接受。如何可靠识别应随回复交付的执行，需在实现链路前明确，不能直接复用这一筛选并假定它排除了打回的结果。
 - 合并本 run 中选定执行的交付物，同一 uri 去重，保持发布顺序；执行的选取规则待明确。
-- Channel 现有的 `artifacts: [{ uri, label?, version? }]` 拟改为 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"。人发的消息也可以带。Console 现有的渲染改用新字段名。Channel 已持久化人发消息的 `artifacts`，实施字段变更前须明确旧消息和 `label` / `version` 的处理，避免历史附件丢失或不可见。
-- 尽量沿用现有事件和存储路径；执行选取规则与历史数据处理确定后，再确认是否需要额外投影或迁移。
+- Channel 的旧 `artifacts` 输入、消息类型和展示已在清理阶段删除。后续新增 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"，人发的消息也可以带；Console / TUI 为新字段增加渲染。旧消息 JSON 不迁移或重写。
+- 尽量沿用现有事件和存储路径；执行选取规则确定后，补齐对应的结构化投影。
 
 ## artifacts Toolkit
 
@@ -159,17 +159,19 @@ Adapter 在 Host 配置里选：
 
 计划移除以下旧实现；删除前须核实外部 Capability、已有 store、checkpoint 和执行记录的兼容影响。仓库内没有写入口的调用，并不能证明所有部署中都没有旧数据：
 
-- pet-agent：`types/artifact.ts`、`orchestrator/capabilityArtifacts.ts`、`orchestrator/artifacts/discovery.ts`、`sessionCapabilityArtifacts`、`SubagentResult.artifacts`、finalize context 中的 `artifactStore` / `recordCapabilityArtifact` / `artifactRefs`；`delegate_capability` 结果里的 `artifacts` 改为 `deliverables`。
+- pet-agent：`types/artifact.ts`、`orchestrator/capabilityArtifacts.ts`、`orchestrator/artifacts/discovery.ts`、`sessionCapabilityArtifacts`、`SubagentResult.artifacts`、finalize context 中的 `artifactStore` / `recordCapabilityArtifact` / `artifactRefs`；`delegate_capability` 旧结果字段 `artifacts` 已删除，后续新增 `deliverables`。
 - Host：`FileCapabilityArtifactStore`、`artifact_discovery` Toolkit、`capabilityArtifactRoot`、各处旧 store 注入；TUI 对 `artifact_discovery_context` 信封的解析。
 - 文档：`docs/reference/artifacts/` 移入 history。
 
-Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链路](#交付物链路)）。`lifecycle.finalize` 删除写入接口后仍可改写 output / messages，是否保留另行决定。
+Channel 后续新增 `deliverables`（见[交付物链路](#交付物链路)）。
+普通 `lifecycle.finalize` 保留 `output` 改写和只读 context `messages`，返回值不再支持
+`messages`；交付物不通过这个 hook 声明。
 
 ## 实现顺序
 
 1. 删除旧 pipeline（一个 PR）。改 prompt 后重跑受影响的 Supervisor eval。
 2. 交付物约定：agent-contracts 的 `Deliverable` 与 schema、核心收集、执行记录与 prompt。
-3. 交付物链路：`message.completed.deliverables`、Channel 字段改名、Console / TUI 渲染。
+3. 交付物链路：`message.completed.deliverables`、Channel 新增字段、Console / TUI 渲染。
 4. artifacts Toolkit 与 Host `local` adapter、source reader。
 5. HTTP 打开引用。
 6. `cos` adapter。
@@ -186,11 +188,12 @@ Channel 的旧 `artifacts` 输入、消息类型和展示也已删除；原有�
 adapter 尚未由本清理提供；新能力仍需另行实现与验证。上文保留原草稿的目标与历史接口描述，
 不应把它们当作本清理后的当前能力。
 
-本次删除 `sessionCapabilityArtifacts` channel、旧 Ref 类型和 reducer，旧索引不再恢复，
-继续运行后可由既有 checkpoint GC 回收；不承诺旧 state 所有字段无损。
+本次删除 `sessionCapabilityArtifacts` channel、旧 Ref 类型和 reducer，旧索引不再进入
+当前 state。
 按用户明确的自测阶段规则，本次也删除旧执行记录 `artifacts` 的兼容读取及专门测试，
 只支持现行契约；历史 checkpoint 和第三方 Capability 兼容仅在用户明确要求时处理。
-这项当前实施决定不改写上文原草稿的兼容影响核查要求。仍使用 `capability-v5`
-namespace，不切换 checkpoint 路径，不自动迁移或删除旧 store 文件；旧文件不再能
-通过原 discovery 工具访问。
+按现有版本隔离方式，checkpoint namespace 升至 `capability-v6`，新 runtime 不读取
+v5 checkpoint，不恢复旧 reader，也不迁移或删除旧 checkpoint 与 store 文件。TUI
+会话注册表随版本隔离；Studio 独立的 `resident-sessions` 注册表路径和记录不变，
+不能据此认为所有旧会话都已清空。旧文件不再能通过原 discovery 工具访问。
 详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。

@@ -411,9 +411,11 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 字段曾持久化，不构成保留兼容实现的依据。执行记录只支持现行 schema，不再接受
 已删除的 `artifacts` 字段，也不提供旧格式适配或专门的兼容测试。
 
-清理不迁移或删除用户数据。checkpoint 路径仍使用 `capability-v5`；旧 store 文件
-留在原处，已退役索引不再恢复，FileSaver 继续现有 checkpoint/GC 行为。此规则不
-改变文件权限、审核或其他安全边界。
+清理不迁移或删除用户数据。checkpoint namespace 升至 `capability-v6`，隔离已删除
+旧 `artifacts` 字段的执行记录；新 runtime 不读取 v5 checkpoint。旧 checkpoint 和
+store 文件留在原处，FileSaver 继续现有 checkpoint/GC 行为。Studio 会话注册表的
+独立边界见 [Workdir 配置](../runtime/workdir.md)。此规则不改变文件权限、审核或
+其他安全边界。
 
 Channel 的旧 `artifacts: [{ uri, label?, version? }]` 输入、消息类型和附件展示也已
 移除，strict schema 拒绝该请求字段。既有数据库 JSON 不被重写或删除，旧附件值

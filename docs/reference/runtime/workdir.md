@@ -19,11 +19,11 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 ~/.pinpawo/workspaces/<workspace-id>/   # sessions (sessionRoot)
 ├── workspace.json
-├── checkpoints-capability-v5/
-├── checkpoints-tui-capability-v5/
-├── checkpoints-studio-capability-v5/
+├── checkpoints-capability-v6/
+├── checkpoints-tui-capability-v6/
+├── checkpoints-studio-capability-v6/
 ├── resident-sessions/
-└── tui-sessions-capability-v5.json
+└── tui-sessions-capability-v6.json
 ```
 
 `HostRuntimeConfig` derives these paths before runtime assembly. Studio
@@ -35,6 +35,15 @@ belongs to. One directory per workdir keeps Hosts running in different projects
 from contending for one checkpoint writer lease. `PINPAWO_WORKSPACES_DIR`
 replaces `~/.pinpawo/workspaces` as the base. Session state is not migrated:
 moving or renaming a workdir starts with no sessions.
+
+`FileSaver` receives `.json` checkpoint anchor paths and removes the extension
+to form the directories shown above. `capability-v6` is the Host's storage
+namespace, not a LangGraph checkpoint format version. It isolates current
+execution records from v5 without reading or migrating the old checkpoint roots.
+The TUI session registry also uses the v6 suffix. Studio's separate
+`resident-sessions/<pet-id>.json` registry keeps its existing path and entries;
+its sessions are not automatically cleared, but their v5 conversation and review
+checkpoints are not loaded from the new root.
 
 The old Capability Artifact Pipeline is retired. Earlier versions may have left
 `capability-artifacts/` under `sessionRoot`; this cleanup does not read, migrate

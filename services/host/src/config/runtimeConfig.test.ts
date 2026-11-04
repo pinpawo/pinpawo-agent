@@ -29,15 +29,15 @@ test('buildHostRuntimeConfig keeps project config in the workdir and sessions un
     workdir: '/tmp/pinpawo-workdir',
     stateRoot: '/tmp/pinpawo-workdir/.pinpawo',
     sessionRoot,
-    checkpointPath: join(sessionRoot, 'checkpoints-capability-v5.json'),
-    tuiCheckpointPath: join(sessionRoot, 'checkpoints-tui-capability-v5.json'),
-    tuiSessionPath: join(sessionRoot, 'tui-sessions-capability-v5.json'),
+    checkpointPath: join(sessionRoot, 'checkpoints-capability-v6.json'),
+    tuiCheckpointPath: join(sessionRoot, 'checkpoints-tui-capability-v6.json'),
+    tuiSessionPath: join(sessionRoot, 'tui-sessions-capability-v6.json'),
     petsDir: '/tmp/pinpawo-workdir/.pinpawo/pets',
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);
   assert.equal(
     resolveHostCheckpointPath(runtimeConfig, 'studio'),
-    join(sessionRoot, 'checkpoints-studio-capability-v5.json'),
+    join(sessionRoot, 'checkpoints-studio-capability-v6.json'),
   );
 });
 

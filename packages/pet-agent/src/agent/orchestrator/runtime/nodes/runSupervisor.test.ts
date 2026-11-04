@@ -30,7 +30,7 @@ function state(): OrchestratorStateType {
       new AIMessage({ content: '', tool_calls: [{ id: 'entry', name: 'plan_request', args: { goal: 'Prepare and publish.' } }] }),
       new ToolMessage({ name: 'plan_request', tool_call_id: 'entry', content: 'Handed off.' }),
     ].map((message) => setAgentMessageMetadata(message, { runId: 'r1', taskId: 't1' })),
-    sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
+    sessionToolAuthorizations: { generation: '', records: [] },
   };
 }
 function node(decision: import('../../runSupervisor/testing').ScriptedSupervisorDecision) {

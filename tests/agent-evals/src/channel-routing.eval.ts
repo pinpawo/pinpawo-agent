@@ -214,7 +214,7 @@ function inputFor(item: Case): RouteInput {
     return {
       sequence, messageId: `${channelId}:${sequence}`, channelId,
       author: { kind: member.kind, id: member.id }, occurredAt: '2026-01-01T00:00:00.000Z',
-      body: entry.body, mentions: [], artifacts: [],
+      body: entry.body, mentions: [],
     };
   };
   const recent = (item.history ?? history).map((entry, index) => toRow(entry, index + 1));

@@ -78,8 +78,10 @@ ship, while executable tools and side effects remain in typed code.
 
 The old Capability Artifact Pipeline is retired. Explicit file publication and
 download remain a [Session Artifacts proposal](../design/agent-runtime/session-artifacts.md),
-not a capability supplied by this cleanup. Channel's independent message
-attachments retain their [existing API](../reference/api/studio.md#channel-messages-and-addressing).
+not a capability supplied by this cleanup. The old Channel attachment field is
+also retired; its stored JSON is left intact, while the current
+[message API](../reference/api/studio.md#channel-messages-and-addressing) exposes
+body text, reply links and mentions without attachments.
 
 Host and Agent are ownership boundaries, not additional extension formats. A
 Host creates and retains one or more Agent runtimes; an Agent executes a

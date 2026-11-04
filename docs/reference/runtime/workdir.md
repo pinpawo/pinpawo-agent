@@ -41,7 +41,9 @@ can be deleted.
 The old Capability Artifact Pipeline is retired. Earlier versions may have left
 `capability-artifacts/` under `sessionRoot`; this cleanup does not read, migrate
 or delete that directory. It is no longer a `HostRuntimeConfig` field or a new
-write destination. Existing checkpoint artifact fields remain read-compatible;
+write destination. Old execution-record `artifacts` fields remain readable, but
+the separate artifact index channel is removed and can be reclaimed by later
+checkpoint GC. This does not promise preservation of every old state field;
 see the [retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
 
 A Studio shared wiki, due-run store, run identity, and scheduler policy are not

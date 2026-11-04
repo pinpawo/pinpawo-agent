@@ -157,7 +157,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       });
       result = {
         ...result,
-        ...(finalized?.messages ? { messages: finalized.messages } : {}),
         ...(finalized?.output !== undefined
           ? { output: finalized.output }
           : {}),

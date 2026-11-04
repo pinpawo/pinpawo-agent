@@ -125,10 +125,6 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
         <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} />
-        {item.artifacts.map((artifact, artifactIndex) => <div className="channel-artifact" key={artifactIndex}>
-          {/^https?:\/\//i.test(artifact.uri) ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label ?? artifact.uri}</a> : <code>{artifact.label ?? artifact.uri}</code>}
-          {artifact.version && <span> · {artifact.version}</span>}
-        </div>)}
         </div>
         {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
           <p className="channel-record-error" role="alert" key={failureIndex}>

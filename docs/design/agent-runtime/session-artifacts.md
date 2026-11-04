@@ -179,13 +179,17 @@ Channel 消息的 `artifacts` 字段改名为 `deliverables`（见[交付物链�
 本节记录 #1047 的清理范围，不改变上文的设计目标或将其视为已经实现。
 
 旧 Capability Artifact store、discovery Toolkit、专用 Host/Studio 注入和 finalize
-写入接口已退役。普通 finalize 仍可改写 `output/messages`，Channel 独立的
-`artifacts` 消息附件 API 保持不变。显式发布、交付物传递、下载与 local/COS
-adapter 尚未由本清理提供；新能力仍需另行实现与验证。
+写入接口已退役。普通 finalize 保留 `output` 收尾接口及只读 context `messages`；
+返回值 `messages` 的无消费赋值和输出类型已删除，不据此声称该 hook 已被实际业务使用。
+Channel 的旧 `artifacts` 输入、消息类型和展示也已删除；原有消息 JSON 不重写，
+旧附件值不再通过 API 或 Console 可见。显式发布、交付物传递、下载与 local/COS
+adapter 尚未由本清理提供；新能力仍需另行实现与验证。上文保留原草稿的目标与历史接口描述，
+不应把它们当作本清理后的当前能力。
 
-本次保留已有 `sessionCapabilityArtifacts` channel、Ref 类型/reducer 和旧执行记录
-`artifacts` 的可选读取，只停止新的业务写入。它们用于保住旧 checkpoint 里的值，
-不是新管线。仍使用 `capability-v5` namespace，不切换 checkpoint 路径，不自动迁移
-或删除旧文件。外部扩展需要移除已退役的注入字段、Toolkit 依赖和 finalize 写入调用；
+本次删除 `sessionCapabilityArtifacts` channel、旧 Ref 类型和 reducer，旧索引不再恢复，
+继续运行后可由既有 checkpoint GC 回收；不承诺旧 state 所有字段无损。
+只保留旧执行记录 `artifacts` 的最小可选读取，因为普通旧委派也写入了 `artifacts: []`。
+仍使用 `capability-v5` namespace，不切换 checkpoint 路径，不自动迁移或删除旧 store 文件。
+外部扩展需要移除已退役的注入字段、Toolkit 依赖和 finalize 写入调用；
 旧文件不再能通过原 discovery 工具访问，更新前仍需评估其他部署的旧数据和导出需求。
 详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。

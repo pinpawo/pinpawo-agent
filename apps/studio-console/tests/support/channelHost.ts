@@ -90,7 +90,7 @@ if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
   const joinedAt = new Date().toISOString();
   await channel.service.store.upsertMember({ channelId: seeded.channelId, kind: 'pet', id: 'retired-pet', joinedAt, leftAt: joinedAt });
   await channel.service.store.appendMessage({ messageId: 'retired-delivery', channelId: seeded.channelId, author: { kind: 'pet', id: 'retired-pet' },
-    occurredAt: joinedAt, body: 'Historical public delivery from a Pet that is no longer registered.', mentions: [], artifacts: [] });
+    occurredAt: joinedAt, body: 'Historical public delivery from a Pet that is no longer registered.', mentions: [] });
 }
 console.log(JSON.stringify({ ready: true, url: `http://127.0.0.1:${http.address()!.port}`, token }));
 let closing = false;

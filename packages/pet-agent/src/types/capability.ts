@@ -28,7 +28,6 @@ export type CapabilityFinalizeContext = {
 } & DelegationScope;
 
 export type CapabilityFinalizeResult = {
-  messages?: BaseMessage[];
   /** Replace the tool output directly; null explicitly means no deliverable. */
   output?: string | null;
 };

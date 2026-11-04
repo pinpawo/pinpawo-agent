@@ -109,9 +109,8 @@ for (const output of [null, '', '  ']) {
   });
 }
 
-test('finalize can replace delivery with its existing message rewrite interface and execution scope', async () => {
+test('finalize can replace delivery with read-only history and execution scope', async () => {
   const toolkit = staticToolkit();
-  const rewritten = [new AIMessage({ id: 'finalized-message', content: 'Finalized history' })];
   const request = input('d1', [toolkit], { finalize: (result, context) => {
     assert.strictEqual(context.models, models);
     assert.equal(context.threadId, 'thread1');
@@ -122,7 +121,7 @@ test('finalize can replace delivery with its existing message rewrite interface 
     assert.ok(context.messages.some(message => message.id === 'user'));
     assert.equal(result.output, 'Delivered');
     assert.equal(result.messages.at(-1)?.text, 'Delivered');
-    return { output: 'Finalized delivery', messages: rewritten };
+    return { output: 'Finalized delivery' };
   } });
   const result = await createCapabilityExecutor({ models, runSubagent: async run => deliver(run) })(request, hostContext());
   assert.equal(result.delivery?.text, 'Finalized delivery');

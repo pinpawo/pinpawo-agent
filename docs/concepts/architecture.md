@@ -130,8 +130,10 @@ for `lifecycle.finalize`. A Toolkit is always typed code. See the
   records the delegated result rather than copying the full tool history.
 
 The old Capability Artifact Pipeline is retired. Its
-[remaining compatibility fields](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)
-preserve older checkpoint data; they do not provide file publication or discovery.
+[minimal execution-record reader](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)
+accepts the old `artifacts` field; the unused state index and Channel attachment
+API are removed. This does not promise preservation of every old checkpoint field
+or provide file publication and discovery.
 The proposed replacement remains in the [Session Artifacts draft](../design/agent-runtime/session-artifacts.md).
 
 For Browser-specific setup and limits, read

@@ -7,7 +7,7 @@ import type { ChannelMessageRow } from './store/channelStore';
 
 const message: ChannelMessageRow = {
   channelId: 'channel', messageId: 'current', sequence: 2,
-  author: { kind: 'pet', id: 'issuer' }, body: 'A public handoff.', occurredAt: 'now', artifacts: [], mentions: [],
+  author: { kind: 'pet', id: 'issuer' }, body: 'A public handoff.', occurredAt: 'now', mentions: [],
 };
 
 test('Channel context supplies a separate preparation hint for direct, routed and scheduled work', () => {

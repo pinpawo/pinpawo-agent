@@ -79,7 +79,7 @@ for (const [backend, config] of backends) {
       await sql`insert into channel_members (channel_id, member_kind, member_id, joined_at)
         values ('old', 'human', 'owner', 'then')`.execute(legacy);
       await sql`insert into channel_messages (message_id, channel_id, author_kind, author_id, occurred_at, data)
-        values ('old-msg', 'old', 'human', 'owner', 'then', ${JSON.stringify({ body: 'Keep this', mentions: [], artifacts: [] })})`.execute(legacy);
+        values ('old-msg', 'old', 'human', 'owner', 'then', ${JSON.stringify({ body: 'Keep this', mentions: [] })})`.execute(legacy);
       const db = await storage.open<ChannelDatabase>('channel', migrations);
       const service = new ChannelService({ store: new KyselyChannelStore(db), pets, humans });
       const context = await service.readContext(owner, 'old');
@@ -87,6 +87,47 @@ for (const [backend, config] of backends) {
       assert.equal(context.channel.prompt, undefined);
       assert.equal(context.messages[0]?.body, 'Keep this');
       assert.equal((await service.updateChannel(owner, 'old', { prompt: 'New prompt' }, { studio: true })).prompt, 'New prompt');
+    } finally { await storage.close(); }
+  });
+
+  test(`${backend}: retired attachment JSON stays stored while message history and replies remain usable`, async () => {
+    const storage = createStudioStorage(config());
+    try {
+      const db = await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect));
+      const service = new ChannelService({ store: new KyselyChannelStore(db), pets, humans });
+      const { channelId } = (await service.createChannel(owner, { title: 'History', pets: ['executor'] })).channel;
+      const original = (await service.postMessage(owner, channelId, { body: 'Original question.' })).message;
+      const historical = {
+        body: 'Historical reply remains visible.', replyTo: original.messageId,
+        mentions: [{ participantId: 'pet:executor', label: 'Stored label' }],
+        artifacts: [{ uri: 'https://example.test/retained-report', label: '旧报告', version: 'v1' }],
+      };
+      const rawJson = JSON.stringify(historical, null, 2);
+      await db.insertInto('channel_messages').values({
+        message_id: 'historical-reply', channel_id: channelId, author_kind: 'human', author_id: owner.id,
+        occurred_at: '2026-01-01T00:00:00Z', external_ref: 'legacy-message', data: rawJson,
+      }).execute();
+      const read = await service.getMessage(channelId, 'historical-reply');
+      assert.equal(read?.body, historical.body);
+      assert.equal(read?.replyTo, original.messageId);
+      assert.deepEqual(read?.author, owner);
+      assert.deepEqual(read?.mentions, historical.mentions);
+      assert.equal(Object.hasOwn(read!, 'artifacts'), false);
+      const context = await service.readContext(owner, channelId);
+      assert.deepEqual(context.messages.find(message => message.messageId === 'historical-reply'), read);
+      const current = (await service.postMessage(owner, channelId, {
+        body: 'A new reply without attachments.', replyTo: 'historical-reply',
+      })).message;
+      assert.equal(Object.hasOwn(current, 'artifacts'), false);
+      const stored = await db.selectFrom('channel_messages').select(['message_id', 'data'])
+        .where('channel_id', '=', channelId).execute();
+      assert.equal(stored.find(row => row.message_id === 'historical-reply')?.data, rawJson,
+        'reading history and posting another message must not rewrite old JSON');
+      assert.equal(Object.hasOwn(JSON.parse(stored.find(row => row.message_id === current.messageId)!.data), 'artifacts'), false);
+      for (const artifacts of [[], historical.artifacts]) {
+        await assert.rejects(service.postMessage(owner, channelId, { body: 'Unsupported old input.', artifacts }));
+      }
+      assert.equal((await service.readContext(owner, channelId)).messages.length, 3);
     } finally { await storage.close(); }
   });
 

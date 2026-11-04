@@ -1553,7 +1553,7 @@ test('ordinary finalize replaces the delivery without writing legacy artifact re
       assert.equal(context.capabilityId, 'report_writer');
       assert.ok(context.runId);
       assert.ok(context.delegationId);
-      return { output: 'Finalized report', messages: [new AIMessage('Rewritten private result')] };
+      return { output: 'Finalized report' };
     } },
   };
   const graph = createOrchestratorGraph({ models: {
@@ -1567,7 +1567,6 @@ test('ordinary finalize replaces the delivery without writing legacy artifact re
   assert.equal(result?.delivery?.text, 'Finalized report');
   assert.ok(result);
   assert.equal(Object.hasOwn(result, 'artifacts'), false);
-  assert.deepEqual(state.sessionCapabilityArtifacts, []);
 });
 
 test('runAgent reuses a host-precompiled toolkit registry', async () => {

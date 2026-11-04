@@ -211,7 +211,7 @@ test('validateCapabilityPlugin accepts an entry that only exports lifecycle.fina
   await fs.writeFile(path.join(capabilityDir, 'index.js'), `
 export const lifecycle = {
   finalize(result, context) {
-    return { output: context.capabilityId + ': ' + result.output, messages: context.messages.slice() };
+    return { output: context.capabilityId + ': ' + result.output + '; history=' + context.messages.length };
   },
 };
 `, 'utf8');
@@ -226,7 +226,7 @@ export const lifecycle = {
     capabilityId: 'finalized_capability', threadId: 'thread', taskId: 'task', runId: 'run', delegationId: 'delegation',
     messages: [message], models: { act: new FakeListChatModel({ responses: ['unused'] }) },
   });
-  assert.deepEqual(finalized, { output: 'finalized_capability: delivery', messages: [message] });
+  assert.deepEqual(finalized, { output: 'finalized_capability: delivery; history=1' });
 });
 
 test('validateCapabilityPlugin rejects entry paths outside the capability root', async () => {

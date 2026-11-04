@@ -7,7 +7,7 @@ import { readChannelTestInput } from '../../../tests/support/channelDispatchInpu
 
 const message: ChannelMessageRow = {
   channelId: 'channel', messageId: 'current', sequence: 2,
-  author: { kind: 'human', id: 'operator)' }, body: 'Inspect this.', occurredAt: 'now', artifacts: [], mentions: [],
+  author: { kind: 'human', id: 'operator)' }, body: 'Inspect this.', occurredAt: 'now', mentions: [],
 };
 
 test('dispatch carries stable server authors and message IDs separately from quoted context', () => {

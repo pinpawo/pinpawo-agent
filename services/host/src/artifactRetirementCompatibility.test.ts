@@ -7,6 +7,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
+import { uuid6 } from '@langchain/langgraph-checkpoint';
 import { z } from 'zod';
 import {
   buildAgentRunnableConfig,
@@ -18,7 +19,6 @@ import {
   readCapabilityExecutions,
   readPendingInterrupt,
   type AgentModels,
-  type CapabilityArtifactRef,
 } from '../../../packages/pet-agent/src/index';
 import { setAgentMessageMetadata } from '../../../packages/pet-agent/src/agent/messages';
 import { withScriptedDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
@@ -43,7 +43,7 @@ function temporaryCheckpoint(t: TestContext) {
   return join(root, `checkpoints-${HOST_CHECKPOINT_CONTRACT}.json`);
 }
 
-function legacyRef(threadId: string): CapabilityArtifactRef {
+function legacyArtifact(threadId: string): Record<string, unknown> {
   return {
     id: 'historical-ref', threadId, capabilityId: 'general', delegationId: 'legacy-nonempty',
     runId: 'legacy-run', kind: 'report', mimeType: 'text/plain',
@@ -54,7 +54,7 @@ function legacyRef(threadId: string): CapabilityArtifactRef {
 }
 
 /** Persist the old executed-record shape, independently of the new record writer. */
-function legacyExecutionPair(suffix: string, artifacts: CapabilityArtifactRef[]): BaseMessage[] {
+function legacyExecutionPair(suffix: string, artifacts: Record<string, unknown>[]): BaseMessage[] {
   const callId = `legacy-call-${suffix}`;
   const delegationId = `legacy-${suffix}`;
   const metadata = { runId: 'legacy-run', taskId: 'legacy-task' };
@@ -84,48 +84,59 @@ async function seedOldRecords(path: string, threadId: string) {
   const graph = createOrchestratorGraph({ models: { act: model }, checkpoint: saver });
   const config = configuration(threadId);
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('An earlier conversation.')]), config);
-  const ref = legacyRef(threadId);
-  await graph.updateState(config, { sessionCapabilityArtifacts: [ref], messages: [
-    ...legacyExecutionPair('empty', []), ...legacyExecutionPair('nonempty', [ref]),
+  const artifact = legacyArtifact(threadId);
+  await graph.updateState(config, { messages: [
+    ...legacyExecutionPair('empty', []), ...legacyExecutionPair('nonempty', [artifact]),
   ] });
+  // Persist an old checkpoint-only channel without reintroducing it into the current graph schema.
+  const tuple = await saver.getTuple(config);
+  assert.ok(tuple?.metadata);
+  const step = tuple.metadata.step + 1;
+  await saver.put(tuple.config, {
+    ...tuple.checkpoint, id: uuid6(step), ts: new Date().toISOString(),
+    channel_values: { ...tuple.checkpoint.channel_values, sessionCapabilityArtifacts: [artifact] },
+    channel_versions: { ...tuple.checkpoint.channel_versions, sessionCapabilityArtifacts: 1 },
+  }, { ...tuple.metadata, source: 'update', step });
+  assert.deepEqual((await saver.getTuple(config))?.checkpoint.channel_values.sessionCapabilityArtifacts, [artifact]);
   await saver.collectThreadGarbage(threadId);
-  return ref;
+  return artifact;
 }
 
-function assertOldRecords(values: { messages: BaseMessage[]; sessionCapabilityArtifacts: CapabilityArtifactRef[] }, ref: CapabilityArtifactRef) {
-  assert.deepEqual(values.sessionCapabilityArtifacts, [ref]);
+function assertOldRecords(values: { messages: BaseMessage[] }, artifact: Record<string, unknown>) {
+  assert.equal(Object.hasOwn(values, 'sessionCapabilityArtifacts'), false, 'the retired index is not restored into graph state');
   const old = readCapabilityExecutions(values.messages).filter(item => item.metadata.runId === 'legacy-run');
   assert.equal(old.length, 2);
-  assert.deepEqual(old.map(item => item.result.artifacts), [[], [ref]]);
+  assert.deepEqual(old.map(item => item.result.artifacts), [[], [artifact]]);
 }
 
-test('the real v5 orchestrator retains old artifact records and state after a new conversation, rebuild and FileSaver GC', async (t) => {
+test('the real v5 orchestrator reads old executions and resumes a checkpoint containing the retired index', async (t) => {
   const path = temporaryCheckpoint(t);
   const threadId = 'artifact-retirement-session';
-  const ref = await seedOldRecords(path, threadId);
+  const artifact = await seedOldRecords(path, threadId);
   const config = configuration(threadId);
   const model = new AnswerModel({});
   const saver = new FileSaver(path);
   const graph = createOrchestratorGraph({ models: { act: model }, checkpoint: saver });
-  assertOldRecords((await graph.getState(config)).values, ref);
+  assertOldRecords((await graph.getState(config)).values, artifact);
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Continue normally.')]), config);
   assert.equal(model.calls, 1);
-  assertOldRecords(result, ref);
+  assertOldRecords(result, artifact);
   await saver.collectThreadGarbage(threadId);
 
   const restoredSaver = new FileSaver(path);
   const restoredGraph = createOrchestratorGraph({ models: { act: model }, checkpoint: restoredSaver });
   const restored = await restoredGraph.getState(config);
-  assertOldRecords(restored.values, ref);
+  assertOldRecords(restored.values, artifact);
   assert.deepEqual(restored.next, []);
   const persisted = await restoredSaver.getTuple(config);
-  assert.deepEqual(persisted?.checkpoint.channel_values.sessionCapabilityArtifacts, [ref]);
+  assert.ok(persisted);
+  assert.equal(Object.hasOwn(persisted.checkpoint.channel_values, 'sessionCapabilityArtifacts'), false);
 });
 
-test('a real Capability approval resumes after graph/FileSaver rebuild without replaying completed tools or losing old refs', async (t) => {
+test('a real Capability approval resumes after rebuild without replaying completed tools or losing historical execution records', async (t) => {
   const path = temporaryCheckpoint(t);
   const threadId = 'artifact-retirement-approval';
-  const ref = await seedOldRecords(path, threadId);
+  const artifact = await seedOldRecords(path, threadId);
   let entryCalls = 0;
   let supervisorCalls = 0;
   let modelCalls = 0;
@@ -185,7 +196,7 @@ test('a real Capability approval resumes after graph/FileSaver rebuild without r
   const paused = await initialGraph.getState(config);
   const pending = readPendingInterrupt(paused);
   assert.ok(pending);
-  assertOldRecords(paused.values, ref);
+  assertOldRecords(paused.values, artifact);
   assert.equal(completedReads, 1);
   assert.equal(approvedWrites, 0);
   assert.equal(modelCalls, 2);
@@ -197,7 +208,7 @@ test('a real Capability approval resumes after graph/FileSaver rebuild without r
   const resumedGraph = makeGraph(resumedSaver);
   const restoredPause = await resumedGraph.getState(config);
   assert.equal(readPendingInterrupt(restoredPause)?.interruptId, pending.interruptId);
-  assertOldRecords(restoredPause.values, ref);
+  assertOldRecords(restoredPause.values, artifact);
   const reviewId = pending.payload.reviews[0]?.id;
   assert.ok(reviewId);
   const finished = await resumedGraph.invoke(new Command({ resume: { [pending.interruptId]: {
@@ -208,7 +219,7 @@ test('a real Capability approval resumes after graph/FileSaver rebuild without r
   assert.equal(modelCalls, 3, 'resume must continue after the persisted tool-call response');
   assert.equal(entryCalls, 1);
   assert.equal(supervisorCalls, 2);
-  assertOldRecords(finished, ref);
+  assertOldRecords(finished, artifact);
   const current = readCapabilityExecutions(finished.messages).filter(item => item.metadata.runId !== 'legacy-run');
   assert.equal(current.length, 1);
   assert.equal(Object.hasOwn(current[0]!.result, 'artifacts'), false, 'new records do not write the retired field');
@@ -216,8 +227,10 @@ test('a real Capability approval resumes after graph/FileSaver rebuild without r
 
   const finalSaver = new FileSaver(path);
   const final = await makeGraph(finalSaver).getState(config);
-  assertOldRecords(final.values, ref);
+  assertOldRecords(final.values, artifact);
   assert.equal(readPendingInterrupt(final), null);
   assert.deepEqual(final.next, []);
-  assert.deepEqual((await finalSaver.getTuple(config))?.checkpoint.channel_values.sessionCapabilityArtifacts, [ref]);
+  const persisted = await finalSaver.getTuple(config);
+  assert.ok(persisted);
+  assert.equal(Object.hasOwn(persisted.checkpoint.channel_values, 'sessionCapabilityArtifacts'), false);
 });

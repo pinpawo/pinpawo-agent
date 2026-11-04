@@ -5,12 +5,6 @@ export type {
 } from './types/agent';
 
 export type {
-  CapabilityArtifactKind,
-  CapabilityArtifactRef,
-  CapabilityArtifactSchemaRef,
-} from './types/artifact';
-
-export type {
   AgentCapability,
   CapabilityDocumentSource,
   CapabilityFinalizeContext,
@@ -205,7 +199,6 @@ export type {
   StructuredOutputMethod,
   StructuredOutputOptions,
 } from './utils/structuredOutput';
-export { mergeCapabilityArtifactRefs } from './agent/orchestrator/capabilityArtifacts';
 export {
   getAgentMessageRunId,
   isMainConversationMessage,

@@ -13,7 +13,7 @@ const input: RouteInput = {
 };
 const endpoint = { profileId: 'p', baseUrl: 'https://models.test/v1/', apiKey: 'k', model: 'small', structuredOutputMethod: 'jsonMode' as const };
 const message = (author: ChannelMessageRow['author'], mentions: ChannelMessageRow['mentions'] = []): ChannelMessageRow => ({
-  sequence: 1, messageId: 'm', channelId: 'c', author, occurredAt: '', body: 'hi', mentions, artifacts: [],
+  sequence: 1, messageId: 'm', channelId: 'c', author, occurredAt: '', body: 'hi', mentions,
 });
 const pet: ChannelMember = { participantId: 'pet:executor', kind: 'pet', id: 'executor', label: 'Executor', joinedAt: '' };
 const human: ChannelMember = { participantId: 'human:local', kind: 'human', id: 'local', label: 'Barry', joinedAt: '' };

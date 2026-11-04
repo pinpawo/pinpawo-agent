@@ -40,7 +40,8 @@ Capability 描述“完成什么任务”；Toolkit 描述“哪些行为可以�
 
 旧 Capability Artifact Pipeline 已退役。显式发布和下载仍是
 [Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)中的目标，
-本次清理不提供这些新能力。Channel 独立的消息附件仍保留[现有 API](../../reference/api/studio.md#channel-messages-and-addressing)。
+本次清理不提供这些新能力。旧 Channel 消息附件字段也已退役；历史 JSON 保留，
+当前[消息 API](../../reference/api/studio.md#channel-messages-and-addressing)仍提供正文、回复关系和提及，不再提供附件。
 
 Host 与 Agent 是所有权边界，不是新的扩展格式：Host 创建并持有一个或多个 Agent runtime；Agent 执行 Capability；Capability 通过 `uses` 引用 Toolkit；Toolkit Runtime 始终从属于 Toolkit。跨 Host 的 accepted constraints 见[领域关系设计（中文）](../../design/host-agent-capability-toolkit.md)。
 

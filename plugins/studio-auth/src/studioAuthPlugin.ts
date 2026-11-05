@@ -22,7 +22,12 @@ import {
 } from './capabilities';
 import { studioAuthOptions, USERNAME_PATTERN, type StudioAuthConfig } from './authOptions';
 import { studioAuthMigrations } from './migrations';
-import { StudioAuthRepository, type StudioAuthDatabase, type StudioAuthUserRow } from './repository';
+import {
+  CredentialConflictError,
+  StudioAuthRepository,
+  type StudioAuthDatabase,
+  type StudioAuthUserRow,
+} from './repository';
 
 const PLUGIN_NAME = 'studio-auth';
 const DEFAULT_SESSION_TTL_HOURS = 12;
@@ -63,6 +68,13 @@ export type CreateStudioAuthPluginOptions = {
    * password change inside that window.
    */
   internalBeforeSessionCreate?: () => Promise<void>;
+  /**
+   * Internal seam, not part of the Plugin contract: awaited after the current
+   * password has been verified and the replacement hashed, but before the
+   * credential is replaced in the database, so a test can land an
+   * administrative reset inside that window.
+   */
+  internalBeforeCredentialReplace?: () => Promise<void>;
 };
 
 export type StudioAuthPlugin = StudioPlugin & {
@@ -185,6 +197,7 @@ export function createStudioAuthPlugin(
   const secret = options.secret ?? randomBytes(32).toString('base64url');
   if (secret.length < 32) throw new Error('Studio auth secret must contain at least 32 characters.');
   const beforeSessionCreate = options.internalBeforeSessionCreate;
+  const beforeCredentialReplace = options.internalBeforeCredentialReplace;
 
   let studio: StudioPluginContext | undefined;
   let db: Kysely<StudioAuthDatabase> | undefined;
@@ -472,8 +485,12 @@ export function createStudioAuthPlugin(
     if (newPassword.length < minPasswordLength || newPassword.length > 256) {
       return error(400, `New password must be ${minPasswordLength.toString()}-256 characters.`);
     }
-    const hash = await repo().credentialHash(session.userId);
-    if (!hash || !(await verifyPassword({ hash, password: currentPassword }))) {
+    // One consistent snapshot: the hash that is verified belongs to the version
+    // this change will be committed against. Reading the version separately
+    // would leave a window where an administrative reset lands between the
+    // verified hash and the replacement.
+    const snapshot = await repo().credentialSnapshot(session.userId);
+    if (!snapshot.hash || !(await verifyPassword({ hash: snapshot.hash, password: currentPassword }))) {
       await audit('password.change', 'denied', {
         request,
         userId: session.userId,
@@ -482,20 +499,43 @@ export function createStudioAuthPlugin(
       });
       return error(401, 'Current password is wrong.');
     }
+    const newHash = await hashPassword(newPassword);
+    if (beforeCredentialReplace) await beforeCredentialReplace();
     // One transaction: the new hash, the version bump and the revocation of the
     // other sessions land together. The session that made the change keeps
-    // working (re-stamped with the new version), everything else dies.
-    const { revoked } = await repo().replaceCredential(
-      session.userId,
-      await hashPassword(newPassword),
-      { keepSessionId: session.sessionId },
-    );
+    // working (re-stamped with the new version), everything else dies. The
+    // commit is conditional on the version this request verified against, so a
+    // reset that landed meanwhile wins: an in-flight self-service change must
+    // never overwrite the password an operator just set.
+    let replaced: { revoked: number; keptSession: boolean };
+    try {
+      replaced = await repo().replaceCredential(session.userId, newHash, {
+        keepSessionId: session.sessionId,
+        expectedVersion: snapshot.version,
+      });
+    } catch (cause) {
+      if (!(cause instanceof CredentialConflictError)) throw cause;
+      await audit('password.change', 'denied', {
+        request,
+        userId: session.userId,
+        clientId: session.principal.clientId,
+        reason: 'credential-changed',
+      });
+      return error(409, 'Password was changed elsewhere. Sign in again and retry.');
+    }
+    const { revoked } = replaced;
     await audit('password.change', 'ok', {
       request,
       userId: session.userId,
       clientId: session.principal.clientId,
       reason: `revoked ${revoked.toString()} sessions`,
     });
+    if (!replaced.keptSession) {
+      // The session that made the change was revoked while it was in flight
+      // (logout or disable elsewhere): say so instead of implying this device
+      // is still signed in.
+      return json(200, { revoked: true });
+    }
     return { kind: 'json', status: 204, body: null };
   }
 

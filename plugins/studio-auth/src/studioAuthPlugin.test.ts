@@ -519,3 +519,92 @@ test('the usernames this Plugin accepts are the ones Better Auth accepts', async
   assert.equal(await h.clients.get('user.bad name'), undefined);
   assert.equal(await h.clients.get('user.-abc'), undefined);
 });
+
+test('a self-service password change cannot overwrite an administrative reset', async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let reachedBarrier!: () => void;
+  const atBarrier = new Promise<void>((resolve) => { reachedBarrier = resolve; });
+
+  const h = await harness({
+    internalBeforeCredentialReplace: async () => {
+      reachedBarrier();
+      await gate;
+    },
+  });
+  t.after(h.stop);
+  const { userId } = (await h.createUser('hopper')).body as { userId: string };
+  const { token } = (await h.login('hopper')).body as { token: string };
+
+  // The change verifies the current password, hashes the replacement and then
+  // waits: everything up to the write is already done and irreversible-looking.
+  const pending = h.call('POST /auth/password', {
+    token,
+    body: { currentPassword: PASSWORD, newPassword: 'self-chosen-long-password' },
+  });
+  await atBarrier;
+  // The administrator resets the password and revokes every session while that
+  // verified change is still in flight.
+  const reset = await h.call('POST /users/password', {
+    body: { userId, password: 'admin-chosen-long-password' },
+  });
+  assert.equal(reset.status, 204);
+  release();
+
+  const raced = await pending;
+  // The operator wins: the stale change is refused instead of clobbering it.
+  assert.equal(raced.status, 409);
+  assert.deepEqual(raced.body, { error: 'Password was changed elsewhere. Sign in again and retry.' });
+
+  const db = await h.inspect();
+  const audit = await db.selectFrom('studio_auth_audit').selectAll().execute();
+  const denied = audit.find((row) =>
+    row.action === 'password.change' && row.result === 'denied' && row.reason === 'credential-changed');
+  assert.ok(denied, 'the refused change is recorded as credential-changed');
+  // The refused change touched nothing: the reset had already revoked the
+  // sessions and the rollback leaves no session of its own behind.
+  assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), []);
+
+  // The password an operator just set is the one that signs in.
+  assert.equal((await h.login('hopper', 'self-chosen-long-password')).status, 401);
+  assert.equal((await h.login('hopper', 'admin-chosen-long-password')).status, 200);
+});
+
+test('two racing self-service changes: the stale one is told to sign in again', async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let reachedBarrier!: () => void;
+  const atBarrier = new Promise<void>((resolve) => { reachedBarrier = resolve; });
+  let calls = 0;
+
+  const h = await harness({
+    internalBeforeCredentialReplace: async () => {
+      calls += 1;
+      // Only the first change is held; the second one lands while it waits.
+      if (calls === 1) {
+        reachedBarrier();
+        await gate;
+      }
+    },
+  });
+  t.after(h.stop);
+  await h.createUser('church');
+  const { token } = (await h.login('church')).body as { token: string };
+
+  const first = h.call('POST /auth/password', {
+    token,
+    body: { currentPassword: PASSWORD, newPassword: 'first-device-long-password' },
+  });
+  await atBarrier;
+  const second = await h.call('POST /auth/password', {
+    token,
+    body: { currentPassword: PASSWORD, newPassword: 'second-device-long-password' },
+  });
+  assert.equal(second.status, 204);
+  release();
+
+  const raced = await first;
+  assert.equal(raced.status, 409);
+  assert.equal((await h.login('church', 'first-device-long-password')).status, 401);
+  assert.equal((await h.login('church', 'second-device-long-password')).status, 200);
+});

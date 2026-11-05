@@ -1,4 +1,4 @@
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 
 import type { StudioCapability } from './capabilities';
 
@@ -74,6 +74,18 @@ export type StudioAuthDatabase = {
 
 /** The provider id Better Auth writes for a username/password credential. */
 const CREDENTIAL_PROVIDER_ID = 'credential';
+
+/**
+ * The credential moved on between the read that was verified and the write that
+ * would have replaced it: an administrative reset landed in that window. The
+ * transaction is rolled back, so neither the password nor the sessions change.
+ */
+export class CredentialConflictError extends Error {
+  constructor() {
+    super('The credential was replaced while this change was in flight.');
+    this.name = 'CredentialConflictError';
+  }
+}
 
 /**
  * Row-level access to this Plugin's tables. Rules (locking policy, capability
@@ -310,15 +322,21 @@ export class StudioAuthRepository {
    * `keepSessionId` is for the self-service change: the session that performed
    * the change survives, re-stamped with the new version, while every other
    * session of that user is revoked.
+   *
+   * `expectedVersion` is the version the caller verified its hash against. When
+   * it is given, the bump only happens if the stored version still matches; a
+   * caller acting on a stale read throws {@link CredentialConflictError} and
+   * leaves the account untouched. Without it (an administrative reset) the
+   * replacement is unconditional, as the operator is not racing their own read.
    */
   async replaceCredential(
     userId: string,
     hash: string,
-    options: { keepSessionId?: string } = {},
-  ): Promise<{ version: number; revoked: number }> {
+    options: { keepSessionId?: string; expectedVersion?: number } = {},
+  ): Promise<{ version: number; revoked: number; keptSession: boolean }> {
     return this.db.transaction().execute(async (trx) => {
       const now = new Date().toISOString();
-      await trx
+      const bumped = await trx
         .updateTable('studio_auth_user')
         .set((expression) => ({
           credential_version: expression(
@@ -329,7 +347,17 @@ export class StudioAuthRepository {
           updated_at: now,
         }))
         .where('id', '=', userId)
-        .execute();
+        .$if(options.expectedVersion !== undefined, (query) =>
+          query.where(
+            sql<number>`COALESCE(credential_version, 0)`,
+            '=',
+            options.expectedVersion ?? 0,
+          ),
+        )
+        .executeTakeFirst();
+      if (options.expectedVersion !== undefined && Number(bumped?.numUpdatedRows ?? 0) === 0) {
+        throw new CredentialConflictError();
+      }
 
       const user = await trx
         .selectFrom('studio_auth_user')
@@ -361,14 +389,27 @@ export class StudioAuthRepository {
           .where('user_id', '=', userId)
           .execute();
       const revoked = Number(deleted[0]?.numDeletedRows ?? 0);
+      // Re-stamp the staying session only if it is still there and still the
+      // one this change was made under: a session revoked meanwhile (logout,
+      // disable) must not be resurrected with the new version.
+      let keptSession = false;
       if (options.keepSessionId) {
-        await trx
+        const restamped = await trx
           .updateTable('studio_auth_session')
           .set({ credential_version: version, updated_at: now })
           .where('id', '=', options.keepSessionId)
-          .execute();
+          .where('user_id', '=', userId)
+          .$if(options.expectedVersion !== undefined, (query) =>
+            query.where(
+              sql<number>`COALESCE(credential_version, 0)`,
+              '=',
+              options.expectedVersion ?? 0,
+            ),
+          )
+          .executeTakeFirst();
+        keptSession = Number(restamped?.numUpdatedRows ?? 0) > 0;
       }
-      return { version, revoked };
+      return { version, revoked, keptSession };
     });
   }
 

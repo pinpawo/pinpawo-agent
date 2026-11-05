@@ -103,9 +103,9 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 | capability | 含义 |
 |---|---|
 | `channel.read` | 读取自己所在 Channel 的成员、消息、session 绑定 |
-| `channel.write` | 发消息、建 Channel、管理成员 |
+| `channel.write` | 发消息、建 Channel、管理成员；在 Channel 内 `@` 一个 Pet 会真正触发该 Pet 运行（见 3.5.1） |
 | `studio.view` | 读 `/dispatch/queues`、Pet 列表等只读投影 |
-| `studio.dispatch` | `POST /dispatch` |
+| `studio.dispatch` | 仅 `POST /dispatch`（HTTP 直调），不含经 Channel 触发的运行，见 3.5.1 |
 | `studio.events` | 订阅 `GET /events` 全局事件流 |
 | `pet.session` | `/pet-sessions/*`（snapshot / events / review） |
 | `studio.manage` | `POST /pets`、`/pets/rename`、`GET /pet-definitions` |
@@ -123,6 +123,25 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 - Channel 路由由 channel 插件自己声明 `channel.read`（GET）/ `channel.write`（POST）：成员关系决定「能看到什么」，capability 决定「能不能碰 Channel」；
 - 缺 capability 的判定顺序：先 scope 再 capability。声明了 capabilities 的凭证会收到 `"This client lacks the \"<capability>\" capability."`，`pps_` key / JWT 继续收到原来的 `"This client may not use this route."`（状态码都是 `403`）；
 - 三条资源边界：workdir 归属（Host 级，当前单 workdir，不做多租户）、Pet 归属（capability 先行，细化到 definition 是后续）、Channel（成员关系决定可见性，已实现）。
+
+#### 3.5.1 两类执行入口：HTTP 直调与 Channel
+
+一个容易误解的点要先说清楚：**`studio.dispatch` 只约束 HTTP 直调 `POST /dispatch`，不约束经 Channel 触发的 Pet 运行。**
+
+经 Channel 的路径是：`POST /channels` 携带 `pets: [petId]` 建 Channel → `POST /channels/messages` 携带 `mentions: [{ participantId: 'pet:<petId>' }]` → `channelPlugin.dispatchPet()` → `host().dispatch()` → `pet.runtime.dispatch.dispatch`。这条链路只经过两个判定：
+
+1. Channel 路由的 capability（`channel.write`）；
+2. Channel 成员关系（Pet 必须是当前成员，`requireMember`）与 client 未吊销。
+
+也就是说，**默认权限集里的 `channel.write` 已经等价于「可以在 Channel 内让 Pet 干活」**。这是有意的产品决定（PR #1055 review 第 1 条的结论），理由：
+
+- Channel 现有的授权模型是「成员身份 + 客户未吊销」，成员关系本身就表达「允许这个人在这个 Channel 里说话」；再叠一层 `studio.dispatch` 会让两套规则互相解释不清——同一句 `@executor` 到底看成员还是看 capability？
+- `pps_` key 与外部 JWT 默认只有 `channel.read` / `channel.write`，若让 Channel 触发也要求 `studio.dispatch`，既有 Channel 集成会静默失效，需要额外兜底与迁移；
+- 想限制「谁能让 Pet 干活」，正确的位置是 Channel 成员管理和 capability 授予（不给 `channel.write`，或不让该 Pet 加入这个 Channel），而不是在 dispatch 入口再加一道。
+
+安全含义写成一句话：**给一个用户 `channel.write`，等于给他在他能进入的 Channel 里触发 Pet 的能力**；只读用户给 `channel.read` / `studio.view`，不要给 `channel.write`。
+
+将来若要收紧到「任何 Pet 执行都必须显式授权」，需要动三处：`channelPlugin` 的 `dispatchPet()`（以及 `deliver` / `run` 两条调用点）加 capability 判定、给 `pps_` / JWT 的 `DEFAULT_CLIENT_CAPABILITIES` 补 `studio.dispatch` 兜底、以及一次针对存量用户的数据迁移（补齐或明确降级）。本分支没有做这件事，行为保持与今日一致。
 
 ### 3.6 认证接入：`authenticators` hook
 

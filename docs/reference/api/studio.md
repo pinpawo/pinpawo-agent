@@ -240,6 +240,14 @@ of a token is stored. Capabilities: `channel.read`, `channel.write`,
 `studio.manage` (explicit grant). A capability never widens the scope rule for
 a route a Plugin declares — only the built-in route table can do that.
 
+`studio.dispatch` gates the direct HTTP `POST /dispatch` route only. A Pet that
+is a member of a Channel runs when a member posts a message mentioning it
+(`mentions: [{ participantId: "pet:<petId>" }]`), and that path is gated by
+`channel.write` plus Channel membership, not by `studio.dispatch`. Granting
+`channel.write` therefore lets a user start Pet runs inside the Channels they
+belong to; grant `channel.read` and `studio.view` alone for read-only users.
+See the [user auth design](../../design/studio/user-auth.md#351-两类执行入口http-直调与-channel).
+
 ## Host lifecycle
 
 `StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls

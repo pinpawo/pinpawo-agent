@@ -80,7 +80,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   不是成员也能列出所有 Channel（`GET /channels?all=true`）、查看和增删任何 Channel 的成员，但读消息、发言仍要先加入。
   创建时必须明确列出要加入的 Pet（`pets: [...]`），它们和创建者一起成为初始成员；不会自动加入所有 Pet。之后仍可增删。
 - **Pet 视角**：`channel_read_context` 返回 Channel 的标题、说明、可选协作提示词、成员和分页消息。
-  协作提示词按运行作用域注入，启用路由时分配模型也可看到；路由仍仅处理无 @ 的人类消息。设计见 [Channel 协作提示词草案](channel-collaboration-prompt.md)。
+  协作提示词按运行作用域注入，启用路由时分配模型也可看到。路由可处理无 @ 的人类消息和 Pet 新公开回复；具体触发条件见 [Channel 路由](channel-routing.md)，提示词设计见 [Channel 协作提示词草案](channel-collaboration-prompt.md)。
 
 ## Pet 在 Channel 里
 
@@ -107,9 +107,9 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   变化时发布 `channel.working {channelId, participantId, working}`。Host 重启时 run 本来也会结束，内存从空开始即可。
   `channel_read_context`（Pet 视角）不带这一项。
 - **交接**：消息 @ 了 Pet 时，Channel 用 `channel_sessions` 的 session 和 `scope:{namespace:'channel'}` 派发。
-  没有 @ 的消息只写入 Channel，不派发给任何 Pet，单 Pet 的 Channel 也一样；`replyTo` 本身不算 @（Console 的回复会预填原作者的 @，删掉就不会唤醒）。
-  Channel 没有默认或兜底 Pet。Pet 只在下次被 @ 或被 schedule / trigger 唤醒时，通过 `channel_read_context` 读到这些消息。
-  [Channel 路由](channel-routing.md) 开启后，为人类的无 @ 消息选一个 Pet 派发（设计草案）；未开启时行为如上。
+  路由默认关闭；关闭时，没有 @ 的消息只写入 Channel，不派发给任何 Pet，单 Pet 的 Channel 也一样。Pet 下次被 @ 或被 schedule / trigger 唤醒时，可通过 `channel_read_context` 读到这些消息。
+  [Channel 路由](channel-routing.md) 开启后，无 @ 的人类消息和 Pet 新公开回复都可能进入路由，由模型选一个其他 Pet 或选择不派发；Pet 作者不在候选中。Channel 没有默认或兜底 Pet。
+  `replyTo` 本身不算 @（Console 的回复会预填原作者的 @；删除后是否派发取决于路由）。
   投递结果不落库：发起请求的一方在响应里拿到；同时 Channel 在全局事件总线上发布投递事件（含失败），
   不区分发言者是人还是 Pet。
 - **投递失败是 best-effort 边界。** Pet 的公开消息由订阅写入，没有请求方：它 @ 的对象投递失败时，只有全局事件可见

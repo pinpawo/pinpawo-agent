@@ -11,7 +11,7 @@ for setup steps, use [Guides](../../guides/index.md).
 | Tool authorization matching | [Authorization matcher](authorization-matcher.md) |
 | Deterministic control decisions | [Guards](guards.md) |
 | Model context sources and boundaries | [Context injection map](context-injection-map.md) |
-| Delegation result delivery | [Delegation announces](delegation-announces.md) |
+| Delegation result delivery | [Delegation result delivery](delegation-announces.md) |
 | Evaluation inputs and evidence | [Eval contract](eval-contract.md) |
 
 Resident runtime assembly remains documented in the accepted

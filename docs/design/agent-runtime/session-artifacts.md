@@ -50,7 +50,7 @@
 | 层 | 负责 |
 |---|---|
 | agent-contracts | `Deliverable` 类型与工具结果里 `deliverables` 的 schema；`ArtifactRef`、`artifact://` 解析 |
-| pet-agent 核心 | 沿现有 Capability 返回路径汇总交付物引用，写进 `delegate_capability` 的执行记录。不认识 artifact store。 |
+| pet-agent 核心 | 沿现有 Capability 返回路径汇总交付物引用，写进 `delegate_capability` 的执行记录。 |
 | artifacts Toolkit（独立包，如 `toolkits/artifacts`） | `ArtifactStore` 与 `ArtifactSourceReader` 两个 port；`publish_artifact` / `list_artifacts` / `download_artifact` 三个工具 |
 | Host | 注入 store adapter（local / COS）与 source reader；把本 run 的交付物挂到 `message.completed`；HTTP 打开引用；可选的 session 产物段落 |
 | agent-session 协议 | `message.completed.deliverables` 与 snapshot 里对应字段 |
@@ -69,7 +69,7 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 
 1. 只有工具声明的才算交付物。模型是否调用 `publish_artifact` 不能保证；能保证的是调用了就一定记下。没发布的情况靠 toolkit instructions 引导，由 Supervisor 验收把关（要求交付文件但没有交付物，判为未完成）。
 2. schema 在工具侧校验，格式不对在工具返回前报错，不静默忽略。
-3. 沿现有 Capability 返回路径汇总引用，写入执行记录；同一委派的多轮尝试累加，同一 uri 去重。消息压缩保留包含引用的完整工具调用及结果组，见[本轮对齐](#本轮对齐引用来源与统一返回)。不要求新增独立的 `state.deliverables` 或 reducer。
+3. Capability 返回时，从本次执行保留的工具结果中汇总已声明引用，随执行记录一起返回。消息压缩保留包含引用的完整工具调用及结果组，见[本轮对齐](#本轮对齐引用来源与统一返回)。不要求新增独立的 `state.deliverables` 或 reducer。
 4. 和委派结果状态无关：被拒绝或取消的委派，已声明的交付物照样记录。
 5. 只在 Capability 执行中产生；Entry 和 Supervisor 只调控制类工具。
 

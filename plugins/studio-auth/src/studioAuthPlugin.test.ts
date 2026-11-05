@@ -87,7 +87,12 @@ async function harness(options: CreateStudioAuthPluginOptions = {}, autoStart = 
 
   async function call(
     route: string,
-    input: { body?: unknown; token?: string; headers?: Record<string, string> } = {},
+    input: {
+      body?: unknown;
+      token?: string;
+      headers?: Record<string, string>;
+      remoteAddress?: string;
+    } = {},
   ): Promise<{ status: number; body: unknown }> {
     const registered = routes.get(route);
     assert.ok(registered, `route ${route} is not registered`);
@@ -96,6 +101,7 @@ async function harness(options: CreateStudioAuthPluginOptions = {}, autoStart = 
     const request = {
       url: new URL(`http://127.0.0.1:3211${registered.path}`),
       headers,
+      ...(input.remoteAddress ? { remoteAddress: input.remoteAddress } : {}),
       readText: async () => (input.body === undefined ? '' : JSON.stringify(input.body)),
       readJson: async () => input.body ?? null,
       principal: { clientId: 'local', scope: 'studio' as const },
@@ -400,21 +406,23 @@ test('a failed start releases everything and can be retried', async (t) => {
   assert.ok(h.routes.has('POST /auth/login'));
 });
 
-test('the audit trail records the user agent but ignores forwarded addresses by default', async (t) => {
+test('the audit trail records the socket address but ignores forwarded ones by default', async (t) => {
   const h = await harness();
   t.after(h.stop);
   await h.createUser('perlis');
   await h.call('POST /auth/login', {
     body: { username: 'perlis', password: PASSWORD },
     headers: { 'user-agent': 'studio-test/1.0', 'x-forwarded-for': '10.0.0.9' },
+    remoteAddress: '::ffff:192.0.2.10',
   });
 
   const db = await h.inspect();
   const rows = await db.selectFrom('studio_auth_audit').selectAll().execute();
   const login = rows.find((row) => row.action === 'login' && row.result === 'ok');
   assert.equal(login?.user_agent, 'studio-test/1.0');
-  // Nothing in front of this Plugin is trusted, so the header is not evidence.
-  assert.equal(login?.remote_addr, null);
+  // Nothing in front of this Plugin is trusted, so the header is not evidence:
+  // the address the connection actually came from is.
+  assert.equal(login?.remote_addr, '192.0.2.10');
 });
 
 test('a trusted proxy makes the forwarded address auditable', async (t) => {
@@ -424,10 +432,90 @@ test('a trusted proxy makes the forwarded address auditable', async (t) => {
   await h.call('POST /auth/login', {
     body: { username: 'cocke', password: PASSWORD },
     headers: { 'x-forwarded-for': '10.0.0.9, 10.0.0.1' },
+    remoteAddress: '192.0.2.10',
   });
 
   const db = await h.inspect();
   const rows = await db.selectFrom('studio_auth_audit').selectAll().execute();
   const login = rows.find((row) => row.action === 'login' && row.result === 'ok');
   assert.equal(login?.remote_addr, '10.0.0.9');
+});
+
+test('a password change during a login cannot mint a session from the old password', async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let reachedBarrier!: () => void;
+  const atBarrier = new Promise<void>((resolve) => { reachedBarrier = resolve; });
+
+  const h = await harness({
+    internalBeforeSessionCreate: async () => {
+      reachedBarrier();
+      await gate;
+    },
+  });
+  t.after(h.stop);
+  const { userId } = (await h.createUser('lovelace')).body as { userId: string };
+
+  // The login verifies the old password and then waits just before minting.
+  const pending = h.login('lovelace');
+  await atBarrier;
+  // The administrator replaces the credential while that verification result is
+  // still in flight, and revokes every session.
+  const reset = await h.call('POST /users/password', {
+    body: { userId, password: 'another-long-password' },
+  });
+  assert.equal(reset.status, 204);
+  release();
+
+  const raced = await pending;
+  assert.equal(raced.status, 401);
+
+  const db = await h.inspect();
+  assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), []);
+
+  // The new credential is the only one that works.
+  assert.equal((await h.login('lovelace')).status, 401);
+  assert.equal((await h.login('lovelace', 'another-long-password')).status, 200);
+});
+
+test('an administrative password reset revokes the sessions already issued', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+  const { userId } = (await h.createUser('torvalds')).body as { userId: string };
+  const { token } = (await h.login('torvalds')).body as { token: string };
+  assert.equal((await h.call('GET /auth/me', { token })).status, 200);
+
+  assert.equal((await h.call('POST /users/password', {
+    body: { userId, password: 'a-different-long-password' },
+  })).status, 204);
+
+  assert.equal((await h.call('GET /auth/me', { token })).status, 401);
+  const db = await h.inspect();
+  assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), []);
+});
+
+test('the usernames this Plugin accepts are the ones Better Auth accepts', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+
+  // Short and hyphenated names pass USERNAME_PATTERN, so Better Auth must agree:
+  // a name that passes here and is refused there would surface as a 409.
+  for (const username of ['ab', 'ada-lovelace']) {
+    const created = await h.createUser(username);
+    assert.equal(created.status, 201, `${username} should be accepted`);
+    assert.equal((created.body as { clientId: string }).clientId, `user.${username}`);
+  }
+
+  // Names the shared rule rejects are refused before any Studio client exists.
+  for (const username of ['bad name', '-abc']) {
+    const rejected = await h.createUser(username);
+    assert.equal(rejected.status, 400, `${username} should be refused`);
+  }
+  const listed = await h.call('GET /users');
+  assert.deepEqual(
+    (listed.body as { users: { username: string }[] }).users.map((user) => user.username),
+    ['ab', 'ada-lovelace'],
+  );
+  assert.equal(await h.clients.get('user.bad name'), undefined);
+  assert.equal(await h.clients.get('user.-abc'), undefined);
 });

@@ -57,6 +57,12 @@ export type CreateStudioAuthPluginOptions = {
   minPasswordLength?: number;
   maxFailedAttempts?: number;
   lockoutMinutes?: number;
+  /**
+   * Internal seam, not part of the Plugin contract: awaited after a password
+   * has been verified and before the session is minted, so a test can land a
+   * password change inside that window.
+   */
+  internalBeforeSessionCreate?: () => Promise<void>;
 };
 
 export type StudioAuthPlugin = StudioPlugin & {
@@ -110,15 +116,35 @@ function hashSessionToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * A socket address in the form an operator can compare with other logs:
+ * IPv4-mapped IPv6 (`::ffff:127.0.0.1`) becomes plain IPv4, IPv6 zone ids
+ * (`fe80::1%en0`) are dropped.
+ */
+function normalizeAddress(address: string | undefined): string | undefined {
+  if (!address) return undefined;
+  const [withoutZone] = address.split('%');
+  const value = withoutZone?.trim();
+  if (!value) return undefined;
+  return value.startsWith('::ffff:') ? value.slice('::ffff:'.length) : value;
+}
+
+/**
+ * The audited origin of a request. The socket address the HTTP Plugin hands
+ * over is the default; a forwarding header only wins when the deployment says a
+ * proxy it trusts sits in front of Studio (`trustProxy`).
+ */
 function readRemote(
   request: StudioHttpRouteRequest,
   trustProxy: boolean,
 ): { remote_addr?: string; user_agent?: string } {
   const agent = request.headers['user-agent'];
   const forwarded = trustProxy ? request.headers['x-forwarded-for'] : undefined;
-  const address = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const forwardedAddress = rawForwarded?.split(',')[0]?.trim();
+  const address = normalizeAddress(forwardedAddress) ?? normalizeAddress(request.remoteAddress);
   return {
-    ...(address ? { remote_addr: address.split(',')[0]!.trim() } : {}),
+    ...(address ? { remote_addr: address } : {}),
     ...(typeof agent === 'string' ? { user_agent: agent.slice(0, 200) } : {}),
   };
 }
@@ -158,6 +184,7 @@ export function createStudioAuthPlugin(
   const trustProxy = options.trustProxy ?? false;
   const secret = options.secret ?? randomBytes(32).toString('base64url');
   if (secret.length < 32) throw new Error('Studio auth secret must contain at least 32 characters.');
+  const beforeSessionCreate = options.internalBeforeSessionCreate;
 
   let studio: StudioPluginContext | undefined;
   let db: Kysely<StudioAuthDatabase> | undefined;
@@ -237,19 +264,22 @@ export function createStudioAuthPlugin(
   async function createSession(
     userId: string,
     request: StudioHttpRouteRequest,
-  ): Promise<{ token: string; expiresAt: string }> {
+    credentialVersion: number,
+  ): Promise<{ token: string; expiresAt: string } | undefined> {
     const token = randomBytes(SESSION_TOKEN_BYTES).toString('base64url');
     const now = Date.now();
     const expiresAt = new Date(now + sessionTtlHours * 60 * 60_000).toISOString();
     const remote = readRemote(request, trustProxy);
-    await repo().createSession({
+    const minted = await repo().createSession({
       id: randomUUID(),
       userId,
       tokenHash: hashSessionToken(token),
       expiresAt,
+      credentialVersion,
       ...(remote.remote_addr ? { ipAddress: remote.remote_addr } : {}),
       ...(remote.user_agent ? { userAgent: remote.user_agent } : {}),
     });
+    if (!minted) return undefined;
     return { token, expiresAt };
   }
 
@@ -286,6 +316,12 @@ export function createStudioAuthPlugin(
       await repo().deleteSessionById(stored.id);
       return undefined;
     }
+    // A session minted from a credential that has since been replaced is dead,
+    // even if it slipped in after the revocation pass of the password change.
+    if ((stored.credential_version ?? 0) !== (row.credential_version ?? 0)) {
+      await repo().deleteSessionById(stored.id);
+      return undefined;
+    }
     const clientId = row.client_id ?? clientIdForUsername(row.username ?? '');
     const client = await requireStudio().clients.get(clientId);
     if (!client || client.revokedAt) return undefined;
@@ -318,7 +354,12 @@ export function createStudioAuthPlugin(
       return json(429, { error: 'Too many attempts.', retryAfterSeconds });
     }
 
-    const storedHash = row ? await repo().credentialHash(row.id) : undefined;
+    // One consistent snapshot: the hash that is verified and the version it
+    // belongs to. A password change after this read bumps the version, and the
+    // session mint below notices (see StudioAuthRepository.createSession).
+    const snapshot = row ? await repo().credentialSnapshot(row.id) : undefined;
+    const storedHash = snapshot?.hash;
+    const credentialVersion = snapshot?.version ?? 0;
     let passwordOk = false;
     try {
       passwordOk = storedHash
@@ -360,7 +401,20 @@ export function createStudioAuthPlugin(
       await repo().setIdentity(row.id, { clientId, capabilities });
     }
     await repo().clearFailedAttempts(row.id);
-    const session = await createSession(row.id, request);
+    if (beforeSessionCreate) await beforeSessionCreate();
+    const session = await createSession(row.id, request, credentialVersion);
+    if (!session) {
+      // The password changed while it was being verified: the credential that
+      // was just checked is no longer the account's credential.
+      await audit('login', 'denied', {
+        request,
+        userId: row.id,
+        username,
+        clientId,
+        reason: 'credential-changed',
+      });
+      return error(401, 'Invalid username or password.');
+    }
     await audit('login', 'ok', { request, userId: row.id, username, clientId });
     return json(200, {
       token: session.token,
@@ -428,8 +482,14 @@ export function createStudioAuthPlugin(
       });
       return error(401, 'Current password is wrong.');
     }
-    await repo().setCredentialHash(session.userId, await hashPassword(newPassword));
-    const revoked = await repo().deleteOtherSessions(session.userId, session.sessionId);
+    // One transaction: the new hash, the version bump and the revocation of the
+    // other sessions land together. The session that made the change keeps
+    // working (re-stamped with the new version), everything else dies.
+    const { revoked } = await repo().replaceCredential(
+      session.userId,
+      await hashPassword(newPassword),
+      { keepSessionId: session.sessionId },
+    );
     await audit('password.change', 'ok', {
       request,
       userId: session.userId,
@@ -489,7 +549,11 @@ export function createStudioAuthPlugin(
       });
     } catch (cause) {
       if (cause instanceof APIError && cause.statusCode >= 400 && cause.statusCode < 500) {
-        return error(409, cause.message);
+        // An invalid username is a bad request; a duplicate is a conflict. Both
+        // rules above keep this Plugin and Better Auth in step, so this is a
+        // backstop rather than the normal path.
+        const status = /username/i.test(cause.message) ? 400 : 409;
+        return error(status, cause.message);
       }
       throw cause;
     }
@@ -511,8 +575,9 @@ export function createStudioAuthPlugin(
     }
     const row = await repo().findUserById(userId);
     if (!row) return error(404, 'No such user.');
-    await repo().setCredentialHash(userId, await hashPassword(password));
-    const revoked = await repo().deleteSessionsOfUser(userId);
+    // An administrative reset revokes every session, in the same transaction as
+    // the new hash, so no session minted from the old password survives.
+    const { revoked } = await repo().replaceCredential(userId, await hashPassword(password));
     await audit('user.password', 'ok', {
       request,
       userId,

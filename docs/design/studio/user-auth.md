@@ -73,7 +73,10 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 - Better Auth 的 `emailAndPassword` 负责 scrypt 哈希与校验，`username` 插件负责登录名（大小写不敏感、唯一）；
 - Studio 只保留策略：密码长度 ≥ 12（上限 256），管理员建号时必须给初始密码，不强制首登改密，但支持自助改密；
 - 用户名是登录句柄，Better Auth 仍要求 email，因此内部用 `<username>@studio-auth.invalid` 合成，用户永远看不到也不会用到它；
-- 用户名校验 `^[A-Za-z0-9][A-Za-z0-9._-]{0,57}$`（留出 `user.` 前缀后仍满足 Studio client id 的 64 字符上限）。
+- 用户名校验 `^[A-Za-z0-9][A-Za-z0-9._-]{0,57}$`（留出 `user.` 前缀后仍满足 Studio client id 的 64 字符上限）；
+  同一条规则以 `usernameValidator` 传给 Better Auth 的 username 插件（并把其最短长度从默认 3 调到 1），
+  否则 `ab`、`ada-lovelace` 这类合法名字会"本地通过、Better Auth 拒绝"，最后变成误导性的 409。
+  校验统一在创建 Studio client **之前**，失败直接 `400`，不会留下孤儿 client。
 
 ### 3.3 会话凭证
 
@@ -180,6 +183,10 @@ create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
 
 -- 0003_auth_session_token
 create index studio_auth_session_by_token on studio_auth_session (token);
+
+-- 0004_auth_credential_version
+alter table studio_auth_user    add column credential_version integer not null default 0;
+alter table studio_auth_session add column credential_version integer not null default 0;
 ```
 
 **会话凭证只存哈希。** Better Auth 自己的 session API 会把原 token 落库，因此本插件不使用它：
@@ -188,11 +195,27 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 生成，登出/改密/禁用都按 `id` 或 `user_id` 删除。这样即使数据库或备份泄露，也拿不到可用的
 `Authorization` 值。
 
+**凭据版本。** 登录与改密是两条并发路径：登录先读密码哈希、异步校验，再签发会话；改密则在写新
+哈希后吊销全部会话。两步之间若不加协调，一个用旧密码获准的登录可能在吊销发生之后才把会话写进
+库，于是"改完密码旧密码仍能进"。因此：
+
+- `studio_auth_user.credential_version` 在每次改密/重置时于同一事务内 +1；
+- 登录用一次读取拿到的 `{hash, version}` 作为快照去校验；签发会话时在事务内重新比对版本，不一致
+  就不签发（对外仍是 `401 Invalid username or password.`，审计 `reason=credential-changed`）；
+- 会话行记录签发时的版本，`verifySession` 发现版本落后即删除该会话并拒绝；
+- 管理员重置 = 递增版本 + 写新哈希 + 删除该用户全部会话，同一事务；
+- 自助改密 = 递增版本 + 写新哈希 + 删除其它会话，并把**当前会话**重标为新版本（发起改密的这台
+  设备继续可用），其余设备立即失效。
+
 时间一律 ISO-8601 文本，与 `studio_clients` 等现有表一致；`studio_auth_user.client_id`
 **不建跨 owner 外键**（迁移顺序与 SQLite/Postgres 行为差异），由应用层保证「先建 client 再建 user」：
 建号时先 `clients.ensure`，再 `signUpEmail`。若后者失败，留下的是一个没有任何凭据的 client 行，
 不会产生"有身份却无法登录"的用户；同一用户名重试即可继续使用该 client。
 审计表**不记录密码、token、token 哈希**。
+
+`remote_addr` 来自 HTTP 层传下来的 socket 对端地址（`StudioHttpRouteRequest.remoteAddress`），
+而不是转发头：只有部署显式声明 `trustProxy` 时才采信 `X-Forwarded-For`（取首段）。IPv4-mapped
+IPv6（`::ffff:127.0.0.1`）归一化为 IPv4，IPv6 zone id 丢弃，便于与其它日志对照。
 
 ### 3.8 失败锁定与限速
 

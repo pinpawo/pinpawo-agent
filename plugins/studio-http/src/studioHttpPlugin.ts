@@ -108,6 +108,13 @@ type StudioHttpContext = Context<StudioHttpEnvironment>;
 export type StudioHttpRouteRequest = {
   readonly url: URL;
   readonly headers: Readonly<IncomingHttpHeaders>;
+  /**
+   * The address the connection actually came from, as the socket reported it.
+   * Forwarding headers are not reflected here: a route that audits or rate
+   * limits a caller starts from this value and decides for itself whether a
+   * proxy in front of Studio is trusted.
+   */
+  readonly remoteAddress?: string;
   /** Exact request text for route-owned signature verification. */
   readText: () => Promise<string>;
   readJson: () => Promise<unknown>;
@@ -906,6 +913,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         const result = await route.handle({
           url: new URL(requestContext.req.url),
           headers: requestContext.env.incoming.headers,
+          ...(requestContext.env.incoming.socket.remoteAddress
+            ? { remoteAddress: requestContext.env.incoming.socket.remoteAddress }
+            : {}),
           readText: () => {
             text ??= requestContext.req.text();
             return text;

@@ -116,6 +116,25 @@ export function studioAuthMigrations(
           .execute();
       },
     },
+    /**
+     * Credential versioning: a session records the version it was minted under
+     * and a password change bumps the user's version. A login that verified the
+     * old password therefore cannot create a session after the change landed,
+     * and any session that slipped through fails verification (see
+     * StudioAuthRepository).
+     */
+    '0004_auth_credential_version': {
+      async up(db: Kysely<unknown>) {
+        await db.schema
+          .alterTable('studio_auth_user')
+          .addColumn('credential_version', 'integer', (column) => column.notNull().defaultTo(0))
+          .execute();
+        await db.schema
+          .alterTable('studio_auth_session')
+          .addColumn('credential_version', 'integer', (column) => column.notNull().defaultTo(0))
+          .execute();
+      },
+    },
   };
 }
 

@@ -270,3 +270,25 @@ test('a malformed login request keeps its 400/415 contract instead of a 500', as
   assert.equal(users.status, 400);
   assert.deepEqual(await users.json(), { error: 'Request body must contain valid JSON.' });
 });
+
+test('a real login is audited with the address the connection came from', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+  await h.createUser('hopper');
+
+  const response = await fetch(`${h.base}/auth/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-forwarded-for': '10.0.0.9',
+    },
+    body: JSON.stringify({ username: 'hopper', password: PASSWORD }),
+  });
+  assert.equal(response.status, 200);
+
+  const db = await h.inspect();
+  const rows = await db.selectFrom('studio_auth_audit').selectAll().execute();
+  const login = rows.find((row) => row.action === 'login' && row.result === 'ok');
+  // The loopback socket address, not the header: nothing is trusted in front.
+  assert.equal(login?.remote_addr, '127.0.0.1');
+});

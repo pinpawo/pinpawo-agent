@@ -135,7 +135,14 @@ export function studioAuthOptions(config: StudioAuthConfig): BetterAuthOptions {
       },
     },
     plugins: [
-      username({ minUsernameLength: 3, maxUsernameLength: 58 }),
+      username({
+        // The same rule the Plugin applies before it creates the Studio client,
+        // so a username can never pass this Plugin and then be refused here
+        // (Better Auth's default validator also rejects `-`, which we allow).
+        minUsernameLength: 1,
+        maxUsernameLength: 58,
+        usernameValidator: (value: string) => USERNAME_PATTERN.test(value),
+      }),
     ],
     // Lockout is enforced per username by this Plugin so the rule is testable
     // and stored with the user row; Better Auth's IP rate limiter stays off.

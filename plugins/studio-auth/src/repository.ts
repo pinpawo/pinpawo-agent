@@ -18,6 +18,12 @@ export type StudioAuthUserRow = {
   failed_attempts: number | null;
   locked_until: string | null;
   disabled_at: string | null;
+  /**
+   * Bumped every time the password changes. A session carries the version it
+   * was minted under, so a login that raced a password change cannot leave a
+   * working session behind.
+   */
+  credential_version: number | null;
 };
 
 /**
@@ -33,6 +39,8 @@ export type StudioAuthSessionRow = {
   ip_address: string | null;
   user_agent: string | null;
   user_id: string;
+  /** The user's `credential_version` at the moment this session was minted. */
+  credential_version: number | null;
 };
 
 export type StudioAuthAccountRow = {
@@ -132,6 +140,28 @@ export class StudioAuthRepository {
     return row?.password ?? undefined;
   }
 
+  /**
+   * The hash to verify and the version it belongs to, read as one consistent
+   * pair: verifying a hash against a newer version would let a stale password
+   * mint a session that looks current.
+   */
+  async credentialSnapshot(userId: string): Promise<{ hash?: string; version: number }> {
+    return this.db.transaction().execute(async (trx) => {
+      const user = await trx
+        .selectFrom('studio_auth_user')
+        .select(['credential_version'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+      const account = await trx
+        .selectFrom('studio_auth_account')
+        .select(['password'])
+        .where('user_id', '=', userId)
+        .where('provider_id', '=', CREDENTIAL_PROVIDER_ID)
+        .executeTakeFirst();
+      return { hash: account?.password ?? undefined, version: user?.credential_version ?? 0 };
+    });
+  }
+
   async setCredentialHash(userId: string, hash: string): Promise<void> {
     const result = await this.db
       .updateTable('studio_auth_account')
@@ -187,29 +217,56 @@ export class StudioAuthRepository {
       .execute();
   }
 
+  async credentialVersion(userId: string): Promise<number> {
+    const row = await this.db
+      .selectFrom('studio_auth_user')
+      .select(['credential_version'])
+      .where('id', '=', userId)
+      .executeTakeFirst();
+    return row?.credential_version ?? 0;
+  }
+
+  /**
+   * Mint a session only if the credential version this login verified against
+   * is still the current one. The check and the insert share one transaction,
+   * so a password change that lands while a password is being verified cannot
+   * leave a session minted from the old credential.
+   */
   async createSession(row: {
     id: string;
     userId: string;
     tokenHash: string;
     expiresAt: string;
+    credentialVersion: number;
     ipAddress?: string;
     userAgent?: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const now = new Date().toISOString();
-    await this.db
-      .insertInto('studio_auth_session')
-      .values({
-        id: row.id,
-        token: row.tokenHash,
-        user_id: row.userId,
-        created_at: now,
-        // `updated_at` doubles as `last_used_at` for the idle timeout.
-        updated_at: now,
-        expires_at: row.expiresAt,
-        ip_address: row.ipAddress ?? null,
-        user_agent: row.userAgent ?? null,
-      })
-      .execute();
+    return this.db.transaction().execute(async (trx) => {
+      const user = await trx
+        .selectFrom('studio_auth_user')
+        .select(['credential_version'])
+        .where('id', '=', row.userId)
+        .executeTakeFirst();
+      if ((user?.credential_version ?? 0) !== row.credentialVersion) return false;
+
+      await trx
+        .insertInto('studio_auth_session')
+        .values({
+          id: row.id,
+          token: row.tokenHash,
+          user_id: row.userId,
+          created_at: now,
+          // `updated_at` doubles as `last_used_at` for the idle timeout.
+          updated_at: now,
+          expires_at: row.expiresAt,
+          ip_address: row.ipAddress ?? null,
+          user_agent: row.userAgent ?? null,
+          credential_version: row.credentialVersion,
+        })
+        .execute();
+      return true;
+    });
   }
 
   async findSessionByTokenHash(tokenHash: string): Promise<StudioAuthSessionRow | undefined> {
@@ -243,6 +300,76 @@ export class StudioAuthRepository {
       .deleteFrom('studio_auth_session')
       .where('id', '=', sessionId)
       .execute();
+  }
+
+  /**
+   * Replace the password and revoke everything issued under the old one, in a
+   * single transaction. The version bump is what makes a concurrent login
+   * notice that the credential it verified is stale.
+   *
+   * `keepSessionId` is for the self-service change: the session that performed
+   * the change survives, re-stamped with the new version, while every other
+   * session of that user is revoked.
+   */
+  async replaceCredential(
+    userId: string,
+    hash: string,
+    options: { keepSessionId?: string } = {},
+  ): Promise<{ version: number; revoked: number }> {
+    return this.db.transaction().execute(async (trx) => {
+      const now = new Date().toISOString();
+      await trx
+        .updateTable('studio_auth_user')
+        .set((expression) => ({
+          credential_version: expression(
+            expression.fn.coalesce('credential_version', expression.val(0)),
+            '+',
+            1,
+          ),
+          updated_at: now,
+        }))
+        .where('id', '=', userId)
+        .execute();
+
+      const user = await trx
+        .selectFrom('studio_auth_user')
+        .select(['credential_version'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+      const version = user?.credential_version ?? 0;
+
+      const updated = await trx
+        .updateTable('studio_auth_account')
+        .set({ password: hash, updated_at: now })
+        .where('user_id', '=', userId)
+        .where('provider_id', '=', CREDENTIAL_PROVIDER_ID)
+        .executeTakeFirst();
+      if (Number(updated.numUpdatedRows ?? 0) === 0) {
+        throw new Error('This user has no password credential to update.');
+      }
+
+      // Inside the same transaction: the revocation and the version bump must
+      // not be observable apart.
+      const deleted = options.keepSessionId
+        ? await trx
+          .deleteFrom('studio_auth_session')
+          .where('user_id', '=', userId)
+          .where('id', '!=', options.keepSessionId)
+          .execute()
+        : await trx
+          .deleteFrom('studio_auth_session')
+          .where('user_id', '=', userId)
+          .execute();
+      const revoked = Number(deleted[0]?.numDeletedRows ?? 0);
+      if (options.keepSessionId) {
+        await trx
+          .updateTable('studio_auth_session')
+          .set({ credential_version: version, updated_at: now })
+          .where('id', '=', options.keepSessionId)
+          .execute();
+      }
+      return { version, revoked };
+    });
   }
 
   /** Idle bookkeeping: the row is touched at most once a minute per session. */

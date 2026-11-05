@@ -202,6 +202,6 @@ export function createOfficeToolkit(deps: { shell: ShellRS; executable?: string 
 export function createOfficeCapability() {
   return defineCapability({
     name: 'office', description: 'Read, create or edit Word DOCX, Excel XLSX and PowerPoint PPTX documents locally.',
-    uses: ['office'], instructions: defineInstructionDocument({ content: 'Use the Office Toolkit for the requested documents. Discover the installed CLI syntax with help; decide operations from the task, inspect results and report the output paths and any verification limitations.' }),
+    uses: ['office', 'artifacts'], instructions: defineInstructionDocument({ content: 'Use the Office Toolkit for the requested documents. Discover the installed CLI syntax with help; decide operations from the task, inspect results and report the output paths and any verification limitations.' }),
   });
 }

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parseAgentClientMessage } from '@pinpawo/agent-session';
 import type { ResidentPetInteraction } from '../residentPetHost';
 import { isAllowedWireOrigin, isAuthorizedWireRequest } from './auth';
+import { serveArtifactHttp, type ArtifactReader } from '../artifacts/http';
 
 /** HTTP transport only: session semantics remain in the shared interaction. */
 export async function handleAgentSessionHttp(
@@ -9,6 +10,7 @@ export async function handleAgentSessionHttp(
   response: ServerResponse,
   interactions: ReadonlyMap<string, ResidentPetInteraction>,
   authToken: string,
+  artifactStore?: ArtifactReader,
 ): Promise<void> {
   const json = (status: number, body: unknown) => {
     response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -21,6 +23,9 @@ export async function handleAgentSessionHttp(
     json(401, { error: 'Unauthorized' }); return;
   }
   const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+  if (pathname === '/agent-session/artifacts') {
+    await serveArtifactHttp(request, response, artifactStore); return;
+  }
   const match = /^\/agent-session\/pets\/([^/]+)\/(snapshot|events|messages)$/.exec(pathname);
   let petId: string;
   try { petId = match ? decodeURIComponent(match[1]!) : ''; } catch {

@@ -1,4 +1,5 @@
 import type {
+  Deliverable,
   ReceivedOperationBlock,
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
@@ -72,6 +73,7 @@ export type AgentSubagentMessageCompletedEvent = {
 
 export type AgentMessageCompletedEvent = {
   resultReferences?: AgentResultReference[];
+  deliverables?: Deliverable[];
   type: 'message.completed';
   requestId: string;
   /** Identifies the streamed message this completion finalizes. */

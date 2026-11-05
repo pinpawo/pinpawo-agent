@@ -45,6 +45,17 @@ test('subagent prose and result references stay out of the main timeline', () =>
   assert.doesNotMatch(lines.map(line => line.text).join('\n'), /private result/);
 });
 
+test('declared deliverables are visible when the reply prose omits links', () => {
+  assert.deepEqual(buildMessageDisplayLines(message({ text: 'Done.', deliverables: [
+    { uri: 'artifact://workspace/thread/id/report.md', title: 'Report' },
+    { uri: 'https://github.com/pinpawo/pinpawo-agent/pull/1' },
+  ] })), [
+    { text: '| Done.', tone: 'assistant' },
+    { text: '| Report: artifact://workspace/thread/id/report.md', tone: 'assistant' },
+    { text: '| https://github.com/pinpawo/pinpawo-agent/pull/1', tone: 'assistant' },
+  ]);
+});
+
 test('only the user\'s own messages carry a timestamp', () => {
   const createdAt = '2026-07-15T02:00:00.000Z';
   assert.deepEqual(buildMessageDisplayLines(message({ role: 'user', text: 'go', createdAt })), [

@@ -12,6 +12,7 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   readMessageText,
+  readReplyDeliverables,
   readPendingInterrupt,
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
@@ -561,6 +562,7 @@ export async function runAgentSessionTurn(
       checkpointReply ? finalThreadState.messages : finalMessages,
       checkpointReply ?? finalMessage,
     ) : [],
+    ...(finalReply ? { deliverables: readReplyDeliverables(checkpointReply ?? finalMessage) } : {}),
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
 

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isAuthorizedWireRequest } from './wire/auth';
+import { serveArtifactHttp, type ArtifactReader } from './artifacts/http';
 
 /**
  * HTTP carries one authenticated liveness probe. Conversation capability and
@@ -8,6 +9,7 @@ import { isAuthorizedWireRequest } from './wire/auth';
  */
 type LocalHttpHandlerOptions = {
   authToken: string;
+  artifactStore?: ArtifactReader;
 };
 
 export function handleLocalHttpRequest(
@@ -24,6 +26,14 @@ export function handleLocalHttpRequest(
 
   if (pathname === '/runtime') {
     writeJson(res, 200, { ok: true });
+    return true;
+  }
+
+  if (pathname === '/agent-session/artifacts') {
+    void serveArtifactHttp(req, res, options.artifactStore).catch(() => {
+      if (res.headersSent) res.destroy();
+      else writeJson(res, 500, { error: 'Artifact could not be read' });
+    });
     return true;
   }
 

@@ -63,7 +63,8 @@ function selectMessagesToKeep(
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
   const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
   const preservedCalls = new Set(readCapabilityExecutions(candidates)
-    .filter(record => preservePlanItemIds.includes(record.execution.planItemId)).map(record => record.call.id!));
+    .filter(record => preservePlanItemIds.includes(record.execution.planItemId)
+      || record.result.deliverables?.length).map(record => record.call.id!));
   // Preserve every attempt for the unfinished delegation, including main evidence.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;

@@ -1,6 +1,7 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
-import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { getInteropZodObjectShape, isInteropZodObject } from '@langchain/core/utils/types';
+import { readToolDeliverables } from '@pinpawo/agent-contracts';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
   composeSystemPrompt,
@@ -132,6 +133,41 @@ function assertValidContextSummaryUpdate(update: unknown) {
   }
 }
 
+/** Keep the actual evidence, including sibling calls, alongside the summary. */
+function preserveDeliverableToolGroups(messages: BaseMessage[], update: unknown) {
+  if (!update || typeof update !== 'object' || !('messages' in update)
+    || !Array.isArray(update.messages)) return;
+  const updated = update.messages as BaseMessage[];
+  if (!updated.some(message => message.additional_kwargs?.lc_source === 'summarization')) return;
+
+  const pinned = new Set<BaseMessage>();
+  for (let index = 0; index < messages.length; index += 1) {
+    const invocation = messages[index];
+    if (!AIMessage.isInstance(invocation) || !invocation.tool_calls?.length) continue;
+    const callIds = new Set(invocation.tool_calls.map(call => call.id));
+    const results: ToolMessage[] = [];
+    for (let next = index + 1; next < messages.length && !AIMessage.isInstance(messages[next]); next += 1) {
+      const message = messages[next];
+      if (ToolMessage.isInstance(message) && callIds.has(message.tool_call_id)) results.push(message);
+    }
+    if (!results.some(message => readToolDeliverables(message.artifact).length > 0)) continue;
+    if (invocation.tool_calls.some(call => !results.some(result => result.tool_call_id === call.id))) {
+      throw new Error('Cannot summarize an incomplete deliverable tool-call group.');
+    }
+    pinned.add(invocation);
+    results.forEach(message => pinned.add(message));
+  }
+  const positions = new Map(messages.map((message, index) => [message.id, index]));
+  const retainedIds = new Set(updated.map(message => message.id));
+  for (const message of messages) {
+    if (!pinned.has(message) || retainedIds.has(message.id)) continue;
+    const position = updated.findIndex(candidate =>
+      (positions.get(candidate.id) ?? -1) > positions.get(message.id)!);
+    updated.splice(position < 0 ? updated.length : position, 0, message);
+    retainedIds.add(message.id);
+  }
+}
+
 function failFastOnInvalidContextSummary(
   middleware: AnyAgentMiddleware,
 ): AnyAgentMiddleware {
@@ -146,6 +182,7 @@ function failFastOnInvalidContextSummary(
     // inside a destructive RemoveMessage update. Reject that update before the
     // graph can commit it, preserving the existing transcript on failure.
     assertValidContextSummaryUpdate(update);
+    preserveDeliverableToolGroups(state.messages, update);
     return update;
   };
   middleware.beforeModel = typeof beforeModel === 'function'

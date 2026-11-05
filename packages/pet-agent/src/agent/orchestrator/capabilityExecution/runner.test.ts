@@ -100,6 +100,28 @@ test('executor returns explicit output without copying subagent messages', async
   assert.notEqual(first.delivery?.id, second.delivery?.id);
 });
 
+for (const reviewDecision of [undefined, 'reject', 'cancel'] as const) {
+  test(`executor returns only this invocation's tool declarations (${reviewDecision ?? 'returned'})`, async () => {
+    const previous = new ToolMessage({ id: 'previous-result', name: 'prior_tool', tool_call_id: 'prior-call',
+      content: 'Earlier file', artifact: { deliverables: [{ uri: 'artifact://old/report.txt' }] } });
+    const base = input();
+    const request = { ...base, history: [...base.history, new AIMessage({ id: 'prior-invocation', content: '',
+      tool_calls: [{ id: 'prior-call', name: 'prior_tool', args: {} }] }), previous] };
+    const refs = [{ uri: 'artifact://current/report.txt', title: 'Report' }, { uri: 'https://example.com/pr/1' }];
+    const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
+      messages: [...run.messages.map(message => ToolMessage.isInstance(message) ? new ToolMessage({ ...message }) : message),
+        new ToolMessage({ id: 'published', name: 'publish_artifact', tool_call_id: 'publish', content: 'File published', artifact: { deliverables: refs } }),
+        new ToolMessage({ id: 'duplicate', name: 'another_tool', tool_call_id: 'another', content: 'Same link', artifact: { deliverables: [refs[0]] } }),
+        new AIMessage({ content: 'An undeclared link https://example.com/ignored' })],
+      output: 'Finished', ...(reviewDecision ? { reviewDecision } : {}),
+    }) });
+    const result = await execute(request, hostContext());
+    assert.deepEqual(result.deliverables, refs);
+    assert.equal(result.reviewDecision, reviewDecision);
+    assert.equal(result.status, reviewDecision ? 'missing_deliverable' : 'returned');
+  });
+}
+
 for (const output of [null, '', '  ']) {
   test(`finalize can clear a delivery (${JSON.stringify(output)}) without changing child execution`, async () => {
     const result = await createCapabilityExecutor({ models, runSubagent: async (run) => deliver(run) })(

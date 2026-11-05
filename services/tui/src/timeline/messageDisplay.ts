@@ -46,6 +46,7 @@ export function buildMessageDisplayLines(
           text: `  ${line}`,
           tone: 'user' as const,
         })),
+        ...buildDeliverableDisplayLines(entry, 'user'),
       ];
     case 'assistant':
       return [
@@ -58,10 +59,19 @@ export function buildMessageDisplayLines(
           tone: 'assistant' as const,
         })) : []),
         ...(options.toolCallDetail ? buildToolCallDetailLines(entry) : buildToolCallDisplayLines(entry)),
+        ...buildDeliverableDisplayLines(entry),
       ];
     case 'subagent':
       return [];
   }
+}
+
+/** Stable references remain usable in embedded stdio sessions without an HTTP listener. */
+export function buildDeliverableDisplayLines(entry: AgentMessageEntry, tone: MessageDisplayTone = 'assistant'): MessageDisplayLine[] {
+  return (entry.deliverables ?? []).map(item => ({
+    text: `${tone === 'user' ? '  ' : '| '}${item.title ? `${item.title}: ` : ''}${item.uri}`,
+    tone,
+  }));
 }
 
 /**

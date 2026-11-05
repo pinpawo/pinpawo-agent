@@ -251,7 +251,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         throw new Error('Pet message session does not match its Channel binding.');
       }
       const { message: saved, created, mentionError } = await service.postMessage(
-        { kind: 'pet', id: petId }, channelId, { body: message.text }, { externalRef: message.messageId },
+        { kind: 'pet', id: petId }, channelId,
+        { body: message.text, ...(message.deliverables !== undefined ? { deliverables: message.deliverables } : {}) },
+        { externalRef: message.messageId },
       );
       if (mentionError) {
         studio.notify({ type: 'channel.delivery', payload: { channelId, messageId: saved.messageId, state: 'failed', error: mentionError } });

@@ -97,6 +97,7 @@ export function formatTranscriptMarkdown(
       '',
       entry.text.trim() || '_empty_',
       '',
+      ...(entry.deliverables ?? []).flatMap(item => [`- ${item.title ? `${item.title}: ` : ''}${item.uri}`, '']),
     );
   }
   return lines.join('\n');

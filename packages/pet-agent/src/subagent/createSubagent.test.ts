@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -318,6 +318,60 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   assert.match(String(summary.content), /Earlier subagent context summary:/);
   assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
   assert.equal(result.messages.some((message) => message.content === oldContext), false);
+});
+
+test('repeated summarization preserves complete parallel tool groups declaring deliverables', async () => {
+  const invocation = new AIMessage({
+    id: 'publish-group', content: 'Publish the report and inspect its source.',
+    tool_calls: [
+      { id: 'publish-call', name: 'publish_artifact', args: { path: 'report.md' } },
+      { id: 'inspect-call', name: 'inspect', args: { path: 'source.md' } },
+    ],
+  });
+  const published = new ToolMessage({
+    id: 'published-report', tool_call_id: 'publish-call', name: 'publish_artifact',
+    content: 'Published [report](artifact://workspace/session/report/report.md).',
+    artifact: { deliverables: [{ uri: 'artifact://workspace/session/report/report.md', title: 'Report' }] },
+  });
+  const inspected = new ToolMessage({
+    id: 'inspected-source', tool_call_id: 'inspect-call', name: 'inspect',
+    content: [{ type: 'text', text: 'The source was inspected.' }],
+    artifact: { source: { path: 'source.md', complete: true } },
+  });
+  const unrelatedCall = new AIMessage({ id: 'old-read', content: '',
+    tool_calls: [{ id: 'read-call', name: 'read', args: {} }],
+  });
+  const unrelatedResult = new ToolMessage({ id: 'old-read-result', tool_call_id: 'read-call',
+    content: 'ordinary evidence that may be summarized',
+  });
+  let messages: BaseMessage[] = [new HumanMessage('Prepare the report.'),
+    invocation, published, inspected, unrelatedCall, unrelatedResult];
+  for (let pass = 0; pass < 2; pass += 1) {
+    messages.push(
+      new HumanMessage(`other investigation ${pass}\n${'x'.repeat(1600)}`),
+      new AIMessage(`other findings ${pass}\n${'y'.repeat(1600)}`),
+      new HumanMessage(`verification ${pass}\n${'z'.repeat(1600)}`),
+      new AIMessage(`verification findings ${pass}\n${'w'.repeat(1600)}`),
+      new HumanMessage('Finish the delegated task.'),
+    );
+    const result = await createSubagent({
+      model: new FakeListChatModel({ responses: ['Investigation summarized.', 'Done.'], sleep: 0 }),
+      tools: [], promptSections: [], messages, contextWindowTokens: 1000, maxIterations: 4,
+    });
+    assert.ok(result.messages.some(message => message.additional_kwargs?.lc_source === 'summarization'));
+    const retained = result.messages.filter(message =>
+      ['publish-group', 'published-report', 'inspected-source'].includes(message.id!));
+    assert.deepEqual(retained.map(message => message.id), ['publish-group', 'published-report', 'inspected-source']);
+    assert.deepEqual(retained[0].content, invocation.content);
+    assert.deepEqual((retained[0] as AIMessage).tool_calls, invocation.tool_calls);
+    assert.deepEqual(retained[1].content, published.content);
+    assert.deepEqual((retained[1] as ToolMessage).artifact, published.artifact);
+    assert.deepEqual(retained[2].content, inspected.content);
+    assert.deepEqual((retained[2] as ToolMessage).artifact, inspected.artifact);
+    assert.equal(result.messages.some(message => message.id === 'old-read'), false);
+    assert.equal(result.messages.some(message => message.id === 'old-read-result'), false);
+    messages = result.messages;
+  }
 });
 
 test('context summarization renders image payloads through LangChain text projection', async () => {

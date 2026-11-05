@@ -100,4 +100,23 @@ test('a Pet works in a Channel only while its run there is running, and context 
     { channelId, participantId: 'pet:writer', working: false },
     { channelId, participantId: 'pet:reviewer', working: true },
   ]);
+
+  const binding = await plugin.service.reserveSession(channelId, 'writer', () => 'writer-session');
+  await plugin.service.confirmSession(binding);
+  const deliverables = [{ uri: 'artifact://workspace/session/report/report.pdf', title: 'Report' }];
+  const reply = async (messageId: string, refs: unknown) => {
+    for (const listener of listeners) await listener({
+      eventId: messageId, type: 'dispatch.message', source: 'resident-pet', occurredAt: '2026-11-05T00:00:00Z',
+      payload: { petId: 'writer', sessionId: binding.sessionId, scope: { namespace: 'channel', id: channelId },
+        message: { type: 'message.completed', messageId, text: 'Ready.', deliverables: refs } },
+    });
+  };
+  await reply('valid-reply', deliverables);
+  const saved = (await plugin.service.readContext(owner, channelId)).messages;
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved[0]!.deliverables, deliverables);
+  await reply('invalid-reply', [{ uri: 4 }]);
+  assert.equal((await plugin.service.readContext(owner, channelId)).messages.length, 1);
+  assert.ok(notified.some(event => event.type === 'channel.message_failed'
+    && (event.payload as { externalRef: string }).externalRef === 'invalid-reply'));
 });

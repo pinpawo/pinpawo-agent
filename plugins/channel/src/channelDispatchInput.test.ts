@@ -27,6 +27,15 @@ test('dispatch names a current member by label next to its participantId', () =>
   assert.deepEqual((input.replyTo as { author: unknown }).author, { participantId: 'pet:gone', kind: 'pet' }, 'a former member keeps only its id');
 });
 
+test('dispatch carries declared references from the current message and quoted reply', () => {
+  const deliverables = [{ uri: 'artifact://workspace/session/report/report.pdf', title: 'Report' }];
+  const original = { ...message, messageId: 'previous', deliverables: [{ uri: 'https://example.com/review' }] };
+  const input = readChannelTestInput(channelDispatchInput({ ...message, deliverables }, original));
+  assert.deepEqual((input as Record<string, unknown>).deliverables, deliverables);
+  assert.deepEqual((input.replyTo as Record<string, unknown>).deliverables, original.deliverables);
+  assert.equal(input.body, message.body);
+});
+
 test('only a routed dispatch carries routing provenance separately from the author', () => {
   const original = { ...message, messageId: 'previous', author: { kind: 'pet' as const, id: 'reviewer' }, body: 'Already completed.' };
   const routed = readChannelTestInput(channelDispatchInput(message, original, undefined, 'routing'));

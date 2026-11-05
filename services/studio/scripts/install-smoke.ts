@@ -22,6 +22,7 @@ const packageRoots = [
   resolve(workspaceRoot, 'packages', 'agent-session'),
   resolve(workspaceRoot, 'packages', 'pet-agent'),
   resolve(workspaceRoot, 'toolkits', 'browser'),
+  resolve(workspaceRoot, 'toolkits', 'artifacts'),
   resolve(workspaceRoot, 'services', 'host'),
   resolve(workspaceRoot, 'packages', 'studio'),
   studioRoot,

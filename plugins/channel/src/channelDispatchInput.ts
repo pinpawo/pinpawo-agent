@@ -43,7 +43,10 @@ export function channelDispatchInput(
     type: 'channel_message', version: 1,
     channelId: message.channelId, messageId: message.messageId,
     author: author(message), body: message.body,
-    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
+    ...(message.deliverables !== undefined ? { deliverables: message.deliverables } : {}),
+    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body,
+      ...(original.deliverables !== undefined ? { deliverables: original.deliverables } : {}),
+    } } : {}),
     ...(addressedBy ? { addressedBy, contextHint: { ...routingContextHint, ...(focus?.trim() ? { focus: focus.trim() } : {}) } } : {}),
   });
 }

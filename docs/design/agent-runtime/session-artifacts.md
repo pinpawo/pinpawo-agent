@@ -197,3 +197,24 @@ v5 checkpoint，不恢复旧 reader，也不迁移或删除旧 checkpoint 与 st
 会话注册表随版本隔离；Studio 独立的 `resident-sessions` 注册表路径不变，已有条目
 继续加载，不能据此认为所有旧会话都已清空。旧文件不再能通过原 discovery 工具访问。
 详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+
+## 后续实现状态（2026-11-05，待 review）
+
+本实现叠加在 #1050 的 `e8badc2c` 上；其 base 为已包含 #1047 的 main
+`29f0bec9`。沿用工具声明契约、既有执行记录和 Capability 返回出口，未增加
+独立交付物 state。子代理压缩保留含引用的整组工具调用与结果；父层压缩保留
+携带引用的执行记录。发布、当前 session 列表、共享引用下载、local/COS adapter、
+HTTP 读取及公开消息的结构化字段已接入，见 [Toolkit](../../../toolkits/artifacts/README.md)
+和 [Host 配置](../../../services/host/src/artifacts/README.md)。
+
+公开引用按既有 `review_current` 结论选取：每个 completed plan item 的最新返回执行，
+并限定为当前 run。Entry 与 Supervisor 在生成最终回复时把选定引用写入该回复的
+结构化元数据，后续事件、snapshot 和 Channel 原样传递；历史回放不依赖当前 plan。
+打回执行的引用仍在执行记录和 store 中，但不随最终回复交付。
+
+仍未实现：仅以自然语言返回的已有 URL 如何形成声明，继续等待上文的设计决定；
+没有扩展 `publish_artifact` 输入或新增登记工具。可选 system section 未接入。
+Console 可下载引用；TUI 当前显示标题和稳定 URI，stdio 模式尚未提供直接打开文件的
+本地路径或 HTTP 地址。COS 通过 mock transport 验证，未用真实 bucket 验证；Console
+跟随 COS 签名地址时还需 bucket CORS 允许其来源。旧 checkpoint、旧 artifact 数据及
+第三方兼容不在本实现范围内；未新增迁移或兼容 reader。

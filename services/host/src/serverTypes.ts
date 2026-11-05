@@ -2,6 +2,7 @@ import type {
   PetDocument,
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type { ArtifactStore } from '@pinpawo-toolkit/artifacts';
 import type { ToolAuthorizationSafetyLevel, ToolAuthorizationMode } from '@pinpawo/agent-contracts';
 import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import type { LocalModelProfileRegistry } from './config/llmConfig';
@@ -31,6 +32,7 @@ export type ServerDeps = HostExecutionConfig & {
    * production Hosts supply their owned adapter so reads, writes and leases agree.
    */
   chatCheckpointer?: BaseCheckpointSaver;
+  artifactStore?: ArtifactStore;
   toolkitInventory: HostToolkitInventoryStore;
   /** Host-owned Capability catalog; Chat consumes its configured snapshot. */
   capabilityCatalog: CapabilityCatalogReader;

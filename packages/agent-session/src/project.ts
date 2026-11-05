@@ -239,7 +239,7 @@ function reduceRuntimeEvent(
         event.messageId,
         event.text,
         event.usage,
-        { ...message, role: 'assistant', text: event.text, resultReferences: event.resultReferences },
+        { ...message, role: 'assistant', text: event.text, resultReferences: event.resultReferences, deliverables: event.deliverables },
         context,
       );
     case 'message.tool_calls':
@@ -644,6 +644,7 @@ function appendMessage(
     role: message.role,
     text: message.text,
     ...(message.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(message.deliverables ? { deliverables: message.deliverables.map(ref => ({ ...ref })) } : {}),
     ...(message.notice ? { notice: cloneAgentNotice(message.notice) } : {}),
     status: 'completed',
     ...(message.requestId ? { requestId: message.requestId } : {}),
@@ -669,6 +670,7 @@ function finalizeAssistantMessage(
     requestId,
     text,
     ...(message?.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(message?.deliverables ? { deliverables: message.deliverables.map(ref => ({ ...ref })) } : {}),
     status: 'completed',
     ...(previous
       ? {
@@ -823,6 +825,7 @@ function upsertTimelineEntry(
 function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   if (entry.type === 'message') return { ...entry,
     ...(entry.resultReferences ? { resultReferences: entry.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(entry.deliverables ? { deliverables: entry.deliverables.map(ref => ({ ...ref })) } : {}),
     ...(entry.toolCalls ? { toolCalls: entry.toolCalls.map(call => ({ ...call, args: { ...call.args } })) } : {}),
     ...(entry.notice ? { notice: cloneAgentNotice(entry.notice) } : {}),
   };

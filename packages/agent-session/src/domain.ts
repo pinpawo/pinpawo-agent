@@ -1,4 +1,5 @@
 import type {
+  Deliverable,
   ReceivedOperationBlock,
   ToolAuthorizationMode,
   ToolAuthorizationSafetyLevel,
@@ -40,6 +41,7 @@ export type AgentMessageEntry = {
   /** Assistant only. A message that calls tools may have no text. */
   toolCalls?: AgentMessageToolCall[];
   resultReferences?: AgentResultReference[];
+  deliverables?: Deliverable[];
   /**
    * System only: the notice this message shows. `text` is its default text;
    * clients render the notice in their own language when they know its code.
@@ -88,6 +90,7 @@ export type AgentTimelineWindow = {
 
 export type AgentSessionMessageInput = {
   resultReferences?: AgentResultReference[];
+  deliverables?: Deliverable[];
   notice?: AgentNotice;
   id?: string;
   role: AgentMessageEntry['role'];

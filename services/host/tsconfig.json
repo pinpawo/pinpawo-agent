@@ -27,6 +27,9 @@
       ],
       "@pinpawo/pet-agent/testing": [
         "../../packages/pet-agent/src/testing/index.ts"
+      ],
+      "@pinpawo-toolkit/artifacts": [
+        "../../toolkits/artifacts/src/index.ts"
       ]
     },
     "strict": true,

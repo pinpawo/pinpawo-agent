@@ -480,6 +480,7 @@ async function prepareToolkitToolReview(params: {
     operation: binding.operation,
     reviewCapabilities,
     authorizationMatcher,
+    workdir: ctx.reviewContext?.workdir ?? null,
   });
 
   if (!reviewSpec) {

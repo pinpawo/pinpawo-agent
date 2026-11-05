@@ -256,6 +256,10 @@ export class StudioHost {
     return this.caps.getRuntimeConfig();
   }
 
+  getArtifactStore() {
+    return this.caps.getArtifactStore();
+  }
+
   getCheckpointer(): FileSaver {
     return this.caps.getCheckpointer();
   }

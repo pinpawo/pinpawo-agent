@@ -25,6 +25,8 @@ export type ToolReviewContext = {
   operation?: ToolOperationMetadata;
   reviewCapabilities?: ToolkitReviewCapabilities;
   authorizationMatcher?: ToolAuthorizationMatcher | null;
+  /** Effective runtime workdir for policies that distinguish destination scope. */
+  workdir?: string | null;
 };
 
 export type ToolAuthorizationContext = {

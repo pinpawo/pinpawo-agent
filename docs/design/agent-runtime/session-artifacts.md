@@ -2,6 +2,8 @@
 
 状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
 
+本轮修订待 review（2026-11-05）：对齐两种引用来源、Capability 统一返回和消息压缩时的保留方式。保留原执行记录、职责分层、显式发布、稳定引用、运行时隔离、文件共享、存储接口与工具契约；自然语言判断如何形成交付声明仍待确认，不在本次修订中改掉原契约。
+
 ## 需求
 
 一个 Agent session 在工作中产生的文件（报告、方案、导出的数据），需要能交给人或别的 Pet。参照 Claude projects 里一个任务 session 的做法：
@@ -48,7 +50,7 @@
 | 层 | 负责 |
 |---|---|
 | agent-contracts | `Deliverable` 类型与工具结果里 `deliverables` 的 schema；`ArtifactRef`、`artifact://` 解析 |
-| pet-agent 核心 | 在工具结果产生时收集 `deliverables`，写进 `delegate_capability` 的执行记录。不认识 artifact store。 |
+| pet-agent 核心 | 沿现有 Capability 返回路径汇总交付物引用，写进 `delegate_capability` 的执行记录。 |
 | artifacts Toolkit（独立包，如 `toolkits/artifacts`） | `ArtifactStore` 与 `ArtifactSourceReader` 两个 port；`publish_artifact` / `list_artifacts` / `download_artifact` 三个工具 |
 | Host | 注入 store adapter（local / COS）与 source reader；把本 run 的交付物挂到 `message.completed`；HTTP 打开引用；可选的 session 产物段落 |
 | agent-session 协议 | `message.completed.deliverables` 与 snapshot 里对应字段 |
@@ -67,7 +69,7 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 
 1. 只有工具声明的才算交付物。模型是否调用 `publish_artifact` 不能保证；能保证的是调用了就一定记下。没发布的情况靠 toolkit instructions 引导，由 Supervisor 验收把关（要求交付文件但没有交付物，判为未完成）。
 2. schema 在工具侧校验，格式不对在工具返回前报错，不静默忽略。
-3. 核心在工具结果产生时收集，不在委派结束后扫消息，因为 Capability 的私有上下文会自己压缩。同一委派的多轮尝试累加，同一 uri 去重。
+3. Capability 返回时，从本次执行保留的工具结果中汇总已声明引用，随执行记录一起返回。消息压缩保留包含引用的完整工具调用及结果组，见[本轮对齐](#本轮对齐引用来源与统一返回)。不要求新增独立的 `state.deliverables` 或 reducer。
 4. 和委派结果状态无关：被拒绝或取消的委派，已声明的交付物照样记录。
 5. 只在 Capability 执行中产生；Entry 和 Supervisor 只调控制类工具。
 
@@ -79,7 +81,7 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 
 ```text
 工具结果 ToolMessage.artifact.deliverables
-  -> delegate_capability 执行记录 deliverables          （pet-agent，工具结果产生时收集）
+  -> delegate_capability 执行记录 deliverables          （沿 Capability 现有返回路径汇总）
   -> message.completed.deliverables                       （Host readReplyDeliverables）
   -> Channel 消息 deliverables                            （Channel recordPetMessage 原样存）
   -> Console / TUI 渲染
@@ -89,6 +91,37 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 - 合并本 run 中选定执行的交付物，同一 uri 去重，保持发布顺序；执行的选取规则待明确。
 - Channel 的旧 `artifacts` 输入、消息类型和展示已在清理阶段删除。后续新增 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"，人发的消息也可以带；Console / TUI 为新字段增加渲染。旧消息 JSON 不迁移或重写。
 - 尽量沿用现有事件和存储路径；执行选取规则确定后，补齐对应的结构化投影。
+
+### 本轮对齐：引用来源与统一返回
+
+两种来源在 Capability 执行结束、返回上一层时统一交付：
+
+| 来源 | 交付前的处理 |
+|---|---|
+| 其他工具生成本地文件 | `publish_artifact(path, title?)` 是统一的本地文件发布兜底：生成工具只返回路径也可以，Agent 根据任务和工具输出选择需要交付的文件，必要时用现有文件工具整理，再调用它保存快照、返回引用并声明交付物。生成工具不必都理解附件协议。 |
+| 其他工具已经返回 URL | 例如创建 PR，或工具自行上传 COS 后返回地址；沿用已有 URL，不要求下载后重新发布，也不要求这些工具使用同一个 store。 |
+
+本轮讨论希望由 Agent 结合自然语言需求和执行上下文判断交付内容；仅以自然语言返回的已有 URL 如何形成声明仍见下文待确认项，类型与 schema 只约束声明格式。这里不增加文件监控，也不要求发布所有生成文件。已有 URL 的访问权限和有效期沿用来源工具的约定，转交引用不会自动续期或赋予访问权限。若来源只提供临时下载地址，仍需对齐上文稳定引用约定，不因统一返回而将其视作长期引用。
+
+统一返回沿用当前代码的位置，不增加 Agent 角色或框架概念。当前 main（`29f0bec9`）的实际边界是：
+
+- [createSubagent](../../../packages/pet-agent/src/subagent/createSubagent.ts) 返回最新 `messages` 和文字 `output`；[Capability 执行函数 `createCapabilityExecutor`](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts) 当前只将文字输出做成 `delivery.text`，没有把子工具引用传给父 `delegate_capability` ToolMessage。这里的 `runner.ts` 只是实现文件名；该函数负责调用子代理、整理返回结果，本身不理解自然语言或判断哪些链接值得交付。
+- [delegate_capability](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/delegateCapabilityTool.ts) 已将执行结果写成父层 ToolMessage；在这份结果中一并传递引用，就是同一个返回出口。answer 当前不能直接扫描到未转交的子消息。
+- 工具实时流里已有 ToolMessage；[Host normalizer](../../../services/host/src/events/agentStreamNormalizer.ts) 通常取出 `content`，前端收到的是 `operation.raw.output`。过程展示可以复用这些事件，但不替代执行记录、最终回复和 Channel 的交付链路；当前 snapshot 不会重建原始工具历史。
+
+消息压缩的方向已确认：保留包含交付引用的完整工具调用及结果组，包括发起调用的 AIMessage、该组对应的全部 ToolMessage，以及原始 `content` 和 `artifact`。同一 AIMessage 发起多个调用时保留整组，不留下孤立结果或缺少结果的调用。其他上下文仍可摘要；引用所在组不只用摘要替代，再在 Capability 返回时从保留的结果汇总。当前 Capability 压缩只按摘要和尾部保留，这项调整尚未实现。
+
+本地文件通过 `publish_artifact` 发布并声明的路径已在原设计中明确，不再列为待决定。仍待确认的是已有 URL 仅以自然语言返回时如何声明：仍要求来源工具按原契约补充声明、允许 Capability 子代理最终整理，或让统一发布工具承接已有链接，具体方式尚未确定。原 `publish_artifact(path, title?)` 只接本地路径，并未约定 URL 登记；本次不扩展其输入，也不新增登记工具。若允许子代理按自然语言结果声明，需明确对“只有工具声明才算”及校验位置的调整；未确认前保留原 `ToolMessage.artifact.deliverables` 契约。
+
+本次保留 `{ status, delivery: { text }, deliverables }` 和最终公开传递契约，不改成仅依赖自然语言正文。若以后决定只在正文中携带链接，需要另行确认对“正文未写链接也能交付”和独立附件展示目标的调整。被打回执行不随回复公开仍是既定目标；实现时需把现有验收结论与选定执行对应，不把 `returned` 当作验收通过，也不另造验收状态机。
+
+### 本轮误读与纠正
+
+以下记录此前解释和初版修订中的误读，作为后续改动的约束：
+
+- 曾将“不设独立 state”扩大为重新讨论是否保留执行记录。原 `{ status, delivery: { text }, deliverables }` 与交付链路应保留；后续先区分数据如何保存、传递与已确认的数据契约，不以实现取舍推翻契约。
+- 曾把 runner helper 抬高为架构概念。它只是已有 Capability 执行代码的返回位置；后续用函数职责描述，不把实现文件名当成新增 Agent 角色或框架层。
+- 曾忽略 `publish_artifact` 原有的本地文件发布兜底，把这条已有路径也泛列为声明问题。后续先核对现有工具输入和职责；自然返回本地路径后调用发布工具即可，只有原契约未覆盖的已有 URL 登记等问题才继续讨论。
 
 ## artifacts Toolkit
 
@@ -145,7 +178,7 @@ Adapter 在 Host 配置里选：
 
 人打开引用：Agent Session HTTP 增加 `GET /agent-session/artifacts?uri=…`，`local` 返回文件流，`cos` 302 跳到签名 URL。Studio HTTP Plugin 同样代理。Console 用 react-markdown 的 `urlTransform` 识别 `artifact://`，与现在的 `participant:` 链接同一处；TUI 显示标题和本地路径或 HTTP 地址。
 
-可选：Host 在每次 root invocation 用 toolkit 导出的 `renderArtifactsSection(store, threadId)` 生成一个 common system section（最多 20 条，没有产物时不生成），补"历史压缩后 Entry 不知道有哪些产物"这一个场景。走现有的 `systemPromptSections`，不进 state 或 checkpoint。
+可选：Host 在每次 root invocation 用 toolkit 导出的 `renderArtifactsSection(store, threadId)` 生成一个 common system section（最多 20 条，没有产物时不生成），补"历史压缩后 Entry 不知道有哪些产物"这一个场景。走现有的 `systemPromptSections`，该 system section 不进 state 或 checkpoint。
 
 ## 后续：artifacts 管理
 
@@ -170,7 +203,7 @@ Channel 后续新增 `deliverables`（见[交付物链路](#交付物链路)）�
 ## 实现顺序
 
 1. 删除旧 pipeline（一个 PR）。改 prompt 后重跑受影响的 Supervisor eval。
-2. 交付物约定：agent-contracts 的 `Deliverable` 与 schema、核心收集、执行记录与 prompt。
+2. review 本轮的声明方式；沿 Capability 现有返回路径补齐引用汇总、执行记录与 prompt，并让消息压缩保留含引用的完整调用及结果组。本轮不预设独立 state 或工具拦截机制。
 3. 交付物链路：`message.completed.deliverables`、Channel 新增字段、Console / TUI 渲染。
 4. artifacts Toolkit 与 Host `local` adapter、source reader。
 5. HTTP 打开引用。

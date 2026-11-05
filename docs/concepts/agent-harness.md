@@ -1,7 +1,9 @@
 # Why an Agent Harness
 
-This explanation preserves the project vision from the repository README. For
-the implemented system boundaries, read [Architecture](architecture.md).
+This explanation preserves a vision previously published in the repository README.
+Its analogy and claims are material for the ongoing [principles discussion](../zh-CN/concepts/principles-discussion.md),
+not conclusions newly confirmed by that discussion. For implemented system
+boundaries, read [Architecture](architecture.md).
 
 
 ### The "Engine" of the Intelligence Revolution

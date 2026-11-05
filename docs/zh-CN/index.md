@@ -35,7 +35,7 @@ PinPawo Agent 是一个本地优先的开源 Agent 框架：工具权限显式�
 
 ## 目录
 
-- [概念](concepts/index.md) — 稳定术语和系统模型。
+- [概念](concepts/index.md) — 已有愿景、术语、系统模型与待讨论问题。
 - [指南](guides/index.md) — 安装、配置和本地运行。
 - [参考](reference/index.md) — 当前 API、扩展与运行时边界。
 - [Studio](studio/index.md) — 多 Pet dispatch、插件边界与本地配置。

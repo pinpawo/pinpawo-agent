@@ -1,8 +1,10 @@
 # 核心概念
 
-> **状态：当前概念指南。** 本页定义稳定术语；具体实现和类型契约由所链接的 Reference 页面维护。
+> **状态：当前术语和设计指南。** 具体实现和类型契约由所链接的 Reference 页面维护。本页不代表这些设计都已确认为长期项目理念；见[核心理念讨论](principles-discussion.md)。
 
 [English](../../concepts/core-concepts.md)
+
+本页的 Toolkit Runtime 表述早于当前 [RS 契约](../../reference/extensions/toolkit-rs.md)；当前依赖和生命周期以该契约为准。
 
 PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理、使用工具、请求审批和委派专门工作，同时把权限、状态和执行边界保持为可检查的系统结构，而不是隐藏在一段大提示词里。
 

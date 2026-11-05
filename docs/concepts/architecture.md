@@ -1,7 +1,9 @@
 # Architecture
 
-> **Status: current conceptual guide.** For type-level contracts, follow the
-> links into [Reference](../reference/index.md).
+> **Status: current architecture guide.** This page describes design choices
+> and implementation boundaries, not a settled list of project principles. See
+> the [principles discussion](../zh-CN/concepts/principles-discussion.md). For
+> type-level contracts, follow the links into [Reference](../reference/index.md).
 
 [简体中文](../zh-CN/concepts/architecture.md)
 
@@ -10,6 +12,9 @@ orchestration, task authority, tool execution, user review, and durable state so
 each concern can evolve independently and remain observable.
 
 For the terminology behind this design, start with [Core Concepts](core-concepts.md).
+The system map below needs correction: Studio Host has its own entry and
+lifecycle, as shown by [StudioHost](../../packages/studio/src/host/StudioHost.ts).
+The Toolkit Runtime wording also predates the current [RS contract](../reference/extensions/toolkit-rs.md).
 
 ## Design goals
 

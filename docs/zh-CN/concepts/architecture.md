@@ -1,8 +1,10 @@
 # 架构
 
-> **状态：当前概念指南。** 类型与协议细节由 [Reference](../reference/index.md) 中的页面维护。
+> **状态：当前架构指南。** 本页描述设计选择与实现边界，不代表项目理念已经全部确定；见[核心理念讨论](principles-discussion.md)。类型与协议细节由 [Reference](../reference/index.md) 中的页面维护。
 
 [English](../../concepts/architecture.md)
+
+下方系统地图有待修正：Studio Host 有独立入口与生命周期，见 [StudioHost](../../../packages/studio/src/host/StudioHost.ts)。Toolkit Runtime 的表述也早于当前 [RS 契约](../../reference/extensions/toolkit-rs.md)。
 
 PinPawo Agent 将编排、任务权限、工具执行、人工审核和持久状态分开，使每个边界可以独立演进并保持可观察。
 

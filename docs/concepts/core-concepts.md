@@ -1,7 +1,8 @@
 # Core Concepts
 
-> **Status: current conceptual guide.** This page defines stable vocabulary;
-> linked reference pages own the detailed implementation contracts.
+> **Status: guide to current terminology and design.** Linked reference pages
+> own detailed implementation contracts. This page does not settle which ideas
+> are lasting project principles; see the [principles discussion](../zh-CN/concepts/principles-discussion.md).
 
 [简体中文](../zh-CN/concepts/core-concepts.md)
 
@@ -10,8 +11,10 @@ can reason, use tools, ask for approval, and delegate focused work without
 turning the whole system into one opaque prompt.
 
 This page is the conceptual entry point for the open-source project. It explains
-the stable vocabulary used across the runtime, CLI, APIs, and extension model.
-For the system map, see [Architecture](architecture.md).
+the vocabulary currently used across the runtime, CLI, APIs, and extension model.
+For the system map, see [Architecture](architecture.md). Toolkit Runtime
+terminology on this page predates the current [RS contract](../reference/extensions/toolkit-rs.md);
+use that reference for current dependencies and lifetimes.
 
 ## What the project gives you
 
@@ -124,8 +127,9 @@ the current protocol and replacement rules in detail.
 ## Studio collaboration
 
 Studio is for work that benefits from several specialized agents. It owns the
-shared dispatch channel: a Pet registry, one dispatch queue per Pet (including
-its admission state), and an in-process plugin event bus. A planner, task board, or
+shared dispatch channel: a Pet registry, read-only per-Pet queue observation,
+and an in-process plugin event bus. The resident runtime owns the queue and gate.
+A planner, task board, or
 scheduler is a plugin or Pet concern; Studio does not store task state, infer
 completion, or own shared knowledge.
 

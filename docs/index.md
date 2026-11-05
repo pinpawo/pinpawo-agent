@@ -38,7 +38,7 @@ status still determines whether its claims are accepted.
 
 | Directory | Contains | Use it for |
 |---|---|---|
-| [concepts/](concepts/index.md) | Stable vocabulary and system map | Learning the mental model first |
+| [concepts/](concepts/index.md) | Existing vision, terminology, and system map | Understanding the current model and its open questions |
 | [guides/](guides/index.md) | Installation, configuration, and integrations | Operating or trying the project |
 | [reference/](reference/index.md) | Current APIs, extension, runtime, and local-tool contracts | Building against a stable boundary |
 | [studio/](studio/index.md) | Current Studio overview and configuration | Running or extending Studio |

@@ -24,7 +24,9 @@ const USER_CLIENT_ID = 'user.ada';
  * login session — this is the regression guard for that narrowing, driven
  * through the real HTTP Plugin and the real hook registry.
  */
-async function harness() {
+async function harness(options: { pets?: Array<{ petId: string; name: string }> } = {}) {
+  const pets = options.pets ?? [];
+  const dispatches: Array<{ petId: string; request: string }> = [];
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   const clients = new StudioClients(async () => new KyselyClientStore(
     await storage.open<ClientDatabase>('clients', clientMigrations),
@@ -56,12 +58,15 @@ async function harness() {
 
   const channel = createChannelPlugin();
   await channel.start({
-    dispatch: async () => { throw new Error('not used'); },
+    dispatch: async (request) => {
+      dispatches.push({ petId: request.petId, request: request.request });
+      return { petId: request.petId, invocationId: `invocation-${dispatches.length}` };
+    },
     registerContextProvider: () => () => undefined,
     allocateSessionId: () => 'unused',
     notify: () => undefined,
     subscribe: () => () => undefined,
-    listPets: () => [],
+    listPets: () => pets.map(pet => ({ ...pet, definitionId: pet.petId })),
     pets: {} as StudioPluginContext['pets'],
     listDispatchQueues: () => [],
     petSessions: {} as StudioPluginContext['petSessions'],
@@ -95,6 +100,7 @@ async function harness() {
   return {
     clients,
     call,
+    dispatches,
     grant: (next: readonly string[]) => { capabilities = next; },
     stop: async () => {
       await channel.stop?.();
@@ -163,4 +169,63 @@ test('the local Host token keeps full Channel access', async (t) => {
     token: HOST_TOKEN,
     body: { title: 'From the Host', pets: [] },
   })).status, 201);
+});
+
+/**
+ * The deliberate split recorded in `docs/design/studio/user-auth.md` §3.5.1:
+ * `studio.dispatch` gates the direct `POST /dispatch` route only, while running
+ * a Pet from inside a Channel is gated by `channel.write` plus membership. These
+ * two tests pin that semantic so it cannot drift silently in either direction.
+ */
+test('channel.write starts a Pet from a Channel without studio.dispatch', async (t) => {
+  const h = await harness({ pets: [{ petId: 'executor', name: 'Executor' }] });
+  t.after(h.stop);
+  h.grant(['channel.read', 'channel.write', 'studio.view']);
+
+  const created = await h.call('POST', '/channels', {
+    token: SESSION_TOKEN,
+    body: { title: 'Release', pets: ['executor'] },
+  });
+  assert.equal(created.status, 201);
+  const channelId = (created.body.channel as { channelId: string }).channelId;
+
+  const posted = await h.call('POST', '/channels/messages', {
+    token: SESSION_TOKEN,
+    body: {
+      channelId,
+      body: 'Please take this one.',
+      mentions: [{ participantId: 'pet:executor' }],
+    },
+  });
+  assert.equal(posted.status, 201);
+  const deliveries = posted.body.deliveries as Array<{ state: string; participantId: string }>;
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]!.state, 'accepted');
+  assert.equal(deliveries[0]!.participantId, 'pet:executor');
+
+  // The Pet really ran: the Channel dispatched it with the Channel scope.
+  assert.equal(h.dispatches.length, 1);
+  assert.equal(h.dispatches[0]!.petId, 'executor');
+
+  // The same session still cannot use the direct dispatch route.
+  const direct = await h.call('POST', '/dispatch', {
+    token: SESSION_TOKEN,
+    body: { petId: 'executor', request: 'direct' },
+  });
+  assert.equal(direct.status, 403);
+  assert.match(String(direct.body.error), /studio\.dispatch/);
+});
+
+test('without channel.write a login session cannot start a Pet from a Channel', async (t) => {
+  const h = await harness({ pets: [{ petId: 'executor', name: 'Executor' }] });
+  t.after(h.stop);
+  h.grant(['channel.read', 'studio.view']);
+
+  const denied = await h.call('POST', '/channels', {
+    token: SESSION_TOKEN,
+    body: { title: 'Release', pets: ['executor'] },
+  });
+  assert.equal(denied.status, 403);
+  assert.match(String(denied.body.error), /channel\.write/);
+  assert.equal(h.dispatches.length, 0);
 });

@@ -109,7 +109,7 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 - [delegate_capability](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/delegateCapabilityTool.ts) 已将执行结果写成父层 ToolMessage；在这份结果中一并传递引用，就是同一个返回出口。answer 当前不能直接扫描到未转交的子消息。
 - 工具实时流里已有 ToolMessage；[Host normalizer](../../../services/host/src/events/agentStreamNormalizer.ts) 通常取出 `content`，前端收到的是 `operation.raw.output`。过程展示可以复用这些事件，但不替代执行记录、最终回复和 Channel 的交付链路；当前 snapshot 不会重建原始工具历史。
 
-消息压缩按用户本轮取舍沿用现有策略，不因包含交付引用而额外保留调用或结果组，也不在压缩后扫描、回填或恢复声明。Capability 返回只汇总仍存在的工具声明。已发布的文件快照保留在 store 中，不受消息压缩影响；本轮接受压缩后部分引用不进入本次交付的限制。
+消息压缩按用户本轮取舍沿用现有策略，不因包含交付引用而额外保留调用或结果组，也不扫描摘要或历史来恢复声明。Capability 返回只汇总仍存在的工具声明。已发布的文件快照保留在 store 中，不受消息压缩影响；本轮接受压缩后部分引用不进入本次交付的限制。
 
 本地文件通过 `publish_artifact` 发布并声明的路径已在原设计中明确，不再列为待决定。仍待确认的是已有 URL 仅以自然语言返回时如何声明：仍要求来源工具按原契约补充声明、允许 Capability 子代理最终整理，或让统一发布工具承接已有链接，具体方式尚未确定。原 `publish_artifact(path, title?)` 只接本地路径，并未约定 URL 登记；本次不扩展其输入，也不新增登记工具。若允许子代理按自然语言结果声明，需明确对“只有工具声明才算”及校验位置的调整；未确认前保留原 `ToolMessage.artifact.deliverables` 契约。
 
@@ -244,7 +244,7 @@ HTTP 读取及公开消息的结构化字段已接入，见 [Toolkit](../../../t
 公开引用按既有 `review_current` 结论选取：每个 completed plan item 的最新返回执行，
 并限定为当前 run。Entry 与 Supervisor 在生成最终回复时把选定引用写入该回复的
 结构化元数据，后续事件、snapshot 和 Channel 原样传递；历史回放不依赖当前 plan。
-打回执行的引用仍在执行记录和 store 中，但不随最终回复交付。
+打回执行在返回时仍保留的声明写入执行记录，已发布的文件快照留在 store 中，但不随最终回复交付。
 
 仍未实现：仅以自然语言返回的已有 URL 如何形成声明，继续等待上文的设计决定；
 没有扩展 `publish_artifact` 输入或新增登记工具。可选 system section 未接入。

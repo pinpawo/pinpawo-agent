@@ -31,19 +31,19 @@ function longMessage(index: number) {
   return new HumanMessage(`message-${index} ${'x'.repeat(3200)}`);
 }
 
-function executionCall(id: string, planItemId: string, runId = 'run', taskId = 'trace') {
+function executionCall(id: string, planItemId: string) {
   return setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
-  }] }), { runId, taskId, source: 'supervisor' });
+  }] }), { runId: 'run', taskId: 'trace', source: 'supervisor' });
 }
-function executionResult(id: string, planItemId: string, text: string, taskId = 'trace', runId = 'run') {
+function executionResult(id: string, planItemId: string, text: string, taskId = 'trace') {
   const delegationId = `delegation:${planItemId}`;
   const task = `Work on ${planItemId}`;
   return createCapabilityExecutionMessage({ callId: id,
     execution: { planItemId, delegationId, capability: 'general', task, briefing: 'Execute the confirmed task.' },
     result: { status: 'returned', delivery: { id: `delivery:${id}`, task, text,
-      scope: { lane: 'capability:general', runId, taskId, delegationId } } },
-    metadata: { runId, taskId } });
+      scope: { lane: 'capability:general', runId: 'run', taskId, delegationId } } },
+    metadata: { runId: 'run', taskId } });
 }
 
 test('compaction retains unfinished execution pairs and private lanes without exposing them to the summary', async () => {
@@ -68,73 +68,21 @@ test('compaction retains unfinished execution pairs and private lanes without ex
   assert.ok(!summarized.includes('private supervisor context'));
 });
 
-test('compaction retains complete referenced pairs for the current run and releases them in the next run', async () => {
+test('declared references follow ordinary compaction of completed execution groups', async () => {
   const call = executionCall('published', 'completed');
   const result = executionResult('published', 'completed', 'Published report');
   result.artifact.result.deliverables = [{ uri: 'artifact://thread/report' }];
+  result.content = JSON.stringify(result.artifact.result);
+  let summarized = '';
   const compacted = await compactOrchestratorMessages({
     messages: [new HumanMessage('Earlier context'), call, result, new HumanMessage('Latest context')],
-    model: fakeSummaryModel(), options: { keepMessages: 1, runId: 'run' },
+    model: fakeSummaryModel('Summary', messages => { summarized = JSON.stringify(messages); }),
+    options: { keepMessages: 1 },
   });
   assert.ok(compacted.compacted);
-  assert.ok(compacted.messages.includes(call));
-  assert.ok(compacted.messages.includes(result));
-  assert.deepEqual(result.artifact.result.deliverables, [{ uri: 'artifact://thread/report' }]);
-  let summarized = '';
-  const next = await compactOrchestratorMessages({
-    messages: [...compacted.messages.slice(1), new HumanMessage('Next request')],
-    model: fakeSummaryModel('Next summary', messages => { summarized = JSON.stringify(messages); }),
-    options: { keepMessages: 1, runId: 'next-run' },
-  });
-  assert.ok(!next.messages.includes(call));
-  assert.ok(!next.messages.includes(result));
-  assert.ok(summarized.includes('Published report'));
-});
-
-for (const runId of ['run', undefined]) {
-  test(`compaction scopes referenced execution retention by run identity (${runId ?? 'no active run'})`, async () => {
-    const pair = (sourceRunId: string, taskId: string) => {
-      const call = executionCall('shared-call-id', 'completed', sourceRunId, taskId);
-      const result = executionResult('shared-call-id', 'completed', `Evidence ${sourceRunId}`, taskId, sourceRunId);
-      result.artifact.result.deliverables = [{ uri: `artifact://thread/${sourceRunId}` }];
-      return [call, result];
-    };
-    const oldSameTask = pair('old-same-task', 'trace');
-    const oldOtherTask = pair('old-other-task', 'older-task');
-    const current = pair('run', 'trace');
-    const summaryInputs: string[] = [];
-    const compacted = await compactOrchestratorMessages({
-      messages: [...oldSameTask, ...oldOtherTask, ...current, new HumanMessage('Latest')],
-      model: fakeSummaryModel('Summary', messages => { summaryInputs.push(JSON.stringify(messages)); }),
-      options: { keepMessages: 1, taskId: 'trace', runId },
-    });
-    assert.ok(compacted.compacted);
-    for (const message of [...oldSameTask, ...oldOtherTask]) assert.ok(!compacted.messages.includes(message));
-    for (const message of current) assert.equal(compacted.messages.includes(message), runId === 'run');
-    const summarized = summaryInputs.join('\n');
-    assert.ok(summarized.includes('Evidence old-same-task'));
-    assert.ok(summarized.includes('Evidence old-other-task'));
-    assert.equal(summarized.includes('Evidence run'), runId === undefined);
-  });
-}
-
-test('compaction still retains unfinished plan attempts across runs without pinning unrelated historical references', async () => {
-  const previousAttempt = [executionCall('previous', 'unfinished', 'old-run'),
-    executionResult('previous', 'unfinished', 'Previous unfinished evidence', 'trace', 'old-run')];
-  const currentAttempt = [executionCall('current', 'unfinished'), executionResult('current', 'unfinished', 'Current unfinished evidence')];
-  const oldCompleted = [executionCall('completed', 'completed', 'old-run'),
-    executionResult('completed', 'completed', 'Historical completed evidence', 'trace', 'old-run')] as const;
-  oldCompleted[1].artifact.result.deliverables = [{ uri: 'artifact://old/report' }];
-  let summarized = '';
-  const compacted = await compactOrchestratorMessages({
-    messages: [...previousAttempt, ...oldCompleted, ...currentAttempt, new HumanMessage('Continue')],
-    model: fakeSummaryModel('Summary', messages => { summarized = JSON.stringify(messages); }),
-    options: { keepMessages: 1, runId: 'run', preservePlanItemIds: ['unfinished'] },
-  });
-  for (const message of [...previousAttempt, ...currentAttempt]) assert.ok(compacted.messages.includes(message));
-  for (const message of oldCompleted) assert.ok(!compacted.messages.includes(message));
-  assert.ok(summarized.includes('Historical completed evidence'));
-  assert.ok(!summarized.includes('unfinished evidence'));
+  assert.ok(!compacted.messages.includes(call));
+  assert.ok(!compacted.messages.includes(result));
+  assert.ok(summarized.includes('artifact://thread/report'));
 });
 
 test('compaction includes completed main tool results in the summary input', async () => {

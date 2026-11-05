@@ -54,7 +54,6 @@ export function createCompactContextNode(params: {
       model: params.config.models.observe ?? params.config.models.act,
       options: {
         taskId: state.taskId,
-        runId: state.runId,
         preservePlanItemIds: state.runSupervisorState.plan
           .filter((task) => task.status !== 'completed' && task.status !== 'superseded').map((task) => task.id),
       },

@@ -7,9 +7,6 @@ import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { realpath } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { limitArtifactBody } from './body';
 import type { ArtifactDownloadWriter, ArtifactSourceReader, ArtifactStore } from './ports';
 
@@ -31,31 +28,6 @@ function executionContext(config: unknown) {
 
 function markdownLabel(label: string) {
   return label.replace(/[\r\n]+/g, ' ').replace(/[\\\[\]]/g, '\\$&');
-}
-
-function isWithin(root: string, path: string) {
-  const child = relative(root, path);
-  return child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`));
-}
-
-async function isTemporaryDestination(input: unknown, workdir?: string | null): Promise<boolean> {
-  if (!input || typeof input !== 'object' || !('path' in input)
-    || typeof input.path !== 'string' || !input.path.trim()) return false;
-  const base = workdir ?? process.cwd();
-  const target = isAbsolute(input.path) ? input.path : resolve(base, input.path);
-  // The writer uses existing parents and renames over the destination entry.
-  // Resolve the parent, rather than following a destination symlink it replaces.
-  try {
-    const [temporaryRoot, realWorkdir, parent] = await Promise.all([
-      realpath(tmpdir()), realpath(base), realpath(dirname(target)),
-    ]);
-    const destination = join(parent, basename(target));
-    return isWithin(temporaryRoot, destination)
-      && !isWithin(realWorkdir, destination)
-      && !isWithin(resolve(base), resolve(target));
-  } catch {
-    return false;
-  }
 }
 
 export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): AgentToolkit {
@@ -115,29 +87,17 @@ export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): Agen
     return JSON.stringify({ path: destination, ref: fetched.ref });
   }, {
     name: 'download_artifact',
-    description: 'Download a stable artifact reference to a local file. Omit path to use this session’s temporary directory. Temporary destinations outside the workdir need no review; other destinations require file-write review. Read the returned path with file tools when needed.',
+    description: 'Download a stable artifact reference to a local file without review. Omit path to use this session’s temporary directory. Read the returned path with file tools when needed.',
     schema: z.object({ uri: z.string().min(1), path: z.string().min(1).optional() }).strict(),
   });
 
-  const explicitDownloadReview = ReviewPolicies.required({
-    authorization: 'exact',
-    canAutoApprove: (context) => isTemporaryDestination(context.input, context.workdir),
-  });
   return defineToolkit({
     name: ARTIFACTS_TOOLKIT_NAME,
     description: 'Explicitly publish local file snapshots, list this session’s artifacts, and download shared references.',
     tools: [
       { tool: publish, review: ReviewPolicies.never() },
       { tool: list, review: ReviewPolicies.never() },
-      { tool: download, review: {
-        ...explicitDownloadReview,
-        request: async (context) => {
-          if (!context.input || typeof context.input !== 'object'
-            || !('path' in context.input) || context.input.path === undefined) return null;
-          return await isTemporaryDestination(context.input, context.workdir)
-            ? null : explicitDownloadReview.request(context);
-        },
-      } },
+      { tool: download, review: ReviewPolicies.never() },
     ],
     instructions: [
       'Publish files that the task requires you to deliver with publish_artifact, even when another tool only returned a local path. Only explicitly published files are artifacts.',

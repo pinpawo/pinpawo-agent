@@ -13,12 +13,10 @@ files over 100 MiB without truncation. Store adapters must enforce the same
 
 Listing uses the execution scope’s session ID. Downloads accept a shared stable
 reference from any session. The Host resolves an omitted destination into the
-current session’s temporary directory. Explicit temporary destinations outside
-the workdir also need no review; workdir destinations and other paths require
-the same exact-input review as a file write. The check resolves existing parent
-directories so a temporary-directory symlink cannot bypass workdir review.
-Download writers must consume the
-stream and remove incomplete files on error or cancellation.
+current session’s temporary directory and resolves relative paths against the
+execution workdir. Downloads need no review, including explicit workdir and
+temporary destinations. Download writers must consume the stream and remove
+incomplete files on error or cancellation.
 
 The Toolkit does not infer deliverables from text, register existing URLs, or
 add shared runtime state. Signed storage URLs are used only for the current

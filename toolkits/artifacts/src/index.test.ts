@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { ToolMessage } from '@langchain/core/messages';
 import type { ArtifactRef } from '@pinpawo/agent-contracts';
 import {
@@ -94,42 +91,25 @@ test('download accepts a shared reference and does not declare a second delivera
   ]);
 });
 
-test('workdir download destinations request file-write review and exact authorization', async () => {
+test('default, workdir and temporary download destinations need no review and retain execution paths', async () => {
   const f = fixture();
   const definition = f.definition('download_artifact');
   const context = { toolkitName: 'artifacts', toolName: 'download_artifact',
     reviewCapabilities: { humanReview: true, sessionAuthorization: true } };
-  assert.equal(await definition.review?.request({ ...context, input: { uri: ref.uri } }), null);
-  assert.ok(await definition.review?.request({ ...context, input: { uri: ref.uri, path: 'report.txt' } }));
-  const matcher = await definition.review?.authorization?.buildMatcher({ ...context,
-    input: { uri: ref.uri, path: 'report.txt' } });
-  assert.ok(matcher);
-});
-
-test('explicit temporary downloads skip review except for workdir paths and symlinked workdir parents', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifact-review-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const workdir = join(root, 'workdir');
-  const temporary = join(root, 'temporary');
-  await Promise.all([mkdir(workdir), mkdir(temporary)]);
-  const policy = fixture().definition('download_artifact').review!;
-  const context = { toolkitName: 'artifacts', toolName: 'download_artifact', workdir,
-    reviewCapabilities: { humanReview: true, sessionAuthorization: true } };
-  const allowed = { ...context, input: { uri: ref.uri, path: join(temporary, 'report.txt') } };
-  assert.equal(await policy.request(allowed), null);
-  assert.equal(await policy.canAutoApprove?.(allowed), true);
-  const inWorkdir = { ...context, input: { uri: ref.uri, path: join(workdir, 'report.txt') } };
-  assert.ok(await policy.request(inWorkdir));
-  assert.equal(await policy.canAutoApprove?.(inWorkdir), false);
-  assert.ok(await policy.request({ ...context, input: { uri: ref.uri, path: 'report.txt' } }));
-  if (process.platform !== 'win32') {
-    const linked = join(temporary, 'linked-workdir');
-    await symlink(workdir, linked, 'dir');
-    const linkedWorkdir = { ...context, input: { uri: ref.uri, path: join(linked, 'report.txt') } };
-    assert.ok(await policy.request(linkedWorkdir));
-    assert.equal(await policy.canAutoApprove?.(linkedWorkdir), false);
+  await f.definition('publish_artifact').tool.invoke({ path: 'report.txt' }, f.config());
+  for (const path of [undefined, 'report.txt', '/work/report.txt', '/tmp/report.txt']) {
+    const input = { uri: ref.uri, ...(path !== undefined ? { path } : {}) };
+    assert.equal(await definition.review?.request({ ...context, input }), null);
+    const result = await definition.tool.invoke(input, f.config('second'));
+    assert.equal(JSON.parse(String(result)).path, path ?? '/tmp/second/report.txt');
   }
-  assert.ok(await policy.request({ ...context, input: { uri: ref.uri, path: join(temporary, 'missing', 'report.txt') } }));
+  assert.equal(definition.review?.authorization, undefined);
+  assert.deepEqual(f.writes.map(({ path, workdir }) => ({ path, workdir })), [
+    { path: undefined, workdir: '/work' },
+    { path: 'report.txt', workdir: '/work' },
+    { path: '/work/report.txt', workdir: '/work' },
+    { path: '/tmp/report.txt', workdir: '/work' },
+  ]);
 });
 
 test('a missing execution session, URL source, or malformed reference cannot reach storage', async () => {

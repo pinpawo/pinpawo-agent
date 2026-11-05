@@ -36,12 +36,10 @@ source-tool permissions or extend a source URL's lifetime.
 
 Publishing and downloading reject files above 100 MiB. Downloads check size and
 SHA256 before replacing the destination. The default destination is a unique
-directory under the current session's temporary directory. Explicit destinations
-inside the workdir use the existing exact write review policy, including workdirs
-located under `/tmp`. Explicit paths under the real system temporary directory
-and outside the workdir also need no review; unresolved or other destinations
-require review. Resolving the existing parent directory prevents symlink paths
-from bypassing workdir review.
+directory under the current session's temporary directory. The download tool
+does not request review for either default or explicit destinations. Destination
+paths still resolve against the execution workdir and use the existing download
+writer.
 
 Tests cover local snapshots, sharing, limits, downloads, HTTP authentication and
 redirects, plus a mock COS transport. No live COS bucket or credentials were used.

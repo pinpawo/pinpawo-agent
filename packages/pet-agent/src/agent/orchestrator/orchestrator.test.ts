@@ -1745,7 +1745,6 @@ test('toolkit review policy runs after model without changing tool identity', as
     'reviewCapabilities',
     'toolName',
     'toolkitName',
-    'workdir',
   ]);
   assert.equal(readToolMessageContent(result.messages, 'call-safe'), 'raw ok');
 });

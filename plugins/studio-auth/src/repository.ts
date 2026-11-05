@@ -141,21 +141,54 @@ export class StudioAuthRepository {
       .execute();
   }
 
-  /** The password hash Better Auth stored for this user, if any. */
-  async credentialHash(userId: string): Promise<string | undefined> {
-    const row = await this.db
-      .selectFrom('studio_auth_account')
-      .select(['password'])
-      .where('user_id', '=', userId)
-      .where('provider_id', '=', CREDENTIAL_PROVIDER_ID)
-      .executeTakeFirst();
-    return row?.password ?? undefined;
+  /**
+   * Disable an account: the state change, the credential version bump and the
+   * session revocation land in one transaction. The bump is what stops a
+   * self-service password change that verified its current password just before
+   * the account was disabled from committing afterwards.
+   */
+  async disableAccount(
+    userId: string,
+    disabledAt: string,
+  ): Promise<{ version: number; revoked: number }> {
+    return this.db.transaction().execute(async (trx) => {
+      const now = new Date().toISOString();
+      await trx
+        .updateTable('studio_auth_user')
+        .set((expression) => ({
+          disabled_at: disabledAt,
+          credential_version: expression(
+            expression.fn.coalesce('credential_version', expression.val(0)),
+            '+',
+            1,
+          ),
+          updated_at: now,
+        }))
+        .where('id', '=', userId)
+        .execute();
+      const user = await trx
+        .selectFrom('studio_auth_user')
+        .select(['credential_version'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+      const deleted = await trx
+        .deleteFrom('studio_auth_session')
+        .where('user_id', '=', userId)
+        .execute();
+      return {
+        version: user?.credential_version ?? 0,
+        revoked: Number(deleted[0]?.numDeletedRows ?? 0),
+      };
+    });
   }
 
   /**
    * The hash to verify and the version it belongs to, read as one consistent
    * pair: verifying a hash against a newer version would let a stale password
    * mint a session that looks current.
+   *
+   * Every caller that verifies a password must use this and commit against
+   * `version`: reading the hash alone is how a stale write loses its guard.
    */
   async credentialSnapshot(userId: string): Promise<{ hash?: string; version: number }> {
     return this.db.transaction().execute(async (trx) => {

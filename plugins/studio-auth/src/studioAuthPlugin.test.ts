@@ -608,3 +608,84 @@ test('two racing self-service changes: the stale one is told to sign in again', 
   assert.equal((await h.login('church', 'first-device-long-password')).status, 401);
   assert.equal((await h.login('church', 'second-device-long-password')).status, 200);
 });
+
+test('two racing administrative resets: the stale one is refused instead of overwriting', async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let reachedBarrier!: () => void;
+  const atBarrier = new Promise<void>((resolve) => { reachedBarrier = resolve; });
+  let resets = 0;
+
+  const h = await harness({
+    internalBeforeAdminReset: async () => {
+      resets += 1;
+      // Only the first operator is held; the second one lands while it waits.
+      if (resets === 1) {
+        reachedBarrier();
+        await gate;
+      }
+    },
+  });
+  t.after(h.stop);
+  const { userId } = (await h.createUser('ritchie')).body as { userId: string };
+
+  const first = h.call('POST /users/password', {
+    body: { userId, password: 'first-operator-long-password' },
+  });
+  await atBarrier;
+  const second = await h.call('POST /users/password', {
+    body: { userId, password: 'second-operator-long-password' },
+  });
+  assert.equal(second.status, 204);
+  release();
+
+  const raced = await first;
+  // The reset that actually landed wins; the other one is told to reload
+  // instead of quietly putting its own password back.
+  assert.equal(raced.status, 409);
+  assert.deepEqual(raced.body, { error: 'Password was changed elsewhere. Reload the user and retry.' });
+
+  const db = await h.inspect();
+  const audit = await db.selectFrom('studio_auth_audit').selectAll().execute();
+  const denied = audit.find((row) =>
+    row.action === 'user.password' && row.result === 'denied' && row.reason === 'credential-changed');
+  assert.ok(denied, 'the refused reset is recorded as credential-changed');
+
+  assert.equal((await h.login('ritchie', 'first-operator-long-password')).status, 401);
+  assert.equal((await h.login('ritchie', 'second-operator-long-password')).status, 200);
+});
+
+test('disabling an account stops a self-service change that is already in flight', async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let reachedBarrier!: () => void;
+  const atBarrier = new Promise<void>((resolve) => { reachedBarrier = resolve; });
+
+  const h = await harness({
+    internalBeforeCredentialReplace: async () => {
+      reachedBarrier();
+      await gate;
+    },
+  });
+  t.after(h.stop);
+  const { userId } = (await h.createUser('backus')).body as { userId: string };
+  const { token } = (await h.login('backus')).body as { token: string };
+
+  const pending = h.call('POST /auth/password', {
+    token,
+    body: { currentPassword: PASSWORD, newPassword: 'self-chosen-long-password' },
+  });
+  await atBarrier;
+  // The account is disabled while that verified change is still in flight.
+  assert.equal((await h.call('POST /users/disable', { body: { userId, disabled: true } })).status, 200);
+  release();
+
+  const raced = await pending;
+  // Disabling bumps the credential version, so the stale change cannot land.
+  assert.equal(raced.status, 409);
+
+  // Enabling again proves the refused change left the password alone.
+  assert.equal((await h.call('POST /users/disable', { body: { userId, disabled: false } })).status, 200);
+  assert.equal((await h.login('backus', 'self-chosen-long-password')).status, 401);
+  assert.equal((await h.login('backus')).status, 200);
+});

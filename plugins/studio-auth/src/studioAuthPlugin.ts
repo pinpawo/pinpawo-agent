@@ -75,6 +75,12 @@ export type CreateStudioAuthPluginOptions = {
    * administrative reset inside that window.
    */
   internalBeforeCredentialReplace?: () => Promise<void>;
+  /**
+   * Internal seam, not part of the Plugin contract: awaited after an
+   * administrative reset has read the credential version it will commit
+   * against, so a test can land a second reset inside that window.
+   */
+  internalBeforeAdminReset?: () => Promise<void>;
 };
 
 export type StudioAuthPlugin = StudioPlugin & {
@@ -198,6 +204,7 @@ export function createStudioAuthPlugin(
   if (secret.length < 32) throw new Error('Studio auth secret must contain at least 32 characters.');
   const beforeSessionCreate = options.internalBeforeSessionCreate;
   const beforeCredentialReplace = options.internalBeforeCredentialReplace;
+  const beforeAdminReset = options.internalBeforeAdminReset;
 
   let studio: StudioPluginContext | undefined;
   let db: Kysely<StudioAuthDatabase> | undefined;
@@ -617,7 +624,29 @@ export function createStudioAuthPlugin(
     if (!row) return error(404, 'No such user.');
     // An administrative reset revokes every session, in the same transaction as
     // the new hash, so no session minted from the old password survives.
-    const { revoked } = await repo().replaceCredential(userId, await hashPassword(password));
+    //
+    // It commits against the version read here instead of overwriting blindly:
+    // two operators resetting the same account at once would otherwise let the
+    // slower one silently undo the faster one. The version is read before the
+    // hash is computed so the scrypt delay sits inside the window on purpose.
+    const { version } = await repo().credentialSnapshot(userId);
+    const newHash = await hashPassword(password);
+    if (beforeAdminReset) await beforeAdminReset();
+    let replaced: { revoked: number };
+    try {
+      replaced = await repo().replaceCredential(userId, newHash, { expectedVersion: version });
+    } catch (cause) {
+      if (!(cause instanceof CredentialConflictError)) throw cause;
+      await audit('user.password', 'denied', {
+        request,
+        userId,
+        username: row.username,
+        clientId: row.client_id,
+        reason: 'credential-changed',
+      });
+      return error(409, 'Password was changed elsewhere. Reload the user and retry.');
+    }
+    const { revoked } = replaced;
     await audit('user.password', 'ok', {
       request,
       userId,
@@ -659,8 +688,14 @@ export function createStudioAuthPlugin(
     const row = await repo().findUserById(userId);
     if (!row) return error(404, 'No such user.');
     if (row.client_id === 'local') return error(400, 'The local identity cannot be disabled.');
-    await repo().setDisableState(userId, body.disabled ? new Date().toISOString() : null);
-    if (body.disabled) await repo().deleteSessionsOfUser(userId);
+    if (body.disabled) {
+      // Disabling bumps the credential version together with the session
+      // revocation, so a self-service password change that verified the old
+      // password moments ago can no longer commit against a disabled account.
+      await repo().disableAccount(userId, new Date().toISOString());
+    } else {
+      await repo().setDisableState(userId, null);
+    }
     await audit('user.disable', 'ok', {
       request,
       userId,

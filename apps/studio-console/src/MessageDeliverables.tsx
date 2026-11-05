@@ -31,7 +31,9 @@ export function MessageLink({ href, children, source }: { href?: string; childre
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = href.split('/').at(-1) || 'artifact';
+      const filename = href.split('/').at(-1) || 'artifact';
+      try { link.download = decodeURIComponent(filename); }
+      catch { link.download = filename; }
       link.click();
       setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
     }).catch(error => setProblem(error instanceof Error ? error.message : String(error)));

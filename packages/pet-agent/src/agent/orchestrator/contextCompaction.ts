@@ -19,6 +19,8 @@ export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 export type ContextCompactionOptions = {
   /** Actual call/result records still needed to review unfinished plan tasks. */
   preservePlanItemIds?: readonly string[];
+  /** Keep this run's declared references available until its final reply is selected. */
+  runId?: string;
   keepMessages?: number;
   /** Keep the current logical task summary separate from older conversations. */
   taskId?: string;
@@ -59,24 +61,28 @@ function selectMessagesToKeep(
   messages: BaseMessage[],
   keepMessages: number,
   preservePlanItemIds: readonly string[] = [],
+  runId?: string,
 ): BaseMessage[] {
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
   const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
   const preservedCalls = new Set(readCapabilityExecutions(candidates)
     .filter(record => preservePlanItemIds.includes(record.execution.planItemId)
-      || record.result.deliverables?.length).map(record => record.call.id!));
+      || (runId !== undefined && record.metadata.runId === runId && record.result.deliverables?.length))
+    .map(record => JSON.stringify([record.metadata.runId, record.call.id])));
+  const preservesCall = (message: BaseMessage, callId: string) =>
+    preservedCalls.has(JSON.stringify([getAgentMessageMetadata(message).runId, callId]));
   // Preserve every attempt for the unfinished delegation, including main evidence.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;
     // Root compacts main context, not private ownership or Supervisor work.
     if (getAgentMessageMetadata(message).lane) return true;
-    if (AIMessage.isInstance(message) && message.tool_calls?.some((call) => call.id && preservedCalls.has(call.id))) return true;
-    if (ToolMessage.isInstance(message) && preservedCalls.has(message.tool_call_id)) return true;
+    if (AIMessage.isInstance(message) && message.tool_calls?.some((call) => call.id && preservesCall(message, call.id))) return true;
+    if (ToolMessage.isInstance(message) && preservesCall(message, message.tool_call_id)) return true;
     return false;
   });
   const safeMain = new Set(toolProtocolSafeMessages(selected.filter((message) => !getAgentMessageMetadata(message).lane)));
   return selected.filter((message) => getAgentMessageMetadata(message).lane || safeMain.has(message)
-    || (AIMessage.isInstance(message) && message.tool_calls?.some((call) => call.id && preservedCalls.has(call.id))));
+    || (AIMessage.isInstance(message) && message.tool_calls?.some((call) => call.id && preservesCall(message, call.id))));
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
@@ -156,6 +162,7 @@ export async function compactOrchestratorMessages(params: {
     messages,
     keepMessages,
     params.options?.preservePlanItemIds,
+    params.options?.runId,
   );
   const keptMessageRefs = new Set(keptMessages);
   const keptIds = new Set(keptMessages.map((message) => message.id).filter((id): id is string => Boolean(id)));

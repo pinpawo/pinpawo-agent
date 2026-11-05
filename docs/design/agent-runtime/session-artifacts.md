@@ -202,8 +202,9 @@ v5 checkpoint，不恢复旧 reader，也不迁移或删除旧 checkpoint 与 st
 
 本实现叠加在 #1050 的 `e8badc2c` 上；其 base 为已包含 #1047 的 main
 `29f0bec9`。沿用工具声明契约、既有执行记录和 Capability 返回出口，未增加
-独立交付物 state。子代理压缩保留含引用的整组工具调用与结果；父层压缩保留
-携带引用的执行记录。发布、当前 session 列表、共享引用下载、local/COS adapter、
+独立交付物 state。子代理压缩保留含引用的整组工具调用与结果；父层为交付引用
+额外保留执行记录的范围限定为当前 run，既有未完成 plan 与近期尾部保留规则不变，
+不永久保留所有历史 run 的引用记录。发布、当前 session 列表、共享引用下载、local/COS adapter、
 HTTP 读取及公开消息的结构化字段已接入，见 [Toolkit](../../../toolkits/artifacts/README.md)
 和 [Host 配置](../../../services/host/src/artifacts/README.md)。
 

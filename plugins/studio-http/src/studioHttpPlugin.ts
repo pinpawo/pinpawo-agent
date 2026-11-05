@@ -30,11 +30,12 @@ const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
 export const STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME = 'authenticators';
+/**
+ * Paths this Plugin answers itself. `/auth/*` and `/users*` are deliberately
+ * absent: they belong to the login Plugin, which registers them through the
+ * routes hook like any other contributor.
+ */
 const RESERVED_ROUTE_PATHS = new Set([
-  '/auth/login',
-  '/auth/logout',
-  '/auth/me',
-  '/auth/password',
   '/dispatch',
   '/dispatch/queues',
   '/events',
@@ -50,10 +51,6 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/clients',
   '/clients/revoke',
   '/clients/keys',
-  '/users',
-  '/users/password',
-  '/users/capabilities',
-  '/users/disable',
 ]);
 const DEFAULT_LOCAL_CLIENT_ID = 'local';
 /** Built-in routes every authenticated client may use; the rest are for the local token. */

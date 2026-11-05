@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
+import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { allocatePetSessionId, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
@@ -199,6 +200,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     // Snapshot the complete Plugin request before asynchronous admission.
     const petId = request.petId;
     const requestText = request.request;
+    const attachments = request.attachments === undefined ? undefined : parseDeliverables(request.attachments);
     const suppliedIdempotencyKey = request.idempotencyKey;
     const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
     const session = request.session ? { ...request.session } : undefined;
@@ -246,6 +248,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       );
       await pet.runtime.dispatch.dispatch({
         request: requestText,
+        ...(attachments?.length ? { attachments } : {}),
         dispatchId: invocationId,
         ...(session ? { session } : {}),
         ...(scope ? { scope } : {}),

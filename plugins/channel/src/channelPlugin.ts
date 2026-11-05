@@ -1,9 +1,10 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
+import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
 import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
@@ -118,12 +119,19 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   }
 
   /** Run a Pet in its session for this Channel. */
-  async function dispatchPet(channelId: string, petId: string, request: string, idempotencyKey?: string): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
+  async function dispatchPet(
+    channelId: string,
+    petId: string,
+    request: string,
+    idempotencyKey?: string,
+    attachments: readonly Deliverable[] = [],
+  ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
     const receipt = await host().dispatch({
       petId, request,
+      ...(attachments.length ? { attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
       scope: { namespace: 'channel', id: channelId },
@@ -138,6 +146,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
     const members = new Map((await service.members(message.channelId)).map(member => [member.participantId, member]));
     const request = channelDispatchInput(message, original, participantId => members.get(participantId)?.label);
+    const attachments = channelDispatchAttachments(message, original);
     const deliveries = await Promise.all(message.mentions
       .map(async ({ participantId }): Promise<ChannelDelivery> => {
         const target = members.get(participantId);
@@ -145,7 +154,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (target.kind !== 'pet') return { participantId, state: 'delivered' };
         try {
           const { invocationId, binding } = await dispatchPet(message.channelId, target.id, request,
-            `channel:${message.channelId}:${message.messageId}:${participantId}`);
+            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments);
           return { participantId, state: 'accepted', invocationId, sessionId: binding.sessionId };
         } catch (error) {
           return { participantId, state: 'failed', error: error instanceof Error ? error.message : String(error) };
@@ -219,7 +228,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       try {
         const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
           channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing', outcome.focus),
-          `channel:${message.channelId}:${message.messageId}:route`);
+          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original));
         delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
       } catch (error) {
         delivery = { participantId: target.participantId, state: 'failed', ...decided, error: error instanceof Error ? error.message : String(error) };

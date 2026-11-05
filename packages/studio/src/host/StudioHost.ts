@@ -168,6 +168,7 @@ export class StudioHost {
         petCapabilities,
         petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),
+        artifactStore: this.caps.getArtifactStore(),
         checkpoint: this.getCheckpointer(),
         ...this.caps.getExecutionConfig(),
         deferPluginActivation: true,

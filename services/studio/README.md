@@ -99,6 +99,35 @@ Existing workdirs are never rewritten by startup or `init`. Follow the single
 [configuration migration guide](../../docs/studio/configuration.md#retired-kanban-workdirs),
 preserving local instructions and historical databases, snapshots and Wiki files.
 
+## User login
+
+Username/password login is available but **not enabled by the default template**.
+Add the Plugin to `.pinpawo/studio.json` to turn it on, then restart the Host:
+
+```json
+{ "id": "@pinpawo-plugin/studio-auth", "options": { "secret": "<至少 32 字符的随机串>" } }
+```
+
+A logged-in user is a Studio client `user.<username>` with a capability list, so
+Channel membership and revocation keep working and `/auth/*` answers with a
+session token instead of the local Host token. Create the first account with the
+Host token:
+
+```sh
+pinpawo-studio clients list                     # 确认 local 客户端存在
+curl -sS -X POST http://127.0.0.1:3211/users \
+  -H "Authorization: Bearer $(cat ~/.pinpawo/local-server-token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ada","password":"<至少 12 字符>"}'
+curl -sS -X POST http://127.0.0.1:3211/auth/login \
+  -H 'Content-Type: application/json' -d '{"username":"ada","password":"…"}'
+```
+
+Sessions are absolute 12 h with a 30 min idle timeout, and the database stores
+only the SHA-256 of a token. Endpoints, capabilities and storage are specified in
+the [user auth design](../../docs/design/studio/user-auth.md) and the
+[Studio API reference](../../docs/reference/api/studio.md#user-login-studio-auth-plugin).
+
 ## Operate a running Host
 
 The same Node.js CLI provides HTTP operator commands. These commands do not

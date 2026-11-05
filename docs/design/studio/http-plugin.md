@@ -133,6 +133,28 @@ Channel 向名为 `http` 的 Plugin 贡献 `/channels` 的 Channel、成员、�
 Plugin 启动顺序不影响挂载；任一方停止时，Studio 托管的 hook lifecycle 移除 route。
 HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。
 
+### `authenticators` hook 与 capability
+
+凭证类型不止本机 token / 客户 key / JWT 三种时（例如 `studio-auth` 的用户会话），插件可以贡献一个
+校验器：`hooks.contribute('http', 'authenticators', hook => hook.register({ verify }))`。`authenticate()`
+的顺序是本机 token → JWT → 客户 key → 贡献的校验器，返回 `undefined` 表示"不是我的凭证"。
+
+route 可以声明 `capability`（如 `channel.read`），语义是**附加要求**而不是放行条件：这条 route
+仍要先过上面的 scope 判定，再检查 capability，缺了返回 `403`。所以给一条
+`authorization: 'studio'` 的管理 route 加 capability 不会把它开放给普通用户 —— 插件只能加要求，
+不能放大权限。
+
+「capability 可以打开一条本该只有本机 token 能用的内置 route」只发生在本插件自己维护的
+`BUILTIN_ROUTE_CAPABILITIES` 白名单里（`POST /dispatch` → `studio.dispatch`、`GET /dispatch/queues`
+→ `studio.view`、`GET /events` → `studio.events`、`/pet-sessions/*` → `pet.session`、
+`/pets*` 与 `/pet-definitions` → `studio.manage`）。命中白名单但没持有该项能力的凭证，若它自己
+声明了 capabilities（登录会话）会收到 `"This client lacks the \"<capability>\" capability."`，
+客户 key / JWT 仍收到原来的 `"This client may not use this route."`。
+
+`GET /me` 只在凭证自己声明了 capabilities 时才多返回这个字段；本机 token、客户 key、JWT 的响应与
+principal 形状保持不变（`studio` 全权，`client` 等价于 `channel.read` + `channel.write`）。
+某个校验器抛异常按「不是我的凭证」处理（继续下一个），不会把别人的 `401` 变成 `500`。
+
 ### 外部 JWT
 
 配置 `jwt.issuers` 后，别的系统签发的 JWT 也能当 Bearer 用。每个签发者写明 `issuer`（精确匹配 `iss`）、

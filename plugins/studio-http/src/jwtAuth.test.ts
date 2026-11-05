@@ -12,7 +12,12 @@ import {
   type ClientDatabase,
 } from '@pinpawo/studio-core';
 
-import { createStudioHttpPlugin, type StudioHttpPluginContext, type StudioHttpRoutesHook } from './studioHttpPlugin';
+import {
+  createStudioHttpPlugin,
+  STUDIO_HTTP_ROUTES_HOOK_NAME,
+  type StudioHttpPluginContext,
+  type StudioHttpRoutesHook,
+} from './studioHttpPlugin';
 import { createJwtVerifier } from './jwtIssuers';
 
 const AUTH_TOKEN = 'test-token-with-at-least-16-characters';
@@ -48,7 +53,9 @@ test('HTTP Plugin accepts JWTs from configured issuers as auto-registered client
     listPets: () => [],
     clients,
     hooks: {
-      expose: (_hookName, hook) => {
+      expose: (hookName, hook) => {
+        // Only the route table is this test's business; other hooks are ignored.
+        if (hookName !== STUDIO_HTTP_ROUTES_HOOK_NAME) return () => undefined;
         routes = hook as StudioHttpRoutesHook;
         return () => { routes = undefined; };
       },

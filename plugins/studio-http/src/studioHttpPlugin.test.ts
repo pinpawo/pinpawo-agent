@@ -19,6 +19,8 @@ import {
 
 import {
   createStudioHttpPlugin,
+  STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME,
+  STUDIO_HTTP_ROUTES_HOOK_NAME,
   type StudioHttpPluginContext,
   type StudioHttpRoutesHook,
 } from './studioHttpPlugin';
@@ -333,7 +335,8 @@ test('HTTP Plugin dispatches contributed routes through its shared Hono middlewa
   let routes: StudioHttpRoutesHook | undefined;
   harness.context.hooks = {
     expose: (hookName, hook) => {
-      assert.equal(hookName, 'routes');
+      // The Plugin exposes the route table first; other hooks are not this test's.
+      if (hookName !== STUDIO_HTTP_ROUTES_HOOK_NAME) return () => undefined;
       routes = hook as StudioHttpRoutesHook;
       return () => {
         routes = undefined;
@@ -380,7 +383,9 @@ test('HTTP Plugin allows an explicitly route-authenticated external endpoint', a
   const harness = createContext();
   let routes: StudioHttpRoutesHook | undefined;
   harness.context.hooks = {
-    expose: (_hookName, hook) => {
+    expose: (hookName, hook) => {
+      // The Plugin exposes several hooks; these tests drive the route table only.
+      if (hookName !== STUDIO_HTTP_ROUTES_HOOK_NAME) return () => undefined;
       routes = hook as StudioHttpRoutesHook;
       return () => { routes = undefined; };
     },
@@ -417,7 +422,9 @@ test('HTTP Plugin gives a route the exact request text for signature verificatio
   const harness = createContext();
   let routes: StudioHttpRoutesHook | undefined;
   harness.context.hooks = {
-    expose: (_hookName, hook) => {
+    expose: (hookName, hook) => {
+      // The Plugin exposes several hooks; these tests drive the route table only.
+      if (hookName !== STUDIO_HTTP_ROUTES_HOOK_NAME) return () => undefined;
       routes = hook as StudioHttpRoutesHook;
       return () => { routes = undefined; };
     },
@@ -667,7 +674,9 @@ test('HTTP Plugin authenticates Studio clients: the Host token has the global AP
   ));
   let routes: StudioHttpRoutesHook | undefined;
   harness.context.hooks = {
-    expose: (_hookName, hook) => {
+    expose: (hookName, hook) => {
+      // The Plugin exposes several hooks; these tests drive the route table only.
+      if (hookName !== STUDIO_HTTP_ROUTES_HOOK_NAME) return () => undefined;
       routes = hook as StudioHttpRoutesHook;
       return () => { routes = undefined; };
     },
@@ -728,4 +737,59 @@ test('HTTP Plugin authenticates Studio clients: the Host token has the global AP
   assert.equal((await call('/whoami', key)).status, 401);
   assert.equal((await call('/whoami', secondKey)).status, 401);
   assert.equal((await call('/clients/keys', AUTH_TOKEN, { clientId: 'alice' })).status, 404);
+});
+
+test('HTTP Plugin accepts credentials contributed by another Plugin and gates built-in routes by capability', async (t) => {
+  const exposed = new Map<string, unknown>();
+  const harness = createContext();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start({
+    ...harness.context,
+    listDispatchQueues: () => [],
+    hooks: {
+      expose: <T>(name: string, hook: T) => {
+        exposed.set(name, hook);
+        return () => exposed.delete(name);
+      },
+      contribute: () => () => undefined,
+    },
+  });
+  t.after(() => plugin.stop());
+
+  const hook = exposed.get(STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME) as {
+    register: (authenticator: { verify: (token: string) => unknown }) => () => void;
+  };
+  assert.ok(hook, 'the authenticators hook is exposed to other Plugins');
+  const VIEWER = 'viewer-session-token-0123456789';
+  hook.register({
+    verify: (token) => (token === VIEWER
+      ? { clientId: 'user.ada', scope: 'client', capabilities: ['studio.view'] }
+      : undefined),
+  });
+
+  const port = plugin.address()!.port;
+  const call = async (path: string, token: string, body?: unknown) => fetch(pluginUrl(port, path), {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  // The capability, not the scope, decides: `studio.view` opens the read-only projection.
+  assert.equal((await call('/dispatch/queues', VIEWER)).status, 200);
+  assert.deepEqual(await (await call('/me', VIEWER)).json(), {
+    clientId: 'user.ada', scope: 'client', capabilities: ['studio.view'],
+  });
+  // Holding one capability grants nothing else.
+  const dispatch = await call('/dispatch', VIEWER, { petId: 'planner', request: 'run this' });
+  assert.equal(dispatch.status, 403);
+  assert.match(((await dispatch.json()) as { error: string }).error, /studio\.dispatch/);
+  assert.equal((await call('/events', VIEWER)).status, 403);
+  assert.equal((await call('/pets', VIEWER, {})).status, 403);
+
+  // The local token keeps full authority; unknown credentials stay unauthorized.
+  assert.equal((await call('/dispatch/queues', AUTH_TOKEN)).status, 200);
+  assert.equal((await call('/dispatch/queues', 'unrelated-token')).status, 401);
 });

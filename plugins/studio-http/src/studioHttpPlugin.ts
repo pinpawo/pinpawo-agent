@@ -29,7 +29,12 @@ const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
+export const STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME = 'authenticators';
 const RESERVED_ROUTE_PATHS = new Set([
+  '/auth/login',
+  '/auth/logout',
+  '/auth/me',
+  '/auth/password',
   '/dispatch',
   '/dispatch/queues',
   '/events',
@@ -45,10 +50,31 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/clients',
   '/clients/revoke',
   '/clients/keys',
+  '/users',
+  '/users/password',
+  '/users/capabilities',
+  '/users/disable',
 ]);
 const DEFAULT_LOCAL_CLIENT_ID = 'local';
 /** Built-in routes every authenticated client may use; the rest are for the local token. */
 const CLIENT_BUILTIN_ROUTES = new Set(['GET /me', 'GET /pets']);
+/** Capabilities a `pps_` key or a JWT client holds: today's Channel-only access. */
+const DEFAULT_CLIENT_CAPABILITIES: readonly string[] = ['channel.read', 'channel.write'];
+/**
+ * Built-in routes that a client may reach when it holds the capability. A
+ * capability is additive: it never widens what the local token may do.
+ */
+const BUILTIN_ROUTE_CAPABILITIES: Readonly<Record<string, string>> = {
+  'POST /dispatch': 'studio.dispatch',
+  'GET /dispatch/queues': 'studio.view',
+  'GET /events': 'studio.events',
+  'GET /pet-definitions': 'studio.manage',
+  'GET /pet-sessions/events': 'pet.session',
+  'GET /pet-sessions/snapshot': 'pet.session',
+  'POST /pet-sessions/review': 'pet.session',
+  'POST /pets': 'studio.manage',
+  'POST /pets/rename': 'studio.manage',
+};
 
 /**
  * Who sent an authenticated request. The local Host token is the client with
@@ -58,6 +84,23 @@ const CLIENT_BUILTIN_ROUTES = new Set(['GET /me', 'GET /pets']);
 export type StudioHttpPrincipal = {
   readonly clientId: string;
   readonly scope: 'studio' | 'client';
+  /** `['*']` for the local Host token; omitted principals fall back to the client defaults. */
+  readonly capabilities?: readonly string[];
+};
+
+/**
+ * Turns a request credential into a principal this Plugin did not issue itself
+ * (for example a `studio-auth` login session). Returning `undefined` means the
+ * token is not this authenticator's.
+ */
+export type StudioHttpAuthenticator = {
+  verify: (
+    token: string,
+  ) => Promise<StudioHttpPrincipal | undefined> | StudioHttpPrincipal | undefined;
+};
+
+export type StudioHttpAuthenticatorsHook = {
+  register: (authenticator: StudioHttpAuthenticator) => () => void;
 };
 
 type StudioHttpEnvironment = { Bindings: HttpBindings; Variables: { principal?: StudioHttpPrincipal } };
@@ -85,6 +128,11 @@ export type StudioHttpRoute = {
    * Studio client. `route`: no Studio auth; handle() validates the request.
    */
   authorization?: 'studio' | 'client' | 'route';
+  /**
+   * When set, the route is reachable by any principal holding this capability
+   * (the scope rule above is then not applied); missing capability is `403`.
+   */
+  capability?: string;
   handle: (
     request: StudioHttpRouteRequest,
   ) => StudioHttpRouteResult | Promise<StudioHttpRouteResult>;
@@ -299,12 +347,29 @@ function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
     && route.authorization !== 'route') {
     throw new Error('Studio HTTP route authorization must be studio, client or route.');
   }
+  if (route.capability !== undefined
+    && (typeof route.capability !== 'string' || !route.capability.trim())) {
+    throw new Error('Studio HTTP route capability must be a non-empty string.');
+  }
   return {
     ...route,
     method,
     path: parsed.pathname,
     authorization: route.authorization ?? 'studio',
+    ...(route.capability === undefined ? {} : { capability: route.capability.trim() }),
   };
+}
+
+/**
+ * The local Host token holds every capability; a credential that names none
+ * (a `pps_` key, a JWT, the Host token) keeps exactly the reach it had before
+ * capabilities existed.
+ */
+function hasCapability(principal: StudioHttpPrincipal, capability: string): boolean {
+  if (!principal.capabilities) {
+    return principal.scope === 'studio' || DEFAULT_CLIENT_CAPABILITIES.includes(capability);
+  }
+  return principal.capabilities.includes('*') || principal.capabilities.includes(capability);
 }
 
 function validateJsonContentType(context: StudioHttpContext): void {
@@ -426,12 +491,14 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   let unsubscribeEvents: (() => void) | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
   let unexposeRoutes: (() => void) | undefined;
+  let unexposeAuthenticators: (() => void) | undefined;
   let started = false;
   let stopped = false;
   const eventClients = new Set<EventClient>();
   const sessionStreams = new Set<EventClient>();
   let sessionObservers = 0;
   const routes = new Map<string, StudioHttpRoute>();
+  const authenticators = new Set<StudioHttpAuthenticator>();
 
   const routesHook: StudioHttpRoutesHook = {
     register: (input) => {
@@ -441,6 +508,18 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       routes.set(key, route);
       return () => {
         if (routes.get(key) === route) routes.delete(key);
+      };
+    },
+  };
+
+  const authenticatorsHook: StudioHttpAuthenticatorsHook = {
+    register: (authenticator) => {
+      if (typeof authenticator?.verify !== 'function') {
+        throw new Error('Studio HTTP authenticator must define verify().');
+      }
+      authenticators.add(authenticator);
+      return () => {
+        authenticators.delete(authenticator);
       };
     },
   };
@@ -457,7 +536,13 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return client.revokedAt ? undefined : { clientId: client.clientId, scope: 'client' };
     }
     const client = await clients?.authenticate(token);
-    return client ? { clientId: client.clientId, scope: 'client' } : undefined;
+    if (client) return { clientId: client.clientId, scope: 'client' };
+    // Credentials owned by another Plugin (for example a login session).
+    for (const authenticator of authenticators) {
+      const principal = await authenticator.verify(token);
+      if (principal) return principal;
+    }
+    return undefined;
   }
 
   async function broadcastChunk(chunk: string): Promise<void> {
@@ -516,8 +601,18 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         requestContext.header('WWW-Authenticate', 'Bearer');
         return requestContext.json({ error: 'Unauthorized.' }, 401);
       }
-      // Built-in routes are the global Studio API; only client routes are open to other clients.
-      if (principal.scope !== 'studio' && route?.authorization !== 'client'
+      const capability = route?.capability
+        ?? BUILTIN_ROUTE_CAPABILITIES[`${requestContext.req.method} ${requestContext.req.path}`];
+      if (capability !== undefined) {
+        // An explicit capability is the whole rule: whoever holds it may call the route.
+        if (!hasCapability(principal, capability)) {
+          return requestContext.json(
+            { error: `This client lacks the "${capability}" capability.` },
+            403,
+          );
+        }
+      } else if (principal.scope !== 'studio' && route?.authorization !== 'client'
+        // Built-in routes are the global Studio API; only client routes are open to other clients.
         && !CLIENT_BUILTIN_ROUTES.has(`${requestContext.req.method} ${requestContext.req.path}`)) {
         return requestContext.json({ error: 'This client may not use this route.' }, 403);
       }
@@ -562,8 +657,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
 
     // Who this token is, so a client can tell what it may do (Console hides the rest).
     app.get('/me', (requestContext) => {
-      const { clientId, scope } = requestContext.get('principal')!;
-      return requestContext.json({ clientId, scope });
+      const { clientId, scope, capabilities } = requestContext.get('principal')!;
+      // `capabilities` only appears for credentials that declare them, so the
+      // Host token and `pps_` keys keep answering exactly what they always did.
+      return requestContext.json(capabilities ? { clientId, scope, capabilities } : { clientId, scope });
     });
     app.all('/me', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
@@ -840,6 +937,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           STUDIO_HTTP_ROUTES_HOOK_NAME,
           routesHook,
         );
+        unexposeAuthenticators = pluginContext.hooks.expose(
+          STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME,
+          authenticatorsHook,
+        );
         currentAddress = await listen(nextServer, options.port);
         unsubscribeEvents = pluginContext.subscribe(broadcastEvent);
         heartbeat = setInterval(() => {
@@ -847,6 +948,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         }, heartbeatIntervalMs);
         heartbeat.unref();
       } catch (error) {
+        unexposeAuthenticators?.();
+        unexposeAuthenticators = undefined;
         unexposeRoutes?.();
         unexposeRoutes = undefined;
         context = undefined;
@@ -861,7 +964,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       stopped = true;
       unexposeRoutes?.();
       unexposeRoutes = undefined;
+      unexposeAuthenticators?.();
+      unexposeAuthenticators = undefined;
       routes.clear();
+      authenticators.clear();
       unsubscribeEvents?.();
       unsubscribeEvents = undefined;
       if (heartbeat) clearInterval(heartbeat);

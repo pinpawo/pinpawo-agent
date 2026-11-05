@@ -102,6 +102,20 @@ export function studioAuthMigrations(
           .execute();
       },
     },
+    /**
+     * Every authenticated request looks a session up by token hash. That column
+     * holds the SHA-256 of the bearer token (see StudioAuthRepository): Better
+     * Auth's own session API is not used, so no plaintext token reaches this table.
+     */
+    '0003_auth_session_token': {
+      async up(db: Kysely<unknown>) {
+        await db.schema
+          .createIndex('studio_auth_session_by_token')
+          .on('studio_auth_session' as never)
+          .column('token' as never)
+          .execute();
+      },
+    },
   };
 }
 
@@ -110,6 +124,7 @@ export const STUDIO_AUTH_AUDIT_TABLE = 'studio_auth_audit';
 export const studioAuthIndexes = {
   userByUsername: 'studio_auth_user_by_username',
   sessionByUser: 'studio_auth_session_by_user',
+  sessionByToken: 'studio_auth_session_by_token',
   auditByTime: 'studio_auth_audit_by_time',
 } as const;
 

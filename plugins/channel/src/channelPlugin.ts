@@ -354,7 +354,14 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         // Any Studio client may call; membership decides what it can see. The caller is the human member `human:<clientId>`.
         // The local Host token (studio scope) may also manage members of any Channel.
         const register = (method: string, route: string, handle: (request: StudioHttpRouteRequest, actor: MemberRef, access: ChannelManageAccess) => ReturnType<StudioHttpRoute['handle']>) => routes.register({
-          method, path: route, authorization: 'client', handle: async (request) => {
+          method,
+          path: route,
+          authorization: 'client',
+          // Membership decides *what* a caller sees; the capability decides
+          // whether they may touch Channels at all. Keys and JWTs hold both by
+          // default, so only a login session can be narrowed here.
+          capability: method === 'GET' ? 'channel.read' : 'channel.write',
+          handle: async (request) => {
             try {
               if (!request.principal) throw new ChannelAccessError('Channel routes require a Studio client.');
               return await handle(request, { kind: 'human', id: request.principal.clientId }, { studio: request.principal.scope === 'studio' });

@@ -1,5 +1,4 @@
 import type { BetterAuthOptions } from 'better-auth';
-import { bearer } from 'better-auth/plugins/bearer';
 import { username } from 'better-auth/plugins/username';
 
 /**
@@ -49,12 +48,17 @@ export function studioAuthOptions(config: StudioAuthConfig): BetterAuthOptions {
       minPasswordLength: config.minPasswordLength,
       maxPasswordLength: 256,
       requireEmailVerification: false,
-      autoSignIn: true,
+      // Sign-up creates the credential account, never a session: sessions are
+      // minted by this Plugin when someone logs in (see studioAuthPlugin.ts).
+      autoSignIn: false,
     },
     session: {
       modelName: AUTH_TABLES.session,
       // No rolling refresh: `updateAge` equals the absolute lifetime, so a
-      // session never outlives `sessionTtlHours` from its creation.
+      // session never outlives `sessionTtlHours` from its creation. This Plugin
+      // stores SHA-256 hashes of its own tokens in this table and never calls
+      // Better Auth's cookie/bearer session API, because that API persists the
+      // raw token (see docs/design/studio/user-auth.md).
       expiresIn: config.sessionTtlHours * 60 * 60,
       updateAge: config.sessionTtlHours * 60 * 60,
       fields: {
@@ -132,9 +136,6 @@ export function studioAuthOptions(config: StudioAuthConfig): BetterAuthOptions {
     },
     plugins: [
       username({ minUsernameLength: 3, maxUsernameLength: 58 }),
-      // Lets `getSession({ headers })` accept `Authorization: Bearer <token>`,
-      // which is the only credential transport this Plugin's routes use.
-      bearer(),
     ],
     // Lockout is enforced per username by this Plugin so the rule is testable
     // and stored with the user row; Better Auth's IP rate limiter stays off.

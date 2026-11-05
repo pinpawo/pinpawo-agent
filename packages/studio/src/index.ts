@@ -31,6 +31,12 @@ export { StudioPetUnavailableError } from './studioContract';
 export { createStudioStorage } from './storage/studioStorage';
 export { StudioClients, StudioClientError } from './clients/studioClients';
 export type { StudioClient } from './clients/studioClients';
+/**
+ * The lifecycle owner for Plugin hook contributions. `createStudio` uses it
+ * internally; embedding (and tests that wire two Plugins together without a
+ * full Host) need the same semantics, so it is exported.
+ */
+export { StudioPluginHookRegistry } from './studioPluginHooks';
 export type { ClientKeyRow, ClientRow, ClientStore } from './clients/store/clientStore';
 export { KyselyClientStore, clientMigrations, type ClientDatabase } from './clients/store/kysely';
 export type {

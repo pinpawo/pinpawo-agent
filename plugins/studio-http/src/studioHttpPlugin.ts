@@ -58,8 +58,10 @@ const CLIENT_BUILTIN_ROUTES = new Set(['GET /me', 'GET /pets']);
 /** Capabilities a `pps_` key or a JWT client holds: today's Channel-only access. */
 const DEFAULT_CLIENT_CAPABILITIES: readonly string[] = ['channel.read', 'channel.write'];
 /**
- * Built-in routes that a client may reach when it holds the capability. A
- * capability is additive: it never widens what the local token may do.
+ * Built-in routes a `client`-scope principal may reach when it holds the named
+ * capability. This table is the only place where a capability widens scope: it
+ * exists so a login session or a key can be granted one Studio capability
+ * (dispatch, events, ...) without becoming a full Studio token.
  */
 const BUILTIN_ROUTE_CAPABILITIES: Readonly<Record<string, string>> = {
   'POST /dispatch': 'studio.dispatch',
@@ -126,8 +128,9 @@ export type StudioHttpRoute = {
    */
   authorization?: 'studio' | 'client' | 'route';
   /**
-   * When set, the route is reachable by any principal holding this capability
-   * (the scope rule above is then not applied); missing capability is `403`.
+   * An extra requirement on top of the scope rule above: the caller must also
+   * hold this capability. It never widens the scope rule, so a `studio` route
+   * that names a capability stays unreachable for `client`-scope credentials.
    */
   capability?: string;
   handle: (
@@ -404,6 +407,11 @@ function jsonResponse(context: StudioHttpContext, status: number, value: unknown
   if (serialized === undefined) throw new Error('Studio HTTP JSON response is not serializable.');
   const headers = new Headers(context.res.headers);
   headers.set('Content-Type', 'application/json; charset=utf-8');
+  // 204/304 must not carry a body: a route can say "done, nothing to return".
+  if (status === 204 || status === 205 || status === 304) {
+    headers.delete('Content-Type');
+    return new Response(null, { status, headers });
+  }
   return new Response(`${serialized}\n`, { status, headers });
 }
 
@@ -534,10 +542,19 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     }
     const client = await clients?.authenticate(token);
     if (client) return { clientId: client.clientId, scope: 'client' };
-    // Credentials owned by another Plugin (for example a login session).
+    // Credentials owned by another Plugin (for example a login session). A
+    // verifier that throws is answering "not mine", not "this request failed":
+    // an unreachable Plugin must not turn someone else's 401 into a 500.
     for (const authenticator of authenticators) {
-      const principal = await authenticator.verify(token);
-      if (principal) return principal;
+      try {
+        const principal = await authenticator.verify(token);
+        if (principal) return principal;
+      } catch (error) {
+        console.error(
+          '[studio-http] credential verifier failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
     return undefined;
   }
@@ -598,20 +615,31 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         requestContext.header('WWW-Authenticate', 'Bearer');
         return requestContext.json({ error: 'Unauthorized.' }, 401);
       }
-      const capability = route?.capability
-        ?? BUILTIN_ROUTE_CAPABILITIES[`${requestContext.req.method} ${requestContext.req.path}`];
-      if (capability !== undefined) {
-        // An explicit capability is the whole rule: whoever holds it may call the route.
-        if (!hasCapability(principal, capability)) {
+      const routeKey = `${requestContext.req.method} ${requestContext.req.path}`;
+      // Only the built-in table may widen the scope rule; a route that declares
+      // its own capability merely adds a requirement (see StudioHttpRoute).
+      const widening = route?.capability === undefined ? BUILTIN_ROUTE_CAPABILITIES[routeKey] : undefined;
+      const capability = route?.capability ?? widening;
+      // Built-in routes are the global Studio API; only client routes are open to other clients.
+      const scopeAllows = principal.scope === 'studio'
+        || route?.authorization === 'client'
+        || CLIENT_BUILTIN_ROUTES.has(routeKey);
+      if (!scopeAllows && !(widening !== undefined && hasCapability(principal, widening))) {
+        // A credential that declares capabilities is told which one it is
+        // missing; a key or JWT gets the answer it always got.
+        if (widening !== undefined && principal.capabilities) {
           return requestContext.json(
-            { error: `This client lacks the "${capability}" capability.` },
+            { error: `This client lacks the "${widening}" capability.` },
             403,
           );
         }
-      } else if (principal.scope !== 'studio' && route?.authorization !== 'client'
-        // Built-in routes are the global Studio API; only client routes are open to other clients.
-        && !CLIENT_BUILTIN_ROUTES.has(`${requestContext.req.method} ${requestContext.req.path}`)) {
         return requestContext.json({ error: 'This client may not use this route.' }, 403);
+      }
+      if (capability !== undefined && !hasCapability(principal, capability)) {
+        return requestContext.json(
+          { error: `This client lacks the "${capability}" capability.` },
+          403,
+        );
       }
       requestContext.set('principal', principal);
       await next();

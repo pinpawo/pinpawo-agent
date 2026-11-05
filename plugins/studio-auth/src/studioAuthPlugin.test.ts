@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -27,7 +28,7 @@ const PASSWORD = 'correct-horse-battery-staple';
  * A Plugin running against a throwaway SQLite database, with the two HTTP
  * extension points it consumes captured instead of attached to a live server.
  */
-async function harness(options: CreateStudioAuthPluginOptions = {}) {
+async function harness(options: CreateStudioAuthPluginOptions = {}, autoStart = true) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   const clients = new StudioClients(async () => new KyselyClientStore(
     await storage.open<ClientDatabase>('clients', clientMigrations),
@@ -80,17 +81,17 @@ async function harness(options: CreateStudioAuthPluginOptions = {}) {
   };
 
   const plugin = createStudioAuthPlugin({ secret: SECRET, ...options });
-  await plugin.start(context);
+  if (autoStart) await plugin.start(context);
   /** The Plugin's own tables, read through a handle that applies no migrations. */
   const inspect = async () => storage.open<StudioAuthDatabase>('test_inspector', {});
 
   async function call(
     route: string,
-    input: { body?: unknown; token?: string } = {},
+    input: { body?: unknown; token?: string; headers?: Record<string, string> } = {},
   ): Promise<{ status: number; body: unknown }> {
     const registered = routes.get(route);
     assert.ok(registered, `route ${route} is not registered`);
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...input.headers };
     if (input.token) headers.authorization = `Bearer ${input.token}`;
     const request = {
       url: new URL(`http://127.0.0.1:3211${registered.path}`),
@@ -112,6 +113,8 @@ async function harness(options: CreateStudioAuthPluginOptions = {}) {
   });
 
   return {
+    context,
+    storage,
     plugin,
     routes,
     authenticators,
@@ -208,7 +211,10 @@ test('a disabled user cannot sign in and loses the sessions they already hold', 
 
   assert.equal((await h.call('GET /auth/me', { token: token.token })).status, 401);
   const denied = await h.login('linus');
-  assert.equal(denied.status, 403);
+  // Same answer as a wrong password: a disabled account is not a probe for
+  // which usernames exist.
+  assert.equal(denied.status, 401);
+  assert.deepEqual(denied.body, { error: 'Invalid username or password.' });
 
   assert.equal((await h.call('POST /users/disable', { body: { userId, disabled: false } })).status, 200);
   assert.equal((await h.login('linus')).status, 200);
@@ -315,4 +321,113 @@ test('without an HTTP route the Plugin still owns the tables but registers nothi
   const db = await h.inspect();
   const users = await db.selectFrom('studio_auth_user').selectAll().execute();
   assert.deepEqual(users, []);
+});
+
+test('the database keeps only the SHA-256 of a session token', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+  await h.createUser('shafi');
+  const { token } = (await h.login('shafi')).body as { token: string };
+
+  const db = await h.inspect();
+  const rows = await db.selectFrom('studio_auth_session').selectAll().execute();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.token, createHash('sha256').update(token).digest('hex'));
+  assert.ok(!JSON.stringify(rows).includes(token));
+
+  // A stolen row is not a credential either: presenting the hash does nothing.
+  assert.equal((await h.call('GET /auth/me', { token: rows[0]!.token })).status, 401);
+});
+
+test('a session dies at its absolute lifetime and after an idle period', async (t) => {
+  const h = await harness({ sessionTtlHours: 1, idleTimeoutMinutes: 30 });
+  t.after(h.stop);
+  await h.createUser('ada2');
+  const db = await h.inspect();
+
+  const expired = (await h.login('ada2')).body as { token: string };
+  await db.updateTable('studio_auth_session')
+    .set({ expires_at: new Date(Date.now() - 1_000).toISOString() })
+    .execute();
+  assert.equal((await h.call('GET /auth/me', { token: expired.token })).status, 401);
+  // The dead session is removed, not just refused.
+  assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), []);
+
+  const idle = (await h.login('ada2')).body as { token: string };
+  await db.updateTable('studio_auth_session')
+    .set({ updated_at: new Date(Date.now() - 31 * 60_000).toISOString() })
+    .execute();
+  assert.equal((await h.call('GET /auth/me', { token: idle.token })).status, 401);
+  assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), []);
+});
+
+test('parallel wrong passwords cannot slip under the lockout', async (t) => {
+  const h = await harness({ maxFailedAttempts: 2 });
+  t.after(h.stop);
+  await h.createUser('hopper');
+
+  const attempts = await Promise.all(Array.from({ length: 5 }, () => h.login('hopper', 'wrong-password-entirely')));
+  assert.ok(attempts.every((attempt) => attempt.status === 401 || attempt.status === 429));
+  // The counter never loses an increment, so the real password is refused too.
+  assert.equal((await h.login('hopper')).status, 429);
+});
+
+test('a failing audit write does not fail the request', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+  await h.createUser('lamarr');
+  const db = await h.inspect();
+  await db.schema.dropTable('studio_auth_audit').execute();
+
+  assert.equal((await h.login('lamarr')).status, 200);
+});
+
+test('a failed start releases everything and can be retried', async (t) => {
+  const h = await harness({}, false);
+  t.after(h.stop);
+
+  const unavailable: StudioPluginContext = {
+    ...h.context,
+    storage: {
+      dialect: 'sqlite',
+      open: async () => { throw new Error('storage is unavailable'); },
+    },
+  };
+  await assert.rejects(async () => { await h.plugin.start(unavailable); }, /storage is unavailable/);
+  // The retry gets a clean slate: routes register and accounts can be created.
+  await h.plugin.start(h.context);
+  assert.equal((await h.createUser('turing')).status, 201);
+  assert.ok(h.routes.has('POST /auth/login'));
+});
+
+test('the audit trail records the user agent but ignores forwarded addresses by default', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+  await h.createUser('perlis');
+  await h.call('POST /auth/login', {
+    body: { username: 'perlis', password: PASSWORD },
+    headers: { 'user-agent': 'studio-test/1.0', 'x-forwarded-for': '10.0.0.9' },
+  });
+
+  const db = await h.inspect();
+  const rows = await db.selectFrom('studio_auth_audit').selectAll().execute();
+  const login = rows.find((row) => row.action === 'login' && row.result === 'ok');
+  assert.equal(login?.user_agent, 'studio-test/1.0');
+  // Nothing in front of this Plugin is trusted, so the header is not evidence.
+  assert.equal(login?.remote_addr, null);
+});
+
+test('a trusted proxy makes the forwarded address auditable', async (t) => {
+  const h = await harness({ trustProxy: true });
+  t.after(h.stop);
+  await h.createUser('cocke');
+  await h.call('POST /auth/login', {
+    body: { username: 'cocke', password: PASSWORD },
+    headers: { 'x-forwarded-for': '10.0.0.9, 10.0.0.1' },
+  });
+
+  const db = await h.inspect();
+  const rows = await db.selectFrom('studio_auth_audit').selectAll().execute();
+  const login = rows.find((row) => row.action === 'login' && row.result === 'ok');
+  assert.equal(login?.remote_addr, '10.0.0.9');
 });

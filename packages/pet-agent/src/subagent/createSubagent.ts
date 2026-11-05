@@ -1,5 +1,6 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
-import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { getAgentMessageMetadata, setAgentMessageMetadata } from '../agent/messages/metadata';
 import { getInteropZodObjectShape, isInteropZodObject } from '@langchain/core/utils/types';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
@@ -18,6 +19,7 @@ import type {
 import type { GuardDecisionRecord } from '../guards';
 import {
   createAgent,
+  createMiddleware,
   modelCallLimitMiddleware,
   summarizationMiddleware,
   type AnyAgentMiddleware,
@@ -35,6 +37,7 @@ import {
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
+import { SUBAGENT_BUDGET_HANDOFF_PROMPT } from './prompts/templates/budgetHandoff.prompt';
 import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
@@ -69,6 +72,7 @@ export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
  */
 export const SUBAGENT_OPERATIONS_EVENT = 'subagent_operations';
 export const SUBAGENT_PROMPT_SECTIONS_EVENT = 'subagent_prompt_sections';
+export const SUBAGENT_BUDGET_HANDOFF_EVENT = 'subagent_budget_handoff';
 
 function readResultMessages(result: unknown): BaseMessage[] | null {
   if (
@@ -189,11 +193,19 @@ function createSubagentSummarizationMiddleware(
   }));
 }
 
-function createSubagentModelCallBudget(maxIterations: number) {
+function isBudgetNotice(message: BaseMessage | undefined): message is ToolMessage {
+  return !!message && ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status'
+    && getAgentMessageMetadata(message).synthetic === true
+    && getAgentMessageMetadata(message).runtimeNotice === 'subagent_budget';
+}
+
+function createSubagentModelCallBudget(maxIterations: number, invocationId: string) {
   // Preserve the existing disabled/fractional-limit contract. The framework
   // owns the counter in checkpoint state, scoped to this child invocation.
   const runLimit = Number.isFinite(maxIterations) && maxIterations > 0
     ? Math.floor(maxIterations) : undefined;
+  const handoffCalls = runLimit ? Math.min(10, Math.ceil(runLimit * 0.1)) : 0;
   const limiter = modelCallLimitMiddleware({ runLimit, exitBehavior: 'end' });
   const beforeModel = limiter.beforeModel!;
   const checkBudget = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
@@ -203,8 +215,8 @@ function createSubagentModelCallBudget(maxIterations: number) {
   // override it or add a thread-wide limit.
   limiter.contextSchema = undefined;
   limiter.beforeModel = undefined;
-  // afterModel hooks run in reverse order. Install the framework's counter
-  // separately at the end, before Review can interrupt or jump to the model.
+  // afterModel hooks run in reverse order: handoff handles notification-only
+  // steps first; the native counter then records real rounds before Review.
   const counter = { ...limiter, name: 'SubagentIterationCounter', afterAgent: undefined };
   limiter.afterModel = undefined;
   limiter.wrapModelCall = async (request, handler) => {
@@ -216,6 +228,40 @@ function createSubagentModelCallBudget(maxIterations: number) {
     });
     const iterationCount = request.state.runModelCallCount + 1;
     const stopped = update?.jumpTo === 'end';
+    const remainingModelCalls = runLimit === undefined ? undefined : runLimit - request.state.runModelCallCount;
+    if (!stopped && remainingModelCalls !== undefined
+      && (remainingModelCalls === handoffCalls || remainingModelCalls === 1)) {
+      const phase = remainingModelCalls === 1 ? 'finalize' : 'prepare';
+      const callId = `runtime-budget:${invocationId}:${phase}`;
+      if (!request.state.messages.some(message => message.id === `${callId}:result`)) {
+        const data = { iteration: iterationCount, maxIterations: runLimit!, remainingModelCalls, phase };
+        const metadata = { synthetic: true, runtimeNotice: 'subagent_budget' };
+        const notification = [
+          setAgentMessageMetadata(new AIMessage({
+            id: `${callId}:call`, content: '',
+            tool_calls: [{ id: callId, name: 'runtime_budget_status', args: {}, type: 'tool_call' }],
+          }), metadata),
+          setAgentMessageMetadata(new ToolMessage({
+            id: `${callId}:result`, name: 'runtime_budget_status', tool_call_id: callId,
+            status: 'success', content: JSON.stringify({
+              ...data,
+              instruction: SUBAGENT_BUDGET_HANDOFF_PROMPT.render({
+                remainingModelCalls: String(remainingModelCalls),
+                maxIterations: String(runLimit),
+                finalInstruction: phase === 'finalize'
+                  ? 'This is your final call. Return the handoff text now using the evidence already gathered. Further tool calls will not execute.'
+                  : 'Finish only essential work that fits the remaining budget, then return the handoff without further tool calls.',
+              }),
+            }),
+          }), metadata),
+        ];
+        writeSubagentRuntimeEvent(SUBAGENT_BUDGET_HANDOFF_EVENT, data);
+        // Commit the whole pair before calling the model, including when Review
+        // Respond jumps past beforeModel. Handoff routes this step back to
+        // the model without counting it or dispatching the synthetic call.
+        return new Command({ update: { messages: notification } });
+      }
+    }
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, {
       guard: 'subagent_iteration_limit',
       position: 'subagent.before_model_iteration',
@@ -233,9 +279,42 @@ function createSubagentModelCallBudget(maxIterations: number) {
         update: { messages: update.messages },
       });
     }
-    return handler(request);
+    const response = await handler(request);
+    if (iterationCount === runLimit && AIMessage.isInstance(response)
+      && (response.tool_calls?.length || response.invalid_tool_calls?.length
+        || (Array.isArray(response.additional_kwargs.tool_calls) && response.additional_kwargs.tool_calls.length))) {
+      // A provider or caller middleware can ignore the final-call restriction. Never
+      // execute another operation with the call reserved for the handoff, or
+      // persist unmatched tool calls as if they were a valid delivery.
+      const notice = markSubagentGuardStop(new AIMessage({
+        content: 'The final budgeted model call did not return a text handoff.',
+        usage_metadata: response.usage_metadata,
+      }), 'subagent_iteration_limit_reached');
+      // Replace the invalid response with a terminal notice, without keeping
+      // an unpaired tool call in this invocation's messages.
+      return notice;
+    }
+    return response;
   };
-  return { guard: limiter, counter };
+  // Keep definitions stable for prefix caching. The local guard remains the
+  // enforcement boundary if a provider ignores the tool-choice restriction.
+  const handoff = createMiddleware({
+    name: 'SubagentBudgetHandoff',
+    stateSchema: limiter.stateSchema,
+    afterModel: {
+      hook: (state) => {
+        // This step only committed the notice. Skip the counter and Review,
+        // then re-enter the model with the persisted pair in its input.
+        if (isBudgetNotice(state.messages.at(-1))) return { jumpTo: 'model' as const };
+      },
+      canJumpTo: ['model'],
+    },
+    wrapModelCall: (request, handler) => {
+      const finalCall = runLimit !== undefined && request.state.runModelCallCount === runLimit - 1;
+      return handler(finalCall ? { ...request, toolChoice: 'none' } : request);
+    },
+  });
+  return { guard: limiter, counter, handoff };
 }
 
 function writeSubagentRuntimeEvent(name: string, data: unknown) {
@@ -306,13 +385,15 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   validateSystemPromptSections(systemPromptSections);
   const systemPrompt = composeSystemPrompt(new SystemMessage(''), {}, frameworkSections);
   const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
-  const iterationBudget = createSubagentModelCallBudget(maxIterations);
+  const iterationBudget = createSubagentModelCallBudget(maxIterations,
+    runtimeContext.executionScope?.delegationId ?? inputState.messages.at(-1)?.id ?? randomUUID());
   const middleware: AnyAgentMiddleware[] = [
     contextSummaryMiddleware,
     iterationBudget.guard,
     ...(input.middleware ?? []),
     createSystemPromptMiddleware(inputState.promptSections),
     iterationBudget.counter,
+    iterationBudget.handoff,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
   assertSubagentStateSchema(input.stateSchema, middleware);
 

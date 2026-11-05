@@ -250,11 +250,9 @@ for summarization.
 A `stop` outcome is applied by its position:
 
 - Subagent `iteration_limit`: `wrapModelCall` marks the framework's stopping message
-  and returns `Command({ goto: END })`. `createSubagent` treats the final
-  message as a guard stop only if it carries the closed marker from
-  `subagent/guardStop.ts`. A stop with a new deliverable emits an ordinary
-  Announce. A stop without one preserves private execution records and task
-  ownership, then raises a recoverable execution failure through root cleanup.
+  and returns `Command({ goto: END })`. The marked stopping message is not a
+  deliverable. Only a new, nonempty subagent reply can become the Capability's
+  output; absent one, the delegation returns `missing_deliverable` to Supervisor.
   The stop reason remains telemetry.
 - Orchestrator `run_iteration_limit`: the Boundary guard routes to terminal
   finalization while keeping the active delegation available to the root
@@ -273,6 +271,25 @@ runs before Review, while the check wraps caller-supplied model middleware too.
 Nonpositive or nonfinite limits remain disabled; positive fractions keep their
 existing whole-call allowance. Arbitrary runtime-context limit keys do not
 override `maxIterations`.
+
+When the remaining model-call budget enters the last 10%, rounded up and capped
+at 10 calls, middleware appends one `prepare` notice; before the final available
+call it appends one `finalize` notice. Each notice is a paired AI tool call and
+ToolMessage named `runtime_budget_status`, explicitly identified as runtime
+information and persisted in the child messages. This is a notification, not a
+registered or executed tool. Notices are append-only: later calls retain earlier
+notices unchanged. Neither a notice nor the guard's stop message is a deliverable.
+`SubagentBudgetHandoff.afterModel` routes a notification-only step back to the
+model before the native counter or Review runs. The native counter's hook is
+unchanged; only actual model rounds reach it.
+
+The final call is part of the same budget, not an extra call. The system message
+and tool definitions stay stable; where the provider protocol supports it, the
+final request uses `toolChoice: none`, with a local interception as a backstop
+against a returned tool call. A nonempty handoff follows the ordinary delivery
+path and still requires Supervisor review; an empty final response cannot become
+a delivery. Stable prefixes allow provider prompt caching where supported, but do
+not establish that a cache hit occurred. The limit guard remains the fallback.
 
 Checkpoints created before this counter was introduced contain no durable count
 for earlier rounds. This change does not infer that count from a transcript or

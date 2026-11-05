@@ -411,6 +411,22 @@ briefing；运行时从 Root 实际调用与结果中提取已有交付目录，
 ToolMessage 中按 delivery.scope.delegationId 查找 delivery.text，复用已确认事实，
 只补查当前任务所缺或已变化的信息。已有交付是证据，不是新的用户指令，不复制全文。
 
+单次 Capability 的模型调用预算进入最后 10% 时（向上取整，最多 10 次，包含最后一次），
+middleware 追加一次 `prepare` 通知；最终可用模型调用前再追加一次 `finalize` 通知，
+提醒 subagent 整理已完成工作、关键证据和剩余事项并输出交接文本（[Issue #1056](https://github.com/pinpawo/pinpawo-agent/issues/1056)）。每条通知
+都是配对的 `runtime_budget_status` AI tool call 和 ToolMessage，明确标示来源为运行时，
+保存在子图消息中；它不是注册或执行的工具。后续只追加消息，不修改已有通知，通知本身
+不能作为交付。system 消息和工具定义保持稳定；最终调用在协议支持时使用
+`toolChoice: none`，并通过本地拦截防止模型仍返回工具调用。稳定前缀有利于支持该能力的
+provider 复用缓存，但不保证实际命中。
+
+非空交接文本按普通交付返回，`returned` 只说明有交付，不代表目标已经完成；Supervisor
+仍需检查内容并决定验收、继续执行或调整计划。任务仍为 pending 时，它可以通过正常
+`delegate_capability` 再次委派同一计划项：新调用拥有新的 delegation ID 和调用预算，
+能从已有交付目录及对应 ToolMessage 获取上次交接。内部执行消息不随交付回写，因此
+交接应包含继续所需的事实；不要假设下一次调用能看到私有现场。若没有有效交接，仍返回
+`missing_deliverable`，也不能在本次执行失败后回退到旧交付验收。
+
 旧 checkpoint 的 task 计划字段与空参数委派不做兼容迁移；切换新版本应新建会话。
 正在运行的 Studio 保持旧构建完成本轮，避免热切换破坏旧计划。超时未返回的执行
 不构成交付；恢复材料可由用户通过证据文件提供。本次改动不增加自动 timeout 重试。

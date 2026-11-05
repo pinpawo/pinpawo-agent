@@ -133,6 +133,20 @@ Channel 向名为 `http` 的 Plugin 贡献 `/channels` 的 Channel、成员、�
 Plugin 启动顺序不影响挂载；任一方停止时，Studio 托管的 hook lifecycle 移除 route。
 HTTP 不读取 Channel 数据库，也不拥有领域状态或恢复机制。
 
+### `authenticators` hook 与 capability
+
+凭证类型不止本机 token / 客户 key / JWT 三种时（例如 `studio-auth` 的用户会话），插件可以贡献一个
+校验器：`hooks.contribute('http', 'authenticators', hook => hook.register({ verify }))`。`authenticate()`
+的顺序是本机 token → JWT → 客户 key → 贡献的校验器，返回 `undefined` 表示"不是我的凭证"。
+
+route 可以声明 `capability`（如 `studio.dispatch`）。声明后这条 route 的判定只剩这一条规则：持有该
+capability 的 principal 可以调用，否则 `403`；内置路由同样带 capability（`POST /dispatch` →
+`studio.dispatch`、`GET /dispatch/queues` → `studio.view`、`GET /events` →
+`studio.events`、`/pet-sessions/*` → `pet.session`、`/pets*` 与 `/pet-definitions` →
+`studio.manage`）。`GET /me` 只在凭证自己声明了 capabilities 时才多返回这个字段；
+本机 token、客户 key、JWT 的响应与 principal 形状保持不变（`studio` 全权，`client` 等价于
+`channel.read` + `channel.write`）。
+
 ### 外部 JWT
 
 配置 `jwt.issuers` 后，别的系统签发的 JWT 也能当 Bearer 用。每个签发者写明 `issuer`（精确匹配 `iss`）、

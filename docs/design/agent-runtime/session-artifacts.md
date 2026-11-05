@@ -2,7 +2,7 @@
 
 状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
 
-本轮修订待 review（2026-11-04）：只重新讨论引用的传递、聚合位置和保证范围；显式发布、稳定引用、运行时隔离、文件共享、存储接口与工具契约保持。下述候选方案尚未定案。
+本轮修订待 review（2026-11-05）：对齐两种引用来源、Capability 统一返回和消息压缩时的保留方式。保留原执行记录、职责分层、显式发布、稳定引用、运行时隔离、文件共享、存储接口与工具契约；自然语言判断如何形成交付声明仍待确认，不在本次修订中改掉原契约。
 
 ## 需求
 
@@ -50,7 +50,7 @@
 | 层 | 负责 |
 |---|---|
 | agent-contracts | `Deliverable` 类型与工具结果里 `deliverables` 的 schema；`ArtifactRef`、`artifact://` 解析 |
-| pet-agent 核心 | 沿现有工具和子代理返回路径传递交付物引用；汇总位置见[本轮讨论](#本轮待-review聚合位置与保证范围)。不认识 artifact store。 |
+| pet-agent 核心 | 沿现有 Capability 返回路径汇总交付物引用，写进 `delegate_capability` 的执行记录。不认识 artifact store。 |
 | artifacts Toolkit（独立包，如 `toolkits/artifacts`） | `ArtifactStore` 与 `ArtifactSourceReader` 两个 port；`publish_artifact` / `list_artifacts` / `download_artifact` 三个工具 |
 | Host | 注入 store adapter（local / COS）与 source reader；把本 run 的交付物挂到 `message.completed`；HTTP 打开引用；可选的 session 产物段落 |
 | agent-session 协议 | `message.completed.deliverables` 与 snapshot 里对应字段 |
@@ -69,19 +69,19 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 
 1. 只有工具声明的才算交付物。模型是否调用 `publish_artifact` 不能保证；能保证的是调用了就一定记下。没发布的情况靠 toolkit instructions 引导，由 Supervisor 验收把关（要求交付文件但没有交付物，判为未完成）。
 2. schema 在工具侧校验，格式不对在工具返回前报错，不静默忽略。
-3. 同一委派的多轮尝试累加，同一 uri 去重。原方案在工具结果产生时收集，避免结束时扫描受 Capability 压缩影响；本轮将这一实现取舍重新列为[待讨论](#本轮待-review聚合位置与保证范围)，不预设独立 state。
+3. 沿现有 Capability 返回路径汇总引用，写入执行记录；同一委派的多轮尝试累加，同一 uri 去重。消息压缩保留包含引用的完整工具调用及结果组，见[本轮对齐](#本轮对齐引用来源与统一返回)。不要求新增独立的 `state.deliverables` 或 reducer。
 4. 和委派结果状态无关：被拒绝或取消的委派，已声明的交付物照样记录。
 5. 只在 Capability 执行中产生；Entry 和 Supervisor 只调控制类工具。
 
-原方案将执行记录扩为 `{ status, delivery: { text }, deliverables }`，供 Supervisor 验收和 Entry 回复读取，和正文是否写了链接无关。是否沿用这份汇总、或传递相关工具结果后再聚合，随下述方案一起 review。
+执行记录变为 `{ status, delivery: { text }, deliverables }`。Supervisor 验收和 Entry 回复时看到的是这份数据，和正文是否写了链接无关。
 
 ## 交付物链路
 
-原方案沿用现有的 `resultReferences` 路径：Host 的 `readReplyResultReferences`（`services/host/src/conversation/transcriptProjection.ts`）从回复所属 run 的执行记录取出 delivery，挂到 `message.completed`，再进 snapshot 和 Console。保留这条链路作为设计基线；聚合位置待本轮 review 确认：
+沿用现有的 `resultReferences` 路径：Host 的 `readReplyResultReferences`（`services/host/src/conversation/transcriptProjection.ts`）从回复所属 run 的执行记录取出 delivery，挂到 `message.completed`，再进 snapshot 和 Console。交付物在这条路上多带一个字段：
 
 ```text
 工具结果 ToolMessage.artifact.deliverables
-  -> delegate_capability 执行记录 deliverables          （原方案：工具结果产生时收集）
+  -> delegate_capability 执行记录 deliverables          （沿 Capability 现有返回路径汇总）
   -> message.completed.deliverables                       （Host readReplyDeliverables）
   -> Channel 消息 deliverables                            （Channel recordPetMessage 原样存）
   -> Console / TUI 渲染
@@ -92,26 +92,28 @@ type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> }
 - Channel 的旧 `artifacts` 输入、消息类型和展示已在清理阶段删除。后续新增 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"，人发的消息也可以带；Console / TUI 为新字段增加渲染。旧消息 JSON 不迁移或重写。
 - 尽量沿用现有事件和存储路径；执行选取规则确定后，补齐对应的结构化投影。
 
-### 本轮待 review：聚合位置与保证范围
+### 本轮对齐：引用来源与统一返回
 
-引用汇总只处理工具返回的引用，不需要知道文件如何存放。`ToolMessage.artifact.deliverables` 仍是声明契约；原稿没有指定独立的 `state.deliverables`、reducer 或收集框架。
+两种来源在 Capability 执行结束、返回上一层时统一交付：
 
-当前 main（`29f0bec9`）有两处传递边界：
+| 来源 | 交付前的处理 |
+|---|---|
+| 其他工具生成本地文件 | Agent 根据任务、调用参数和工具输出判断哪些需要交付；需要整理时使用现有文件工具，再由 `publish_artifact(path, title?)` 保存快照并返回引用。生成工具不必都理解附件协议。 |
+| 其他工具已经返回 URL | 例如创建 PR，或工具自行上传 COS 后返回地址；沿用已有 URL，不要求下载后重新发布，也不要求这些工具使用同一个 store。 |
 
-- [createSubagent](../../../packages/pet-agent/src/subagent/createSubagent.ts) 返回最新 `messages`；[Capability runner](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts) 当前只将文字输出做成 `delivery.text`，没有把子工具结果传给父 `delegate_capability` ToolMessage。answer 当前不能直接扫描到未转交的子消息。
-- 工具实时流里已有 ToolMessage；[Host normalizer](../../../services/host/src/events/agentStreamNormalizer.ts) 通常取出 `content`，前端收到的是 `operation.raw.output`。正文链接已经能到达前端，结构化 artifact 则需要明确传递。
+是否值得交付由 Agent 结合自然语言需求和执行上下文判断；类型与 schema 只约束声明格式。这里不增加文件监控，也不要求发布所有生成文件。已有 URL 的访问权限和有效期沿用来源工具的约定，转交引用不会自动续期或赋予访问权限。若来源只提供临时下载地址，仍需对齐上文稳定引用约定，不因统一返回而将其视作长期引用。
 
-以下都是候选，不在本文提前选择：
+统一返回沿用当前代码的位置，不增加 Agent 角色或框架概念。当前 main（`29f0bec9`）的实际边界是：
 
-| 候选 | 最小接线 | 聚合范围 |
-|---|---|---|
-| 子代理返回时取引用，最终回复统一聚合 | 从仍保留的子工具结果提取引用，随现有父 ToolMessage 返回；沿回复投影汇总 | 当前返回的结果；无需先增加独立 state |
-| 到 answer 才扫描相关工具结果 | 先把相关结果结构带进父 ToolMessage，再在最终回复组装处扫描；不必复制整段私有日志 | 实际传到回复阶段的结果；不限定只改 Entry 节点 |
-| 前端聚合工具事件 | 可先识别现有正文链接；若需要精确的声明集合，再透传声明引用 | 本次接收到的过程结果；是否成为最终公开交付另行确认 |
+- [createSubagent](../../../packages/pet-agent/src/subagent/createSubagent.ts) 返回最新 `messages` 和文字 `output`；[Capability 执行函数 `createCapabilityExecutor`](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts) 当前只将文字输出做成 `delivery.text`，没有把子工具引用传给父 `delegate_capability` ToolMessage。这里的 `runner.ts` 只是实现文件名；该函数负责调用子代理、整理返回结果，本身不理解自然语言或判断哪些链接值得交付。
+- [delegate_capability](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/delegateCapabilityTool.ts) 已将执行结果写成父层 ToolMessage；在这份结果中一并传递引用，就是同一个返回出口。answer 当前不能直接扫描到未转交的子消息。
+- 工具实时流里已有 ToolMessage；[Host normalizer](../../../services/host/src/events/agentStreamNormalizer.ts) 通常取出 `content`，前端收到的是 `operation.raw.output`。过程展示可以复用这些事件，但不替代执行记录、最终回复和 Channel 的交付链路；当前 snapshot 不会重建原始工具历史。
 
-当前 Capability 压缩会用摘要和保留尾部替换 `messages`；结束时扫描取不到已移除的结构化结果。前端工具 operation 是实时数据，当前 snapshot 不会重建原始工具历史。这些是候选方案的实际边界，不据此自动增加跨压缩、重连或长期恢复机制。
+消息压缩的方向已确认：保留包含交付引用的完整工具调用及结果组，包括发起调用的 AIMessage、该组对应的全部 ToolMessage，以及原始 `content` 和 `artifact`。同一 AIMessage 发起多个调用时保留整组，不留下孤立结果或缺少结果的调用。其他上下文仍可摘要；引用所在组不只用摘要替代，再在 Capability 返回时从保留的结果汇总。当前 Capability 压缩只按摘要和尾部保留，这项调整尚未实现。
 
-review 需确认：本阶段先聚合实际返回或观察到的结果，还是继续要求原方案的完整记录范围；选择后再确定是否需要额外保留，以及保留在哪里。过程中的引用展示与原目标中的最终回复、Channel 交付分别确认，不将前端实时展示自动视为整条链路完成。未确认前，上述已确认目标和声明契约保持，也不把保证范围默认扩大。
+仍待确认的是声明方式：原契约由工具在 `ToolMessage.artifact.deliverables` 中声明。若自上传工具只返回自然语言 URL，是否允许 Capability 子代理根据上下文在最终交付时整理并声明引用，仍需 review；这会调整“只有工具声明才算”的规则及校验位置，不能视为现成能力。本文不提前新增链接登记工具，也不改成系统从任意正文自动识别交付物。
+
+本次保留 `{ status, delivery: { text }, deliverables }` 和最终公开传递契约，不改成仅依赖自然语言正文。若以后决定只在正文中携带链接，需要另行确认对“正文未写链接也能交付”和独立附件展示目标的调整。被打回执行不随回复公开仍是既定目标；实现时需把现有验收结论与选定执行对应，不把 `returned` 当作验收通过，也不另造验收状态机。
 
 ## artifacts Toolkit
 
@@ -193,7 +195,7 @@ Channel 后续新增 `deliverables`（见[交付物链路](#交付物链路)）�
 ## 实现顺序
 
 1. 删除旧 pipeline（一个 PR）。改 prompt 后重跑受影响的 Supervisor eval。
-2. 先 review 本轮的聚合位置与保证范围，再补齐 `Deliverable` / schema 及必要的消息传递；不提前绑定独立 state 或工具拦截机制。
+2. review 本轮的声明方式；沿 Capability 现有返回路径补齐引用汇总、执行记录与 prompt，并让消息压缩保留含引用的完整调用及结果组。本轮不预设独立 state 或工具拦截机制。
 3. 交付物链路：`message.completed.deliverables`、Channel 新增字段、Console / TUI 渲染。
 4. artifacts Toolkit 与 Host `local` adapter、source reader。
 5. HTTP 打开引用。

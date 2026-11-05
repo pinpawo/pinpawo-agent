@@ -110,6 +110,7 @@ async function harness(startOrder: 'http-first' | 'auth-first' = 'http-first') {
     clients,
     storage,
     registry,
+    base,
     call,
     createUser,
     login,
@@ -238,4 +239,34 @@ test('a verifying Plugin that throws answers 401, not 500', async (t) => {
   // An unknown credential is a 401, not a 500 leaking an internal failure.
   const unknown = await h.call('GET', '/pets', { token: 'not-a-known-credential-value' });
   assert.equal(unknown.status, 401);
+});
+
+test('a malformed login request keeps its 400/415 contract instead of a 500', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+
+  const malformed = await fetch(`${h.base}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{not json',
+  });
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), { error: 'Request body must contain valid JSON.' });
+
+  const wrongType = await fetch(`${h.base}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: '{"username":"ada","password":"irrelevant"}',
+  });
+  assert.equal(wrongType.status, 415);
+  assert.deepEqual(await wrongType.json(), { error: 'Content-Type must be application/json.' });
+
+  // The administrator routes read a body the same way, so they answer alike.
+  const users = await fetch(`${h.base}/users`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${HOST_TOKEN}`, 'content-type': 'application/json' },
+    body: '{"username":',
+  });
+  assert.equal(users.status, 400);
+  assert.deepEqual(await users.json(), { error: 'Request body must contain valid JSON.' });
 });

@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from 'better-auth/crypto';
 import type { Kysely } from 'kysely';
 
 import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio-core';
+import { HttpRequestError } from '@pinpawo-plugin/studio-http';
 import type {
   StudioHttpAuthenticatorsHook,
   StudioHttpRouteRequest,
@@ -472,6 +473,10 @@ export function createStudioAuthPlugin(
       return error(409, `Studio client "${clientId}" has been revoked.`);
     }
 
+    // The client row comes first: a user without one could never sign in. If
+    // signUpEmail then fails, the leftover client carries no credential and
+    // stays inert until someone retries with the same username.
+    await requireStudio().clients.ensure({ clientId, label: displayName });
     let created: SignUpResult;
     try {
       created = await authApi().signUpEmail({
@@ -491,7 +496,6 @@ export function createStudioAuthPlugin(
     // Better Auth never signs a new account in (autoSignIn: false); clear any
     // session a future default might create so no orphan token survives.
     await repo().deleteSessionsOfUser(created.user.id);
-    await requireStudio().clients.ensure({ clientId, label: displayName });
     await repo().setIdentity(created.user.id, { clientId, capabilities });
     await audit('user.create', 'ok', { request, userId: created.user.id, username, clientId });
     return json(201, { userId: created.user.id, username, clientId, capabilities });
@@ -619,6 +623,9 @@ export function createStudioAuthPlugin(
                     return await route.handle(request);
                   } catch (cause) {
                     if (cause instanceof APIError) return error(cause.statusCode, cause.message);
+                  // A malformed request is the caller's mistake, not a server
+                  // failure: keep the 400/415 the HTTP Plugin already decided.
+                  if (cause instanceof HttpRequestError) return error(cause.status, cause.message);
                     console.error('[studio-auth] route failed:', cause instanceof Error ? cause.message : cause);
                     return error(500, 'Internal server error.');
                   }

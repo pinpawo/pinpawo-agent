@@ -192,12 +192,17 @@ type EventClient = {
   close: () => void;
 };
 
-class HttpRequestError extends Error {
+/**
+ * A request the caller got wrong: the status is part of the HTTP contract, so
+ * route contributors may turn it into a response instead of a generic 500.
+ */
+export class HttpRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
+    this.name = 'HttpRequestError';
   }
 }
 

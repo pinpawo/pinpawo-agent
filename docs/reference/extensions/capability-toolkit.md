@@ -132,6 +132,7 @@ type AgentToolkit = {
   readonly description: string;
   readonly tools: readonly ToolDefinition[];
   readonly instructions?: string;
+  readonly stateSchema?: AnyStateSchema;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
   readonly requires?: Readonly<Record<string, ToolkitRSRequirement>>;
@@ -151,6 +152,10 @@ type ToolDefinition = {
   `instructions` 时允许为 `[]`。工具与说明不能同时为空。
 - `instructions`：工具族的使用规则或共享上下文指引，会进入使用该 Toolkit 的
   subagent system prompt。仅提供说明不会授予文件读取或其他工具能力。
+- `stateSchema`：LangGraph 原生 `StateSchema`，声明工具执行所用的字段、默认值与
+  reducer。Capability 按 `uses` 组合字段；工具通过 `ToolRuntime.state` 读取、
+  `Command` 更新，调用方从 `SubagentResult.state` 读取原生执行结果。
+  字段重名或占用框架字段时装配报错，详见 [Toolkit 执行状态](../../design/toolkits/execution-state.md)。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
 - `requires`：可选的执行环境（RS）依赖声明，只供 Host 装配使用；见

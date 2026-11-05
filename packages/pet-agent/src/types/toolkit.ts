@@ -2,6 +2,7 @@ import {
   isStructuredTool,
   type StructuredTool,
 } from '@langchain/core/tools';
+import { StateSchema, type AnyStateSchema } from '@langchain/langgraph';
 import { wrapToolCancellation } from './toolCancellation';
 
 import type { ToolReviewPolicy, ToolOperationMetadata, ToolkitReviewGuidance } from '../autoReview/policy';
@@ -161,6 +162,8 @@ export type AgentToolkit = {
   /** May be empty when non-blank instructions contribute execution context. */
   readonly tools: readonly ToolDefinition[];
   readonly instructions?: string;
+  /** Native state fields owned by this Toolkit for each Capability execution. */
+  readonly stateSchema?: AnyStateSchema;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
   /**
@@ -244,6 +247,9 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   }
   if (toolkit.instructions !== undefined && typeof toolkit.instructions !== 'string') {
     throw new Error(`Toolkit "${toolkit.name}" instructions must be a string`);
+  }
+  if (toolkit.stateSchema !== undefined && !StateSchema.isInstance(toolkit.stateSchema)) {
+    throw new Error(`Toolkit "${toolkit.name}" stateSchema must be a native StateSchema`);
   }
   if (toolkit.tools.length === 0 && !toolkit.instructions?.trim()) {
     throw new Error(`Toolkit "${toolkit.name}" must define at least one tool or non-empty instructions`);

@@ -1,5 +1,6 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
 import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { getInteropZodObjectShape, isInteropZodObject } from '@langchain/core/utils/types';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
   composeSystemPrompt,
@@ -25,7 +26,7 @@ import {
   markSubagentGuardStop,
   readSubagentGuardStopReason,
 } from './guardStop';
-import { Command, END } from '@langchain/langgraph';
+import { Command, END, StateSchema, type AnyStateSchema } from '@langchain/langgraph';
 import { readReviewStopDecision } from '../agent/orchestrator/interrupt/reviewStop';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 import {
@@ -241,6 +242,33 @@ function writeSubagentRuntimeEvent(name: string, data: unknown) {
   emitRuntimeEventToStreamWriter({ event: 'on_runtime_event', name, data });
 }
 
+function assertSubagentStateSchema(
+  stateSchema: AnyStateSchema | undefined,
+  middleware: AnyAgentMiddleware[],
+) {
+  if (stateSchema === undefined) return;
+  if (!StateSchema.isInstance(stateSchema)) {
+    throw new Error('Subagent stateSchema must be a native StateSchema');
+  }
+  const owners = new Map([
+    'messages', 'jumpTo', 'structuredResponse', ...Object.getOwnPropertyNames(Object.prototype),
+  ].map(field => [field, 'the agent framework']));
+  for (const item of middleware) {
+    const schema = item.stateSchema;
+    const fields = StateSchema.isInstance(schema) ? Object.keys(schema.fields)
+      : isInteropZodObject(schema) ? Object.keys(getInteropZodObjectShape(schema)) : [];
+    for (const field of fields) {
+      if (!owners.has(field)) owners.set(field, `middleware "${item.name}"`);
+    }
+  }
+  for (const field of Object.keys(stateSchema.fields)) {
+    const owner = owners.get(field);
+    if (owner !== undefined) {
+      throw new Error(`Subagent state field "${field}" conflicts with ${owner}`);
+    }
+  }
+}
+
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
   // Stable IDs distinguish this invocation's output and usage from its input.
@@ -286,6 +314,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     createSystemPromptMiddleware(inputState.promptSections),
     iterationBudget.counter,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  assertSubagentStateSchema(input.stateSchema, middleware);
 
   // No checkpointer here: the child inherits the parent's through the runnable
   // config, so its state checkpoints under the parent's namespaced thread and a
@@ -295,6 +324,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     tools: input.tools,
     systemPrompt,
     contextSchema: subagentRuntimeContextSchema,
+    ...(input.stateSchema ? { stateSchema: input.stateSchema } : {}),
     ...(middleware.length > 0 ? { middleware } : {}),
   });
 
@@ -333,6 +363,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   const tokenUsage = readMessagesTokenUsage(invocationMessages);
   const reviewDecision = readReviewStopDecision(invocationMessages.at(-1));
   return {
+    state: result,
     messages: latestMessages, tokenUsage,
     output: reviewDecision ? null : readInvocationOutput(invocationMessages),
     ...(reviewDecision ? { reviewDecision } : {}),

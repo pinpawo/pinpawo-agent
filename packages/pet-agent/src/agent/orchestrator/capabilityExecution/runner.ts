@@ -103,6 +103,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const subagentInput: SubagentRunInput = {
       model: options.models.subagent ?? options.models.act,
       tools: usedResolvedToolkitExecution.tools,
+      stateSchema: usedResolvedToolkitExecution.stateSchema,
       promptSections: [
         {
           id: 'delegation-deliveries',

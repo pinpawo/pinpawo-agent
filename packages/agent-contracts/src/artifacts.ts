@@ -1,8 +1,7 @@
 import { hasOnlyKeys, isJsonObject } from './json';
 
-/** A reference explicitly declared by a tool for delivery to its caller. */
+/** A reference selected for delivery to the caller. */
 export type Deliverable = { uri: string; title?: string };
-export type ToolDeliverables = { deliverables: Deliverable[] };
 
 /** A published file snapshot; download URLs are deliberately not persisted here. */
 export type ArtifactRef = Deliverable & {
@@ -27,12 +26,6 @@ export function parseDeliverables(value: unknown): Deliverable[] {
     throw new Error('Invalid deliverables: expected an array of { uri, title? } references.');
   }
   return value.map(({ uri, title }) => ({ uri, ...(title !== undefined ? { title } : {}) }));
-}
-
-/** Other tool artifact fields remain the owning toolkit's concern. */
-export function readToolDeliverables(artifact: unknown): Deliverable[] {
-  if (!isJsonObject(artifact) || !Object.hasOwn(artifact, 'deliverables')) return [];
-  return parseDeliverables(artifact.deliverables);
 }
 
 /** Resolve a stable reference without URL host normalization or a lookup index. */

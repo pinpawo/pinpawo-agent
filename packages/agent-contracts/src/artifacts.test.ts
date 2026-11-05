@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseArtifactUri, parseDeliverables, readToolDeliverables } from './artifacts';
+import { parseArtifactUri, parseDeliverables } from './artifacts';
 
-test('tool declarations validate independently of tool content and retain exact reference values', () => {
+test('deliverables validate and retain exact reference values', () => {
   const declared = [{ uri: 'https://example.com/PR/1?view=all', title: '' }, { uri: 'artifact://Workspace/session/file/report.pdf' }];
-  assert.deepEqual(readToolDeliverables({ deliverables: declared, ref: { private: true } }), declared);
-  assert.deepEqual(readToolDeliverables({ ref: 'not a declaration' }), []);
-  assert.deepEqual(readToolDeliverables(null), []);
+  assert.deepEqual(parseDeliverables(declared), declared);
+  assert.deepEqual(parseDeliverables([]), []);
   for (const value of [null, {}, 'url', [{ uri: 'relative/path' }], [{ uri: 'https://example.com', title: 1 }], [{ uri: 'https://example.com', extra: true }]]) {
     assert.throws(() => parseDeliverables(value), /Invalid deliverables/);
-    assert.throws(() => readToolDeliverables({ deliverables: value }), /Invalid deliverables/);
   }
 });
 

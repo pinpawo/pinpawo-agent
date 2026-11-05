@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ToolMessage } from '@langchain/core/messages';
-import { readToolDeliverables } from '@pinpawo/agent-contracts';
+import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { SubagentRunInput } from '../../../types/subagent';
@@ -146,12 +145,9 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       runnableConfig,
       signal: runnableConfig?.signal,
     };
-    const inputMessageIds = new Set(scopedMessages.flatMap(message => message.id ? [message.id] : []));
     let result = await runSubagent(subagentInput);
-    const deliverables = result.messages.flatMap(message => ToolMessage.isInstance(message)
-      && !scopedMessages.includes(message) && (!message.id || !inputMessageIds.has(message.id))
-      ? readToolDeliverables(message.artifact) : [])
-      .filter((reference, index, references) => references.findIndex(other => other.uri === reference.uri) === index);
+    const deliverables = Object.hasOwn(result.state, 'deliverables')
+      ? parseDeliverables(result.state.deliverables) : [];
 
     if (!result.reviewDecision && capability.lifecycle?.finalize) {
       const finalized = await capability.lifecycle.finalize(result, {

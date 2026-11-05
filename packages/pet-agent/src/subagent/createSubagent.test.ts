@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -318,35 +318,6 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   assert.match(String(summary.content), /Earlier subagent context summary:/);
   assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
   assert.equal(result.messages.some((message) => message.content === oldContext), false);
-});
-
-test('native summarization can discard old tool groups declaring deliverables', async () => {
-  const result = await createSubagent({
-    model: new FakeListChatModel({ responses: ['Earlier work summarized.', 'Done.'], sleep: 0 }),
-    tools: [], promptSections: [], contextWindowTokens: 1000, maxIterations: 4,
-    messages: [
-      new HumanMessage('Prepare the report.'),
-      new AIMessage({ id: 'old-publication', content: '', tool_calls: [
-        { id: 'publish-call', name: 'publish_artifact', args: { path: 'report.md' } },
-      ] }),
-      new ToolMessage({ id: 'old-reference', tool_call_id: 'publish-call', name: 'publish_artifact',
-        content: 'Published artifact://workspace/session/report/report.md',
-        artifact: { deliverables: [{ uri: 'artifact://workspace/session/report/report.md' }] },
-      }),
-      new HumanMessage(`other investigation\n${'x'.repeat(1600)}`),
-      new AIMessage(`other findings\n${'y'.repeat(1600)}`),
-      new HumanMessage(`verification\n${'z'.repeat(1600)}`),
-      new AIMessage(`verification findings\n${'w'.repeat(1600)}`),
-      new HumanMessage('Finish the delegated task.'),
-    ],
-  });
-
-  assert.ok(result.messages.some(message => message.additional_kwargs?.lc_source === 'summarization'));
-  assert.equal(result.messages.some(message => message.id === 'old-publication'), false);
-  assert.equal(result.messages.some(message => message.id === 'old-reference'), false);
-  assert.equal(result.messages.some(message => ToolMessage.isInstance(message)
-    && message.artifact?.deliverables?.length), false);
-  assert.equal(result.output, 'Done.');
 });
 
 test('context summarization renders image payloads through LangChain text projection', async () => {

@@ -7,8 +7,17 @@ and supplies its `ArtifactStore`, `ArtifactSourceReader` and
 `ArtifactDownloadWriter` adapters.
 
 Publishing takes a local file, saves a snapshot, and returns a stable
-`artifact://` reference plus `ToolMessage.artifact.deliverables`. It rejects
-files over 100 MiB without truncation. Store adapters must enforce the same
+`artifact://` reference. The Toolkit declares a `deliverables` execution-state
+field, initially empty. Successful `publish_artifact` calls update this field
+through a native `Command`; its reducer merges publications by URI in publication
+order. The normal ToolMessage carries the `ArtifactRef` receipt and a Markdown
+link. The Capability returns the accumulated references from its subagent state.
+
+Toolkit instructions guide the model to select files for delivery according to
+the task when it creates a file or receives a local path from another tool.
+The Capability’s `uses` declaration supplies these instructions and tools.
+
+Files over 100 MiB produce a publication error. Store adapters enforce the same
 `MAX_ARTIFACT_BYTES` limit for direct calls and remove incomplete uploads.
 
 Listing uses the execution scope’s session ID. Downloads accept a shared stable
@@ -18,6 +27,5 @@ execution workdir. Downloads need no review, including explicit workdir and
 temporary destinations. Download writers must consume the stream and remove
 incomplete files on error or cancellation.
 
-The Toolkit does not infer deliverables from text, register existing URLs, or
-add shared runtime state. Signed storage URLs are used only for the current
-download and are not returned as stable references.
+Store adapters use temporary signed URLs for the current download; published
+snapshots use stable `artifact://` references.

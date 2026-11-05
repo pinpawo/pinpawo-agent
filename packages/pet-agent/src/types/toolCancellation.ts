@@ -1,6 +1,4 @@
 import type { StructuredTool } from '@langchain/core/tools';
-import { ToolMessage } from '@langchain/core/messages';
-import { readToolDeliverables } from '@pinpawo/agent-contracts';
 
 /**
  * Tools report failures by returning an `Error: ...` string so the model can
@@ -85,10 +83,6 @@ export function wrapToolCancellation<TTool extends StructuredTool>(tool: TTool):
           if (signal?.aborted) {
             throw createAbortError();
           }
-          // Validate explicit declarations at the existing toolkit call boundary,
-          // before the result enters the graph. Content is never interpreted.
-          if (ToolMessage.isInstance(result)) readToolDeliverables(result.artifact);
-          else if (target.responseFormat === 'content_and_artifact' && Array.isArray(result)) readToolDeliverables(result[1]);
           return result;
         } catch (err) {
           if (signal?.aborted && !isAbortError(err)) {

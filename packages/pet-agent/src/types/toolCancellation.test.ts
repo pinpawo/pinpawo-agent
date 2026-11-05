@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { tool } from '@langchain/core/tools';
-import { ToolMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { isAbortError, wrapToolCancellation } from './toolCancellation';
 import { defineToolkit } from './toolkit';
@@ -23,21 +22,6 @@ function makeTool(
 test('passes through a normal result when nothing is aborted', async () => {
   const wrapped = wrapToolCancellation(makeTool('ok', async () => 'done'));
   assert.equal(await wrapped.invoke({ value: 'x' }), 'done');
-});
-
-test('toolkit validates explicit deliverables before exposing tool results to the graph', async () => {
-  for (const declarations of [[{ uri: 'https://example.com/report', title: 'Report' }], [{ uri: 1 }]]) {
-    const toolkit = defineToolkit({ name: 'declaring', description: 'Declared results.', tools: [{ tool: tool(
-      async () => ['Report ready', { deliverables: declarations }],
-      { name: 'publish', description: 'Publish.', schema: z.object({}), responseFormat: 'content_and_artifact' },
-    ) }] });
-    const invocation = () => toolkit.tools[0].tool.invoke({ id: 'publish-call', type: 'tool_call', name: 'publish', args: {} });
-    if (typeof declarations[0].uri === 'string') {
-      const result = await invocation();
-      assert.ok(ToolMessage.isInstance(result));
-      assert.deepEqual(result.artifact.deliverables, declarations);
-    } else await assert.rejects(invocation, /Invalid deliverables/);
-  }
 });
 
 test('keeps execution failures as ordinary string results', async () => {

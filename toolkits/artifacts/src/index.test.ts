@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { tool } from '@langchain/core/tools';
+import { Command } from '@langchain/langgraph';
 import type { ArtifactRef } from '@pinpawo/agent-contracts';
+import { createSubagent } from '@pinpawo/pet-agent';
+import { FakeToolCallingModel } from 'langchain';
+import { z } from 'zod';
 import {
   createArtifactsToolkit,
   limitArtifactBody,
@@ -32,7 +37,9 @@ function fixture() {
   let source = 'snapshot';
   const store: ArtifactStore = {
     async put(input) {
-      const published = { ...ref, ...(input.title !== undefined ? { title: input.title } : {}) };
+      const published = { ...ref, name: input.name,
+        uri: `${ref.uri.slice(0, ref.uri.lastIndexOf('/') + 1)}${input.name}`,
+        ...(input.title !== undefined ? { title: input.title } : {}) };
       snapshots.set(published.uri, { ref: published, text: await readBody(input.body), threadId: input.threadId });
       return published;
     },
@@ -49,7 +56,7 @@ function fixture() {
     store,
     sourceReader: async (input) => {
       reads.push(input);
-      return { name: 'report.txt', mimeType: 'text/plain', body: body(source) };
+      return { name: input.path.split('/').at(-1)!, mimeType: 'text/plain', body: body(source) };
     },
     downloadWriter: async (input) => {
       writes.push({ ...input, text: await readBody(input.body) });
@@ -57,18 +64,25 @@ function fixture() {
     },
   });
   const definition = (name: string) => toolkit.tools.find((item) => item.tool.name === name)!;
-  const config = (threadId = 'first') => ({ context: { executionScope: { threadId, workdir: '/work' } } });
-  return { store, toolkit, definition, config, snapshots, reads, writes, setSource: (text: string) => { source = text; } };
+  const config = (threadId = 'first') => ({ context: { executionScope: {
+    threadId, workdir: '/work', taskId: 'task', runId: 'run', delegationId: 'delegation',
+  } } });
+  const publish = (path = 'report.txt', title?: string) => definition('publish_artifact').tool.invoke({
+    name: 'publish_artifact', id: `publish:${path}`, type: 'tool_call',
+    args: { path, ...(title !== undefined ? { title } : {}) },
+  }, config());
+  return { store, toolkit, definition, config, publish, snapshots, reads, writes, setSource: (text: string) => { source = text; } };
 }
 
-test('publishing snapshots a local file, declares its reference, and lists only the execution session', async () => {
+test('publishing snapshots a local file, records its successful receipt, and lists the execution session', async () => {
   const f = fixture();
-  const result = await f.definition('publish_artifact').tool.invoke({
-    name: 'publish_artifact', id: 'publish', type: 'tool_call', args: { path: 'report.txt', title: 'Report' },
-  }, f.config());
-  assert.ok(ToolMessage.isInstance(result));
-  assert.deepEqual(result.artifact, { deliverables: [{ uri: ref.uri, title: 'Report' }] });
-  assert.ok(String(result.content).includes(`[Report](${ref.uri})`));
+  const result = await f.publish('report.txt', 'Report');
+  assert.ok(result instanceof Command);
+  const update = result.update as { deliverables: unknown; messages: ToolMessage[] };
+  assert.deepEqual(update.deliverables, [{ uri: ref.uri, title: 'Report' }]);
+  assert.deepEqual(update.messages[0].artifact, { ...ref, title: 'Report' });
+  assert.equal(update.messages[0].tool_call_id, 'publish:report.txt');
+  assert.ok(String(update.messages[0].content).includes(`[Report](${ref.uri})`));
   assert.deepEqual(f.reads, [{ path: 'report.txt', workdir: '/work' }]);
   f.setSource('changed after publication');
   assert.equal(f.snapshots.get(ref.uri)?.text, 'snapshot');
@@ -79,7 +93,7 @@ test('publishing snapshots a local file, declares its reference, and lists only 
 
 test('download accepts a shared reference and does not declare a second deliverable', async () => {
   const f = fixture();
-  await f.definition('publish_artifact').tool.invoke({ path: 'report.txt' }, f.config());
+  await f.publish();
   const result = await f.definition('download_artifact').tool.invoke({
     name: 'download_artifact', id: 'download', type: 'tool_call', args: { uri: ref.uri },
   }, f.config('second'));
@@ -96,7 +110,7 @@ test('default, workdir and temporary download destinations need no review and re
   const definition = f.definition('download_artifact');
   const context = { toolkitName: 'artifacts', toolName: 'download_artifact',
     reviewCapabilities: { humanReview: true, sessionAuthorization: true } };
-  await f.definition('publish_artifact').tool.invoke({ path: 'report.txt' }, f.config());
+  await f.publish();
   for (const path of [undefined, 'report.txt', '/work/report.txt', '/tmp/report.txt']) {
     const input = { uri: ref.uri, ...(path !== undefined ? { path } : {}) };
     assert.equal(await definition.review?.request({ ...context, input }), null);
@@ -110,6 +124,98 @@ test('default, workdir and temporary download destinations need no review and re
     { path: '/work/report.txt', workdir: '/work' },
     { path: '/tmp/report.txt', workdir: '/work' },
   ]);
+});
+
+class ScriptedModel extends FakeToolCallingModel {
+  private execution = { summaries: 0, normalCalls: 0 };
+  private toolsBound = false;
+
+  get summaries() { return this.execution.summaries; }
+
+  override bindTools() {
+    const bound = new ScriptedModel({ toolCalls: this.toolCalls });
+    bound.execution = this.execution;
+    bound.toolsBound = true;
+    return bound;
+  }
+
+  override async _generate() {
+    const summarizing = !this.toolsBound;
+    if (summarizing) this.execution.summaries += 1;
+    const calls = summarizing ? [] : this.toolCalls[this.execution.normalCalls++] ?? [];
+    const text = summarizing ? 'Earlier execution details summarized.' : calls.length ? '' : 'Done.';
+    return { generations: [{ text, message: new AIMessage({ content: text, tool_calls: calls }) }], llmOutput: {} };
+  }
+}
+
+test('execution state accumulates parallel publications by URI while list and download leave it unchanged', async () => {
+  const f = fixture();
+  const model = new ScriptedModel({ toolCalls: [
+    [
+      { id: 'first', name: 'publish_artifact', args: { path: 'report.txt', title: 'Report' } },
+      { id: 'second', name: 'publish_artifact', args: { path: 'data.csv' } },
+      { id: 'repeat', name: 'publish_artifact', args: { path: 'report.txt', title: 'Duplicate' } },
+    ],
+    [
+      { id: 'list', name: 'list_artifacts', args: {} },
+      { id: 'download', name: 'download_artifact', args: { uri: ref.uri } },
+    ],
+    [],
+  ] });
+  const result = await createSubagent({
+    model, tools: f.toolkit.tools.map(({ tool }) => tool), stateSchema: f.toolkit.stateSchema,
+    promptSections: [], messages: [new HumanMessage('Deliver the report and data.')],
+    runtimeContext: f.config().context,
+  });
+  assert.deepEqual(result.state.deliverables, [
+    { uri: ref.uri, title: 'Report' },
+    { uri: 'artifact://workspace/first/data.csv' },
+  ]);
+  assert.equal(result.messages.filter(message => ToolMessage.isInstance(message)
+    && message.name === 'publish_artifact').length, 3);
+  const next = await createSubagent({
+    model: new ScriptedModel(), tools: f.toolkit.tools.map(({ tool }) => tool), stateSchema: f.toolkit.stateSchema,
+    promptSections: [], messages: [new HumanMessage('Start a separate execution.')],
+    runtimeContext: f.config().context,
+  });
+  assert.deepEqual(next.state.deliverables, []);
+});
+
+test('a failed publication returns no successful state update', async () => {
+  const f = fixture();
+  f.store.put = async () => { throw new Error('Publication failed.'); };
+  await assert.rejects(f.publish(), /Publication failed/);
+  assert.equal(f.snapshots.size, 0);
+});
+
+test('native context compaction can remove publication messages while accumulated references remain', async () => {
+  const f = fixture();
+  const addContext = tool((_input, runtime) => new Command({ update: {
+    messages: [
+      new ToolMessage({ name: 'add_context', tool_call_id: runtime.toolCall!.id!, content: 'Investigation recorded.' }),
+      new HumanMessage(`other investigation\n${'x'.repeat(1600)}`),
+      new AIMessage(`other findings\n${'y'.repeat(1600)}`),
+      new HumanMessage(`verification\n${'z'.repeat(1600)}`),
+      new AIMessage(`verification findings\n${'w'.repeat(1600)}`),
+      new HumanMessage('Finish the delegated task.'),
+    ],
+  } }), { name: 'add_context', description: 'Record investigation context.', schema: z.object({}) });
+  const model = new ScriptedModel({ toolCalls: [
+    [{ id: 'published-before-context', name: 'publish_artifact', args: { path: 'report.txt' } }],
+    [{ id: 'context', name: 'add_context', args: {} }],
+    [],
+  ] });
+  const result = await createSubagent({
+    model, tools: [...f.toolkit.tools.map(({ tool }) => tool), addContext], stateSchema: f.toolkit.stateSchema,
+    promptSections: [], messages: [new HumanMessage('Publish the report and verify the result.')],
+    runtimeContext: f.config().context, contextWindowTokens: 1000, maxIterations: 4,
+  });
+  assert.ok(model.summaries > 0);
+  assert.ok(result.messages.some(message => message.additional_kwargs?.lc_source === 'summarization'));
+  assert.equal(result.messages.some(message => ToolMessage.isInstance(message)
+    && message.tool_call_id === 'published-before-context'), false);
+  assert.deepEqual(result.state.deliverables, [{ uri: ref.uri }]);
+  assert.equal(result.output, 'Done.');
 });
 
 test('a missing execution session, URL source, or malformed reference cannot reach storage', async () => {

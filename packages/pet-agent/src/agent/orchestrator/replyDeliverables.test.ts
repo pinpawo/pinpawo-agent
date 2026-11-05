@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { Command, ReducedValue, StateSchema } from '@langchain/langgraph';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
+import { z as stateZod } from 'zod/v4';
 import { setAgentMessageMetadata } from '../messages';
 import { createCapabilityExecutionMessage } from './executionMessages';
 import { readReplyDeliverables, selectReplyDeliverables } from './replyDeliverables';
@@ -73,10 +76,19 @@ test('Entry commits selected references on the final reply and ignores model-aut
 test('delegated execution delivers accepted references through the Supervisor final reply and budget exit', async () => {
   const uris = ['artifact://thread/rejected/report', 'artifact://thread/accepted/report'];
   let published = 0;
-  const toolkit = defineToolkit({ name: 'artifacts', description: 'Publish files.', tools: [{ tool: tool(
-    async () => ['Published', { deliverables: [{ uri: uris[published++] }] }],
-    { name: 'publish_artifact', description: 'Publish.', schema: z.object({}), responseFormat: 'content_and_artifact' },
-  ) }] });
+  const toolkit = defineToolkit({ name: 'artifacts', description: 'Publish files.',
+    stateSchema: new StateSchema({ deliverables: new ReducedValue<Deliverable[], Deliverable[]>(
+      stateZod.array(stateZod.object({ uri: stateZod.string() })).default([]) as never,
+      { reducer: (current, next) => [...current, ...next] },
+    ) }),
+    tools: [{ tool: tool(
+      async (_args, runtime: ToolRuntime) => new Command({ update: {
+        deliverables: [{ uri: uris[published++] }],
+        messages: [new ToolMessage({ name: 'publish_artifact', tool_call_id: runtime.toolCallId, content: 'Published' })],
+      } }),
+      { name: 'publish_artifact', description: 'Publish.', schema: z.object({}) },
+    ) }],
+  });
   const registry = compileAgentRegistry({ toolkits: [toolkit], capabilities: [{ name: 'general',
     description: 'Prepare reports.', uses: ['artifacts'], instructions: defineInstructionDocument({ content: 'Prepare and publish the report.' }),
   }] });

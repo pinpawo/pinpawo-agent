@@ -45,8 +45,8 @@ Agent session 在工作中产生的报告、方案、截图和导出数据，需
 | 层 | 负责 |
 |---|---|
 | agent-contracts | 对外 `Deliverable` 类型、`ArtifactRef` 与 `artifact://` 解析 |
-| pet-agent 核心 | 汇总发布成功回执，沿 Capability 返回路径写入执行记录 |
-| artifacts Toolkit（`toolkits/artifacts`） | 存储与文件读取 port、三个工具、文件选择与发布指引 |
+| pet-agent 核心 | 读取子代理 state 中的交付引用，沿 Capability 返回路径写入执行记录 |
+| artifacts Toolkit（`toolkits/artifacts`） | 存储与文件读取 port、三个工具、发布引用的执行状态、文件选择与发布指引 |
 | Host | 注入 store adapter 和 source reader；投影本 run 的交付物；提供 HTTP 文件访问 |
 | agent-session 协议 | `message.completed.deliverables` 与 snapshot 对应字段 |
 | Channel Plugin | 将 Pet 回复事件中的 `deliverables` 原样存入消息 |
@@ -62,12 +62,12 @@ type Deliverable = { uri: string; title?: string };
 
 1. 浏览器、Office 等工具在生成文件时保存文件，在正常工具结果中提供本地路径。
 2. Capability 子代理模型根据用户目标、业务需求和工具输出，选择需要交付的文件，调用 `publish_artifact(path, title?)`。
-3. `publish_artifact` 校验文件并保存快照，成功后返回 `ArtifactRef`。
-4. 核心从本次执行可用的发布成功回执提取 `uri` 和 `title`，按 `uri` 去重，沿 Capability 返回出口写入执行记录。
+3. `publish_artifact` 校验文件并保存快照，成功后返回 `ArtifactRef`，同时将 `uri` 和可选 `title` 写入子代理 state 的 `deliverables`。
+4. artifacts Toolkit 通过原生 reducer 累计发布引用，按 `uri` 去重。核心读取 `SubagentResult.state.deliverables`，沿 Capability 返回出口写入执行记录。
 5. 执行记录保存委派状态、文字交付和已汇总的引用：`{ status, delivery: { text }, deliverables }`。
 6. Supervisor 根据用户目标和实际结果验收，Entry 与 Supervisor 按既有回复流程生成最终回复。
 
-文件快照由 store 保存，消息按 Agent 既有上下文策略压缩。发布结果与委派状态分别记录；拒绝或取消委派后，已保存的快照仍可读取。
+artifacts Toolkit 按 [Toolkit 执行状态](../toolkits/execution-state.md) 声明 `deliverables`，默认值为空数组。文件快照由 store 保存，引用在本次子代理 state 中累计，消息按 Agent 既有上下文策略压缩。发布结果与委派状态分别记录；拒绝或取消委派后，已保存的快照仍可读取。
 
 ### 文件选择与发布指引
 
@@ -83,7 +83,8 @@ Capability 在 `uses` 中声明 `artifacts`，获得发布、列表、下载工�
 
 ```text
 publish_artifact 成功回执 ArtifactRef
-  -> 本次 Capability 的文件交付引用
+  -> artifacts Toolkit state.deliverables
+  -> SubagentResult.state.deliverables
   -> delegate_capability 执行记录 deliverables
   -> message.completed.deliverables
   -> snapshot / Channel 消息 deliverables
@@ -157,7 +158,6 @@ Console 通过 react-markdown 的 `urlTransform` 识别 `artifact://`，与现�
 
 ## 待定问题
 
-- **发布回执的汇总位置**：从 Capability messages 读取，或在 Capability 执行 state 中累计；按整体流程的简单程度选择。
 - **已有 URL 的结构化交付**：确定来源工具返回的 URL 如何进入 `deliverables`。URL 的访问权限和有效期沿用来源工具的约定。
 
 ## 后续：artifacts 管理

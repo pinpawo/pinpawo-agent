@@ -1,5 +1,7 @@
-import { tool } from '@langchain/core/tools';
-import { parseArtifactUri, parseDeliverables } from '@pinpawo/agent-contracts';
+import { ToolMessage } from '@langchain/core/messages';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { Command, ReducedValue, StateSchema } from '@langchain/langgraph';
+import { isDeliverable, parseArtifactUri, parseDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import {
   defineToolkit,
   readToolExecutionContext,
@@ -7,12 +9,21 @@ import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import { z as stateZod } from 'zod/v4';
 import { limitArtifactBody } from './body';
 import type { ArtifactDownloadWriter, ArtifactSourceReader, ArtifactStore } from './ports';
 
 export { MAX_ARTIFACT_BYTES, limitArtifactBody } from './body';
 export type { ArtifactStore, ArtifactSourceReader, ArtifactDownloadWriter } from './ports';
 export const ARTIFACTS_TOOLKIT_NAME = 'artifacts';
+
+const artifactsStateSchema = new StateSchema({
+  deliverables: new ReducedValue<Deliverable[], Deliverable[]>(
+    stateZod.array(stateZod.custom<Deliverable>(isDeliverable)).default([]) as never,
+    { reducer: (current, next) => [...current, ...next]
+      .filter((reference, index, references) => references.findIndex(other => other.uri === reference.uri) === index) },
+  ),
+});
 
 export type ArtifactsToolkitDependencies = {
   store: ArtifactStore;
@@ -31,7 +42,7 @@ function markdownLabel(label: string) {
 }
 
 export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): AgentToolkit {
-  const publish = tool(async ({ path, title }, config) => {
+  const publish = tool(async ({ path, title }, config: ToolRuntime) => {
     const { threadId, workdir } = executionContext(config);
     const source = await deps.sourceReader({ path, workdir });
     const ref = await deps.store.put({
@@ -42,18 +53,21 @@ export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): Agen
     const deliverables = parseDeliverables([{
       uri: ref.uri, ...(ref.title !== undefined ? { title: ref.title } : {}),
     }]);
-    return [
-      `${JSON.stringify(ref)}\n[${markdownLabel(ref.title ?? ref.name)}](${ref.uri})`,
-      { deliverables },
-    ];
+    return new Command({ update: {
+      deliverables,
+      messages: [new ToolMessage({
+        name: 'publish_artifact', tool_call_id: config.toolCall?.id ?? config.toolCallId,
+        content: `${JSON.stringify(ref)}\n[${markdownLabel(ref.title ?? ref.name)}](${ref.uri})`,
+        artifact: ref,
+      })],
+    } });
   }, {
     name: 'publish_artifact',
-    description: 'Publish a local file snapshot for delivery. Returns a stable artifact reference and declares it as a deliverable. The source path is local; URLs are not accepted.',
+    description: 'Publish a local file snapshot for delivery and return its stable artifact reference.',
     schema: z.object({
       path: z.string().min(1).refine((path) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(path), 'A local file path is required.'),
       title: z.string().optional(),
     }).strict(),
-    responseFormat: 'content_and_artifact',
   });
 
   const list = tool(async (_input, config) => {
@@ -61,7 +75,7 @@ export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): Agen
     return JSON.stringify(await deps.store.list(threadId));
   }, {
     name: 'list_artifacts',
-    description: 'List artifacts published by the current Agent session. This does not list other sessions.',
+    description: 'List artifacts published by the current Agent session.',
     schema: z.object({}).strict(),
   });
 
@@ -94,17 +108,18 @@ export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): Agen
   return defineToolkit({
     name: ARTIFACTS_TOOLKIT_NAME,
     description: 'Explicitly publish local file snapshots, list this session’s artifacts, and download shared references.',
+    stateSchema: artifactsStateSchema,
     tools: [
       { tool: publish, review: ReviewPolicies.never() },
       { tool: list, review: ReviewPolicies.never() },
       { tool: download, review: ReviewPolicies.never() },
     ],
     instructions: [
-      'Publish files that the task requires you to deliver with publish_artifact, even when another tool only returned a local path. Only explicitly published files are artifacts.',
-      'Publishing copies a snapshot and returns a stable artifact:// reference. Deliver those references; editing the source later does not update an existing artifact.',
-      'Use list_artifacts only for this session. You may download a shared artifact:// reference from another session without reading that session’s runtime context.',
-      'Download a reference only when you need its file, then read the local path with existing file tools. Files over 100 MB cannot be published.',
-      'Existing URLs from other tools keep their source contract. Do not pass a URL to publish_artifact or claim an undeclared link is a structured deliverable.',
+      'When you create a file or a tool returns a local file path, decide whether the task requires handing that file to the requester. Publish the files selected for delivery with publish_artifact.',
+      'Publishing saves a file snapshot and returns a stable artifact:// reference. Use the returned references when handing over files.',
+      'Use list_artifacts to find this session’s published snapshots. Shared artifact:// references from other sessions can be downloaded when needed.',
+      'Download a reference when you need its file, then read the returned local path with existing file tools. The single-file publication limit is 100 MB.',
+      'Use links returned by other tools according to their source contract.',
     ].join('\n'),
   });
 }

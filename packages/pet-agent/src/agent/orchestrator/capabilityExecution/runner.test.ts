@@ -101,26 +101,49 @@ test('executor returns explicit output without copying subagent messages', async
 });
 
 for (const reviewDecision of [undefined, 'reject', 'cancel'] as const) {
-  test(`executor returns only this invocation's tool declarations (${reviewDecision ?? 'returned'})`, async () => {
+  test(`executor reads state deliverables without scanning historical or current tool artifacts (${reviewDecision ?? 'returned'})`, async () => {
     const previous = new ToolMessage({ id: 'previous-result', name: 'prior_tool', tool_call_id: 'prior-call',
       content: 'Earlier file', artifact: { deliverables: [{ uri: 'artifact://old/report.txt' }] } });
     const base = input();
     const request = { ...base, history: [...base.history, new AIMessage({ id: 'prior-invocation', content: '',
       tool_calls: [{ id: 'prior-call', name: 'prior_tool', args: {} }] }), previous] };
-    const refs = [{ uri: 'artifact://current/report.txt', title: 'Report' }, { uri: 'https://example.com/pr/1' }];
-    const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
-      messages: [...run.messages.map(message => ToolMessage.isInstance(message) ? new ToolMessage({ ...message }) : message),
-        new ToolMessage({ id: 'published', name: 'publish_artifact', tool_call_id: 'publish', content: 'File published', artifact: { deliverables: refs } }),
-        new ToolMessage({ id: 'duplicate', name: 'another_tool', tool_call_id: 'another', content: 'Same link', artifact: { deliverables: [refs[0]] } }),
-        new AIMessage({ content: 'An undeclared link https://example.com/ignored' })],
-      output: 'Finished', ...(reviewDecision ? { reviewDecision } : {}),
-    }) });
+    const refs = [{ uri: 'artifact://current/report.txt', title: 'Report' }];
+    const execute = createCapabilityExecutor({ models, runSubagent: async (run) => {
+      const messages = [...run.messages,
+        new ToolMessage({ id: 'published', name: 'publish_artifact', tool_call_id: 'publish', content: 'File published',
+          artifact: { deliverables: [{ uri: 'artifact://ignored/tool-artifact.txt' }] } }),
+        new ToolMessage({ id: 'other', name: 'another_tool', tool_call_id: 'another', content: 'Other tool data',
+          artifact: { deliverables: null } }),
+        new AIMessage({ content: 'An ordinary link https://example.com/ignored' })];
+      return { state: { messages, deliverables: refs }, messages, output: 'Finished',
+        ...(reviewDecision ? { reviewDecision } : {}) };
+    } });
     const result = await execute(request, hostContext());
     assert.deepEqual(result.deliverables, refs);
     assert.equal(result.reviewDecision, reviewDecision);
     assert.equal(result.status, reviewDecision ? 'missing_deliverable' : 'returned');
   });
 }
+
+test('executor defaults to no deliverables when subagent state has no artifacts field', async () => {
+  const execute = createCapabilityExecutor({ models, runSubagent: async run => {
+    const message = new ToolMessage({ name: 'another_tool', tool_call_id: 'result', content: 'https://example.com/report',
+      artifact: { deliverables: [{ uri: 'artifact://ignored/report.txt' }] } });
+    const messages = [...run.messages, message];
+    return { state: { messages }, messages, output: 'Finished' };
+  } });
+  const result = await execute(input(), hostContext());
+  assert.deepEqual(result.deliverables, []);
+});
+
+test('executor rejects malformed deliverables in subagent state', async () => {
+  for (const deliverables of [undefined, null, {}, 'artifact://report.txt', [{ uri: 'relative/path' }], [{ uri: 1 }]]) {
+    const execute = createCapabilityExecutor({ models, runSubagent: async run => ({
+      ...deliver(run), state: { deliverables },
+    }) });
+    await assert.rejects(execute(input(), hostContext()), /Invalid deliverables/);
+  }
+});
 
 for (const output of [null, '', '  ']) {
   test(`finalize can clear a delivery (${JSON.stringify(output)}) without changing child execution`, async () => {

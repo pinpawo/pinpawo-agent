@@ -68,7 +68,7 @@ workspace registry or per-request workspace selection contract.
 The Host supplies its resolved directory as `AgentInvokeInput.context.workdir`;
 low-level graph calls pass `context.workdir` in their runnable options. The shared
 system-message composer renders this fact once for Entry, Supervisor, Capability
-execution and final Answer. Review context and Toolkit Runtime execution scopes
+execution and final Answer. Review context and Toolkit tool execution context
 read the same structured value. Host machine/session facts use common system
 sections and do not repeat the directory. The legacy `runtimeEnvironment` and
 `configurable.workdir` channels are removed.

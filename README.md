@@ -6,8 +6,16 @@
   <img alt="PinPawo" src="assets/brand/pinpawo-primary-black-lockup.svg" width="320">
 </picture>
 
-Open-source agent runtime, local CLI/TUI, browser Toolkit, and Studio for PinPawo.
-The public stack runs locally; the private app and hosted backend live elsewhere.
+PinPawo Agent is an open-source agent project. Its goal is to build Studio on a
+reliable single-agent mechanism, `pet-agent`, and organize work through that
+foundation. Studio Plugins make business functionality pluggable; Capability
+and Toolkit organize and extend what an agent can do.
+
+Reliability is an ongoing goal. Mechanisms such as checkpoints, review, and
+recovery are designs that continue to evolve; they do not by themselves prove
+the goal is achieved. The public stack runs locally; the private app and hosted
+backend live elsewhere. See [Core concepts](docs/concepts/core-concepts.md) for
+the project model and current boundaries.
 
 ## Quick Start
 
@@ -34,15 +42,16 @@ scaffold validation, and server alternatives.
 
 | Your goal | Entry |
 |---|---|
-| Understand Pet, Capability, and Toolkit | [Core concepts](docs/concepts/core-concepts.md) |
+| Understand the project model and its extension points | [Core concepts](docs/concepts/core-concepts.md) |
 | Integrate a runtime or client | [API reference](docs/reference/api/index.md) |
 | Coordinate multiple Pets | [Studio](docs/studio/index.md) |
 | Improve documentation | [Writing and maintenance](docs/contributing.md) |
 
 ## Vision
 
-The [agent harness explanation](docs/concepts/agent-harness.md) describes the
-project's engine analogy and the repeated perceive, reason, act, and state loop.
+The [agent harness explanation](docs/concepts/agent-harness.md) preserves an
+earlier engine analogy and agent loop as material for the ongoing discussion of
+the project's direction.
 
 <a id="the-engine-of-the-intelligence-revolution"></a>
 <a id="the-essence-of-the-loop-energy--air-vs-token--context"></a>
@@ -94,7 +103,8 @@ See the [CLI reference](docs/reference/api/cli.md) and [Studio CLI](services/stu
 
 See the [Capability directory protocol](docs/reference/extensions/capability-directory.md)
 and [Capability / Toolkit contract](docs/reference/extensions/capability-toolkit.md).
-Local Plugin loading is documented in the [Host README](services/host/README.md).
+See [Studio](docs/studio/index.md) and [Studio configuration](docs/studio/configuration.md)
+for Studio Plugins. Local Host Plugin loading is documented in the [Host README](services/host/README.md).
 
 ## Browser Toolkit
 

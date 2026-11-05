@@ -4,7 +4,7 @@
 
 ## 为什么回看
 
-现有文档把项目希望解决的问题、已接受的设计和具体实现放得较近。例如，[核心概念](core-concepts.md)同时介绍用户价值、Capability 与 checkpoint；[架构](architecture.md)的设计目标也直接引用了现有组件。这些内容有助于理解当前系统，但仅凭代码已经这样实现，不能证明它应当成为长期理念。
+此前文档把项目目标、已接受的设计和具体实现放得较近。本次先调整 [README](../../../README.md)、[核心概念](core-concepts.md)和[架构](architecture.md)，让读者能够区分项目目标与当前设计；仅凭代码已经这样实现，不能证明它是长期理念或目标已达成。
 
 ## 已明确的项目目标
 
@@ -14,21 +14,18 @@
 
 据此，讨论时先区分这几个层次和作用：
 
-- **基础：pet-agent** 提供可靠的单 Agent 机制。
+- **基础：pet-agent** 以可靠的单 Agent 机制为目标。
 - **组织：Studio** 基于这套单 Agent 机制来组织工作。
 - **业务扩展：Studio Plugin** 实现业务上的可插拔。
 - **能力扩展：Capability + Toolkit** 让能力可组织、可扩展。
 
-这是对上述目标的整理，不规定具体组件如何实现、部署或相互调用，也不意味着“可靠”的验收标准已确定。
+这是对上述目标的整理，不规定具体组件如何实现、部署或相互调用，也不意味着“可靠”的验收标准已确定或目标已经达成。审核、恢复等是持续迭代的设计机制，不等同于可靠性目标本身。
 
-## 现有文档与目标的落差
+## 本轮文档调整
 
-- [文档首页](../index.md)和[核心概念](core-concepts.md)主要从本地控制、权限、恢复等特性介绍项目，没有先说明单 Agent 基础与 Studio 的关系，也没有区分业务扩展和能力扩展。
-- [架构](architecture.md)把 Studio 作为“从单 Agent 扩展到协作”的一项设计目标，较难看出 Studio 在整体目标中的位置；[英文架构页的扩展模型](../../concepts/architecture.md#extension-model)只列 Capability 和 Toolkit，没有说明 Studio Plugin 的业务扩展。checkpoint 等具体方案也不应直接等同于可靠性的定义。
-- [Studio 当前说明](../studio/index.md)聚焦 dispatch、事件和所有权等当前契约；这些细节有用，但不能替代 Studio 与业务可插拔的目标说明。
-- [领域关系设计](../../design/host-agent-capability-toolkit.md)讨论 Host、Agent、Capability、Toolkit 的装配约束。它的四个角色用于该设计的范围，不是对项目目标中 Studio 和 Studio Plugin 作用的完整概括。
+[文档首页](../index.md)与[核心概念](core-concepts.md)以项目目标说明单 Agent 基础、Studio 和两个扩展维度；[架构](architecture.md)描述当前实现和边界。Studio 的[当前契约](../studio/index.md)仍侧重 dispatch、事件和所有权，不应单独作为整个项目目标的定义。
 
-这些是文档表达的落差，不据此判断当前实现正确与否。后续应分别核对读者入口、概念说明和具体契约，而不是一次重写所有文档。
+[领域关系设计](../../design/host-agent-capability-toolkit.md)讨论 Host、Agent、Capability、Toolkit 的装配约束；它不是对 Studio 和 Studio Plugin 项目作用的完整概括。设计是否支持目标，需要结合具体场景持续检验。
 
 ## 建议逐项讨论
 
@@ -48,9 +45,6 @@
 - **待 review 的工作设计：** [Root、Supervisor 与 Capability 的状态与交接](../../design/agent-runtime/run-scoped-supervisor-session.md)提出由模型决定如何完成任务、程序维护执行约束的方向；可作为分工讨论的输入，不视作本轮已确认结论。
 - **历史材料：** [历史索引](../../history/index.md)保留早期设计、调查和迁移记录，用于理解背景，不覆盖当前契约。
 
-## 已发现的文档勘误
+## 已修正的文档问题
 
-这两项是当前系统描述需要修正的问题，和理念讨论分开处理：
-
-- 架构图将 Studio 画在 Local Host 之下，但 [StudioHost](../../../packages/studio/src/host/StudioHost.ts) 有独立入口和生命周期，并复用 Host 装配能力。需要重新核对并更新中英文系统地图。
-- 概念与架构页仍使用旧的 Toolkit Runtime 归属和生命周期表述；[当前 RS 契约](../../reference/extensions/toolkit-rs.md)说明旧 `AgentToolkit.runtime` / `ToolkitRuntimeManager` 已删除，Host 注入 RS 依赖。需要按当前代码整理这些描述，避免把一个 RS 简化为某个 Toolkit 私有的运行时。
+中英文架构图已区分 Studio Host 和 Chat Host 的独立入口；概念与架构页中的旧 Toolkit Runtime 表述已按 [RS 契约](../../reference/extensions/toolkit-rs.md)更新。现行实现和边界仍以代码与相应参考文档为准。

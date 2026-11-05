@@ -1,7 +1,7 @@
 # Resident Pet Host Ports
 
 > 状态：Accepted，implemented
-> 更新：2026-08-27
+> 更新：2026-08-27；后续实现补充了精确 Pet session 的有限访问面，见下文。
 > 关联：[Studio 独立 Host runtime](../studio/independent-host-runtime.md)、
 > [Agent Session projection](../../reference/runtime/session-projection.md)
 
@@ -15,7 +15,7 @@ WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Ho
 
 ## 1. 决策
 
-同一个 resident Pet 可以同时被两类调用者使用，但两类调用不是同一个概念：
+同一个 resident Pet 可以同时被两类调用者使用，但两类调用不是同一个概念。下图保留原设计的派发与交互边界；当前实现还向 Studio 借出受限的 `PetSessionPort`，见下文：
 
 ```text
                          host composition
@@ -32,7 +32,7 @@ WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Ho
                                               TUI
 ```
 
-- `PetDispatchPort` 是工作派发面。Studio 只持有这一面。
+- `PetDispatchPort` 是工作派发面。Studio 还借用 `PetSessionPort`，用于精确 session 的 snapshot、observe 和 review。
 - `ResidentPetInteraction` 是人与同一个 Pet 持续对话的 adapter。TUI 通过 host
   已有的 Agent Session projection 与 wire adapter 使用它。
 - 两个入口不是平级能力：conversation 在功能上覆盖 dispatch，并额外拥有观察、控制、
@@ -44,14 +44,15 @@ WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Ho
 - `@pinpawo/studio` 不拥有 conversation registry，不注册 TUI，不依赖
   `@pinpawo/agent-session`，也不向 TUI 暴露 Studio WebSocket。Studio control plane
   只通过 HTTP Plugin 暴露 dispatch、event 与其他 Plugin route。
-- Studio Plugin 仍只使用 dispatch、event、hook，并可定义 Toolkit；它不参与
-  Pet 的构造、conversation 或 Agent Session。
+- Studio Plugin 可使用 dispatch、event、hook、受限 `petSessions` 等上下文，并可定义 Toolkit。
+  `petSessions` 只针对明确的 Pet 和 session 提供 snapshot、observe、review；它不授予
+  任意 conversation 控制或 Pet runtime 的所有权。接口与限制见 [Studio API](../../reference/api/studio.md#exact-pet-session-observation-and-review)。
 - 配置中的 Pet 在对应 Host 启动时全部构造成 resident runtime；port contract 不表达
   `lazy` 或 `disabled`。
 
 `ResidentPetHost` 是 host 的装配结果，不是 Studio 的新领域对象。Studio Host
-启动时可以调用 host 工厂完成装配，但只能把 `resident.dispatch` 交给 Studio
-registry；`interaction` 留在 host 的 Agent Session adapter/registry 中。
+启动时可以调用 host 工厂完成装配，将 `resident.dispatch` 与受限的 `resident.sessions`
+交给 Studio registry；`interaction` 仍留在 host 的 Agent Session adapter/registry 中。
 
 ## 2. 词汇约束
 
@@ -156,8 +157,8 @@ Session service。Host 启动 interaction 时提供中性的 Host/Pet namespace�
 通过共享 service 读取 active thread；因此排队期间的 conversation thread 切换会自然影响
 它。
 
-同样，构造输入只包含 Agent 执行真正需要的 actor、models、Capability、Toolkit、
-checkpointer、Agent Session state store、workdir 与 runtime limits。Chat Host 与 Studio
+同样，构造输入包含 Host 的 Pet 标识，以及执行所需的 models、Capability、Toolkit、
+checkpointer、Agent Session state store、workdir 与 runtime limits。旧 `AgentActor` 已移除。Chat Host 与 Studio
 Host 都从 composition root 注入自己的 store/root；公共 builder 不推导 Studio identity
 或路径。它不接收 `StudioHostConfig`、`studioConfigPath`、Plugin、Studio registration 或
 invocation/receipt 配置。`dispatchId` 只是调用方提供的 opaque correlation，runtime
@@ -166,8 +167,9 @@ invocation/receipt 配置。`dispatchId` 只是调用方提供的 opaque correla
 
 ## 4. Studio 映射
 
-Studio 对外仍只有 `Studio.dispatch(StudioDispatchRequest)`。Studio registry 保存的是
-上层 binding，而不是要求 lower port 携带 Studio registration：
+工作派发入口仍为 `Studio.dispatch(StudioDispatchRequest)`。Studio registry 保存的是
+上层 binding，而不是要求 lower port 携带 Studio registration；下方为原设计的派发绑定示意，
+当前 runtime 还可借出 `PetSessionPort`：
 
 ```ts
 type StudioPetBinding = {
@@ -267,10 +269,10 @@ control/history 处理。它不替代 Agent Session stream，也不提供执行�
 host 必须把 resident runtime 构造与 interaction adapter 构造拆成两个可组合步骤。
 普通 Chat Host 可以只选用它需要的组合；Studio Host composition 则为每个配置 Pet 同时：
 
-1. 完成模型、Capability、Toolkit、Toolkit Runtime 与 checkpointer 装配；
+1. 完成模型、Capability、Toolkit、RS 依赖与 checkpointer 装配；
 2. 创建并持有 resident runtime/Coordinator；
 3. 基于同一个 resident runtime 创建 Agent Session interaction adapter；
-4. 只把 `PetDispatchPort` 注册给 Studio core；
+4. 将 `PetDispatchPort` 与受限 `PetSessionPort` 注册给 Studio core；
 5. 由 host 启动独立的 Agent Session WebSocket listener，供 TUI 与内部 Pet 交互；
 6. 由 Studio HTTP Plugin 启动 control-plane HTTP route，承载 dispatch、event 与 Plugin hook。
 
@@ -282,8 +284,8 @@ Studio core。Studio 对外没有另一个内置 WebSocket/stdio conversation tr
 资源。启动和关闭不定义 Pet 顺序，也没有 `lazy`、`disabled` 或兼容回退语义。
 
 创建 Resident Pet 的 Host 是其唯一 lifecycle owner。Studio Host 可以持有完整
-`ResidentPetHost` 资源句柄，但 Studio core 只借用 dispatch port；conversation 的装配仍
-封装在 host adapter 中，Studio core 不解释它。关闭时 owner 先停止接受新请求，
+`ResidentPetHost` 资源句柄，但 Studio core 只借用 dispatch 与受限 session port；
+conversation 的装配仍封装在 host adapter 中，Studio core 不拥有底层 runtime。关闭时 owner 先停止接受新请求，
 再关闭全部 `ResidentPetHost`；不同 Pet 之间不要求顺序，但必须等待全部 close settle。单个
 Pet 内部 interaction/runtime 如何释放由 `ResidentPetHost.close()` 封装，不成为外层 Host
 contract。任一 consumer 都不能自行关闭底层 runtime。
@@ -298,14 +300,14 @@ target 返回。Capability inventory 不进入该列表。
 | Package/surface | 可以知道 | 不可以知道 |
 | --- | --- | --- |
 | `pinpawo/host-runtime` | resident Pet、两个访问面、Coordinator、graph/checkpoint/toolkit 装配 | Studio registration metadata、Studio Plugin、TUI view、具体 wire route |
-| `@pinpawo/studio` | `PetDispatchPort`、Pet registry、dispatch admission、Plugin event | conversation、Agent Session、Chat/TUI message |
+| `@pinpawo/studio` | `PetDispatchPort`、受限 `PetSessionPort`、Pet registry、dispatch admission、Plugin event | resident runtime 所有权、完整 conversation 交互 |
 | `services/host` Agent Session adapter | resident interaction 构造、`@pinpawo/agent-session` contract 与 WebSocket listener | Studio dispatch/invocation、Plugin hook |
 | TUI | Agent Session wire/projection | Studio protocol、Pet graph/checkpoint |
-| Studio Plugin | Studio dispatch/event/hook、可定义 Toolkit | Pet construction、conversation、Agent Session |
+| Studio Plugin | Studio dispatch/event/hook、精确 session 的 snapshot/observe/review、可定义 Toolkit | Pet construction、runtime 所有权、完整 conversation 交互 |
 
 ## 8. 已完成迁移与验收
 
-以下顺序已经落地；它同时保留为后续变更不得回退的验收清单：
+以下顺序记录原迁移的验收；后续新增的受限 `PetSessionPort` 见本文更新与 [Studio API](../../reference/api/studio.md#exact-pet-session-observation-and-review)。
 
 1. 在 `pinpawo/host-runtime` 定义上述共享类型，消除 Studio 与 host 的重复类型。
 2. 把 resident runtime/Coordinator 构造与 Agent Session interaction 构造收进公共
@@ -341,7 +343,7 @@ target 返回。Capability inventory 不进入该列表。
 
 现有测试与 package 边界必须持续证明：
 
-- Studio package 无 Agent Session、TUI 或 conversation import；
+- Studio package 不拥有 Agent Session runtime、TUI 或完整 conversation adapter；受限 session 访问借用 Host port；
 - TUI 无 Studio message、Studio WebSocket 或 `composerTarget = studio`；
 - `pinpawo/host-runtime` 的 public types 无 `Studio*`、Plugin、receipt、invocation、
   idempotency、producer metadata、`studioConfigPath`、Studio registration 或

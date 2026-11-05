@@ -1,57 +1,58 @@
 # 核心概念
 
-> **状态：当前术语和设计指南。** 具体实现和类型契约由所链接的 Reference 页面维护。本页不代表这些设计都已确认为长期项目理念；见[核心理念讨论](principles-discussion.md)。
-
 [English](../../concepts/core-concepts.md)
 
-本页的 Toolkit Runtime 表述早于当前 [RS 契约](../../reference/extensions/toolkit-rs.md)；当前依赖和生命周期以该契约为准。
+PinPawo Agent 的目标是以 `pet-agent` 构建可靠的单 Agent 机制，并在此基础上组织 Studio。Studio Plugin 实现业务上的可插拔；Capability 与 Toolkit 让 Agent 的能力可组织、可扩展。
 
-PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理、使用工具、请求审批和委派专门工作，同时把权限、状态和执行边界保持为可检查的系统结构，而不是隐藏在一段大提示词里。
+可靠性是持续迭代的目标，不代表当前系统已经达成。审核、checkpoint、恢复等是当前设计机制，会随着真实工作中的经验继续演进。尚待对齐的问题见[核心理念讨论](principles-discussion.md)。
 
-## 项目带来的价值
+<a id="项目带来的价值"></a>
 
-- **本地控制：** host、工具、session 和可选浏览器桥接都在操作者选择的机器上运行；模型提供商和端点由你决定。
-- **显式权限：** Capability 必须声明可使用的 Toolkit；有副作用的工具可在执行前等待人工审核。
-- **可恢复执行：** checkpoint 保存对话和待继续状态，session projection 为 TUI 与集成提供统一视图。
-- **可组合扩展：** 任务意图写在可审查的 Markdown Capability 中，可执行行为与安全策略写在 typed Toolkit 中。
-- **可扩展协作：** Studio 向多个 Pet runtime 派发工作并广播 Plugin 事件，而不暴露 worker 的私有推理。任务队列、依赖、重试与共享知识属于 Plugin 或 resident Host，不属于 Studio。
+## 各部分如何配合
+
+- **Pet agent** 是单 Agent 运行单元，处理请求，并在配置的权限范围内使用 Capability 和 Toolkit。
+- **Studio** 组织多个 Pet runtime 的工作。Plugin 为业务行为提供扩展点，也有一些 Plugin 提供基础设施。
+- **Capability 与 Toolkit** 组织 Agent 的能力。Capability 描述专门工作并声明所使用的 Toolkit；Toolkit 提供工具和相应策略。Plugin 可以提供 Toolkit，Host 则为各 Pet 独立选择 Capability。
+
+当前包和运行时边界见[架构](architecture.md)。
 
 ## 术语
 
 | 术语 | 含义 | 作用 |
 |---|---|---|
-| **Host** | 解析配置、选择 Capability/Toolkit definitions、持有 Agent runtime 并管理 Toolkit Runtime 生命周期的产品或进程边界。 | 把机器、transport 与生命周期职责留在 Agent graph 之外。 |
-| **Pet agent** | 具有身份、模型、Capability、编译后 Toolkit binding 与状态的一套 Agent runtime。 | 接收 invocation 并产生面向用户的结果。 |
+| **Host** | 解析配置、选择 Capability/Toolkit definitions、持有 Agent runtime 并提供执行环境依赖的产品或进程边界。 | 把机器、transport 与生命周期职责留在 Agent graph 之外。 |
+| **Pet agent** | 具有模型、Capability、编译后 Toolkit binding 与状态的一套 Agent runtime。 | 接收 invocation 并产生面向用户的结果。 |
 | **Capability** | 带有任务说明和固定 Toolkit allowlist 的可委派工作单元。 | 让路由和工具权限可检查。 |
-| **Toolkit** | 一组 typed 工具、操作元数据、可用性检查、审核策略和可选 Toolkit Runtime。 | 集中管理可复用实现、安全规则与动态资源所有权。 |
+| **Toolkit** | 一组 typed 工具、说明、可用性检查、审核指导及可选执行环境依赖。 | 组织可复用的工具实现与策略。 |
 | **Subagent lane** | 一次 Capability 或通用任务使用的短生命周期私有执行上下文。 | 隔离任务推理，避免污染主对话。 |
 | **Human review** | 需要用户授权或补充输入时的暂停与继续边界。 | 审批是运行时契约，而不是提示词约定。 |
-| **Checkpoint** | LangGraph 的持久状态，保存消息与待继续执行。 | resume 与恢复的权威来源。 |
+| **Checkpoint** | 配置 checkpointer 时，LangGraph 为消息与待继续执行保存的状态。 | 支持继续执行与恢复。 |
 | **Session projection** | checkpoint 与当前运行事实的客户端无关表示。 | 客户端不需要各自重建状态。 |
-| **Studio** | 多 Pet 的 dispatch 底座：Pet registry、只读的每 Pet dispatch-admission 队列观测与 Plugin 事件总线。 | 在不破坏 worker 边界的前提下协作。 |
+| **Studio** | 多 Pet 的 dispatch 底座：Pet registry、只读的每 Pet dispatch-admission 队列观测与 Plugin 事件总线。 | 组织多个 Pet runtime 的工作。 |
+| **Studio Plugin** | 可以派发工作、交换事件、持有领域状态并可提供 Toolkit 的 Studio 扩展。 | 通过 Plugin 增加业务行为。 |
 | **Workdir** | 运行时配置、Studio 状态和相对工具路径的本地作用域。 | 防止不同项目误共享状态。 |
 
-## 两个扩展边界
+<a id="两个扩展边界"></a>
+
+## Capability 与 Toolkit 的扩展边界
 
 ```text
 用户请求 → Pet agent → Capability（意图 + Toolkit allowlist）
-                         → Toolkit（typed 工具 + 审核策略）
+                     → Toolkit（typed 工具 + 审核策略）
 ```
 
-Capability 描述“完成什么任务”；Toolkit 描述“哪些行为可以执行、如何审核”。这样 Markdown 保持易审查，而副作用留在 typed code。
+Capability 描述“完成什么任务”；Toolkit 提供工具或共享说明，以及相应策略。Capability 的说明可以用 Markdown 或代码编写，可执行工具及其策略定义在 typed Toolkit 中。
 
-旧 Capability Artifact Pipeline 已退役。显式发布和下载仍是
-[Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)中的目标，
-本次清理不提供这些新能力。旧 Channel 消息附件字段也已退役；历史 JSON 保留，
-当前[消息 API](../../reference/api/studio.md#channel-messages-and-addressing)仍提供正文、回复关系和提及，不再提供附件。
+旧 Capability Artifact Pipeline 和 Channel 消息附件字段已退役；见[退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)与当前[消息 API](../../reference/api/studio.md#channel-messages-and-addressing)。显式文件发布与下载仍是 [Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)中的目标。
 
-Host 与 Agent 是所有权边界，不是新的扩展格式：Host 创建并持有一个或多个 Agent runtime；Agent 执行 Capability；Capability 通过 `uses` 引用 Toolkit；Toolkit Runtime 始终从属于 Toolkit。跨 Host 的 accepted constraints 见[领域关系设计（中文）](../../design/host-agent-capability-toolkit.md)。
+Host 创建并持有 Agent runtime，为 Toolkit 声明的执行环境依赖提供实例；多个 Toolkit 可以共享同一环境依赖。详见 [Toolkit RS 契约](../../reference/extensions/toolkit-rs.md)和已接受的[领域关系设计](../../design/host-agent-capability-toolkit.md)。
 
 ## 概念的唯一详细入口
 
 | 概念范围 | 当前详细契约 |
 |---|---|
 | Capability 与 Toolkit 权限 | [扩展契约](../reference/extensions/capability-toolkit.md) |
+| Toolkit 执行环境依赖 | [Toolkit RS 契约](../../reference/extensions/toolkit-rs.md) |
 | 审核与授权复用 | [事件与人工审核（英文）](../../reference/api/events-and-review.md) 与 [授权匹配器（英文）](../../reference/runtime/authorization-matcher.md) |
 | checkpoint、session、snapshot 与 timeline | [Session projection（英文）](../../reference/runtime/session-projection.md) |
 | 旧 artifact 扩展更新 | [退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) |
@@ -60,6 +61,6 @@ Host 与 Agent 是所有权边界，不是新的扩展格式：Host 创建并持
 
 ## 执行模型
 
-一次用户请求不会自动获得全部工具权限。运行时通常依次：选择直接回答、通用任务或 Capability；在隔离 lane 中执行；按照 Toolkit policy 继续、审核或阻止；把完成结果交回主对话。
+一次用户请求不会自动获得全部工具权限。运行时可以直接回答；需要委派时，选择通用任务或 Capability，在隔离 lane 中执行，按照 Toolkit policy 继续、审核或阻止，并把执行结果交回主对话。
 
 主对话接收完成结果，而不是完整私有 scratchpad 与工具过程，因此既能控制上下文增长，也能让最终答案基于真实完成的工作。

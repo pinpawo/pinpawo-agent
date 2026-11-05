@@ -1,6 +1,6 @@
 # PinPawo Agent 文档（简体中文）
 
-PinPawo Agent 是一个本地优先的开源 Agent 框架：工具权限显式声明、风险操作可人工审核、运行可从 checkpoint 恢复，并可通过 Capability 与 Toolkit 扩展。
+PinPawo Agent 的目标是以可靠的单 Agent 机制 `pet-agent` 为基础组织 Studio：通过 Studio Plugin 实现业务可插拔，通过 Capability 与 Toolkit 组织和扩展 Agent 能力。可靠性是持续追求的目标，审核、恢复等机制仍在不断迭代。项目模型见[核心概念](concepts/core-concepts.md)。
 
 [Read in English](../index.md)
 

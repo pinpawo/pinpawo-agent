@@ -12,14 +12,12 @@ orchestration, task authority, tool execution, user review, and durable state so
 each concern can evolve independently and remain observable.
 
 For the terminology behind this design, start with [Core Concepts](core-concepts.md).
-The system map below needs correction: Studio Host has its own entry and
-lifecycle, as shown by [StudioHost](../../packages/studio/src/host/StudioHost.ts).
-The Toolkit Runtime wording also predates the current [RS contract](../reference/extensions/toolkit-rs.md).
 
 ## Design goals
 
-The architecture is optimized for five practical needs of production agent
-systems:
+The project aims to build a reliable single-Agent mechanism and use it as the
+foundation for Studio. The following current design choices support that goal;
+they do not by themselves establish that reliability has been achieved:
 
 1. **Keep users in control.** Local-machine Toolkit operations and browser
    sessions stay on the machine that runs the agent; review policy can stop
@@ -28,37 +26,42 @@ systems:
    statically, so the available tool surface is explicit per task.
 3. **Support real, multi-step work.** Checkpoints, structured events, and
    session snapshots let a client recover after disconnection or review.
-4. **Stay extensible without forking the runtime.** Markdown Capabilities and
-   typed Toolkits let contributors add domain behavior at the correct boundary.
-5. **Scale from one agent to a team.** Studio adds a shared dispatch channel
-   and plugin boundary without a global prompt or shared scratchpad.
+4. **Organize and extend capabilities.** Capabilities describe tasks and bind
+   typed Toolkits that provide tools and their policies.
+5. **Organize work with Studio.** Studio uses Pet runtimes and Plugins; Plugins
+   provide a way to add business behavior.
 
 ## System map
 
 ```mermaid
 flowchart TB
-  U["User, TUI, Console, or stdio client"] --> H["Local Host\nservices/host"]
-  H --> O["Pet-agent orchestrator\npackages/pet-agent"]
-  H --> S["Session projection\npackages/agent-session"]
-  O --> C["Capability lane"]
-  C --> K["Toolkit tools"]
-  K --> L["Local filesystem, shell, browser, or configured services"]
-  O --> A["Checkpoint and execution records"]
-  H --> ST["Optional Studio runtime\npackages/studio + plugins/channel"]
-  ST --> O
+  U["User or client"] --> CH["Chat Host\nservices/host"]
+  U --> SH["Studio Host\npackages/studio"]
+  CH --> CA["Pet-agent runtime\nChat"]
+  SH --> ST["Studio core + Plugins"]
+  SH --> PA["Resident Pet runtimes\npet-agent"]
+  ST -->|dispatch| PA
+  CA --> CAP["Capability + Toolkit"]
+  PA --> CAP
+  CAP --> OPS["Tools and configured execution environments"]
 ```
 
-The local host is the integration boundary. It resolves configuration, starts
-Toolkit runtimes, exposes HTTP/WebSocket or JSONL stdio transports, and composes
-the Capability registry. Runtime-independent orchestration stays in
-`packages/pet-agent`; host-specific integrations remain in `services/` and
+Chat Host and Studio Host are independent composition entries. Both use Host
+assembly and the `pet-agent` mechanism; Studio Host creates resident Pet runtimes
+and connects them to Studio. The diagram shows roles, not a shared runtime instance.
+
+Each Host resolves configuration and assembles Capabilities and Toolkits. A
+Toolkit may declare execution-environment dependencies; the Host injects RS
+instances, which can be shared by multiple Toolkits. See the
+[RS contract](../reference/extensions/toolkit-rs.md). Agent orchestration remains
+in `packages/pet-agent`; host-specific integrations live in `services/` and
 `toolkits/`.
 
-The ownership chain is `Host -> Agent Runtime -> Capability -> Toolkit`.
-`ToolDefinition` and Toolkit Runtime are subordinate to Toolkit; the
-orchestrator and subagent lanes are internal to Agent. This prevents an
-aggregate factory such as the Browser helper from becoming a parallel architecture
-layer. See the accepted
+The Agent-side ownership relationship is
+`Host -> Agent Runtime -> Capability -> Toolkit`: a Capability selects Toolkits,
+and Tool definitions belong to a Toolkit.
+RS is an injected dependency, not a Toolkit-owned runtime. The orchestrator and
+subagent lanes are internal to Agent. See the accepted
 [domain and assembly constraints](../design/host-agent-capability-toolkit.md).
 
 ## Main packages
@@ -72,15 +75,15 @@ layer. See the accepted
 | Studio distribution | `services/studio/` | Complete `@pinpawo/studio` CLI and six foundational Plugin dependencies. |
 | Local host | `services/host/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
-| Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/channel/`, including their runtime lifecycles. |
+| Tool integrations | `toolkits/`, `plugins/`, and `services/host/` | Toolkit definitions and their execution-environment integrations. |
 
 ## Request lifecycle
 
 ```text
 1. A client submits a user request to the local host.
 2. The host composes a registry from enabled Capabilities and available Toolkits.
-3. The orchestrator either answers directly or selects one bounded execution lane.
-4. The lane can use only the Toolkits declared by its Capability.
+3. The orchestrator may answer directly. When it delegates work, the following steps apply.
+4. Each lane can use only the Toolkits declared by its Capability.
 5. Tool policy may proceed, request human review, or block the operation.
 6. The completed result returns to the main conversation.
 7. The session projection reports durable and live state to connected clients.
@@ -94,7 +97,7 @@ state from a transient tool-event stream.
 
 | State | Owner | Boundary rule |
 |---|---|---|
-| Conversation messages and pending continuation | LangGraph checkpoint | Durable authority for resume and review. |
+| Conversation messages and pending continuation | LangGraph checkpoint, when configured | Durable authority for resume and review. |
 | Current client view | Session projection | A materialized view; never a second conversation store. |
 | Capability scratch work | Subagent lane | Private to the selected unit of work. |
 | Delegated result evidence | Checkpoint messages | Typed execution records preserve the delivery; private tool transcripts stay in the child graph. |
@@ -112,17 +115,20 @@ state from a transient tool-event stream.
 
 ## Extension model
 
-Contributors normally extend the project in one of two ways:
+The project has two complementary extension concerns:
 
+- Add a **Studio Plugin** to contribute business behavior through Studio. A
+  Plugin may also provide Toolkits; the Host assembles Capabilities separately.
 - Add a **Capability** when the extension defines a new user-facing task,
   instructions, and a fixed Toolkit allowlist.
 - Add a **Toolkit** when the extension supplies reusable tools, availability
-  checks, runtime state, operation metadata, or review policy.
+  checks, execution-environment dependencies, operation metadata, or review policy.
 
-A Capability is authored as `CAPABILITY.md` with optional narrowly scoped code
-for `lifecycle.finalize`. A Toolkit is always typed code. See the
+A Capability can be authored as `CAPABILITY.md` with optional narrowly scoped
+code for `lifecycle.finalize`, or defined in code. A Toolkit is typed code. See the
 [Capability / Toolkit V2 contract](../reference/extensions/capability-toolkit.md) and
 [Capability directory protocol](../reference/extensions/capability-directory.md).
+See [Studio](../studio/index.md) for Plugin composition and boundaries.
 
 ## Security and privacy boundaries
 

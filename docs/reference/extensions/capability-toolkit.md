@@ -23,7 +23,7 @@ ToolDefinition
                  └─ 由 Run Supervisor 选择并在独立 subagent 中执行
 ```
 
-只有两个扩展概念：
+`pet-agent` 的能力扩展包含两个概念：
 
 - **Capability**：面向业务目标的可委派执行单元。
 - **Toolkit**：编码实现的工具、共享说明和工具级策略集合；可仅提供说明。
@@ -340,13 +340,11 @@ lane = capability:<name>
 executor = compiled Capability
 ```
 
-subagent system prompt section 的稳定顺序是：
-
-1. framework delegation contract；
-2. actor context；
-3. `uses` 所解析 Toolkit 的 instructions；
-4. Capability Markdown instructions；
-5. host runtime environment（存在时）。
+subagent 的 system prompt 由 framework 指令开始，随后依次合成 Host 提供的公共
+sections、存在时的结构化 workdir，以及执行上下文中的 sections。后者包括 `uses`
+解析出的 Toolkit instructions 和 Capability instructions。Host 公共 sections 可包含
+PET.md 等内容；不再传入旧的 `AgentActor` 或 `runtimeEnvironment`。详见
+[Context injection map](../runtime/context-injection-map.md#3-shared-building-blocks)。
 
 当前任务本身通过调用前临时生成的 delegation briefing 传入，不写进稳定
 system prompt 或 checkpoint lane。subagent 只获得编译到该 Capability 的 tools。
@@ -436,10 +434,9 @@ Channel 的旧 `artifacts: [{ uri, label?, version? }]` 输入、消息类型和
 不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability
 可用性；可用性必须来自同一次编译结果。
 
-Accepted target（#645）：Host config selection、Toolkit availability 和 Toolkit
-Runtime diagnostics 是三个不同维度。inventory 来源、顺序和 provenance 必须
-确定，重复名称显式失败；Host 只聚合通用 Runtime diagnostics，不解释 Toolkit
-专属 `details`。
+Host config selection 与 Toolkit availability 是不同维度。inventory 来源、顺序和
+provenance 必须确定，重复名称显式失败。Toolkit 可以声明由 Host 注入的 RS 依赖；
+RS 状态及生命周期的当前契约见 [Toolkit 的 RS 依赖](toolkit-rs.md)。
 
 ## 9. V2 不包含的概念
 

@@ -19,7 +19,7 @@ branch belongs in the generic Host or Agent lifecycle. See
 
 ## Availability
 
-Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser-specific status views consume that projection instead of independently combining Bridge booleans. Under #645, a generic Toolkit Runtime diagnostics surface will carry the same state as Browser-owned details rather than creating a Browser-only diagnostics lifecycle. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
+The Browser Toolkit obtains its availability from the injected BrowserRS. The Host evaluates availability when assembling the Toolkit inventory. BrowserRS distinguishes bridge startup from extension connectivity: a disconnected extension does not by itself make the RS unavailable, and operations report connectivity failures as structured errors. A listening bridge without a registered extension is not command-ready; reconnecting the extension does not require a new Toolkit definition. See [Toolkit RS dependencies](../extensions/toolkit-rs.md) for the RS service and Host client lifecycle.
 
 ## Process boundary
 

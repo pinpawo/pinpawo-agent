@@ -1,6 +1,6 @@
 # PinPawo Agent 文档（简体中文）
 
-PinPawo Agent 的目标是以可靠的单 Agent 机制 `pet-agent` 为基础组织 Studio：通过 Studio Plugin 实现业务可插拔，通过 Capability 与 Toolkit 组织和扩展 Agent 能力。可靠性是持续追求的目标，审核、恢复等机制仍在不断迭代。项目模型见[核心概念](concepts/core-concepts.md)。
+PinPawo Agent 以 `pet-agent` 已实现的可靠单 Agent 机制为基础组织 Studio：通过 Studio Plugin 实现业务可插拔，通过 Capability 与 Toolkit 组织和扩展 Agent 能力。项目在已有审核、恢复等机制的基础上持续提升可靠程度。项目模型见[核心概念](concepts/core-concepts.md)。
 
 [Read in English](../index.md)
 

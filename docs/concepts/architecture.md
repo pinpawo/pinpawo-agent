@@ -15,9 +15,9 @@ For the terminology behind this design, start with [Core Concepts](core-concepts
 
 ## Design goals
 
-The project aims to build a reliable single-Agent mechanism and use it as the
-foundation for Studio. The following current design choices support that goal;
-they do not by themselves establish that reliability has been achieved:
+The project uses the reliable single-Agent mechanism implemented in `pet-agent`
+as the foundation for Studio. Its current design includes the following
+mechanisms and boundaries, which continue to evolve:
 
 1. **Keep users in control.** Local-machine Toolkit operations and browser
    sessions stay on the machine that runs the agent; review policy can stop

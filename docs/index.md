@@ -1,9 +1,9 @@
 # PinPawo Agent Documentation
 
-PinPawo Agent aims to build Studio on a reliable single-agent mechanism,
-`pet-agent`. Studio Plugins make business functionality pluggable, while
-Capability and Toolkit organize and extend agent capabilities. Reliability is
-an ongoing goal; mechanisms such as review and recovery continue to evolve.
+PinPawo Agent organizes Studio on the reliable single-agent mechanism provided
+by `pet-agent`. Studio Plugins make business functionality pluggable, while
+Capability and Toolkit organize and extend agent capabilities. The existing
+review and recovery mechanisms continue to evolve to improve reliability.
 
 This directory distinguishes current contracts from proposals and records of
 earlier implementations. See [Core concepts](concepts/core-concepts.md) for

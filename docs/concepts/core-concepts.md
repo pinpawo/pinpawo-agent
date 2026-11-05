@@ -2,13 +2,12 @@
 
 [简体中文](../zh-CN/concepts/core-concepts.md)
 
-PinPawo Agent aims to build a reliable single-agent mechanism in `pet-agent`
-and use that foundation to organize Studio. Studio Plugins make business behavior
+PinPawo Agent uses the reliable single-agent mechanism implemented in `pet-agent`
+as the foundation for organizing Studio. Studio Plugins make business behavior
 pluggable; Capability and Toolkit organize and extend the agent's abilities.
 
-Reliability is a goal under continuous development, not a claim that the current
-system has achieved it. Review, checkpoints, recovery, and other mechanisms are
-current design choices that can evolve as the project learns from real work.
+The runtime already implements tool authority, review, checkpoints, and recovery.
+The project continues to improve reliability through real work and iteration.
 The [principles discussion](../zh-CN/concepts/principles-discussion.md) records
 questions still being aligned.
 

@@ -2,9 +2,9 @@
 
 [English](../../concepts/core-concepts.md)
 
-PinPawo Agent 的目标是以 `pet-agent` 构建可靠的单 Agent 机制，并在此基础上组织 Studio。Studio Plugin 实现业务上的可插拔；Capability 与 Toolkit 让 Agent 的能力可组织、可扩展。
+PinPawo Agent 以 `pet-agent` 已实现的可靠单 Agent 机制为基础组织 Studio。Studio Plugin 实现业务上的可插拔；Capability 与 Toolkit 让 Agent 的能力可组织、可扩展。
 
-可靠性是持续迭代的目标，不代表当前系统已经达成。审核、checkpoint、恢复等是当前设计机制，会随着真实工作中的经验继续演进。尚待对齐的问题见[核心理念讨论](principles-discussion.md)。
+运行时已有工具权限、审核、checkpoint 和恢复等机制。项目在这些基础上结合真实工作持续迭代，进一步提升可靠程度。尚待对齐的问题见[核心理念讨论](principles-discussion.md)。
 
 <a id="项目带来的价值"></a>
 

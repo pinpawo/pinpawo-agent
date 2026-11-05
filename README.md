@@ -6,14 +6,14 @@
   <img alt="PinPawo" src="assets/brand/pinpawo-primary-black-lockup.svg" width="320">
 </picture>
 
-PinPawo Agent is an open-source agent project. Its goal is to build Studio on a
-reliable single-agent mechanism, `pet-agent`, and organize work through that
-foundation. Studio Plugins make business functionality pluggable; Capability
-and Toolkit organize and extend what an agent can do.
+PinPawo Agent is an open-source agent project. `pet-agent` provides a reliable
+single-agent mechanism that forms the foundation for organizing work with Studio.
+Studio Plugins make business functionality pluggable; Capability and Toolkit
+organize and extend what an agent can do.
 
-Reliability is an ongoing goal. Mechanisms such as checkpoints, review, and
-recovery are designs that continue to evolve; they do not by themselves prove
-the goal is achieved. The public stack runs locally; the private app and hosted
+The single-agent runtime includes mechanisms for tool authority, human review,
+checkpoints, and recovery. The project continues to improve reliability through
+real use and iteration. The public stack runs locally; the private app and hosted
 backend live elsewhere. See [Core concepts](docs/concepts/core-concepts.md) for
 the project model and current boundaries.
 

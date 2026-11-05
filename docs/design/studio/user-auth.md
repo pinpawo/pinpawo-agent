@@ -113,9 +113,12 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 
 落点：
 
-- `StudioHttpPrincipal` 增加 `capabilities: readonly string[]`（本机 token 为 `['*']`）；
-- `StudioHttpRoute` 增加可选 `capability?: string`；中间件在通过 scope 判定后再校验 capability，缺失返回 `403`（`401` 专指未认证）；
+- `StudioHttpPrincipal` 增加**可选** `capabilities?: readonly string[]`：只有插件贡献的凭证（登录会话）带这个字段；本机 token、`pps_` key、JWT 不带，继续走原来的兜底规则（`studio` 全权，`client` 只拿 `channel.read` / `channel.write`）。`/me` 也只在凭证声明了 capabilities 时才回显该字段，老客户端的响应形状不变；
+- `StudioHttpRoute` 增加可选 `capability?: string`，语义是**附加要求**，不是放行条件：声明了 capability 的路由仍要先过 scope 判定，所以给 `authorization: 'studio'` 的路由加 capability 不会把管理路由开放给普通用户；
+- 允许「capability 打开某条内置路由」的**唯一**入口是 `studio-http` 自己维护的 `BUILTIN_ROUTE_CAPABILITIES` 白名单（`POST /dispatch`、`GET /events`、`/pet-sessions/*` 等），外部插件只能加要求、不能自行放大；
 - 内置路由标注：`POST /dispatch` → `studio.dispatch`，`GET /events` → `studio.events`，`/pet-sessions/*` → `pet.session`，`GET /dispatch/queues` → `studio.view`，`POST /pets`、`/pets/rename`、`GET /pet-definitions` → `studio.manage`；`/clients*`、`/users*` 仍只接受本机 token；
+- Channel 路由由 channel 插件自己声明 `channel.read`（GET）/ `channel.write`（POST）：成员关系决定「能看到什么」，capability 决定「能不能碰 Channel」；
+- 缺 capability 的判定顺序：先 scope 再 capability。声明了 capabilities 的凭证会收到 `"This client lacks the \"<capability>\" capability."`，`pps_` key / JWT 继续收到原来的 `"This client may not use this route."`（状态码都是 `403`）；
 - 三条资源边界：workdir 归属（Host 级，当前单 workdir，不做多租户）、Pet 归属（capability 先行，细化到 definition 是后续）、Channel（成员关系决定可见性，已实现）。
 
 ### 3.6 认证接入：`authenticators` hook
@@ -135,39 +138,35 @@ export type StudioHttpAuthenticator = {
 
 ### 3.7 存储
 
-`plugins/studio-auth/src/store/kysely/migrations.ts`，迁移键 `0001_auth`（插件自有历史，
-与 `studio_clients` 的 `0001_clients` 互不干扰）：
+实现走插件自有迁移历史（`studio.storage.open('studio_auth', …)`，与 `studio_clients` 的
+`0001_clients` 互不干扰）。四张 Better Auth 表由 `getAuthTables(studioAuthOptions(...))` 在迁移
+`0001_better_auth` 里按**安装的库版本**生成，表名统一加 `studio_auth_` 前缀：
 
 ```sql
-create table studio_auth_users (
-  user_id            text primary key,
-  client_id          text not null unique,     -- 'user.<username>'
-  username           text not null,
-  username_lower     text not null unique,     -- 大小写不敏感唯一
-  display_name       text not null,
-  password_hash      text not null,
-  password_changed_at text not null,
-  capabilities       text not null,            -- JSON 数组
-  failed_attempts    integer not null default 0,
-  locked_until       text,
-  disabled_at        text,
-  created_at         text not null,
-  updated_at         text not null
+-- 0001_better_auth：四张表由库生成，字段名映射见 authOptions.ts
+create table studio_auth_user (
+  id text primary key,
+  name / email / email_verified / image,
+  created_at / updated_at,
+  username / displayUsername,                  -- username 插件
+  client_id,                                   -- 'user.<username>'（additionalFields）
+  capabilities,                                -- JSON 数组
+  failed_attempts, locked_until, disabled_at
 );
-
-create table studio_auth_sessions (
-  token_hash    text primary key,              -- sha256 hex
-  user_id       text not null,
-  created_at    text not null,
-  last_used_at  text not null,
-  expires_at    text not null,                 -- 绝对过期
-  revoked_at    text,
-  remote_addr   text,
-  user_agent    text
+create table studio_auth_account (             -- 密码凭据行（provider_id = 'credential'）
+  id text primary key, account_id, provider_id, user_id, password, …
 );
-create index studio_auth_sessions_by_user on studio_auth_sessions (user_id);
+create table studio_auth_session (
+  id text primary key,
+  token,                                       -- 见下：存的是 SHA-256 hex，不是原 token
+  user_id, expires_at, created_at, updated_at, ip_address, user_agent
+);
+create table studio_auth_verification ( … );   -- 库要求存在，本设计不使用
+create index studio_auth_user_by_username on studio_auth_user (username);
+create index studio_auth_session_by_user on studio_auth_session (user_id);
 
-create table studio_auth_audit (               -- 只追加，无主键，避免方言差异
+-- 0002_auth_audit
+create table studio_auth_audit (
   occurred_at  text not null,
   action       text not null,                  -- login.ok / login.fail / logout / password.change / user.create / user.disable / user.capabilities
   username     text,
@@ -178,9 +177,18 @@ create table studio_auth_audit (               -- 只追加，无主键，避免
   user_agent   text
 );
 create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
+
+-- 0003_auth_session_token
+create index studio_auth_session_by_token on studio_auth_session (token);
 ```
 
-时间一律 ISO-8601 文本，与 `studio_clients` 等现有表一致；`studio_auth_users.client_id`
+**会话凭证只存哈希。** Better Auth 自己的 session API 会把原 token 落库，因此本插件不使用它：
+登录校验通过后由插件 `randomBytes(32)` 自签 token，库里只写 `sha256(token)`，`updated_at`
+同时充当「最后使用时间」以驱动空闲超时（绝对 12h + 空闲 30min，不滚动续期）。会话 `id` 由插件
+生成，登出/改密/禁用都按 `id` 或 `user_id` 删除。这样即使数据库或备份泄露，也拿不到可用的
+`Authorization` 值。
+
+时间一律 ISO-8601 文本，与 `studio_clients` 等现有表一致；`studio_auth_user.client_id`
 **不建跨 owner 外键**（迁移顺序与 SQLite/Postgres 行为差异），由应用层保证「先建 client 再建 user」。
 审计表**不记录密码、token、token 哈希**。
 
@@ -207,14 +215,16 @@ create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
 
 - Better Auth 自带 `user` / `session` / `account` / `verification` 四张表，表名统一加 `studio_auth_` 前缀；`client_id`、`capabilities`、`failed_attempts`、`locked_until`、`disabled_at` 是它允许的 `additionalFields`，身份规则仍在本插件；
 - 表结构由 `getAuthTables(studioAuthOptions(...))` 在迁移时按库版本生成，**库升级若改 schema，启动时 Better Auth 的 schema 校验会直接报错**，而不是运行时才炸；
-- 不用它的 HTTP handler，也不给它监听端口：`/auth/*` 仍由本插件按 `authorization: 'route'` 提供，只是内部调用 `auth.api.*`；
+- **用它的地方**：`signUpEmail` 建号 + 凭据行、`hashPassword` / `verifyPassword`（`better-auth/crypto` 的 scrypt，走 libuv 线程池）；这两项是"写错了很难发现"的密码学部分；
+- **不用它的地方**：不用它的 HTTP handler、不给它监听端口、不接 cookie/social/OAuth；**也不使用它的 session API**（会把原 token 落库），会话由本插件自签并只存 SHA-256（见 §3.7）。因此 `session` 表虽然存在，但只承载插件写入的哈希行；
+- 版本精确锁定（`"better-auth": "1.7.17"`，不带 `^`）：迁移与哈希行为都绑定该版本，升级要有意识地做并跑登录/改密用例；
 - 不把 Better Auth 的 cookie/social/OAuth 能力接进来，保持只支持"用户名 + 密码"这一条路径。
 
 ## 4. 端点草案
 
 | 路由 | 鉴权 | 请求 | 响应 |
 |---|---|---|---|
-| `POST /auth/login` | `route`（handler 自校验） | `{username, password}` | `200 {token, expiresAt, user: {userId, username, clientId, capabilities}}`；`401 {error: "Invalid username or password."}`；`429 {error: "Too many attempts.", retryAfterSeconds}`；`403 {error: "This account is disabled."}` |
+| `POST /auth/login` | `route`（handler 自校验） | `{username, password}` | `200 {token, expiresAt, user: {userId, username, clientId, capabilities}}`；`401 {error: "Invalid username or password."}`（密码错、用户名不存在、账号被禁用都是这一个答案）；`429 {error: "Too many attempts.", retryAfterSeconds}`；`403 {error: "This client has been revoked."}`（密码已通过但 client 被吊销） |
 | `POST /auth/logout` | 会话 | – | `204` |
 | `GET /auth/me` | 会话 | – | `200 {userId, username, clientId, capabilities, expiresAt}` |
 | `POST /auth/password` | 会话 | `{currentPassword, newPassword}` | `204`（撤销该用户其他会话）；`401` / `400` |
@@ -224,11 +234,15 @@ create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
 | `POST /users/capabilities` | 本机 token | `{userId, capabilities}` | `200 {userId, capabilities}` |
 | `POST /users/disable` | 本机 token | `{userId, disabled}` | `200 {userId, disabled}`；禁用同时吊销 client 与会话 |
 
-状态码约定：`401` 未认证（无/过期/已吊销凭证）；`403` 已认证但无 capability、账号禁用、
+状态码约定：`401` 未认证（无/过期/已吊销凭证）或登录凭据无效；`403` 已认证但无 capability、
 或不属于该 Channel；`429` 登录被锁定。所有响应沿用现有 `{error}` 结构。
 
-保留路径：`/auth/*`、`/users*` 需加入 `RESERVED_ROUTE_PATHS`，避免贡献方覆盖；`/auth/login`
-走 `authorization: 'route'`，因此仍需通过 `allowedOrigins` 与 body limit 检查（Console 源本来就在白名单里）。
+**不能**把 `/auth/*`、`/users*` 加进 `RESERVED_ROUTE_PATHS`：那个集合是 `normalizeRoute` 拒绝
+贡献方注册的清单，加进去会让本插件自己的路由在注册时直接抛
+（`Studio HTTP route must use an unreserved absolute path`），插件起不来。这两组路径不是
+`studio-http` 内置路由，因此留给插件注册即可；重复注册由 hook 的 `routes` 映射按
+`METHOD /path` 覆盖，属于配置错误，会在开发期暴露。`/auth/login` 走 `authorization: 'route'`，
+因此仍需通过 `allowedOrigins` 与 body limit 检查（Console 源本来就在白名单里）。
 
 ## 5. 需要改动或新增的文件
 
@@ -236,16 +250,18 @@ create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
 
 - `package.json`（`@pinpawo-plugin/studio-auth`）
 - `src/studioAuthPlugin.ts`：`StudioPlugin` 实现，`start()` 建表 → 贡献 `/auth/*`、`/users*` 路由 → 贡献 authenticator；`stop()` 反向清理
-- `src/authOptions.ts`：Better Auth 配置（表名/列名映射、`additionalFields`、username + bearer 插件）
+- `src/authOptions.ts`：Better Auth 配置（表名/列名映射、`additionalFields`、username 插件、`autoSignIn: false`）
 - `src/migrations.ts`：按 Better Auth 的 schema 生成 `studio_auth_*` 表 + 索引 + 审计表
 - `src/repository.ts`：本插件表的行级访问（用户、会话、失败计数、审计）
 - `src/capabilities.ts`：capability 白名单、默认最小集与解析
-- `src/studioAuthPlugin.test.ts`：登录/登出/改密/锁定/capability 门
+- `src/studioAuthPlugin.test.ts`：登录/登出/改密/锁定/过期/审计/生命周期用例
+- `src/studioAuthHttp.test.ts`：与**真实** `studio-http` + 真实 hook registry 的集成用例
 
 修改：
 
-- `plugins/studio-http/src/studioHttpPlugin.ts`：`StudioHttpPrincipal` 增加 `capabilities`；`StudioHttpRoute` 增加 `capability`；中间件加 capability 判定；新增 `authenticators` hook 并在 `authenticate()` 里调用；内置路由标注 capability；`RESERVED_ROUTE_PATHS` 补 `/auth/*` 与 `/users*`
-- `packages/studio/src/studioContract.ts`：若 hook 类型需要从 core 导出（否则留在 studio-http）
+- `plugins/studio-http/src/studioHttpPlugin.ts`：`StudioHttpPrincipal` 增加 `capabilities`；`StudioHttpRoute` 增加 `capability`；中间件先 scope 再 capability；新增 `authenticators` hook 并在 `authenticate()` 里兜底调用（每个 verifier 单独 try/catch，异常按"不是我的凭证"处理）；`jsonResponse` 支持 `204` 无 body
+- `plugins/channel/src/channelPlugin.ts`：注册路由时声明 `channel.read` / `channel.write`（两行，身份继承逻辑不变）
+- `packages/studio/src/index.ts`：导出 `StudioPluginHookRegistry`，让嵌入方（和集成测试）能像 `createStudio` 一样接线
 - `apps/studio-console/src/App.tsx`：连接弹窗增加「用户名 / 密码」表单，登录成功复用现有 `sessionStorage['studio.token']`，额外存 `studio.user` 用于展示；`401` 时重新弹出登录而非只显示错误
 - `packages/studio/templates/default/studio.json`：示例中给出可选的 `@pinpawo-plugin/studio-auth` 条目（注释性文档放在 README，不默认开启）
 - `docs/reference/api/studio.md`：补 `/auth/*` 与 `/users*` 契约
@@ -269,14 +285,25 @@ create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
 - 锁定：5 次失败锁定、窗口过期恢复、地址限速；
 - capability 判定：缺 capability 返回 403，本机 token 恒通过。
 
-集成（`plugins/studio-auth/src/studioAuthPlugin.test.ts`，内存 SQLite + 真实 HTTP 插件）：
+单元与插件级（`plugins/studio-auth/src/studioAuthPlugin.test.ts`，内存 SQLite）：
 
 1. 本机 token 建号 → `POST /auth/login` 拿 token → `GET /auth/me` 身份与 capabilities 正确；
-2. 会话 token 访问 Channel 路由：成员可见、非成员 `403`；
-3. `POST /dispatch` 无 `studio.dispatch` → `403`，授予后 → `202`；
-4. `POST /auth/logout` 后同 token → `401`；
-5. 管理员 `POST /users/disable` 后 token 立即 `401`、再登录 `403`；
-6. 审计表记录上述动作且不含密码/token 明文。
+2. 会话：绝对过期、空闲超时（并顺手删除死行）、登出、改密撤销其他会话；
+3. 锁定：5 次失败锁定、窗口过期恢复、**并发失败不能绕过**（原子自增）；
+4. 禁用账号：既有会话立即 `401`，再登录也是 `401`（与用户名不存在同一答案）；
+5. 库里只有 token 的 SHA-256，拿哈希值当凭证无效；
+6. 审计写入失败不影响请求；`X-Forwarded-For` 默认不采信，`trustProxy` 打开后才入库；
+7. 启动失败会回滚干净并可重试。
+
+集成（`plugins/studio-auth/src/studioAuthHttp.test.ts`，真实 `studio-http` + 真实 `StudioPluginHookRegistry`）：
+
+1. `/auth/*`、`/users*` 在真实中间件下能注册成功（这条用例正是为了守住前者踩过的坑）；
+2. 插件启动顺序无关（http 先起 / auth 先起都成立）；
+3. 本机 token 的 `/me` 响应形状不变；会话 token 可访问内置路由；
+4. `POST /dispatch` 无 `studio.dispatch` → `403`，授予后 → `202`；
+5. `pps_` key 的可达范围与 `403` 文案与改造前一致；
+6. 过期会话在 HTTP 层被 `401`；
+7. 某个 verifier 抛异常时是 `401` 而不是 `500`。
 
 回归：未启用插件时 `plugins/studio-http` 与 `tests/studio-e2e` 现有用例不变。
 
@@ -303,19 +330,22 @@ create index studio_auth_audit_by_time on studio_auth_audit (occurred_at);
 
 | 能力 | 状态 |
 |---|---|
-| Better Auth（email+password、username、bearer）+ Kysely/SQLite | ✅ |
+| Better Auth（email+password、username、`hashPassword`/`verifyPassword`）+ Kysely/SQLite | ✅ |
+| 插件自签会话 token，库里只存 SHA-256；绝对过期 + 空闲超时；登出/禁用/改密即失效 | ✅ |
 | `studio_auth_*` 表与迁移、审计表 | ✅ |
 | `POST /auth/login`、`POST /auth/logout`、`GET /auth/me`、`POST /auth/password` | ✅ |
 | 管理员 `GET/POST /users`、`POST /users/password`、`POST /users/capabilities`、`POST /users/disable` | ✅ |
 | 用户 → `user.<username>` client 映射、client 吊销后拒绝 | ✅ |
-| capability 最小集与 `studio-http` 的 capability 门 | ✅ |
-| `authenticators` hook（`authenticate()` 兜底调用） | ✅ |
-| 失败锁定（5 次 / 15 分钟）与审计脱敏 | ✅ |
-| 未启用时行为不变（studio-http 既有用例全绿） | ✅ |
+| capability 最小集与 `studio-http` 的 capability 门（scope 优先，插件只能加要求） | ✅ |
+| Channel 路由的 `channel.read` / `channel.write` 门（撤销后真的不可用） | ✅ |
+| `authenticators` hook（`authenticate()` 兜底调用，逐个别名 try/catch） | ✅ |
+| 失败锁定（5 次 / 15 分钟，原子计数）与审计脱敏 | ✅ |
+| 未启用时行为不变（`studio-http` 19/19、`studio-e2e` 36/36 全绿） | ✅ |
 | Console 登录表单 | ⬜ 未做，留作下一步 |
 | 按来源地址限速 | ⬜ 未做（当前靠按用户名锁定） |
-| `docs/reference/api/studio.md` 的 `/auth/*` 契约 | ⬜ 未做 |
+| `docs/reference/api/studio.md` 的 `/auth/*` 契约 | ✅ 已补 |
 
-验收方式：`npm test -w @pinpawo-plugin/studio-auth`（8 个集成用例）、
-`npm test -w @pinpawo-plugin/studio-http`（19 个用例，含新增的 authenticator + capability 用例）、
-两个包的 `npm run typecheck`。
+验收方式：`npm test -w @pinpawo-plugin/studio-auth`（21 个用例）、
+`npm test -w @pinpawo-plugin/studio-http`（19 个用例）、
+`npm test -w @pinpawo-plugin/channel`（69 通过 / 1 跳过，跳过项需要 `PINPAWO_TEST_POSTGRES_URL`）、
+`npm test -w @pinpawo-tests/studio-e2e`（36 个用例），以及根 `npm run build`、`npm run typecheck`。

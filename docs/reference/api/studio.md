@@ -204,6 +204,42 @@ first use with the `name` claim (or `sub`) as its label. Revoking that client
 with `POST /clients/revoke` refuses its later tokens. See the
 [HTTP Plugin design](../../design/studio/http-plugin.md#外部-jwt) for the options.
 
+## User login (`studio-auth` Plugin)
+
+The `@pinpawo-plugin/studio-auth` Plugin adds username/password login. It is
+**off unless configured**: without it there are no `/auth/*` routes and every
+credential behaves exactly as described above. A logged-in user is a Studio
+client `user.<username>`, so Channel membership, labels and revocation work
+unchanged; the session also carries a capability list, which is what lets one
+user reach a route that otherwise needs the Host token (for example
+`POST /dispatch` with `studio.dispatch`). See the
+[user auth design](../../design/studio/user-auth.md).
+
+Session routes (`Authorization: Bearer <session token>`):
+
+| Route | Input / result |
+|---|---|
+| `POST /auth/login` | `{ username, password }`; `200 { token, expiresAt, user: { userId, username, clientId, capabilities } }`. `401` for a wrong password, an unknown username or a disabled account (one answer, no enumeration); `429 { error, retryAfterSeconds }` while locked; `403` if the client was revoked. |
+| `POST /auth/logout` | `204`; the token stops working immediately. |
+| `GET /auth/me` | `{ userId, username, clientId, displayName, capabilities, expiresAt }`. |
+| `POST /auth/password` | `{ currentPassword, newPassword }`; `204`, other sessions of that user are revoked. |
+
+Administrator routes (local Host token only):
+
+| Route | Input / result |
+|---|---|
+| `GET /users` | `{ users: [{ userId, username, clientId, displayName, capabilities, createdAt, disabledAt?, lockedUntil? }] }`. |
+| `POST /users` | `{ username, password, displayName?, capabilities? }`; `201 { userId, username, clientId, capabilities }`; `409` if the username exists or its client is revoked. |
+| `POST /users/password` | `{ userId, password }`; `204`, every session of that user is revoked. |
+| `POST /users/capabilities` | `{ userId, capabilities }`; `200 { userId, capabilities }`. Unknown names are `400`. |
+| `POST /users/disable` | `{ userId, disabled }`; `200 { userId, disabled }`, disabling revokes the user's sessions. |
+
+Sessions are absolute 12 hours and die after 30 idle minutes; only the SHA-256
+of a token is stored. Capabilities: `channel.read`, `channel.write`,
+`studio.view` (default), `studio.dispatch`, `studio.events`, `pet.session`,
+`studio.manage` (explicit grant). A capability never widens the scope rule for
+a route a Plugin declares — only the built-in route table can do that.
+
 ## Host lifecycle
 
 `StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls

@@ -1,0 +1,52 @@
+{
+  "name": "@pinpawo-plugin/studio-auth",
+  "version": "1.0.0",
+  "description": "Username/password user login for PinPawo Studio, built on Better Auth",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+  },
+  "dependencies": {
+    "@pinpawo/studio-core": "^1.0.0",
+    "better-auth": "^1.7.17",
+    "kysely": "^0.29.6"
+  },
+  "peerDependencies": {
+    "@pinpawo-plugin/studio-http": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@pinpawo-plugin/studio-http": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@pinpawo-plugin/studio-http": "^1.0.0",
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

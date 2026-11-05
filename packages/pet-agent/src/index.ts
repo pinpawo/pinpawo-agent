@@ -90,6 +90,7 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
+  ToolkitResult,
   ToolkitRS,
   ToolkitRSRequirement,
   ToolkitRSSessionBinding,

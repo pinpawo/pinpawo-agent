@@ -18,7 +18,7 @@ export type { ArtifactStore, ArtifactSourceReader, ArtifactDownloadWriter } from
 export const ARTIFACTS_TOOLKIT_NAME = 'artifacts';
 
 const artifactsStateSchema = new StateSchema({
-  deliverables: new ReducedValue<Deliverable[], Deliverable[]>(
+  publishedRefs: new ReducedValue<Deliverable[], Deliverable[]>(
     stateZod.array(stateZod.custom<Deliverable>(isDeliverable)).default([]) as never,
     { reducer: (current, next) => [...current, ...next]
       .filter((reference, index, references) => references.findIndex(other => other.uri === reference.uri) === index) },
@@ -50,11 +50,11 @@ export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): Agen
       ...(title !== undefined ? { title } : {}), body: limitArtifactBody(source.body, config.signal),
     });
     parseArtifactUri(ref.uri);
-    const deliverables = parseDeliverables([{
+    const publishedRefs = parseDeliverables([{
       uri: ref.uri, ...(ref.title !== undefined ? { title: ref.title } : {}),
     }]);
     return new Command({ update: {
-      deliverables,
+      publishedRefs,
       messages: [new ToolMessage({
         name: 'publish_artifact', tool_call_id: config.toolCall?.id ?? config.toolCallId,
         content: `${JSON.stringify(ref)}\n[${markdownLabel(ref.title ?? ref.name)}](${ref.uri})`,
@@ -109,6 +109,7 @@ export function createArtifactsToolkit(deps: ArtifactsToolkitDependencies): Agen
     name: ARTIFACTS_TOOLKIT_NAME,
     description: 'Explicitly publish local file snapshots, list this session’s artifacts, and download shared references.',
     stateSchema: artifactsStateSchema,
+    getResult: state => ({ deliverables: parseDeliverables(state.publishedRefs) }),
     tools: [
       { tool: publish, review: ReviewPolicies.never() },
       { tool: list, review: ReviewPolicies.never() },

@@ -4,7 +4,7 @@ import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langcha
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, ReducedValue, StateSchema } from '@langchain/langgraph';
-import type { Deliverable } from '@pinpawo/agent-contracts';
+import { parseDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { z as stateZod } from 'zod/v4';
@@ -77,13 +77,14 @@ test('delegated execution delivers accepted references through the Supervisor fi
   const uris = ['artifact://thread/rejected/report', 'artifact://thread/accepted/report'];
   let published = 0;
   const toolkit = defineToolkit({ name: 'artifacts', description: 'Publish files.',
-    stateSchema: new StateSchema({ deliverables: new ReducedValue<Deliverable[], Deliverable[]>(
+    stateSchema: new StateSchema({ publishedRefs: new ReducedValue<Deliverable[], Deliverable[]>(
       stateZod.array(stateZod.object({ uri: stateZod.string() })).default([]) as never,
       { reducer: (current, next) => [...current, ...next] },
     ) }),
+    getResult: state => ({ deliverables: parseDeliverables(state.publishedRefs) }),
     tools: [{ tool: tool(
       async (_args, runtime: ToolRuntime) => new Command({ update: {
-        deliverables: [{ uri: uris[published++] }],
+        publishedRefs: [{ uri: uris[published++] }],
         messages: [new ToolMessage({ name: 'publish_artifact', tool_call_id: runtime.toolCallId, content: 'Published' })],
       } }),
       { name: 'publish_artifact', description: 'Publish.', schema: z.object({}) },

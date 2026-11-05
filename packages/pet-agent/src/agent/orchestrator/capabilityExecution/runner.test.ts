@@ -4,7 +4,10 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
+import { StateSchema } from '@langchain/langgraph';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import { z } from 'zod';
+import { z as stateZod } from 'zod/v4';
 import type { AgentModels } from '../../../types/agent';
 import { defineInstructionDocument, type CapabilityLifecycle } from '../../../types/capability';
 import { defineToolkit, type AgentToolkit } from '../../../types/toolkit';
@@ -65,6 +68,11 @@ function staticToolkit(): AgentToolkit {
   });
 }
 
+function resultToolkit(name: string, getResult: AgentToolkit['getResult'], stateSchema?: AgentToolkit['stateSchema']): AgentToolkit {
+  return defineToolkit({ name, description: 'Project execution results.', tools: [],
+    instructions: 'Report the collected results.', getResult, stateSchema });
+}
+
 test('executor uses main history and briefing without replaying child transcripts', async () => {
   const request = input();
   const own = setAgentMessageMetadata(new AIMessage({ id: 'own', content: 'Earlier attempt' }), messageScope(request));
@@ -101,10 +109,11 @@ test('executor returns explicit output without copying subagent messages', async
 });
 
 for (const reviewDecision of [undefined, 'reject', 'cancel'] as const) {
-  test(`executor reads state deliverables without scanning historical or current tool artifacts (${reviewDecision ?? 'returned'})`, async () => {
+  test(`executor reads Toolkit results without scanning historical or current tool artifacts (${reviewDecision ?? 'returned'})`, async () => {
     const previous = new ToolMessage({ id: 'previous-result', name: 'prior_tool', tool_call_id: 'prior-call',
       content: 'Earlier file', artifact: { deliverables: [{ uri: 'artifact://old/report.txt' }] } });
-    const base = input();
+    const toolkit = resultToolkit('reports', state => ({ deliverables: state.publishedReports as Deliverable[] }));
+    const base = input('d1', [toolkit]);
     const request = { ...base, history: [...base.history, new AIMessage({ id: 'prior-invocation', content: '',
       tool_calls: [{ id: 'prior-call', name: 'prior_tool', args: {} }] }), previous] };
     const refs = [{ uri: 'artifact://current/report.txt', title: 'Report' }];
@@ -115,7 +124,7 @@ for (const reviewDecision of [undefined, 'reject', 'cancel'] as const) {
         new ToolMessage({ id: 'other', name: 'another_tool', tool_call_id: 'another', content: 'Other tool data',
           artifact: { deliverables: null } }),
         new AIMessage({ content: 'An ordinary link https://example.com/ignored' })];
-      return { state: { messages, deliverables: refs }, messages, output: 'Finished',
+      return { state: { messages, publishedReports: refs, deliverables: null }, messages, output: 'Finished',
         ...(reviewDecision ? { reviewDecision } : {}) };
     } });
     const result = await execute(request, hostContext());
@@ -125,25 +134,104 @@ for (const reviewDecision of [undefined, 'reject', 'cancel'] as const) {
   });
 }
 
-test('executor defaults to no deliverables when subagent state has no artifacts field', async () => {
+test('executor ignores state deliverables without a Toolkit result getter', async () => {
   const execute = createCapabilityExecutor({ models, runSubagent: async run => {
     const message = new ToolMessage({ name: 'another_tool', tool_call_id: 'result', content: 'https://example.com/report',
       artifact: { deliverables: [{ uri: 'artifact://ignored/report.txt' }] } });
     const messages = [...run.messages, message];
-    return { state: { messages }, messages, output: 'Finished' };
+    return { state: { messages, deliverables: 'Unclaimed invalid state' }, messages, output: 'Finished' };
   } });
-  const result = await execute(input(), hostContext());
-  assert.deepEqual(result.deliverables, []);
-});
-
-test('executor rejects malformed deliverables in subagent state', async () => {
-  for (const deliverables of [undefined, null, {}, 'artifact://report.txt', [{ uri: 'relative/path' }], [{ uri: 1 }]]) {
-    const execute = createCapabilityExecutor({ models, runSubagent: async run => ({
-      ...deliver(run), state: { deliverables },
-    }) });
-    await assert.rejects(execute(input(), hostContext()), /Invalid deliverables/);
+  for (const toolkits of [[], [staticToolkit()]]) {
+    const result = await execute(input('d1', toolkits), hostContext());
+    assert.deepEqual(result.deliverables, []);
   }
 });
+
+test('executor projects selected Toolkit private fields in uses order before finalize and keeps the first URI value', async () => {
+  const reports = [{ uri: 'artifact://first/report' }, { uri: 'artifact://shared/report', title: 'First title' }];
+  const links = [{ uri: reports[0].uri, title: 'Later title' }, { uri: reports[1].uri, title: 'Replacement title' },
+    { uri: 'artifact://second/report', title: 'Second report' }];
+  const calls: string[] = [];
+  const first = resultToolkit('reports', state => {
+    calls.push('reports');
+    return { deliverables: state.reportReceipts as Deliverable[] };
+  }, new StateSchema({ reportReceipts: stateZod.array(stateZod.object({ uri: stateZod.string() })).default([]) as never }));
+  const second = resultToolkit('links', state => {
+    calls.push('links');
+    return { deliverables: state.savedLinks as Deliverable[] };
+  }, new StateSchema({ savedLinks: stateZod.array(stateZod.object({ uri: stateZod.string() })).default([]) as never }));
+  const unselected = resultToolkit('unused', () => { throw new Error('An unused Toolkit must not project results'); });
+  const request = input('d1', [first, second], { finalize: result => {
+    calls.push('finalize');
+    assert.equal(result.output, 'Delivered');
+    return { output: 'Final wording' };
+  } });
+  const registry = compileAgentRegistry({ toolkits: [unselected, second, first], capabilities: [request.capability.capability] });
+  const execute = createCapabilityExecutor({ models, runSubagent: async run => {
+    assert.deepEqual(Object.keys(run.stateSchema!.fields), ['reportReceipts', 'savedLinks']);
+    return { ...deliver(run), state: { reportReceipts: reports, savedLinks: links } };
+  } });
+  const result = await execute({ ...request, capability: registry.capabilities[0] }, hostContext());
+  assert.deepEqual(calls, ['reports', 'links', 'finalize']);
+  assert.deepEqual(result.deliverables, [...reports, links[2]]);
+  assert.equal(result.delivery?.text, 'Final wording');
+});
+
+test('an explicit empty Toolkit result contributes no deliverables', async () => {
+  const toolkit = resultToolkit('empty', () => ({ deliverables: [] }));
+  const execute = createCapabilityExecutor({ models, runSubagent: async run => deliver(run) });
+  assert.deepEqual((await execute(input('d1', [toolkit]), hostContext())).deliverables, []);
+});
+
+test('executor rejects malformed Toolkit results with the owning Toolkit name', async () => {
+  for (const value of [undefined, null, [], {}, { deliverables: undefined }, { deliverables: null },
+    { deliverables: 'artifact://report.txt' }, { deliverables: [{ uri: 'relative/path' }] },
+    { deliverables: [{ uri: 1 }] }, { deliverables: [], extra: true }, Promise.resolve({ deliverables: [] })]) {
+    const toolkit = resultToolkit('invalid_result', () => value as never);
+    const execute = createCapabilityExecutor({ models, runSubagent: async run => deliver(run) });
+    await assert.rejects(execute(input('d1', [toolkit]), hostContext()), error => error instanceof Error
+      && error.message.includes('Toolkit "invalid_result"') && error.cause instanceof Error);
+  }
+});
+
+test('a Toolkit getter failure stops collection and finalize without replacing the error', async () => {
+  for (const failure of [new Error('Result projection failed'), new DOMException('Aborted', 'AbortError')]) {
+    let continued = false;
+    const toolkit = resultToolkit('failed', () => { throw failure; });
+    const next = resultToolkit('next', () => { continued = true; return { deliverables: [] }; });
+    const execute = createCapabilityExecutor({ models, runSubagent: async run => deliver(run) });
+    await assert.rejects(execute(input('d1', [toolkit, next], { finalize: () => { continued = true; } }), hostContext()),
+      error => error === failure);
+    assert.equal(continued, false);
+  }
+});
+
+for (const cancellation of ['before_collection', 'during_getter', 'during_finalize'] as const) {
+  test(`executor preserves cancellation ${cancellation} without continuing result delivery`, async () => {
+    const controller = new AbortController();
+    const reason = new Error('Cancelled');
+    const calls: string[] = [];
+    const toolkit = resultToolkit('results', () => {
+      calls.push('getter');
+      if (cancellation === 'during_getter') controller.abort(reason);
+      return { deliverables: [{ uri: 'artifact://report' }] };
+    });
+    const next = resultToolkit('next', () => { calls.push('next'); return { deliverables: [] }; });
+    const execute = createCapabilityExecutor({ models, runSubagent: async run => {
+      if (cancellation === 'before_collection') controller.abort(reason);
+      return deliver(run);
+    } });
+    const request = input('d1', [toolkit, next], { finalize: async () => {
+      calls.push('finalize');
+      await Promise.resolve();
+      controller.abort(reason);
+      return { output: 'Too late' };
+    } });
+    await assert.rejects(execute(request, { ...hostContext(), runnableConfig: { signal: controller.signal } }), error => error === reason);
+    assert.deepEqual(calls, cancellation === 'before_collection' ? []
+      : cancellation === 'during_getter' ? ['getter'] : ['getter', 'next', 'finalize']);
+  });
+}
 
 for (const output of [null, '', '  ']) {
   test(`finalize can clear a delivery (${JSON.stringify(output)}) without changing child execution`, async () => {

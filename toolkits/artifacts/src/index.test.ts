@@ -78,8 +78,9 @@ test('publishing snapshots a local file, records its successful receipt, and lis
   const f = fixture();
   const result = await f.publish('report.txt', 'Report');
   assert.ok(result instanceof Command);
-  const update = result.update as { deliverables: unknown; messages: ToolMessage[] };
-  assert.deepEqual(update.deliverables, [{ uri: ref.uri, title: 'Report' }]);
+  const update = result.update as { publishedRefs: unknown; messages: ToolMessage[] };
+  assert.deepEqual(update.publishedRefs, [{ uri: ref.uri, title: 'Report' }]);
+  assert.deepEqual(f.toolkit.getResult!(update), { deliverables: [{ uri: ref.uri, title: 'Report' }] });
   assert.deepEqual(update.messages[0].artifact, { ...ref, title: 'Report' });
   assert.equal(update.messages[0].tool_call_id, 'publish:report.txt');
   assert.ok(String(update.messages[0].content).includes(`[Report](${ref.uri})`));
@@ -167,10 +168,13 @@ test('execution state accumulates parallel publications by URI while list and do
     promptSections: [], messages: [new HumanMessage('Deliver the report and data.')],
     runtimeContext: f.config().context,
   });
-  assert.deepEqual(result.state.deliverables, [
+  const expectedRefs = [
     { uri: ref.uri, title: 'Report' },
     { uri: 'artifact://workspace/first/data.csv' },
-  ]);
+  ];
+  assert.deepEqual(result.state.publishedRefs, expectedRefs);
+  assert.equal(Object.hasOwn(result.state, 'deliverables'), false);
+  assert.deepEqual(f.toolkit.getResult!(result.state), { deliverables: expectedRefs });
   assert.equal(result.messages.filter(message => ToolMessage.isInstance(message)
     && message.name === 'publish_artifact').length, 3);
   const next = await createSubagent({
@@ -178,7 +182,16 @@ test('execution state accumulates parallel publications by URI while list and do
     promptSections: [], messages: [new HumanMessage('Start a separate execution.')],
     runtimeContext: f.config().context,
   });
-  assert.deepEqual(next.state.deliverables, []);
+  assert.deepEqual(next.state.publishedRefs, []);
+  assert.deepEqual(f.toolkit.getResult!(next.state), { deliverables: [] });
+});
+
+test('public result extraction rejects invalid publication state', () => {
+  const f = fixture();
+  for (const publishedRefs of [undefined, null, {}, ['artifact://file'], [{ uri: 'not a URI' }],
+    [{ uri: ref.uri, privateField: true }]]) {
+    assert.throws(() => f.toolkit.getResult!({ publishedRefs }), /Invalid deliverables/);
+  }
 });
 
 test('a failed publication returns no successful state update', async () => {
@@ -214,7 +227,8 @@ test('native context compaction can remove publication messages while accumulate
   assert.ok(result.messages.some(message => message.additional_kwargs?.lc_source === 'summarization'));
   assert.equal(result.messages.some(message => ToolMessage.isInstance(message)
     && message.tool_call_id === 'published-before-context'), false);
-  assert.deepEqual(result.state.deliverables, [{ uri: ref.uri }]);
+  assert.deepEqual(result.state.publishedRefs, [{ uri: ref.uri }]);
+  assert.deepEqual(f.toolkit.getResult!(result.state), { deliverables: [{ uri: ref.uri }] });
   assert.equal(result.output, 'Done.');
 });
 

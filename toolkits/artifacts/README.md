@@ -7,11 +7,12 @@ and supplies its `ArtifactStore`, `ArtifactSourceReader` and
 `ArtifactDownloadWriter` adapters.
 
 Publishing takes a local file, saves a snapshot, and returns a stable
-`artifact://` reference. The Toolkit declares a `deliverables` execution-state
+`artifact://` reference. The Toolkit declares a `publishedRefs` execution-state
 field, initially empty. Successful `publish_artifact` calls update this field
 through a native `Command`; its reducer merges publications by URI in publication
 order. The normal ToolMessage carries the `ArtifactRef` receipt and a Markdown
-link. The Capability returns the accumulated references from its subagent state.
+link. The Toolkit’s `getResult(state)` validates the accumulated references and
+returns the public result `{ deliverables }` for the Capability to collect.
 
 Toolkit instructions guide the model to select files for delivery according to
 the task when it creates a file or receives a local path from another tool.

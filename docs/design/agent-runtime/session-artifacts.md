@@ -45,7 +45,7 @@ Agent session 在工作中产生的报告、方案、截图和导出数据，需
 | 层 | 负责 |
 |---|---|
 | agent-contracts | 对外 `Deliverable` 类型、`ArtifactRef` 与 `artifact://` 解析 |
-| pet-agent 核心 | 读取子代理 state 中的交付引用，沿 Capability 返回路径写入执行记录 |
+| pet-agent 核心 | 汇总 Toolkit 显式提供的公共结果，沿 Capability 返回路径写入执行记录 |
 | artifacts Toolkit（`toolkits/artifacts`） | 存储与文件读取 port、三个工具、发布引用的执行状态、文件选择与发布指引 |
 | Host | 注入 store adapter 和 source reader；投影本 run 的交付物；提供 HTTP 文件访问 |
 | agent-session 协议 | `message.completed.deliverables` 与 snapshot 对应字段 |
@@ -62,12 +62,12 @@ type Deliverable = { uri: string; title?: string };
 
 1. 浏览器、Office 等工具在生成文件时保存文件，在正常工具结果中提供本地路径。
 2. Capability 子代理模型根据用户目标、业务需求和工具输出，选择需要交付的文件，调用 `publish_artifact(path, title?)`。
-3. `publish_artifact` 校验文件并保存快照，成功后返回 `ArtifactRef`，同时将 `uri` 和可选 `title` 写入子代理 state 的 `deliverables`。
-4. artifacts Toolkit 通过原生 reducer 累计发布引用，按 `uri` 去重。核心读取 `SubagentResult.state.deliverables`，沿 Capability 返回出口写入执行记录。
+3. `publish_artifact` 校验文件并保存快照，成功后返回 `ArtifactRef`，同时将 `uri` 和可选 `title` 写入 artifacts 的 `publishedRefs` state。
+4. artifacts Toolkit 通过原生 reducer 累计发布引用，按 `uri` 去重，并由自己的 `getResult(state)` 返回 `{ deliverables }`。核心汇总本次所选 Toolkit 的公共结果，沿 Capability 返回出口写入执行记录。
 5. 执行记录保存委派状态、文字交付和已汇总的引用：`{ status, delivery: { text }, deliverables }`。
 6. Supervisor 根据用户目标和实际结果验收，Entry 与 Supervisor 按既有回复流程生成最终回复。
 
-artifacts Toolkit 按 [Toolkit 执行状态](../toolkits/execution-state.md) 声明 `deliverables`，默认值为空数组。文件快照由 store 保存，引用在本次子代理 state 中累计，消息按 Agent 既有上下文策略压缩。发布结果与委派状态分别记录；拒绝或取消委派后，已保存的快照仍可读取。
+artifacts Toolkit 按 [Toolkit 执行状态](../toolkits/execution-state.md) 声明 `publishedRefs`，默认值为空数组，并定义自己的结果提取函数。文件快照由 store 保存，引用在本次子代理 state 中累计，消息按 Agent 既有上下文策略压缩。发布结果与委派状态分别记录；拒绝或取消委派后，已保存的快照仍可读取。
 
 ### 文件选择与发布指引
 
@@ -83,8 +83,9 @@ Capability 在 `uses` 中声明 `artifacts`，获得发布、列表、下载工�
 
 ```text
 publish_artifact 成功回执 ArtifactRef
-  -> artifacts Toolkit state.deliverables
-  -> SubagentResult.state.deliverables
+  -> artifacts Toolkit state.publishedRefs
+  -> artifacts.getResult(state) 返回 { deliverables }
+  -> pet-agent 汇总本次所选 Toolkit 的公共结果
   -> delegate_capability 执行记录 deliverables
   -> message.completed.deliverables
   -> snapshot / Channel 消息 deliverables

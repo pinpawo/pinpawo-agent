@@ -1,7 +1,7 @@
 import type { ProviderTokenUsage } from '../agent/tokenUsage';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { LangGraphRunnableConfig } from '@langchain/langgraph';
+import type { AnyStateSchema, LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { SystemPromptSection } from './systemPrompt';
@@ -77,6 +77,8 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
+  /** Native state fields assembled from the selected Toolkits. */
+  stateSchema?: AnyStateSchema;
   middleware?: AnyAgentMiddleware[];
   /** Read-only invocation data exposed to tools as ToolRuntime.context. */
   runtimeContext?: SubagentRuntimeContext;
@@ -85,6 +87,8 @@ export type SubagentRunInput = SubagentInputState & {
 };
 
 export type SubagentResult = {
+  /** The native agent.invoke result, including Toolkit execution state. */
+  state: Readonly<Record<string, unknown>>;
   /** Terminal review outcome for this invocation; no retained execution or resume state. */
   reviewDecision?: 'reject' | 'cancel';
   /** Usage reported by this invocation, independent of transcript storage. */

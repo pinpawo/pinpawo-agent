@@ -54,7 +54,8 @@ function messageScope(request: CapabilityExecutionInput) {
 
 function deliver(run: SubagentRunInput, text = 'Delivered') {
   const message = new AIMessage({ id: `result:${run.runtimeContext?.executionScope?.delegationId}`, content: text });
-  return { messages: [...run.messages, message], output: message.text };
+  const messages = [...run.messages, message];
+  return { state: { messages }, messages, output: message.text };
 }
 
 function staticToolkit(): AgentToolkit {
@@ -90,7 +91,7 @@ test('executor uses main history and briefing without replaying child transcript
 
 test('executor returns explicit output without copying subagent messages', async () => {
   const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
-    messages: run.messages, output: 'Final output independent of private history.',
+    state: { messages: run.messages }, messages: run.messages, output: 'Final output independent of private history.',
   }) });
   const first = await execute(input(), hostContext());
   const second = await execute(input(), hostContext());
@@ -142,7 +143,7 @@ for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'abor
         run.signal?.throwIfAborted();
       }
       const messages = [...run.messages, new AIMessage({ id: 'partial', content: 'Partial work' })];
-      return { messages, output: null,
+      return { state: { messages }, messages, output: null,
         ...(outcome === 'reject' || outcome === 'cancel' ? { reviewDecision: outcome } : {}),
       };
     } });

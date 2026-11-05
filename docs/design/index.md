@@ -21,6 +21,8 @@ See [Reference](../reference/index.md) for the current public reading path.
 - [Session Artifacts](agent-runtime/session-artifacts.md) — draft：第一阶段的显式发布、交付物引用与按需下载；
   交付物随回复到达 Channel，artifacts Toolkit 管存储，Host 提供 local / COS adapter
 - [Review and interrupt semantics](agent-runtime/review.md) — 工具审核策略、执行与恢复
+- [Toolkit 执行状态](toolkits/execution-state.md) — draft：Toolkit 声明原生 state schema，
+  Capability 按 `uses` 装配子代理执行状态
 - Capability / Toolkit 的组合规则见[公共契约](../reference/extensions/capability-toolkit.md)。
 
 ## Local host and interfaces

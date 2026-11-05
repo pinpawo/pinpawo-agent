@@ -244,6 +244,21 @@ alter table studio_auth_session add column credential_version integer not null d
 才重标为新版本；否则不重标，并返回 `200 {"revoked": true}`，明确告知这台设备需要重新登录（不再出现
 "返回成功但实际已被登出"）。
 
+**管理员重置同样走版本闸，禁用也递增版本。** 只盖登录与自助改密还不够，剩下两处写入会让并发结果
+不可解释：
+
+- **管理员重置**（`POST /users/password`）：处理开始时读取 `{hash, version}` 快照，提交时带上
+  `expectedVersion` 走同一套条件递增。两个操作员同时重置同一个账号时，先落库的那个生效，另一个拿到
+  `409 {"error": "Password was changed elsewhere. Reload the user and retry."}` 并**不覆盖**，
+  审计写 `user.password / denied / reason=credential-changed`。调用方拿到 `409` 应重新拉取用户状态
+  （`GET /users`）后重试，而不是盲目重发。
+- **禁用**（`POST /users/disable` 且 `disabled: true`）：状态变更、版本 +1 与会话删除在**同一事务**里
+  完成。这样"改密已校验旧密码、尚未落库"时发生的禁用会让那次改密在提交时被版本闸拦下（`409`），
+  不会出现"账号已禁用但密码被改掉"的残留。
+
+哪些动作动 `credential_version`，一句话记法：**登录不动；自助改密 +1；管理员重置 +1；禁用 +1**。
+新增任何管理动作时，只要它会写入凭据或改变账号可用性，就必须在这张表里补一行，否则版本闸会被绕过。
+
 时间一律 ISO-8601 文本，与 `studio_clients` 等现有表一致；`studio_auth_user.client_id`
 **不建跨 owner 外键**（迁移顺序与 SQLite/Postgres 行为差异），由应用层保证「先建 client 再建 user」：
 建号时先 `clients.ensure`，再 `signUpEmail`。若后者失败，留下的是一个没有任何凭据的 client 行，
@@ -292,15 +307,15 @@ IPv6（`::ffff:127.0.0.1`）归一化为 IPv4，IPv6 zone id 丢弃，便于与�
 | `POST /auth/password` | 会话 | `{currentPassword, newPassword}` | `204`（撤销该用户其他会话，当前会话保留）；`401` 旧密码错；`400` 参数/口令长度不合法；`409` 凭据在提交前已被改密/重置（条件提交未命中，整体回滚，需重新登录后重试）；`200 {"revoked": true}` 表示改密已生效但当前会话在此期间被吊销，需重新登录 |
 | `GET /users` | 本机 token | – | `200 {users: [{userId, username, clientId, displayName, capabilities, disabledAt?, lockedUntil?}]}` |
 | `POST /users` | 本机 token | `{username, password, displayName?, capabilities?}` | `201 {userId, clientId, capabilities}`；`409` 用户名已存在 |
-| `POST /users/password` | 本机 token | `{userId, password}` | `204`，撤销该用户全部会话 |
+| `POST /users/password` | 本机 token | `{userId, password}` | `204`，撤销该用户全部会话；`409 {error: "Password was changed elsewhere. Reload the user and retry."}` 并发重置时后提交者被拒（条件提交未命中，整体回滚，密码与会话均不变） |
 | `POST /users/capabilities` | 本机 token | `{userId, capabilities}` | `200 {userId, capabilities}` |
-| `POST /users/disable` | 本机 token | `{userId, disabled}` | `200 {userId, disabled}`；禁用同时吊销 client 与会话 |
+| `POST /users/disable` | 本机 token | `{userId, disabled}` | `200 {userId, disabled}`；禁用同时吊销 client 与会话，并在同一事务内递增 `credential_version`，使进行中的自助改密无法再落库 |
 
 状态码约定：`401` 未认证（无/过期/已吊销凭证）或登录凭据无效；`403` 已认证但无 capability、
 或不属于该 Channel；`429` 登录被锁定；`400` 请求体不是合法 JSON；`415` 请求的
 `Content-Type` 不是 `application/json`。后两者沿用 `studio-http` 的 `HttpRequestError`
 （该错误类已从包导出），插件把它转成同样的状态码，而不是折成 `500`。所有响应沿用现有 `{error}` 结构。
-`409` 用于"凭据已被他人/管理员改动"的乐观并发冲突（自助改密的条件提交未命中），与 `401`
+`409` 用于"凭据已被他人/管理员改动"的乐观并发冲突（自助改密或管理员重置的条件提交未命中），与 `401`
 （旧密码错误）区分开，避免把并发冲突误报成密码输错。
 
 **不能**把 `/auth/*`、`/users*` 加进 `RESERVED_ROUTE_PATHS`：那个集合是 `normalizeRoute` 拒绝

@@ -189,7 +189,9 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 `Authorization` 值。
 
 时间一律 ISO-8601 文本，与 `studio_clients` 等现有表一致；`studio_auth_user.client_id`
-**不建跨 owner 外键**（迁移顺序与 SQLite/Postgres 行为差异），由应用层保证「先建 client 再建 user」。
+**不建跨 owner 外键**（迁移顺序与 SQLite/Postgres 行为差异），由应用层保证「先建 client 再建 user」：
+建号时先 `clients.ensure`，再 `signUpEmail`。若后者失败，留下的是一个没有任何凭据的 client 行，
+不会产生"有身份却无法登录"的用户；同一用户名重试即可继续使用该 client。
 审计表**不记录密码、token、token 哈希**。
 
 ### 3.8 失败锁定与限速
@@ -235,7 +237,9 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 | `POST /users/disable` | 本机 token | `{userId, disabled}` | `200 {userId, disabled}`；禁用同时吊销 client 与会话 |
 
 状态码约定：`401` 未认证（无/过期/已吊销凭证）或登录凭据无效；`403` 已认证但无 capability、
-或不属于该 Channel；`429` 登录被锁定。所有响应沿用现有 `{error}` 结构。
+或不属于该 Channel；`429` 登录被锁定；`400` 请求体不是合法 JSON；`415` 请求的
+`Content-Type` 不是 `application/json`。后两者沿用 `studio-http` 的 `HttpRequestError`
+（该错误类已从包导出），插件把它转成同样的状态码，而不是折成 `500`。所有响应沿用现有 `{error}` 结构。
 
 **不能**把 `/auth/*`、`/users*` 加进 `RESERVED_ROUTE_PATHS`：那个集合是 `normalizeRoute` 拒绝
 贡献方注册的清单，加进去会让本插件自己的路由在注册时直接抛
@@ -259,11 +263,11 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 
 修改：
 
-- `plugins/studio-http/src/studioHttpPlugin.ts`：`StudioHttpPrincipal` 增加 `capabilities`；`StudioHttpRoute` 增加 `capability`；中间件先 scope 再 capability；新增 `authenticators` hook 并在 `authenticate()` 里兜底调用（每个 verifier 单独 try/catch，异常按"不是我的凭证"处理）；`jsonResponse` 支持 `204` 无 body
+- `plugins/studio-http/src/studioHttpPlugin.ts`：`StudioHttpPrincipal` 增加 `capabilities`；`StudioHttpRoute` 增加 `capability`；中间件先 scope 再 capability；新增 `authenticators` hook 并在 `authenticate()` 里兜底调用（每个 verifier 单独 try/catch，异常按"不是我的凭证"处理）；`jsonResponse` 支持 `204` 无 body；导出 `HttpRequestError`，让贡献方把请求体错误透传成 `400`/`415`
 - `plugins/channel/src/channelPlugin.ts`：注册路由时声明 `channel.read` / `channel.write`（两行，身份继承逻辑不变）
 - `packages/studio/src/index.ts`：导出 `StudioPluginHookRegistry`，让嵌入方（和集成测试）能像 `createStudio` 一样接线
-- `apps/studio-console/src/App.tsx`：连接弹窗增加「用户名 / 密码」表单，登录成功复用现有 `sessionStorage['studio.token']`，额外存 `studio.user` 用于展示；`401` 时重新弹出登录而非只显示错误
-- `packages/studio/templates/default/studio.json`：示例中给出可选的 `@pinpawo-plugin/studio-auth` 条目（注释性文档放在 README，不默认开启）
+- `apps/studio-console/src/App.tsx`：连接弹窗增加「用户名 / 密码」表单，登录成功复用现有 `sessionStorage['studio.token']`，额外存 `studio.user` 用于展示；`401` 时重新弹出登录而非只显示错误 —— **本分支未做，留作下一步**（后端 `/auth/*` 已可用）
+- `packages/studio/templates/default/studio.json`：示例中给出可选的 `@pinpawo-plugin/studio-auth` 条目（注释性文档放在 README，不默认开启）—— **本分支未做**，启用方式写在 `services/studio/README.md`
 - `docs/reference/api/studio.md`：补 `/auth/*` 与 `/users*` 契约
 - `docs/design/studio/http-plugin.md`：补 `authenticators` hook 与 capability 门
 
@@ -303,7 +307,17 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 4. `POST /dispatch` 无 `studio.dispatch` → `403`，授予后 → `202`；
 5. `pps_` key 的可达范围与 `403` 文案与改造前一致；
 6. 过期会话在 HTTP 层被 `401`；
-7. 某个 verifier 抛异常时是 `401` 而不是 `500`。
+7. 某个 verifier 抛异常时是 `401` 而不是 `500`；
+8. 坏 JSON → `400`、错 `Content-Type` → `415`，`/users` 与 `/auth/*` 同一套答案。
+
+Channel capability 门（`plugins/channel/src/channelCapabilityHttp.test.ts`，真实 `studio-http` + 真实 hook
+registry，用一个只返回 capability 的校验器代替登录插件）：
+
+1. 只有 `studio.view` 的会话 → `GET /channels` `403`（提示 `channel.read`）；
+2. 有 `channel.read` 没有 `channel.write` → 读 `200`、建 Channel `403`；
+3. 两项都授予 → 读 `200`、建 `201`；
+4. `pps_` key 与未声明 capabilities 的凭证照旧可读可写；
+5. 本机 token 仍全权。
 
 回归：未启用插件时 `plugins/studio-http` 与 `tests/studio-e2e` 现有用例不变。
 
@@ -338,6 +352,7 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 | 用户 → `user.<username>` client 映射、client 吊销后拒绝 | ✅ |
 | capability 最小集与 `studio-http` 的 capability 门（scope 优先，插件只能加要求） | ✅ |
 | Channel 路由的 `channel.read` / `channel.write` 门（撤销后真的不可用） | ✅ |
+| `/auth/*` 的 `400`（坏 JSON）/ `415`（错 `Content-Type`）契约，不折成 `500` | ✅ |
 | `authenticators` hook（`authenticate()` 兜底调用，逐个别名 try/catch） | ✅ |
 | 失败锁定（5 次 / 15 分钟，原子计数）与审计脱敏 | ✅ |
 | 未启用时行为不变（`studio-http` 19/19、`studio-e2e` 36/36 全绿） | ✅ |
@@ -345,7 +360,7 @@ create index studio_auth_session_by_token on studio_auth_session (token);
 | 按来源地址限速 | ⬜ 未做（当前靠按用户名锁定） |
 | `docs/reference/api/studio.md` 的 `/auth/*` 契约 | ✅ 已补 |
 
-验收方式：`npm test -w @pinpawo-plugin/studio-auth`（21 个用例）、
+验收方式：`npm test -w @pinpawo-plugin/studio-auth`（22 个用例）、
 `npm test -w @pinpawo-plugin/studio-http`（19 个用例）、
-`npm test -w @pinpawo-plugin/channel`（69 通过 / 1 跳过，跳过项需要 `PINPAWO_TEST_POSTGRES_URL`）、
+`npm test -w @pinpawo-plugin/channel`（74 通过 / 1 跳过，跳过项需要 `PINPAWO_TEST_POSTGRES_URL`）、
 `npm test -w @pinpawo-tests/studio-e2e`（36 个用例），以及根 `npm run build`、`npm run typecheck`。

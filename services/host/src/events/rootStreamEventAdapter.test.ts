@@ -366,22 +366,34 @@ test('adapter emits one completed subagent message per child lifecycle across mu
   assert.ok(!assistantText.includes('foo'), `assistant text leaked subagent output: ${JSON.stringify(assistantText)}`);
 });
 
-test('adapter hides context-summary model output and keeps the final subagent message', async () => {
-  const summaryText = 'INTERNAL_SUMMARY_CONTENT';
-  const finalText = 'FINAL_SUBAGENT_CONTENT';
+test('adapter exposes the context handoff as one subagent message without a summary model call', async () => {
+  const finalText = 'Partial progress; verification remains.';
+  class CountingChatModel extends FakeListChatModel {
+    responseCount = 0;
+    override bindTools() {
+      // FakeListChatModel otherwise returns a new base instance, losing this
+      // subclass's counter when the final request binds toolChoice: none.
+      return this.withConfig({});
+    }
+    override _currentResponse() {
+      this.responseCount += 1;
+      return super._currentResponse();
+    }
+  }
+  const model = new CountingChatModel({ responses: [finalText], sleep: 0 });
   const capability = async (
     state: typeof MessagesAnnotation.State,
     config?: RunnableConfig,
   ) => {
     const result = await createSubagent({
-      model: new FakeListChatModel({ responses: [summaryText, finalText], sleep: 0 }),
-      tools: [],
-      promptSections: [],
-      messages: state.messages,
-      contextWindowTokens: 1000,
-      maxIterations: 4,
-      runnableConfig: config,
+      model, tools: [], promptSections: [], messages: state.messages,
+      contextWindowTokens: 12_000, maxIterations: 20, runnableConfig: config,
     });
+    const notice = result.messages.find((message): message is ToolMessage => ToolMessage.isInstance(message)
+      && message.name === 'runtime_budget_status');
+    assert.ok(notice);
+    assert.equal(JSON.parse(notice.text).reason, 'context_window');
+    assert.ok(result.messages.every(message => message.additional_kwargs?.lc_source !== 'summarization'));
     const finalMessage = result.messages.at(-1);
     assert.ok(finalMessage);
     return { messages: [finalMessage] };
@@ -391,22 +403,14 @@ test('adapter hides context-summary model output and keeps the final subagent me
     .addEdge(START, 'capability')
     .addEdge('capability', END)
     .compile();
-  const messages = [
-    new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
-    new AIMessage(`pending verification\n${'y'.repeat(800)}`),
-    new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
-    new AIMessage(`more findings\n${'w'.repeat(800)}`),
-    new HumanMessage('Finish the delegated task.'),
-  ];
 
-  const events = await collectChatEvents(graph as never, messages);
+  const events = await collectChatEvents(graph as never, [new HumanMessage('x'.repeat(32_000))]);
   const subagentMessages = events
     .filter((event): event is Extract<RootStreamChatEvent, { type: 'subagent.message' }> => event.type === 'subagent.message')
     .map((event) => event.text);
 
+  assert.equal(model.responseCount, 1);
   assert.deepEqual(subagentMessages, [finalText]);
-  assert.ok(events.every((event) => event.type !== 'subagent.message'
-    || !event.text.includes(summaryText)));
 });
 
 test('adapter surfaces guard decision records written to the stream writer', async () => {

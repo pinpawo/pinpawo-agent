@@ -28,14 +28,24 @@ function notices(messages: BaseMessage[]) {
     assert.equal(invocation.tool_calls[0].id, message.tool_call_id);
     const data = JSON.parse(message.text);
     assert.ok(data.phase === 'prepare' || data.phase === 'finalize');
-    assert.equal(data.remainingModelCalls, data.maxIterations - data.iteration + 1);
-    if (data.phase === 'finalize') assert.equal(data.remainingModelCalls, 1);
+    if (data.reason === 'model_calls') {
+      assert.equal(data.remainingModelCalls, data.maxIterations - data.iteration + 1);
+      if (data.phase === 'finalize') assert.equal(data.remainingModelCalls, 1);
+    } else {
+      assert.equal(data.reason, 'context_window');
+      assert.equal(data.phase, 'finalize');
+      assert.ok(data.estimatedInputTokens >= data.triggerTokens);
+      assert.ok(data.estimatedInputTokens < data.inputBudgetTokens);
+    }
     assert.equal(typeof data.instruction, 'string');
     return [message];
   });
 }
 
-function budgetFixture(t: TestContext, maxIterations: number, initialUnreviewed = 0) {
+function budgetFixture(t: TestContext, maxIterations: number, initialUnreviewed = 0, options: {
+  contextWindowTokens?: number;
+  resumeMessage?: string;
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'pinpawo-durable-budget-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const path = join(root, 'checkpoints.json');
@@ -44,15 +54,22 @@ function budgetFixture(t: TestContext, maxIterations: number, initialUnreviewed 
   const results: SubagentResult[] = [];
   const records: GuardDecisionRecord[] = [];
   const boundToolCounts: number[] = [];
+  const boundToolChoices: unknown[] = [];
   const inputs: BaseMessage[][] = [];
   class ActionModel extends BaseChatModel {
     _llmType() { return 'durable-budget-fixture'; }
     private boundTools = 0;
-    bindTools(tools: unknown[]) { this.boundTools = tools.length; return this; }
+    private toolChoice: unknown;
+    bindTools(tools: unknown[], settings?: Record<string, unknown>) {
+      this.boundTools = tools.length;
+      this.toolChoice = settings?.tool_choice;
+      return this;
+    }
     async _generate(messages: BaseMessage[]) {
       inputs.push([...messages]);
       modelCalls++;
       boundToolCounts.push(this.boundTools);
+      boundToolChoices.push(this.toolChoice);
       this.boundTools = 0;
       const latest = messages.at(-1);
       const finalize = ToolMessage.isInstance(latest) && latest.name === 'runtime_budget_status' && JSON.parse(latest.text).phase === 'finalize';
@@ -85,7 +102,8 @@ function budgetFixture(t: TestContext, maxIterations: number, initialUnreviewed 
       });
       assert.ok(review);
       const result = await createSubagent({ model, tools, messages: state.messages,
-        promptSections: [], maxIterations, middleware: [review], runnableConfig,
+        promptSections: [], maxIterations, contextWindowTokens: options.contextWindowTokens,
+        middleware: [review], runnableConfig,
       });
       results.push(result);
       return { messages: result.messages };
@@ -110,7 +128,7 @@ function budgetFixture(t: TestContext, maxIterations: number, initialUnreviewed 
     const review = await pending();
     return run(new Command({ resume: { [review.interruptId]: decision === 'invalid'
       ? { decisions: [] } : { decisions: [{ reviewId: review.payload.reviews[0].id,
-        selectedOptionId: decision, ...(decision === 'respond' ? { input: { message: 'Choose another action.' } } : {}),
+        selectedOptionId: decision, ...(decision === 'respond' ? { input: { message: options.resumeMessage ?? 'Choose another action.' } } : {}),
       }] },
     } }));
   };
@@ -122,7 +140,8 @@ function budgetFixture(t: TestContext, maxIterations: number, initialUnreviewed 
     }
     assert.deepEqual(activeCounts, [count], 'the paused child already checkpointed its completed model calls');
   };
-  return { run, resume, pending, assertPersistedCount, effects, results, records, boundToolCounts, inputs, config, makeGraph,
+  return { run, resume, pending, assertPersistedCount, effects, results, records, boundToolCounts, boundToolChoices, inputs, config, makeGraph,
+    checkpointPath: path,
     get modelCalls() { return modelCalls; },
   };
 }
@@ -202,4 +221,45 @@ test('FileSaver does not duplicate a preparation notice across approval resumes'
   assert.deepEqual(notices(fixture.inputs[11]).map(message => JSON.parse(message.text).phase), ['prepare', 'finalize']);
   assert.ok(fixture.boundToolCounts.every(count => count === 2));
   assert.deepEqual(fixture.records.map(record => record.iteration), Array.from({ length: 12 }, (_, i) => i + 1));
+});
+
+
+test('FileSaver resumes Review Respond into one persisted context handoff without executing the proposed action', async (t) => {
+  const fixture = budgetFixture(t, 100, 0, {
+    contextWindowTokens: 12_000,
+    resumeMessage: 'x'.repeat(32_000),
+  });
+  await fixture.run({ messages: [new HumanMessage('Perform the reviewed task.')] });
+  await fixture.assertPersistedCount(1);
+  assert.equal(fixture.modelCalls, 1);
+  assert.equal(notices(fixture.inputs[0]).length, 0);
+  assert.equal(fixture.effects.length, 0);
+
+  await fixture.resume('invalid');
+  await fixture.assertPersistedCount(1);
+  assert.equal(fixture.modelCalls, 1, 'an invalid approval response does not call the model');
+  const output = await fixture.resume('respond');
+
+  assert.equal(fixture.modelCalls, 2, 'Respond calls the model once for the handoff and never invokes a summarizer');
+  assert.deepEqual(fixture.effects, [], 'the previously proposed action remains cancelled');
+  assert.deepEqual(fixture.boundToolCounts, [1, 1]);
+  assert.deepEqual(fixture.boundToolChoices, [undefined, 'none']);
+  assert.equal(fixture.results.at(-1)?.output, 'Handoff');
+  assert.equal(output.messages.at(-1)?.text, 'Handoff');
+  assert.equal(readPendingInterrupt(await fixture.makeGraph().getState(fixture.config)), null);
+  const contextNotices = notices(output.messages);
+  assert.equal(contextNotices.length, 1);
+  assert.equal(JSON.parse(contextNotices[0].text).reason, 'context_window');
+  assert.equal(JSON.parse(contextNotices[0].text).iteration, 2);
+  assert.equal(notices(fixture.inputs[1]).length, 1, 'the real model input includes the paired notice');
+  assert.ok(output.messages.every((message: BaseMessage) => message.additional_kwargs?.lc_source !== 'summarization'));
+  const savedChildMessages: BaseMessage[][] = [];
+  for await (const tuple of new FileSaver(fixture.checkpointPath).list(fixture.config)) {
+    if (!tuple.config.configurable?.checkpoint_ns) continue;
+    const messages = tuple.checkpoint.channel_values.messages;
+    if (Array.isArray(messages)) savedChildMessages.push(messages as BaseMessage[]);
+  }
+  assert.ok(savedChildMessages.some(messages => notices(messages).length === 1
+    && notices(messages)[0].id === contextNotices[0].id), 'a freshly loaded saver retains the single child handoff notice');
+  assert.deepEqual(fixture.records.map(record => record.iteration), [1, 2]);
 });

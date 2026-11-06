@@ -6,7 +6,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool } from '@langchain/core/tools';
 import { Command, END, interrupt, MemorySaver, MessagesAnnotation, START, StateGraph } from '@langchain/langgraph';
-import { createMiddleware } from 'langchain';
+import { countTokensApproximately, createMiddleware } from 'langchain';
 import { z } from 'zod';
 import { createSubagent, SUBAGENT_BUDGET_HANDOFF_EVENT } from './createSubagent';
 import { readSubagentGuardStopReason } from './guardStop';
@@ -77,8 +77,8 @@ test('budget notifications persist before the model with stable system, tools an
   assert.deepEqual(notices.filter(ToolMessage.isInstance).map(message => JSON.parse(message.text).phase), ['prepare', 'finalize']);
   assert.deepEqual(makeToolProtocolSafe(childMessages).removedMessageIds, []);
   assert.deepEqual(events.filter(event => event.name === SUBAGENT_BUDGET_HANDOFF_EVENT).map(event => event.data), [
-    { iteration: 11, maxIterations: 12, remainingModelCalls: 2, phase: 'prepare' },
-    { iteration: 12, maxIterations: 12, remainingModelCalls: 1, phase: 'finalize' },
+    { reason: 'model_calls', iteration: 11, maxIterations: 12, remainingModelCalls: 2, phase: 'prepare' },
+    { reason: 'model_calls', iteration: 12, maxIterations: 12, remainingModelCalls: 1, phase: 'finalize' },
   ]);
 });
 
@@ -146,4 +146,95 @@ test('a forbidden final tool call cannot execute, and an empty final answer is n
   assert.equal(emptyResult.output, null);
   const failing = createMiddleware({ name: 'Failure', wrapModelCall: () => { throw new Error('model unavailable'); } });
   await assert.rejects(createSubagent({ model: empty, tools: [noop], middleware: [failing], promptSections: [], messages: [new HumanMessage('work')], maxIterations: 1 }), /model unavailable/);
+});
+
+test('context budget counts composed system sections and tool schemas and reserves generation space', async () => {
+  const noop = tool(() => 'unused', {
+    name: 'noop', description: 'schema details '.repeat(900), schema: z.object({}),
+  });
+  const model = new RecordingModel(() => new AIMessage('handoff'));
+  const result = await createSubagent({
+    model, tools: [noop], promptSections: [{ id: 'capability:large', content: 'evidence '.repeat(1500) }],
+    messages: [new HumanMessage('small task')], contextWindowTokens: 12_000, generationReserveTokens: 4_000,
+  });
+  assert.equal(model.calls.length, 1);
+  assert.equal(model.calls[0].toolChoice, 'none');
+  const notice = result.messages.find(message => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status')!;
+  const data = JSON.parse(notice.text);
+  assert.equal(data.reason, 'context_window');
+  assert.equal(data.inputBudgetTokens, 8_000);
+  assert.equal(data.triggerTokens, 5_200);
+  assert.ok(data.estimatedInputTokens >= 5_200);
+  assert.ok(countTokensApproximately([new HumanMessage('small task')]) < data.triggerTokens);
+});
+
+test('context finalization blocks violating tool calls even when caller middleware bypasses the model', async () => {
+  let effects = 0;
+  let responses = 0;
+  const noop = tool(() => { effects++; return 'observed'; }, {
+    name: 'noop', description: 'inspect', schema: z.object({}),
+  });
+  const bypass = createMiddleware({
+    name: 'BypassContextFinal', wrapModelCall: (request, handler) => {
+      if (request.messages.some(message => ToolMessage.isInstance(message)
+        && message.name === 'runtime_budget_status' && JSON.parse(message.text).reason === 'context_window')) {
+        return call(2);
+      }
+      return handler(request);
+    },
+  });
+  const model = new RecordingModel(() => {
+    responses++;
+    return new AIMessage({ content: '', tool_calls: [{ id: 'first', name: 'noop', args: {} }],
+      usage_metadata: { input_tokens: 9_000, output_tokens: 10, total_tokens: 9_010 } });
+  });
+  const result = await createSubagent({
+    model, tools: [noop], middleware: [bypass], promptSections: [],
+    messages: [new HumanMessage('inspect')], contextWindowTokens: 12_000,
+  });
+  assert.equal(responses, 1);
+  assert.equal(effects, 1, 'only the first, budget-permitted operation executes');
+  assert.equal(result.output, null);
+  assert.equal(readSubagentGuardStopReason(result.messages.at(-1)!), 'subagent_context_limit_reached');
+  assert.deepEqual(makeToolProtocolSafe(result.messages).removedMessageIds, []);
+});
+
+test('provider usage from parent history does not consume a new delegation context budget', async () => {
+  const model = new RecordingModel(() => new AIMessage('fresh result'));
+  const result = await createSubagent({
+    model, tools: [], promptSections: [], contextWindowTokens: 12_000,
+    messages: [new AIMessage({ content: 'parent result',
+      usage_metadata: { input_tokens: 50_000, output_tokens: 10, total_tokens: 50_010 } }),
+    new HumanMessage('new delegation')],
+  });
+  assert.equal(result.output, 'fresh result');
+  assert.equal(model.calls.length, 1);
+  assert.ok(!result.messages.some(message => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status'));
+});
+
+test('a later missing usage report retains the provider anchor plus all intervening growth', async () => {
+  let effects = 0;
+  const observe = tool(() => ++effects === 1 ? 'small result' : 'x'.repeat(8_000), {
+    name: 'noop', description: 'observe', schema: z.object({}),
+  });
+  const model = new RecordingModel(i => {
+    if (i === 3) return new AIMessage('context handoff');
+    const message = call(i);
+    if (i === 1) message.usage_metadata = { input_tokens: 9_000, output_tokens: 10, total_tokens: 9_010 };
+    return message;
+  });
+  const result = await createSubagent({
+    model, tools: [observe], promptSections: [], messages: [new HumanMessage('inspect')],
+    contextWindowTokens: 16_000,
+  });
+  assert.equal(effects, 2);
+  assert.equal(model.calls.length, 3);
+  assert.equal(model.calls[2].toolChoice, 'none');
+  const notice = result.messages.find(message => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status')!;
+  const data = JSON.parse(notice.text);
+  assert.equal(data.reason, 'context_window');
+  assert.ok(data.estimatedInputTokens >= 11_000);
 });

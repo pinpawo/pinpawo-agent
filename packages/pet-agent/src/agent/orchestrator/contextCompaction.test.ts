@@ -40,7 +40,7 @@ function executionResult(id: string, planItemId: string, text: string, taskId = 
   const delegationId = `delegation:${planItemId}`;
   const task = `Work on ${planItemId}`;
   return createCapabilityExecutionMessage({ callId: id,
-    execution: { planItemId, delegationId, capability: 'general', task, briefing: 'Execute the confirmed task.' },
+    execution: { planItemId, delegationId, capability: 'general', goal: 'Complete the planned work.', task, briefing: 'Execute the confirmed task.' },
     result: { status: 'returned', delivery: { id: `delivery:${id}`, task, text,
       scope: { lane: 'capability:general', runId: 'run', taskId, delegationId } } },
     metadata: { runId: 'run', taskId } });

@@ -39,7 +39,7 @@ const completedCriteria: PromptGoalAcceptanceCriterion[] = [
 ];
 const continuationBriefingCriterion: PromptGoalAcceptanceCriterion = {
   id: 'continuation_briefing_preserves_progress',
-  statement: 'Each continuation briefing is grounded in the current objective and prior actual deliveries: it carries forward relevant established results and constraints, identifies the unfinished work, and requests the next necessary action without treating completed work as absent. Necessary rechecks are allowed; repeated tool calls alone do not mean the handoff failed. Use delegationBriefings and the actual model-input evidence to judge the instructions, not whether two briefings merely have different wording.',
+  statement: 'The actual continuation input preserves the original task and briefing without rewriting their requirements. The runtime continuation annotation identifies the preceding execution and any real delivery, and the actual model input contains that delivery as progress evidence. Together they make clear that this is continuation of unfinished work, rather than a restart or acceptance of the partial result. Do not require the Supervisor to restate progress in a newly written briefing: these fixtures have no new requirements or corrective work and should use continue=true. Do not add new operating constraints. Necessary rechecks are allowed; repeated tool calls alone do not mean the handoff failed. Judge delegationBriefings and the actual model-input evidence together.',
 };
 
 export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHandoffExpected> = {

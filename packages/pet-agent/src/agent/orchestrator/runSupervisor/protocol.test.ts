@@ -11,6 +11,7 @@ test('control schemas describe plan, review, adjustment and explicit execution w
   for (const control of [
     { schema: submitPlanSchema, args: { tasks } },
     { schema: delegateCapabilitySchema, args: { briefing: 'Execute current objective.' } },
+    { schema: delegateCapabilitySchema, args: { continue: true } },
     { schema: reviewCurrentSchema, args: { completed: false, reason: 'Missing verification' } },
     { schema: reviewCurrentSchema, args: { completed: true, reason: 'Verified' } },
     { schema: adjustPlanSchema, args: { adjustedGoal: 'Calibrated goal', reason: 'New request', currentTask: 'replace', tasks } },
@@ -28,6 +29,11 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
     { schema: reviewCurrentSchema, args: { completed: true, reason: 'Verified', reply: 'Done' } },
     { schema: delegateCapabilitySchema, args: { briefing: 'Task', priorDelegationIds: ['not-a-model-parameter'] } },
     { schema: delegateCapabilitySchema, args: { briefing: null } },
+    { schema: delegateCapabilitySchema, args: {} },
+    { schema: delegateCapabilitySchema, args: { continue: false } },
+    { schema: delegateCapabilitySchema, args: { continue: 'true' } },
+    { schema: delegateCapabilitySchema, args: { continue: true, briefing: 'Rewrite the task.' } },
+    { schema: delegateCapabilitySchema, args: { continue: true, briefing: '' } },
     { schema: delegateCapabilitySchema, args: { briefing: 'Execute', guidance: 'Old field' } },
     { schema: delegateCapabilitySchema, args: { planItemId: 'model-selected-task' } },
     { schema: delegateCapabilitySchema, args: { briefing: ' ' } },
@@ -37,9 +43,15 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
 
 test('execution snapshot is internal and does not duplicate model arguments', () => {
   const snapshot = { planItemId: 'task', delegationId: 'delegation', capability: 'general',
-    task: 'Verify the change', briefing: 'Verify the change' };
+    goal: 'Verify and report the change.', task: 'Verify the change', briefing: 'Verify the change' };
   assert.deepEqual(capabilityExecutionSnapshotSchema.parse(snapshot), snapshot);
   assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, briefing: undefined }).success, false);
+  assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, goal: undefined }).success, false);
+  const resumed = { ...snapshot, continuation: { delegationId: 'previous-delegation', deliveryId: 'previous-delivery' } };
+  assert.deepEqual(capabilityExecutionSnapshotSchema.parse(resumed), resumed);
+  assert.deepEqual(capabilityExecutionSnapshotSchema.parse({ ...resumed,
+    continuation: { delegationId: 'previous-delegation', deliveryId: null } }).continuation,
+  { delegationId: 'previous-delegation', deliveryId: null });
 });
 
 test('plan objectives and delegation briefings have distinct schemas', () => {

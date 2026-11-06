@@ -328,7 +328,7 @@ function supervisorInput(
     }] }), { ...metadata, source: 'supervisor' }));
     messages.push(createCapabilityExecutionMessage({ callId, metadata,
       execution: { planItemId: current!.delegationId, delegationId: current!.delegationId,
-        capability: current!.capability, task: current!.task, briefing: 'Execute the confirmed task.' },
+        capability: current!.capability, goal: input.userRequest, task: current!.task, briefing: 'Execute the confirmed task.' },
       result: { status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
         runId: report.runId, taskId: input.taskId, delegationId: report.delegationId, lane: report.sourceLane,
       } } },

@@ -18,7 +18,12 @@ export const capabilityExecutionSnapshotSchema = z.object({
   delegationId: z.string().min(1),
   capability: z.string().min(1),
   task: z.string().min(1),
+  goal: z.string().min(1),
   briefing: z.string().refine(text => text.trim().length > 0),
+  continuation: z.object({
+    delegationId: z.string().min(1),
+    deliveryId: z.string().min(1).nullable(),
+  }).strict().optional(),
 }).strict();
 
 export type CapabilityExecutionInput = z.infer<typeof capabilityExecutionSnapshotSchema>;

@@ -45,7 +45,7 @@ test('readTuiCheckpointMessages keeps visible conversation and delegations witho
 
 test('readTuiCheckpointMessages hides paired, private and unmatched Capability deliveries', () => {
   const execution = { planItemId: 'task-1', delegationId: 'delegation-1', capability: 'general',
-    task: 'Inspect files', briefing: 'Execute the confirmed task.' };
+    task: 'Inspect files', goal: 'Inspect files', briefing: 'Execute the confirmed task.' };
   const metadata = { runId: 'run-1', taskId: 'trace-1' };
   const call = setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },

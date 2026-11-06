@@ -22,11 +22,13 @@ import { createPromptEvalUsageCollector, readLlmResultTokenUsage } from './promp
 import type { BudgetHandoffInput, BudgetHandoffExpected } from './datasets/budget-handoff.ts';
 
 export type BudgetHandoffObservation = {
-  executions: Array<{ taskId: string; planItemId: string; delegationId: string; status: string; delivery: string | null }>;
+  executions: Array<{ taskId: string; planItemId: string; delegationId: string; goal: string; briefing: string;
+    continuationRequested: boolean; continuation?: { delegationId: string; deliveryId: string | null };
+    status: string; deliveryId: string | null; delivery: string | null }>;
   toolCalls: Array<{ name: string; delegationId: string; success: boolean }>;
   notices: Array<{ reason: string; phase: string; paired: boolean; delegationId: string | null }>;
   continuationInputs: Array<{ delegationId: string; taskMatches: boolean; briefingMatches: boolean;
-    hasPriorResult: boolean; hasPriorDelivery: boolean; hasPrivateToolHistory: boolean }>;
+    continuationMatches: boolean; hasPriorResult: boolean; hasPriorDelivery: boolean; hasPrivateToolHistory: boolean }>;
   guardStops: Array<{ reason: string; delegationId: string | null }>;
   childModelCalls: Array<{ delegationId: string; count: number }>;
   planCompleted: boolean;
@@ -65,7 +67,8 @@ export function evaluateBudgetHandoffInvariants(
       ? item.status === 'missing_deliverable' && item.delivery === null
       : item.status === 'returned' && Boolean(item.delivery?.trim())) },
     { key: 'same_task_and_plan', passed: Boolean(first?.taskId.trim() && first.planItemId.trim())
-      && executions.every(item => item.taskId === first.taskId && item.planItemId === first.planItemId) },
+      && Boolean(first?.goal.trim())
+      && executions.every(item => item.taskId === first.taskId && item.planItemId === first.planItemId && item.goal === first.goal) },
     { key: 'fresh_delegations', passed: executions.every(item => Boolean(item.delegationId.trim()))
       && new Set(executions.map(item => item.delegationId)).size === executions.length },
     { key: 'tool_calls_belong_to_real_attempts', passed: observed.toolCalls.every(call => scopes.has(call.delegationId)) },
@@ -88,6 +91,17 @@ export function evaluateBudgetHandoffInvariants(
     { key: 'current_briefing_reaches_each_model_input', passed: executions.length > 0
       && executions.every(execution => observed.continuationInputs.some(item => item.delegationId === execution.delegationId
         && item.taskMatches && item.briefingMatches)) },
+    // These synthetic tasks have no changed requirements or corrective work.
+    // Reusing the same task therefore exercises continuation, not re-briefing.
+    { key: 'unchanged_task_reuses_previous_briefing', passed: !continues || executions.slice(1).every((execution, index) => {
+      const previous = executions[index];
+      return execution.continuationRequested && execution.briefing === previous.briefing
+        && execution.continuation?.delegationId === previous.delegationId
+        && execution.continuation.deliveryId === previous.deliveryId;
+    }) },
+    { key: 'runtime_continuation_reaches_each_model_input', passed: executions.length > 0
+      && executions.every(execution => observed.continuationInputs.some(item => item.delegationId === execution.delegationId
+        && item.continuationMatches)) },
     { key: 'continuation_sees_delivery_not_private_history', passed: !continues
       || executions.slice(1).every((execution, index) => observed.continuationInputs.some(item => item.delegationId === execution.delegationId
         && item.hasPriorResult && item.hasPriorDelivery === Boolean(executions[index].delivery) && !item.hasPrivateToolHistory)) },
@@ -111,11 +125,19 @@ type ModelInput = { group: string; messages: BaseMessage[]; inputTokens: number;
 /** Compare dynamic delegation data with the real first provider input. */
 export function observeDelegationInput(
   messages: BaseMessage[],
-  expected: { delegationId: string; task: string; briefing: string },
+  expected: { delegationId: string; task: string; briefing: string;
+    continuation?: { delegationId: string; deliveryId: string | null } },
   previous?: { delegationId: string; status: string; delivery: string | null },
 ): BudgetHandoffObservation['continuationInputs'][number] {
   const briefings = messages.filter(message => HumanMessage.isInstance(message) && isDelegationBriefingMessage(message));
   const actual = briefings.at(-1)?.text ?? '';
+  const continuation = actual.match(/<continuation source="runtime">([\s\S]*?)<\/continuation>/)?.[1];
+  const continuationMatches = expected.continuation
+    ? Boolean(continuation?.includes(indentXmlBlock(xmlTextBlock('previous_delegation_id', expected.continuation.delegationId), 4))
+      && (expected.continuation.deliveryId === null
+        ? !continuation.includes('<previous_delivery_id>')
+        : continuation.includes(indentXmlBlock(xmlTextBlock('previous_delivery_id', expected.continuation.deliveryId), 4))))
+    : continuation === undefined;
   const priorRecord = previous ? readCapabilityExecutions(messages)
     .find(item => item.execution.delegationId === previous.delegationId) : undefined;
   const prior = priorRecord?.result;
@@ -133,6 +155,7 @@ export function observeDelegationInput(
     delegationId: expected.delegationId,
     taskMatches: Boolean(expected.task.trim()) && actual.includes(indentXmlBlock(xmlTextBlock('task', expected.task), 2)),
     briefingMatches: Boolean(expected.briefing.trim()) && actual.includes(indentXmlBlock(xmlTextBlock('briefing', expected.briefing), 2)),
+    continuationMatches,
     hasPriorResult,
     hasPriorDelivery: hasPriorResult && Boolean(previous?.delivery?.trim()),
     hasPrivateToolHistory: messages.some(message => ToolMessage.isInstance(message)
@@ -263,9 +286,12 @@ export async function runBudgetHandoffCase(params: {
     output = (await graph.getState({ configurable: config.configurable })).values as OrchestratorStateType;
   }
   const executionRecords = readCapabilityExecutions(output?.messages ?? []);
-  const executions = executionRecords.map(({ metadata, execution, result }) => ({
+  const executions = executionRecords.map(({ call, metadata, execution, result }) => ({
     taskId: typeof metadata.taskId === 'string' ? metadata.taskId : '', planItemId: execution.planItemId, delegationId: execution.delegationId,
-    status: result.status, delivery: result.delivery?.text ?? null,
+    goal: execution.goal, briefing: execution.briefing,
+    continuationRequested: (call.args as Record<string, unknown>).continue === true,
+    ...(execution.continuation ? { continuation: execution.continuation } : {}),
+    status: result.status, deliveryId: result.delivery?.id ?? null, delivery: result.delivery?.text ?? null,
   }));
   const notices = new Map<string, BudgetHandoffObservation['notices'][number]>();
   const persistedNoticeIds = new Set<string>();
@@ -327,9 +353,11 @@ export async function runBudgetHandoffCase(params: {
     ...(verbatimEvidence ? { verbatimEvidence } : {}),
   };
   return { observation, usage: usage.read(), diagnostics: { modelCallCount, completedDelegations, runtimeEvents, expectedTicket: ticket,
-    delegationBriefings: executionRecords.map(({ execution }, index) => ({
+    delegationBriefings: executionRecords.map(({ call, execution }, index) => ({
       delegationId: execution.delegationId, planItemId: execution.planItemId,
-      task: execution.task, briefing: execution.briefing,
+      goal: execution.goal, task: execution.task, briefing: execution.briefing,
+      request: call.args,
+      continuation: execution.continuation ?? null,
       modelInput: firstInputs[index]?.messages.filter(isDelegationBriefingMessage).at(-1)?.text ?? null,
     })),
     efficiency: { readCalls: toolCalls.filter(call => call.name === 'read_evidence').length,

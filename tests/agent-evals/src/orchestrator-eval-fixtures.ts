@@ -30,7 +30,7 @@ export function buildRouteEvalInput(inputs: Record<string, unknown>) {
     input.messages.push(createCapabilityExecutionMessage({
       callId: `call:${id}`,
       execution: { planItemId: item.id, delegationId: id, capability: item.capability,
-        task: item.objective, briefing: 'Execute the fixture plan item.' },
+        goal, task: item.objective, briefing: 'Execute the fixture plan item.' },
       result: { status: 'returned', delivery: { id: `delivery:${id}`,
         task: item.objective, text, scope } },
       metadata: { runId: evidenceRunId, taskId: evidenceTaskId },

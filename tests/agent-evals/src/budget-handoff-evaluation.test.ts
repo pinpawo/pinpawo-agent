@@ -23,14 +23,19 @@ const inputExpectation = {
   task: '验证当前目标中的 "ready" 状态 <&> ]]>，不改变目标',
   briefing: '复用已取得的成果。\n仅执行缺失的验证：status="ready"。\n保留原始边界 ]]> 和换行。',
 };
+const continuationExpectation = {
+  ...inputExpectation,
+  continuation: { delegationId: 'attempt-1', deliveryId: 'delivery-1' as string | null },
+};
 const previousExpectation = {
   delegationId: 'attempt-1', status: 'returned',
   delivery: 'EVIDENCE-6429\nopaque-ticket="original"\nOriginal diagnostic: ]]> remains literal.',
 };
 
-function currentBriefing(overrides: Partial<typeof inputExpectation> = {}) {
+function currentBriefing(overrides: Partial<typeof continuationExpectation> = {}) {
   const supplied = { ...inputExpectation, ...overrides };
-  return materializeDelegation({ userRequest: 'Read and verify one report.', task: supplied.task, briefing: supplied.briefing });
+  return materializeDelegation({ userRequest: 'Read and verify one report.', task: supplied.task, briefing: supplied.briefing,
+    ...('continuation' in supplied ? { continuation: supplied.continuation } : {}) });
 }
 
 function priorExecution(status: 'returned' | 'missing_deliverable' = 'returned', delivery: string | null = previousExpectation.delivery): BaseMessage[] {
@@ -42,6 +47,7 @@ function priorExecution(status: 'returned' | 'missing_deliverable' = 'returned',
   const result = createCapabilityExecutionMessage({
     callId,
     execution: { planItemId: 'plan-1', delegationId: previousExpectation.delegationId,
+      goal: 'Read and verify one report.',
       capability: 'general', task: inputExpectation.task, briefing: 'Previous execution instructions.' },
     result: { status, delivery: delivery === null ? null : {
       id: 'delivery-1', task: inputExpectation.task, text: delivery,
@@ -56,9 +62,41 @@ test('model-input observation preserves the current task and multiline briefing 
   const observed = observeDelegationInput([currentBriefing()], inputExpectation);
   assert.equal(observed.taskMatches, true);
   assert.equal(observed.briefingMatches, true);
+  assert.equal(observed.continuationMatches, true);
   assert.equal(observed.hasPriorResult, false);
   assert.equal(observed.hasPriorDelivery, false);
 });
+
+test('runtime continuation context identifies the exact preceding execution and delivery outside the reused briefing', () => {
+  const messages = [...priorExecution(), currentBriefing({ continuation: continuationExpectation.continuation })];
+  const observed = observeDelegationInput(messages, continuationExpectation, previousExpectation);
+  assert.equal(observed.briefingMatches, true);
+  assert.equal(observed.continuationMatches, true);
+  assert.equal(observed.hasPriorDelivery, true);
+  assert.equal(observed.hasPrivateToolHistory, false);
+});
+
+test('a continuation with no prior delivery preserves the execution reference without inventing a delivery ID', () => {
+  const continuation = { delegationId: previousExpectation.delegationId, deliveryId: null };
+  const observed = observeDelegationInput([
+    ...priorExecution('missing_deliverable', null), currentBriefing({ continuation }),
+  ], { ...inputExpectation, continuation }, { ...previousExpectation, status: 'missing_deliverable', delivery: null });
+  assert.equal(observed.continuationMatches, true);
+  assert.equal(observed.hasPriorResult, true);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+for (const [name, continuation] of [
+  ['a missing runtime continuation', undefined],
+  ['another preceding execution', { ...continuationExpectation.continuation, delegationId: 'other-execution' }],
+  ['another preceding delivery', { ...continuationExpectation.continuation, deliveryId: 'other-delivery' }],
+  ['an omitted existing delivery', { ...continuationExpectation.continuation, deliveryId: null }],
+] as const) {
+  test(`actual model-input evidence rejects ${name}`, () => {
+    const observed = observeDelegationInput([currentBriefing({ continuation })], continuationExpectation, previousExpectation);
+    assert.equal(observed.continuationMatches, false);
+  });
+}
 
 test('a stale briefing is not the current instructions even when the task remains unchanged', () => {
   const observed = observeDelegationInput([currentBriefing({ briefing: 'Start the original investigation again.' })], inputExpectation);
@@ -160,8 +198,11 @@ function completedHandoff(): BudgetHandoffObservation {
   return {
     executions: [
       { taskId: 'task-1', planItemId: 'plan-1', delegationId: 'attempt-1', status: 'returned',
+        goal: 'Read and verify one report.', briefing: 'Read and verify the evidence.', continuationRequested: false, deliveryId: 'delivery-1',
         delivery: 'Report fact EVIDENCE-6429. Ticket opaque-fixture-ticket; verification is unfinished.' },
       { taskId: 'task-1', planItemId: 'plan-1', delegationId: 'attempt-2', status: 'returned',
+        goal: 'Read and verify one report.', briefing: 'Read and verify the evidence.', continuationRequested: true, deliveryId: 'delivery-2',
+        continuation: { delegationId: 'attempt-1', deliveryId: 'delivery-1' },
         delivery: 'EVIDENCE-6429 and verified VERIFY-3817.' },
     ],
     toolCalls: [
@@ -170,8 +211,8 @@ function completedHandoff(): BudgetHandoffObservation {
     ],
     notices: [{ reason: 'context_window', phase: 'finalize', paired: true, delegationId: 'attempt-1' }],
     continuationInputs: [
-      { delegationId: 'attempt-1', hasPriorResult: false, hasPriorDelivery: false, hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true },
-      { delegationId: 'attempt-2', hasPriorResult: true, hasPriorDelivery: true, hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true },
+      { delegationId: 'attempt-1', hasPriorResult: false, hasPriorDelivery: false, hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true, continuationMatches: true },
+      { delegationId: 'attempt-2', hasPriorResult: true, hasPriorDelivery: true, hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true, continuationMatches: true },
     ],
     guardStops: [],
     childModelCalls: [{ delegationId: 'attempt-1', count: 2 }, { delegationId: 'attempt-2', count: 2 }],
@@ -197,6 +238,8 @@ function completedOverflowRecovery(): BudgetHandoffObservation {
   const observation = completedHandoff();
   observation.executions[0].status = 'missing_deliverable';
   observation.executions[0].delivery = null;
+  observation.executions[0].deliveryId = null;
+  observation.executions[1].continuation!.deliveryId = null;
   observation.toolCalls.splice(1, 0, { name: 'read_evidence', delegationId: 'attempt-2', success: true });
   observation.notices = [];
   observation.guardStops = [{ reason: 'subagent_context_limit_reached', delegationId: 'attempt-1' }];
@@ -301,15 +344,34 @@ test('rereading evidence does not erase a correctly received briefing and prior 
   assert.equal(passes(observation), true);
 });
 
+for (const [name, mutate] of [
+  ['a newly written briefing', (observation: BudgetHandoffObservation) => { observation.executions[1].briefing = 'Retry at most once, then stop.'; }],
+  ['a normal briefing request in this unchanged-task fixture', (observation: BudgetHandoffObservation) => { observation.executions[1].continuationRequested = false; }],
+  ['a missing continuation record', (observation: BudgetHandoffObservation) => { delete observation.executions[1].continuation; }],
+  ['an unrelated execution reference', (observation: BudgetHandoffObservation) => { observation.executions[1].continuation!.delegationId = 'foreign'; }],
+  ['an unrelated delivery reference', (observation: BudgetHandoffObservation) => { observation.executions[1].continuation!.deliveryId = 'foreign'; }],
+  ['an absent runtime annotation in actual input', (observation: BudgetHandoffObservation) => { observation.continuationInputs[1].continuationMatches = false; }],
+  ['a changed goal under the same task ID', (observation: BudgetHandoffObservation) => { observation.executions[1].goal = 'A different objective.'; }],
+] as const) {
+  test(`unchanged-task continuation rejects ${name}`, () => {
+    const observation = completedHandoff();
+    mutate(observation);
+    assert.equal(passes(observation), false);
+  });
+}
+
 test('another successful continuation of the same task can retain progress across all attempts', () => {
   const observation = completedHandoff();
   observation.executions.splice(1, 0, {
     taskId: 'task-1', planItemId: 'plan-1', delegationId: 'attempt-middle', status: 'returned',
+    goal: 'Read and verify one report.', briefing: 'Read and verify the evidence.', continuationRequested: true,
+    deliveryId: 'delivery-middle', continuation: { delegationId: 'attempt-1', deliveryId: 'delivery-1' },
     delivery: 'EVIDENCE-6429 and opaque-fixture-ticket remain available; verification remains unfinished.',
   });
+  observation.executions[2].continuation = { delegationId: 'attempt-middle', deliveryId: 'delivery-middle' };
   observation.continuationInputs.splice(1, 0, {
     delegationId: 'attempt-middle', hasPriorResult: true, hasPriorDelivery: true,
-    hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true,
+    hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true, continuationMatches: true,
   });
   observation.childModelCalls.splice(1, 0, { delegationId: 'attempt-middle', count: 2 });
   observation.notices.push({ reason: 'context_window', phase: 'finalize', paired: true, delegationId: 'attempt-middle' });

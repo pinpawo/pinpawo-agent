@@ -9,7 +9,7 @@ import {
 } from './executionMessages';
 
 const execution = { planItemId: 'item', delegationId: 'delegation', capability: 'general',
-  task: 'Prepare a report.', briefing: 'Prepare the requested report.' };
+  goal: 'Prepare the requested report.', task: 'Prepare a report.', briefing: 'Prepare the requested report.' };
 const metadata = { runId: 'run', taskId: 'task', delegationId: execution.delegationId };
 const result = { status: 'returned' as const, delivery: { id: 'delivery', task: execution.task, text: 'Report prepared.',
   scope: { lane: 'capability:general' as const, ...metadata } } };

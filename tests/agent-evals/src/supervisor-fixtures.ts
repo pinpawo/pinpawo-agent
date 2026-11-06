@@ -59,7 +59,7 @@ export function supervisorFixture(params: {
       id, name: 'delegate_capability', type: 'tool_call', args: {},
     }] }), { ...metadata, source: 'supervisor' }),
     createCapabilityExecutionMessage({ callId: id, metadata,
-      execution: { planItemId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, briefing: 'Execute the confirmed task.' },
+      execution: { planItemId: 'current', delegationId: 'delegation-fixture', capability, goal: params.goal, task: params.task, briefing: 'Execute the confirmed task.' },
       result: { status: 'returned', delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
         scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } } } }),
   ] };

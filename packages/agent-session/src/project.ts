@@ -130,10 +130,9 @@ export function applySessionSnapshot(
   const context = options.observedAt === undefined
     ? undefined
     : { observedAt: options.observedAt };
-  const runtime = {
-    ...(session.runtime ?? {}),
-    ...(incoming.runtime ?? {}),
-  };
+  // A snapshot is the current runtime, not a configuration patch. Omitted
+  // profile fields must not inherit facts from a previous profile or session.
+  const runtime = incoming.runtime;
   const actor = incoming.actor ?? session.actor;
   const preserveSessionTokenUsage = options.preserveOmittedSessionTokenUsage
     ?? options.preserveOmittedTokenUsage;
@@ -153,7 +152,7 @@ export function applySessionSnapshot(
     ...(incoming.currentPlan !== undefined
       ? { currentPlan: cloneAgentPlan(incoming.currentPlan) }
       : {}),
-    ...(Object.keys(runtime).length ? { runtime } : {}),
+    ...(runtime ? { runtime: { ...runtime } } : {}),
     ...(incoming.tokenUsage
       ? { tokenUsage: incoming.tokenUsage }
       : options.preserveOmittedTokenUsage && session.tokenUsage

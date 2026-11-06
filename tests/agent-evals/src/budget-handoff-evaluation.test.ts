@@ -1,13 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { markSubagentGuardStop } from '../../../packages/pet-agent/src/subagent/guardStop.ts';
 import {
   evaluateBudgetHandoffInvariants,
+  readCheckpointGuardStops,
   type BudgetHandoffObservation,
 } from './budget-handoff-evaluation.ts';
 import { budgetHandoffDataset } from './datasets/budget-handoff.ts';
 
 const handoffExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'context-window-handoff')!.expected;
 const controlExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'below-watermark-control')!.expected;
+const overflowExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'context-already-exceeded')!.expected;
+
+test('checkpoint guard scope survives reuse of a provider tool-call ID in a fresh delegation', () => {
+  const scopes = new Map([['result-first', 'attempt-first'], ['result-second', 'attempt-second']]);
+  for (const suffix of ['first', 'second']) {
+    const result = new ToolMessage({ id: `result-${suffix}`, content: 'evidence', name: 'read_evidence', tool_call_id: 'reused-call-id' });
+    const stop = markSubagentGuardStop(new AIMessage({ id: `stop-${suffix}`, content: 'guard stop' }), 'subagent_context_limit_reached');
+    assert.deepEqual(readCheckpointGuardStops([result, stop], scopes), [{
+      id: `stop-${suffix}`, reason: 'subagent_context_limit_reached', delegationId: `attempt-${suffix}`,
+    }]);
+  }
+});
 
 function completedHandoff(): BudgetHandoffObservation {
   return {
@@ -22,7 +37,9 @@ function completedHandoff(): BudgetHandoffObservation {
       { name: 'verify_evidence', delegationId: 'attempt-2', success: true },
     ],
     notices: [{ reason: 'context_window', phase: 'finalize', paired: true, delegationId: 'attempt-1' }],
-    continuationInputs: [{ delegationId: 'attempt-2', hasPriorDelivery: true, hasPrivateToolHistory: false }],
+    continuationInputs: [{ delegationId: 'attempt-2', hasPriorResult: true, hasPriorDelivery: true, hasPrivateToolHistory: false }],
+    guardStops: [],
+    childModelCalls: [{ delegationId: 'attempt-1', count: 2 }, { delegationId: 'attempt-2', count: 2 }],
     planCompleted: true,
     finalText: 'The report confirms EVIDENCE-6429; actual verification returned VERIFY-3817.',
     invocationError: null,
@@ -37,6 +54,19 @@ function completedControl(): BudgetHandoffObservation {
   observation.toolCalls[1].delegationId = 'attempt-1';
   observation.notices = [];
   observation.continuationInputs = [];
+  observation.childModelCalls = [{ delegationId: 'attempt-1', count: 3 }];
+  return observation;
+}
+
+function completedOverflowRecovery(): BudgetHandoffObservation {
+  const observation = completedHandoff();
+  observation.executions[0].status = 'missing_deliverable';
+  observation.executions[0].delivery = null;
+  observation.toolCalls.splice(1, 0, { name: 'read_evidence', delegationId: 'attempt-2', success: true });
+  observation.notices = [];
+  observation.guardStops = [{ reason: 'subagent_context_limit_reached', delegationId: 'attempt-1' }];
+  observation.childModelCalls = [{ delegationId: 'attempt-1', count: 1 }, { delegationId: 'attempt-2', count: 3 }];
+  observation.continuationInputs[0].hasPriorDelivery = false;
   return observation;
 }
 
@@ -48,10 +78,16 @@ function passes(observation: BudgetHandoffObservation, expected = handoffExpecte
 
 test('budget handoff dataset has executable identities, mechanical expectations and semantic acceptance criteria', () => {
   const cases = budgetHandoffDataset.cases;
-  assert.equal(cases.length, 2);
+  assert.equal(cases.length, 4);
   assert.equal(new Set(cases.map(({ id }) => id)).size, cases.length);
-  assert.deepEqual(cases.map(({ expected }) => expected.contextHandoff), [true, false]);
-  assert.deepEqual(cases.map(({ expected }) => expected.expectedDelegations), [2, 1]);
+  assert.deepEqual(cases.map(({ expected }) => expected.contextHandoff), [true, false, false, false]);
+  assert.deepEqual(cases.map(({ expected }) => expected.expectedDelegations), [2, 2, 2, 1]);
+  const overflowCase = cases.find(({ name }) => name === 'context-already-exceeded')!;
+  const callBudgetCase = cases.find(({ name }) => name === 'model-call-budget-exhausted')!;
+  assert.equal(overflowCase.input.scenario, 'context-overflow');
+  assert.equal(overflowCase.expected.contextOverflow, true);
+  assert.equal(callBudgetCase.input.scenario, 'model-call-exhausted');
+  assert.notEqual(callBudgetCase.expected.contextOverflow, true);
   for (const { input, expected } of cases) {
     assert.equal(input.contextWindowTokens, 16_000);
     assert.equal(input.generationReserveTokens, 0);
@@ -60,7 +96,9 @@ test('budget handoff dataset has executable identities, mechanical expectations 
     assert.ok(criterionIds.length > 0);
     assert.equal(new Set(criterionIds).size, criterionIds.length);
   }
-  assert.ok(cases[0].input.reportChars > cases[1].input.reportChars);
+  const controlCase = cases.find(({ name }) => name === 'below-watermark-control')!;
+  assert.ok(overflowCase.input.reportChars > cases[0].input.reportChars);
+  assert.ok(cases[0].input.reportChars > controlCase.input.reportChars);
 });
 
 test('mechanical scoring accepts a paired context handoff followed by same-task completion', () => {
@@ -181,4 +219,48 @@ test('below-watermark control rejects an unnecessary context handoff', () => {
 
 test('below-watermark control rejects an unnecessary second delegation', () => {
   assert.equal(passes(completedHandoff(), controlExpected), false);
+});
+
+test('already-exceeded context accepts a guarded missing delivery followed by same-task recovery', () => {
+  assert.equal(passes(completedOverflowRecovery(), overflowExpected), true);
+});
+
+const invalidOverflowObservations: Array<{
+  name: string;
+  mutate: (observation: BudgetHandoffObservation) => void;
+}> = [
+  { name: 'an invocation failure', mutate: observation => { observation.invocationError = 'provider failed'; } },
+  { name: 'a fabricated first delivery', mutate: observation => { observation.executions[0].delivery = 'Invented handoff'; } },
+  { name: 'a claimed successful first attempt', mutate: observation => { observation.executions[0].status = 'returned'; } },
+  { name: 'an unguarded missing delivery', mutate: observation => { observation.guardStops = []; } },
+  { name: 'a second provider request after overflow', mutate: observation => { observation.childModelCalls[0].count = 2; } },
+  { name: 'missing provider-call evidence', mutate: observation => { observation.childModelCalls = []; } },
+  { name: 'an unrelated stop reason', mutate: observation => { observation.guardStops[0].reason = 'subagent_iteration_limit_reached'; } },
+  { name: 'a guard from another delegation', mutate: observation => { observation.guardStops[0].delegationId = 'unrelated-attempt'; } },
+  { name: 'an unscoped guard', mutate: observation => { observation.guardStops[0].delegationId = null; } },
+  { name: 'an extra hard stop', mutate: observation => { observation.guardStops.push({ ...observation.guardStops[0] }); } },
+  { name: 'replayed private tool history', mutate: observation => { observation.continuationInputs[0].hasPrivateToolHistory = true; } },
+  { name: 'a continuation with no prior execution result', mutate: observation => { observation.continuationInputs[0].hasPriorResult = false; } },
+  { name: 'a fabricated valid prior delivery', mutate: observation => { observation.continuationInputs[0].hasPriorDelivery = true; } },
+  { name: 'recovery without rereading evidence', mutate: observation => { observation.toolCalls.splice(1, 1); } },
+  { name: 'a failed evidence reread', mutate: observation => { observation.toolCalls[1].success = false; } },
+  { name: 'a reread attributed to the failed attempt', mutate: observation => { observation.toolCalls[1].delegationId = 'attempt-1'; } },
+  { name: 'verification in the failed attempt', mutate: observation => { observation.toolCalls[2].delegationId = 'attempt-1'; } },
+  { name: 'a notice presented as a successful handoff', mutate: observation => { observation.notices = completedHandoff().notices; } },
+  { name: 'a new task replacing the original', mutate: observation => { observation.executions[1].taskId = 'replacement-task'; } },
+  { name: 'an unfinished recovery plan', mutate: observation => { observation.planCompleted = false; } },
+];
+
+for (const { name, mutate } of invalidOverflowObservations) {
+  test(`already-exceeded context recovery rejects ${name}`, () => {
+    const observation = completedOverflowRecovery();
+    mutate(observation);
+    assert.equal(passes(observation, overflowExpected), false);
+  });
+}
+
+test('a hard context stop cannot substitute for a successful near-watermark handoff', () => {
+  const observation = completedHandoff();
+  observation.guardStops = completedOverflowRecovery().guardStops;
+  assert.equal(passes(observation), false);
 });

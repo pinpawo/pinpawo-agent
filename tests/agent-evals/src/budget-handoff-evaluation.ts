@@ -14,6 +14,7 @@ import { defineToolkit } from '../../../packages/pet-agent/src/types/toolkit.ts'
 import { defineInstructionDocument } from '../../../packages/pet-agent/src/types/capability.ts';
 import type { SubagentRuntimeContext } from '../../../packages/pet-agent/src/types/subagent.ts';
 import type { AgentModels } from '../../../packages/pet-agent/src/types/agent.ts';
+import { readSubagentGuardStopReason } from '../../../packages/pet-agent/src/subagent/guardStop.ts';
 import { createPromptEvalUsageCollector, readLlmResultTokenUsage } from './prompt-eval-usage.ts';
 import type { BudgetHandoffInput, BudgetHandoffExpected } from './datasets/budget-handoff.ts';
 
@@ -21,7 +22,9 @@ export type BudgetHandoffObservation = {
   executions: Array<{ taskId: string; planItemId: string; delegationId: string; status: string; delivery: string | null }>;
   toolCalls: Array<{ name: string; delegationId: string; success: boolean }>;
   notices: Array<{ reason: string; phase: string; paired: boolean; delegationId: string | null }>;
-  continuationInputs: Array<{ delegationId: string; hasPriorDelivery: boolean; hasPrivateToolHistory: boolean }>;
+  continuationInputs: Array<{ delegationId: string; hasPriorResult: boolean; hasPriorDelivery: boolean; hasPrivateToolHistory: boolean }>;
+  guardStops: Array<{ reason: string; delegationId: string | null }>;
+  childModelCalls: Array<{ delegationId: string; count: number }>;
   planCompleted: boolean;
   finalText: string;
   invocationError: string | null;
@@ -29,37 +32,58 @@ export type BudgetHandoffObservation = {
 
 export function evaluateBudgetHandoffInvariants(
   observed: BudgetHandoffObservation,
-  expected: Pick<BudgetHandoffExpected, 'expectedDelegations' | 'contextHandoff'>,
+  expected: Pick<BudgetHandoffExpected, 'expectedDelegations' | 'contextHandoff' | 'contextOverflow'>,
 ) {
   const executions = observed.executions;
   const reads = observed.toolCalls.filter(call => call.name === 'read_evidence' && call.success);
   const verifications = observed.toolCalls.filter(call => call.name === 'verify_evidence' && call.success);
   const first = executions[0];
+  const overflow = expected.contextOverflow === true;
+  const continues = expected.contextHandoff || overflow;
   return [
     { key: 'invocation_succeeded', passed: observed.invocationError === null },
     { key: 'expected_delegation_count', passed: executions.length === expected.expectedDelegations },
-    { key: 'all_deliveries_returned', passed: executions.length > 0 && executions.every(item => item.status === 'returned' && Boolean(item.delivery?.trim())) },
+    { key: 'expected_delivery_statuses', passed: executions.length > 0 && executions.every((item, index) => overflow && index === 0
+      ? item.status === 'missing_deliverable' && item.delivery === null
+      : item.status === 'returned' && Boolean(item.delivery?.trim())) },
     { key: 'same_task_and_plan', passed: Boolean(first?.taskId.trim() && first.planItemId.trim())
       && executions.every(item => item.taskId === first.taskId && item.planItemId === first.planItemId) },
     { key: 'fresh_delegations', passed: executions.every(item => Boolean(item.delegationId.trim()))
       && new Set(executions.map(item => item.delegationId)).size === executions.length },
-    { key: 'actual_evidence_and_verification', passed: reads.length === 1 && verifications.length === 1 },
-    { key: 'verification_in_expected_attempt', passed: reads.length === 1 && verifications.length === 1
+    { key: 'actual_evidence_and_verification', passed: reads.length === (overflow ? 2 : 1) && verifications.length === 1 },
+    { key: 'verification_in_expected_attempt', passed: reads.length === (overflow ? 2 : 1) && verifications.length === 1
       && reads[0].delegationId === first?.delegationId
-      && verifications[0].delegationId === executions[expected.contextHandoff ? 1 : 0]?.delegationId },
+      && (!overflow || reads[1].delegationId === executions[1]?.delegationId)
+      && verifications[0].delegationId === executions[continues ? 1 : 0]?.delegationId },
     { key: 'context_notice', passed: expected.contextHandoff
       ? observed.notices.length === 1 && observed.notices[0].reason === 'context_window' && observed.notices[0].phase === 'finalize'
         && observed.notices[0].paired && observed.notices[0].delegationId === first?.delegationId
       : observed.notices.length === 0 },
-    { key: 'continuation_sees_delivery_not_private_history', passed: !expected.contextHandoff
+    { key: 'expected_hard_stop', passed: overflow
+      ? observed.guardStops.length === 1 && observed.guardStops[0].reason === 'subagent_context_limit_reached'
+        && observed.guardStops[0].delegationId === first?.delegationId
+      : observed.guardStops.length === 0 },
+    { key: 'no_provider_request_after_overflow', passed: !overflow
+      || observed.childModelCalls.find(item => item.delegationId === first?.delegationId)?.count === 1 },
+    { key: 'continuation_sees_delivery_not_private_history', passed: !continues
       || observed.continuationInputs.some(item => item.delegationId === executions[1]?.delegationId
-        && item.hasPriorDelivery && !item.hasPrivateToolHistory) },
+        && item.hasPriorResult && (overflow ? !item.hasPriorDelivery : item.hasPriorDelivery) && !item.hasPrivateToolHistory) },
     { key: 'plan_accepted', passed: observed.planCompleted },
     { key: 'final_facts', passed: observed.finalText.includes('EVIDENCE-6429') && observed.finalText.includes('VERIFY-3817') },
   ];
 }
 
 type ModelInput = { group: string; messages: BaseMessage[]; inputTokens: number; providerInputTokens: number | null };
+
+export function readCheckpointGuardStops(messages: BaseMessage[], toolResultDelegations: ReadonlyMap<string, string>) {
+  const privateTool = [...messages].reverse().find(message => ToolMessage.isInstance(message)
+    && message.id && toolResultDelegations.has(message.id));
+  const delegationId = privateTool?.id ? toolResultDelegations.get(privateTool.id)! : null;
+  return messages.flatMap(message => {
+    const reason = readSubagentGuardStopReason(message);
+    return reason ? [{ id: message.id!, reason, delegationId }] : [];
+  });
+}
 
 /** All models and orchestration are real; only the evidence environment is synthetic. */
 export async function runBudgetHandoffCase(params: {
@@ -76,6 +100,7 @@ export async function runBudgetHandoffCase(params: {
   const modelInputs: ModelInput[] = [];
   const runInputs = new Map<string, ModelInput>();
   const groupDelegations = new Map<string, string>();
+  const toolResultDelegations = new Map<string, string>();
   let latestInput: ModelInput | null = null;
   let modelCallCount = 0;
   let completedDelegations = 0;
@@ -85,6 +110,15 @@ export async function runBudgetHandoffCase(params: {
     if (latestInput) groupDelegations.set(latestInput.group, delegationId);
     return delegationId;
   };
+  const toolResult = (name: string, content: string, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+    // Provider tool-call IDs need only be unique inside one response. Give
+    // fixture results stable unique IDs so fresh attempts cannot overwrite
+    // the checkpoint-to-delegation association when those call IDs repeat.
+    const result = new ToolMessage({ id: `budget-evidence-${randomUUID()}`,
+      name, content, tool_call_id: runtime.toolCallId });
+    toolResultDelegations.set(result.id!, scope(runtime));
+    return result;
+  };
   const readEvidence = tool((_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     toolCalls.push({ name: 'read_evidence', delegationId: scope(runtime), success: true });
     const header = `Evidence fact: EVIDENCE-6429. The report identifies a reproducible fixture defect; verification has not yet run.\nVerification ticket: ${ticket}\nThe next required operation is verify_evidence with this ticket.\n`;
@@ -93,16 +127,24 @@ export async function runBudgetHandoffCase(params: {
     // Exercise the production watermark with a scaled logical window rather
     // than spending a provider's million-token window on artificial padding.
     const baseline = Math.max(latest.inputTokens, latest.providerInputTokens ?? 0);
-    const targetTokens = Math.floor(input.contextWindowTokens * 0.85) - input.generationReserveTokens + 200;
-    const targetChars = Math.min(input.reportChars, Math.max(header.length, (targetTokens - baseline) * 4));
+    const overflow = input.scenario === 'context-overflow';
+    const firstRead = toolCalls.filter(call => call.name === 'read_evidence').length === 1;
+    const targetTokens = Math.floor(input.contextWindowTokens * (overflow ? 1 : 0.85))
+      - input.generationReserveTokens + (overflow ? 400 : 200);
+    // A fresh attempt can reread a bounded report; private findings from the
+    // failed attempt are intentionally not promoted into a made-up delivery.
+    const reportCap = overflow && !firstRead ? 1_600 : input.reportChars;
+    const targetChars = Math.min(reportCap, Math.max(header.length, (targetTokens - baseline) * 4));
     const row = 'Synthetic evidence sample: source=fixture; observation=stable; mutation=none.\n';
-    return header + row.repeat(Math.ceil(targetChars / row.length)).slice(0, Math.max(0, targetChars - header.length));
+    return toolResult('read_evidence', header + row.repeat(Math.ceil(targetChars / row.length))
+      .slice(0, Math.max(0, targetChars - header.length)), runtime);
   }, { name: 'read_evidence', description: 'Read the requested synthetic report and its opaque verification ticket.', schema: z.object({}) });
   const verifyEvidence = tool(({ ticket: received }, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     const success = received === ticket && toolCalls.some(call => call.name === 'read_evidence' && call.success);
     toolCalls.push({ name: 'verify_evidence', delegationId: scope(runtime), success });
-    return success ? 'Verification actually completed: VERIFY-3817. Evidence EVIDENCE-6429 is confirmed. No external resources were modified.'
-      : 'Verification did not run: use the exact ticket returned by read_evidence.';
+    return toolResult('verify_evidence', success
+      ? 'Verification actually completed: VERIFY-3817. Evidence EVIDENCE-6429 is confirmed. No external resources were modified.'
+      : 'Verification did not run: use the exact ticket returned by read_evidence.', runtime);
   }, { name: 'verify_evidence', description: 'Actually verify the evidence using the opaque ticket returned by read_evidence.', schema: z.object({ ticket: z.string() }) });
   const tools = [readEvidence, verifyEvidence];
   const observer = BaseCallbackHandler.fromMethods({
@@ -149,7 +191,7 @@ export async function runBudgetHandoffCase(params: {
     output = await run.output as OrchestratorStateType;
   } catch (error) {
     invocationError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    output = (await graph.getState(config)).values as OrchestratorStateType;
+    output = (await graph.getState({ configurable: config.configurable })).values as OrchestratorStateType;
   }
   const executions = readCapabilityExecutions(output?.messages ?? []).map(({ metadata, execution, result }) => ({
     taskId: typeof metadata.taskId === 'string' ? metadata.taskId : '', planItemId: execution.planItemId, delegationId: execution.delegationId,
@@ -157,9 +199,13 @@ export async function runBudgetHandoffCase(params: {
   }));
   const notices = new Map<string, BudgetHandoffObservation['notices'][number]>();
   const persistedNoticeIds = new Set<string>();
+  const guardStops = new Map<string, BudgetHandoffObservation['guardStops'][number]>();
   for await (const tuple of checkpoint.list(config)) {
     const messages = tuple.checkpoint.channel_values.messages;
     if (!Array.isArray(messages)) continue;
+    for (const { id, reason, delegationId } of readCheckpointGuardStops(messages, toolResultDelegations)) {
+      guardStops.set(id, { reason, delegationId });
+    }
     for (let index = 1; index < messages.length; index++) {
       const message = messages[index] as BaseMessage;
       const call = messages[index - 1] as BaseMessage;
@@ -183,15 +229,23 @@ export async function runBudgetHandoffCase(params: {
   }
   const firstInputs = new Map<string, ModelInput>();
   for (const entry of modelInputs) if (groupDelegations.has(entry.group) && !firstInputs.has(entry.group)) firstInputs.set(entry.group, entry);
-  const continuationInputs = [...firstInputs.values()].map(entry => ({
-    delegationId: groupDelegations.get(entry.group)!,
-    hasPriorDelivery: entry.messages.some(message => ToolMessage.isInstance(message) && message.name === 'delegate_capability'),
-    hasPrivateToolHistory: entry.messages.some(message => ToolMessage.isInstance(message) && ['read_evidence', 'verify_evidence', 'runtime_budget_status'].includes(message.name ?? '')),
-  }));
+  const continuationInputs = [...firstInputs.values()].map(entry => {
+    const priorResults = readCapabilityExecutions(entry.messages);
+    return {
+      delegationId: groupDelegations.get(entry.group)!,
+      hasPriorResult: priorResults.length > 0,
+      hasPriorDelivery: priorResults.some(({ result }) => result.status === 'returned' && Boolean(result.delivery?.text.trim())),
+      hasPrivateToolHistory: entry.messages.some(message => ToolMessage.isInstance(message) && ['read_evidence', 'verify_evidence', 'runtime_budget_status'].includes(message.name ?? '')),
+    };
+  });
   const finalText = (output?.messages ?? []).filter(message => AIMessage.isInstance(message)
     && !getAgentMessageMetadata(message).lane && !message.tool_calls?.length).at(-1)?.text ?? '';
   const observation: BudgetHandoffObservation = {
     executions, toolCalls, notices: [...notices.values()], continuationInputs, finalText, invocationError,
+    guardStops: [...guardStops.values()],
+    childModelCalls: [...groupDelegations].map(([group, delegationId]) => ({
+      delegationId, count: modelInputs.filter(entry => entry.group === group).length,
+    })),
     planCompleted: Boolean(output?.runSupervisorState.plan.length) && output!.runSupervisorState.plan.every(item => item.status === 'completed'),
   };
   return { observation, usage: usage.read(), diagnostics: { modelCallCount, completedDelegations, runtimeEvents, expectedTicket: ticket,

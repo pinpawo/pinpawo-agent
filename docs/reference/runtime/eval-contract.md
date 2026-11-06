@@ -123,12 +123,29 @@ Recorded so it is visible rather than rediscovered:
 
 ## 8. Budget handoff coverage
 
-`npm run eval:budget-handoff` runs the production graph with real Entry,
-Supervisor and Capability models, plus synthetic read/verify tools. The
+The context cases in `npm run eval:budget-handoff` run the production graph
+with real Entry, Supervisor and Capability models, plus synthetic read/verify tools. The
 `context-window-handoff` case fills a bounded runtime context budget, observes
 the actual budget notice and partial delivery, and checks continuation of the
 same task and plan item through a fresh delegation. The
 `below-watermark-control` case checks ordinary completion without a handoff.
+`context-already-exceeded` returns a tool report that crosses the hard input
+capacity in one step. The next child provider call must be blocked, and the
+checkpoint must contain the native context guard marker. Its first attempt
+must remain `missing_deliverable` with no invented handoff. The real Supervisor
+then retries the same task and plan item; the fresh attempt rereads a bounded
+report and completes verification. Private findings from the stopped attempt
+are not replayed or promoted into a delivery.
+
+`model-call-budget-exhausted` runs real `createSubagent` with a scaled two-call
+limit. After the real final handoff response, an eval-only `afterModel` hook
+requests an additional model step. The native hard guard must block that third
+provider request and all further tool effects, while preserving the valid
+handoff already generated. A manually driven fresh invocation receives only
+that delivery and finishes the actual verification. This controlled re-entry
+case checks the child lifecycle, not Supervisor scheduling. The context cases
+cover the real Supervisor continuation separately. No production budget or
+Supervisor prompt is changed for these fixtures.
 
 This is separate from the existing `major-missing-work-retry` Supervisor case
 and `briefing-discloses-existing-progress` subagent case: those supply partial
@@ -138,7 +155,9 @@ regressions check the control mechanism independently of model behavior.
 The handoff eval uses a scaled logical window of 16,000 tokens and synthetic
 tool evidence to exercise the configured 85% policy without filling the
 provider's full native window. It is not a native-window capacity or stress
-benchmark. It does not claim real-model coverage of the 100-call budget limit.
+benchmark. The two-call exhaustion case does not claim real-model coverage of
+the default 100-call limit; scripted production graph regressions cover that
+default boundary separately.
 
 Runs default to three repeats per case. The subject uses the configured default
 model profile; an independent model profile judges semantic acceptance, while

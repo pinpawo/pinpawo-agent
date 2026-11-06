@@ -2,8 +2,8 @@
 
 OpenTUI-based TUI v2 client.
 
-The package now contains the Phase 2–4 vertical slice and the first Phase 5
-dogfood entrypoint from issue #454:
+The client uses the shared Agent Session contract and supports local and
+resident Pet conversations:
 
 - it imports the canonical projection from `@pinpawo/agent-session`;
 - it does not import `services/host/src/*`;
@@ -67,7 +67,9 @@ dogfood entrypoint from issue #454:
 - it opens the complete ordered canonical timeline in `$PAGER` (or `less`) by
   temporarily handing over the TTY, instead of maintaining a second viewport.
 
-## Run the vertical slice
+<a id="run-the-vertical-slice"></a>
+
+## Run the client
 
 Install dependencies, then start the client from the repository root:
 
@@ -318,8 +320,8 @@ development is still available through `npm run dev:qa -w @pinpawo/tui`.
 
 The TUI has no Studio mode and sends no `studio_request` messages. It consumes
 the host Agent Session protocol for the focused conversation. A resident
-Pet may later be exposed through that same conversation adapter, but Studio
-dispatch, invocation progress, and Studio transports remain outside the TUI.
+Pet can be reached through the Host's conversation adapter with `--pet-port`
+and `--pet-id`. Studio dispatch and Studio transports remain outside the TUI.
 See the accepted
 [Resident Pet Host ports](../../docs/design/agent-runtime/resident-pet-host-ports.md)
 boundary.
@@ -427,5 +429,5 @@ Run the native textarea regression with Bun:
 npm run test:native -w @pinpawo/tui
 ```
 
-Manual results belong in
-[the OpenTUI capability matrix](../../docs/design/tui/v2-capability-matrix.md).
+Earlier manual results are recorded in the historical
+[OpenTUI migration capability matrix](../../docs/design/tui/v2-capability-matrix.md).

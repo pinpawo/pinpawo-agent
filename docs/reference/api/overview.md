@@ -17,14 +17,14 @@ cross-host ownership rules are recorded in
 |---|---|---|
 | **Resident Pet Host ports** | `pinpawo/host-runtime` | You need a shared resident runtime with one-way dispatch and Agent Session interaction surfaces. |
 | **Studio runtime** | `@pinpawo/studio-core` | You need multi-Pet one-way dispatch admission or Plugins. |
-| **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or Toolkit runtime. |
+| **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or an RS dependency. |
 | **Local agent host** | `pinpawo` CLI package | You need local configuration, Capability loading, HTTP/WebSocket, or stdio transport. |
 | **Session projection** | `@pinpawo/agent-session` | You are building a client adapter that renders host conversations, runs, and review state; it is not a Studio dispatch protocol. |
 
 ## Boundary rules
 
-1. **The Pet runtime owns execution.** It receives an actor, models,
-   Capabilities, Toolkits, and input; it owns model calls, Capability selection,
+1. **The Pet runtime owns execution.** It receives models, Capabilities,
+   Toolkits, and input; it owns model calls, Capability selection,
    tool execution, and human-review continuation.
 2. **Studio owns the dispatch channel, not workflow state, Agent Session, or
    worker internals.** It validates live Pets, forwards accepted dispatches,
@@ -36,9 +36,10 @@ cross-host ownership rules are recorded in
    tools, availability checks, operation metadata, and policy.
 4. **The local host owns machine integration and assembly.** CLI commands,
    local config, Capability/Toolkit selection, transport servers, and workdir
-   choice belong outside the runtime-independent packages. A Browser driver or
-   another Toolkit backend remains owned by that Toolkit Runtime; the Host only
-   injects config and coordinates the generic lifecycle.
+   choice belong outside the runtime-independent packages. Toolkits may declare
+   execution-environment dependencies; the Host selects and injects RS instances.
+   See [Toolkit RS dependencies](../extensions/toolkit-rs.md) for ownership and
+   lifecycle boundaries.
 5. **Checkpoints are durable authority.** A session projection is a versioned
    materialized client view; it is not a second conversation store.
 

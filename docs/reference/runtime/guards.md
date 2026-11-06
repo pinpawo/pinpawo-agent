@@ -4,10 +4,10 @@
 > Supersedes `GUARD_REGISTRY_DESIGN.md`. Older limit/fuse/loop-guard design notes
 > are deprecated and should point here.
 
-The guard language remains canonical. Issue #755 changes only how a subagent
-stop is exposed across the Capability Boundary: guard reasons remain internal
-diagnostics and do not become Announce or Supervisor fields. See the
-[Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
+The guard language remains canonical. Capability execution now returns a paired
+tool result rather than an Announce. The current handoff is described in the
+[Root, Supervisor and Capability design](../../design/agent-runtime/run-scoped-supervisor-session.md).
+For earlier boundary behavior, see the [historical protocol](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
 
 ## What A Guard Is
 
@@ -30,8 +30,8 @@ guard (which rule) × position (where) × outcome (what happened)
 Example sentence in this language:
 
 ```
-run_iteration_limit @ orchestrator.delegation_outcome_iteration
-  → stop(run_iteration_limit_reached, { count: 25, limit: 25 })
+run_iteration_limit @ orchestrator.supervisor_boundary_iteration
+  → stop(run_iteration_limit_reached, { runIterationCount: 25, runIterationLimit: 25 })
 ```
 
 ## Vocabulary
@@ -164,10 +164,11 @@ results cross boundaries and private control detail does not:
   `stop` records ("subagent hit iteration limit 25/25") without bespoke
   plumbing. Emission is advisory at every layer: `evaluateGuard` and the shared
   stream writer contain emitter failures — a record must never fail the decision.
-- **Private durable form**: a position may keep a marked stop notice when its
-  own execution or recovery mechanism needs it. That notice remains private
-  control data and is not part of a Delegation Announce or Supervisor Boundary.
-  Do not persist `proceed`/`maintain`/`derive` records in graph state. No stop reason is projected into an Announce or Supervisor input.
+- **Private stop notice**: the subagent marks a framework stopping message so
+  output extraction can distinguish it from a task deliverable. Guard telemetry
+  is separate from the Capability execution record; see
+  [guardStop](../../../packages/pet-agent/src/subagent/guardStop.ts) and
+  [subagent output extraction](../../../packages/pet-agent/src/subagent/createSubagent.ts).
 
 ## Current Guards
 
@@ -175,7 +176,7 @@ results cross boundaries and private control detail does not:
 | --- | --- | --- | --- |
 | `context_compaction_watermark` | `orchestrator.context_compaction` | `maintain` | `latestInputTokens`, `watermarkTokens`, `mainMessageCount`, `keepMessages` |
 | `run_iteration_limit` | `orchestrator.supervisor_boundary_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
-| `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
+| `subagent_iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
 
 Subagent context summarization and model-call limiting use LangChain middleware,
 with no custom guard predicates. The model-call limiter's native decision is
@@ -231,15 +232,11 @@ the rule proceeds.
 
 Root evaluates this maintenance rule only at new-run entry; the execution loop
 does not return to compaction. The 0.75 ratio applies after generation reserves,
-leaving about 25% of usable input capacity for new context. Under the
-[main-message evidence design (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md#check-compaction-only-when-a-new-run-starts),
-the compaction effect retains recent messages and all original Announces for the
-current unfinished delegation, including attempts outside the recent suffix.
-Those retention rules already exist; matching main Announces through their
-existing payload identities instead of private lane tags is pending migration.
-Other old history can compact normally even on continuation. Retention belongs
-to the compaction effect, without another guard, whole-step deferral, or new
-protection state. A more aggressive watermark must preserve the same evidence.
+leaving about 25% of usable input capacity for new context. The compaction effect
+retains recent messages and actual call/result records for unfinished plan items;
+other eligible old messages can be summarized. See
+[prepare](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/prepare.ts)
+and [context compaction](../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts).
 
 Subagents use LangChain's pre-model approximate token counting with an absolute
 trigger derived from `contextWindowTokens`; they do not emit a guard decision
@@ -249,16 +246,14 @@ for summarization.
 
 A `stop` outcome is applied by its position:
 
-- Subagent `iteration_limit`: `wrapModelCall` marks the framework's stopping message
-  and returns `Command({ goto: END })`. `createSubagent` treats the final
-  message as a guard stop only if it carries the closed marker from
-  `subagent/guardStop.ts`. A stop with a new deliverable emits an ordinary
-  Announce. A stop without one preserves private execution records and task
-  ownership, then raises a recoverable execution failure through root cleanup.
-  The stop reason remains telemetry.
-- Orchestrator `run_iteration_limit`: the Boundary guard routes to terminal
-  finalization while keeping the active delegation available to the root
-  continuation contract.
+- Subagent `subagent_iteration_limit`: the model-call budget marks the framework's stop
+  message. Output extraction skips marked stop messages; a prior new valid reply
+  can still be returned. When no delivery is produced, the Capability result is
+  `missing_deliverable`. See [subagent output extraction](../../../packages/pet-agent/src/subagent/createSubagent.ts)
+  and [Capability execution](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts).
+- Orchestrator `run_iteration_limit`: the Supervisor node returns a notice that
+  the task has not been accepted and ends the run, preserving plan state for a
+  later explicit continuation. See [Supervisor node](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts).
 
 The subagent model-call budget uses LangChain's `modelCallLimitMiddleware`
 checkpoint state. Its counter records a logical model round before Toolkit
@@ -302,9 +297,9 @@ removed. Current guard call sites name their rule and position statically and
 emit decision records through `evaluateGuard`. Historical guard names that are
 not listed in **Current Guards** are not part of the current runtime contract.
 
-Issue #755 is a separate Boundary migration: it keeps the subagent iteration
-guard and its diagnostics while removing stop-reason projection from Capability
-results and Announces.
+The earlier #755 boundary proposal retained the subagent iteration guard. Its
+Announce-based handoff was superseded by the current paired tool result; see
+[delegation result delivery](delegation-announces.md).
 
 Relation to PR #304: the shared `checkProviderInputWatermark` helper and the
 `contextWindowTokens` config placement carry forward as-is; the runner/adapter

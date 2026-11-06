@@ -1,7 +1,9 @@
 # `@pinpawo-toolkit/browser`
 
-Browser Toolkit for PinPawo. The package owns the Browser runtime, browser
-drivers, Chrome Extension, Native Messaging Host, and their shared protocol.
+Browser Toolkit for PinPawo. This package provides the Toolkit, BrowserRS
+contract and Chrome Extension implementation, Native Messaging Host, and their
+shared protocol. The Host injects a BrowserRS client into the Toolkit and
+registers the Toolkit and Capability in its default distribution.
 
-The host creates the integration with explicit configuration and registers its
-Toolkit and Capability in the host's default distribution.
+See [browser bridge setup](../../docs/guides/browser-bridge.md) and the
+[BrowserRS contract](../../docs/reference/extensions/toolkit-rs.md).

@@ -1,16 +1,16 @@
 # PinPawo Browser Bridge
 
-This MV3 extension is the Browser Toolkit's Chrome companion. It connects one Chrome tab to a running PinPawo local agent through Chrome Native Messaging. Protocol v3 supports navigation, snapshot, trusted click/type/scroll input, wait, chunked text extraction, viewport screenshots and debugger detach.
+This MV3 extension is the Browser Toolkit's Chrome companion. It connects the agent to Chrome tabs through Chrome Native Messaging. Protocol v4 supports navigation, snapshot, trusted click/type/scroll input, wait, chunked text extraction, viewport screenshots and debugger detach.
 
 The extension is developed and versioned inside `@pinpawo-toolkit/browser`. A host build bundles its output beside the Browser Toolkit native host at `dist/toolkits/browser`.
 
 ## Development setup
 
 1. Run the repository `npm run build` (or `npm run build -w @pinpawo-toolkit/browser`).
-2. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `toolkits/browser/dist/hosts/chrome-extension/extension`. A packaged host also reports its `bundledExtensionPath` through `pinpawo browser extension status`.
+2. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `toolkits/browser/dist/hosts/chrome-extension/extension`. A packaged host also reports its `host.bundledExtensionPath` through `pinpawo browser extension status`.
 3. Copy the extension ID shown by Chrome.
 4. Run `pinpawo browser extension register --extension-id <id>`. Registration preserves previously approved development and Web Store extension IDs.
-5. Set `PINPAWO_BROWSER_BACKEND=extension` and start the local agent.
+5. Start the local agent and check `pinpawo browser extension status`.
 
 For the official Chrome Web Store build, `pinpawo browser extension register`
 uses the Store extension ID by default, so `--extension-id` is not required.

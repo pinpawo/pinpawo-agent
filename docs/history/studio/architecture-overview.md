@@ -1,6 +1,9 @@
 # Pet Agent Studio Architecture Overview
 
-> Status: historical overview. The current Studio rewrite is defined by `../../studio/run-controller.md`; this document is background context only and should not be used as the source of truth for Studio runtime internals.
+> Status: historical overview. This document describes an earlier Studio model
+> and is background context, not the current runtime contract. For the current
+> model, start with [Studio](../../studio/index.md); the former pull-model
+> [run controller](run-controller.md) is also historical.
 
 本文档是 Studio → Agents → Subagents 三层架构的理念性总览,定位在两份具体设计文档之上,回答**为什么这个结构站得住脚、以什么为代价换来了什么**。
 

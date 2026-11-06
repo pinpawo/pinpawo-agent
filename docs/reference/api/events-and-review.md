@@ -1,7 +1,7 @@
 # Events and Human Review API
 
-> **Status: current contract.** Review port types live in
-> [`packages/studio/src/types.ts`](../../../packages/studio/src/types.ts).
+> **Status: current contract.** Review payload types live in
+> [`packages/pet-agent/src/types/reviewSpec.ts`](../../../packages/pet-agent/src/types/reviewSpec.ts).
 > Root tool-event normalization is implemented by
 > [`SubagentProtocolToolEventReader`](../../../packages/pet-agent/src/subagent/protocolToolEvents.ts)
 > and runtime notices are emitted through
@@ -9,9 +9,9 @@
 
 There are two intentionally separate observability paths:
 
-1. **Studio orchestration events** report run and task progress. Consume
-   `StudioRunEvent` or the optional `onTurnEvent` callback when building a
-   queue, status, or task-progress view.
+1. **Studio Plugin events** carry producer-defined notifications and Studio
+   boundary facts. A dispatch acceptance is not an execution result; see the
+   [Studio contract](../api/studio.md).
 2. **Root stream events** carry Pet-internal operation detail. Local hosts
    normalize the LangGraph `tools` protocol channel into tool lifecycle events;
    runtime notices appear on the `custom` channel.
@@ -42,20 +42,34 @@ events; it de-duplicates repeated protocol events. A serialized review
 interrupt is not reported as a tool failure because its state is represented by
 the review boundary below.
 
+## Host operation events
+
+The Host normalizes tool lifecycle events to
+[`AgentOperationEvent`](../../../packages/agent-session/src/events.ts), including
+operation metadata and an optional `raw` object with tool input, output, and
+errors. Toolkit authors can provide a pure input `summarize` function in the
+[Toolkit contract](../extensions/capability-toolkit.md); clients can use the
+summary and blocks for stable display. See the
+[operation summary design](../../design/host/operation-summary.md) for details.
+
+Raw tool data can contain sensitive user or environment information. Local Host
+transports preserve native events; any adapter exposing them beyond its trust
+boundary must apply its own disclosure policy. Summaries are display projections,
+not a guarantee that the contents are safe to disclose.
+
 ## Human review boundary
 
-```ts
-type HumanReviewer = (
-  request: HumanReviewInterruptPayload,
-) => Promise<ReviewResponse>;
-```
+A tool review can interrupt execution with a single review or ordered review
+batch. The Host exposes the pending interrupt from the checkpoint through the
+session projection. A client sends `interrupt.resume` with the pending interrupt
+and review decisions; the Host validates the response and resumes the checkpoint
+so the Runtime can apply the decision. Rejection or cancellation ends the current
+round.
+See [Session projection](../runtime/session-projection.md#shape) for pending
+interrupts and continuation, and the [Studio API](studio.md#exact-pet-session-observation-and-review)
+for exact-session review over HTTP.
 
-The local host supplies this callback when it creates a Pet runtime. It routes a
-canonical review request to the appropriate client, waits for one canonical
-`ReviewResponse`, then resumes or stops the graph. The caller of `invoke()`
-sees an atomic Promise rather than an additional review callback.
-
-An integration should keep a review request scoped to its run/session, avoid
-inventing a second approval state machine, and treat an interrupted tool as
-pending review rather than failed work. See [Authorization matcher](../runtime/authorization-matcher.md)
+An integration should keep a review scoped to its session, avoid inventing a
+second approval state machine, and treat an interrupted tool as pending review
+rather than failed work. See [Authorization matcher](../runtime/authorization-matcher.md)
 for durable per-session authorization reuse.

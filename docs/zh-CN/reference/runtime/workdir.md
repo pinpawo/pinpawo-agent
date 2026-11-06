@@ -59,8 +59,8 @@ runtime 还会由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace 
 
 Host 将解析后的目录放入 `AgentInvokeInput.context.workdir`；直接调用 graph 时使用
 runnable options 中的 `context.workdir`。共享 system-message 构造器为 Entry、Supervisor、
-Capability 执行器和最终 Answer 渲染一次工作目录。review context 与 Toolkit Runtime
-execution scope 读取同一个结构化值。Host 的机器和会话信息走公共 system sections，
+Capability 执行器和最终 Answer 渲染一次工作目录。review context 与 Toolkit 工具执行
+上下文读取同一个结构化值。Host 的机器和会话信息走公共 system sections，
 不再重复目录；旧 `runtimeEnvironment` 和 `configurable.workdir` 通道已移除。
 
 每次调用都需要重新提供 context，包括 checkpoint resume。它不从对话历史恢复，通用

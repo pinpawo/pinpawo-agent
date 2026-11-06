@@ -1,11 +1,13 @@
 import { readPetInvocationContext, type PetInvocationScope } from 'pinpawo/host-runtime';
-import { isJsonObject, isJsonValue, type JsonObject } from '@pinpawo/agent-contracts';
+import { isJsonObject, isJsonValue, type Deliverable, type JsonObject } from '@pinpawo/agent-contracts';
 
 export type StudioDispatchRequest = {
   petId: string;
   /** In-process Plugin only: a reserved session target, never accepted from the wire. */
   session?: { id: string; create?: boolean };
   request: string;
+  /** In-process only: explicit shared file references, resolved by the Host. */
+  attachments?: readonly Deliverable[];
   /** Producer-owned correlation data echoed by Studio; never passed to the Pet. */
   metadata?: JsonObject;
   idempotencyKey?: string;
@@ -18,8 +20,8 @@ export type StudioDispatchRequest = {
   delivery?: 'interrupt';
 };
 
-/** The public wire form: Host-trusted targeting fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'delivery'>;
+/** The public wire form: Host-trusted fields are deliberately absent. */
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'delivery' | 'attachments'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {

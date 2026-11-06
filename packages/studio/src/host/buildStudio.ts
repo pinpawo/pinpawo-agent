@@ -12,6 +12,7 @@ import {
   buildModel,
   createResidentPetHost,
   type FileSaver,
+  type ArtifactStore,
   type HostToolkitInventoryStore,
   type HostExecutionConfig,
   type LocalModelProfileRegistry,
@@ -46,6 +47,7 @@ export type BuildStudioInput = HostExecutionConfig & {
   /** Optional PET.md root-document snapshot keyed by definition id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
+  artifactStore?: ArtifactStore;
   checkpoint: FileSaver;
   /** Host composition defers Plugin listeners until Agent Session transport is ready. */
   deferPluginActivation?: boolean;
@@ -247,6 +249,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       resolveInvocationContext: async (target) => prepared.resolveInvocationContext(target),
       capabilities: definition.capabilities,
       toolkitInventory: input.toolkitInventory,
+      artifactStore: input.artifactStore,
       checkpointer: input.checkpoint,
       runtimeConfig: input.runtimeConfig,
       toolAuthorizationMode: input.toolAuthorizationMode,

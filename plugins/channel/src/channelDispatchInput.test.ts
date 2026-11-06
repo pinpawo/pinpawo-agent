@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { channelDispatchInput, channelTaskInput } from './channelDispatchInput';
+import { channelDispatchAttachments, channelDispatchInput, channelTaskInput } from './channelDispatchInput';
 import { parseChannelMentions } from './channelParticipants';
 import type { ChannelMessageRow } from './store/channelStore';
 import { readChannelTestInput } from '../../../tests/support/channelDispatchInput';
@@ -34,6 +34,24 @@ test('dispatch carries declared references from the current message and quoted r
   assert.deepEqual((input as Record<string, unknown>).deliverables, deliverables);
   assert.deepEqual((input.replyTo as Record<string, unknown>).deliverables, original.deliverables);
   assert.equal(input.body, message.body);
+});
+
+test('attachment selection uses current references and only the explicitly addressed same-Channel reply', () => {
+  const current = { ...message, replyTo: 'previous', deliverables: [
+    { uri: 'artifact://workspace/current.png', title: 'Current image' },
+    { uri: 'artifact://workspace/shared.png', title: 'Current title' },
+  ] };
+  const original = { ...message, messageId: 'previous', deliverables: [
+    { uri: 'artifact://workspace/shared.png', title: 'Original title' },
+    { uri: 'artifact://workspace/reply.png', title: 'Reply image' },
+  ] };
+  const selected = channelDispatchAttachments(current, original);
+  assert.deepEqual(selected, [...current.deliverables, original.deliverables[1]]);
+  assert.notStrictEqual(selected[0], current.deliverables[0]);
+  assert.deepEqual(channelDispatchAttachments({ ...current, replyTo: undefined }, original), current.deliverables);
+  assert.deepEqual(channelDispatchAttachments(current, { ...original, channelId: 'other' }), current.deliverables);
+  assert.deepEqual(channelDispatchAttachments(current, { ...original, messageId: 'unrelated' }), current.deliverables);
+  assert.deepEqual(channelDispatchAttachments({ ...message, body: 'See artifact://workspace/guessed.png' }), []);
 });
 
 test('only a routed dispatch carries routing provenance separately from the author', () => {

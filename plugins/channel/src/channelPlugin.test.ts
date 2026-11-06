@@ -1,8 +1,82 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createStudioStorage, type StudioEvent, type StudioPluginContext } from '@pinpawo/studio-core';
+import { createStudioStorage, type StudioDispatchRequest, type StudioEvent, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { createChannelPlugin, type ChannelWorking } from './channelPlugin';
+import { ChannelAccessError } from './channelService';
+import { readChannelTestInput } from '../../../tests/support/channelDispatchInput';
+
+test('mentions dispatch explicit current and reply attachments without guessing earlier or textual references', async (t) => {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  const dispatched: StudioDispatchRequest[] = [];
+  const plugin = createChannelPlugin({ httpRoute: false });
+  const context = {
+    dispatch: async (request: StudioDispatchRequest) => {
+      dispatched.push(request);
+      return { petId: request.petId, invocationId: `dispatch-${dispatched.length}` };
+    },
+    allocateSessionId: () => 'writer-session',
+    registerContextProvider: () => () => undefined,
+    notify: () => undefined,
+    subscribe: () => () => undefined,
+    listPets: () => [{ petId: 'writer', name: 'Writer', definitionId: 'writer' }],
+    clients: { get: async (clientId: string) => ({ clientId, label: clientId }) },
+    storage: { dialect: 'sqlite', open: (migrations: Parameters<typeof storage.open>[1]) => storage.open('channel', migrations) },
+    hooks: { expose: () => () => undefined },
+    models: { resolve: () => { throw new Error('No model is used by this dispatch test.'); } },
+  } as unknown as StudioPluginContext;
+  await plugin.start!(context);
+  t.after(() => plugin.stop?.());
+
+  const owner = { kind: 'human' as const, id: 'owner' };
+  const former = { kind: 'human' as const, id: 'former' };
+  const channelId = (await plugin.service.createChannel(owner, { title: 'Images', pets: ['writer'] })).channel.channelId;
+  await plugin.service.addMember(owner, channelId, former);
+  const original = await plugin.sendMessage(channelId, { body: 'Previously shared images.', deliverables: [
+    { uri: 'artifact://workspace/shared.png', title: 'Old shared title' },
+    { uri: 'artifact://workspace/reply.png', title: 'Reply image' },
+  ] }, former);
+  assert.equal(dispatched.length, 0);
+  await plugin.service.removeMember(owner, channelId, former);
+
+  const current = [{ uri: 'artifact://workspace/current.png', title: 'Current image' },
+    { uri: 'artifact://workspace/shared.png', title: 'Current shared title' }];
+  const mentioned = await plugin.sendMessage(channelId, {
+    body: 'Inspect the current image and the replied images.', replyTo: original.message.messageId,
+    mentions: [{ participantId: 'pet:writer' }], deliverables: current,
+  }, owner);
+  assert.equal(mentioned.deliveries[0]!.state, 'accepted');
+  assert.deepEqual(dispatched[0]!.attachments, [...current, { uri: 'artifact://workspace/reply.png', title: 'Reply image' }]);
+  assert.deepEqual(dispatched[0]!.scope, { namespace: 'channel', id: channelId });
+  const envelope = readChannelTestInput(dispatched[0]!.request);
+  assert.equal(envelope.messageId, mentioned.message.messageId);
+  assert.equal(envelope.body, mentioned.message.body);
+  assert.equal(envelope.replyTo?.messageId, original.message.messageId);
+  assert.deepEqual(envelope.replyTo?.author, { participantId: 'human:former', kind: 'human' });
+
+  await plugin.sendMessage(channelId, { body: 'Only this image.', mentions: [{ participantId: 'pet:writer' }],
+    deliverables: [current[0]],
+  }, owner);
+  assert.deepEqual(dispatched[1]!.attachments, [current[0]], 'an unquoted earlier image is not added');
+  await plugin.sendMessage(channelId, { body: 'Text link artifact://workspace/not-an-attachment.png',
+    mentions: [{ participantId: 'pet:writer' }],
+  }, owner);
+  assert.equal(Object.hasOwn(dispatched[2]!, 'attachments'), false);
+
+  const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: ['writer'] })).channel.channelId;
+  const otherMessage = (await plugin.sendMessage(other, { body: 'Elsewhere.', deliverables: current }, owner)).message;
+  await assert.rejects(plugin.sendMessage(channelId, { body: 'Wrong reply.', replyTo: otherMessage.messageId,
+    mentions: [{ participantId: 'pet:writer' }],
+  }, owner), /does not exist in this Channel/);
+  await assert.rejects(plugin.sendMessage(channelId, { body: 'Former member cannot send.',
+    mentions: [{ participantId: 'pet:writer' }], deliverables: current,
+  }, former), ChannelAccessError);
+  await assert.rejects(plugin.sendMessage(channelId, { body: 'Unknown target.',
+    mentions: [{ participantId: 'pet:missing' }], deliverables: current,
+  }, owner));
+  assert.equal(dispatched.length, 3);
+});
 
 test('a Pet works in a Channel only while its run there is running, and context reads say so', async (t) => {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });

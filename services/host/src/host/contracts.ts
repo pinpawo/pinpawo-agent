@@ -1,4 +1,5 @@
 import type { PetInvocationScope } from './petInvocationContext';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type {
   PendingInterruptProjection,
   AgentClientMessage,
@@ -50,6 +51,8 @@ export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope }
  */
 export type PetDispatchRequest = {
   request: string;
+  /** Explicit in-process input references; never inferred from request text. */
+  attachments?: readonly Deliverable[];
   dispatchId?: string;
   /** Explicit durable session; create only when registering a reserved identity. */
   session?: { id: string; create?: boolean };

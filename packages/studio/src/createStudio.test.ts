@@ -222,12 +222,15 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     const scope = { namespace: 'channel', id: 'a' };
     const session = { id: 'worker:00000001', create: true };
     const metadata = { nested: { value: 'original correlation' } };
-    const request = { petId: 'worker', request: 'work', idempotencyKey: 'key-a', metadata, scope, session };
+    const attachments = [{ uri: 'artifact://workspace/session/image.png', title: 'Original image' }];
+    const request = { petId: 'worker', request: 'work', idempotencyKey: 'key-a', metadata, scope, session, attachments };
     const admitted = studio.dispatch(request);
     request.petId = 'other-pet';
     request.request = 'another message';
     request.idempotencyKey = 'key-b';
     metadata.nested.value = 'mutated correlation';
+    attachments[0]!.uri = 'artifact://workspace/changed.png';
+    attachments.push({ uri: 'artifact://workspace/extra.png', title: 'Late image' });
     scope.id = 'b';
     session.id = 'worker:00000002';
     session.create = false;
@@ -238,6 +241,7 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     assert.deepEqual(targets, [{ petId: 'worker', request: 'work', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' } }]);
     assert.deepEqual(seen[0]?.scope, { namespace: 'channel', id: 'a' });
     assert.deepEqual(seen[0]?.session, { id: 'worker:00000001', create: true });
+    assert.deepEqual(seen[0]?.attachments, [{ uri: 'artifact://workspace/session/image.png', title: 'Original image' }]);
     const retried = await studio.dispatch({ petId: 'worker', request: 'ignored', idempotencyKey: 'key-a' });
     assert.equal(retried.invocationId, receipt.invocationId);
     assert.equal(seen.length, 1, 'the original idempotency key was reserved');
@@ -246,9 +250,24 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     await studio.dispatch({ petId: 'worker', request: 'next', scope: { namespace: 'channel', id: 'a' }, session: { id: 'worker:00000001' } });
     assert.equal(resolves, 2, 'a new scoped invocation resolves context');
     assert.equal(Object.hasOwn(seen[1]!, 'systemPromptSections'), false);
-    await studio.dispatch({ petId: 'worker', request: 'ordinary', session: { id: 'worker:00000001' } });
+    await studio.dispatch({ petId: 'worker', request: 'ordinary artifact://workspace/text.png', session: { id: 'worker:00000001' },
+      metadata: { attachments: [{ uri: 'artifact://workspace/metadata.png' }] } });
     assert.equal(resolves, 2, 'an unscoped invocation does not resolve Plugin context');
     assert.equal(Object.hasOwn(seen[2]!, 'systemPromptSections'), false);
+    assert.equal(Object.hasOwn(seen[2]!, 'attachments'), false, 'metadata and request text do not become attachments');
+  } finally {
+    await studio.shutdown();
+  }
+});
+
+test('Studio rejects malformed explicit attachments before sending input to the Pet', async () => {
+  let dispatched = false;
+  const studio = await createStudio({ studioId: 'attachment-shape', pets: [binding('worker', () => { dispatched = true; })] });
+  try {
+    await assert.rejects(studio.dispatch({ petId: 'worker', request: 'Inspect.',
+      attachments: [{ uri: 42 }] as never,
+    }), /Invalid deliverables/);
+    assert.equal(dispatched, false);
   } finally {
     await studio.shutdown();
   }

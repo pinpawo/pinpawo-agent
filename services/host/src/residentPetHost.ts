@@ -154,6 +154,7 @@ export async function createResidentPetRuntime(
     autoAuthorizationSafetyLevel: options.autoAuthorizationSafetyLevel,
     chatCheckpointer: options.checkpointer,
     toolkitInventory: options.toolkitInventory,
+    artifactStore: options.artifactStore,
     capabilityCatalog: {
       getSnapshot: () => ({ capabilities: options.capabilities }),
     },

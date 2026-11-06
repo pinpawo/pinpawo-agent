@@ -51,6 +51,8 @@ import {
 import { sendAgentSessionPeerEvent, type ServerPeer } from '../wire/peer';
 import { ThreadInvocationCoordinator } from '../threadInvocationCoordinator';
 import { describeAgentError } from './errorDiagnostics';
+import type { Deliverable } from '@pinpawo/agent-contracts';
+import { createArtifactChatHumanMessage } from './artifactImageInput';
 
 type InflightRequest = InflightOperationRun;
 
@@ -268,7 +270,7 @@ export class ServerChatHandler {
    */
   async runHostTurn(
     peer: ServerPeer,
-    turn: { requestId: string; message: string; runAgentTurn?: RunAgentSessionTurn },
+    turn: { requestId: string; message: string; artifactReferences?: readonly Deliverable[]; runAgentTurn?: RunAgentSessionTurn },
     deps: ServerDeps,
     target?: ChatTurnTarget,
   ): Promise<HostTurnOutcome> {
@@ -278,6 +280,7 @@ export class ServerChatHandler {
       kind: 'user_message',
       requestId: turn.requestId,
       message: turn.message,
+      ...(turn.artifactReferences ? { artifactReferences: turn.artifactReferences } : {}),
     }, deps, { type: 'host_dispatch' }, target, {
       ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
       onFailure: (failure) => { error = failure; },
@@ -500,11 +503,12 @@ export class ServerChatHandler {
         },
         ...(request.kind === 'user_message'
           ? {
-              prepareUserMessage: () => this.tuiSessions.createUserMessage(
-                deps,
-                request.message,
-                request.attachments ?? [],
-              ),
+              prepareUserMessage: () => request.artifactReferences?.length
+                ? createArtifactChatHumanMessage(request.message, request.artifactReferences, deps.artifactStore, {
+                  allowImages: (setup.graphConfig.modelInputModalities ?? ['text']).includes('image'),
+                  signal: controller.signal,
+                })
+                : this.tuiSessions.createUserMessage(deps, request.message, request.attachments ?? []),
             }
           : {}),
       });

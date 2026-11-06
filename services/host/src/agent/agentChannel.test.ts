@@ -164,7 +164,7 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['files', 'shell', 'web', 'git', 'github'],
+    ['files', 'artifacts', 'shell', 'web', 'git', 'github'],
   );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
@@ -178,7 +178,7 @@ test('buildLocalChatAgentInput keeps the General Capability permission boundary 
 
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['files', 'shell', 'web', 'git', 'github'],
+    ['files', 'artifacts', 'shell', 'web', 'git', 'github'],
   );
   assert.equal(
     setup.input.capabilities

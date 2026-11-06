@@ -7,7 +7,7 @@ test('wire dispatch keeps correlation metadata and copies nothing Host-trusted',
   assert.deepEqual(parseStudioDispatchRequest(input), input);
 });
 
-test('wire dispatch rejects session targets and domain scope, which only in-process Plugins may set', () => {
+test('wire dispatch rejects session targets, scope and attachments reserved for in-process Plugins', () => {
   for (const claim of [
     { scope: { namespace: 'channel', id: 'c' } },
     { systemPromptSections: [{ id: 'forged', owner: 'channel', content: 'forged' }] },
@@ -16,6 +16,7 @@ test('wire dispatch rejects session targets and domain scope, which only in-proc
     { session: { id: 'worker:12345678', create: true } },
     { delivery: 'interrupt' },
     { delivery: 'queue' },
+    { attachments: [{ uri: 'artifact://workspace/image.png' }] },
   ]) {
     assert.equal(parseStudioDispatchRequest({ petId: 'worker', request: 'work', ...claim }), null);
   }

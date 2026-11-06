@@ -1,0 +1,37 @@
+{
+  "name": "@pinpawo-toolkit/artifacts",
+  "version": "1.0.0",
+  "description": "Explicit session artifact publication and download tools",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist/", "README.md"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist --platform node --target node24",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph": "^1.5.1",
+    "@pinpawo/agent-contracts": "^1.0.0",
+    "@pinpawo/pet-agent": "^1.0.1",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.3",
+    "typescript": "^5.9.3"
+  },
+  "engines": { "node": ">=24" },
+  "publishConfig": { "access": "public" }
+}

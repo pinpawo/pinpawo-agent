@@ -1,94 +1,102 @@
 # Session Artifacts
 
-状态：draft，2026-10-29。第一阶段：显式发布、交付物链路、按需下载。替代 [Capability Artifact Pipeline](../../history/artifacts/pipeline/index.md)。
+状态：draft，2026-11-05。第一阶段：显式发布、交付物链路、按需下载。
+
+设计来源：[#1008](https://github.com/pinpawo/pinpawo-agent/pull/1008)、[#1050](https://github.com/pinpawo/pinpawo-agent/pull/1050)。
 
 ## 需求
 
-一个 Agent session 在工作中产生的文件（报告、方案、导出的数据），需要能交给人或别的 Pet。参照 Claude projects 里一个任务 session 的做法：
+Agent session 在工作中产生的报告、方案、截图和导出数据，需要能交给人或别的 Pet：
 
-- 文件由产生它的 session 显式发布，发布后有一个稳定的引用。
-- session 的交付里一定带着这些引用，不依赖模型是否在正文里写了链接。
-- 存储可以替换：本地目录是默认，也要能换成腾讯云 COS 这类对象存储。
-- Chat、TUI、Studio 都是 Host，不经过 Studio 也必须能用；pet-agent 在服务器上复用时同样适用。
-
-旧的 Capability Artifact Pipeline 不满足这个需求：它只有 Capability `lifecycle.finalize` 一个写入口，仓库内没有 Capability 使用该写入口；引用只在 graph state 里，模型和人都看不到。本设计不以它为前提。仓库内的调用情况不能证明外部 Capability 或已有 store 没有数据，删除前需要核实兼容影响。
+- session 显式发布文件，获得稳定引用。
+- 文件交付由发布成功回执形成引用清单，随最终回复送达请求方。
+- 默认使用本地存储，也支持腾讯云 COS 等对象存储。
+- Chat、TUI、Studio 和独立部署的 pet-agent 使用同一套发布与下载能力。
 
 ## 第一阶段范围
 
-做：
-
-1. 显式发布：`publish_artifact` 把文件写进存储，返回稳定引用。
-2. 交付物引用：工具结果声明交付物，核心把它收进委派的执行记录。
-3. 按需下载：Agent 自己决定何时把引用下载到本地，再用现有文件工具读取。
-4. 交付物跟着这次 run 的最终回复走，作为公开消息的结构化字段到达 Channel 和 Console。
+1. `publish_artifact` 保存文件快照，返回稳定引用。
+2. Capability 子代理模型选择需要交付的文件并发布，核心汇总发布成功回执，写入委派执行记录。
+3. Agent 按需将引用下载到本地，再用现有文件工具读取。
+4. 本次 run 的交付物随最终回复，通过结构化字段到达 Channel 和客户端。
 5. 人通过 HTTP 打开引用。
 
-不做（见[后续](#后续artifacts-管理)）：从引用反查归属、统一删除、保留策略、孤儿文件清理。
+归属查询、删除和保留策略见[后续：artifacts 管理](#后续artifacts-管理)。
 
 ## 边界：运行时隔离与文件共享
 
-这两件事分开：
+- **运行时隔离**：每个 session 独立持有自己的上下文和运行态，包括消息、checkpoint 和执行记录。
+- **文件显式共享**：发布方通过交付或 Channel 消息传递 artifact 引用，接收方凭引用下载文件。
 
-- **运行时隔离**：Agent 运行期间不能访问其他 session 的上下文和运行态（消息、checkpoint、执行记录）。跨 Pet 交接不通过共享运行上下文实现。
-- **文件可以显式共享**：artifact 引用是一个可以交出去的东西。发布方把引用写进交付或 Channel 消息，拿到引用的人或 Pet 就可以下载这个文件。没拿到引用的，看不到也列不出别的 session 发布了什么。
-
-所以 `list_artifacts` 只列当前 session 发布的；`download_artifact` 接受任何引用。
+`list_artifacts` 的查询范围是当前 session。`download_artifact` 支持读取其他 session 显式共享的引用。
 
 ## 概念
 
-- **Artifact**：session 显式发布的一个文件快照。Pet 写到 workdir 或临时目录的文件都不算，只有调用 `publish_artifact` 发布的才算。发布时复制一份进存储，源文件之后被改、被删或在 `/tmp` 里被清掉，都不影响已发布的版本。再发布一次得到新的 artifact。
-- **稳定引用**：`artifact://<key>`，长期有效，可以写进消息、交付和文档。`<key>` 本身就能定位存储对象（例如 `<workspaceId>/<threadId>/<artifactId>/<name>`），第一阶段不需要反查索引。
-- **临时下载地址**：由存储按需生成，例如 COS 的签名 URL，有过期时间，只用于这一次下载，不写进消息或上下文。
-- **交付物（Deliverable）**：一次 run 交给请求方的引用 `{ uri, title? }`。由工具声明，由执行记录收集，跟着这次 run 的最终回复走。artifact 是交付物的一种来源，其他工具也可以用同一约定声明交付物，比如创建 PR 后交付 PR 链接。
-  - 和 `resultReferences` 分开：`resultReferences` 是执行证据的文本，供详情展示；Deliverable 是可以打开的引用。
-  - 各层只原样传递，不从正文推断，也不改写正文。
+- **Artifact**：session 通过 `publish_artifact` 发布的文件快照。发布时复制文件到存储；源文件后续变化或清理后，快照仍可读取。再次发布得到新的 artifact。
+- **稳定引用**：`artifact://<key>`，可以长期写入消息、交付和文档。`<key>` 直接定位存储对象，例如 `<workspaceId>/<threadId>/<artifactId>/<name>`。
+- **临时下载地址**：存储按需生成的下载地址，例如有过期时间的 COS 签名 URL，用于一次下载。
+- **发布回执**：`publish_artifact` 成功保存快照后返回的 `ArtifactRef`，是文件交付的凭据。
+- **交付物（Deliverable）**：一次 run 交给请求方的引用 `{ uri, title? }`。文件交付从发布成功回执取得 `uri` 和可选 `title`，写入执行记录并随最终回复传递。
+
+`resultReferences` 提供执行证据文本，供详情展示；`deliverables` 提供可打开的引用。各层原样传递结构化引用，回复正文由模型正常生成。
 
 ## 分层
 
 | 层 | 负责 |
 |---|---|
-| agent-contracts | `Deliverable` 类型与工具结果里 `deliverables` 的 schema；`ArtifactRef`、`artifact://` 解析 |
-| pet-agent 核心 | 在工具结果产生时收集 `deliverables`，写进 `delegate_capability` 的执行记录。不认识 artifact store。 |
-| artifacts Toolkit（独立包，如 `toolkits/artifacts`） | `ArtifactStore` 与 `ArtifactSourceReader` 两个 port；`publish_artifact` / `list_artifacts` / `download_artifact` 三个工具 |
-| Host | 注入 store adapter（local / COS）与 source reader；把本 run 的交付物挂到 `message.completed`；HTTP 打开引用；可选的 session 产物段落 |
-| agent-session 协议 | `message.completed.deliverables` 与 snapshot 里对应字段 |
-| Channel Plugin | 把 Pet 回复事件里的 `deliverables` 原样存进消息 |
-| 客户端（TUI / Console） | 渲染消息的 `deliverables` 与正文里的 `artifact://` 链接 |
+| agent-contracts | 对外 `Deliverable` 类型、`ArtifactRef` 与 `artifact://` 解析 |
+| pet-agent 核心 | 汇总 Toolkit 显式提供的公共结果，沿 Capability 返回路径写入执行记录 |
+| artifacts Toolkit（`toolkits/artifacts`） | 存储与文件读取 port、三个工具、发布引用的执行状态、文件选择与发布指引 |
+| Host | 注入 store adapter 和 source reader；投影本 run 的交付物；提供 HTTP 文件访问 |
+| agent-session 协议 | `message.completed.deliverables` 与 snapshot 对应字段 |
+| Channel Plugin | 将 Pet 回复事件中的 `deliverables` 原样存入消息 |
+| 客户端（TUI / Console） | 展示消息的 `deliverables` 与正文中的 `artifact://` 链接 |
 
 ## 交付物约定（agent-contracts + pet-agent）
 
-工具在 `ToolMessage.artifact` 里用固定字段声明交付物：
-
 ```ts
-type ToolDeliverables = { deliverables: Array<{ uri: string; title?: string }> };
+type Deliverable = { uri: string; title?: string };
 ```
 
-硬约束：
+文件从生成到交付的职责如下：
 
-1. 只有工具声明的才算交付物。模型是否调用 `publish_artifact` 不能保证；能保证的是调用了就一定记下。没发布的情况靠 toolkit instructions 引导，由 Supervisor 验收把关（要求交付文件但没有交付物，判为未完成）。
-2. schema 在工具侧校验，格式不对在工具返回前报错，不静默忽略。
-3. 核心在工具结果产生时收集，不在委派结束后扫消息，因为 Capability 的私有上下文会自己压缩。同一委派的多轮尝试累加，同一 uri 去重。
-4. 和委派结果状态无关：被拒绝或取消的委派，已声明的交付物照样记录。
-5. 只在 Capability 执行中产生；Entry 和 Supervisor 只调控制类工具。
+1. 浏览器、Office 等工具在生成文件时保存文件，在正常工具结果中提供本地路径。
+2. Capability 子代理模型根据用户目标、业务需求和工具输出，选择需要交付的文件，调用 `publish_artifact(path, title?)`。
+3. `publish_artifact` 校验文件并保存快照，成功后返回 `ArtifactRef`，同时将 `uri` 和可选 `title` 写入 artifacts 的 `publishedRefs` state。
+4. artifacts Toolkit 通过原生 reducer 累计发布引用，按 `uri` 去重，并由自己的 `getResult(state)` 返回 `{ deliverables }`。核心汇总本次所选 Toolkit 的公共结果，沿 Capability 返回出口写入执行记录。
+5. 执行记录保存委派状态、文字交付和已汇总的引用：`{ status, delivery: { text }, deliverables }`。
+6. Supervisor 根据用户目标和实际结果验收，Entry 与 Supervisor 按既有回复流程生成最终回复。
 
-执行记录变为 `{ status, delivery: { text }, deliverables }`。Supervisor 验收和 Entry 回复时看到的是这份数据，和正文是否写了链接无关。
+artifacts Toolkit 按 [Toolkit 执行状态](../toolkits/execution-state.md) 声明 `publishedRefs`，默认值为空数组，并定义自己的结果提取函数。文件快照由 store 保存，引用在本次子代理 state 中累计，消息按 Agent 既有上下文策略压缩。发布结果与委派状态分别记录；拒绝或取消委派后，已保存的快照仍可读取。
+
+### 文件选择与发布指引
+
+Capability 在 `uses` 中声明 `artifacts`，获得发布、列表、下载工具。artifacts Toolkit 的 `instructions` 随现有装配进入子代理提示词，引导模型：看到工具返回的文件路径，或自己生成文件时，结合任务判断文件是否需要交给请求方，需要时调用 `publish_artifact`。
+
+例如 `browser_screenshot` 把截图写到 `<workdir>/.pinpawo/browser/screenshots/`，并在工具结果中返回路径。使用 `browser` 和 `artifacts` 的 Capability 可以在同一次执行中完成截图与发布。用于操作过程的截图保留在本地；需要交付给请求方的截图由模型选择并发布。
+
+文件选择由模型完成，核心处理发布成功回执。已有 URL 的结构化交付方式见[待定问题](#待定问题)。
 
 ## 交付物链路
 
-沿用现有的 `resultReferences` 路径：Host 的 `readReplyResultReferences`（`services/host/src/conversation/transcriptProjection.ts`）从回复所属 run 的执行记录取出 delivery，挂到 `message.completed`，再进 snapshot 和 Console。交付物在这条路上多带一个字段：
+交付物沿现有执行记录、回复事件和消息存储路径传递：
 
 ```text
-工具结果 ToolMessage.artifact.deliverables
-  -> delegate_capability 执行记录 deliverables          （pet-agent，工具结果产生时收集）
-  -> message.completed.deliverables                       （Host readReplyDeliverables）
-  -> Channel 消息 deliverables                            （Channel recordPetMessage 原样存）
+publish_artifact 成功回执 ArtifactRef
+  -> artifacts Toolkit state.publishedRefs
+  -> artifacts.getResult(state) 返回 { deliverables }
+  -> pet-agent 汇总本次所选 Toolkit 的公共结果
+  -> delegate_capability 执行记录 deliverables
+  -> message.completed.deliverables
+  -> snapshot / Channel 消息 deliverables
   -> Console / TUI 渲染
 ```
 
-- 目标是让被 Supervisor 打回、之后重做的那次执行的文件留在 store，但不跟着回复走。现有 `readReplyResultReferences` 只按回复所属 run 和 `returned` 筛选；`returned` 表示执行已返回，不代表 Supervisor 已接受。如何可靠识别应随回复交付的执行，需在实现链路前明确，不能直接复用这一筛选并假定它排除了打回的结果。
-- 合并本 run 中选定执行的交付物，同一 uri 去重，保持发布顺序；执行的选取规则待明确。
-- Channel 的旧 `artifacts` 输入、消息类型和展示已在清理阶段删除。后续新增 `deliverables: [{ uri, title? }]`，语义是"这条消息交付的引用"，人发的消息也可以带；Console / TUI 为新字段增加渲染。旧消息 JSON 不迁移或重写。
-- 尽量沿用现有事件和存储路径；执行选取规则确定后，补齐对应的结构化投影。
+- Capability 执行函数整理子代理文字结果和发布引用，`delegate_capability` 将同一次执行结果写入父层 ToolMessage。
+- 最终回复按已有验收结论选择当前 run 中已验收任务的最新执行，合并其交付物，按 `uri` 去重并保持发布顺序。打回执行的记录和文件快照继续保存。
+- Entry 与 Supervisor 将选定引用写入最终回复的结构化元数据，Host 据此生成 `message.completed.deliverables` 和 snapshot。
+- Channel 消息使用 `deliverables: [{ uri, title? }]` 表达这条消息交付的引用；人发的消息也可以携带该字段。
+- Console / TUI 展示结构化交付物，并支持正文中的 `artifact://` 链接。
 
 ## artifacts Toolkit
 
@@ -121,79 +129,42 @@ type ArtifactSourceReader = (input: { path: string; workdir: string | null }) =>
 }>;
 ```
 
-Store 只管数据，不做权限判断。
+存储操作由 `ArtifactStore` 承担，访问控制由 Host 承担。
 
 | 工具 | 作用 | 审核 |
 |---|---|---|
-| `publish_artifact(path, title?)` | 经 source reader 读文件（workdir、`/tmp` 或 session 临时目录），写入存储，返回 ref、一行可粘进回复的 Markdown 链接，并在工具结果里声明交付物 | 不需要 |
-| `list_artifacts()` | 列出当前 session 发布的 artifacts | 不需要 |
-| `download_artifact(uri, path?)` | 把引用下载到本地（默认 session 临时目录），返回本地路径；之后用 files 工具读取 | 写 workdir 时按 files 的写入审核；写临时目录不需要 |
+| `publish_artifact(path, title?)` | 经 source reader 读取本地文件，保存快照，返回 `ArtifactRef` 成功回执及 Markdown 链接 | 免审 |
+| `list_artifacts()` | 列出当前 session 发布的 artifacts | 免审 |
+| `download_artifact(uri, path?)` | 将引用下载到本地，默认保存到 session 临时目录，返回本地路径 | 免审 |
 
-- Agent 自己决定何时下载、何时读已有的本地文件；存储层不自动下载，也不直接返回正文。
-- 发布时的 `threadId` 来自工具的 execution scope，模型不传。
-- 必须在 Capability 的 `uses` 里声明 `artifacts` 才能用，内置 Capability 也一样。
-- 单文件上限 100 MB，超过时 `publish_artifact` 报错，不截断；不设 session 总量上限。
+- Agent 自行决定下载和读取文件的时机，下载后使用 files 工具读取。
+- 发布时的 `threadId` 由工具 execution scope 提供。
+- Capability 的 `uses` 决定 artifacts 工具与 instructions 的装配。
+- 单文件上限 100 MB，超限时 `publish_artifact` 返回错误。session 总量由存储容量决定。
 
 ## Host
 
-Adapter 在 Host 配置里选：
+Host 配置选择存储 adapter：
 
 - `local`（默认）：`~/.pinpawo/workspaces/<workspaceId>/artifacts/<threadId>/<artifactId>/<name>`，`fetch` 返回文件流。
-- `cos`：bucket + prefix，对象键与 `<key>` 一致；`fetch` 返回签名 URL。密钥放在全局配置 `~/.pinpawo/config.json` 或环境变量，不进 workdir。
+- `cos`：使用 bucket 和 prefix，对象键与 `<key>` 一致，`fetch` 返回签名 URL。密钥放在全局配置 `~/.pinpawo/config.json` 或环境变量。
 
-`ArtifactSourceReader` 按 files Toolkit 的规则解析路径（相对路径基于 workdir，绝对路径原样），只读普通文件。
+`ArtifactSourceReader` 按 files Toolkit 的规则解析路径：相对路径基于 workdir，绝对路径原样使用；读取对象为普通文件。
 
-人打开引用：Agent Session HTTP 增加 `GET /agent-session/artifacts?uri=…`，`local` 返回文件流，`cos` 302 跳到签名 URL。Studio HTTP Plugin 同样代理。Console 用 react-markdown 的 `urlTransform` 识别 `artifact://`，与现在的 `participant:` 链接同一处；TUI 显示标题和本地路径或 HTTP 地址。
+Agent Session HTTP 提供 `GET /agent-session/artifacts?uri=…`：`local` 返回文件流，`cos` 通过 302 跳转到签名 URL。Studio HTTP Plugin 提供对应代理。
 
-可选：Host 在每次 root invocation 用 toolkit 导出的 `renderArtifactsSection(store, threadId)` 生成一个 common system section（最多 20 条，没有产物时不生成），补"历史压缩后 Entry 不知道有哪些产物"这一个场景。走现有的 `systemPromptSections`，不进 state 或 checkpoint。
+Console 通过 react-markdown 的 `urlTransform` 识别 `artifact://`，与现有 `participant:` 链接共用入口。TUI 显示标题和可打开的本地路径或 HTTP 地址。
+
+可选的 session 产物上下文通过 `renderArtifactsSection(store, threadId)` 生成，列出当前 session 最多 20 条产物。Host 在 root invocation 时通过 `systemPromptSections` 注入；有产物时生成该段落。
+
+## 待定问题
+
+- **已有 URL 的结构化交付**：确定来源工具返回的 URL 如何进入 `deliverables`。URL 的访问权限和有效期沿用来源工具的约定。
 
 ## 后续：artifacts 管理
 
-以下有价值，但不是第一阶段的前置条件，由独立的 artifacts 管理能力承接：
+独立的 artifacts 管理能力承接：
 
-- 从引用反查归属（Pet、session、存储对象）和管理入口。
-- 删除入口、保留策略、失败清理、孤儿文件处理。第一阶段不承诺随 session 删除自动清理。
-- 是否需要一个通用机制，让 toolkit 按 scope 提供动态上下文。
-
-## 移除的旧实现
-
-计划移除以下旧实现；删除前须核实外部 Capability、已有 store、checkpoint 和执行记录的兼容影响。仓库内没有写入口的调用，并不能证明所有部署中都没有旧数据：
-
-- pet-agent：`types/artifact.ts`、`orchestrator/capabilityArtifacts.ts`、`orchestrator/artifacts/discovery.ts`、`sessionCapabilityArtifacts`、`SubagentResult.artifacts`、finalize context 中的 `artifactStore` / `recordCapabilityArtifact` / `artifactRefs`；`delegate_capability` 旧结果字段 `artifacts` 已删除，后续新增 `deliverables`。
-- Host：`FileCapabilityArtifactStore`、`artifact_discovery` Toolkit、`capabilityArtifactRoot`、各处旧 store 注入；TUI 对 `artifact_discovery_context` 信封的解析。
-- 文档：`docs/reference/artifacts/` 移入 history。
-
-Channel 后续新增 `deliverables`（见[交付物链路](#交付物链路)）。
-普通 `lifecycle.finalize` 保留 `output` 改写和只读 context `messages`，返回值不再支持
-`messages`；交付物不通过这个 hook 声明。
-
-## 实现顺序
-
-1. 删除旧 pipeline（一个 PR）。改 prompt 后重跑受影响的 Supervisor eval。
-2. 交付物约定：agent-contracts 的 `Deliverable` 与 schema、核心收集、执行记录与 prompt。
-3. 交付物链路：`message.completed.deliverables`、Channel 新增字段、Console / TUI 渲染。
-4. artifacts Toolkit 与 Host `local` adapter、source reader。
-5. HTTP 打开引用。
-6. `cos` adapter。
-
-## 清理阶段实施状态
-
-本节记录 #1047 的清理范围，不改变上文的设计目标或将其视为已经实现。
-
-旧 Capability Artifact store、discovery Toolkit、专用 Host/Studio 注入和 finalize
-写入接口已退役。普通 finalize 保留 `output` 收尾接口及只读 context `messages`；
-返回值 `messages` 的无消费赋值和输出类型已删除，不据此声称该 hook 已被实际业务使用。
-Channel 的旧 `artifacts` 输入、消息类型和展示也已删除；原有消息 JSON 不重写，
-旧附件值不再通过 API 或 Console 可见。显式发布、交付物传递、下载与 local/COS
-adapter 尚未由本清理提供；新能力仍需另行实现与验证。上文保留原草稿的目标与历史接口描述，
-不应把它们当作本清理后的当前能力。
-
-本次删除 `sessionCapabilityArtifacts` channel、旧 Ref 类型和 reducer，旧索引不再进入
-当前 state。
-按用户明确的自测阶段规则，本次也删除旧执行记录 `artifacts` 的兼容读取及专门测试，
-只支持现行契约；历史 checkpoint 和第三方 Capability 兼容仅在用户明确要求时处理。
-按现有版本隔离方式，checkpoint namespace 升至 `capability-v6`，新 runtime 不读取
-v5 checkpoint，不恢复旧 reader，也不迁移或删除旧 checkpoint 与 store 文件。TUI
-会话注册表随版本隔离；Studio 独立的 `resident-sessions` 注册表路径不变，已有条目
-继续加载，不能据此认为所有旧会话都已清空。旧文件不再能通过原 discovery 工具访问。
-详见[当前退役边界](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)。
+- 从引用查询归属 Pet、session 和存储对象，提供管理入口。
+- 删除、保留策略、失败清理与孤儿文件处理。
+- 评估 Toolkit 按 scope 提供动态上下文的通用需求。

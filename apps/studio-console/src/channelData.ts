@@ -1,3 +1,5 @@
+import type { Deliverable } from '@pinpawo/agent-session';
+
 export type ChannelMemberKind = 'human' | 'pet';
 export type ChannelAuthor = { kind: string; id: string };
 export type ChannelRow = {
@@ -7,6 +9,7 @@ export type ChannelRow = {
 export type ChannelMessage = {
   sequence: number; messageId: string; channelId: string; author: ChannelAuthor; occurredAt: string;
   externalRef?: string; body: string; replyTo?: string;
+  deliverables?: Deliverable[];
   mentions: { participantId: string; label?: string }[];
 };
 /** A current member, as messages address it. */

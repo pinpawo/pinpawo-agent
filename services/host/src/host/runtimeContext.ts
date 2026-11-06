@@ -15,7 +15,7 @@ import type { loadAgentContext } from '../contextLoader';
 import type { createChatHostHandlers, ServerHandlerOptions } from '../serverHandlers';
 import type { AgentSessionPeerHandlers } from '../wire/messageDispatcher';
 import type { ServerTuiSessionService, TuiSessionCheckpointer } from '../session/serverTuiSessions';
-import type { ServerRuntimeDepsStore } from '../serverTypes';
+import type { ServerDeps, ServerRuntimeDepsStore } from '../serverTypes';
 import type { HostExecutionConfig } from '../config/hostExecutionConfig';
 import type { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from '../config/llmConfig';
@@ -49,6 +49,7 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   petDocument?: PetDocument;
   capabilities: readonly AgentCapability[];
   toolkitInventory: HostToolkitInventoryStore;
+  artifactStore?: ServerDeps['artifactStore'];
   checkpointer: TuiSessionCheckpointer;
   /** Pet-scoped Agent Session registry path owned by the composing Host. */
   sessionStatePath: string;

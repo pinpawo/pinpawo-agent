@@ -133,10 +133,13 @@ type AgentToolkit = {
   readonly tools: readonly ToolDefinition[];
   readonly instructions?: string;
   readonly stateSchema?: AnyStateSchema;
+  readonly getResult?: (state: Readonly<Record<string, unknown>>) => ToolkitResult;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
   readonly requires?: Readonly<Record<string, ToolkitRSRequirement>>;
 };
+
+type ToolkitResult = { deliverables: readonly Deliverable[] };
 
 type ToolDefinition = {
   readonly tool: NamedStructuredTool;
@@ -156,6 +159,9 @@ type ToolDefinition = {
   reducer。Capability 按 `uses` 组合字段；工具通过 `ToolRuntime.state` 读取、
   `Command` 更新，调用方从 `SubagentResult.state` 读取原生执行结果。
   字段重名或占用框架字段时装配报错，详见 [Toolkit 执行状态](../../design/toolkits/execution-state.md)。
+- `getResult`：可选的同步结果提取函数，负责将 Toolkit 自身 state 转为公共结果。
+  pet-agent 按 `uses` 顺序校验、汇总引用并按 URI 保留首次；缺省函数贡献为空，
+  显式返回空数组表示本次没有交付物。结果提取先于 Capability 的文字 `finalize`。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
 - `requires`：可选的执行环境（RS）依赖声明，只供 Host 装配使用；见

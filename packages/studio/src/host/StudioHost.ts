@@ -168,6 +168,7 @@ export class StudioHost {
         petCapabilities,
         petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),
+        artifactStore: this.caps.getArtifactStore(),
         checkpoint: this.getCheckpointer(),
         ...this.caps.getExecutionConfig(),
         deferPluginActivation: true,
@@ -254,6 +255,10 @@ export class StudioHost {
 
   getRuntimeConfig(): HostRuntimeConfig {
     return this.caps.getRuntimeConfig();
+  }
+
+  getArtifactStore() {
+    return this.caps.getArtifactStore();
   }
 
   getCheckpointer(): FileSaver {

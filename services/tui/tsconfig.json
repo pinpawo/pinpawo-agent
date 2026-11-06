@@ -19,6 +19,9 @@
       ],
       "@pinpawo-toolkit/browser": [
         "../../toolkits/browser/src/index.ts"
+      ],
+      "@pinpawo-toolkit/artifacts": [
+        "../../toolkits/artifacts/src/index.ts"
       ]
     },
     "strict": true,

@@ -25,6 +25,7 @@ import { buildCapabilityRoutingManifest } from '../../prompts/capabilityRoutingM
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { getAgentRuntimeContext } from '../../../../runtime/context';
 import { buildInvocationHintContext } from '../../../../prompts/invocationHint';
+import { withReplyDeliverables } from '../../replyDeliverables';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -287,7 +288,12 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     if (!toolCalls?.length && !response.text.trim()) {
       throw new Error('Entry Answer must reply or request routing.');
     }
-    const committed = toolCalls?.length === response.tool_calls?.length ? response : withoutRepeatedCalls(response, toolCalls!);
+    let committed = toolCalls?.length === response.tool_calls?.length ? response : withoutRepeatedCalls(response, toolCalls!);
+    if (!toolCalls?.length) {
+      // Capture acceptance while this run's plan is available; later projections
+      // read the reply itself rather than reinterpreting a future plan snapshot.
+      committed = withReplyDeliverables(committed, state.messages, state.runSupervisorState, state.runId);
+    }
     return {
       messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],
     };

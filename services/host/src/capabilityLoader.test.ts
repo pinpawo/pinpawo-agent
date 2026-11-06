@@ -222,7 +222,7 @@ export const lifecycle = {
   assert.equal(result.ok, true, result.errors.join('\n'));
   assert.equal(typeof result.capability?.lifecycle?.finalize, 'function');
   const message = new HumanMessage('earlier work');
-  const finalized = await result.capability!.lifecycle!.finalize!({ state: {}, messages: [], output: 'delivery' }, {
+  const finalized = await result.capability!.lifecycle!.finalize!({ state: { messages: [] }, messages: [], output: 'delivery' }, {
     capabilityId: 'finalized_capability', threadId: 'thread', taskId: 'task', runId: 'run', delegationId: 'delegation',
     messages: [message], models: { act: new FakeListChatModel({ responses: ['unused'] }) },
   });

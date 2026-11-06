@@ -1,3 +1,5 @@
+import type { Deliverable } from '@pinpawo/agent-contracts';
+
 export type ChannelMemberKind = 'human' | 'pet';
 export type MemberRef = { kind: ChannelMemberKind; id: string };
 
@@ -35,6 +37,7 @@ export type ChannelMessageRow = {
   body: string;
   replyTo?: string;
   mentions: ChannelMention[];
+  deliverables?: Deliverable[];
 };
 
 export type ChannelSessionRow = {

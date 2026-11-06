@@ -1,9 +1,7 @@
 import {
   applySessionSnapshot,
-  type AgentMessageEntry,
   type AgentSession,
   type AgentSessionSnapshot,
-  type AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 
 export function reconcileCompletionSnapshot(
@@ -16,26 +14,11 @@ export function reconcileCompletionSnapshot(
     preserveOmittedTokenUsage: true,
     preserveOmittedSessionTokenUsage: true,
   });
-  if (
-    live.activeRun
-    // The snapshot's own entries: a windowed one keeps the live entries
-    // before it, operations included.
-    || hasCanonicalOperationEntries(snapshot.session.timeline)
-  ) {
-    return live.activeRun
-      ? mergeCompletionSnapshotMetadata(live, applied)
-      : applied;
-  }
-  // Checkpoints persist the user/assistant conversation. Subagent progress,
-  // operations and system entries belong to the live projection.
-  // Replace checkpoint-owned messages without discarding those settled details.
-  return {
-    ...applied,
-    timeline: mergeCheckpointMessagesWithLiveDetails(
-      live.timeline,
-      applied.timeline,
-    ),
-  };
+  // A completion snapshot owns the projection it covers, including omissions.
+  // A request made for an older run must not replace a newer active timeline.
+  return live.activeRun
+    ? mergeCompletionSnapshotMetadata(live, applied)
+    : applied;
 }
 
 export function reconcileCompletionSnapshotMetadata(
@@ -51,113 +34,6 @@ export function reconcileCompletionSnapshotMetadata(
       preserveOmittedSessionTokenUsage: true,
     }),
   );
-}
-
-function mergeCheckpointMessagesWithLiveDetails(
-  live: readonly AgentTimelineEntry[],
-  checkpoint: readonly AgentTimelineEntry[],
-) {
-  const checkpointMessages = checkpoint.filter(isCheckpointMessage);
-  const liveMessages = live.filter(isCheckpointMessage);
-  const reconciledMessages = reconcileCheckpointMessages(
-    checkpointMessages,
-    liveMessages,
-  );
-  const replacements = new Map(
-    reconciledMessages.flatMap(({ message, liveIndex }) => (
-      liveIndex >= 0 ? [[liveMessages[liveIndex]!, message] as const] : []
-    )),
-  );
-  const insertionsBefore = new Map<AgentMessageEntry, AgentMessageEntry[]>();
-  let pendingInsertions: AgentMessageEntry[] = [];
-  for (const reconciled of reconciledMessages) {
-    if (reconciled.liveIndex < 0) {
-      pendingInsertions.push(reconciled.message);
-      continue;
-    }
-    if (pendingInsertions.length > 0) {
-      insertionsBefore.set(
-        liveMessages[reconciled.liveIndex]!,
-        pendingInsertions,
-      );
-      pendingInsertions = [];
-    }
-  }
-  const timeline: AgentTimelineEntry[] = [];
-  for (const entry of live) {
-    if (isCheckpointMessage(entry)) {
-      timeline.push(...(insertionsBefore.get(entry) ?? []));
-    }
-    const replacement = isCheckpointMessage(entry)
-      ? replacements.get(entry)
-      : undefined;
-    if (replacement) {
-      timeline.push(replacement);
-      continue;
-    }
-    if (isSettledSupplementaryEntry(entry)) {
-      timeline.push(entry);
-    }
-  }
-  timeline.push(...pendingInsertions);
-  return timeline;
-}
-
-function isCheckpointMessage(
-  entry: AgentTimelineEntry,
-): entry is AgentMessageEntry {
-  return entry.type === 'message'
-    && (entry.role === 'user' || entry.role === 'assistant');
-}
-
-function reconcileCheckpointMessages(
-  checkpoint: readonly AgentMessageEntry[],
-  live: readonly AgentMessageEntry[],
-) {
-  let liveIndex = 0;
-  return checkpoint.map((message) => {
-    const exactIndex = live.findIndex((candidate, index) => (
-      index >= liveIndex
-      && candidate.role === message.role
-      && message.text === candidate.text
-      && toolCallIds(candidate) === toolCallIds(message)
-    ));
-    const matchingIndex = exactIndex >= 0
-      ? exactIndex
-      : live.findIndex((candidate, index) => (
-        index >= liveIndex && candidate.role === message.role
-        && Boolean(candidate.toolCalls?.length) === Boolean(message.toolCalls?.length)
-      ));
-    if (matchingIndex < 0) {
-      return { message, liveIndex: -1 };
-    }
-    liveIndex = matchingIndex + 1;
-    const matched = live[matchingIndex]!;
-    return {
-      message: matched.requestId
-        ? { ...message, requestId: matched.requestId }
-        : message,
-      liveIndex: matchingIndex,
-    };
-  });
-}
-
-function toolCallIds(message: AgentMessageEntry) {
-  return message.toolCalls?.map(call => call.id).join('\n') ?? '';
-}
-
-function isSettledSupplementaryEntry(entry: AgentTimelineEntry) {
-  return entry.type === 'message'
-    ? entry.status === 'completed'
-    : entry.phase === 'completed'
-      || entry.phase === 'failed'
-      || entry.phase === 'interrupted';
-}
-
-function hasCanonicalOperationEntries(
-  timeline: readonly AgentTimelineEntry[],
-) {
-  return timeline.some((entry) => entry.type === 'operation');
 }
 
 function mergeCompletionSnapshotMetadata(

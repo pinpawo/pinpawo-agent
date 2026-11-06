@@ -12,6 +12,7 @@ import { budgetHandoffDataset } from './datasets/budget-handoff.ts';
 const handoffExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'context-window-handoff')!.expected;
 const controlExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'below-watermark-control')!.expected;
 const overflowExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'context-already-exceeded')!.expected;
+const verbatimCase = budgetHandoffDataset.cases.find(({ name }) => name === 'goal-results-verbatim')!;
 
 test('checkpoint guard scope survives reuse of a provider tool-call ID in a fresh delegation', () => {
   const scopes = new Map([['result-first', 'attempt-first'], ['result-second', 'attempt-second']]);
@@ -70,6 +71,15 @@ function completedOverflowRecovery(): BudgetHandoffObservation {
   return observation;
 }
 
+function completedVerbatimResults(): BudgetHandoffObservation {
+  const observation = completedHandoff();
+  const original = verbatimCase.expected.verbatimResult!;
+  observation.verbatimEvidence = { source: 'evidence-fixture.ts', text: original };
+  observation.executions[0].delivery += `\nSource: evidence-fixture.ts\n\`\`\`text\n${original}\n\`\`\``;
+  observation.finalText += `\nSource: evidence-fixture.ts\n\`\`\`text\n${original}\n\`\`\``;
+  return observation;
+}
+
 function passes(observation: BudgetHandoffObservation, expected = handoffExpected): boolean {
   const invariants = evaluateBudgetHandoffInvariants(observation, expected);
   assert.ok(invariants.length > 0, 'the eval must have mechanical acceptance checks');
@@ -78,10 +88,10 @@ function passes(observation: BudgetHandoffObservation, expected = handoffExpecte
 
 test('budget handoff dataset has executable identities, mechanical expectations and semantic acceptance criteria', () => {
   const cases = budgetHandoffDataset.cases;
-  assert.equal(cases.length, 4);
+  assert.equal(cases.length, 5);
   assert.equal(new Set(cases.map(({ id }) => id)).size, cases.length);
-  assert.deepEqual(cases.map(({ expected }) => expected.contextHandoff), [true, false, false, false]);
-  assert.deepEqual(cases.map(({ expected }) => expected.expectedDelegations), [2, 2, 2, 1]);
+  assert.deepEqual(cases.map(({ expected }) => expected.contextHandoff), [true, false, false, false, true]);
+  assert.deepEqual(cases.map(({ expected }) => expected.expectedDelegations), [2, 2, 2, 1, 2]);
   const overflowCase = cases.find(({ name }) => name === 'context-already-exceeded')!;
   const callBudgetCase = cases.find(({ name }) => name === 'model-call-budget-exhausted')!;
   assert.equal(overflowCase.input.scenario, 'context-overflow');
@@ -99,6 +109,52 @@ test('budget handoff dataset has executable identities, mechanical expectations 
   const controlCase = cases.find(({ name }) => name === 'below-watermark-control')!;
   assert.ok(overflowCase.input.reportChars > cases[0].input.reportChars);
   assert.ok(cases[0].input.reportChars > controlCase.input.reportChars);
+  assert.ok(verbatimCase.input.requiredVerbatimText);
+  assert.equal(verbatimCase.input.requiredVerbatimText, verbatimCase.expected.verbatimResult);
+  assert.ok(verbatimCase.input.requiredVerbatimText.includes('\n'));
+  assert.equal(verbatimCase.input.userMessage.includes(verbatimCase.input.requiredVerbatimText), false,
+    'the exact diagnostic must come from the evidence tool, not be leaked in the task');
+});
+
+test('goal-related results retain the complete sourced original in delivery and final reply', () => {
+  assert.equal(passes(completedVerbatimResults(), verbatimCase.expected), true);
+});
+
+test('Markdown blockquote markers do not invalidate an otherwise exact original quotation', () => {
+  const observation = completedVerbatimResults();
+  const original = verbatimCase.expected.verbatimResult!;
+  const quote = original.split('\n').map(line => `> ${line}`).join('\n');
+  observation.executions[0].delivery = observation.executions[0].delivery!.replace(original, quote);
+  observation.finalText = observation.finalText.replace(original, quote);
+  assert.equal(passes(observation, verbatimCase.expected), true);
+});
+
+for (const [name, change] of [
+  ['a changed fact value', (text: string) => text.replace('pending', 'ready')],
+  ['a missing second line', (text: string) => text.split('\n')[0]],
+  ['typographic quotes replacing original ASCII quotes', (text: string) => text.replaceAll('"', '“')],
+  ['literal backslash-n replacing the original line break', (text: string) => text.replace('\n', '\\n')],
+  ['extra whitespace inside the original', (text: string) => text.replace('expected status', 'expected  status')],
+] as const) {
+  for (const output of ['first-delivery', 'final-reply'] as const) {
+    test(`verbatim results reject ${name} in the ${output}`, () => {
+      const observation = completedVerbatimResults();
+      const original = verbatimCase.expected.verbatimResult!;
+      if (output === 'first-delivery') observation.executions[0].delivery = observation.executions[0].delivery!.replace(original, change(original));
+      else observation.finalText = observation.finalText.replace(original, change(original));
+      assert.equal(passes(observation, verbatimCase.expected), false);
+    });
+  }
+}
+
+test('verbatim results require the original to have been observed from the evidence source', () => {
+  const observation = completedVerbatimResults();
+  delete observation.verbatimEvidence;
+  assert.equal(passes(observation, verbatimCase.expected), false);
+});
+
+test('an empty verbatim requirement cannot pass through vacuous substring matching', () => {
+  assert.equal(passes(completedVerbatimResults(), { ...verbatimCase.expected, verbatimResult: '' }), false);
 });
 
 test('mechanical scoring accepts a paired context handoff followed by same-task completion', () => {

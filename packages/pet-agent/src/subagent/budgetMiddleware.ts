@@ -88,8 +88,8 @@ function notification(invocationId: string, data: HandoffNotice) {
         instruction: SUBAGENT_BUDGET_HANDOFF_PROMPT.render({
           budget,
           finalInstruction: data.phase === 'finalize'
-            ? 'This is your final call. Return the handoff text now using the evidence already gathered. Further tool calls will not execute.'
-            : 'Finish only essential work that fits the remaining budget, then return the handoff without further tool calls.',
+            ? 'This is your final call. Deliver the useful results now in the required format using the evidence already gathered. Further tool calls will not execute.'
+            : 'Finish only essential work that fits the remaining budget, then deliver the useful results in the required format without further tool calls.',
         }),
       }),
     }), metadata),

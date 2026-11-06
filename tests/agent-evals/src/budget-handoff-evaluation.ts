@@ -28,11 +28,20 @@ export type BudgetHandoffObservation = {
   planCompleted: boolean;
   finalText: string;
   invocationError: string | null;
+  verbatimEvidence?: { source: string; text: string };
 };
+
+function preservesVerbatimText(candidate: string | null | undefined, original: string): boolean {
+  if (!candidate || !original) return false;
+  // Markdown blockquote markers are presentation syntax. Remove only that
+  // prefix, leaving the quoted text's punctuation and internal whitespace.
+  return candidate.includes(original)
+    || candidate.split('\n').map(line => line.replace(/^ {0,3}> ?/, '')).join('\n').includes(original);
+}
 
 export function evaluateBudgetHandoffInvariants(
   observed: BudgetHandoffObservation,
-  expected: Pick<BudgetHandoffExpected, 'expectedDelegations' | 'contextHandoff' | 'contextOverflow'>,
+  expected: Pick<BudgetHandoffExpected, 'expectedDelegations' | 'contextHandoff' | 'contextOverflow' | 'verbatimResult'>,
 ) {
   const executions = observed.executions;
   const reads = observed.toolCalls.filter(call => call.name === 'read_evidence' && call.success);
@@ -40,7 +49,7 @@ export function evaluateBudgetHandoffInvariants(
   const first = executions[0];
   const overflow = expected.contextOverflow === true;
   const continues = expected.contextHandoff || overflow;
-  return [
+  const checks = [
     { key: 'invocation_succeeded', passed: observed.invocationError === null },
     { key: 'expected_delegation_count', passed: executions.length === expected.expectedDelegations },
     { key: 'expected_delivery_statuses', passed: executions.length > 0 && executions.every((item, index) => overflow && index === 0
@@ -71,6 +80,16 @@ export function evaluateBudgetHandoffInvariants(
     { key: 'plan_accepted', passed: observed.planCompleted },
     { key: 'final_facts', passed: observed.finalText.includes('EVIDENCE-6429') && observed.finalText.includes('VERIFY-3817') },
   ];
+  if (expected.verbatimResult !== undefined) {
+    checks.push(
+      { key: 'verbatim_source_observed', passed: Boolean(expected.verbatimResult)
+        && observed.verbatimEvidence?.text === expected.verbatimResult
+        && observed.verbatimEvidence.source === 'evidence-fixture.ts' },
+      { key: 'first_delivery_preserves_original', passed: preservesVerbatimText(first?.delivery, expected.verbatimResult) },
+      { key: 'final_reply_preserves_original', passed: preservesVerbatimText(observed.finalText, expected.verbatimResult) },
+    );
+  }
+  return checks;
 }
 
 type ModelInput = { group: string; messages: BaseMessage[]; inputTokens: number; providerInputTokens: number | null };
@@ -104,6 +123,7 @@ export async function runBudgetHandoffCase(params: {
   let latestInput: ModelInput | null = null;
   let modelCallCount = 0;
   let completedDelegations = 0;
+  let verbatimEvidence: BudgetHandoffObservation['verbatimEvidence'];
   const scope = (runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     const delegationId = runtime.context.executionScope?.delegationId;
     if (!delegationId) throw new Error('Synthetic evidence tools require the real Capability execution scope.');
@@ -121,7 +141,11 @@ export async function runBudgetHandoffCase(params: {
   };
   const readEvidence = tool((_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     toolCalls.push({ name: 'read_evidence', delegationId: scope(runtime), success: true });
-    const header = `Evidence fact: EVIDENCE-6429. The report identifies a reproducible fixture defect; verification has not yet run.\nVerification ticket: ${ticket}\nThe next required operation is verify_evidence with this ticket.\n`;
+    let header = `Evidence fact: EVIDENCE-6429. The report identifies a reproducible fixture defect; verification has not yet run.\nVerification ticket: ${ticket}\nThe next required operation is verify_evidence with this ticket.\n`;
+    if (input.requiredVerbatimText !== undefined) {
+      verbatimEvidence = { source: 'evidence-fixture.ts', text: input.requiredVerbatimText };
+      header += `Diagnostic source: ${verbatimEvidence.source}\nOriginal diagnostic:\n${verbatimEvidence.text}\nEnd original diagnostic.\n`;
+    }
     const latest = latestInput;
     if (!latest) throw new Error('No actual model input was observed before reading evidence.');
     // Exercise the production watermark with a scaled logical window rather
@@ -247,6 +271,7 @@ export async function runBudgetHandoffCase(params: {
       delegationId, count: modelInputs.filter(entry => entry.group === group).length,
     })),
     planCompleted: Boolean(output?.runSupervisorState.plan.length) && output!.runSupervisorState.plan.every(item => item.status === 'completed'),
+    ...(verbatimEvidence ? { verbatimEvidence } : {}),
   };
   return { observation, usage: usage.read(), diagnostics: { modelCallCount, completedDelegations, runtimeEvents, expectedTicket: ticket,
     logicalWindowTokens: input.contextWindowTokens, generationReserveTokens: input.generationReserveTokens, maxReportChars: input.reportChars,

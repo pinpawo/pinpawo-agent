@@ -7,6 +7,7 @@ export type BudgetHandoffInput = {
   contextWindowTokens: number;
   generationReserveTokens: number;
   reportChars: number;
+  requiredVerbatimText?: string;
 };
 
 export type BudgetHandoffExpected = {
@@ -15,10 +16,12 @@ export type BudgetHandoffExpected = {
   expectedDelegations: number;
   contextHandoff: boolean;
   contextOverflow?: boolean;
+  verbatimResult?: string;
 };
 
 const SUITE = 'agent-budget-handoff';
 const SOURCE_FILE = 'tests/agent-evals/src/datasets/budget-handoff.ts';
+const fixtureDiagnostic = 'AssertionError: expected status="ready", received status="pending"\nat evidence-fixture.ts:17:3';
 const userMessage = [
   '请把证据读取和验证作为同一个完整任务完成，不修改外部资源。',
   '先用 read_evidence 获取报告中的关键事实和验证 ticket，再用 verify_evidence(ticket) 实际验证。',
@@ -157,6 +160,49 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
       metadata: {
         difficulty: 'medium',
         reason: 'A short synthetic report is a negative control: ordinary execution should complete without an unnecessary handoff or redelegation.',
+        source: SOURCE_FILE,
+      },
+    },
+    {
+      id: `${SUITE}.goal-results-verbatim`,
+      name: 'goal-results-verbatim',
+      suite: SUITE,
+      tags: ['delegation_control', 'interruption_recovery', 'supervisor_boundary', 'context_synthesis'],
+      input: {
+        userMessage: [
+          userMessage,
+          '当前目标还包括定位报告中的原始断言错误。在最终答复中引用 read_evidence 报告给出的完整两行原始错误，并注明来源；保留原文的英文引号、标点和换行，不要翻译或改写这段错误。',
+          '如果任务需要分轮推进，每轮交付成果也必须保留这段原始错误及来源，交付围绕当前目标已取得的可复用成果，并清楚区分已读取的事实和尚未完成的验证。',
+        ].join('\n'),
+        contextWindowTokens: 16_000,
+        generationReserveTokens: 0,
+        reportChars: 52_000,
+        requiredVerbatimText: fixtureDiagnostic,
+      },
+      expected: {
+        objective: '在真实上下文预算交接与同任务续派中，交付围绕目标可复用的执行成果，并在本轮交付和最终答复中逐字保留有来源的两行原始错误。',
+        acceptanceCriteria: [
+          ...completedCriteria,
+          {
+            id: 'goal_results_preserve_reusable_progress',
+            statement: 'The first Capability delivery supplies results useful for the current investigation: the observed report fact, the exact opaque verification ticket and the sourced original diagnostic. It clearly leaves verification unfinished and enables the continuation to perform the actual missing verification without inventing its result.',
+          },
+          {
+            id: 'sourced_original_diagnostic_survives',
+            statement: 'Both the first Capability delivery and the final reply quote the complete original diagnostic recorded in verbatimEvidence, preserve its quotes, punctuation and line break, and identify evidence-fixture.ts as its source. Markdown quotation formatting is allowed, but translating or paraphrasing the diagnostic is not.',
+          },
+          {
+            id: 'clear_goal_focused_results',
+            statement: 'The deliveries and final reply use clear, direct writing focused on the requested investigation. They distinguish observed facts, actual verification results and remaining work, without burying useful results in budget commentary or adding unsupported operating constraints or unrelated work. This criterion evaluates writing clarity, not formal ASD-STE100 certification.',
+          },
+        ],
+        expectedDelegations: 2,
+        contextHandoff: true,
+        verbatimResult: fixtureDiagnostic,
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'A real context-watermark handoff must preserve useful goal-related results and an exact sourced two-line diagnostic through a fresh delegation and the final user-visible result.',
         source: SOURCE_FILE,
       },
     },

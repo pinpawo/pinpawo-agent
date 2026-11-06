@@ -258,7 +258,16 @@ does not stand in for the current child's input size. This remains an estimate,
 especially for multimodal content, rather than an exact provider token count.
 
 Crossing the watermark requests a final handoff instead of compressing the
-child's transcript. Toolkits still own single-result size limits, and Root
+child's transcript. The budget notice asks for this attempt's results that
+advance the current task's goal, under the task and Capability's result
+requirements. The result document uses the repository's
+[STE clarity principles](../../contributing.md#write-clear-instructions).
+Necessary source passages remain verbatim quotations, with exact identifiers
+and resource references. The writing guidance applies to the executor's own
+prose, not to quoted source text. Completed results remain separate from
+unfinished work and its next necessary action.
+
+Toolkits still own single-result size limits, and Root
 still owns main-history compaction. A fresh delegation excludes the earlier
 child's private tool history, but still inherits the main history and deliveries.
 If that inherited input is too large, repeatedly delegating does not make it

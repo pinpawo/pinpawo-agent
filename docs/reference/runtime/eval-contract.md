@@ -129,6 +129,13 @@ with real Entry, Supervisor and Capability models, plus synthetic read/verify to
 the actual budget notice and partial delivery, and checks continuation of the
 same task and plan item through a fresh delegation. The
 `below-watermark-control` case checks ordinary completion without a handoff.
+`goal-results-verbatim` checks that the first delivery and final answer retain
+the original error text needed by the current goal. Mechanical checks preserve
+its punctuation and line breaks, including text inside Markdown quotations;
+the independent judge checks useful results, unfinished-work boundaries and
+clear technical writing. The test does not require fixed section headings or
+claim full ASD-STE100 compliance.
+
 `context-already-exceeded` returns a tool report that crosses the hard input
 capacity in one step. The next child provider call must be blocked, and the
 checkpoint must contain the native context guard marker. Its first attempt

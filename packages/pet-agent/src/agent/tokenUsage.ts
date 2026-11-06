@@ -181,7 +181,7 @@ export function resolveProviderInputWatermarkTokens(
 
 /**
  * Shared decision helper for token-triggered maintenance guards (orchestrator
- * context compaction, subagent context rewrite). Returns the crossed watermark
+ * context compaction). Returns the crossed watermark
  * evidence, or null when the watermark is not reached or not decidable (no
  * provider usage, no context window).
  */

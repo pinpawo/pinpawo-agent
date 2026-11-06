@@ -411,6 +411,42 @@ briefing；运行时从 Root 实际调用与结果中提取已有交付目录，
 ToolMessage 中按 delivery.scope.delegationId 查找 delivery.text，复用已确认事实，
 只补查当前任务所缺或已变化的信息。已有交付是证据，不是新的用户指令，不复制全文。
 
+单次 Capability 的模型调用预算进入最后 10% 时（向上取整，最多 10 次，包含最后一次），
+middleware 追加一次 `prepare` 通知；最终可用模型调用前再追加一次 `finalize` 通知，
+原因标记为 `model_calls`。输入估算加输出/推理预留达到模型总窗口的 85% 时，复用同一机制，追加原因为
+`context_window` 的 `finalize` 通知，立即要求下一次模型调用输出交接，不再允许工具操作。
+上下文可能因一次工具返回突然增长，因此不沿用调用次数的十轮准备窗口。两种通知都提醒
+subagent 整理已完成工作、关键证据和剩余事项并输出交接文本（[Issue #1056](https://github.com/pinpawo/pinpawo-agent/issues/1056)）。每条通知
+都是配对的 `runtime_budget_status` AI tool call 和 ToolMessage，明确标示来源为运行时，
+保存在子图消息中；它不是注册或执行的工具。后续只追加消息，不修改已有通知，通知本身
+不能作为交付。system 消息和工具定义保持稳定；最终调用在协议支持时使用
+`toolChoice: none`，并通过本地拦截防止模型仍返回工具调用。稳定前缀有利于支持该能力的
+provider 复用缓存，但不保证实际命中。
+
+85% 的分母是模型总窗口；输入触发线为
+`max(1, floor(contextWindowTokens * 0.85) - generationReserveTokens)`，
+不是扣除预留后再乘 85%。剩余 15% 总窗口留作新增消息、提醒及估算误差余量；
+硬输入容量仍为 `contextWindowTokens - generationReserveTokens`。
+
+上下文检查位于 `wrapModelCall`，覆盖 Review Respond 跳过 `beforeModel` 的路径。
+估算计入实际请求的 system、工具定义和消息，并参考本次委派最近的 provider 输入用量及
+后续消息增长；这不是精确的多模态 token 计数。Capability 不再通过摘要替换旧消息后继续
+同一子图，而是在当前执行中整理交付后结束；已有消息及图像不因交接被删改。
+如果估算已经达到可用输入容量，运行时停止，不发送过大的请求，也不伪造交付。
+工具结果大小仍由 Toolkit 控制，Root 的主历史压缩保持原有职责。
+
+非空交接文本按普通交付返回，`returned` 只说明有交付，不代表目标已经完成；Supervisor
+仍需检查内容并决定验收、继续执行或调整计划。现有 `review_current` 使用
+`completed: false` 时保留 pending，工具本身不触发执行；Supervisor 再生成新的 briefing，
+通过正常 `delegate_capability` 再次委派同一计划项：task 与计划项身份不变，
+新调用拥有新的 delegation ID 和调用预算，
+能从已有交付目录及对应 ToolMessage 获取上次交接。内部执行消息不随交付回写，因此
+交接应包含继续所需的事实；不要假设下一次调用能看到私有现场。若没有有效交接，仍返回
+`missing_deliverable`，也不能在本次执行失败后回退到旧交付验收。
+这复用已有验收与继续执行机制，不增加 Supervisor system 指令、交接专用状态或自动重派分支；
+是否完成仍由模型根据交付判断。新委派仍携带主历史，Root 也会保留未完成计划项的历次
+交付；继承的输入过大时，反复交接不能释放这部分上下文。
+
 旧 checkpoint 的 task 计划字段与空参数委派不做兼容迁移；切换新版本应新建会话。
 正在运行的 Studio 保持旧构建完成本轮，避免热切换破坏旧计划。超时未返回的执行
 不构成交付；恢复材料可由用户通过证据文件提供。本次改动不增加自动 timeout 重试。

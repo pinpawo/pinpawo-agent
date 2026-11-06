@@ -1,5 +1,5 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
-import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { getInteropZodObjectShape, isInteropZodObject } from '@langchain/core/utils/types';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
@@ -15,50 +15,25 @@ import type {
   SubagentRunInput,
   SubagentRuntimeContext,
 } from '../types/subagent';
-import type { GuardDecisionRecord } from '../guards';
-import {
-  createAgent,
-  modelCallLimitMiddleware,
-  summarizationMiddleware,
-  type AnyAgentMiddleware,
-} from 'langchain';
-import {
-  markSubagentGuardStop,
-  readSubagentGuardStopReason,
-} from './guardStop';
-import { Command, END, StateSchema, type AnyStateSchema } from '@langchain/langgraph';
+import { createAgent, type AnyAgentMiddleware } from 'langchain';
+import { readSubagentGuardStopReason } from './guardStop';
+import { StateSchema, type AnyStateSchema } from '@langchain/langgraph';
 import { readReviewStopDecision } from '../agent/orchestrator/interrupt/reviewStop';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
-import {
-  SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
-  SUBAGENT_CONTEXT_SUMMARY_PREFIX,
-  SUBAGENT_CONTEXT_SUMMARY_PROMPT,
-} from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
+import { createSubagentBudgetMiddleware } from './budgetMiddleware';
 import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
+
+export { SUBAGENT_BUDGET_HANDOFF_EVENT, SUBAGENT_GUARD_DECISION_EVENT } from './budgetMiddleware';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
 // is a deliberately high last-resort breaker, not a normal control signal.
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
-const SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO = 0.65;
-const SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO = 0.3;
-const INVALID_CONTEXT_SUMMARY_MESSAGES = new Set([
-  'No previous conversation history.',
-  'Previous conversation was too long to summarize.',
-]);
-const CONTEXT_SUMMARY_ERROR_PREFIX = 'Error generating summary:';
-
-/**
- * Runtime-event name carrying subagent guard decision records. Written to the
- * run's stream writer, so the records surface as `custom` events on the root
- * protocol stream (#322); consumers filter by this name.
- */
-export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
 
 /**
  * Runtime-event name announcing the per-delegation tool-operation display
@@ -99,143 +74,6 @@ function readInvocationOutput(messages: BaseMessage[]): string | null {
     return text;
   }
   return null;
-}
-
-function assertValidContextSummaryUpdate(update: unknown) {
-  if (!update || typeof update !== 'object' || !('messages' in update)) {
-    return;
-  }
-  const messages = (update as { messages?: unknown }).messages;
-  if (!Array.isArray(messages)) {
-    return;
-  }
-  const summary = messages.find(
-    (message): message is BaseMessage => typeof message === 'object'
-      && message !== null
-      && 'content' in message
-      && 'additional_kwargs' in message
-      && (message as BaseMessage).additional_kwargs?.lc_source === 'summarization',
-  );
-  if (!summary) {
-    return;
-  }
-
-  const content = summary.text;
-  const prefix = `${SUBAGENT_CONTEXT_SUMMARY_PREFIX}\n\n`;
-  const summaryText = content.startsWith(prefix) ? content.slice(prefix.length) : content;
-  if (
-    summaryText.trim().length === 0
-    || INVALID_CONTEXT_SUMMARY_MESSAGES.has(summaryText)
-    || summaryText.startsWith(CONTEXT_SUMMARY_ERROR_PREFIX)
-  ) {
-    throw new Error(`Subagent context summarization failed: ${summaryText || 'empty summary'}`);
-  }
-}
-
-function failFastOnInvalidContextSummary(
-  middleware: AnyAgentMiddleware,
-): AnyAgentMiddleware {
-  const beforeModel = middleware.beforeModel;
-  if (!beforeModel) {
-    throw new Error('LangChain summarization middleware has no beforeModel hook.');
-  }
-  const hook = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
-  const wrappedHook: typeof hook = async (state, runtime) => {
-    const update = await hook(state, runtime);
-    // LangChain currently represents summarization failures as summary text
-    // inside a destructive RemoveMessage update. Reject that update before the
-    // graph can commit it, preserving the existing transcript on failure.
-    assertValidContextSummaryUpdate(update);
-    return update;
-  };
-  middleware.beforeModel = typeof beforeModel === 'function'
-    ? wrappedHook
-    : { ...beforeModel, hook: wrappedHook };
-  return middleware;
-}
-
-function createSubagentSummarizationMiddleware(
-  inputState: SubagentInputState,
-  model: SubagentRunInput['model'],
-): AnyAgentMiddleware | null {
-  const contextWindowTokens = inputState.contextWindowTokens;
-  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
-    return null;
-  }
-
-  const rawGenerationReserveTokens = inputState.generationReserveTokens;
-  const generationReserveTokens = typeof rawGenerationReserveTokens === 'number'
-    && Number.isFinite(rawGenerationReserveTokens)
-    ? Math.max(0, Math.floor(rawGenerationReserveTokens))
-    : 0;
-  const usableInputTokens = Math.max(1, contextWindowTokens - generationReserveTokens);
-  const triggerTokens = Math.max(1, Math.floor(
-    usableInputTokens * SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO,
-  ));
-  const keepTokens = Math.max(1, Math.floor(
-    usableInputTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
-  ));
-
-  return failFastOnInvalidContextSummary(summarizationMiddleware({
-    model,
-    trigger: { tokens: triggerTokens },
-    keep: { tokens: keepTokens },
-    // LangChain defaults this to 4k tokens, which would inspect only a small
-    // slice when our model window is large. The derived budget covers the
-    // expected summarized prefix while leaving room for the summary prompt.
-    trimTokensToSummarize: Math.max(1, Math.floor(usableInputTokens * 0.5)),
-    summaryPrompt: SUBAGENT_CONTEXT_SUMMARY_PROMPT,
-    summaryPrefix: SUBAGENT_CONTEXT_SUMMARY_PREFIX,
-  }));
-}
-
-function createSubagentModelCallBudget(maxIterations: number) {
-  // Preserve the existing disabled/fractional-limit contract. The framework
-  // owns the counter in checkpoint state, scoped to this child invocation.
-  const runLimit = Number.isFinite(maxIterations) && maxIterations > 0
-    ? Math.floor(maxIterations) : undefined;
-  const limiter = modelCallLimitMiddleware({ runLimit, exitBehavior: 'end' });
-  const beforeModel = limiter.beforeModel!;
-  const checkBudget = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
-
-  limiter.name = 'SubagentIterationGuard';
-  // maxIterations owns this budget; unrelated caller context keys must not
-  // override it or add a thread-wide limit.
-  limiter.contextSchema = undefined;
-  limiter.beforeModel = undefined;
-  // afterModel hooks run in reverse order. Install the framework's counter
-  // separately at the end, before Review can interrupt or jump to the model.
-  const counter = { ...limiter, name: 'SubagentIterationCounter', afterAgent: undefined };
-  limiter.afterModel = undefined;
-  limiter.wrapModelCall = async (request, handler) => {
-    // Review Respond jumps straight to the model node, skipping beforeModel
-    // hooks. Run the official check at the model-call boundary for every path.
-    const update = await checkBudget(request.state, {
-      ...request.runtime,
-      context: { runLimit, threadLimit: undefined, exitBehavior: 'end' },
-    });
-    const iterationCount = request.state.runModelCallCount + 1;
-    const stopped = update?.jumpTo === 'end';
-    writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, {
-      guard: 'subagent_iteration_limit',
-      position: 'subagent.before_model_iteration',
-      outcome: stopped
-        ? { kind: 'stop', reason: 'subagent_iteration_limit_reached', details: { iterationCount, maxIterations } }
-        : { kind: 'proceed' },
-      iteration: iterationCount,
-    } satisfies GuardDecisionRecord);
-    if (stopped) {
-      const notice = update.messages?.find(AIMessage.isInstance);
-      if (!notice) throw new Error('LangChain model-call limit returned no AI stop message.');
-      markSubagentGuardStop(notice, 'subagent_iteration_limit_reached');
-      return new Command({
-        goto: END,
-        update: { messages: update.messages },
-      });
-    }
-    return handler(request);
-  };
-  return { guard: limiter, counter };
 }
 
 function writeSubagentRuntimeEvent(name: string, data: unknown) {
@@ -293,11 +131,6 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   };
   const frameworkSections = [
     { id: 'framework:governing', owner: 'framework', content: SUBAGENT_GOVERNING_PROMPT },
-    ...(inputState.contextWindowTokens ? [{
-      id: 'framework:context-summary',
-      owner: 'framework',
-      content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
-    }] : []),
   ];
   const systemPromptSections = [
     ...frameworkSections,
@@ -305,15 +138,20 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   ];
   validateSystemPromptSections(systemPromptSections);
   const systemPrompt = composeSystemPrompt(new SystemMessage(''), {}, frameworkSections);
-  const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
-  const iterationBudget = createSubagentModelCallBudget(maxIterations);
+  const budget = createSubagentBudgetMiddleware({
+    maxIterations,
+    invocationId: runtimeContext.executionScope?.delegationId ?? inputState.messages.at(-1)?.id ?? randomUUID(),
+    contextWindowTokens: inputState.contextWindowTokens,
+    generationReserveTokens: inputState.generationReserveTokens,
+    inputMessageIds,
+  });
   const middleware: AnyAgentMiddleware[] = [
-    contextSummaryMiddleware,
-    iterationBudget.guard,
+    budget.guard,
     ...(input.middleware ?? []),
     createSystemPromptMiddleware(inputState.promptSections),
-    iterationBudget.counter,
-  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+    budget.counter,
+    budget.handoff,
+  ];
   assertSubagentStateSchema(input.stateSchema, middleware);
 
   // No checkpointer here: the child inherits the parent's through the runnable

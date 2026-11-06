@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { tool } from '@langchain/core/tools';
+import { AIMessage, HumanMessage, RemoveMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import type { ArtifactRef } from '@pinpawo/agent-contracts';
 import { createSubagent } from '@pinpawo/pet-agent';
@@ -201,18 +201,21 @@ test('a failed publication returns no successful state update', async () => {
   assert.equal(f.snapshots.size, 0);
 });
 
-test('native context compaction can remove publication messages while accumulated references remain', async () => {
+test('publication references survive message cleanup and a context-budget handoff', async () => {
   const f = fixture();
-  const addContext = tool((_input, runtime) => new Command({ update: {
-    messages: [
+  const addContext = tool((_input, runtime: ToolRuntime<{ messages: BaseMessage[] }>) => {
+    const { messages } = runtime.state;
+    // Exercise native message removal explicitly. The child no longer owns
+    // automatic compaction, and publication state must survive either path.
+    const publication = messages.filter(message => ToolMessage.isInstance(message)
+      ? message.tool_call_id === 'published-before-context'
+      : AIMessage.isInstance(message) && message.tool_calls?.some(call => call.id === 'published-before-context'));
+    return new Command({ update: { messages: [
+      ...publication.map(message => new RemoveMessage({ id: message.id! })),
       new ToolMessage({ name: 'add_context', tool_call_id: runtime.toolCall!.id!, content: 'Investigation recorded.' }),
-      new HumanMessage(`other investigation\n${'x'.repeat(1600)}`),
-      new AIMessage(`other findings\n${'y'.repeat(1600)}`),
-      new HumanMessage(`verification\n${'z'.repeat(1600)}`),
-      new AIMessage(`verification findings\n${'w'.repeat(1600)}`),
-      new HumanMessage('Finish the delegated task.'),
-    ],
-  } }), { name: 'add_context', description: 'Record investigation context.', schema: z.object({}) });
+      new HumanMessage(`other investigation\n${'x'.repeat(56_000)}`),
+    ] } });
+  }, { name: 'add_context', description: 'Record investigation context.', schema: z.object({}) });
   const model = new ScriptedModel({ toolCalls: [
     [{ id: 'published-before-context', name: 'publish_artifact', args: { path: 'report.txt' } }],
     [{ id: 'context', name: 'add_context', args: {} }],
@@ -221,10 +224,13 @@ test('native context compaction can remove publication messages while accumulate
   const result = await createSubagent({
     model, tools: [...f.toolkit.tools.map(({ tool }) => tool), addContext], stateSchema: f.toolkit.stateSchema,
     promptSections: [], messages: [new HumanMessage('Publish the report and verify the result.')],
-    runtimeContext: f.config().context, contextWindowTokens: 1000, maxIterations: 4,
+    runtimeContext: f.config().context, contextWindowTokens: 16_000, maxIterations: 4,
   });
-  assert.ok(model.summaries > 0);
-  assert.ok(result.messages.some(message => message.additional_kwargs?.lc_source === 'summarization'));
+  assert.equal(model.summaries, 0);
+  assert.ok(result.messages.some(message => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status'
+    && JSON.parse(message.text).reason === 'context_window'
+    && JSON.parse(message.text).phase === 'finalize'));
   assert.equal(result.messages.some(message => ToolMessage.isInstance(message)
     && message.tool_call_id === 'published-before-context'), false);
   assert.deepEqual(result.state.publishedRefs, [{ uri: ref.uri }]);

@@ -43,7 +43,7 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
       indentXmlBlock(xmlTextBlock('previous_delegation_id', spec.continuation.delegationId), 2),
       ...(spec.continuation.deliveryId ? [indentXmlBlock(xmlTextBlock('previous_delivery_id', spec.continuation.deliveryId), 2)] : []),
       indentXmlBlock(xmlTextBlock('context', spec.continuation.deliveryId
-        ? 'The previous execution ended and returned a delivery. The current task has not been accepted as complete. Continue the same briefing below using that delivery in the main history, including its progress, remaining work and any stated reason for ending. Reuse confirmed results and complete the missing work.'
+        ? 'The previous execution ended and returned a delivery. The current task has not been accepted as complete. Continue the same briefing below using that delivery in the main history, including its progress, remaining work and any stated reason for ending. Steps confirmed by prior deliveries count as completed under this briefing; perform only remaining work unless evidence is missing or has changed.'
         : 'The previous execution ended without a valid delivery. The current task has not been accepted as complete. Continue the same briefing below. Use the available evidence in the main history; do not assume that the previous execution completed work or produced a handoff.'), 2),
       '</continuation>',
     ].join('\n')] : []),

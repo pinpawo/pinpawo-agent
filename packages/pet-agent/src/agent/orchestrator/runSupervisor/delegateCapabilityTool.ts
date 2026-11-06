@@ -12,8 +12,8 @@ import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME, execut
 import { createCapabilityCatalog } from './capabilityCatalog';
 
 export const delegateCapabilitySchema = z.object({
-  briefing: z.string().refine(text => text.trim().length > 0).optional().describe('Full instructions for a first execution or a necessary correction of the current plan item. Omit when continuing unchanged work. Do not copy earlier deliveries in full or expand into later tasks.'),
-  continue: z.literal(true).optional().describe('Continue the current task with its previous briefing unchanged and the existing deliveries. Omit briefing; the runtime supplies the continuation context.'),
+  briefing: z.string().refine(text => text.trim().length > 0).optional().describe('Full instructions for a first execution or a necessary correction of the instructions themselves. Do not rewrite merely to restate unfinished work or a missing delivery; use continue: true. Do not copy earlier deliveries in full or expand into later tasks.'),
+  continue: z.literal(true).optional().describe('Continue the current task with its previous briefing unchanged, including when the previous execution returned no delivery. Omit briefing; the runtime supplies continuation context and any existing deliveries.'),
 }).strict().refine(args => (args.briefing !== undefined) !== (args.continue === true), {
   message: 'Provide exactly one of briefing or continue: true.',
 });

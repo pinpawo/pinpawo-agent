@@ -227,7 +227,7 @@ test('FileSaver does not duplicate a preparation notice across approval resumes'
 test('FileSaver resumes Review Respond into one persisted context handoff without executing the proposed action', async (t) => {
   const fixture = budgetFixture(t, 100, 0, {
     contextWindowTokens: 12_000,
-    resumeMessage: 'x'.repeat(32_000),
+    resumeMessage: 'x'.repeat(44_000),
   });
   await fixture.run({ messages: [new HumanMessage('Perform the reviewed task.')] });
   await fixture.assertPersistedCount(1);

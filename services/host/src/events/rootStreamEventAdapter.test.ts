@@ -404,7 +404,7 @@ test('adapter exposes the context handoff as one subagent message without a summ
     .addEdge('capability', END)
     .compile();
 
-  const events = await collectChatEvents(graph as never, [new HumanMessage('x'.repeat(32_000))]);
+  const events = await collectChatEvents(graph as never, [new HumanMessage('x'.repeat(44_000))]);
   const subagentMessages = events
     .filter((event): event is Extract<RootStreamChatEvent, { type: 'subagent.message' }> => event.type === 'subagent.message')
     .map((event) => event.text);

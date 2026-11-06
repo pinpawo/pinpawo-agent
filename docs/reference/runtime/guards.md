@@ -244,7 +244,12 @@ to the compaction effect, without another guard, whole-step deferral, or new
 protection state. A more aggressive watermark must preserve the same evidence.
 
 Subagents check context at the `wrapModelCall` boundary, including Review
-Respond paths that skip `beforeModel`. The handoff watermark is 65% of
+Respond paths that skip `beforeModel`. The handoff watermark is 85% of the total
+`contextWindowTokens`, counting both estimated input and the configured
+output/reasoning reserve. Equivalently, the input trigger is
+`max(1, floor(contextWindowTokens * 0.85) - generationReserveTokens)`.
+The remaining 15% of the total window provides headroom for growth, the runtime
+notice and estimation error. The hard input capacity remains
 `contextWindowTokens - generationReserveTokens`. The estimate includes the
 request's system message, tool definitions and messages. The latest provider
 input usage from the current invocation, plus subsequent message growth,

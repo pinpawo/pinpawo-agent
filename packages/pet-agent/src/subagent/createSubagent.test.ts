@@ -311,10 +311,10 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
 test('context watermark returns a handoff without summarizing or replacing persisted history', async () => {
   const model = new ContextHandoffModel();
   const history = [
-    new HumanMessage({ id: 'old-evidence', content: 'x'.repeat(8_000) }),
-    new AIMessage({ id: 'pending-work', content: 'y'.repeat(8_000) }),
-    new HumanMessage({ id: 'more-evidence', content: 'z'.repeat(8_000) }),
-    new AIMessage({ id: 'verification', content: 'w'.repeat(8_000) }),
+    new HumanMessage({ id: 'old-evidence', content: 'x'.repeat(11_000) }),
+    new AIMessage({ id: 'pending-work', content: 'y'.repeat(11_000) }),
+    new HumanMessage({ id: 'more-evidence', content: 'z'.repeat(11_000) }),
+    new AIMessage({ id: 'verification', content: 'w'.repeat(11_000) }),
     new HumanMessage({ id: 'continue', content: 'Continue the delegated task.' }),
   ];
   const noop = tool(() => 'must not execute', {
@@ -350,7 +350,7 @@ test('context handoff preserves original images in both the model input and chec
   const model = new ContextHandoffModel();
   const result = await createSubagent({
     model, tools: [], promptSections: [], contextWindowTokens: 12_000,
-    messages: [new HumanMessage('x'.repeat(32_000)), screenshot], maxIterations: 20,
+    messages: [new HumanMessage('x'.repeat(44_000)), screenshot], maxIterations: 20,
   });
 
   assert.equal(model.inputs.length, 1);
@@ -378,7 +378,7 @@ test('an empty context handoff remains missing rather than becoming a synthetic 
   const model = new ContextHandoffModel('');
   const result = await createSubagent({
     model, tools: [], promptSections: [], contextWindowTokens: 12_000,
-    messages: [new HumanMessage('x'.repeat(32_000))], maxIterations: 20,
+    messages: [new HumanMessage('x'.repeat(44_000))], maxIterations: 20,
   });
 
   assert.equal(model.inputs.length, 1);
@@ -388,7 +388,7 @@ test('an empty context handoff remains missing rather than becoming a synthetic 
 
 test('a failed context handoff propagates the model failure without rewriting history', async () => {
   const model = new ContextHandoffModel(new Error('model unavailable'));
-  const history = [new HumanMessage({ id: 'evidence', content: 'x'.repeat(32_000) })];
+  const history = [new HumanMessage({ id: 'evidence', content: 'x'.repeat(44_000) })];
   await assert.rejects(createSubagent({
     model, tools: [], promptSections: [], contextWindowTokens: 12_000,
     messages: history, maxIterations: 20,
@@ -396,7 +396,7 @@ test('a failed context handoff propagates the model failure without rewriting hi
 
   assert.equal(model.inputs.length, 1);
   assert.equal(history.length, 1);
-  assert.equal(history[0].content, 'x'.repeat(32_000));
+  assert.equal(history[0].content, 'x'.repeat(44_000));
 });
 
 test('createSubagent leaves single-result sizing to the toolkit below the watermark', async () => {

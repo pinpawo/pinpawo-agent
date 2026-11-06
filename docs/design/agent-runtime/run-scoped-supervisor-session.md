@@ -413,8 +413,7 @@ ToolMessage 中按 delivery.scope.delegationId 查找 delivery.text，复用已�
 
 单次 Capability 的模型调用预算进入最后 10% 时（向上取整，最多 10 次，包含最后一次），
 middleware 追加一次 `prepare` 通知；最终可用模型调用前再追加一次 `finalize` 通知，
-原因标记为 `model_calls`。上下文达到可用输入预算
-`contextWindowTokens - generationReserveTokens` 的 65% 时，复用同一机制，追加原因为
+原因标记为 `model_calls`。输入估算加输出/推理预留达到模型总窗口的 85% 时，复用同一机制，追加原因为
 `context_window` 的 `finalize` 通知，立即要求下一次模型调用输出交接，不再允许工具操作。
 上下文可能因一次工具返回突然增长，因此不沿用调用次数的十轮准备窗口。两种通知都提醒
 subagent 整理已完成工作、关键证据和剩余事项并输出交接文本（[Issue #1056](https://github.com/pinpawo/pinpawo-agent/issues/1056)）。每条通知
@@ -423,6 +422,11 @@ subagent 整理已完成工作、关键证据和剩余事项并输出交接文�
 不能作为交付。system 消息和工具定义保持稳定；最终调用在协议支持时使用
 `toolChoice: none`，并通过本地拦截防止模型仍返回工具调用。稳定前缀有利于支持该能力的
 provider 复用缓存，但不保证实际命中。
+
+85% 的分母是模型总窗口；输入触发线为
+`max(1, floor(contextWindowTokens * 0.85) - generationReserveTokens)`，
+不是扣除预留后再乘 85%。剩余 15% 总窗口留作新增消息、提醒及估算误差余量；
+硬输入容量仍为 `contextWindowTokens - generationReserveTokens`。
 
 上下文检查位于 `wrapModelCall`，覆盖 Review Respond 跳过 `beforeModel` 的路径。
 估算计入实际请求的 system、工具定义和消息，并参考本次委派最近的 provider 输入用量及

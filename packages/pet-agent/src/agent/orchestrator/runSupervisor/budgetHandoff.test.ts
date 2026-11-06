@@ -173,7 +173,7 @@ class ContextBudgetExecutor extends BaseChatModel {
     let message: AIMessage;
     if (turn === 1) {
       message = call('probe', {}, 'context-probe');
-      message.usage_metadata = { input_tokens: 9_000, output_tokens: 10, total_tokens: 9_010 };
+      message.usage_metadata = { input_tokens: 11_000, output_tokens: 10, total_tokens: 11_010 };
     } else if (turn === 2) {
       const notice = messages.find(message => ToolMessage.isInstance(message)
         && message.name === 'runtime_budget_status');

@@ -10,7 +10,7 @@ import { SUBAGENT_BUDGET_HANDOFF_PROMPT } from './prompts/templates/budgetHandof
 
 export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
 export const SUBAGENT_BUDGET_HANDOFF_EVENT = 'subagent_budget_handoff';
-const CONTEXT_HANDOFF_RATIO = 0.65;
+const CONTEXT_HANDOFF_RATIO = 0.85;
 
 type BudgetOptions = {
   maxIterations: number;
@@ -29,6 +29,8 @@ type HandoffNotice = {
   estimatedInputTokens?: number;
   inputBudgetTokens?: number;
   triggerTokens?: number;
+  contextWindowTokens?: number;
+  generationReserveTokens?: number;
 };
 
 function isBudgetNotice(message: BaseMessage | undefined): message is ToolMessage {
@@ -72,7 +74,7 @@ function notification(invocationId: string, data: HandoffNotice) {
   const callId = noticeId(invocationId, data.reason, data.phase);
   const metadata = { synthetic: true, runtimeNotice: 'subagent_budget' };
   const budget = data.reason === 'context_window'
-    ? `Estimated input is ${data.estimatedInputTokens} tokens, reaching the handoff threshold of ${data.triggerTokens} within this delegation's ${data.inputBudgetTokens}-token input budget.`
+    ? `Estimated input is ${data.estimatedInputTokens} tokens, with ${data.generationReserveTokens} tokens reserved for generation in this delegation's ${data.contextWindowTokens}-token total context window. The input handoff threshold is ${data.triggerTokens} tokens.`
     : `You have ${data.remainingModelCalls} model calls left, including this call, within this delegation's limit of ${data.maxIterations}.`;
   return [
     setAgentMessageMetadata(new AIMessage({
@@ -111,7 +113,9 @@ export function createSubagentBudgetMiddleware(options: BudgetOptions) {
   const inputBudgetTokens = window && Number.isFinite(window) && window > 0
     ? Math.max(1, Math.floor(window - reserve)) : undefined;
   const triggerTokens = inputBudgetTokens === undefined ? undefined
-    : Math.max(1, Math.floor(inputBudgetTokens * CONTEXT_HANDOFF_RATIO));
+    // The ratio applies to total occupancy, including reserved output/reasoning.
+    // Keep the remaining 15% of the full window for growth and estimation error.
+    : Math.max(1, Math.floor(window! * CONTEXT_HANDOFF_RATIO) - reserve);
   const limiter = modelCallLimitMiddleware({ runLimit, exitBehavior: 'end' });
   const beforeModel = limiter.beforeModel!;
   const checkBudget = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
@@ -182,7 +186,8 @@ export function createSubagentBudgetMiddleware(options: BudgetOptions) {
       let data: HandoffNotice | undefined;
       if (!contextFinal && estimatedInputTokens !== undefined && estimatedInputTokens >= triggerTokens!) {
         data = { reason: 'context_window', phase: 'finalize', iteration,
-          estimatedInputTokens, inputBudgetTokens, triggerTokens };
+          estimatedInputTokens, inputBudgetTokens, triggerTokens,
+          contextWindowTokens: window, generationReserveTokens: reserve };
       } else if (!contextFinal && remainingModelCalls !== undefined
         && (remainingModelCalls === handoffCalls || remainingModelCalls === 1)) {
         data = { reason: 'model_calls', phase: remainingModelCalls === 1 ? 'finalize' : 'prepare',

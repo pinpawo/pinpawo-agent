@@ -164,10 +164,53 @@ test('context budget counts composed system sections and tool schemas and reserv
   const data = JSON.parse(notice.text);
   assert.equal(data.reason, 'context_window');
   assert.equal(data.inputBudgetTokens, 8_000);
-  assert.equal(data.triggerTokens, 5_200);
-  assert.ok(data.estimatedInputTokens >= 5_200);
+  assert.equal(data.contextWindowTokens, 12_000);
+  assert.equal(data.generationReserveTokens, 4_000);
+  assert.equal(data.triggerTokens, 6_200);
+  assert.ok(data.estimatedInputTokens >= 6_200);
   assert.ok(countTokensApproximately([new HumanMessage('small task')]) < data.triggerTokens);
 });
+
+for (const [window, reserve, threshold] of [
+  [12_000, 0, 10_200],
+  [12_000, 4_000, 6_200],
+  [983_616, 147_456, 688_617],
+  [1_000_000, 384_000, 466_000],
+]) {
+  test(`context handoff budgets 85% of the total ${window}-token window with ${reserve} reserved`, async () => {
+    let effects = 0;
+    const noop = tool(() => { effects++; return 'observed'; }, {
+      name: 'noop', description: 'inspect', schema: z.object({}),
+    });
+    const model = new RecordingModel(i => {
+      if (i === 3) return new AIMessage('handoff');
+      const message = call(i);
+      const input = i === 1 ? threshold - 200 : threshold;
+      message.usage_metadata = { input_tokens: input, output_tokens: 10, total_tokens: input + 10 };
+      return message;
+    });
+    const result = await createSubagent({
+      model, tools: [noop], promptSections: [], messages: [new HumanMessage('inspect')],
+      contextWindowTokens: window, generationReserveTokens: reserve,
+    });
+    assert.equal(effects, 2, 'work continues below the watermark');
+    assert.equal(model.calls.length, 3);
+    assert.notEqual(model.calls[1].toolChoice, 'none');
+    assert.equal(model.calls[2].toolChoice, 'none');
+    assert.equal(result.output, 'handoff', 'the notice leaves enough space for the real handoff call');
+    const notices = result.messages.filter(message => ToolMessage.isInstance(message)
+      && message.name === 'runtime_budget_status');
+    assert.equal(notices.length, 1);
+    const data = JSON.parse(notices[0].text);
+    assert.equal(data.reason, 'context_window');
+    assert.equal(data.contextWindowTokens, window);
+    assert.equal(data.generationReserveTokens, reserve);
+    assert.equal(data.triggerTokens, threshold);
+    assert.ok(data.estimatedInputTokens + reserve >= Math.floor(window * 0.85));
+    assert.ok(data.estimatedInputTokens < data.inputBudgetTokens);
+    assert.deepEqual(makeToolProtocolSafe(result.messages).removedMessageIds, []);
+  });
+}
 
 test('context finalization blocks violating tool calls even when caller middleware bypasses the model', async () => {
   let effects = 0;
@@ -187,7 +230,7 @@ test('context finalization blocks violating tool calls even when caller middlewa
   const model = new RecordingModel(() => {
     responses++;
     return new AIMessage({ content: '', tool_calls: [{ id: 'first', name: 'noop', args: {} }],
-      usage_metadata: { input_tokens: 9_000, output_tokens: 10, total_tokens: 9_010 } });
+      usage_metadata: { input_tokens: 11_000, output_tokens: 10, total_tokens: 11_010 } });
   });
   const result = await createSubagent({
     model, tools: [noop], middleware: [bypass], promptSections: [],
@@ -222,7 +265,7 @@ test('a later missing usage report retains the provider anchor plus all interven
   const model = new RecordingModel(i => {
     if (i === 3) return new AIMessage('context handoff');
     const message = call(i);
-    if (i === 1) message.usage_metadata = { input_tokens: 9_000, output_tokens: 10, total_tokens: 9_010 };
+    if (i === 1) message.usage_metadata = { input_tokens: 12_000, output_tokens: 10, total_tokens: 12_010 };
     return message;
   });
   const result = await createSubagent({
@@ -236,5 +279,5 @@ test('a later missing usage report retains the provider anchor plus all interven
     && message.name === 'runtime_budget_status')!;
   const data = JSON.parse(notice.text);
   assert.equal(data.reason, 'context_window');
-  assert.ok(data.estimatedInputTokens >= 11_000);
+  assert.ok(data.estimatedInputTokens >= 14_000);
 });

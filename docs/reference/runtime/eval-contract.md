@@ -172,6 +172,10 @@ structural checks own task identity, tool effects and actual handoff evidence.
 Results stay in a local report and do not require a tracing sink. The report
 records model settings, production revision and harness identity. A successful
 run establishes coverage at those settings, not a before/after quality gain.
+Context-case diagnostics also retain each delegation's task objective and
+Supervisor-authored briefing verbatim. Compare these instructions with the
+prior delivery and actual tool calls when investigating repeated work; changed
+wording alone does not establish that a retry requests only unfinished work.
 
 Use `npm run eval:budget-handoff -- --list` to list the executable cases.
 `BUDGET_HANDOFF_EVAL_PROFILE` and `BUDGET_HANDOFF_EVAL_JUDGE_PROFILE` select the

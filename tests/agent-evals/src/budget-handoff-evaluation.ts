@@ -217,7 +217,8 @@ export async function runBudgetHandoffCase(params: {
     invocationError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     output = (await graph.getState({ configurable: config.configurable })).values as OrchestratorStateType;
   }
-  const executions = readCapabilityExecutions(output?.messages ?? []).map(({ metadata, execution, result }) => ({
+  const executionRecords = readCapabilityExecutions(output?.messages ?? []);
+  const executions = executionRecords.map(({ metadata, execution, result }) => ({
     taskId: typeof metadata.taskId === 'string' ? metadata.taskId : '', planItemId: execution.planItemId, delegationId: execution.delegationId,
     status: result.status, delivery: result.delivery?.text ?? null,
   }));
@@ -274,6 +275,10 @@ export async function runBudgetHandoffCase(params: {
     ...(verbatimEvidence ? { verbatimEvidence } : {}),
   };
   return { observation, usage: usage.read(), diagnostics: { modelCallCount, completedDelegations, runtimeEvents, expectedTicket: ticket,
+    delegationBriefings: executionRecords.map(({ execution }) => ({
+      delegationId: execution.delegationId, planItemId: execution.planItemId,
+      task: execution.task, briefing: execution.briefing,
+    })),
     logicalWindowTokens: input.contextWindowTokens, generationReserveTokens: input.generationReserveTokens, maxReportChars: input.reportChars,
     actualInputEstimates: modelInputs.map(entry => ({ group: entry.group, inputTokens: entry.inputTokens, providerInputTokens: entry.providerInputTokens })) } };
 }

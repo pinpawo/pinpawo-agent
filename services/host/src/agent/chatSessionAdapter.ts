@@ -1,6 +1,7 @@
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import { readReplyResultReferences } from '../conversation/transcriptProjection';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
@@ -12,6 +13,7 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   readMessageText,
+  readReplyDeliverables,
   readPendingInterrupt,
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
@@ -62,6 +64,7 @@ export type AgentSessionTurnRequest =
       requestId: string;
       message: string;
       attachments?: AgentLocalAttachment[];
+      artifactReferences?: readonly Deliverable[];
     }
   | { kind: 'resume'; requestId: string; resume: InterruptResume };
 
@@ -301,7 +304,7 @@ export async function runAgentSessionTurn(
     && !isResumeRequest
   ) {
     // A review holds a tool call open; ordinary input cannot bypass it.
-    if (message.trim() || attachments.length > 0) {
+    if (message.trim() || attachments.length > 0 || request.artifactReferences?.length) {
       emitEvent(agentSystemNoticeEvent(requestId, { code: 'review_pending_input_not_sent' }));
     }
     emitInterruptRequested({
@@ -561,6 +564,7 @@ export async function runAgentSessionTurn(
       checkpointReply ? finalThreadState.messages : finalMessages,
       checkpointReply ?? finalMessage,
     ) : [],
+    ...(finalReply ? { deliverables: readReplyDeliverables(checkpointReply ?? finalMessage) } : {}),
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
 

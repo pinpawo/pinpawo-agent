@@ -13,7 +13,7 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
     kind: 'chat',
     messages: [
       { id: 'human-1', role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-      { role: 'assistant', text: 'hi' },
+      { role: 'assistant', text: 'hi', deliverables: [{ uri: 'https://example.test/result', title: 'Result' }] },
     ],
     deps: {
       petId: 'pet-a',
@@ -80,6 +80,8 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
     '2026-06-01T01:00:00.000Z',
   );
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
+  assert.deepEqual(snapshot.session.timeline[1]?.type === 'message'
+    ? snapshot.session.timeline[1].deliverables : undefined, [{ uri: 'https://example.test/result', title: 'Result' }]);
   assert.equal(snapshot.session.activeRun, null);
   assert.equal(
     snapshot.session.pendingInterrupt?.payload.kind === 'human_review'

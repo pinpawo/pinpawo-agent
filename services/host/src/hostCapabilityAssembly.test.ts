@@ -138,7 +138,7 @@ test('Office Host opt-in assembles the real Toolkit and matching capability', as
   await caps.getCapabilityCatalog().load();
   const capability = caps.getCapabilityCatalog().getSnapshot({ capabilities: { office: true } })
     .capabilities.find(({ name }) => name === 'office');
-  assert.deepEqual(capability?.uses, ['office']);
+  assert.deepEqual(capability?.uses, ['office', 'artifacts']);
   assert.equal(caps.getCapabilityCatalog().getSnapshot({ capabilities: { office: false } })
     .capabilities.some(({ name }) => name === 'office'), false);
 });

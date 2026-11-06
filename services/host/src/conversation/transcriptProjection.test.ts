@@ -211,3 +211,17 @@ test('checkpoint projection reads only normalized text from native multi-block a
     { id: 'native-reply', role: 'assistant', text: 'Hello world' },
   ]);
 });
+
+test('checkpoint projection preserves each reply’s selected deliverables without reselecting historical executions', () => {
+  const first = new AIMessage({ id: 'reply-1', content: 'First result', additional_kwargs: {
+    pinpawo: { runId: 'run-1' }, deliverables: [{ uri: 'artifact://workspace/session/first.txt', title: 'First' }],
+  } });
+  const second = new AIMessage({ id: 'reply-2', content: 'Second result', additional_kwargs: {
+    pinpawo: { runId: 'run-2' }, deliverables: [{ uri: 'https://example.test/result' }],
+  } });
+  const projected = readTuiCheckpointMessages([first, new HumanMessage('next'), second]);
+  assert.deepEqual(projected.filter(message => message.role === 'assistant').map(message => message.deliverables), [
+    [{ uri: 'artifact://workspace/session/first.txt', title: 'First' }], [{ uri: 'https://example.test/result' }],
+  ]);
+  assert.equal(first.text, 'First result');
+});

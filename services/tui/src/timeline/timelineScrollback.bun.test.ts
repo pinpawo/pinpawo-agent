@@ -173,6 +173,29 @@ test('completed subagent messages do not render in scrollback', async () => {
   }
 });
 
+test('declared references render with the completed rich reply when prose omits links', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const streaming = assistantMessage('Report ready.', 'streaming');
+    timeline.render(session([streaming], 'request-1'));
+    assert.deepEqual(setup.externalOutput.take(), []);
+    const completed = { ...streaming, status: 'completed' as const, deliverables: [
+      { uri: 'artifact://workspace/thread/id/report.md', title: 'Report' },
+    ] };
+    timeline.render(session([completed]));
+    const text = setup.cellOutput.takeText();
+    assert.match(text, /Report ready\./);
+    assert.match(text, /Report: artifact:\/\/workspace\/thread\/id\/report.md/);
+    assert.ok(setup.externalOutput.take().length > 0);
+    timeline.render(session([completed]));
+    assert.deepEqual(setup.externalOutput.take(), []);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('assistant tables preserve borders around empty cells', async () => {
   const setup = await createTimelineRenderer(48);
   const timeline = new TimelineScrollback(setup.renderer);

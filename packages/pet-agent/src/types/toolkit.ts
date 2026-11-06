@@ -3,6 +3,7 @@ import {
   type StructuredTool,
 } from '@langchain/core/tools';
 import { StateSchema, type AnyStateSchema } from '@langchain/langgraph';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import { wrapToolCancellation } from './toolCancellation';
 
 import type { ToolReviewPolicy, ToolOperationMetadata, ToolkitReviewGuidance } from '../autoReview/policy';
@@ -156,6 +157,10 @@ export async function filterAvailableToolkits(
     .map(({ toolkit }) => toolkit);
 }
 
+export type ToolkitResult = {
+  deliverables: readonly Deliverable[];
+};
+
 export type AgentToolkit = {
   readonly name: string;
   readonly description: string;
@@ -164,6 +169,8 @@ export type AgentToolkit = {
   readonly instructions?: string;
   /** Native state fields owned by this Toolkit for each Capability execution. */
   readonly stateSchema?: AnyStateSchema;
+  /** Synchronously project this Toolkit's execution state into public results. */
+  readonly getResult?: (state: Readonly<Record<string, unknown>>) => ToolkitResult;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
   /**
@@ -251,6 +258,7 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   if (toolkit.stateSchema !== undefined && !StateSchema.isInstance(toolkit.stateSchema)) {
     throw new Error(`Toolkit "${toolkit.name}" stateSchema must be a native StateSchema`);
   }
+  assertOptionalFunction(`Toolkit "${toolkit.name}" getResult`, toolkit.getResult);
   if (toolkit.tools.length === 0 && !toolkit.instructions?.trim()) {
     throw new Error(`Toolkit "${toolkit.name}" must define at least one tool or non-empty instructions`);
   }

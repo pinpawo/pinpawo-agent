@@ -54,6 +54,7 @@ jobs:
           npm run typecheck -w @pinpawo/agent-session
           npm run typecheck -w @pinpawo/tui
           npm run typecheck -w @pinpawo-toolkit/browser
+          npm run typecheck -w @pinpawo-toolkit/artifacts
           npm run typecheck -w @pinpawo-plugin/channel
           npm run typecheck -w @pinpawo-plugin/scheduler
           npm run typecheck -w @pinpawo-plugin/notice

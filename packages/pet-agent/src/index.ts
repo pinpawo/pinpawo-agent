@@ -1,4 +1,5 @@
 export { readCapabilityExecutions, readCapabilityExecutionCall } from './agent/orchestrator/executionMessages';
+export { readReplyDeliverables } from './agent/orchestrator/replyDeliverables';
 
 export type {
   AgentModels,
@@ -89,6 +90,7 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
+  ToolkitResult,
   ToolkitRS,
   ToolkitRSRequirement,
   ToolkitRSSessionBinding,

@@ -16,6 +16,7 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
     shutdown: async () => { events.push('caps:shutdown'); },
     getExecutionConfig: () => ({ runtimeConfig, toolAuthorizationMode: 'require_authorization' as const, autoAuthorizationSafetyLevel: 'strict' as const }),
     getRuntimeConfig: () => runtimeConfig,
+    getArtifactStore: () => ({ fetch: async () => { throw new Error('Artifact not found'); } }),
     getModelProfiles: () => ({}) as never,
     getCapabilityCatalog: () => ({
       getSnapshot: () => ({ capabilities: [{ name: 'general' }] }),

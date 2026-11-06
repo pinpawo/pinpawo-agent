@@ -1,4 +1,5 @@
 import type { ProviderTokenUsage } from '../../tokenUsage';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
@@ -53,6 +54,7 @@ export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'missing_deliverable';
   readonly reviewDecision?: 'reject' | 'cancel';
   readonly delivery: DelegationDelivery | null;
+  readonly deliverables: Deliverable[];
   /** Provider usage reported by this invocation. */
   readonly tokenUsage: ProviderTokenUsage | null;
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */

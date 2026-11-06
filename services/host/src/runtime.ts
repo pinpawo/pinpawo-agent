@@ -134,6 +134,7 @@ export class AgentHost {
       petId: this.petConfig.definitionId,
       petName: this.petConfig.name,
       chatCheckpointer: this.getCheckpointer(),
+      artifactStore: this.caps.getArtifactStore(),
       modelProfiles: this.getModelProfiles(),
       ...this.caps.getExecutionConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),

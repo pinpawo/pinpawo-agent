@@ -25,6 +25,43 @@ import {
 
 const AUTH_TOKEN = 'test-token-with-at-least-16-characters';
 
+test('Studio artifact route authenticates shared-reference downloads and respects client revocation', async () => {
+  const uri = 'artifact://workspace/session/id/report.txt';
+  const ref = { uri, name: 'report.txt', mimeType: 'text/plain', size: 6, sha256: 'hash', createdAt: '2026-11-05T00:00:00Z' };
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN, artifactStore: {
+    fetch: async value => {
+      if (value.endsWith('signed.txt')) return { ref, url: 'https://bucket.example/report?signature=temporary', expiresAt: '2026-11-05T00:15:00Z' };
+      return { ref, body: new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('report')); controller.close(); } }) };
+    },
+  } });
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  const harness = createContext();
+  harness.context.clients = new StudioClients(async () => new KyselyClientStore(
+    await storage.open<ClientDatabase>('studio', clientMigrations),
+  ));
+  const { key } = await harness.context.clients.create({ clientId: 'reader', label: 'Reader' });
+  await plugin.start(harness.context);
+  const url = pluginUrl(plugin.address()!.port, `/agent-session/artifacts?uri=${encodeURIComponent(uri)}`);
+  const headers = { Authorization: `Bearer ${AUTH_TOKEN}` };
+  try {
+    assert.equal((await fetch(url)).status, 401);
+    const response = await fetch(url, { headers });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'report');
+    const shared = await fetch(url, { headers: { Authorization: `Bearer ${key}` } });
+    assert.equal(shared.status, 200);
+    assert.equal(await shared.text(), 'report');
+    assert.equal((await fetch(pluginUrl(plugin.address()!.port, '/pet-sessions/snapshot'), {
+      headers: { Authorization: `Bearer ${key}` },
+    })).status, 403);
+    await harness.context.clients.revoke('reader');
+    assert.equal((await fetch(url, { headers: { Authorization: `Bearer ${key}` } })).status, 401);
+    const redirect = await fetch(url.replace('report.txt', 'signed.txt'), { headers, redirect: 'manual' });
+    assert.equal(redirect.status, 302);
+    assert.equal(redirect.headers.get('location'), 'https://bucket.example/report?signature=temporary');
+  } finally { await plugin.stop(); await storage.close(); }
+});
+
 function receipt(request: StudioDispatchRequest): StudioDispatchReceipt {
   return {
     petId: request.petId,

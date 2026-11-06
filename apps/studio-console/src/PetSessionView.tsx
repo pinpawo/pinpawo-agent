@@ -13,6 +13,7 @@ import type {
   HumanReviewPendingInterruptProjection,
 } from '@pinpawo/agent-session';
 import { ChannelCopy } from './ChannelConversation';
+import { MessageDeliverables, MessageLink, messageUrlTransform, type ArtifactSource } from './MessageDeliverables';
 import { channelPetIdentity, type ChannelPet } from './channelData';
 import {
   applyPetSessionMessage,
@@ -76,12 +77,14 @@ function SessionToolCalls({ calls }: { calls: AgentMessageToolCall[] }) {
   })}</ul>;
 }
 
-function SessionMessage({ entry, petName }: { entry: AgentMessageEntry; petName: string }) {
+function SessionMessage({ entry, petName, artifactSource }: { entry: AgentMessageEntry; petName: string; artifactSource?: ArtifactSource }) {
   return <article className={'pet-session-entry message ' + entry.role} data-entry-id={entry.id}>
     <div className="pet-session-entry-head"><strong>{roleLabel(entry, petName)}</strong>
       {entry.status === 'streaming' && <span className="pet-session-streaming">Streaming…</span>}
       {entry.createdAt && <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>}</div>
-    {entry.text.trim() && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown></div>}
+    {entry.text.trim() && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={messageUrlTransform}
+      components={{ a: ({ href, children }) => <MessageLink href={href} source={artifactSource}>{children}</MessageLink> }}>{entry.text}</ReactMarkdown></div>}
+    <MessageDeliverables deliverables={entry.deliverables} source={artifactSource} />
     {entry.toolCalls?.length ? <SessionToolCalls calls={entry.toolCalls} /> : null}
     {entry.resultReferences?.map(reference => <details className="pet-session-reference" key={reference.id}>
       <summary>Result · {reference.title}</summary>
@@ -112,10 +115,10 @@ function SessionOperation({ entry }: { entry: AgentOperationEntry }) {
 }
 
 /** The session's saved and live content, in the order the Host projected it. */
-export function PetSessionTranscript({ session, petName }: { session: AgentSession; petName: string }) {
+export function PetSessionTranscript({ session, petName, artifactSource }: { session: AgentSession; petName: string; artifactSource?: ArtifactSource }) {
   if (!session.timeline.length) return <div className="compact-empty">This session has no messages yet.</div>;
   return <div className="pet-session-timeline">{session.timeline.map(entry => entry.type === 'message'
-    ? <SessionMessage key={entry.id} entry={entry} petName={petName} />
+    ? <SessionMessage key={entry.id} entry={entry} petName={petName} artifactSource={artifactSource} />
     : <SessionOperation key={entry.id} entry={entry} />)}</div>;
 }
 
@@ -379,7 +382,7 @@ export function PetSessionView({ url, token, target, pets, petsReady = true, onC
         {session?.timelineWindow && <button className="pet-session-earlier" type="button" disabled={loadingEarlier}
           onClick={() => { void loadEarlier(); }}>
           {loadingEarlier ? 'Loading earlier entries…' : `Load earlier entries (${session.timelineWindow.omitted} more)`}</button>}
-        {session ? <PetSessionTranscript session={session} petName={identity.name} />
+        {session ? <PetSessionTranscript session={session} petName={identity.name} artifactSource={{ url, token }} />
           : connection === 'loading' ? <div className="compact-empty">Loading session…</div> : null}
         {session && <p className="pet-session-footnote">Saved history and results come from the session checkpoint. Live tool input and output appear only while observed and are not kept after a reconnect.</p>}
       </div>

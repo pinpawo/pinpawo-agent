@@ -7,9 +7,11 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   readMessageText,
+  readReplyDeliverables,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
 import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import { readLocalChatDisplayText } from './chatDisplayText';
 import { readMessageToolCalls, readToolResults } from '../agent/agentStreamEvents';
 
@@ -27,6 +29,7 @@ export type TuiCheckpointMessage = {
   id?: string;
   role: 'user' | 'assistant';
   resultReferences?: AgentResultReference[];
+  deliverables?: Deliverable[];
   /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
   toolCalls?: AgentMessageToolCall[];
   /** The orchestrator run that wrote this message, as stamped by the runtime. */
@@ -56,11 +59,14 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       ? metadata.runId : undefined;
     const resultReferences = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
       ? readReplyResultReferences(messages, message) : [];
+    const deliverables = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
+      ? readReplyDeliverables(message) : [];
     return [{
       ...(message.id ? { id: message.id } : {}),
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
+      ...(deliverables.length ? { deliverables } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(runId ? { runId } : {}),
       ...(createdAt ? { createdAt } : {}),

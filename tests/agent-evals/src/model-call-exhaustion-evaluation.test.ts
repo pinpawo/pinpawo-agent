@@ -35,6 +35,21 @@ test('model-call exhaustion scoring accepts a blocked third request and fresh-ch
   assert.equal(passes(completed()), true);
 });
 
+test('repeated verification in the continuation does not discard the preserved handoff', () => {
+  const observation = completed();
+  observation.attempts[1].modelCallCount = 3;
+  observation.toolCalls.push({ name: 'verify_evidence', delegationId: 'second', success: true });
+  assert.equal(passes(observation), true);
+});
+
+test('an unsuccessful verification may be retried successfully within the fresh budget', () => {
+  const observation = completed();
+  observation.attempts[1].modelCallCount = 3;
+  observation.toolCalls[1].success = false;
+  observation.toolCalls.push({ name: 'verify_evidence', delegationId: 'second', success: true });
+  assert.equal(passes(observation), true);
+});
+
 test('a repeated evidence read does not invalidate preserved results and completed continuation', () => {
   const observation = completed();
   observation.toolCalls.splice(1, 0, { name: 'read_evidence', delegationId: 'second', success: true });

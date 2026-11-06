@@ -54,8 +54,8 @@ export function evaluateModelCallExhaustionInvariants(observed: ModelCallExhaust
     { key: 'fresh_attempt_receives_handoff_without_private_history', passed: observed.continuationInputs.length === 1
       && observed.continuationInputs[0].delegationId === second?.delegationId
       && observed.continuationInputs[0].hasPriorDelivery && !observed.continuationInputs[0].hasPrivateToolHistory },
-    { key: 'continuation_performs_actual_verification', passed: verifies.length === 1 && verifies[0].success
-      && verifies[0].delegationId === second?.delegationId },
+    { key: 'continuation_performs_actual_verification', passed: verifies.some(call => call.success)
+      && verifies.every(call => call.delegationId === second?.delegationId) },
     { key: 'continuation_finishes_within_fresh_budget', passed: second?.maxIterations === 4
       && second.modelCallCount >= 2 && second.modelCallCount <= second.maxIterations
       && second.guardStopReasons.length === 0 && Boolean(second.delivery?.trim()) },

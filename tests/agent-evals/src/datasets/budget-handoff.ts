@@ -13,7 +13,7 @@ export type BudgetHandoffInput = {
 export type BudgetHandoffExpected = {
   objective: string;
   acceptanceCriteria: PromptGoalAcceptanceCriterion[];
-  expectedDelegations: number;
+  minimumDelegations: number;
   contextHandoff: boolean;
   contextOverflow?: boolean;
   verbatimResult?: string;
@@ -37,10 +37,14 @@ const completedCriteria: PromptGoalAcceptanceCriterion[] = [
     statement: 'The result stays within the requested read-and-verify scope and does not claim that files, external resources, or the evidence source were modified.',
   },
 ];
+const continuationBriefingCriterion: PromptGoalAcceptanceCriterion = {
+  id: 'continuation_briefing_preserves_progress',
+  statement: 'Each continuation briefing is grounded in the current objective and prior actual deliveries: it carries forward relevant established results and constraints, identifies the unfinished work, and requests the next necessary action without treating completed work as absent. Necessary rechecks are allowed; repeated tool calls alone do not mean the handoff failed. Use delegationBriefings and the actual model-input evidence to judge the instructions, not whether two briefings merely have different wording.',
+};
 
 export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHandoffExpected> = {
   name: SUITE,
-  description: 'Real-model Capability budget handoff and Supervisor continuation through the production graph, with deterministic synthetic evidence tools.',
+  description: 'Real-model production orchestration and native child budget lifecycles, with deterministic synthetic evidence tools.',
   metadata: { owner: 'pet-agent', areas: ['delegation_control', 'supervisor_boundary', 'context_synthesis'] },
   cases: [
     {
@@ -58,6 +62,7 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
         objective: '先读取真实工具证据，在上下文预算交接后继续同一个任务，完成实际验证并向用户交付两项有依据的事实。',
         acceptanceCriteria: [
           ...completedCriteria,
+          continuationBriefingCriterion,
           {
             id: 'handoff_preserves_unfinished_work',
             statement: 'The first Capability delivery accurately preserves the report fact and the opaque verification ticket, clearly states that verification is unfinished, and gives the next invocation enough information to perform verification without inventing its result.',
@@ -67,7 +72,7 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
             statement: 'The continuation uses the prior delivery to complete the missing verification, and the final reply synthesizes the completed evidence rather than merely reporting that a handoff occurred.',
           },
         ],
-        expectedDelegations: 2,
+        minimumDelegations: 2,
         contextHandoff: true,
       },
       metadata: {
@@ -92,12 +97,13 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
         objective: '工具结果一次越过上下文硬上限后，如实保留首次无交付状态；Supervisor 在同一任务下重新委派，重新获取可用证据并完成实际验证。',
         acceptanceCriteria: [
           ...completedCriteria,
+          continuationBriefingCriterion,
           {
             id: 'recovers_without_fabricated_handoff',
             statement: 'After the first attempt returns missing_deliverable with no delivery, the Supervisor treats the work as incomplete and retries the same task. The fresh attempt rereads evidence and actually verifies it; neither the Supervisor nor the final reply presents the failed attempt as a successful handoff or invents private findings from it.',
           },
         ],
-        expectedDelegations: 2,
+        minimumDelegations: 2,
         contextHandoff: false,
         contextOverflow: true,
       },
@@ -131,7 +137,7 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
             statement: 'The first real subagent delivery preserves EVIDENCE-6429 and the exact opaque ticket, explicitly leaves verification unfinished, and supplies enough information for the fresh invocation to actually verify without rereading the report or inventing success.',
           },
         ],
-        expectedDelegations: 2,
+        minimumDelegations: 2,
         contextHandoff: false,
       },
       metadata: {
@@ -154,7 +160,7 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
       expected: {
         objective: '在上下文预算充足时，同一次 Capability 执行完成读取与实际验证，向用户交付两项有依据的事实。',
         acceptanceCriteria: [...completedCriteria],
-        expectedDelegations: 1,
+        minimumDelegations: 1,
         contextHandoff: false,
       },
       metadata: {
@@ -183,6 +189,7 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
         objective: '在真实上下文预算交接与同任务续派中，交付围绕目标可复用的执行成果，并在本轮交付和最终答复中逐字保留有来源的两行原始错误。',
         acceptanceCriteria: [
           ...completedCriteria,
+          continuationBriefingCriterion,
           {
             id: 'goal_results_preserve_reusable_progress',
             statement: 'The first Capability delivery supplies results useful for the current investigation: the observed report fact, the exact opaque verification ticket and the sourced original diagnostic. It clearly leaves verification unfinished and enables the continuation to perform the actual missing verification without inventing its result.',
@@ -196,7 +203,7 @@ export const budgetHandoffDataset: AgentEvalDataset<BudgetHandoffInput, BudgetHa
             statement: 'The deliveries and final reply use clear, direct writing focused on the requested investigation. They distinguish observed facts, actual verification results and remaining work, without burying useful results in budget commentary or adding unsupported operating constraints or unrelated work. This criterion evaluates writing clarity, not formal ASD-STE100 certification.',
           },
         ],
-        expectedDelegations: 2,
+        minimumDelegations: 2,
         contextHandoff: true,
         verbatimResult: fixtureDiagnostic,
       },

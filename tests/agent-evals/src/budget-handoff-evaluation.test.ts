@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { markSubagentGuardStop } from '../../../packages/pet-agent/src/subagent/guardStop.ts';
+import { materializeDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/delegation/briefing.ts';
+import { createCapabilityExecutionMessage } from '../../../packages/pet-agent/src/agent/orchestrator/executionMessages.ts';
+import { setAgentMessageMetadata } from '../../../packages/pet-agent/src/agent/messages/metadata.ts';
 import {
   evaluateBudgetHandoffInvariants,
+  observeDelegationInput,
   readCheckpointGuardStops,
   type BudgetHandoffObservation,
 } from './budget-handoff-evaluation.ts';
@@ -13,6 +17,133 @@ const handoffExpected = budgetHandoffDataset.cases.find(({ name }) => name === '
 const controlExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'below-watermark-control')!.expected;
 const overflowExpected = budgetHandoffDataset.cases.find(({ name }) => name === 'context-already-exceeded')!.expected;
 const verbatimCase = budgetHandoffDataset.cases.find(({ name }) => name === 'goal-results-verbatim')!;
+
+const inputExpectation = {
+  delegationId: 'attempt-2',
+  task: '验证当前目标中的 "ready" 状态 <&> ]]>，不改变目标',
+  briefing: '复用已取得的成果。\n仅执行缺失的验证：status="ready"。\n保留原始边界 ]]> 和换行。',
+};
+const previousExpectation = {
+  delegationId: 'attempt-1', status: 'returned',
+  delivery: 'EVIDENCE-6429\nopaque-ticket="original"\nOriginal diagnostic: ]]> remains literal.',
+};
+
+function currentBriefing(overrides: Partial<typeof inputExpectation> = {}) {
+  const supplied = { ...inputExpectation, ...overrides };
+  return materializeDelegation({ userRequest: 'Read and verify one report.', task: supplied.task, briefing: supplied.briefing });
+}
+
+function priorExecution(status: 'returned' | 'missing_deliverable' = 'returned', delivery: string | null = previousExpectation.delivery): BaseMessage[] {
+  const metadata = { runId: 'run-1', taskId: 'task-1', delegationId: previousExpectation.delegationId };
+  const callId = 'previous-call';
+  const call = setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
+    id: callId, name: 'delegate_capability', args: { briefing: 'Previous execution instructions.' },
+  }] }), metadata);
+  const result = createCapabilityExecutionMessage({
+    callId,
+    execution: { planItemId: 'plan-1', delegationId: previousExpectation.delegationId,
+      capability: 'general', task: inputExpectation.task, briefing: 'Previous execution instructions.' },
+    result: { status, delivery: delivery === null ? null : {
+      id: 'delivery-1', task: inputExpectation.task, text: delivery,
+      scope: { ...metadata, lane: 'capability:general' },
+    } },
+    metadata,
+  });
+  return [call, result];
+}
+
+test('model-input observation preserves the current task and multiline briefing across XML data boundaries', () => {
+  const observed = observeDelegationInput([currentBriefing()], inputExpectation);
+  assert.equal(observed.taskMatches, true);
+  assert.equal(observed.briefingMatches, true);
+  assert.equal(observed.hasPriorResult, false);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+test('a stale briefing is not the current instructions even when the task remains unchanged', () => {
+  const observed = observeDelegationInput([currentBriefing({ briefing: 'Start the original investigation again.' })], inputExpectation);
+  assert.equal(observed.taskMatches, true);
+  assert.equal(observed.briefingMatches, false);
+});
+
+test('an earlier matching briefing cannot hide a newer conflicting briefing', () => {
+  const observed = observeDelegationInput([
+    currentBriefing(), currentBriefing({ briefing: 'Different latest instructions.' }),
+  ], inputExpectation);
+  assert.equal(observed.briefingMatches, false);
+});
+
+test('a briefing for a different task cannot establish the expected delegation boundary', () => {
+  const observed = observeDelegationInput([currentBriefing({ task: 'Unrelated objective.' })], inputExpectation);
+  assert.equal(observed.taskMatches, false);
+  assert.equal(observed.briefingMatches, true);
+});
+
+test('ordinary user text cannot substitute for the native model-visible briefing message', () => {
+  const observed = observeDelegationInput([new HumanMessage(currentBriefing().text)], inputExpectation);
+  assert.equal(observed.taskMatches, false);
+  assert.equal(observed.briefingMatches, false);
+});
+
+test('the next model input contains the exact preceding delivery from its native execution record', () => {
+  const observed = observeDelegationInput([...priorExecution(), currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(observed.hasPriorResult, true);
+  assert.equal(observed.hasPriorDelivery, true);
+  assert.equal(observed.hasPrivateToolHistory, false);
+});
+
+test('a changed earlier delivery is not accepted as faithful result transport', () => {
+  const observed = observeDelegationInput([...priorExecution('returned', 'A different result.'), currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+test('an intact private execution artifact cannot replace delivery text missing from the actual model input', () => {
+  const messages = priorExecution();
+  const result = messages[1] as ToolMessage;
+  result.content = JSON.stringify({ status: 'returned', delivery: { text: 'The visible result was changed.' } });
+  const observed = observeDelegationInput([...messages, currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+test('a non-JSON model-visible execution result cannot establish prior delivery transport', () => {
+  const messages = priorExecution();
+  (messages[1] as ToolMessage).content = 'Result body removed.';
+  const observed = observeDelegationInput([...messages, currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+test('model-visible delivery attribution must identify the preceding delegation', () => {
+  const messages = priorExecution();
+  const result = messages[1] as ToolMessage;
+  const visible = JSON.parse(result.text);
+  visible.delivery.scope.delegationId = 'another-attempt';
+  result.content = JSON.stringify(visible);
+  const observed = observeDelegationInput([...messages, currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+test('a delivery from another delegation cannot substitute for the preceding result', () => {
+  const observed = observeDelegationInput([...priorExecution(), currentBriefing()], inputExpectation, { ...previousExpectation, delegationId: 'another-attempt' });
+  assert.equal(observed.hasPriorResult, false);
+  assert.equal(observed.hasPriorDelivery, false);
+});
+
+test('missing prior result transport is distinct from a legitimately missing delivery', () => {
+  const absent = observeDelegationInput([currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(absent.hasPriorResult, false);
+  assert.equal(absent.hasPriorDelivery, false);
+  const stopped = observeDelegationInput([...priorExecution('missing_deliverable', null), currentBriefing()], inputExpectation,
+    { ...previousExpectation, status: 'missing_deliverable', delivery: null });
+  assert.equal(stopped.hasPriorResult, true);
+  assert.equal(stopped.hasPriorDelivery, false);
+});
+
+test('a private tool transcript is still detected when briefing and result transport are correct', () => {
+  const observed = observeDelegationInput([...priorExecution(), new ToolMessage({
+    name: 'read_evidence', content: 'private report body', tool_call_id: 'private-read',
+  }), currentBriefing()], inputExpectation, previousExpectation);
+  assert.equal(observed.hasPrivateToolHistory, true);
+});
 
 test('checkpoint guard scope survives reuse of a provider tool-call ID in a fresh delegation', () => {
   const scopes = new Map([['result-first', 'attempt-first'], ['result-second', 'attempt-second']]);
@@ -38,7 +169,10 @@ function completedHandoff(): BudgetHandoffObservation {
       { name: 'verify_evidence', delegationId: 'attempt-2', success: true },
     ],
     notices: [{ reason: 'context_window', phase: 'finalize', paired: true, delegationId: 'attempt-1' }],
-    continuationInputs: [{ delegationId: 'attempt-2', hasPriorResult: true, hasPriorDelivery: true, hasPrivateToolHistory: false }],
+    continuationInputs: [
+      { delegationId: 'attempt-1', hasPriorResult: false, hasPriorDelivery: false, hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true },
+      { delegationId: 'attempt-2', hasPriorResult: true, hasPriorDelivery: true, hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true },
+    ],
     guardStops: [],
     childModelCalls: [{ delegationId: 'attempt-1', count: 2 }, { delegationId: 'attempt-2', count: 2 }],
     planCompleted: true,
@@ -54,7 +188,7 @@ function completedControl(): BudgetHandoffObservation {
   }];
   observation.toolCalls[1].delegationId = 'attempt-1';
   observation.notices = [];
-  observation.continuationInputs = [];
+  observation.continuationInputs = [observation.continuationInputs[0]];
   observation.childModelCalls = [{ delegationId: 'attempt-1', count: 3 }];
   return observation;
 }
@@ -67,7 +201,7 @@ function completedOverflowRecovery(): BudgetHandoffObservation {
   observation.notices = [];
   observation.guardStops = [{ reason: 'subagent_context_limit_reached', delegationId: 'attempt-1' }];
   observation.childModelCalls = [{ delegationId: 'attempt-1', count: 1 }, { delegationId: 'attempt-2', count: 3 }];
-  observation.continuationInputs[0].hasPriorDelivery = false;
+  observation.continuationInputs[1].hasPriorDelivery = false;
   return observation;
 }
 
@@ -91,7 +225,7 @@ test('budget handoff dataset has executable identities, mechanical expectations 
   assert.equal(cases.length, 5);
   assert.equal(new Set(cases.map(({ id }) => id)).size, cases.length);
   assert.deepEqual(cases.map(({ expected }) => expected.contextHandoff), [true, false, false, false, true]);
-  assert.deepEqual(cases.map(({ expected }) => expected.expectedDelegations), [2, 2, 2, 1, 2]);
+  assert.deepEqual(cases.map(({ expected }) => expected.minimumDelegations), [2, 2, 2, 1, 2]);
   const overflowCase = cases.find(({ name }) => name === 'context-already-exceeded')!;
   const callBudgetCase = cases.find(({ name }) => name === 'model-call-budget-exhausted')!;
   assert.equal(overflowCase.input.scenario, 'context-overflow');
@@ -161,6 +295,48 @@ test('mechanical scoring accepts a paired context handoff followed by same-task 
   assert.equal(passes(completedHandoff()), true);
 });
 
+test('rereading evidence does not erase a correctly received briefing and prior delivery', () => {
+  const observation = completedHandoff();
+  observation.toolCalls.splice(1, 0, { name: 'read_evidence', delegationId: 'attempt-2', success: true });
+  assert.equal(passes(observation), true);
+});
+
+test('another successful continuation of the same task can retain progress across all attempts', () => {
+  const observation = completedHandoff();
+  observation.executions.splice(1, 0, {
+    taskId: 'task-1', planItemId: 'plan-1', delegationId: 'attempt-middle', status: 'returned',
+    delivery: 'EVIDENCE-6429 and opaque-fixture-ticket remain available; verification remains unfinished.',
+  });
+  observation.continuationInputs.splice(1, 0, {
+    delegationId: 'attempt-middle', hasPriorResult: true, hasPriorDelivery: true,
+    hasPrivateToolHistory: false, taskMatches: true, briefingMatches: true,
+  });
+  observation.childModelCalls.splice(1, 0, { delegationId: 'attempt-middle', count: 2 });
+  observation.notices.push({ reason: 'context_window', phase: 'finalize', paired: true, delegationId: 'attempt-middle' });
+  assert.equal(passes(observation), true);
+});
+
+test('an extra read with an unknown execution scope cannot pass as harmless repetition', () => {
+  const observation = completedHandoff();
+  observation.toolCalls.push({ name: 'read_evidence', delegationId: 'unknown', success: true });
+  assert.equal(passes(observation), false);
+});
+
+for (const attempt of [0, 1]) {
+  for (const field of ['taskMatches', 'briefingMatches'] as const) {
+    test(`attempt ${attempt + 1} must receive its own exact ${field === 'taskMatches' ? 'task' : 'briefing'}`, () => {
+      const observation = completedHandoff();
+      observation.continuationInputs[attempt][field] = false;
+      assert.equal(passes(observation), false);
+    });
+  }
+  test(`missing model-input evidence for attempt ${attempt + 1} cannot establish briefing delivery`, () => {
+    const observation = completedHandoff();
+    observation.continuationInputs.splice(attempt, 1);
+    assert.equal(passes(observation), false);
+  });
+}
+
 test('a completed-looking final reply cannot pass while Supervisor leaves the plan unaccepted', () => {
   const observation = completedHandoff();
   observation.planCompleted = false;
@@ -191,7 +367,7 @@ test('reusing a delegation identity does not count as a fresh context handoff', 
   const observation = completedHandoff();
   observation.executions[1].delegationId = 'attempt-1';
   observation.toolCalls[1].delegationId = 'attempt-1';
-  observation.continuationInputs[0].delegationId = 'attempt-1';
+  observation.continuationInputs[1].delegationId = 'attempt-1';
   assert.equal(passes(observation), false);
 });
 
@@ -235,13 +411,19 @@ for (const toolIndex of [0, 1]) {
 
 test('continuation cannot pass by replaying private tool history', () => {
   const observation = completedHandoff();
-  observation.continuationInputs[0].hasPrivateToolHistory = true;
+  observation.continuationInputs[1].hasPrivateToolHistory = true;
   assert.equal(passes(observation), false);
 });
 
 test('continuation must actually receive the prior delivery', () => {
   const observation = completedHandoff();
-  observation.continuationInputs[0].hasPriorDelivery = false;
+  observation.continuationInputs[1].hasPriorDelivery = false;
+  assert.equal(passes(observation), false);
+});
+
+test('continuation must actually receive the immediately preceding execution result', () => {
+  const observation = completedHandoff();
+  observation.continuationInputs[1].hasPriorResult = false;
   assert.equal(passes(observation), false);
 });
 
@@ -295,9 +477,9 @@ const invalidOverflowObservations: Array<{
   { name: 'a guard from another delegation', mutate: observation => { observation.guardStops[0].delegationId = 'unrelated-attempt'; } },
   { name: 'an unscoped guard', mutate: observation => { observation.guardStops[0].delegationId = null; } },
   { name: 'an extra hard stop', mutate: observation => { observation.guardStops.push({ ...observation.guardStops[0] }); } },
-  { name: 'replayed private tool history', mutate: observation => { observation.continuationInputs[0].hasPrivateToolHistory = true; } },
-  { name: 'a continuation with no prior execution result', mutate: observation => { observation.continuationInputs[0].hasPriorResult = false; } },
-  { name: 'a fabricated valid prior delivery', mutate: observation => { observation.continuationInputs[0].hasPriorDelivery = true; } },
+  { name: 'replayed private tool history', mutate: observation => { observation.continuationInputs[1].hasPrivateToolHistory = true; } },
+  { name: 'a continuation with no prior execution result', mutate: observation => { observation.continuationInputs[1].hasPriorResult = false; } },
+  { name: 'a fabricated valid prior delivery', mutate: observation => { observation.continuationInputs[1].hasPriorDelivery = true; } },
   { name: 'recovery without rereading evidence', mutate: observation => { observation.toolCalls.splice(1, 1); } },
   { name: 'a failed evidence reread', mutate: observation => { observation.toolCalls[1].success = false; } },
   { name: 'a reread attributed to the failed attempt', mutate: observation => { observation.toolCalls[1].delegationId = 'attempt-1'; } },

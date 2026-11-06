@@ -172,10 +172,27 @@ structural checks own task identity, tool effects and actual handoff evidence.
 Results stay in a local report and do not require a tracing sink. The report
 records model settings, production revision and harness identity. A successful
 run establishes coverage at those settings, not a before/after quality gain.
-Context-case diagnostics also retain each delegation's task objective and
-Supervisor-authored briefing verbatim. Compare these instructions with the
-prior delivery and actual tool calls when investigating repeated work; changed
-wording alone does not establish that a retry requests only unfinished work.
+The handoff contract requires a continuation briefing that reflects the current
+goal, reusable results and unfinished work. The judge evaluates its meaning,
+not whether it merely differs from the first briefing. Context-case diagnostics
+retain each task objective, Supervisor briefing and actual first model-input
+briefing. Mechanical checks compare the dynamic task and briefing data and the
+exact preceding delivery with that model input. A saved private execution
+artifact alone cannot establish that its result text reached the model.
+
+Repeated reads are efficiency observations, not automatic handoff failures.
+Handoff and recovery cases also allow additional successful delegations of the
+same task. The below-watermark negative control still requires one delegation
+without a budget notice. Efficiency observations appear under
+`diagnostics.efficiency`. Lost results, wrong or missing briefings, leaked
+private history, absent actual verification and unaccepted plans still fail.
+Valid later context notices are allowed when continued work reaches its budget.
+
+Report version 3 records this acceptance definition. Older reports used stricter
+no-reread and exact-attempt assertions; retain them without rewriting their
+results. Their pass rates are not directly comparable. In particular, reports
+without actual model-input briefing evidence cannot be promoted to passes under
+the new contract by simply dropping their repeat-read failures.
 
 Use `npm run eval:budget-handoff -- --list` to list the executable cases.
 `BUDGET_HANDOFF_EVAL_PROFILE` and `BUDGET_HANDOFF_EVAL_JUDGE_PROFILE` select the

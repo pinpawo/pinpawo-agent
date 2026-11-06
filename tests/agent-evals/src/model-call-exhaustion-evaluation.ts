@@ -44,10 +44,10 @@ export function evaluateModelCallExhaustionInvariants(observed: ModelCallExhaust
       && first.guardStopReasons.includes('subagent_iteration_limit_reached') },
     { key: 'real_final_call_preserves_handoff', passed: Boolean(first?.delivery?.trim())
       && Boolean(first?.delivery?.includes('EVIDENCE-6429')) && observed.handoffTicketPreserved },
-    { key: 'first_attempt_reads_but_does_not_verify', passed: reads.filter(call => call.delegationId === first?.delegationId).length === 1
-      && reads.some(call => call.delegationId === first?.delegationId && call.success)
+    { key: 'first_attempt_reads_but_does_not_verify', passed: reads.some(call => call.delegationId === first?.delegationId && call.success)
       && !verifies.some(call => call.delegationId === first?.delegationId) },
-    { key: 'continuation_does_not_reread_evidence', passed: !reads.some(call => call.delegationId !== first?.delegationId) },
+    { key: 'tool_calls_belong_to_actual_attempts', passed: observed.toolCalls.every(call =>
+      observed.attempts.some(attempt => attempt.delegationId === call.delegationId)) },
     { key: 'paired_final_model_call_notice', passed: observed.notices.length === 1
       && observed.notices[0].reason === 'model_calls' && observed.notices[0].phase === 'finalize'
       && observed.notices[0].paired && observed.notices[0].delegationId === first?.delegationId },
@@ -210,6 +210,10 @@ export async function runModelCallExhaustionCase(params: {
   }
   return { observation, usage: usage.read(), diagnostics: {
     modelCallCount, completedDelegations: observation.attempts.length, runtimeEvents, expectedTicket: ticket,
+    efficiency: {
+      readCalls: observation.toolCalls.filter(call => call.name === 'read_evidence').length,
+      repeatedReadCalls: Math.max(0, observation.toolCalls.filter(call => call.name === 'read_evidence').length - 1),
+    },
     firstAttemptMaxIterations: 2, continuationMaxIterations: 4,
     boundary: 'The eval manually starts two real createSubagent invocations. Its afterModel probe requests one extra model entry after the first child completes two real calls. Native middleware blocks that entry; no response, counter or usage is fabricated. Supervisor scheduling is not exercised.',
   } };

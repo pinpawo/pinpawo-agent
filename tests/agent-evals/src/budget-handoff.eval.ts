@@ -41,11 +41,12 @@ if (process.argv.includes('--list')) {
     ?? `.eval-results/budget-handoff-${new Date().toISOString().replace(/[:.]/g, '-')}`);
   mkdirSync(outputDir, { recursive: true });
   const report = {
-    reportVersion: 2, kind: 'budget-handoff', createdAt: new Date().toISOString(), revision,
+    reportVersion: 3, kind: 'budget-handoff', createdAt: new Date().toISOString(), revision,
     harnessHash: harnessHash.digest('hex'), datasetHash: createHash('sha256').update(JSON.stringify(cases)).digest('hex'),
     subject: subject.metadata, judge: judge.metadata,
     settings: { repeats, cases: cases.map(item => item.name), timeoutMs: 240_000, maxModelCalls: 20, maxDelegations: 4,
       contextWatermarkRatio: 0.85, baseline: 'No previous-revision real-model baseline has been run for this new harness.',
+      acceptance: 'Briefings must reflect the current goal and prior progress, and the actual child model input must contain the current task/briefing and the exact preceding delivery. Repeated reads are reported as efficiency metrics rather than automatic handoff failures. Earlier reports used stricter no-reread/exact-attempt assertions and remain unchanged.',
       boundary: 'Context cases use the production Orchestrator graph with a scaled 16000-token child window and zero generation reserve. The model-call exhaustion case uses production createSubagent with a scaled two-call limit and controlled afterModel re-entry, then a manually driven fresh invocation; it does not exercise Supervisor scheduling. These are not provider-native million-token or default 100-call pressure tests. Evidence tools are synthetic; model decisions are real.' },
     results: [] as Array<Record<string, unknown>>,
   };
@@ -63,11 +64,13 @@ if (process.argv.includes('--list')) {
           if (testCase.input.scenario === 'model-call-exhausted') {
             const executed = await runModelCallExhaustionCase({ input: testCase.input, model: subject.model });
             return { ...executed, invariants: evaluateModelCallExhaustionInvariants(executed.observation),
+              briefingEvidence: [],
               attemptCount: executed.observation.attempts.length,
               contract: 'Real-model production createSubagent budget exhaustion with synthetic evidence tools and eval-only afterModel re-entry requesting one call beyond a two-call limit. A manually driven fresh invocation receives only the valid handoff. This case does not test Supervisor scheduling.' };
           }
           const executed = await runBudgetHandoffCase({ input: testCase.input, model: subject.model });
           return { ...executed, invariants: evaluateBudgetHandoffInvariants(executed.observation, testCase.expected),
+            briefingEvidence: executed.diagnostics.delegationBriefings,
             attemptCount: executed.observation.executions.length,
             contract: 'Real-model budget handoff and hard context stop in the production orchestration graph, using synthetic evidence tools. Evaluate all deliveries, real tool effects and the final reply; a partial handoff is valid evidence but not completion, and a hard stop without delivery must not be invented into a handoff.' };
         };
@@ -83,6 +86,7 @@ if (process.argv.includes('--list')) {
               contract: executed.contract,
               objective: testCase.expected.objective, acceptanceCriteria: testCase.expected.acceptanceCriteria,
               evidence: { ...executed.observation, runtimeEvents: executed.diagnostics.runtimeEvents,
+                delegationBriefings: executed.briefingEvidence,
                 referenceFacts: { report: 'EVIDENCE-6429', successfulVerification: 'VERIFY-3817', expectedTicket: executed.diagnostics.expectedTicket } },
               candidateOutput: executed.observation,
             });

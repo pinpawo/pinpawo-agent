@@ -88,8 +88,8 @@ function notification(invocationId: string, data: HandoffNotice) {
         instruction: SUBAGENT_BUDGET_HANDOFF_PROMPT.render({
           budget,
           finalInstruction: data.phase === 'finalize'
-            ? 'This is your final call. Deliver the useful results now in the required format using the evidence already gathered. Further tool calls will not execute.'
-            : 'Finish only essential work that fits the remaining budget, then deliver the useful results in the required format without further tool calls.',
+            ? 'This is your final call. Deliver these results now; further tool calls will not execute.'
+            : 'Use the remaining calls for essential work, then deliver these results.',
         }),
       }),
     }), metadata),
@@ -102,7 +102,7 @@ function stopForContext(content: string) {
   )] } });
 }
 
-/** A checkpointed model counter and one shared handoff path for both budgets. */
+/** Native model-call counting/limits; this layer adds the shared handoff policy. */
 export function createSubagentBudgetMiddleware(options: BudgetOptions) {
   const { maxIterations, invocationId } = options;
   const runLimit = Number.isFinite(maxIterations) && maxIterations > 0 ? Math.floor(maxIterations) : undefined;

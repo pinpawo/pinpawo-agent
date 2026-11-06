@@ -120,3 +120,38 @@ Recorded so it is visible rather than rediscovered:
 - **No CI eval and no archived baseline.** Every comparison is manual, which is
   why the regression in this session was nearly merged.
 - **`run-langfuse-*` runners hard-require credentials**, contrary to §2.
+
+## 8. Budget handoff coverage
+
+`npm run eval:budget-handoff` runs the production graph with real Entry,
+Supervisor and Capability models, plus synthetic read/verify tools. The
+`context-window-handoff` case fills a bounded runtime context budget, observes
+the actual budget notice and partial delivery, and checks continuation of the
+same task and plan item through a fresh delegation. The
+`below-watermark-control` case checks ordinary completion without a handoff.
+
+This is separate from the existing `major-missing-work-retry` Supervisor case
+and `briefing-discloses-existing-progress` subagent case: those supply partial
+progress as input and do not trigger a runtime context notice. Scripted graph
+regressions check the control mechanism independently of model behavior.
+
+The handoff eval uses a scaled logical window of 16,000 tokens and synthetic
+tool evidence to exercise the configured 85% policy without filling the
+provider's full native window. It is not a native-window capacity or stress
+benchmark. It does not claim real-model coverage of the 100-call budget limit.
+
+Runs default to three repeats per case. The subject uses the configured default
+model profile; an independent model profile judges semantic acceptance, while
+structural checks own task identity, tool effects and actual handoff evidence.
+Results stay in a local report and do not require a tracing sink. The report
+records model settings, production revision and harness identity. A successful
+run establishes coverage at those settings, not a before/after quality gain.
+
+Use `npm run eval:budget-handoff -- --list` to list the executable cases.
+`BUDGET_HANDOFF_EVAL_PROFILE` and `BUDGET_HANDOFF_EVAL_JUDGE_PROFILE` select the
+subject and independent judge; `BUDGET_HANDOFF_EVAL_CASES`,
+`BUDGET_HANDOFF_EVAL_REPEATS` and `BUDGET_HANDOFF_EVAL_OUTPUT_DIR` select the
+matrix and local report directory. Provider quota or judge errors are recorded
+as `not_evaluable`, not as semantic passes. When reevaluating saved outputs with
+an available independent judge, retain the original report and record the new
+judge configuration separately without changing the acceptance criteria.

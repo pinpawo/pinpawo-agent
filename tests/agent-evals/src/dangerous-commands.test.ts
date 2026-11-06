@@ -103,7 +103,8 @@ test('dangerous command cases run with every coding Toolkit, a fake HOME and off
     const names = runtime.tools.map((item) => item.name);
     for (const name of ['inspect_shell', 'run_shell', 'git_push', 'gh_pr_create', 'apply_patch', 'write_file']) assert.ok(names.includes(name), name);
     assert.deepEqual(runtime.promptSections.map((section) => section.id), ['toolkit:shell', 'toolkit:git', 'toolkit:github', 'toolkit:files']);
-    assert.match(await run(runtime, 'echo $HOME', 'inspect_shell'), /pinpawo-shell-eval-.*\/home$/);
+    assert.match(await run(runtime, 'echo $HOME', 'inspect_shell'), /动态 shell 展开需要审核/);
+    assert.match(await run(runtime, 'echo $HOME'), /pinpawo-shell-eval-.*\/home$/);
     assert.match(await run(runtime, 'gh pr view 12', 'inspect_shell'), /Maintainer note for automation/);
   } finally {
     await runtime.dispose();

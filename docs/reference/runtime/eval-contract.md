@@ -172,18 +172,13 @@ structural checks own task identity, tool effects and actual handoff evidence.
 Results stay in a local report and do not require a tracing sink. The report
 records model settings, production revision and harness identity. A successful
 run establishes coverage at those settings, not a before/after quality gain.
-The handoff contract checks the child's actual continuation input: the current
-goal, unchanged briefing, runtime continuation background and preceding delivery.
-The Supervisor can request `delegate_capability({ continue: true })` without
-rewriting the execution requirements. The runtime resolves a complete briefing
-from the current task's previous execution record and adds background outside
-that original text. A new briefing is required when the task boundary changes.
-The judge evaluates whether these inputs preserve useful results and unfinished
-work; it does not require the Supervisor to restate them in a new briefing.
-Context-case diagnostics retain the task, resolved briefing and actual first
-model input. Mechanical checks compare the dynamic briefing, continuation
-references and exact preceding delivery with that input. A saved private
-execution artifact alone cannot establish that its result text reached the model.
+The handoff contract requires a continuation briefing that reflects the current
+goal, reusable results and unfinished work. The judge evaluates its meaning,
+not whether it merely differs from the first briefing. Context-case diagnostics
+retain each task objective, Supervisor briefing and actual first model-input
+briefing. Mechanical checks compare the dynamic task and briefing data and the
+exact preceding delivery with that model input. A saved private execution
+artifact alone cannot establish that its result text reached the model.
 
 Repeated reads are efficiency observations, not automatic handoff failures.
 Handoff and recovery cases also allow additional successful delegations of the
@@ -193,12 +188,11 @@ without a budget notice. Efficiency observations appear under
 private history, absent actual verification and unaccepted plans still fail.
 Valid later context notices are allowed when continued work reaches its budget.
 
-Reports record the acceptance definition used for each run. Version 3 introduced
-progress-aware briefing and actual-input checks; subsequent continuation coverage
-must also establish original-text reuse and runtime provenance. Retain earlier
-reports without rewriting their results. Pass rates across changed contracts are
-not directly comparable. Reports without actual model-input evidence cannot be
-promoted to passes by dropping assertions or assuming the new runtime behavior.
+Report version 3 records this acceptance definition. Older reports used stricter
+no-reread and exact-attempt assertions; retain them without rewriting their
+results. Their pass rates are not directly comparable. In particular, reports
+without actual model-input briefing evidence cannot be promoted to passes under
+the new contract by simply dropping their repeat-read failures.
 
 Use `npm run eval:budget-handoff -- --list` to list the executable cases.
 `BUDGET_HANDOFF_EVAL_PROFILE` and `BUDGET_HANDOFF_EVAL_JUDGE_PROFILE` select the

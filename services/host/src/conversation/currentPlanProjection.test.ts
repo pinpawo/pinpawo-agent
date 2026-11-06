@@ -9,7 +9,7 @@ function execution(planItemId: string, capability: string, lane?: string) {
   return [new AIMessage({ content: '', additional_kwargs: { pinpawo: metadata },
     tool_calls: [{ id: `call:${planItemId}`, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] }),
   createCapabilityExecutionMessage({ callId: `call:${planItemId}`, metadata,
-    execution: { planItemId, capability, task: 'Work', goal: 'Work', delegationId: 'delegation', briefing: 'Plan' },
+    execution: { planItemId, capability, task: 'Work', delegationId: 'delegation', briefing: 'Plan' },
     result: { status: 'returned', delivery: { id: `delivery:${planItemId}`, task: 'Work', text: 'Delivery',
       scope: { lane: `capability:${capability}`, runId: 'run', taskId: 'trace', delegationId: 'delegation' } } } })];
 }

@@ -152,11 +152,11 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
 
 /** Fixture for an actual returned execution, matching the native tool's result artifact. */
 export function capabilityResultMessage(state: { runId: string; taskId: string },
-  call: { id: string; planItemId: string; delegationId: string; capability: string; task: string; goal?: string; briefing?: string },
+  call: { id: string; planItemId: string; delegationId: string; capability: string; task: string; briefing?: string },
   result: { status: string; delivery: unknown }) {
   const { id, ...input } = call;
   return createCapabilityExecutionMessage({ callId: id,
-    execution: { ...input, goal: input.goal ?? input.task, briefing: input.briefing ?? 'Execute the current objective.' },
+    execution: { ...input, briefing: input.briefing ?? 'Execute the current objective.' },
     result: result as CapabilityExecutionResultRecord,
     metadata: { runId: state.runId, taskId: state.taskId } });
 }

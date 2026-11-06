@@ -8,15 +8,12 @@ import { acceptanceGoal, currentSupervisorTask } from './state';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
-import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME, executionsForPlanItem } from '../executionMessages';
+import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME } from '../executionMessages';
 import { createCapabilityCatalog } from './capabilityCatalog';
 
 export const delegateCapabilitySchema = z.object({
-  briefing: z.string().refine(text => text.trim().length > 0).optional().describe('Full instructions for a first execution or a necessary correction of the instructions themselves. Do not rewrite merely to restate unfinished work or a missing delivery; use continue: true. Do not copy earlier deliveries in full or expand into later tasks.'),
-  continue: z.literal(true).optional().describe('Continue the current task with its previous briefing unchanged, including when the previous execution returned no delivery. Omit briefing; the runtime supplies continuation context and any existing deliveries.'),
-}).strict().refine(args => (args.briefing !== undefined) !== (args.continue === true), {
-  message: 'Provide exactly one of briefing or continue: true.',
-});
+  briefing: z.string().refine(text => text.trim().length > 0).describe('Execution instructions for the current plan item only. From the user\'s requirements and the deliveries returned so far, state the work to do, reusable conclusions and necessary constraints; do not copy earlier deliveries in full or expand into later tasks.'),
+}).strict();
 
 export type DelegateCapabilityArgs = z.infer<typeof delegateCapabilitySchema>;
 
@@ -31,15 +28,14 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const catalog = createCapabilityCatalog({ registry, allowedCapabilityNames: invokeOptions.allowedCapabilityNames });
     // Plan checks first: delegating without an executable task is a correctable decision.
     const input = buildCapabilityExecutionInput({
-      state: state.runSupervisorState, runId: state.runId, allowedCapabilityNames: catalog.capabilityNames, messages: state.messages,
+      state: state.runSupervisorState, runId: state.runId, allowedCapabilityNames: catalog.capabilityNames,
     }, args, runtime.toolCallId);
     const userRequest = acceptanceGoal(state.runSupervisorState);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,
       delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId,
-        userRequest, task: input.task, briefing: input.briefing,
-        ...(input.continuation ? { continuation: input.continuation } : {}) },
+        userRequest, task: input.task, briefing: input.briefing },
       history: state.messages,
     }, {
       review: {
@@ -69,12 +65,12 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     } });
   }, {
     name: DELEGATE_CAPABILITY_TOOL_NAME, schema: delegateCapabilitySchema, verboseParsingErrors: true,
-    description: 'Execute the current plan item. Supply briefing for a first execution or necessary correction; use continue: true to resume unchanged work from prior deliveries without rewriting its briefing. The runtime determines task identity and Capability; after it returns, you continue to judge.',
+    description: 'Prepare a briefing for the current plan item, referring to relevant existing deliveries, and hand it to the Capability to execute. The runtime determines the task identity and the Capability; after it returns, you continue to judge.',
   });
 }
 
 export function buildCapabilityExecutionInput(
-  context: Pick<SupervisorControlContext, 'state' | 'runId' | 'allowedCapabilityNames' | 'messages'>,
+  context: Pick<SupervisorControlContext, 'state' | 'runId' | 'allowedCapabilityNames'>,
   args: DelegateCapabilityArgs,
   callId: string,
 ): CapabilityExecutionInput {
@@ -82,27 +78,11 @@ export function buildCapabilityExecutionInput(
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
   if (!context.allowedCapabilityNames.includes(next.capability)) throw new SupervisorDecisionError('Capability is no longer available.');
-  if ((args.briefing !== undefined) === (args.continue === true)) {
-    throw new SupervisorDecisionError('Provide exactly one of briefing or continue: true.');
-  }
-  const goal = acceptanceGoal(state);
-  const execution = {
+  return {
     planItemId: next.id,
     delegationId: identity('delegation', context.runId, callId),
     capability: next.capability,
     task: next.objective,
-    goal,
+    briefing: args.briefing,
   };
-  if (args.continue) {
-    const previous = executionsForPlanItem(context, next.id).filter(record => record.call.id !== callId).at(-1);
-    if (!previous) throw new SupervisorDecisionError('Continuing requires a previous execution of the current task. Supply a briefing for its first execution.');
-    if (previous.execution.capability !== next.capability || previous.execution.task !== next.objective
-      || previous.execution.goal !== goal) {
-      throw new SupervisorDecisionError('The task boundary changed since its previous execution. Supply a briefing for the updated task.');
-    }
-    return { ...execution, briefing: previous.execution.briefing,
-      continuation: { delegationId: previous.execution.delegationId, deliveryId: previous.result.delivery?.id ?? null } };
-  }
-  if (!args.briefing?.trim()) throw new SupervisorDecisionError('The execution briefing must not be empty.');
-  return { ...execution, briefing: args.briefing };
 }

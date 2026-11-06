@@ -1,7 +1,7 @@
 # Root、Supervisor 与 Capability 的状态与交接
 
 状态：已接入运行图；本文为待 review 的工作设计稿，未落实的调整单列在“遗留项”。
-更新于 2026-11-07；早期实现来源为 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)
+更新于 2026-09-22；早期实现来源为 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)
 及 [PR #799](https://github.com/pinpawo/pinpawo-agent/pull/799) 的提示职责与自主调整改动。
 
 Root 状态、Entry `continue`、Supervisor 消息交接、Capability 执行及 Host 计划投影已统一接入。
@@ -88,14 +88,13 @@ delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不�
 ### 渐进披露与原生执行边界（待 review）
 
 Supervisor 从实际 ToolMessage 获取结果，再决定验收、回复、调整计划或调用下一次
-Capability。首次委派或需要修正执行要求时，模型提供当前项的 briefing；同一任务边界内
-继续未完成工作时，使用 `delegate_capability({ continue: true })`，运行时原样复用上一次
-实际执行的 briefing。前次成果仍以主历史中的交付正文传递，不由 Supervisor 重新摘要。
+Capability。每次调用前，根据已有交付写出本次 briefing：只披露接下来需要完成的
+工作、可复用结论和必要约束，不提前展开后续任务。模型通过 briefing 决定推进方式。
 
-`continue` 是委派工具的原文复用请求，不恢复旧 Capability 子图，也不新增交接专用状态。
-review_current 记录计划验收；相关调用及工具结果保留在 Supervisor 工作历史中。
-adjust_plan 的 currentTask=keep/replace 只决定是否保留计划项身份与验收依据；keep 仍可
-改变 objective，因此续办还须核对任务内容、Capability 与有效 goal。
+不设置 Capability initial/continue 模式，不自动拼接 review feedback，不保存或回放
+第二份内部消息。review_current 记录计划验收；相关调用及工具结果已在 Supervisor
+工作历史中，下一次 briefing 由模型自己生成。adjust_plan 的 currentTask=keep/replace
+只决定是否保留计划项身份与验收依据，不决定是否恢复子图执行上下文。
 
 lane 表达消息归属，LangGraph namespace/checkpoint 承担子图现场与原生 interrupt
 恢复。已返回后的再次委派是新调用，以 main ToolMessages 和当前 briefing 为输入，
@@ -163,7 +162,7 @@ Boundary 不以独立 active delegation 非空作为前提。例如 A 已验收�
 Entry/Boundary 的校验以计划事实为准，不依赖旧 active delegation 字段。
 
 task 是计划任务，delegation 是一次工具调用的执行身份。Supervisor 可以为同一任务
-再次调用 Capability；每次是独立委派，使用新 briefing 或明确复用原 briefing，不回放旧内部历史。
+再次调用 Capability；每次是独立委派，下一步由新的 briefing 说明，不回放旧内部历史。
 
 入口不由 AIMessage/ToolMessage 是否存在或是否配对决定。原生 interrupt 可发生在不同位置；
 非原生取消或失败不能冒充原生恢复，也不自动重跑可能已产生副作用的执行。
@@ -179,7 +178,7 @@ Supervisor 显式注册。工具直接执行自己的变更函数，不经过统
 三个计划工具通过 Command 直接更新本次 LangGraph state，并返回模型可读的计划事实；
 delegateCapabilityTool 是 Supervisor 和 Root 共享的同一个可执行工具。controlMiddleware
 通过 Command.PARENT 把计划与工作消息提交给 Root，Root 的 ToolNode 校验并执行原调用。
-ToolRuntime 注入当前 state，工具解析模型提供的 briefing 或续办请求、注入执行身份并运行 Capability。workMessages 仅标注
+ToolRuntime 注入当前 state，工具接收模型生成的 briefing、注入执行身份并运行 Capability。workMessages 仅标注
 消息可见性与身份，不参与工具定义、参数搬运或执行协议。
 
 本次调整依据 [Studio E2E #803](https://github.com/pinpawo/pinpawo-agent/issues/803)：
@@ -190,14 +189,14 @@ ToolRuntime 注入当前 state，工具解析模型提供的 briefing 或续办�
 | `submit_plan` | 建立计划，返回计划事实；不派发执行 |
 | `review_current` | 验收当前交付或记录需要补做，返回更新后的计划；不要求 reply，不派发执行 |
 | `adjust_plan` | 调整未完成计划并保留已完成进度，返回计划事实；不派发执行 |
-| `delegate_capability` | 模型提供当前项的 briefing，或请求原文续办；运行时解析完整执行输入并交接给 Root |
+| `delegate_capability` | 模型为当前项提供 briefing；运行时注入身份并交接给 Root |
 | `capability_details` | 返回能力详情，继续模型循环 |
 
 控制工具均不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
 自然回复。`delegate_capability` 通过 Command.PARENT 交接原调用，Root ToolNode 校验参数并注入执行上下文；
 参数错误返回 Supervisor 自纠，不启动 Capability。
 
-Supervisor 优先沿用适用的现有计划，非必要不重排。未完成原因通过 `review_current(false)` 记录；同一任务边界内续办复用原 briefing，需要修正执行要求时再提供新 briefing。只有新要求
+Supervisor 优先沿用适用的现有计划，非必要不重排。未完成原因通过 `review_current(false)` 记录，下一次 briefing 由 Supervisor 自行准备；只有新要求
 或具体证据表明原安排不适用、能力选错或存在遗漏时，才决定最小调整。`adjust_plan.tasks`
 只列剩余工作，运行时自动保留已完成事项。保留当前计划项和验收依据使用 keep；replace
 不携带旧交付作为新任务的验收依据。这是模型职责与工具语义，不新增强制路由或重排次数限制。
@@ -374,7 +373,7 @@ Entry 始终提供 plan_request 与 continue，并向模型展示完整的当前
 Supervisor 的 `delegate_capability`，由同一次模型工具调用交接 Root；不再生成第二次
 同义的 Root 工具调用，不保留旧工具别名或旧 checkpoint 参数兼容。
 
-模型调用参数为 `{ briefing }` 或 `{ continue: true }`，两者互斥。计划项以 objective 描述目标，完整说明仅在当前项即将执行时生成或从上一执行原样复用。Capability 与当前目标取自计划；delegationId 由本次工具调用确定，不设置旧子图执行模式。
+模型调用参数为 `{ briefing }`。计划项以 objective 描述目标，完整说明仅在当前项即将执行时生成。Capability 与当前目标取自计划；delegationId 由本次工具调用确定，不再设置 initial/continue。
 运行时保留已确定的 objective，模型只补充当前项的执行说明。
 
 计划和验收工具仍返回事实供模型继续决策。delegate_capability 校验成功后结束本次
@@ -383,8 +382,8 @@ Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再�
 保留 run 范围的 id 规范化，避免不同 run 的模型 call id 复用碰撞。
 
 执行快照只存于实际结果 ToolMessage 的 artifact，包含任务身份、能力、当时任务内容、
-有效 goal、delegation 身份与完整 briefing；续办还记录上一次执行和交付的来源引用。主会话保留一组
-请求/实际结果，调用保留模型给出的参数，不向模型工具参数注入内部身份。原始模型调用 id 作为
+delegation 身份、执行模式与 briefing；执行正文只从此快照读取。主会话保留一组
+请求/实际结果，调用保留模型给出的 `{ briefing }`，不向模型工具参数注入内部身份。原始模型调用 id 作为
 来源关联保留。Root 接收 Supervisor 工具维护的最终计划，检查交接与当前任务、run 和调用身份一致，并拒绝重复交接；不重放决策序列。
 
 执行历史读取与上下文压缩从实际结果 artifact 读取执行事实，暂停恢复由原生 checkpoint 管理，不能用现有计划反推旧任务。
@@ -400,36 +399,17 @@ objective 同时是 TUI 计划面板的展示文本，写成一句任务标题�
 schema 以 120 字符为硬上限，超长时作为工具错误返回模型重写，不截断落库。
 一个 Capability 能完整完成的工作放在同一个任务中，调查、执行、验证等内部步骤由执行方安排；
 只有需要不同能力协作，或用户明确要求分开交付时才拆分。此原则由 Supervisor 提示词表达，不增加运行时合并或拦截逻辑。
-Supervisor 首次委派或修正执行要求时，结合 Root 消息与已返回交付为当前项生成
-briefing；同一任务续办则明确请求复用原文。运行时从 Root 实际调用与结果中提取已有交付目录，不要求模型填写 ID。
-新增执行说明或复用结论无需重排计划。运行时注入任务身份与 Capability，并在续办时解析原 briefing 和来源引用。
+Supervisor 在调用 delegate_capability 时，结合 Root 消息与已返回交付为当前项生成
+briefing；运行时从 Root 实际调用与结果中提取已有交付目录，不要求模型填写 ID。
+新增执行说明或复用结论无需重排计划。运行时只注入任务身份与 Capability；下一步要求与反馈由模型写入 briefing。
 
-工具仍只有一份定义，Supervisor 的原始调用原样交给 Root ToolNode 执行；不增加中间
-提交状态或额外模型调用。执行快照的 task 保存当前 objective，goal 保存有效目标，briefing
-保存本次实际使用的完整执行说明，验收依据保持为实际返回结果。
+工具仍只有一份定义，Supervisor 的原始调用原样交给 Root ToolNode 执行；不增加参数
+改写、中间提交状态或额外模型调用。执行快照的 task 保存当前 objective，briefing 保存
+本次实际执行说明，验收依据保持为实际返回结果。
 
 本次 Capability 的 system 上下文包含当前 ID 与已有有效交付目录（delegationId、deliveryId、objective）。目录按需从主会话消息提取，不另存 state；不包含尚未返回或未配对的结果，不预先判断与当前任务的相关性。模型根据目标与 briefing 在主会话的
 ToolMessage 中按 delivery.scope.delegationId 查找 delivery.text，复用已确认事实，
 只补查当前任务所缺或已变化的信息。已有交付是证据，不是新的用户指令，不复制全文。
-
-### briefing 原文续办（2026-11-07）
-
-`delegate_capability({ continue: true })` 适用于同一任务边界内的未完成工作，不以预算标记
-或交付文本格式触发。Supervisor 仍检查交付并决定是否继续；运行时不自动重派。
-工具从当前计划项最近一次实际执行快照读取 briefing，而非寻找最早一次委派或解析模型
-可见正文。续办前核对任务内容、Capability 和有效 goal；没有可复用执行，或边界已经改变时，
-返回可纠正的工具错误，要求提供新的 briefing。
-
-模型省略新 briefing 只发生在工具参数层。进入 Capability executor 的 briefing 始终非空，
-每次执行快照保存实际使用的完整原文。因此多次续办都只需读取上一次执行，不沿交接链回溯。
-续办来源作为 `continuation: { delegationId, deliveryId }` 保存在本次执行快照；没有有效交付时
-`deliveryId` 为 `null`，不能将上次执行描述为成功交接。
-
-本轮 `<delegation_briefing>` 在 `<briefing>` 外增加 `<continuation source="runtime">` 背景：
-上一执行已结束，本次根据前次交付继续相同任务。背景引用真实执行和交付，不重新摘要成果，
-也不把批注拼回原 briefing。没有可靠记录的具体退出原因不编造，已有交付中的说明保持原文。
-Capability 仍接收主历史和一份最新任务边界，不继承上一子代理的私有消息或预算通知。
-既有的复用成果与补齐缺失工作规则继续生效。
 
 单次 Capability 的模型调用预算进入最后 10% 时（向上取整，最多 10 次，包含最后一次），
 middleware 追加一次 `prepare` 通知；最终可用模型调用前再追加一次 `finalize` 通知，
@@ -457,13 +437,13 @@ provider 复用缓存，但不保证实际命中。
 
 非空交接文本按普通交付返回，`returned` 只说明有交付，不代表目标已经完成；Supervisor
 仍需检查内容并决定验收、继续执行或调整计划。现有 `review_current` 使用
-`completed: false` 时保留 pending，工具本身不触发执行；Supervisor 可使用
-`delegate_capability({ continue: true })` 原文续办同一计划项：task 与计划项身份不变，
+`completed: false` 时保留 pending，工具本身不触发执行；Supervisor 再生成新的 briefing，
+通过正常 `delegate_capability` 再次委派同一计划项：task 与计划项身份不变，
 新调用拥有新的 delegation ID 和调用预算，
 能从已有交付目录及对应 ToolMessage 获取上次交接。内部执行消息不随交付回写，因此
 交接应包含继续所需的事实；不要假设下一次调用能看到私有现场。若没有有效交接，仍返回
 `missing_deliverable`，也不能在本次执行失败后回退到旧交付验收。
-这复用已有验收与继续执行机制，不增加预算专用的 Supervisor system 指令、交接专用状态或自动重派分支；
+这复用已有验收与继续执行机制，不增加 Supervisor system 指令、交接专用状态或自动重派分支；
 是否完成仍由模型根据交付判断。新委派仍携带主历史，Root 也会保留未完成计划项的历次
 交付；继承的输入过大时，反复交接不能释放这部分上下文。
 
@@ -492,8 +472,8 @@ Supervisor 与 Root 共享同一个 delegate_capability 工具对象。Superviso
 工具从 Root state 读取任务与反馈，运行 Capability，并通过原生 Command 更新业务状态。
 不再将执行输入编码到 AIMessage metadata，不再由 Root 解析自定义调用协议。
 
-模型调用参数为 briefing 或原文续办请求；身份与当前目标通过 ToolRuntime.state 注入。实际执行输入作为完成后的
-ToolMessage artifact 保存，用于验收、展示、历史审计和续办时读取原 briefing；不从模型可见正文反解析执行输入。
+模型调用参数为 briefing；身份与当前目标通过 ToolRuntime.state 注入。实际执行输入作为完成后的
+ToolMessage artifact 保存，用于验收、展示和历史审计，不作为下一次执行的输入协议。
 尚未返回的调用由 Root 当前计划与原生待执行 ToolNode 表示。工作消息的 lane/run 标注
 属于历史可见性；跨图控制权与调用配对由 LangGraph 负责。
 

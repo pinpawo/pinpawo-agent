@@ -26,7 +26,7 @@ function execution(id: string, planItemId: string, uri: string, runId = 'run'): 
   const metadata = { runId, taskId: 'task' };
   return [setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{ id, name: 'delegate_capability', args: {} }] }), metadata),
     createCapabilityExecutionMessage({ callId: id, metadata,
-      execution: { planItemId, delegationId: id, capability: 'general', goal: 'Reports', task: 'Write report', briefing: 'Prepare it' },
+      execution: { planItemId, delegationId: id, capability: 'general', task: 'Write report', briefing: 'Prepare it' },
       result: { status: 'returned', deliverables: [{ uri }], delivery: { id: `delivery:${id}`, task: 'Write report', text: 'Ready',
         scope: { lane: 'capability:general', runId, taskId: 'task', delegationId: id } } },
     })];

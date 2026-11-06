@@ -112,7 +112,7 @@ export function buildStudioPetBoundaryInput(testCase: StudioPetRoleCase, catalog
   const state: RunSupervisorInput['state'] = { runId, goal: boundary.goal, plan: [
     { objective: boundary.task, capability: boundary.capability }, ...(boundary.remaining ?? []),
   ].map((task, index) => ({ ...task, id: identity('task', runId, planCallId, String(index)), status: 'pending' })) };
-  const execution = buildCapabilityExecutionInput({ state, runId, messages, allowedCapabilityNames: catalog.capabilityNames }, { briefing }, callId);
+  const execution = buildCapabilityExecutionInput({ state, runId, allowedCapabilityNames: catalog.capabilityNames }, { briefing }, callId);
   const delegationId = execution.delegationId;
   return {
     mode: 'boundary', inputId: opaque('boundary'), ...metadata, userRequest: boundary.goal,

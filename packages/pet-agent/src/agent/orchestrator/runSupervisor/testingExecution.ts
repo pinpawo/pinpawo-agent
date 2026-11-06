@@ -26,7 +26,6 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
   }
   return { id: call.id, ...buildCapabilityExecutionInput({
     state: state.runSupervisorState, runId: state.runId,
-    messages: state.messages,
     allowedCapabilityNames: state.runSupervisorState.plan.map(task => task.capability),
   }, delegateCapabilitySchema.parse(call.args), call.id) };
 }

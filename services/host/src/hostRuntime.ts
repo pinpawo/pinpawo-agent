@@ -49,6 +49,7 @@ export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';
 export { createHostArtifactStore } from './artifacts';
 export type { ArtifactStore } from '@pinpawo-toolkit/artifacts';
+export { MAX_ARTIFACT_BYTES } from '@pinpawo-toolkit/artifacts';
 export { loadPetDocumentFile } from './config/petDocument';
 export type {
   HostCapabilityAssemblyInitOptions,

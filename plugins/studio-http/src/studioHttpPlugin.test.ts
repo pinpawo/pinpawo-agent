@@ -62,6 +62,100 @@ test('Studio artifact route authenticates shared-reference downloads and respect
   } finally { await plugin.stop(); await storage.close(); }
 });
 
+test('artifact upload keeps studio authorization, Origin checks, and the separate JSON cap', async (t) => {
+  const harness = createContext();
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  harness.context.clients = new StudioClients(async () => new KyselyClientStore(
+    await storage.open<ClientDatabase>('studio', clientMigrations),
+  ));
+  const { key } = await harness.context.clients.create({ clientId: 'reader', label: 'Reader' });
+  const puts: Array<{ threadId: string; name: string; mimeType: string; content: string }> = [];
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN,
+    maxBodyBytes: 64, maxUploadBytes: 128, allowedOrigins: ['http://localhost:3000'], artifactStore: {
+      fetch: async () => { throw new Error('not used'); },
+      put: async input => {
+        const content = await new Response(input.body).text();
+        puts.push({ threadId: input.threadId, name: input.name, mimeType: input.mimeType, content });
+        return { uri: 'artifact://workspace/studio-uploads/random/report.txt', name: input.name,
+          mimeType: input.mimeType, size: content.length, sha256: '0'.repeat(64), createdAt: '2026-11-07T00:00:00Z' };
+      },
+    } });
+  await plugin.start(harness.context);
+  t.after(async () => { await plugin.stop(); await storage.close(); });
+  const url = pluginUrl(plugin.address()!.port, '/artifacts/upload?name=report.txt');
+  const headers = { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'text/plain' };
+  const send = (extra: Record<string, string>) => fetch(url, { method: 'POST', headers: { ...headers, ...extra }, body: 'x' });
+  assert.equal((await send({ Authorization: '' })).status, 401);
+  assert.equal((await send({ Authorization: `Bearer ${key}` })).status, 403);
+  assert.equal((await send({ Origin: 'https://evil.example' })).status, 403);
+  assert.equal(puts.length, 0, 'no unauthenticated or client upload reaches storage');
+  const payload = 'x'.repeat(128);
+  const uploaded = await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'http://localhost:3000' }, body: payload });
+  assert.equal(uploaded.status, 201);
+  const result = await uploaded.json() as { artifact: { uri: string; size: number } };
+  assert.equal(result.artifact.size, payload.length);
+  assert.deepEqual(puts, [{ threadId: 'studio-uploads', name: 'report.txt', mimeType: 'text/plain', content: payload }]);
+  const tooLarge = await fetch(url, { method: 'POST', headers, body: 'x'.repeat(129) });
+  assert.equal(tooLarge.status, 413);
+  assert.equal(puts.length, 1, 'oversize Content-Length is refused before storage');
+  const wrongMethod = await fetch(url, { headers });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get('allow'), 'POST, OPTIONS');
+  const json = await fetch(pluginUrl(plugin.address()!.port, '/dispatch'), {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ petId: 'planner', request: 'x'.repeat(65) }),
+  });
+  assert.equal(json.status, 413);
+  const chunkedJson = await fetch(pluginUrl(plugin.address()!.port, '/dispatch'), {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify({ petId: 'planner', request: 'x'.repeat(65) })));
+      controller.close();
+    } }), duplex: 'half',
+  } as RequestInit);
+  assert.equal(chunkedJson.status, 413, 'chunked JSON retains the original body cap');
+  assert.deepEqual(harness.requests, []);
+});
+
+test('upload receive deadline ends at EOF and does not pretend to cancel a backend commit', async (t) => {
+  const harness = createContext();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN, uploadTimeoutMs: 20, artifactStore: {
+    fetch: async () => { throw new Error('not used'); },
+    put: async input => {
+      const content = await new Response(input.body).text();
+      await new Promise(resolve => setTimeout(resolve, 40));
+      return { uri: 'artifact://workspace/studio-uploads/random/report.txt', name: input.name,
+        mimeType: input.mimeType, size: content.length, sha256: '0'.repeat(64), createdAt: '2026-11-07T00:00:00Z' };
+    },
+  } });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const response = await fetch(pluginUrl(plugin.address()!.port, '/artifacts/upload?name=report.txt'), {
+    method: 'POST', headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'text/plain' }, body: 'file',
+  });
+  assert.equal(response.status, 201);
+});
+
+test('artifact upload needs writable storage and remains a reserved built-in route', async (t) => {
+  const harness = createContext();
+  let routes: StudioHttpRoutesHook | undefined;
+  harness.context.hooks = { expose: (_name, hook) => { routes = hook as StudioHttpRoutesHook; return () => {}; },
+    contribute: () => () => {} };
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN, artifactStore: {
+    fetch: async () => { throw new Error('not used'); },
+  } });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  assert.ok(routes);
+  const registeredRoutes = routes;
+  assert.throws(() => registeredRoutes.register({ method: 'POST', path: '/artifacts/upload', authorization: 'client',
+    handle: () => ({ kind: 'json', body: {} }) }), /reserved/);
+  const response = await fetch(pluginUrl(plugin.address()!.port, '/artifacts/upload?name=file.bin'), {
+    method: 'POST', headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/octet-stream' }, body: 'x',
+  });
+  assert.equal(response.status, 503);
+});
+
 function receipt(request: StudioDispatchRequest): StudioDispatchReceipt {
   return {
     petId: request.petId,
@@ -527,6 +621,10 @@ test('HTTP Plugin projects live Studio events over SSE and releases the subscrip
 });
 
 test('HTTP Plugin rejects invalid security and resource options eagerly', () => {
+  for (const options of [{ maxUploadBytes: 0 }, { maxUploadBytes: 100 * 1024 * 1024 + 1 },
+    { uploadTimeoutMs: 0 }, { uploadTimeoutMs: NaN }, { uploadTimeoutMs: 15_001 }]) {
+    assert.throws(() => createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN, ...options }));
+  }
   assert.throws(
     () => createStudioHttpPlugin({ port: -1, authToken: AUTH_TOKEN }),
     /port must be an integer/,

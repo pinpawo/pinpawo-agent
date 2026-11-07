@@ -25,6 +25,8 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
   Studio dispatch 与 Pet 直接对话之间的 host 装配边界。
 - [配置](configuration.md) — `studio.json`、Pet 文件、校验与 Plugin 注入。
 - [Studio API](../../reference/api/studio.md) — 导出的类型和精确语义。
+- [Channel 模型](../../design/studio/channel-model.md)、[寻址与执行](../../design/studio/channel-addressing-and-execution.md)
+  和[路由](../../design/studio/channel-routing.md) — 成员、消息、session 和可选路由。
 - [HTTP Plugin 设计](../../design/studio/http-plugin.md) — 唯一 HTTP/SSE control plane
   与 Plugin route 边界。
 
@@ -35,8 +37,10 @@ Studio 校验存活 Pet 和 entryPetId、接纳输入并分配 invocation identi
 Plugin 拥有领域历史、调度与知识投影。精确接口以 API 为准，进程内幂等和 live 事件
 不提供执行结果、自动重试、超时或持久重放。
 
-Channel 的唯一[当前设计](../../design/studio/channel-addressing-and-execution.md)定义
-目标/消息、参与者寻址、默认 Reply、可信来源与固定 session。
+Channel 持有成员、公开消息和固定的 Channel/Pet session 绑定。[Channel 模型](../../design/studio/channel-model.md)
+说明数据与成员规则；[寻址与执行](../../design/studio/channel-addressing-and-execution.md)说明
+参与者寻址、默认 Reply、可信来源与观察边界；[Channel 路由](../../design/studio/channel-routing.md)
+可为符合条件的无 @ 消息选择 Pet。
 Scheduler/Trigger 仍为独立 Plugin；[队列巡检](../../design/studio-dispatch-queue-notices.md)
 是可选策略，不把队列所有权交给 Channel。
 HTTP Plugin 提供 control plane；同进程独立的 Host Pet listener 提供 Agent Session

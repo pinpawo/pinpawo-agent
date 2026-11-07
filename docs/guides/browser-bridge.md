@@ -24,7 +24,7 @@ pinpawo browser extension status
 3. Load the extension directory as an unpacked extension.
 
    For a checkout, use `toolkits/browser/dist/hosts/chrome-extension/extension`.
-   For an installed package, use the reported `bundledExtensionPath`.
+   For an installed package, use the reported `host.bundledExtensionPath`.
 
 4. Copy the extension ID shown by Chrome.
 5. Register that ID:

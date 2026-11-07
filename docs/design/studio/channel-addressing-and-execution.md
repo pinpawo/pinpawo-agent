@@ -2,10 +2,10 @@
 
 状态：当前实现设计，2026-10-05；基础由 [#897](https://github.com/pinpawo/pinpawo-agent/pull/897)
 引入，统一参与者与来源修复由 [#904](https://github.com/pinpawo/pinpawo-agent/pull/904) 合并。
-本文是 Channel 当前设计入口；合并不表示已更新任何用户 workdir 或部署。
+本文记录 Channel 寻址、执行与状态；合并不表示已更新任何用户 workdir 或部署。
 
 > 2026-10-14：按 [Channel 模型](channel-model.md) 重新实现：成员、自然对话（无目标/修订）、Pet 公开回复即消息、
-> schedule / trigger 的 `run()`。本文已同步；数据与规则以 Channel 模型为准。
+> schedule / trigger 的 `run()`。成员与数据规则见 Channel 模型；无 @ 消息的可选自动派发见 [Channel 路由](channel-routing.md)。
 
 早期方案与验收沿革见[历史记录](../../history/studio/channel-evolution.md)。Channel 公共协作提示的作用域与迁移目标见[设计草案](channel-collaboration-prompt.md)。
 
@@ -43,12 +43,13 @@ HTTP 请求的成员身份是认证出的 Studio 客户 `human:<clientId>`（本
 - 有效目标须是当前成员，缺失/无效身份报错；同一消息的重复目标合并。Pet @ 自己同样派发（自我交接）。
 - 多目标独立接纳与失败，不隐含依赖或顺序。Pet 目标调用 dispatch；人目标在 UI 阅读。
 - Pet 的公开回复是普通消息，使用同一解析和投递入口；Pet 自主决定是否、向谁交接。
-  其中无法解析的 @ 不阻止保存，消息不带目标，并发布失败的 `channel.delivery` 事件。
+  其中无法解析的 @ 不阻止保存，消息不带目标，并发布失败的 `channel.delivery` 事件；该消息不会当成无 @ 消息重新路由。
 - `replyTo` 只提供同 Channel 引用，不选择目标或授权借用原作者的 session。
 
 Console 点击 Reply 按原作者的 kind / 原始 id 预选已登记 participantId（输入框开头放入该成员的 @），可改选或删除；
-已移除作者不猜目标。人作者默认选择人，不派发 Pet。清除且正文无有效寻址时仅保存；
-正文主动寻址仍生效，UI 明确说明该条件。这个人的 UI 默认不替 Pet 输出补目标。
+已移除作者不预选目标。人作者默认选择人，不按该 @ 派发 Pet。清除预选目标且正文没有 @ 寻址、消息成功保存时，
+路由关闭则只保存消息；路由开启且存在合格 Pet 候选时，消息可异步进入 [Channel 路由](channel-routing.md)，
+由模型选择一个候选或不派发。正文主动寻址仍生效；Console 提示无 @ 时路由可能选择 Pet。UI 不替 Pet 输出补目标。
 
 ## 持久事实与 session
 

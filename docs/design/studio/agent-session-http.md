@@ -4,7 +4,10 @@
 
 为外部 coding agent 的 Studio skill 提供会话观察和审批入口。实现放在
 host 的 Agent Session listener，与 WebSocket 共用 Pet registry、鉴权、
-协议解析、snapshot、审批校验和 conversation coordinator。Studio Plugin 不依赖会话协议。
+协议解析、snapshot、审批校验和 conversation coordinator。Studio Plugin 可通过
+Studio context 的受限 `petSessions` 接口观察指定 Pet session 并处理当前审核；它不需要
+直接实现 Host 的 HTTP/SSE 或 WebSocket wire 协议。接口见
+[Studio API](../../reference/api/studio.md#exact-pet-session-observation-and-review)。
 
 ## 接口
 

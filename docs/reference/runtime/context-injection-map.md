@@ -1,419 +1,129 @@
 # Context Injection Map
 
-> 2026-09-11：本文部分上下文描述仍保留旧 Announce / active delegation 设计，
-> 不作为当前状态与交接契约。当前实现及待审查设计以
-> [Root、Supervisor 与 Capability 的状态与交接](../../design/agent-runtime/run-scoped-supervisor-session.md)
-> 为准；下方图与终端回复来源已同步本轮节点清理。
-
-> Scope: every model-invoking node in the orchestrator graph, and exactly what
-> enters its context window.
-> Audience: written to be read by an LLM working on this repo. Each node section
-> is self-contained — you can read one section without reading the others.
+> **Status: current implementation guide.** This page maps where the runtime
+> assembles model context. For exact schemas and behavior, follow the source
+> links. The [earlier context map](https://github.com/pinpawo/pinpawo-agent/blob/29f0bec9094a0be57ed48f03778ce2a7ccc6ac3d/docs/reference/runtime/context-injection-map.md)
+> describes the retired Announce and active-delegation design; it is historical.
 
 Read this before changing what a node sends to its model. Prompt text lives in
-`prompts/templates/`; this document is about **assembly**: which pieces exist,
-which are stable across a run, and which are rebuilt per invocation.
+[`prompts/templates/`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/).
+The [Root, Supervisor and Capability design](../../design/agent-runtime/run-scoped-supervisor-session.md)
+explains the current state and handoff; it remains a working design under review.
 
 ## 1. The two axes
 
-Everything below is classified on two independent axes. Do not conflate them.
-
-**Axis 1 — Static vs Dynamic** (does it change between invocations?)
-
-| Class | Meaning | Rebuilt when |
-|---|---|---|
-| `STATIC` | Same string for every invocation of this node, for the whole process | Never (module constant) |
-| `RUN-STABLE` | Held stable once prepared for this run; execution progress is projected separately | New run; plan changes require user confirmation |
-| `DYNAMIC` | Recomputed from state on every single invocation | Every invocation |
-
-**Axis 2 — Authority** (may the model treat it as an instruction?)
-
-| Class | Meaning |
-|---|---|
-| `INSTRUCTION` | The model must obey it. System prompts only. |
-| `BOUNDARY` | Defines what "done" means for this step. |
-| `FACT` | Read-only data. Explicitly *not* an instruction. Carries `authority="none"`. |
-| `HISTORY` | Canonical conversation or private delegation messages. |
-
-The repo encodes Axis 2 in the XML itself — blocks carry `role=`, `source=` and
-`trust=`/`authority=` attributes. When adding a block, set these; they are the
-only thing preventing a data block from being read as a new user instruction.
+When reviewing model context, distinguish both **lifetime** (what is stable for a
+run and what is rebuilt per invocation) and **authority** (instructions, task
+boundary, facts, or conversation history). Tool results and summaries are data;
+they are not new user instructions. The model-facing format is assembled at the
+relevant call site, so source and tests establish the current details.
 
 ### Canonical message ownership
 
-`OrchestratorState.messages` is the only canonical message collection. An
-untagged message belongs to the main conversation; a private Capability message
-has one complete `{ lane, runId, delegationId }` scope. The immutable
-`queryAgentMessages()` selection preserves canonical chronology and may append
-invocation-only input without persisting it.
-
-A fresh delegation never inherits another delegation's private history.
-Continuing the exact delegation reuses its scope. Capability briefings and
-Supervisor provider messages are invocation-private and never enter root
-messages. Current handoff moves typed Announces into main and clears private
-messages for that scope. In the target, root publishes Announces into main before
-acceptance; acceptance updates task metadata and closes private execution scope,
-without publishing the result again. Section 5 distinguishes these input paths.
+Root state holds the main messages and Supervisor work messages. Capability
+internal messages stay in the child graph; with a configured checkpointer, they
+use its child namespace. Root receives the paired `delegate_capability` tool result. A new delegation is a new execution;
+it does not replay a previous child's internal transcript. See
+[execution records](../../../packages/pet-agent/src/agent/orchestrator/executionMessages.ts)
+and the [state and handoff design](../../design/agent-runtime/run-scoped-supervisor-session.md).
 
 ## 2. Graph shape
 
-```
-START
-  └─> prepare ─> compactContext ─> captureUserRequest ─> entryAnswer
-      entryAnswer ─(plan_request / continue)─> runSupervisor ─┬─> capability
-                                                            └─> answer ─> END
-      entryAnswer ─(direct reply)─> END
-      capability ─(result)─> delegationBoundary ─> runSupervisor
-      capability ─(review reject/cancel)─> explicit terminal reply ─> END
+```text
+prepare -> compactContext -> captureUserRequest -> entryAnswer
+  entryAnswer -> direct reply / end, or runSupervisor
+  runSupervisor -> end, or capability -> delegationBoundary -> runSupervisor
 ```
 
-Model-invoking nodes: **entryAnswer**, **runSupervisor**, **capability**
-(subagent), plus **compactContext** (summarizer).
-`prepare`, `captureUserRequest` and the guards invoke no model.
-
-`answer` is the current deterministic output node, not a permanent domain role.
-A unified Finalizer node is planned after Supervisor optimization; its design is
-deferred and this reference does not prescribe its future model usage.
+A rejected or cancelled review can terminate after Capability execution. Native
+review resume follows its checkpoint rather than starting a fresh Entry run.
+See the [graph](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)
+and [Capability route](../../../packages/pet-agent/src/agent/orchestrator/runtime/routes/afterCapability.ts).
 
 ## 3. Shared building blocks
 
-These are assembled by several nodes. Defined in
-`prompts/xml.ts` and `prompts/context.ts`.
-
-| Block | Class | Built by | Notes |
-|---|---|---|---|
-| `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor renders this run request in its run context. Capability briefings carry the plan goal instead (`runSupervisorState.goal`), which can differ from it; see §8. |
-| `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + `<briefing>`. Each invocation uses the same shape. |
-| `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
-
-`xmlTextBlock()` wraps payloads in `CDATA` and escapes nested `]]>`. Always use
-it for free text — never interpolate user or tool text into a tag directly.
-
-Role prompts no longer receive `AgentActor` or a legacy `[配置]` block. Common
-Host instructions, including PET.md, are composed at the model boundary from
-invocation runtime context; see [Pet root document](../../design/pet-document.md).
-`AgentRuntimeContext.workdir` is rendered once between common Host sections and
-execution-local sections. The same value supplies review and Toolkit execution
-scopes. Host environment facts also use common sections; there is no separate
-`runtimeEnvironment` configurable channel. Root context is reapplied on resume,
-without putting these sections in checkpointed messages.
+The role prompt is composed with Host-provided system sections, structured
+workdir when present, and execution-specific sections, in that order. Capability
+execution sections include selected Toolkit instructions and Capability
+instructions. Host sections can include PET.md. Context is supplied again on
+resume; it is not reconstructed from conversation history. See
+[system prompt composition](../../../packages/pet-agent/src/prompts/systemPrompt.ts),
+[Capability execution](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts),
+and [workdir context](workdir.md).
 
 ## 4. Node: entryAnswer
 
-Routes the request: reply directly, ask a question, or hand off via
-`plan_request`. Source: `runtime/nodes/entryAnswer.ts`.
-
-| Slot | Class | Content |
-|---|---|---|
-| system instructions | `RUN-STABLE` / `INSTRUCTION` | Entry routing and goal-definition rules selected for the current invocation, plus shared invocation context such as the Pet's identity and Channel announcement |
-| system facts | invocation projection / `FACT` | With non-empty validated external system sections, the current `<capability_routing_manifest>`: available Capability names, purposes, Toolkit summaries and the default Capability when available |
-| plan snapshot | `DYNAMIC` / `FACT` | `<supervisor_snapshot>` — the saved goal and plan, with their origin |
-| history | `DYNAMIC` / `HISTORY` | `mainConversationMessages(state.messages)` |
-
-Entry selects the new goal-definition instructions only when the current
-`AgentRuntimeContext.systemPromptSections` is non-empty after schema validation.
-In that form, the system prompt asks it to consider the current Agent's identity,
-available Capabilities and the main conversation. The user's overall request
-provides the context and constraints; the goal should state the work this Agent
-is responsible for in this turn. Available tools do not expand that responsibility.
-
-Both forms share neutral `plan_request` and `continue` tool descriptions. These
-describe the planning operation and goal parameter; responsibility boundaries
-remain in the system prompt. Tool binding does not vary with injected sections.
-
-Absent sections or `[]` retain the original system instructions, with no Entry
-Capability manifest. A typed `workdir` alone does not count as external system
-sections. Invalid sections are rejected rather than treated as absent. Selection
-uses the current invocation, not earlier messages
-or a cached graph's first invocation; it does not inspect Pet, Channel, or owner
-identifiers. Supervisor's existing context and optional detail reading are unchanged.
-
-After a delegation result commits, the optional invocation-scoped
-`onDelegationComplete` hook lets a Host cancel at a separate Root boundary.
-The hook does not inject messages or consume a queue. The Host admits subsequent
-input through a fresh Entry invocation; the existing `continue` tool can retain
-the saved plan and returned deliveries. Native review resume keeps its separate
-contract. See [incoming input boundaries](../../design/agent-runtime/incoming-input-boundary.md).
-
-The Capability summary is rebuilt from the current invocation's compiled
-registry and `allowedCapabilityNames`. Entry reuses the catalog, manifest and
-renderer used by Supervisor, so both see the same available names and purposes.
-An unavailable default is omitted. The summary does not contain the full
-Capability instructions and is not appended to canonical message history.
-PET.md and Channel context continue to arrive through shared system sections;
-they are not copied into the summary.
-
-`mainConversationMessages()` excludes every lane-tagged message. Briefings are
-current Capability inputs and never enter canonical state. An accepted
-typed Announce reaches this view after handoff moves its semantic identity into
-the main queue. Entry Answer selects this history with the shared message query;
-the model-invocation runtime renders typed messages without changing state.
-
-Entry Answer also receives `<supervisor_snapshot origin="none|current_run|previous_run">`,
-the projected Supervisor state. Supervisor state outlives a run, so `origin`
-reports where these facts came from: no plan yet, this run's own, or an earlier
-run's. "No plan yet" is its own answer, not an empty previous run. Plan items
-project `capability`, `status` and `objective`; their ids are content hashes the
-model never cites, and `continue` takes no arguments.
-That freshness is what choosing between `continue` and `plan_request` turns on;
-the runtime renders the fact and the model makes the choice — nothing in the
-runtime infers the answer from the plan being non-empty.
-
-**Output → state:** `plan_request(goal)` resolves the run goal against the whole
-conversation. With external system sections, the goal-definition instructions also
-use the current identity and Capability summary to identify this Agent's part in
-the work while preserving the user's requirements and constraints. Without those
-sections, the original instructions to faithfully convey the user's goal apply.
-The original request remains in the main conversation. This authors the initial
-goal; user-directed Supervisor adjustments may revise it. See §8.
-`continue` adopts the saved plan into this run, which is what places Supervisor
-at a Boundary over facts it now owns.
+Entry sees the main conversation and a projection of the saved Supervisor plan.
+It can reply directly, route a new goal through `plan_request`, or choose
+`continue` for an unfinished plan. When validated external system sections are
+present, it also receives a Capability routing manifest. These are invocation
+projections, not a second conversation store. See
+[Entry implementation](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts).
 
 ## 5. Node: runSupervisor
 
-Two modes use the same steering domain. The target lifetime and ownership
-contract is defined by
-[`run-scoped-supervisor-session.md`](../../design/agent-runtime/run-scoped-supervisor-session.md).
-Capability exit, Boundary entry, and the target command convergence are defined
-by the
-[`delegation-boundary-protocol.md` (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md)
-draft for issue #755. The implementation uses the single-proposal surface below.
-The lifetime and tool-scope table includes the 2026-09-06 target clarification:
-the committed plan and prepared disclosure stay stable during execution, and
-conversation plus execution evidence arrive only through main messages.
-Execution Boundaries cannot rewrite the plan or discover more Capabilities.
-A new user supplement allows confirmed adjustments before execution resumes.
-Sources:
-`runtime/nodes/runSupervisor.ts` (dispatch),
-`runSupervisor/agent.ts` (assembly),
-`orchestrator/modelInvocation.ts` (internal model-call wiring).
-
-| Slot | Lifetime | Entry mode | Boundary mode |
-|---|---|---|---|
-| system | invocation projection / `INSTRUCTION` | entry objective and context meaning | boundary objective and context meaning |
-| clean conversation | projected per invocation / `HISTORY` | canonical main conversation with typed result facts | current canonical main conversation including unaccepted Announces |
-| session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
-| current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
-| tools | invocation projection / `INSTRUCTION` | `capability_details`, `submit_plan` | execution: `review_current`; fresh user input additionally enables `adjust_plan` and `capability_details` |
-
-Mode is a state read: `runSupervisorState.runId === runId` means this run has
-already entered Supervisor (Boundary); otherwise Entry. The field records
-entering, not committing — the Supervisor node and the decision-error recovery
-path both stamp it, because a rejected decision still spends the turn. Runtime
-code does not reconstruct Entry intent from a trailing routing tool pair.
-
-Entry initializes the run's Supervisor context. Capability returns a paired
-ToolMessage containing its delivery and status; its artifact records
-the actual plan item and invocation identity. Supervisor reads those results to
-decide acceptance and the next action. Child transcripts remain in their native
-LangGraph namespace/checkpoints and are not copied to Root messages or the plan.
-
-`review_current({ completed, reason })` records task acceptance without invoking
-Capability. The model then chooses whether to delegate, adjust the plan or reply.
-Every `delegate_capability({ briefing })` is an independent invocation. Supervisor
-progressively discloses the next work, useful prior findings and constraints in
-that briefing. There is no initial/continue mode, automatic feedback injection,
-or replay of an earlier child's internal messages.
-
-`adjust_plan({ goal, reason, currentTask, tasks })` commits the remaining plan.
-`currentTask: keep` retains the plan item and its acceptance evidence; `replace`
-creates a new plan item. Neither option resumes a child execution. Goal changes
-require fresh user input. Pause guidance becomes a HumanMessage for Supervisor
-to interpret; it does not force the next Capability call. Native tool-review
-interrupts resume through LangGraph's existing checkpoint chain.
-
-In the current implementation, Capability disclosure is run-scoped semantic state. It contains every
-Capability whose complete document was disclosed during this run in stable
-order; the configured default is candidate policy rather than an initial
-disclosure. A deterministic routing manifest projected from the effective in-memory registry
-is projected into each Supervisor invocation. It retains the Toolkit names and
-descriptions resolved from each Capability's compiled `uses`, while complete
-Capability documents remain progressively disclosed. No extra model call, filesystem snapshot, search backend, or routing cache is involved. Dynamic registry
-facts do not enter the stable system prompt. A new run revalidates disclosure; resumed root tasks may seed the
-capabilities named by their active and remaining plan.
-
-`capability_details` is callable at Entry and at the first Boundary of a new user
-supplement, with automatic tool choice. It is unavailable during execution. Each ToolMessage
-reports newly provided documents, already provided names and unknown names.
-There is no private search counter, empty-round allowance, disclosure open/closed
-flag, or round-limit response. Parallel reads merge only disclosed names.
-Call counts and timings remain eval diagnostics. Document byte limits remain;
-Supervisor has no elapsed-time limit and honors caller cancellation.
-
-The manifest supports planning without a mandatory detail read. Exact-name detail
-reads are optional; they do not search document text. The target prepares any needed disclosure before execution and reuses it during execution
-Boundaries. Needing a different scope leads to a direct question. The user's
-answer enters main with the active delegation retained, and Supervisor can
-prepare documents needed for the explicit adjustment on the new run's first
-decision, including in Boundary mode. It then resumes execution with stable
-disclosure. No separate replanning stage, disclosure registry, or fallback is
-needed; receiving input alone does not end or replace the delegation.
-
-Each Supervisor invocation receives two input messages around the selected
-history (main plus this run's `supervisor` lane):
-
-```
-system prompt (stable per mode)
-earlier runs' history                      ← unchanged across the run
-<run context>  run request, routing manifest, disclosed documents
-this run's messages and Supervisor work
-<turn>         remaining plan / supervisor_plan, invocation instruction
-```
-
-The run context is placed immediately before this run's first message and only
-changes when disclosure grows, so the prefix through it is identical across the
-run's invocations and can be served from provider prefix caches; only the turn
-message is new each time. Neither input message is persisted. Supervisor work is
-persisted in the `supervisor` lane of the current run (earlier runs' lanes are
-pruned when the next run starts). A persisted `capability_details` result keeps
-only the disclosed, already-disclosed and unknown names: the documents themselves
-are rendered once, in the run context, rather than repeated in work records.
-
-Run `npm run supervisor:context-audit -w @pinpawo-tests/agent-evals` to inspect the complete static provider
-contract for both modes. It renders the production system/input builders,
-projected history, tool descriptions, and argument schemas together.
+Supervisor receives selected Root history, run context and the current turn. It
+can inspect Capability details, plan or adjust work, review a result, delegate
+and respond; control validation enforces the applicable state constraints.
+Capability deliveries return as paired tool results, not Announce messages.
+The actual call/result and execution record are evidence; accepting a plan item
+is a separate decision. Run context and turn messages are invocation-only
+projections around the selected history. Supervisor work is retained for its
+current run; fresh-run preparation removes earlier Supervisor work lanes. See
+the [Supervisor agent](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.ts),
+[control middleware](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/controlMiddleware.ts)
+and [execution records](../../../packages/pet-agent/src/agent/orchestrator/executionMessages.ts).
 
 ## 6. Node: capability (subagent execution)
 
-Executes one delegated task. Source: `runSupervisor/delegateCapabilityTool.ts`,
-registered as the `capability` ToolNode in `runtime/graph.ts`; the isolated
-attempt itself runs in `capabilityExecution/runner.ts`.
-
-| Slot | Class | Content |
-|---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions and capability instructions |
-| history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().select()` — main conversation including paired Capability results |
-| boundary | `RUN-STABLE` / `BOUNDARY` | One `<delegation_briefing>` containing goal context, current task and Supervisor's next-step instructions; always last |
-
-Each tool call gets a distinct delegation identity. Earlier findings are available
-through paired ToolMessages and the Supervisor-authored briefing; internal child
-messages are not replayed. The briefing is input to the child and may be present
-in its native checkpoint, but is never appended to Root conversation history.
-The retired artifact-discovery Toolkit contributes no tools or prompt section.
-Execution records use only the current schema; the old `artifacts` field and
-unused state index have been removed. The boundaries are described in the
-[retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
-
-Invocation input:
-
-```xml
-<delegation_briefing role="task_boundary" source="orchestrator">
-  <run_user_request role="goal_context" source="orchestrator_state" trust="read_only">
-    <request><![CDATA[用户的整体目标与约束]]></request>
-  </run_user_request>
-  <task><![CDATA[当前 Capability 的执行边界]]></task>
-  <briefing><![CDATA[Supervisor 为本次执行准备的说明]]></briefing>
-</delegation_briefing>
-```
-
-The same input shape applies to every invocation; the model expresses remaining
-work and useful prior findings through briefing.
+For each delegated call, the executor assembles a task briefing, selected Toolkit
+instructions and Capability instructions. It exposes only the tools in the
+compiled Capability and forwards the parent runtime context and cancellation.
+The selected main history must have stable message IDs. The current delegation
+briefing is appended to the child input; earlier deliveries are evidence, not
+new instructions. A result can contain a delivery or report `missing_deliverable`;
+private child messages are not copied into Root as a transcript. See the
+[Capability runner](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts)
+and [subagent construction](../../../packages/pet-agent/src/subagent/createSubagent.ts).
 
 ## 7. Current node: answer
 
-The terminal node `runtime/nodes/answer.ts` reads the committed current-run
-Supervisor reply from its messages and emits it exactly
-once and clears run-scoped state. It does not invoke a model. Root iteration
-limits, the Supervisor invocation step limit and incompatible checkpoints have
-deterministic notices. An empty reply without a runtime stop is a protocol error,
-not a request for a fallback answer or a retry.
-
-Natural Supervisor replies retain the active delegation and remaining plan.
-`review_current({ completed: true, reason, reply? })` accepts the active task before terminal
-cleanup and saves any remaining plan without dispatching it. The existing
-continuation snapshot also supports a remaining plan with no active delegation;
-explicit resume then starts a fresh Entry session.
-
-Supervisor itself supplies questions as well as answers. A question retains
-unfinished work and exposes the existing continuation entry so the user's answer
-returns to the same goal; it does not require an `interrupted` event. The answer
-enters the next root main projection. Changing the plan requires user agreement,
-not merely a new invocation. UI continuation integration is still pending.
-
-Before any plan or delegation exists, a question has no execution snapshot to
-resume: the answer follows ordinary `entryAnswer`, which resolves the goal from
-main. With an active delegation, explicit user input reaches Supervisor before
-further execution while retaining the delegation and existing messages. It need
-not wait for another Announce, but acceptance still requires result evidence.
-
-Historical replay is not a terminal-finalization responsibility. A later request
-to re-show a result is an ordinary conversational request handled by Entry
-Answer from canonical main history and any compaction summary.
+The current Root graph has no separate `answer` node. Entry and Supervisor can
+produce a natural response through their respective paths; the graph routes a
+normal Supervisor return to `END`. See the [graph](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)
+and [Supervisor node](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts).
+This retained heading supports earlier links; it does not prescribe a future node.
 
 ## 8. Run request and plan goal
 
-Two state values with different owners. They start equal and can diverge:
-
-| Value | Written by | Meaning | Model projection |
-|---|---|---|---|
-| `runUserRequest` | `captureRunUserRequest` seeds the latest human message (provisional); `plan_request(goal)` replaces it with the resolved request; `continue` keeps the provisional capture | What the user asked in this run. On `continue` it can be a bare continuation utterance such as "继续". | Supervisor `<run_user_request>` in the run context |
-| `runSupervisorState.goal` | `submit_plan` at Entry (set to the run request); `submit_plan` at a boundary keeps the established goal; `adjust_plan` (sets its `goal` argument, which may differ from the current goal only with fresh user input); carried into a new run unchanged by Entry `continue` | The goal the plan executes and is accepted against. | Capability briefing `<run_user_request role="goal_context">`; Supervisor `<supervisor_plan>`; Entry `<supervisor_snapshot>` |
-
-A non-empty plan always carries a goal: every writer of a plan also writes or
-preserves its goal. Execution, acceptance and boundary re-planning read the plan
-goal and never fall back to the run request — on `continue` that fallback would
-hand the executor a continuation utterance as its goal. A missing goal on a
-planned task is an invariant violation: `delegate_capability` and
-`review_current` fail the run (`requirePlanGoal`).
-
-Why the run request is model-authored: the last human message is often a continuation
-utterance ("嗯。开始吧") that states no goal. Entry Answer resolves the initial
-goal from conversation; when external system sections are supplied, its instructions
-also use the current identity and Capability summary as described in §4.
-Supervisor uses the existing goal and current task conversation to interpret
-later adjustments. Verbatim text is still preserved
-when the resolved goal equals the current message, so formatting-sensitive
-requests are unaffected.
+`captureRunUserRequest` seeds the current user request before Entry. Entry can
+resolve a new goal through `plan_request` or adopt an unfinished plan through
+`continue`. The current `runUserRequest` can be a continuation utterance, while
+`runSupervisorState.goal` carries the plan goal across runs; an explicit goal
+change can update it through the continuation path. The model's routing choice
+is distinct from the state projection. See
+[Entry implementation](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts)
+and [Supervisor state](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/state.ts).
 
 ## 9. Compaction
 
-Root history maintenance is owned by `contextCompaction.ts`,
-`guardDefinitions/contextCompactionWatermarkGuard.ts`, and the run-entry graph.
-
-- **Trigger** — a token watermark against the real context window
-  (`contextWindowTokens` / `generationReserveTokens`), measured on
-  `mainConversationMessages()`. The threshold is 75% of input capacity after
-  generation reserves, leaving roughly 25% as headroom for new context.
-- **Timing** — `prepare → compactContext` runs at new root-run entry. Execution
-  loops do not return to compaction. This is already the graph structure.
-- **Sweep** — `RemoveMessage({ id: REMOVE_ALL_MESSAGES })` then rebuild from
-  `selectMessagesToKeep(messages, keepMessages)` (default 10), which operates on
-  the **full** message array and re-runs `toolProtocolSafeMessages()` so no
-  orphaned tool call survives.
-
-Currently the sweep covers root message lanes and pins active private-lane
-Announces intact because those results are excluded from the generated summary.
-In the target, Announces live in main before acceptance. Keep the entry-only
-schedule and the two existing retention rules: retain recent messages and every
-original Announce for the current unfinished delegation, including attempts
-outside the recent suffix. Match the latter by existing Announce identity metadata
-and active-task state instead of private lane tags. This requires no additional
-pinning state and allows other old history to compact normally on continuation.
-
-Within the run, retain complete result messages and prior attempts. Do not add
-per-Announce clipping or mid-run root compaction. The 25% headroom and retention
-rules work together: more aggressive compaction of older history must still keep
-current unfinished-delegation evidence intact. No whole-step deferral or duplicate
-result storage is needed. Raw Supervisor invocation history stays private and
-ephemeral; Capability's private context maintenance remains subagent-owned.
+Root evaluates the watermark on a fresh run before Entry. The compaction effect
+retains recent messages and call/result records for unfinished plan items, and
+summarizes eligible older messages. This is based on current execution records,
+not Announce identifiers. Capability execution keeps its private transcript
+and requests a final handoff when its context or model-call budget is reached;
+it does not summarize and replace that transcript. A fresh delegation gets a
+new execution context. See [subagent budget middleware](../../../packages/pet-agent/src/subagent/budgetMiddleware.ts),
+[prepare and compaction](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/prepare.ts)
+and [compaction implementation](../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts).
 
 ## 10. Checklist for adding context
 
-1. Which node? Entry Answer, Supervisor, Capability, and the compaction summarizer
-   invoke models; the current terminal answer node does not.
-2. Static, run-stable, or dynamic (§1)? Static belongs in a template constant,
-   not in a per-invocation builder.
-3. Instruction, boundary, fact, or history? Anything not an instruction needs
-   `authority="none"` / `role="fact"`.
-4. Wrap free text in `xmlTextBlock()`.
-5. Does ordering matter? Capability invocation context must keep the ephemeral briefing last.
-6. Will it survive compaction? Keep goal and plan in run-stable state. Result
-   evidence stays in main messages intact during execution; compaction retains
-   all Announces for the current unfinished delegation by existing identity,
-   independently of the recent-message suffix.
-
-Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Reviews do not carry plan updates; user-directed changes use adjust_plan. Root applies these effects inside its existing `runSupervisor` node.
-
-Boundary context and review (2026-09-07): select main by the existing logical-task taskId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps taskId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
-
-The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Execution Boundary uses review_current; a fresh user input also enables adjust_plan. For review_current, completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.
+1. Identify the receiving model call and the source, lifetime and authority of
+   each section.
+2. Keep user or tool data distinct from instructions, and avoid persisting
+   invocation-only projections as new canonical messages.
+3. Check resume, cancellation and compaction behavior when changing context that
+   must survive those boundaries.
+4. Validate observable behavior and protocol boundaries with relevant tests;
+   follow [repository testing guidance](../../../AGENTS.md#testing).

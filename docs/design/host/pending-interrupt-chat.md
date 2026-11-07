@@ -1,6 +1,8 @@
 # Pending Interrupt in Chat
 
-> Status: Draft
+> Status: Historical design draft for PR #682; wire and Studio details have since evolved.
+> Current contract: [Agent Session projection](../../reference/runtime/session-projection.md) and
+> [Native human review interrupts](../agent-runtime/interrupt.md).
 > Date: 2026-08-22
 > Related: issues #675 and #684, PR #682
 > Resident Pet integration: [Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md)
@@ -25,7 +27,7 @@ active Chat thread
   -> validate current payload and resume the same thread
 ```
 
-## Canonical vocabulary
+## Vocabulary
 
 | Name | Meaning | Owner |
 | --- | --- | --- |
@@ -36,10 +38,9 @@ active Chat thread
 | interaction response | Selection for one review interaction | Producer/adapter input |
 | `requestId` | One Chat transport command and the events it produces | Chat adapter |
 
-There is no canonical `ReviewAction`, `actionId`, or independent review
-lifecycle. During compatibility migration, old names may remain at the wire or
-TUI boundary, but they alias the current interrupt rather than naming another
-entity.
+Review is represented by the pending interrupt, not a separate review lifecycle.
+The earlier draft's wire aliases are not the current protocol; use the contracts
+linked above.
 
 ## Shared checkpoint contract
 
@@ -66,30 +67,34 @@ The same interrupt ID can be observed again with updated review content after a
 middleware re-ask. Consumers must refresh the payload from the latest checkpoint
 or event rather than treating an ID match as immutable content.
 
-The canonical Chat wire shapes are:
+The current Agent Session runtime event and client command use these shapes:
 
 ```ts
-type HumanReviewRequested = {
-  type: 'human_review.requested';
+type InterruptRequested = {
+  type: 'interrupt.requested';
   requestId: string;
-  pendingInterrupt: PendingInterrupt<HumanReviewInterruptPayload>;
+  pendingInterrupt: PendingInterruptProjection;
+  usage?: TokenUsageSnapshot;
 };
 
-type HumanReviewResponse = {
-  type: 'human_review_response';
+type InterruptResume = {
+  type: 'interrupt.resume';
   requestId: string;
   interruptId: string;
-  responses: Array<{
-    interactionId: string;
-    selectedOptionId: string;
-    input?: Record<string, unknown>;
-  }>;
+  value: JsonObject;
 };
 ```
 
-`actionId`, scalar response fields, and `decisions` are accepted only by the
-inbound compatibility parser and are normalized immediately. Newly emitted
-messages use the shapes above.
+`interrupt.requested` is carried inside an Agent Session event envelope. The
+human-review kind currently accepts `value: { decisions: HumanReviewResponse[] }`
+or `value: { action: 'cancel' }`; each public decision identifies its
+`interactionId` and `selectedOptionId`, with optional input. The Host validates
+responses against the current checkpoint before resuming. See
+[`protocol.ts`](../../../packages/agent-session/src/protocol.ts),
+[`events.ts`](../../../packages/agent-session/src/events.ts), and
+[`pendingHumanReviewInterrupt.ts`](../../../services/host/src/pendingHumanReviewInterrupt.ts).
+The original `human_review.requested` / `human_review_response` names were draft
+shapes and are not the current canonical wire messages.
 
 ## Chat boundary
 
@@ -118,27 +123,28 @@ ordering belongs to that coordinator and the graph checkpoint, not to an
 Studio has an explicit target and invocation protocol:
 
 ```text
-dispatch(petId, input) -> invocation on that Pet's stable thread
+dispatch(petId, input) -> invocation in the selected Pet session
 ```
 
-Studio may later carry an interrupt-resume input through dispatch, but that is
-outside PR #682. Studio reuses only the shared `PendingInterrupt` payload and
-resume semantics. `petId`, `invocationId`, and dispatch producer metadata stay
-in Studio envelopes; they do not enter the shared interrupt projection or the
-Chat adapter.
+PR #682 did not specify a Studio dispatch resume protocol. Current Studio also
+borrows a restricted Host session port for snapshot, observation, and review of
+an exact Pet session; see [Studio API](../../reference/api/studio.md#exact-pet-session-observation-and-review).
+Studio routing metadata does not enter the shared interrupt projection.
 
-## Migration sequence
+## Original migration sequence
+
+This records the draft plan, not a current implementation checklist.
 
 1. Make the Chat checkpoint projection use `PendingInterrupt` and
    `interruptId` vocabulary.
 2. Rebuild Chat snapshots and resume routes directly from the active checkpoint.
 3. Remove Chat-local review existence, claim, consumed, and fatal tombstone
    state once thread serialization covers competing calls.
-4. Keep temporary wire aliases only where an older TUI can still send them.
+4. At the time, keep temporary wire aliases only where an older TUI can still send them.
 5. Let Studio adopt the shared interrupt contract separately through issue
    #684 and its typed dispatch input.
 
-## Non-goals
+## Original non-goals
 
 - Adding `petId`, `threadId`, or `invocationId` to the Chat interrupt payload.
 - Treating a Chat response as dispatch.

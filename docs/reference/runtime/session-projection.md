@@ -8,7 +8,7 @@
 > [Core Concepts](../../concepts/core-concepts.md) for the distinction between checkpoints,
 > sessions, and timelines.
 
-`AgentSession` is the client-neutral, in-memory projection consumed by the local TUI and hosted chat adapter. It is not a second durable conversation store.
+`AgentSession` is a client-neutral, in-memory projection used by clients such as the local TUI. It is not a second durable conversation store.
 
 The canonical implementation lives in the runtime-neutral
 `@pinpawo/agent-session` workspace package. `services/host` produces and
@@ -96,11 +96,9 @@ package does not maintain a second `Wire` object graph or a general-purpose JSON
 serializer.
 
 Disclosure policy belongs to the endpoint that knows its trust boundary. The
-current host remote adapter preserves native events and snapshots,
-including deltas and operation `raw`, and only redacts obvious local path
-fragments in main-agent `message.completed.text`. Trusted local transports
-retain the canonical data unchanged. A future public API may use the same
-snapshot contract while applying a stricter API-specific disclosure policy.
+current Host wire sends the message payload unchanged and does not apply local
+path redaction. An adapter exposing a remote surface must establish its own
+disclosure policy. See [Host protocol](../../../services/host/src/wire/protocol.ts).
 
 Runtime/checkpoint-to-snapshot materialization remains a host adapter.
 WebSocket, stdio, HTTP, future API routes, authentication, persistence and
@@ -265,31 +263,14 @@ continues to own checkpoint persistence and interrupted continuation state;
 the local coordinator neither inspects checkpoint generations nor uses a
 checkpoint as a lock.
 
-## Hosted chat adapter
+<a id="hosted-chat-adapter"></a>
 
-The hosted chat adapter folds accepted user input, runtime events, server
-interrupt progress, and terminal state through the same reducer as the TUI.
-Review-resolution commands do not optimistically advance the hosted projection.
-Runtime events rejected by the shared ownership rules are not forwarded to the
-hosted wire. The process-local projection evicts least-recently-updated idle
-sessions above its retention limit while always retaining active runs; the
-existing event and control wire protocol remains compatible and does not add
-session patches or revision numbers.
+## Transport scope
 
-Before a completed main-agent message reaches the current remote transport, the
-host adapter redacts obvious local path fragments in its `text`. This
-narrow endpoint rule is not part of the shared projection contract. Other
-events and snapshots retain their canonical payload, including operation
-`raw`, title, summary, source, target, and details fields.
+The former hosted app relay and its path-redaction adapter have been removed;
+the shared session projection does not define a remote disclosure policy. The
+Host's current session ports and transports are described in
+[Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)
+and the [Studio session API](../../reference/api/studio.md#exact-pet-session-observation-and-review).
 
-Pending Chat interrupts are durable in the implicit active thread's LangGraph
-checkpoint. Every response attempt reloads that checkpoint and identifies the
-continuation with `interruptId`; `interactionId` identifies one item inside a
-human-review payload. Decisions remain ordered as supplied by the human-review
-payload.
-
-Studio dispatch, `petId`, and backend persistence are outside this Chat
-projection contract. Studio may reuse the `PendingInterrupt` value contract,
-but not Chat's implicit-thread route or response protocol.
-
-Ink/React state, composer focus, viewport state, sockets, filesystem handles, and partial review drafts are outside this contract.
+UI state, composer focus, viewport state, sockets, filesystem handles, and partial review drafts are outside this contract.

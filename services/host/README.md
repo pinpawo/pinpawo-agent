@@ -53,26 +53,27 @@ node services/host/dist/index.js capability validate /tmp/pinpawo-demo/capabilit
 Local external plugins are loaded from `~/.pinpawo/plugins/*.mjs` or `*.js`.
 Each plugin module must export a default object with `{ name }`.
 
-Plugins must export `toolkits`; this keeps tools, operation metadata, and review policy under one owner. A legacy `tools` export is ignored.
+Plugins that provide tools export `toolkits`; this keeps tools, operation metadata, and review policy under one owner. A legacy `tools` export is ignored. The example below requires `@pinpawo/pet-agent`, `@langchain/core`, and `zod` to be resolvable from the plugin file.
 
 ```js
 import { defineToolkit } from '@pinpawo/pet-agent';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 
-// Use a real LangChain StructuredTool instance here. Its name must match the
-// operation metadata key below.
-const sampleTool = createYourStructuredTool({ name: 'sample_tool' });
+const sampleTool = tool(async ({ text }) => text, {
+  name: 'sample_tool',
+  description: 'Return the supplied text.',
+  schema: z.object({ text: z.string() }),
+});
 
 export const toolkits = [
   defineToolkit({
     name: 'sample_plugin',
     description: 'Sample local plugin toolkit',
-    tools: [sampleTool],
-    operations: {
-      sample_tool: {
-        kind: 'sample.tool',
-        title: 'Sample tool',
-      },
-    },
+    tools: [{
+      tool: sampleTool,
+      operation: { title: 'Sample tool' },
+    }],
   }),
 ];
 
@@ -135,7 +136,7 @@ Because one session has exactly one transport owner, `--embed-host` (which only
 restates the default) is mutually exclusive with `--server-port`,
 `--pet-port`/`--pet-id`, `--check`, and `--qa`.
 
-The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
+The packaged extension directory is printed by `pinpawo browser extension status`. Follow the [browser bridge setup](../../docs/guides/browser-bridge.md) to install, register, and diagnose the Chrome extension and Native Messaging host.
 
 For the official Chrome Web Store build, run
 `pinpawo browser extension register` without `--extension-id`. The option
@@ -144,8 +145,8 @@ official Store ID and any previously registered development IDs.
 
 `pinpawo browser extension status` reports whether the Native Messaging setup is
 healthy, including the wrapper, native-host entry, and manifest consistency. If it
-reports `repairRecommended: true`, run `pinpawo browser extension repair` (with an
-unpacked extension ID when applicable) and restart the local agent.
+reports `host.repairRecommended: true`, run `pinpawo browser extension repair` (with an
+unpacked extension ID when applicable), reload the extension, and check status again.
 
 `pinpawo run --stdio` starts one logical host peer over newline-delimited
 JSON. It reads one `HostClientMessage` per stdin line and writes one

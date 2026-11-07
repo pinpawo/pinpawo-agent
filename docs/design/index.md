@@ -33,25 +33,25 @@ See [Reference](../reference/index.md) for the current public reading path.
   [app chat UI](host/app-chat-runtime-ui.md)
 - [Tool operation summary 与 block kind](host/operation-summary.md) — draft：
   toolkit `summarize`、通用展示 block，以及新增 block kind 的固定流程
-- [TUI textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the
-  [OpenTUI capability matrix](tui/v2-capability-matrix.md)
+- [TUI textarea](tui/textarea.md); earlier [timeline design](tui/agent-timeline.md)
+  and [OpenTUI capability matrix](tui/v2-capability-matrix.md) are historical records
 - [Browser Toolkit package](toolkits/browser-package.md)
 - [Resident Pet Host ports](agent-runtime/resident-pet-host-ports.md) — canonical
   host boundary for resident runtime, Agent Session interaction, and
   conversation-priority dispatch coordination
 - [Studio Independent Host runtime](studio/independent-host-runtime.md) — Studio
   process, dispatch mapping, Plugin boundary, persistence, and lifecycle
-- [Pending interrupt in Chat](host/pending-interrupt-chat.md) — draft
-  checkpoint/projection/resume boundary for PR #682, explicitly excluding
-  Studio dispatch identity
+- [Pending interrupt in Chat](host/pending-interrupt-chat.md) — historical draft
+  for PR #682; current wire and review contracts are linked from the page
 
 ## Studio applications and Plugins
 
 - [Channel 图片输入](studio/channel-image-input.md) — draft：结构化附件随消息派发，Host 复用图片输入准入
 - [Channel 协作提示词](studio/channel-collaboration-prompt.md) — draft for Channel-scoped collaboration context and Pet invocation isolation
-- [Channel 寻址、执行与状态](studio/channel-addressing-and-execution.md) — 唯一当前设计入口，
-  参与者协议、固定 session、可信来源、公开回复、全局观察与现有限制；阶段原文见
-  [Channel 历史](../history/studio/channel-evolution.md)
+- [Channel 模型](studio/channel-model.md) — Channel、成员、消息与存储规则；
+  [寻址、执行与状态](studio/channel-addressing-and-execution.md) — 寻址、固定 session、
+  可信来源与公开回复；[Channel 路由](studio/channel-routing.md) — 无 @ 消息的可选路由。
+  阶段原文见 [Channel 历史](../history/studio/channel-evolution.md)
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
   Channel, Scheduler, Notice, Trigger, and Knowledge APIs
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container

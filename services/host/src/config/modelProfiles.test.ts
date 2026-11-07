@@ -458,3 +458,21 @@ test('native explicit methods survive resolution and contribute to profile ident
   }
   assert.notEqual(registry.resolve('schema').modelProfileFingerprint, registry.resolve('mode').modelProfileFingerprint);
 });
+
+test('native file input is explicit profile metadata, never inferred from a preset', () => {
+  const parsed = parseModelProfile(storedProfile({ inputModalities: ['text', 'image', 'file', 'file'] }));
+  assert.deepEqual(parsed.issues, []);
+  assert.deepEqual(parsed.profile?.inputModalities, ['text', 'image', 'file']);
+  assert.deepEqual(summarizeModelProfile(parsed.profile!).inputModalities, ['text', 'image', 'file']);
+  assert.equal(parseModelProfile(storedProfile({ inputModalities: ['text', 'audio'] })).profile, undefined);
+  for (const preset of listLlmModelPresets()) assert.equal(preset.inputModalities.includes('file'), false);
+});
+
+test('preset refresh preserves explicit native PDF opt-in alongside current image support', () => {
+  const registry = createLocalModelProfileRegistry({ snapshot: buildModelProfileRegistry({
+    stored: storedConfig({ primary: storedProfile({ sourcePreset: 'kimi-code', model: 'k3',
+      inputModalities: ['text', 'file'] }) }), env: {},
+  }) });
+  assert.deepEqual(registry.resolve().inputModalities, ['text', 'image', 'file']);
+  assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text', 'image', 'file']);
+});

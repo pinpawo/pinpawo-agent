@@ -294,3 +294,15 @@ test('filterAvailableToolkits excludes unavailable and failed checks for one gen
     reason: 'check failed',
   });
 });
+
+test('toolkit modality validation accepts native PDF requirements and rejects unknown formats', () => {
+  const toolkit = defineToolkit({ name: 'pdf', description: 'Read native PDFs.',
+    tools: [{ tool: alphaTool, requiresInputModalities: ['file'] }],
+  });
+  assert.deepEqual(toolkit.tools[0].requiresInputModalities, ['file']);
+  for (const requiresInputModalities of [[], ['audio'], ['text', 'video'], 'file']) {
+    assert.throws(() => validateToolkitDefinition({ name: 'invalid', description: 'Invalid modalities.',
+      tools: [{ tool: alphaTool, requiresInputModalities }],
+    } as never), /requiresInputModalities must contain supported modalities/);
+  }
+});

@@ -33,7 +33,8 @@ export type NamedStructuredTool<TName extends string = string> = StructuredTool 
   name: TName;
 };
 
-export type ModelInputModality = 'text' | 'image';
+/** `file` currently means native PDF input, not arbitrary binary formats. */
+export type ModelInputModality = 'text' | 'image' | 'file';
 
 export type ToolDefinition<
   TTool extends NamedStructuredTool = NamedStructuredTool,
@@ -333,7 +334,7 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
         !Array.isArray(definition.requiresInputModalities)
         || definition.requiresInputModalities.length === 0
         || definition.requiresInputModalities.some(
-          (modality: unknown) => modality !== 'text' && modality !== 'image',
+          (modality: unknown) => modality !== 'text' && modality !== 'image' && modality !== 'file',
         )
       ) {
         throw new Error(

@@ -13,4 +13,5 @@ const subagentExecutionScopeSchema = z.object({
 
 export const subagentRuntimeContextSchema = agentRuntimeContextSchema.extend({
   executionScope: subagentExecutionScopeSchema.optional(),
+  modelInputModalities: z.array(z.enum(['text', 'image', 'file'])).readonly().optional(),
 }).passthrough() satisfies z.ZodType<SubagentRuntimeContext>;

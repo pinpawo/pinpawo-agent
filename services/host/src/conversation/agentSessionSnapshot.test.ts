@@ -205,3 +205,23 @@ test('buildHostSessionSnapshot windows the timeline without cutting into an open
   assert.deepEqual(window({ requestId: 'r', state: 'running', activity: 'using_tool', startedAt: 1 }),
     [['u-2', 'a-2', 'a-3'], { omitted: 2 }]);
 });
+
+test('Host runtime snapshot preserves native PDF modality through the session parser', () => {
+  const snapshot = buildHostSessionSnapshot({
+    sessionId: 'chat:pdf', kind: 'chat', messages: [],
+    deps: {
+      petId: 'pdf', ...createTestModelServerDeps({ inputModalities: ['text', 'file'] }),
+      runtimeConfig: {
+        workdir: '/tmp/work', stateRoot: '/tmp/work/.pinpawo',
+        checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
+        tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
+        tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
+      },
+    } as ServerDeps,
+    requiredInputModalities: ['text', 'file'],
+  });
+  assert.deepEqual(snapshot.session.runtime?.inputModalities, ['text', 'file']);
+  assert.equal(snapshot.session.runtime?.modelProfileCompatible, true);
+  assert.deepEqual(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot)))?.session.runtime?.inputModalities,
+    ['text', 'file']);
+});

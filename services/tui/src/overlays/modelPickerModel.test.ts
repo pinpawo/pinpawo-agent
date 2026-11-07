@@ -78,3 +78,13 @@ test('model picker windows a large registry around the selected profile', () => 
   assert.doesNotMatch(output, /Profile 0/);
   assert.ok(output.split('\n').length <= 7);
 });
+
+test('model picker preserves and displays explicit file capability', () => {
+  const state = loadModelPickerProfiles({
+    sessionId: 'session-pdf', defaultProfileId: 'pdf', selectedProfileId: 'pdf', requiredInputModalities: ['text', 'file'],
+    profiles: [{ id: 'pdf', label: 'PDF', inputModalities: ['text', 'image', 'file'], available: true,
+      compatible: true, issues: [] }],
+  });
+  assert.deepEqual(selectedModelProfile(state)?.inputModalities, ['text', 'image', 'file']);
+  assert.match(formatModelPicker(state, 80), /image · file/);
+});

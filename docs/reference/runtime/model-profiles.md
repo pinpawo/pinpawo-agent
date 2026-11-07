@@ -41,7 +41,7 @@ The API key is host-private. It must never be included in client protocol payloa
 
 Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens. The record key must match the profile's `id`.
 
-`inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image support from a model name.
+`inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image or file support from a model name. The supported values are `text`, `image`, and `file`; `text` is required. `file` is an explicit opt-in for native PDF input, not arbitrary binary formats. Presets do not assert PDF support. A preset-backed profile retains an explicit `file` opt-in while preset image/text metadata remains authoritative. Verify the configured model and endpoint before enabling it. See [native local-file input](../local-tools/read-file.md) for formats, message blocks, and limits.
 
 `protocol` is optional: `openai-compatible` (the backward-compatible default) or
 `anthropic-compatible` (Anthropic Messages API). Unknown values make the profile unavailable.

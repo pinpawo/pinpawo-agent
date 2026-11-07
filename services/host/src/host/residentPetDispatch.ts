@@ -1,4 +1,5 @@
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
+import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
 import { snapshotInvocationContext, withInvocationContext } from './invocationSystemContext';
@@ -45,7 +46,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, delivery }) => {
+    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, delivery }) => {
+      const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
       if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
       if (delivery === 'interrupt' && (!suppliedSession?.id || !suppliedScope)) {
         throw new Error('Interrupt delivery requires an explicit session and scope.');
@@ -101,6 +103,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             const { outcome, error, pendingInterrupt: settledInterrupt } = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
               requestId,
               message: request,
+              ...(artifactReferences.length ? { artifactReferences } : {}),
               runAgentTurn: (turn) => withPetInvocationContext(
                 { petId, dispatchId, scope, sessionId: target?.id },
                 async () => {

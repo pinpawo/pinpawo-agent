@@ -222,7 +222,7 @@ Session routes (`Authorization: Bearer <session token>`):
 | `POST /auth/login` | `{ username, password }`; `200 { token, expiresAt, user: { userId, username, clientId, capabilities } }`. `401` for a wrong password, an unknown username or a disabled account (one answer, no enumeration); `429 { error, retryAfterSeconds }` while locked; `403` if the client was revoked. |
 | `POST /auth/logout` | `204`; the token stops working immediately. |
 | `GET /auth/me` | `{ userId, username, clientId, displayName, capabilities, expiresAt }`. |
-| `POST /auth/password` | `{ currentPassword, newPassword }`; `204`, other sessions of that user are revoked. |
+| `POST /auth/password` | `{ currentPassword, newPassword }`; `204`, other sessions of that user are revoked. `401` if the authorizing session is revoked/expired before commit; `409` if reset/disable changes its credential version. Rejected changes leave the password unchanged. |
 
 Administrator routes (local Host token only):
 
@@ -235,7 +235,11 @@ Administrator routes (local Host token only):
 | `POST /users/disable` | `{ userId, disabled }`; `200 { userId, disabled }`, disabling revokes the user's sessions. |
 
 Sessions are absolute 12 hours and die after 30 idle minutes; only the SHA-256
-of a token is stored. Capabilities: `channel.read`, `channel.write`,
+of a token is stored. Both SSE routes reauthenticate and check their capability
+before each write (including snapshots and heartbeats), ending the stream on
+revocation, expiry or capability removal. Open streams count as session activity
+but never extend absolute expiry. JWT issuer prefix `user` is reserved for these
+login identities and rejected at startup. Capabilities: `channel.read`, `channel.write`,
 `studio.view` (default), `studio.dispatch`, `studio.events`, `pet.session`,
 `studio.manage` (explicit grant). A capability never widens the scope rule for
 a route a Plugin declares — only the built-in route table can do that.

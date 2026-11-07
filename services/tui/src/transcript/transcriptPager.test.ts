@@ -61,6 +61,7 @@ test('transcript pager shows ordered replies and reference bodies, excluding amb
     status: 'completed',
   }, {
     id: 'reply', type: 'message', role: 'assistant', text: 'Final answer', status: 'completed',
+    deliverables: [{ uri: 'artifact://workspace/thread/id/report.md', title: 'Report' }],
     resultReferences: [{ id: 'result', title: 'Task', text: 'done\u001b[31m' }],
   }]));
 
@@ -70,6 +71,7 @@ test('transcript pager shows ordered replies and reference bodies, excluding amb
   assert.match(content, /done�\[31m/);
   assert.doesNotMatch(content, /hidden child prose/);
   assert.ok(content.indexOf('Final answer') < content.indexOf('done�[31m'));
+  assert.match(content, /Report: artifact:\/\/workspace\/thread\/id\/report.md/);
 });
 
 test('transcript pager holds what each handoff was given and why a failed one stopped', () => {

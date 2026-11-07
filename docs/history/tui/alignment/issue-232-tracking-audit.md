@@ -155,7 +155,7 @@ explicitly marked as superseded-by-CORE-7.
 | --- | --- |
 | Issue #232 body / blocking chain / PR split | GitHub issue #232 |
 | State-audit comment (CORE/UI/CONTRACT merged; CORE-6 closed-unmerged) | issue #232 comment `5043855804` (2026-07-22) |
-| Per-track completion records | `docs/history/tui/alignment/core-1…core-7`, `ui-1…ui-4`, `contract-1`, `ui-alignment-closure.md` |
+| Per-track records | `docs/history/tui/alignment/core-1…core-7`, `ui-1…ui-4`, `ui-alignment-closure.md`; [CONTRACT-1 planning checklist](https://github.com/pinpawo/pinpawo-agent/blob/29f0bec9094a0be57ed48f03778ce2a7ccc6ac3d/docs/history/tui/alignment/contract-1-snapshot-contract.md) remains in Git history and contains no completion log |
 | Current canonical contract | `docs/reference/runtime/session-projection.md` |
 | Canonical domain types | `packages/agent-session/src/domain.ts` (v5) |
 | Canonical reducer / snapshot apply | `packages/agent-session/src/project.ts` |

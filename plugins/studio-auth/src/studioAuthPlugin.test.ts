@@ -89,6 +89,7 @@ async function harness(options: CreateStudioAuthPluginOptions = {}, autoStart = 
     route: string,
     input: {
       body?: unknown;
+      readJson?: () => Promise<unknown>;
       token?: string;
       headers?: Record<string, string>;
       remoteAddress?: string;
@@ -103,7 +104,7 @@ async function harness(options: CreateStudioAuthPluginOptions = {}, autoStart = 
       headers,
       ...(input.remoteAddress ? { remoteAddress: input.remoteAddress } : {}),
       readText: async () => (input.body === undefined ? '' : JSON.stringify(input.body)),
-      readJson: async () => input.body ?? null,
+      readJson: input.readJson ?? (async () => input.body ?? null),
       principal: { clientId: 'local', scope: 'studio' as const },
     } as unknown as StudioHttpRouteRequest;
     const result = await registered.handle(request);
@@ -689,3 +690,61 @@ test('disabling an account stops a self-service change that is already in flight
   assert.equal((await h.login('backus', 'self-chosen-long-password')).status, 401);
   assert.equal((await h.login('backus')).status, 200);
 });
+
+
+test('disabling during body read cannot authorize a password change with the newer version', async (t) => {
+  const h = await harness();
+  t.after(h.stop);
+  const { userId } = (await h.createUser('body-race')).body as { userId: string };
+  const { token } = (await h.login('body-race')).body as { token: string };
+  const result = await h.call('POST /auth/password', {
+    token,
+    readJson: async () => {
+      assert.equal((await h.call('POST /users/disable', { body: { userId, disabled: true } })).status, 200);
+      return { currentPassword: PASSWORD, newPassword: 'unauthorized-new-password' };
+    },
+  });
+  assert.equal(result.status, 409);
+  assert.equal((await h.call('POST /users/disable', { body: { userId, disabled: false } })).status, 200);
+  assert.equal((await h.login('body-race', 'unauthorized-new-password')).status, 401);
+  assert.equal((await h.login('body-race')).status, 200);
+});
+
+for (const loss of ['logout', 'absolute-expiry', 'idle-expiry', 'client-revocation'] as const) {
+  test(`a password change rolls back if its session loses authorization before commit: ${loss}`, async (t) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const barrier = new Promise<void>((resolve) => { reached = resolve; });
+    const h = await harness({ internalBeforeCredentialReplace: async () => { reached(); await gate; } });
+    t.after(h.stop);
+    t.after(() => release());
+    await h.createUser('commit-race');
+    const { token } = (await h.login('commit-race')).body as { token: string };
+    const db = await h.inspect();
+    const userBefore = await db.selectFrom('studio_auth_user').selectAll().executeTakeFirstOrThrow();
+    const accountBefore = await db.selectFrom('studio_auth_account').selectAll().executeTakeFirstOrThrow();
+    const pending = h.call('POST /auth/password', {
+      token, body: { currentPassword: PASSWORD, newPassword: 'unauthorized-new-password' },
+    });
+    await barrier;
+    if (loss === 'logout') {
+      assert.equal((await h.call('POST /auth/logout', { token })).status, 204);
+    } else if (loss === 'client-revocation') {
+      await h.clients.revoke('user.commit-race');
+    } else {
+      await db.updateTable('studio_auth_session').set(loss === 'absolute-expiry'
+        ? { expires_at: new Date(Date.now() - 1_000).toISOString() }
+        : { updated_at: new Date(Date.now() - 31 * 60_000).toISOString() }).execute();
+    }
+    release();
+    assert.equal((await pending).status, 401);
+    const userAfter = await db.selectFrom('studio_auth_user').selectAll().executeTakeFirstOrThrow();
+    const accountAfter = await db.selectFrom('studio_auth_account').selectAll().executeTakeFirstOrThrow();
+    assert.equal(accountAfter.password, accountBefore.password, 'refused change must leave the password unchanged');
+    assert.equal(userAfter.credential_version, userBefore.credential_version, 'refused change must roll back the version bump');
+    const successes = await db.selectFrom('studio_auth_audit').selectAll()
+      .where('action', '=', 'password.change').where('result', '=', 'ok').execute();
+    assert.deepEqual(successes, [], 'refused change must not be audited as success');
+  });
+}

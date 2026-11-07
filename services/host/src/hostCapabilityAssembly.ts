@@ -18,6 +18,8 @@ import {
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
 import { join } from 'node:path';
+import { createArtifactsToolkit, type ArtifactStore } from '@pinpawo-toolkit/artifacts';
+import { createHostArtifactStore, readArtifactSource, writeArtifactDownload } from './artifacts';
 import { atomicWriteFile } from './atomicFile';
 import {
   createCapabilityCreatorCapability,
@@ -140,6 +142,7 @@ export class HostCapabilityAssembly {
   /** In-process RS instances this Host created and injects into Toolkits. */
   private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
+  private readonly artifactStore: ArtifactStore;
   private readonly capabilityCatalog: HostCapabilityCatalog;
   private readonly checkpointer: FileSaver;
   private writerLeaseHeld = false;
@@ -153,6 +156,7 @@ export class HostCapabilityAssembly {
     this.executionConfig = resolveHostExecutionConfig(options.runtimeConfig);
     this.sourceId = options.sourceId;
     const storedConfig = loadStoredConfig();
+    this.artifactStore = createHostArtifactStore(options.runtimeConfig, storedConfig);
     const officeSelected = officeEnabled(storedConfig, options.includeOffice);
     const browserSelected = options.includeBrowser
       ?? storedConfig.capabilities?.browser !== false;
@@ -170,6 +174,8 @@ export class HostCapabilityAssembly {
       : null;
     this.hostBuiltInToolkits = [
       createFilesToolkit(),
+      createArtifactsToolkit({ store: this.artifactStore, sourceReader: readArtifactSource,
+        downloadWriter: writeArtifactDownload }),
       createWebToolkit(),
       this.rsInstances.assemble(createShellToolkit, { shell }),
       this.rsInstances.assemble(createGitToolkit, { shell }),
@@ -195,6 +201,10 @@ export class HostCapabilityAssembly {
     this.checkpointer = new FileSaver(
       options.checkpointPath ?? this.runtimeConfig.checkpointPath,
     );
+  }
+
+  getArtifactStore(): ArtifactStore {
+    return this.artifactStore;
   }
 
   async init(options: HostCapabilityAssemblyInitOptions = {}) {

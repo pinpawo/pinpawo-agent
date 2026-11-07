@@ -27,6 +27,37 @@ route 背后的领域。
 
 ## 1. HTTP contract
 
+### `POST /artifacts/upload?name=...`
+
+只接受本机 Host token（`studio` scope）；client key 和 JWT client 不能上传。
+请求体是一份文件的原始字节，`name` 是 URL 编码的文件名，`Content-Type` 是该文件的 MIME
+类型，未知类型用 `application/octet-stream`。不支持 multipart 或压缩编码；除唯一的
+`name` 外不接受其他 query 参数。文件名必须是单一安全路径段，不能含斜杠、反斜杠、
+控制字符、首尾空白、`.` 或 `..`，长度最多 240 UTF-8 字节。
+
+HTTP 通过 `ArtifactStore.put` 流式保存文件，接收 body 时不聚合全部字节。调用方不能选择
+workspace、session、路径、URI 或覆盖目标；Host 使用 `studio-uploads` 命名空间，store
+生成每份快照的随机 ID。成功返回 `201 {artifact: ArtifactRef}`，包含稳定的 `uri`、
+`name`、`mimeType`、`size`、`sha256` 和 `createdAt`，没有签名下载 URL。
+重试上传会创建新快照。把 `{uri, title?}` 加入现有 `deliverables`，才能将引用随消息提交；
+上传本身不发送消息，也不创建 Agent Session。
+
+- `maxUploadBytes` 默认 20 MiB，可配置为不超过 store 100 MiB 硬上限的正整数；
+  `Content-Length` 过大立即拒绝，无长度或 chunked 入流也逐块检查，超限返回 `413`。
+- `uploadTimeoutMs` 默认 15000，允许缩短但不能超过 HTTP server 既有的 15 秒接收上限。
+  即使客户端停止发送，接收 deadline 也会使流失败并返回 `408`。断线、超时或超限在 body
+  未接收完时会终止入流，由 store 清理 pending 写入，不发布截断文件。
+- 此 deadline 不包括 body 接收完成后的存储提交。上传成功后不提供撤销/删除；客户端未收到
+  响应不能推断提交失败。COS 的远端提交、失败回滚和取消需要单独验收，不因本地流测试通过而
+  宣称已验证。
+- 其他路由继续使用 `maxBodyBytes`（默认 1 MiB）；上传限额不会放宽 JSON 或 Plugin route 的上限。
+- 上传只存储不透明附件，不声明文件安全，也不自动把图片送进模型。模型图片输入继续经过 Host
+  既有的 PNG/JPEG/WebP 签名校验、单图 10 MiB、每轮最多四图及总计 20 MiB 准入。
+
+缺少可写 ArtifactStore 返回 `503`；无效文件名/参数返回 `400`，不支持的媒体类型或编码返回
+`415`。已有 `GET /agent-session/artifacts?uri=...` 下载入口与 shared-reference 权限保持不变。
+`/artifacts/upload` 是保留路径，其他 Plugin 不能覆盖或把它变成 client route。
+
 ### `GET /dispatch/queues`
 
 使用现有 Studio Bearer，直接转发 `context.listDispatchQueues()` 的只读全局投影。
@@ -154,6 +185,11 @@ route 可以声明 `capability`（如 `channel.read`），语义是**附加要�
 `GET /me` 只在凭证自己声明了 capabilities 时才多返回这个字段；本机 token、客户 key、JWT 的响应与
 principal 形状保持不变（`studio` 全权，`client` 等价于 `channel.read` + `channel.write`）。
 某个校验器抛异常按「不是我的凭证」处理（继续下一个），不会把别人的 `401` 变成 `500`。
+
+`GET /events` 和 `GET /pet-sessions/events` 不缓存建连时的权限：每个串行写入（包括初始快照和
+心跳）前重新认证原始 Bearer，并检查 `studio.events` / `pet.session`。失效或撤权即结束流并清理
+订阅；无事件时在下次心跳检测。客户端已收到的数据不能撤回。`pps_` / JWT 仍没有这两项能力，
+不会因本次修改获得事件流权限。JWT 的 `clientPrefix: "user"` 为登录用户保留，启动时拒绝。
 
 ### 外部 JWT
 

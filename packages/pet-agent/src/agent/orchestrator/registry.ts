@@ -1,4 +1,5 @@
 import type { StructuredTool } from '@langchain/core/tools';
+import { StateSchema } from '@langchain/langgraph';
 import { createHash } from 'node:crypto';
 import type { AgentCapability } from '../../types/capability';
 import type {
@@ -220,6 +221,9 @@ function snapshotToolkit(toolkit: AgentToolkit): AgentToolkit {
   return Object.freeze({
     ...toolkit,
     tools: Object.freeze(toolkit.tools.map(snapshotToolDefinition)),
+    ...(toolkit.stateSchema
+      ? { stateSchema: new StateSchema(Object.freeze({ ...toolkit.stateSchema.fields })) }
+      : {}),
     ...(toolkit.reviewGuidance
       ? { reviewGuidance: Object.freeze({ ...toolkit.reviewGuidance }) }
       : {}),

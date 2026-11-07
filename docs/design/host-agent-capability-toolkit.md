@@ -10,25 +10,27 @@ Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当
 为准；Toolkit 的执行环境依赖（ShellRS / BrowserRS）见
 [Toolkit 的 RS 依赖](../reference/extensions/toolkit-rs.md)（#856）。
 
-本文中的 inventory、execution boundary、Host Toolkit 协调器和统一诊断已按 #645
-进入当前实现。当历史设计中的 `local tools`、
+本文中的 inventory 和 execution boundary 约束已按 #645 进入实现；原 Toolkit Runtime
+生命周期与统一诊断已由 RS 依赖及状态契约取代，见上方链接。当历史设计中的 `local tools`、
 `host tools`、`capability-private tools`、Browser 专属 lifecycle/diagnostics 或
 `BrowserIntegration` 与本文冲突时，只能把这些表述作为历史实现背景，不能据此
 新增公共架构层。
 Studio Host 已按 #643 提取为独立入口，不再嵌入 Chat Host (`AgentHost`)。
 Resident Pet 的双访问面及 host 装配边界另见
-[Resident Pet Host Ports](agent-runtime/resident-pet-host-ports.md)：Studio 只消费
-dispatch，TUI 的直接对话通过独立 conversation adapter，不增加新的 Agent 领域角色。
+[Resident Pet Host Ports](agent-runtime/resident-pet-host-ports.md)：Studio 使用 dispatch，
+并借用 Host 的受限 session port 提供精确 session 的 snapshot、observe 与 review；TUI 的
+直接对话通过独立 conversation adapter，不增加新的 Agent 领域角色。
 
 ## 1. 核心关系
 
-系统只有四个需要在顶层讨论的领域角色：
+本设计聚焦 Agent 装配边界的四个领域角色；Studio 与 Studio Plugin 在项目中的作用另见
+[Studio](../studio/index.md)：
 
 ```text
 Host
   ├─ 读取配置并选择 Capability / Toolkit definitions
   ├─ 创建并持有一个或多个 Agent Runtime
-  └─ 创建并持有 RS 实例（ShellRS、BrowserRS）
+  └─ 创建并持有 RS 实例或服务客户端（ShellRS、BrowserRS）
        └─ 按 Toolkit 的 requires 声明注入 Toolkit 工厂
 
 Agent Runtime
@@ -51,8 +53,8 @@ Host 是进程或产品入口的装配边界。它负责：
 - 读取 Host 配置，并据此选择 Capability 与 Toolkit definitions；
 - 定义 inventory 的来源、优先级、重复名称失败规则和 provenance；
 - 创建、持有和关闭 Agent Runtime；Studio Host 可以持有多个常驻 Agent Runtime；
-- 创建并持有进程内 RS 实例，按 Toolkit 的 `requires` 声明注入；RS 启动失败只
-  影响依赖它的 Toolkit 的 availability；
+- 创建并持有 RS 实例或连接独立 RS 服务的客户端，按 Toolkit 的 `requires` 声明注入；
+  RS 启动失败只影响依赖它的 Toolkit 的 availability；
 - 提供 transport、API、TUI/Web adapter、持久化 port 和全局 review mode 等
   Host concerns。
 
@@ -66,9 +68,8 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 - 使用同一个常驻 Chat runtime / graph 处理 invocation；
 - 从编译后的 registry 选择并执行 Capability；
 - 使用 Host 提供的同一份 workdir snapshot 构造 execution prompt 与 review context；
-- 通过 `ToolRuntime.context` 传递 thread、run、delegation identity 和按 Toolkit name
-  索引的 opaque Runtime ports，并通过 `ToolRuntime.signal` 传递 cancellation；
-- 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
+- 通过执行上下文传递 thread、run、delegation 和 workdir，并传递 cancellation；
+- 使用 Host 装配的静态 Toolkit 定义与工具；依赖 RS 的工具通过注入的实例访问环境。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在
 graph state 之外维护第二份 Toolkit 业务状态。Agent 运行期不创建、识别或管理
@@ -102,8 +103,9 @@ Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只�
 
 `StudioPlugin` 是 Studio control-plane 扩展形态，不是第五个 Agent 扩展领域，也不是
 `AgentToolkit` 的子类型。它可以通过 `toolkits` 定义出口声明零个或多个 Toolkit；Host 将
-它们纳入统一 inventory，Agent 侧再由 `Capability.uses` 选择。Plugin lifecycle 只使用
-Studio context 的 dispatch、event 与 hook，不能参与 Capability 选择或 Pet runtime 装配。详见
+它们纳入统一 inventory，Agent 侧再由 `Capability.uses` 选择。Plugin 可使用 Studio context
+中的 dispatch、event、hook 及受限 session 等接口，但不能参与 Capability 选择或 Pet runtime
+装配。详见
 [Studio Independent Host Runtime](studio/independent-host-runtime.md)。
 
 Capability 完全属于 Agent。Plugin 和 Studio 都不得注册、贡献或隐式附带 Capability；
@@ -121,21 +123,17 @@ Studio Host 根据 `petId` 从
 以下概念必须分开，不能统一称为 `enabled` 或“可用”：
 
 ```text
-Toolkit definitions
-  -> Host config selection
-  -> selected Toolkit definitions
-  -> start optional Runtime roots
-  -> Toolkit availability evaluation
+Host config selection / Toolkit definitions 与 RS 依赖装配
+  -> RS 状态与 Toolkit availability evaluation
   -> effective Toolkit inventory
   -> compile Capability bindings
 ```
 
 - **Host config selection**：产品配置是否选择某个 Toolkit definition，归 Host。
 - **Toolkit availability**：该 Toolkit 的静态契约在当前环境能否成立，归 Toolkit。
-- **Runtime diagnostics**：已选择 Toolkit 的 Runtime 当前是否 ready/degraded/failed，
-  是实时观测，不改变 Capability 的静态权限含义。
-- **Runtime root / execution binding**：动态资源，不进入 inventory、Supervisor workspace、
-  prompt 或 checkpoint。
+- **RS status**：RS 实例报告可用性及原因，由 Host 汇总；它不改变 Capability 的
+  静态权限含义。
+- **RS 依赖**：Host 在装配 Toolkit 时注入实例；Agent 运行期不持有或管理 RS。
 
 Inventory 合并必须是确定性的：来源和顺序可追溯，重复 Capability/Toolkit 名称
 必须显式失败，不能依赖“最后一个覆盖”或让不同入口各自重算。
@@ -173,8 +171,8 @@ Browser、files、shell、web、git、github 都是普通 Toolkit：
 以下规则适用于 Chat Host、Studio Host 和未来 Host surface：
 
 1. 新 Capability 只需要注册定义和 `uses`，不应修改 Host lifecycle。
-2. 新 Toolkit 只需要注册定义及可选 Runtime，不应修改 Agent graph 或 Host 的
-   Toolkit-name 分支。
+2. 新 Toolkit 注册定义并可声明 RS 依赖，不应修改 Agent graph 或按 Toolkit 名称增加
+   Host 分支；需要环境服务时由 Host 装配相应 RS 依赖。
 3. 所有暴露给 Capability subagent 的可执行业务/外部 Tool 必须归属一个 Toolkit；
    不存在 direct host tools、capability-private tools 或与 Toolkit 平级的
    LocalTools。Run Supervisor 的框架内部 control action 不属于扩展 inventory，
@@ -222,6 +220,6 @@ Browser、files、shell、web、git、github 都是普通 Toolkit：
 - `local-machine Toolkit` 或 `local Host built-in Toolkit`：取代含糊的
   `local tools` / `CLI tools`。
 
-`runtimeEnvironment` 已用于传给模型的 Host 环境说明字符串，不得复用为新的资源
-装配对象名称。尚未有必要把本模型包装成新的公共 `HostAgentEnvironment` 类型；
+旧的 `runtimeEnvironment` 调用通道已移除；Host 环境说明通过公共 system sections
+提供，不应把该旧名称复用为新的资源装配对象。尚未有必要把本模型包装成新的公共 `HostAgentEnvironment` 类型；
 先以职责和契约约束实现，等至少两个 Host 的真实调用方稳定后再提取公共类型。

@@ -68,6 +68,23 @@ test('compaction retains unfinished execution pairs and private lanes without ex
   assert.ok(!summarized.includes('private supervisor context'));
 });
 
+test('declared references follow ordinary compaction of completed execution groups', async () => {
+  const call = executionCall('published', 'completed');
+  const result = executionResult('published', 'completed', 'Published report');
+  result.artifact.result.deliverables = [{ uri: 'artifact://thread/report' }];
+  result.content = JSON.stringify(result.artifact.result);
+  let summarized = '';
+  const compacted = await compactOrchestratorMessages({
+    messages: [new HumanMessage('Earlier context'), call, result, new HumanMessage('Latest context')],
+    model: fakeSummaryModel('Summary', messages => { summarized = JSON.stringify(messages); }),
+    options: { keepMessages: 1 },
+  });
+  assert.ok(compacted.compacted);
+  assert.ok(!compacted.messages.includes(call));
+  assert.ok(!compacted.messages.includes(result));
+  assert.ok(summarized.includes('artifact://thread/report'));
+});
+
 test('compaction includes completed main tool results in the summary input', async () => {
   let summarized = '';
   const call = new AIMessage({ content: '', tool_calls: [{ id: 'done', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] });

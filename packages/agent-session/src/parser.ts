@@ -1,3 +1,4 @@
+import { parseDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { parseResultReferences } from './resultReferences';
 import { parseAgentNotice } from './notice';
 import {
@@ -297,6 +298,9 @@ function parseAgentTimelineEntry(
     }
     const toolCalls = value.toolCalls === undefined ? undefined : parseAgentMessageToolCalls(value.toolCalls, true);
     if (toolCalls === null || (toolCalls && value.role !== 'assistant')) return null;
+    let deliverables: Deliverable[] | undefined;
+    try { deliverables = value.deliverables === undefined ? undefined : parseDeliverables(value.deliverables); }
+    catch { return null; }
     // An unreadable notice leaves the message as its default text.
     const notice = value.role === 'system' && isRecord(value.notice) ? parseAgentNotice(value.notice) : null;
     return {
@@ -306,6 +310,7 @@ function parseAgentTimelineEntry(
       text: value.text,
       ...(toolCalls ? { toolCalls } : {}),
       ...(value.resultReferences !== undefined ? { resultReferences: parseResultReferences(value.resultReferences) } : {}),
+      ...(deliverables !== undefined ? { deliverables } : {}),
       ...(notice ? { notice } : {}),
       status: value.status,
       ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),

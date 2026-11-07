@@ -1,4 +1,5 @@
 export * from './configuration';
+export * from './artifacts';
 export * from './interaction';
 export * from './invocation';
 export * from './json';

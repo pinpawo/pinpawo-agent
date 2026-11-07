@@ -1,3 +1,4 @@
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import { channelParticipantId } from './channelParticipants';
 import type { ChannelMessageRow } from './store/channelStore';
 
@@ -9,6 +10,20 @@ const routingContextHint = {
   source: 'channel-routing',
   action: 'read-latest-channel',
 } as const;
+
+/** Explicit references from this message and its one addressed reply. */
+export function channelDispatchAttachments(message: ChannelMessageRow, original?: ChannelMessageRow): Deliverable[] {
+  const reply = original && message.replyTo === original.messageId && message.channelId === original.channelId
+    ? original : undefined;
+  const seen = new Set<string>();
+  return [...(message.deliverables ?? []), ...(reply?.deliverables ?? [])]
+    .filter(({ uri }) => {
+      if (seen.has(uri)) return false;
+      seen.add(uri);
+      return true;
+    })
+    .map(reference => ({ ...reference }));
+}
 
 function fenced(input: Record<string, unknown>): string {
   const text = JSON.stringify(input, null, 2);
@@ -43,7 +58,10 @@ export function channelDispatchInput(
     type: 'channel_message', version: 1,
     channelId: message.channelId, messageId: message.messageId,
     author: author(message), body: message.body,
-    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body } } : {}),
+    ...(message.deliverables !== undefined ? { deliverables: message.deliverables } : {}),
+    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body,
+      ...(original.deliverables !== undefined ? { deliverables: original.deliverables } : {}),
+    } } : {}),
     ...(addressedBy ? { addressedBy, contextHint: { ...routingContextHint, ...(focus?.trim() ? { focus: focus.trim() } : {}) } } : {}),
   });
 }

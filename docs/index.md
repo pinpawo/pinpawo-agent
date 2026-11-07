@@ -1,10 +1,13 @@
 # PinPawo Agent Documentation
 
-PinPawo Agent is an open-source, local-first framework for agents that use
-real tools with explicit authority, human review, checkpoint-backed recovery,
-and composable extensions. This directory is organized by the role a document
-plays, so a reader can distinguish the current contract from a proposal or a
-record of an earlier implementation.
+PinPawo Agent organizes Studio on the reliable single-agent mechanism provided
+by `pet-agent`. Studio Plugins make business functionality pluggable, while
+Capability and Toolkit organize and extend agent capabilities. The existing
+review and recovery mechanisms continue to evolve to improve reliability.
+
+This directory distinguishes current contracts from proposals and records of
+earlier implementations. See [Core concepts](concepts/core-concepts.md) for
+the project model.
 
 [简体中文](zh-CN/index.md)
 
@@ -38,7 +41,7 @@ status still determines whether its claims are accepted.
 
 | Directory | Contains | Use it for |
 |---|---|---|
-| [concepts/](concepts/index.md) | Stable vocabulary and system map | Learning the mental model first |
+| [concepts/](concepts/index.md) | Existing vision, terminology, and system map | Understanding the current model and its open questions |
 | [guides/](guides/index.md) | Installation, configuration, and integrations | Operating or trying the project |
 | [reference/](reference/index.md) | Current APIs, extension, runtime, and local-tool contracts | Building against a stable boundary |
 | [studio/](studio/index.md) | Current Studio overview and configuration | Running or extending Studio |

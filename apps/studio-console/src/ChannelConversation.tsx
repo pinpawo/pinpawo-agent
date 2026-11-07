@@ -1,7 +1,8 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
+import { MessageDeliverables, MessageLink, messageUrlTransform, type ArtifactSource } from './MessageDeliverables';
 import {
   channelDateKey, channelDeliveryLabel, channelParticipantId, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
   channelPetSession, channelRoutingSkipLabel, channelWorkingLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession, type ChannelWorking,
@@ -27,17 +28,18 @@ export function ChannelTechnicalDetails({ message }: { message: ChannelMessage }
   </dl></details>;
 }
 
-type MessageMarkdownProps = { body: string; members: ChannelMember[]; viewerParticipantId?: string };
+type MessageMarkdownProps = { body: string; members: ChannelMember[]; viewerParticipantId?: string; artifactSource?: ArtifactSource;
+  deliverables?: ChannelMessage['deliverables'] };
 
-export function ChannelMessageMarkdown({ body, members, viewerParticipantId }: MessageMarkdownProps) {
+export function ChannelMessageMarkdown({ body, members, viewerParticipantId, artifactSource }: MessageMarkdownProps) {
   return <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
-    urlTransform={url => url.startsWith('participant:') ? url : defaultUrlTransform(url)}
+    urlTransform={url => url.startsWith('participant:') ? url : messageUrlTransform(url)}
     components={{ a: ({ href, children }) => href?.startsWith('participant:')
       ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, members, viewerParticipantId)}</span>
-      : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{body}</ReactMarkdown></div>;
+      : <MessageLink href={href} source={artifactSource}>{children}</MessageLink> }}>{body}</ReactMarkdown></div>;
 }
 
-function ChannelMessageViewer({ body, author, occurredAt, members, viewerParticipantId, onClose }: MessageMarkdownProps & {
+function ChannelMessageViewer({ body, author, occurredAt, members, viewerParticipantId, artifactSource, deliverables, onClose }: MessageMarkdownProps & {
   author: string; occurredAt: string; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -65,7 +67,8 @@ function ChannelMessageViewer({ body, author, occurredAt, members, viewerPartici
       <button type="button" autoFocus onClick={onClose} aria-label="Close full-screen message">Close <span aria-hidden="true">×</span></button>
     </header>
     <div className="channel-message-viewer-scroll" tabIndex={0} aria-label="Full message content">
-      <ChannelMessageMarkdown body={body} members={members} viewerParticipantId={viewerParticipantId} />
+      <ChannelMessageMarkdown body={body} members={members} viewerParticipantId={viewerParticipantId} artifactSource={artifactSource} />
+      <MessageDeliverables deliverables={deliverables} source={artifactSource} />
     </div>
   </dialog>;
 }
@@ -81,10 +84,11 @@ type TimelineProps = {
   sessions?: ChannelSession[]; onViewSession?: (session: ChannelSession) => void;
   /** Pet members running a turn in this Channel now. */
   working?: ChannelWorking[];
+  artifactSource?: ArtifactSource;
 };
 
 export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
-  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession, working = [] }: TimelineProps) {
+  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession, working = [], artifactSource }: TimelineProps) {
   const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const byId = new Map(messages.map(item => [item.messageId, item]));
@@ -124,7 +128,8 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
           <strong>{original ? channelMessageIdentity(original, pets, petsReady, members, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
-        <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} />
+        <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} artifactSource={artifactSource} />
+        <MessageDeliverables deliverables={item.deliverables} source={artifactSource} />
         </div>
         {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
           <p className="channel-record-error" role="alert" key={failureIndex}>
@@ -135,7 +140,7 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
           <button type="button" aria-haspopup="dialog" aria-label="View full screen" onClick={() => {
             onViewerChange?.(true);
             setViewer({ body: item.body, author: identity.name, occurredAt: item.occurredAt,
-              members: members.map(member => ({ ...member })), viewerParticipantId });
+              members: members.map(member => ({ ...member })), viewerParticipantId, artifactSource, deliverables: item.deliverables });
           }}>Full screen</button>
           <ChannelTechnicalDetails message={item} />
         </div>

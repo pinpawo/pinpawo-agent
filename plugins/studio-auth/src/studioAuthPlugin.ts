@@ -24,6 +24,7 @@ import { studioAuthOptions, USERNAME_PATTERN, type StudioAuthConfig } from './au
 import { studioAuthMigrations } from './migrations';
 import {
   CredentialConflictError,
+  SessionAuthorizationError,
   StudioAuthRepository,
   type StudioAuthDatabase,
   type StudioAuthUserRow,
@@ -308,6 +309,7 @@ export function createStudioAuthPlugin(
     principal: { clientId: string; scope: 'client'; capabilities: readonly StudioCapability[] };
     userId: string;
     sessionId: string;
+    credentialVersion: number;
     expiresAt: string;
   } | undefined> {
     if (!SESSION_TOKEN_PATTERN.test(token)) return undefined;
@@ -354,6 +356,7 @@ export function createStudioAuthPlugin(
       },
       userId: row.id,
       sessionId: stored.id,
+      credentialVersion: stored.credential_version ?? 0,
       expiresAt: stored.expires_at,
     };
   }
@@ -492,10 +495,9 @@ export function createStudioAuthPlugin(
     if (newPassword.length < minPasswordLength || newPassword.length > 256) {
       return error(400, `New password must be ${minPasswordLength.toString()}-256 characters.`);
     }
-    // One consistent snapshot: the hash that is verified belongs to the version
-    // this change will be committed against. Reading the version separately
-    // would leave a window where an administrative reset lands between the
-    // verified hash and the replacement.
+    // Read the credential together with its version, but retain the version
+    // of the session that authorized this request. Body parsing above can
+    // yield to a disable/reset; a later snapshot must not refresh authority.
     const snapshot = await repo().credentialSnapshot(session.userId);
     if (!snapshot.hash || !(await verifyPassword({ hash: snapshot.hash, password: currentPassword }))) {
       await audit('password.change', 'denied', {
@@ -508,19 +510,37 @@ export function createStudioAuthPlugin(
     }
     const newHash = await hashPassword(newPassword);
     if (beforeCredentialReplace) await beforeCredentialReplace();
+    const client = await requireStudio().clients.get(session.principal.clientId);
+    if (!client || client.revokedAt) {
+      await audit('password.change', 'denied', {
+        request, userId: session.userId, clientId: session.principal.clientId,
+        reason: 'client-revoked',
+      });
+      return error(401, 'Unauthorized.');
+    }
     // One transaction: the new hash, the version bump and the revocation of the
     // other sessions land together. The session that made the change keeps
     // working (re-stamped with the new version), everything else dies. The
     // commit is conditional on the version this request verified against, so a
     // reset that landed meanwhile wins: an in-flight self-service change must
     // never overwrite the password an operator just set.
-    let replaced: { revoked: number; keptSession: boolean };
+    let replaced: { revoked: number };
     try {
       replaced = await repo().replaceCredential(session.userId, newHash, {
         keepSessionId: session.sessionId,
-        expectedVersion: snapshot.version,
+        // Authorize against the session's version, not a later snapshot that
+        // could have been read after disable/reset while reading the body.
+        expectedVersion: session.credentialVersion,
+        idleTimeoutMs: idleTimeoutMinutes * 60_000,
       });
     } catch (cause) {
+      if (cause instanceof SessionAuthorizationError) {
+        await audit('password.change', 'denied', {
+          request, userId: session.userId, clientId: session.principal.clientId,
+          reason: 'session-revoked',
+        });
+        return error(401, 'Unauthorized.');
+      }
       if (!(cause instanceof CredentialConflictError)) throw cause;
       await audit('password.change', 'denied', {
         request,
@@ -537,12 +557,6 @@ export function createStudioAuthPlugin(
       clientId: session.principal.clientId,
       reason: `revoked ${revoked.toString()} sessions`,
     });
-    if (!replaced.keptSession) {
-      // The session that made the change was revoked while it was in flight
-      // (logout or disable elsewhere): say so instead of implying this device
-      // is still signed in.
-      return json(200, { revoked: true });
-    }
     return { kind: 'json', status: 204, body: null };
   }
 

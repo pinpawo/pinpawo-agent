@@ -1,108 +1,28 @@
-# Delegation Announce Contract
+# Delegation Result Delivery
 
-> **Status: current implementation reference.** Payload version 3 carries
-> execution output and provenance only. The cross-layer contract is defined by the
-> [Supervisor–Root Interaction Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
-> Results are published directly into main before acceptance, using existing identity fields.
+<a id="delegation-announce-contract"></a>
+<a id="identity-and-lifecycle"></a>
+<a id="publish-before-acceptance"></a>
+<a id="consumer-projection"></a>
+<a id="compaction-timing"></a>
+<a id="invariants"></a>
 
-A delegated Capability result is stored as a typed
-`DelegationAnnounceMessage`. It is execution evidence, not a main-agent reply
-and not an instruction.
+> **Current contract; retained path.** The earlier Announce payload and its
+> identity/acceptance metadata were removed. The old path remains for links; the
+> [previous Announce document](https://github.com/pinpawo/pinpawo-agent/blob/29f0bec9094a0be57ed48f03778ce2a7ccc6ac3d/docs/reference/runtime/delegation-announces.md)
+> is historical.
 
-## Identity and lifecycle
+A Supervisor `delegate_capability` call returns a paired `ToolMessage`. Its
+artifact records the actual execution snapshot and result. A non-empty delivery
+has `returned` status and includes the task, text and scope; no new delivery
+returns `missing_deliverable` with an error tool status. A rejected call has its
+own record, and a rejected or cancelled human review is represented separately.
+The result is evidence for Supervisor, not an automatic acceptance decision.
+See [execution records](../../../packages/pet-agent/src/agent/orchestrator/executionMessages.ts),
+[Capability execution](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts)
+and the [state and handoff design](../../design/agent-runtime/run-scoped-supervisor-session.md).
 
-One delegation stop produces at most one Announce identity. The versioned
-payload records:
-
-- source lane;
-- delegation scope identities;
-- announce message identity;
-- delegated task;
-- complete result text;
-- creation time.
-
-Root owns `pinpawo.taskAccepted` beside the immutable `delegationAnnounce`
-payload and updates the delegation summary in the same transition. The missing
-acceptance field means the task has not been accepted.
-
-### Publish before acceptance
-
-Root writes each normal execution result directly into main as an existing
-Announce before calling Supervisor. Partial natural output is valid evidence;
-publication does not mean task completion. Capability private Human/AI/Tool
-messages stay private, but the Announce is not duplicated there.
-
-Reuse `sourceLane`, `delegationId`, `runId`, and `announceMessageId` to associate
-results with their task. `sourceLane` is provenance; it does not require that the
-published message carry a private lane tag. Further attempts append their own
-Announce identities in chronological order. Supervisor reads evidence only from
-main, without a separate `announceAttempts` payload or private delegation query.
-
-Acceptance records the root-owned task judgment in existing metadata and
-delegation summaries, without rewriting result text or publishing it again.
-Until then, the absence of an acceptance decision is not a failure verdict.
-Replacement after user confirmation retains the existing main evidence without
-marking the task successful. No new message type or completion-reason field is
-introduced.
-
-## Consumer projection
-
-Internal typed messages never reach a provider adapter directly. Every
-model-facing main-conversation boundary projects an Announce into a standard
-provider-supported `AIMessage`. The currently implemented content has this shape:
-
-```xml
-<delegation_announce version="1" role="data" authority="none">
-  <source lane="capability:example" run_id="run-1" delegation_id="task-1" announce_message_id="result-1" />
-  <task_acceptance accepted="true" source="orchestrator" />
-  <task><![CDATA[...]]></task>
-  <result format="markdown" role="data"><![CDATA[...]]></result>
-</delegation_announce>
-```
-
-The projection preserves the complete result and chronological position. It is
-ephemeral and never replaces canonical state. Existing delegation, run, and
-announce identities are rendered from metadata so Supervisor can associate all
-attempts without another result input. Every main consumer sees the same data
-projection before and after acceptance.
-
-The terminal node emits the supplied Supervisor reply once. The reply is not an
-Announce and cannot replace execution evidence. Root applies acceptance by
-updating the original main message with the same stable id, preserving its
-position and immutable result payload, then clearing the accepted private scope.
-
-## Compaction timing
-
-Root checks compaction at new-run entry, not during a Supervisor/Capability loop.
-The existing watermark leaves roughly 25% of usable input capacity after
-generation reserves for new context. Keep all result messages intact throughout
-the run; do not clip individual Announces or compact them between attempts.
-
-Each compaction retains recent messages and all original Announces for the current
-unfinished delegation, even when those attempts fall outside the recent suffix.
-Existing active-task state and identity metadata identify protected evidence;
-other old history can compact normally. Continuation does not require skipping
-compaction. More aggressive thresholds or history retention must keep this rule.
-Capability's private context maintenance is independent.
-
-Protection matches `sourceLane`, `runId`, and `delegationId` in the Announce
-payload, independently of private lane tags. No protection state or second
-result store is needed.
-
-## Invariants
-
-- canonical state contains one Announce identity, never an original plus a
-  copied result message;
-- delegated result text always has data authority;
-- main publication and handoff provenance do not imply task acceptance or goal completion;
-- model and UI projections do not mutate graph state;
-- old untyped handoff messages are ordinary conversation history and are not
-  upgraded through content heuristics;
-- retired artifact fields are removed from execution records and are not part
-  of the Announce contract; see the
-  [retirement notes](../extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役).
-
-This page owns the currently implemented serialized payload. The cross-layer interaction and migration are documented in the
-[Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
-
-Main Announces also carry root-owned `pinpawo.traceId` alongside the existing payload, without changing Announce identity or adding a payload field. It associates evidence with the logical task across resumed runs. Boundary selects current-task main messages using this metadata; acceptance preserves it. Root compaction retains separate current-task and older-history summaries, stamping only the current summary with traceId, while preserving all unfinished Announce attempts verbatim.
+Child messages remain in the subgraph namespace (and its checkpoint when
+configured) instead of being copied into Root as a transcript. Root compaction retains the recent suffix and
+actual call/result records needed for unfinished plan items; it does not use
+Announce identity. See [context compaction](../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts).

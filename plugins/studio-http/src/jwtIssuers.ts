@@ -15,7 +15,7 @@ export type StudioHttpJwtIssuer = {
   jwksUrl?: string;
   /** SPKI PEM public key. Set this or jwksUrl. */
   publicKey?: string;
-  /** Names this issuer's clients: letters, digits, "_" or "-", no dots. */
+  /** Names this issuer's clients: letters, digits, "_" or "-", no dots; "user" is reserved. */
   clientPrefix: string;
   /** Defaults to RS256 and ES256. */
   algorithms?: readonly string[];
@@ -71,6 +71,11 @@ function readIssuer(input: StudioHttpJwtIssuer): Verifier {
   const clientPrefix = nonEmpty(input.clientPrefix, 'clientPrefix');
   if (!PREFIX.test(clientPrefix)) {
     throw new Error(`Studio HTTP Plugin jwt clientPrefix "${clientPrefix}" must be 1-32 letters, digits, "_" or "-".`);
+  }
+  // Login sessions own user.<username>. Allowing an issuer to mint the same
+  // client ids would grant its subjects that user's Channel identity/membership.
+  if (clientPrefix === 'user') {
+    throw new Error('Studio HTTP Plugin jwt clientPrefix "user" is reserved for Studio user accounts.');
   }
   const algorithms = [...(input.algorithms ?? DEFAULT_ALGORITHMS)];
   if (algorithms.length === 0 || algorithms.some((algorithm) => !ALLOWED_ALGORITHMS.has(algorithm))) {

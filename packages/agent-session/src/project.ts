@@ -130,10 +130,9 @@ export function applySessionSnapshot(
   const context = options.observedAt === undefined
     ? undefined
     : { observedAt: options.observedAt };
-  const runtime = {
-    ...(session.runtime ?? {}),
-    ...(incoming.runtime ?? {}),
-  };
+  // A snapshot is the current runtime, not a configuration patch. Omitted
+  // profile fields must not inherit facts from a previous profile or session.
+  const runtime = incoming.runtime;
   const actor = incoming.actor ?? session.actor;
   const preserveSessionTokenUsage = options.preserveOmittedSessionTokenUsage
     ?? options.preserveOmittedTokenUsage;
@@ -153,7 +152,7 @@ export function applySessionSnapshot(
     ...(incoming.currentPlan !== undefined
       ? { currentPlan: cloneAgentPlan(incoming.currentPlan) }
       : {}),
-    ...(Object.keys(runtime).length ? { runtime } : {}),
+    ...(runtime ? { runtime: { ...runtime } } : {}),
     ...(incoming.tokenUsage
       ? { tokenUsage: incoming.tokenUsage }
       : options.preserveOmittedTokenUsage && session.tokenUsage
@@ -239,7 +238,7 @@ function reduceRuntimeEvent(
         event.messageId,
         event.text,
         event.usage,
-        { ...message, role: 'assistant', text: event.text, resultReferences: event.resultReferences },
+        { ...message, role: 'assistant', text: event.text, resultReferences: event.resultReferences, deliverables: event.deliverables },
         context,
       );
     case 'message.tool_calls':
@@ -472,15 +471,16 @@ function appendToolCallMessage(
 }
 
 /**
- * Settle by the call's own identity: a call made before a review keeps its
- * entry when the run that answers the review settles it.
+ * Settle within the owning message. Call ids can recur after compaction;
+ * review resume can change the request id without changing the message.
  */
 function settleToolCall(
   session: AgentSession,
   event: Extract<AgentRuntimeEvent, { type: 'tool_call.settled' }>,
 ) {
   const entry = session.timeline.find((candidate): candidate is AgentMessageEntry =>
-    candidate.type === 'message' && Boolean(candidate.toolCalls?.some(call => call.id === event.callId)));
+    candidate.type === 'message' && candidate.id === event.messageId
+    && Boolean(candidate.toolCalls?.some(call => call.id === event.callId)));
   if (!entry) return session;
   return {
     ...session,
@@ -644,6 +644,7 @@ function appendMessage(
     role: message.role,
     text: message.text,
     ...(message.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(message.deliverables ? { deliverables: message.deliverables.map(ref => ({ ...ref })) } : {}),
     ...(message.notice ? { notice: cloneAgentNotice(message.notice) } : {}),
     status: 'completed',
     ...(message.requestId ? { requestId: message.requestId } : {}),
@@ -669,6 +670,7 @@ function finalizeAssistantMessage(
     requestId,
     text,
     ...(message?.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(message?.deliverables ? { deliverables: message.deliverables.map(ref => ({ ...ref })) } : {}),
     status: 'completed',
     ...(previous
       ? {
@@ -823,6 +825,7 @@ function upsertTimelineEntry(
 function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   if (entry.type === 'message') return { ...entry,
     ...(entry.resultReferences ? { resultReferences: entry.resultReferences.map(ref => ({ ...ref })) } : {}),
+    ...(entry.deliverables ? { deliverables: entry.deliverables.map(ref => ({ ...ref })) } : {}),
     ...(entry.toolCalls ? { toolCalls: entry.toolCalls.map(call => ({ ...call, args: { ...call.args } })) } : {}),
     ...(entry.notice ? { notice: cloneAgentNotice(entry.notice) } : {}),
   };

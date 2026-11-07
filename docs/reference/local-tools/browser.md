@@ -3,7 +3,7 @@
 > **Status: current operation reference.** For installation and diagnosis,
 > follow [Browser bridge setup](../../guides/browser-bridge.md).
 
-The Chrome extension uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). This is Browser's only execution path: there is no Playwright driver, backend selection, named session, custom profile or headless mode.
+The Chrome extension uses an existing Chrome installation and its login state. Protocol v4 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). This is Browser's only execution path: there is no Playwright driver, backend selection, named browser-session API, custom profile or headless mode.
 
 Architecturally, the extension is a driver inside BrowserRS
 (`ChromeExtensionBrowserRS`), not a driver of the Browser Capability and not a
@@ -19,7 +19,7 @@ branch belongs in the generic Host or Agent lifecycle. See
 
 ## Availability
 
-Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser-specific status views consume that projection instead of independently combining Bridge booleans. Under #645, a generic Toolkit Runtime diagnostics surface will carry the same state as Browser-owned details rather than creating a Browser-only diagnostics lifecycle. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
+The Browser Toolkit obtains its availability from the injected BrowserRS. The Host evaluates availability when assembling the Toolkit inventory. BrowserRS distinguishes bridge startup from extension connectivity: a disconnected extension does not by itself make the RS unavailable, and operations report connectivity failures as structured errors. A listening bridge without a registered extension is not command-ready; reconnecting the extension does not require a new Toolkit definition. See [Toolkit RS dependencies](../extensions/toolkit-rs.md) for the RS service and Host client lifecycle.
 
 ## Process boundary
 
@@ -36,7 +36,7 @@ Unix socket (~/.pinpawo/run/browser-bridge.sock)
 independent Native Messaging host (stdio framing only)
         │ chrome.runtime.connectNative
         ▼
-MV3 service worker ── chrome.debugger / allowlisted CDP ── one Chrome tab
+MV3 service worker ── chrome.debugger / allowlisted CDP ── active Chrome target
 ```
 
 The RS service owns commands, deadlines and final payload normalization; the Host keeps review and origin approval. The native host only translates Chrome's length-prefixed messages to authenticated Unix-socket JSONL. The extension owns tab binding and the narrow CDP execution allowlist.
@@ -80,7 +80,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
 - Each navigation carries an origin already authorized by the host review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and host repeats that check before building final payloads.
-- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot, DOM box/scroll and read-only page identity, layout and node lookups (`Page.getFrameTree`, `Page.getNavigationHistory`, `Page.getLayoutMetrics`, `DOM.describeNode`, `Runtime.getProperties`, `Runtime.releaseObjectGroup`) commands required by the declared Browser operations; arbitrary CDP is never relayed.
+- CDP remains allowlisted. Protocol v4 exposes the declared Browser operations, not arbitrary CDP calls. The extension internally uses a fixed set of CDP commands for accessibility, page and network observation, screenshots, input and DOM inspection, including `Runtime.evaluate` for its own page-reading expressions. See the [extension allowlist](../../../toolkits/browser/src/hosts/chromeExtension/extension/background.ts).
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the RS service stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
 - Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.

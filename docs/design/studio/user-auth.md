@@ -1,7 +1,7 @@
 # Studio 用户身份登录
 
-> 状态：设计草案（未实现）
-> 更新：2026-11-05
+> 状态：设计草案（后端已实现，Console 登录表单未做）
+> 更新：2026-11-08
 > Issue：[#1053](https://github.com/pinpawo/pinpawo-agent/issues/1053)
 
 Studio 目前只有「凭证」，没有「人」。本文设计一层最小的用户身份：用户用用户名密码登录，
@@ -80,13 +80,14 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 
 ### 3.3 会话凭证
 
-会话同样由 Better Auth 签发，本插件只补"过期之外"的两条规则：
+会话由本插件签发，Better Auth 只负责账号与密码：
 
-- 会话表 `studio_auth_session`（`token`、`user_id`、`expires_at`、`updated_at`）；token 是 Better Auth 生成的不透明串，插件只做形状预检（`^[A-Za-z0-9_-]{20,200}$`）再交给 `getSession({headers})`；
-- 绝对有效期 12 小时（`expiresIn = updateAge`，因此不会被滚动续期无限延长）；空闲 30 分钟由本插件读 `updated_at` 判定，超时即删除该会话并 `401`；
-- 撤销：登出删除当前会话行；改密删除该用户其他会话；管理员禁用删除全部会话且禁止再登录；client 被 `POST /clients/revoke` 吊销后，认证阶段直接拒绝；
-- 传输沿用现有 `Authorization: Bearer`（当前部署无 TLS，因此不用 cookie）；`bearer` 插件只用于让 `getSession` 接受这个头；
-- 扩展点：将来经 TLS 反代暴露时，可切换为 HttpOnly + SameSite cookie，token 与表结构不变。
+- token 由 `randomBytes(32)` 生成，响应中仅返回一次；`studio_auth_session.token` 只存 SHA-256，验证不调用 Better Auth 的 session API；
+- 绝对有效期 12 小时，不滚动续期；空闲 30 分钟由 `updated_at` 判定，超时删除会话并拒绝认证；
+- 撤销：登出删除当前会话行；改密删除其他会话；管理员禁用删除全部会话并禁止再登录；client 被 `POST /clients/revoke` 吊销后也拒绝认证；
+- `GET /events` 与 `GET /pet-sessions/events` 在每次发送数据、初始快照和心跳前重新认证并检查对应 capability，失效即结束连接并释放订阅。无事件时最迟在下个心跳检测；已发送的数据不会收回；
+- 保持中的事件流算作会话活动，心跳验证会更新最后使用时间，但不会延长绝对有效期；
+- 传输沿用 `Authorization: Bearer`，目前不启用 cookie。Better Auth 的 `secret` 不参与这些随机会话 token 的签发或验证。
 
 ### 3.4 身份映射：用户即 Studio client
 
@@ -229,7 +230,8 @@ alter table studio_auth_session add column credential_version integer not null d
 **版本闸覆盖两条写入路径**，不只是登录签发：
 
 - 登录：快照里的 `{hash, version}` 一起校验，事务内比对版本后才签发会话（见上）；
-- 自助改密：校验用的哈希与提交时比对的版本来自**同一个快照**；提交时先做条件递增
+- 自助改密：提交版本绑定到**读取请求体之前已认证的会话**，不能用读取请求体后得到的新版本代替。
+  否则禁用发生在 `readJson()` 期间时，旧会话会拿到禁用后的版本，绕过版本闸。提交时先做条件递增
   `UPDATE ... SET credential_version = credential_version + 1 WHERE id = ? AND COALESCE(credential_version,0) = ?`，
   影响行数为 0 就整体回滚 —— 密码不写、会话不动、当前会话也不重标，返回 `409`
   （`{"error": "Password was changed elsewhere. Sign in again and retry."}`），审计
@@ -240,9 +242,11 @@ alter table studio_auth_session add column credential_version integer not null d
 都显示 `ok`，事后无法从审计看出被覆盖。加上版本条件后，这类过期写入会被拒绝，操作员的动作总是生效。
 两个自助改密并发时同理：后提交者 `409`，先提交者的新密码生效。
 
-当前会话的保留同样是条件性的：只有该会话行仍存在、且其 `credential_version` 仍等于本次读到的版本时
-才重标为新版本；否则不重标，并返回 `200 {"revoked": true}`，明确告知这台设备需要重新登录（不再出现
-"返回成功但实际已被登出"）。
+当前会话也属于提交条件：同一事务内检查账号未禁用，并通过条件 `UPDATE` 锁定会话行，
+要求会话仍存在、版本匹配、绝对与空闲时限都未到。登出或过期发生在密码校验/哈希期间时，
+返回 `401` 并回滚整个事务，密码和版本都不动，不再返回「改密成功但当前会话已撤销」。
+锁顺序与禁用一致（用户行 → 会话行）。Studio client 是否已撤销在提交前再次查询；
+client 存储通过独立接口访问，不与本插件事务组成跨 owner 事务。
 
 **管理员重置同样走版本闸，禁用也递增版本。** 只盖登录与自助改密还不够，剩下两处写入会让并发结果
 不可解释：
@@ -304,12 +308,12 @@ IPv6（`::ffff:127.0.0.1`）归一化为 IPv4，IPv6 zone id 丢弃，便于与�
 | `POST /auth/login` | `route`（handler 自校验） | `{username, password}` | `200 {token, expiresAt, user: {userId, username, clientId, capabilities}}`；`401 {error: "Invalid username or password."}`（密码错、用户名不存在、账号被禁用都是这一个答案）；`429 {error: "Too many attempts.", retryAfterSeconds}`；`403 {error: "This client has been revoked."}`（密码已通过但 client 被吊销） |
 | `POST /auth/logout` | 会话 | – | `204` |
 | `GET /auth/me` | 会话 | – | `200 {userId, username, clientId, capabilities, expiresAt}` |
-| `POST /auth/password` | 会话 | `{currentPassword, newPassword}` | `204`（撤销该用户其他会话，当前会话保留）；`401` 旧密码错；`400` 参数/口令长度不合法；`409` 凭据在提交前已被改密/重置（条件提交未命中，整体回滚，需重新登录后重试）；`200 {"revoked": true}` 表示改密已生效但当前会话在此期间被吊销，需重新登录 |
+| `POST /auth/password` | 会话 | `{currentPassword, newPassword}` | `204`（撤销该用户其他会话，当前会话保留）；`401` 旧密码错、会话在提交前被登出/过期或 client 被撤销；`400` 参数/口令长度不合法；`409` 凭据在提交前已被改密/重置（条件提交未命中，整体回滚，需重新登录后重试） |
 | `GET /users` | 本机 token | – | `200 {users: [{userId, username, clientId, displayName, capabilities, disabledAt?, lockedUntil?}]}` |
 | `POST /users` | 本机 token | `{username, password, displayName?, capabilities?}` | `201 {userId, clientId, capabilities}`；`409` 用户名已存在 |
 | `POST /users/password` | 本机 token | `{userId, password}` | `204`，撤销该用户全部会话；`409 {error: "Password was changed elsewhere. Reload the user and retry."}` 并发重置时后提交者被拒（条件提交未命中，整体回滚，密码与会话均不变） |
 | `POST /users/capabilities` | 本机 token | `{userId, capabilities}` | `200 {userId, capabilities}` |
-| `POST /users/disable` | 本机 token | `{userId, disabled}` | `200 {userId, disabled}`；禁用同时吊销 client 与会话，并在同一事务内递增 `credential_version`，使进行中的自助改密无法再落库 |
+| `POST /users/disable` | 本机 token | `{userId, disabled}` | `200 {userId, disabled}`；禁用账号并吊销该用户全部会话，并在同一事务内递增 `credential_version`，使进行中的自助改密无法再落库 |
 
 状态码约定：`401` 未认证（无/过期/已吊销凭证）或登录凭据无效；`403` 已认证但无 capability、
 或不属于该 Channel；`429` 登录被锁定；`400` 请求体不是合法 JSON；`415` 请求的
@@ -412,7 +416,7 @@ registry，用一个只返回 capability 的校验器代替登录插件）：
 - **Console 存 sessionStorage**：XSS 风险与今天相同，不因本设计改善或恶化；
 - **锁定可被用于 DoS 单账号**：依赖地址限速兜底，必要时改成「指数退避 + 不锁账号只延迟」；
 - **是否需要 workdir 级多租户**：当前单 workdir，本设计明确不做；
-- **`user.` 前缀与 JWT issuer 命名空间**：需在 issuer 文档中声明保留，避免撞名；
+- **`user.` 前缀与 JWT issuer 命名空间**：HTTP 配置校验拒绝 `clientPrefix: "user"`，避免 JWT 与登录用户撞名；其他前缀保持不变；
 - **审计保留期**：暂不清理，后续需要按天轮转或裁剪。
 
 ## 10. 实现状态

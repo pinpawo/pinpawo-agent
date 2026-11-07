@@ -19,10 +19,13 @@ const originalBody = '# Public evidence\n\n[Analyst](participant:pet:analyst) ·
   '| Check | Result |\n| --- | --- |\n| Reader | Passed |\n\n```ts\nconst wide = "' + 'evidence'.repeat(120) + '";\n```\n\n' +
   Array.from({ length: 70 }, (_, i) => 'Reading paragraph ' + i + '. ' + 'Public evidence remains read-only. '.repeat(4)).join('\n\n') +
   '\n\n[Unsafe](javascript:alert(1))\n\n<script>window.bad = true</script>';
+const downloadNames = ['报告 一.txt', 'space 100%20 #.txt'];
+const deliverables = downloadNames.map(name => ({ uri: `artifact://workspace/thread/file/${encodeURIComponent(name)}`, title: name }));
 const makeMessage = (id, sequence, body) => ({ channelId: channel.channelId, messageId: id, sequence, body,
   author: { kind: 'pet', id: 'analyst' }, occurredAt: date, mentions: [] });
 const messages = Array.from({ length: 20 }, (_, i) => makeMessage('older-' + i, i + 2, 'Older evidence ' + i + '. '.repeat(40)));
 messages.push(makeMessage('long', 22, originalBody));
+messages.at(-1).deliverables = deliverables;
 for (let i = 0; i < 20; i++) messages.push(makeMessage('newer-' + i, 23 + i, 'Newer evidence ' + i + '. '.repeat(40)));
 const streams = new Set();
 const writes = [];
@@ -34,6 +37,12 @@ const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://fixture').pathname;
   requests.push(path);
   if (request.method !== 'GET') { writes.push(path); response.writeHead(405).end(); return; }
+  if (path === '/agent-session/artifacts') {
+    const uri = new URL(request.url, 'http://fixture').searchParams.get('uri');
+    if (request.headers.authorization !== 'Bearer synthetic-only-token') { response.writeHead(401).end(); return; }
+    if (!deliverables.some(item => item.uri === uri)) { response.writeHead(404).end(); return; }
+    response.writeHead(200, { 'Content-Type': 'application/octet-stream' }); response.end('downloaded report'); return;
+  }
   if (path === '/events') {
     response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write(': fixture ready\n\n');
     streams.add(response); request.on('close', () => streams.delete(response)); return;
@@ -72,6 +81,14 @@ try {
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
   const message = page.locator('[data-message-id="long"]');
+  for (const filename of downloadNames) {
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      message.getByRole('link', { name: filename, exact: true }).click(),
+    ]);
+    assert.equal(download.suggestedFilename(), filename, 'artifact filename is decoded exactly once');
+    assert.equal(await download.failure(), null);
+  }
   const expand = message.getByRole('button', { name: 'View full screen', exact: true });
   const timeline = page.locator('.channel-timeline-scroll');
   const dialog = page.getByRole('dialog', { name: 'Message from Analyst', exact: true });
@@ -149,7 +166,7 @@ try {
   assert.deepEqual(writes, [], 'reading never posts messages or dispatches');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'passed', fixture: 'frontend + synthetic HTTP/SSE only', sizes, writes, screenshots,
-    coverage: ['discoverable keyboard entry', 'shared safe Markdown/mentions/table', 'full viewport', 'vertical reader and horizontal code scrolling',
+    coverage: ['authenticated artifact download preserves Unicode, spaces and literal percent sequences', 'discoverable keyboard entry', 'shared safe Markdown/mentions/table', 'full viewport', 'vertical reader and horizontal code scrolling',
       'native modal focus containment', 'Esc/Close restore focus, Timeline and document scrolling', 'blank-space click stays open', 'repeat opening under StrictMode', 'stable snapshot during SSE update; latest on reopen', 'no write or dispatch'] }));
 } finally {
   await browser?.close();

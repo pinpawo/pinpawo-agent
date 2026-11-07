@@ -1,5 +1,6 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { isDeliverable, type Deliverable } from '@pinpawo/agent-contracts';
 import { getAgentMessageMetadata, setAgentMessageMetadata, type AgentMessageMetadata } from '../messages';
 import { capabilityExecutionSnapshotSchema, type CapabilityExecutionInput } from './runSupervisor/protocol';
 
@@ -8,6 +9,7 @@ export const DELEGATE_CAPABILITY_TOOL_NAME = 'delegate_capability';
 const executionResultSchema = z.object({
   status: z.enum(['returned', 'missing_deliverable']),
   reviewDecision: z.enum(['reject', 'cancel']).optional(),
+  deliverables: z.array(z.custom<Deliverable>(isDeliverable)).optional(),
   delivery: z.object({
     id: z.string().min(1), task: z.string(), text: z.string().refine((text) => text.trim().length > 0),
     scope: z.object({

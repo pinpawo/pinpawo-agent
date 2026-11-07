@@ -9,6 +9,8 @@ import {
   createStudioStorage,
   type ClientDatabase,
   type StudioPluginContext,
+  type StudioEvent,
+  type StudioEventHandler,
 } from '@pinpawo/studio-core';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 
@@ -24,25 +26,48 @@ const PASSWORD = 'correct-horse-battery-staple';
  * this is the wiring a Studio Host performs, and the only one that exercises
  * route registration end to end.
  */
-async function harness(startOrder: 'http-first' | 'auth-first' = 'http-first') {
+async function harness(
+  startOrder: 'http-first' | 'auth-first' = 'http-first',
+  options: { heartbeatIntervalMs?: number; afterObserve?: () => Promise<void> } = {},
+) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   const clients = new StudioClients(async () => new KyselyClientStore(
     await storage.open<ClientDatabase>('clients', clientMigrations),
   ));
   const registry = new StudioPluginHookRegistry();
 
-  const http = createStudioHttpPlugin({ port: 0, authToken: HOST_TOKEN });
+  const eventListeners = new Set<StudioEventHandler>();
+  const sessionListeners = new Set<(message: unknown) => void>();
+  const snapshot = { version: 1, session: { sessionId: 'pet:0000000b', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null } };
+  const petSessions: StudioPluginContext['petSessions'] = {
+    snapshot: async () => snapshot as never,
+    observe: async (_petId, _sessionId, listener) => {
+      listener({ type: 'session.snapshot.result', requestId: 'first', snapshot } as never);
+      const forward = (message: unknown) => listener(message as never);
+      sessionListeners.add(forward);
+      await options.afterObserve?.();
+      return () => { sessionListeners.delete(forward); };
+    },
+    review: async () => undefined,
+  };
+  const subscribe: StudioPluginContext['subscribe'] = (listener) => {
+    eventListeners.add(listener);
+    return () => { eventListeners.delete(listener); };
+  };
+  const http = createStudioHttpPlugin({
+    port: 0, authToken: HOST_TOKEN, heartbeatIntervalMs: options.heartbeatIntervalMs ?? 60_000,
+  });
   const auth = createStudioAuthPlugin({ secret: SECRET });
   const authContext: StudioPluginContext = {
     dispatch: async () => { throw new Error('not used'); },
     registerContextProvider: () => () => undefined,
     allocateSessionId: () => 'unused',
     notify: () => undefined,
-    subscribe: () => () => undefined,
+    subscribe,
+    petSessions,
     listPets: () => [],
     pets: {} as StudioPluginContext['pets'],
     listDispatchQueues: () => [],
-    petSessions: {} as StudioPluginContext['petSessions'],
     hooks: registry.contextFor('studio-auth'),
     storage: {
       dialect: storage.dialect,
@@ -54,7 +79,8 @@ async function harness(startOrder: 'http-first' | 'auth-first' = 'http-first') {
 
   if (startOrder === 'http-first') await http.start({
     dispatch: async (request) => ({ petId: request.petId, invocationId: 'invocation-1' }),
-    subscribe: () => () => undefined,
+    subscribe,
+    petSessions,
     listPets: () => [],
     clients,
     hooks: registry.contextFor('http'),
@@ -62,7 +88,8 @@ async function harness(startOrder: 'http-first' | 'auth-first' = 'http-first') {
   await auth.start(authContext);
   if (startOrder === 'auth-first') await http.start({
     dispatch: async (request) => ({ petId: request.petId, invocationId: 'invocation-1' }),
-    subscribe: () => () => undefined,
+    subscribe,
+    petSessions,
     listPets: () => [],
     clients,
     hooks: registry.contextFor('http'),
@@ -114,6 +141,13 @@ async function harness(startOrder: 'http-first' | 'auth-first' = 'http-first') {
     call,
     createUser,
     login,
+    sessionListeners,
+    emitEvent: async (event: StudioEvent) => {
+      for (const listener of eventListeners) await listener(event);
+    },
+    emitSession: (message: unknown) => {
+      for (const listener of sessionListeners) listener(message);
+    },
     inspect: () => storage.open<StudioAuthDatabase>('inspector', {}),
     stop: async () => {
       await auth.stop();
@@ -291,4 +325,131 @@ test('a real login is audited with the address the connection came from', async 
   const login = rows.find((row) => row.action === 'login' && row.result === 'ok');
   // The loopback socket address, not the header: nothing is trusted in front.
   assert.equal(login?.remote_addr, '127.0.0.1');
+});
+
+
+/** Bound every stream read so a failed revocation cannot hang the suite. */
+function streamReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  let buffered = '';
+  const decoder = new TextDecoder();
+  async function readUntil(predicate: (text: string) => boolean, toEnd = false): Promise<string> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        (async () => {
+          while (true) {
+            if (!toEnd && predicate(buffered)) {
+              const result = buffered;
+              buffered = '';
+              return result;
+            }
+            const next = await reader.read();
+            if (next.done) {
+              assert.ok(toEnd || predicate(buffered), 'stream closed before the expected event');
+              return buffered;
+            }
+            buffered += decoder.decode(next.value, { stream: true });
+          }
+        })(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('SSE read did not finish within 3 seconds')), 3_000);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  return {
+    until: (marker: string) => readUntil((text) => text.includes(marker)),
+    end: () => readUntil(() => false, true),
+  };
+}
+
+const sessionEventsPath = '/pet-sessions/events?petId=pet&sessionId=pet%3A0000000b';
+for (const path of ['/events', sessionEventsPath]) {
+  for (const invalidation of ['logout', 'admin disable', 'capability removal', 'client revocation', 'password reset', 'absolute expiry']) {
+    test(`real login session SSE ${path} closes after ${invalidation}`, async (t) => {
+      const h = await harness('http-first', {
+        heartbeatIntervalMs: invalidation === 'absolute expiry' ? 20 : 60_000,
+      });
+      const controller = new AbortController();
+      t.after(async () => { controller.abort(); await h.stop(); });
+      const userId = await h.createUser('stream-reader');
+      assert.equal((await h.call('POST', '/users/capabilities', {
+        token: HOST_TOKEN, body: { userId, capabilities: ['studio.events', 'pet.session'] },
+      })).status, 200);
+      const token = await h.login('stream-reader');
+      const response = await fetch(`${h.base}${path}`, {
+        headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+      });
+      assert.equal(response.status, 200);
+      const reader = response.body!.getReader();
+      const stream = streamReader(reader);
+      await stream.until(path === '/events' ? ': connected' : 'session.snapshot.result');
+      const emit = async (marker: string) => {
+        if (path === '/events') {
+          await h.emitEvent({ eventId: marker, type: 'test.event', source: 'test', payload: { marker }, occurredAt: new Date().toISOString() });
+        } else {
+          h.emitSession({ type: 'session.snapshot.result', requestId: marker, snapshot: { marker } });
+        }
+      };
+      await emit('visible-before-invalidation');
+      await stream.until('visible-before-invalidation');
+
+      if (invalidation === 'logout') {
+        assert.equal((await h.call('POST', '/auth/logout', { token })).status, 204);
+      } else if (invalidation === 'admin disable') {
+        assert.equal((await h.call('POST', '/users/disable', {
+          token: HOST_TOKEN, body: { userId, disabled: true },
+        })).status, 200);
+      } else if (invalidation === 'capability removal') {
+        assert.equal((await h.call('POST', '/users/capabilities', {
+          token: HOST_TOKEN, body: { userId, capabilities: ['channel.read'] },
+        })).status, 200);
+      } else if (invalidation === 'client revocation') {
+        assert.equal((await h.call('POST', '/clients/revoke', {
+          token: HOST_TOKEN, body: { clientId: 'user.stream-reader' },
+        })).status, 200);
+      } else if (invalidation === 'password reset') {
+        assert.equal((await h.call('POST', '/users/password', {
+          token: HOST_TOKEN, body: { userId, password: 'replacement-password-for-stream' },
+        })).status, 204);
+      } else {
+        // Move the persisted absolute deadline behind now without sleeping or
+        // replacing the verifier. The idle heartbeat must discover the expiry.
+        const db = await h.inspect();
+        await db.updateTable('studio_auth_session')
+          .set({ expires_at: new Date(Date.now() - 1_000).toISOString() }).execute();
+      }
+      if (invalidation !== 'absolute expiry') await emit('secret-after-invalidation');
+      const remaining = await stream.end();
+      assert.ok(!remaining.includes('secret-after-invalidation'), remaining);
+      assert.equal(h.sessionListeners.size, 0, 'the Pet session observer is released');
+      await emit('secret-after-close');
+      assert.equal((await reader.read()).done, true);
+      assert.equal((await h.call('GET', '/me', { token: HOST_TOKEN })).status, 200);
+    });
+  }
+}
+
+test('real logout during observation attachment suppresses the buffered session snapshot', async (t) => {
+  let logout: (() => Promise<void>) | undefined;
+  const h = await harness('http-first', { afterObserve: async () => logout?.() });
+  const controller = new AbortController();
+  t.after(async () => { controller.abort(); await h.stop(); });
+  const userId = await h.createUser('snapshot-reader');
+  assert.equal((await h.call('POST', '/users/capabilities', {
+    token: HOST_TOKEN, body: { userId, capabilities: ['pet.session'] },
+  })).status, 200);
+  const token = await h.login('snapshot-reader');
+  logout = async () => {
+    assert.equal((await h.call('POST', '/auth/logout', { token })).status, 204);
+  };
+  const response = await fetch(`${h.base}${sessionEventsPath}`, {
+    headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  const remaining = await streamReader(response.body!.getReader()).end();
+  assert.ok(!remaining.includes('session.snapshot.result'), remaining);
+  assert.equal(h.sessionListeners.size, 0);
 });

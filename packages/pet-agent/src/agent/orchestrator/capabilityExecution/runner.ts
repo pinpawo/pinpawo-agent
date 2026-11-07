@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hasOnlyKeys, isJsonObject, parseDeliverables, type Deliverable } from '@pinpawo/agent-contracts';
 import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { SubagentRunInput } from '../../../types/subagent';
@@ -103,6 +104,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const subagentInput: SubagentRunInput = {
       model: options.models.subagent ?? options.models.act,
       tools: usedResolvedToolkitExecution.tools,
+      stateSchema: usedResolvedToolkitExecution.stateSchema,
       promptSections: [
         {
           id: 'delegation-deliveries',
@@ -144,6 +146,28 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       signal: runnableConfig?.signal,
     };
     let result = await runSubagent(subagentInput);
+    const signal = runnableConfig?.signal;
+    signal?.throwIfAborted();
+    const deliverables = new Map<string, Deliverable>();
+    for (const toolkit of usedResolvedToolkitExecution.toolkits) {
+      if (!toolkit.getResult) continue;
+      signal?.throwIfAborted();
+      const toolkitResult = toolkit.getResult(result.state);
+      signal?.throwIfAborted();
+      let references: Deliverable[];
+      try {
+        if (!isJsonObject(toolkitResult) || !hasOnlyKeys(toolkitResult, ['deliverables'])) {
+          throw new Error('Expected an object containing only deliverables.');
+        }
+        references = parseDeliverables(toolkitResult.deliverables);
+      } catch (cause) {
+        throw new Error(`Toolkit "${toolkit.name}" returned an invalid result.`, { cause });
+      }
+      for (const reference of references) {
+        if (!deliverables.has(reference.uri)) deliverables.set(reference.uri, reference);
+      }
+    }
+    signal?.throwIfAborted();
 
     if (!result.reviewDecision && capability.lifecycle?.finalize) {
       const finalized = await capability.lifecycle.finalize(result, {
@@ -162,6 +186,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
           : {}),
       };
     }
+    signal?.throwIfAborted();
 
     const output = result.reviewDecision ? null : result.output;
     const delivery = output?.trim() ? {
@@ -174,6 +199,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       status: delivery ? 'returned' : 'missing_deliverable',
       ...(result.reviewDecision ? { reviewDecision: result.reviewDecision } : {}),
       delivery,
+      deliverables: [...deliverables.values()],
       tokenUsage: result.tokenUsage ?? null,
       toolAuthorizations: [...authorizationRecorder.active],
     };

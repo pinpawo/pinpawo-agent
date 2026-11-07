@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
   ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
@@ -19,10 +20,18 @@ export const channelUpdateSchema = z.object({
   description: z.string().trim().max(50_000).nullable().optional(),
   prompt: z.string().trim().max(50_000).nullable().optional(),
 }).strict();
+export const channelDeliverablesSchema = z.unknown().transform((value, context) => {
+  try { return parseDeliverables(value); }
+  catch (error) {
+    context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid deliverables.' });
+    return z.NEVER;
+  }
+});
 export const channelMessageSchema = z.object({
   body: z.string().trim().min(1).max(100_000),
   replyTo: identifier.optional(),
   mentions: z.array(channelMentionSchema).max(100).default([]),
+  deliverables: channelDeliverablesSchema.optional(),
 }).strict();
 export const channelPageSchema = z.object({
   after: z.number().int().nonnegative().safe().default(0),
@@ -280,6 +289,7 @@ export class ChannelService {
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),
         ...(options.externalRef ? { externalRef: options.externalRef } : {}),
         body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}), mentions,
+        ...(value.deliverables !== undefined ? { deliverables: value.deliverables } : {}),
       });
       return { message, created: message.messageId === messageId };
     });

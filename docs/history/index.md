@@ -8,11 +8,10 @@ behavior.
 ## Agent runtime
 
 - [Context governance refactor](agent-runtime/context-governance-refactor.md)
-- [Guard registry](agent-runtime/guard-registry.md)
+- [Guard design](../reference/runtime/guards.md) — current rules and migration from the removed registry; earlier recursion formulas and local token-fuse proposals are historical.
 - [Planner return to answer](agent-runtime/planner-return-to-answer.md)
 - [Decision prompt](agent-runtime/decision-prompt.md)
-- [Lifecycle composition evaluation](agent-runtime/lifecycle-composition-evaluation.md),
-  [recursion-guard diagnosis](agent-runtime/recursion-guard-diagnosis.md), and
+- [Lifecycle composition evaluation](agent-runtime/lifecycle-composition-evaluation.md) and
   [subagent stream bridge](agent-runtime/subagent-stream-bridge.md)
 
 ## Artifacts, Studio, and TUI

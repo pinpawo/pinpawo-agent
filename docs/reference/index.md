@@ -9,7 +9,7 @@ proposals, and accepted contracts at retained paths; check each page's status.
 - [API reference](api/index.md) — Pet runtime, Studio, events and review, CLI,
   errors, and integration ownership.
 - [Extension contracts](extensions/capability-toolkit.md) — Capability,
-  Toolkit, directory format, and Toolkit runtime lifecycle.
+  Toolkit, directory format, and [RS dependencies](extensions/toolkit-rs.md).
 - [Runtime contracts](runtime/index.md) — sessions, model profiles, authorization,
   guards, workdirs, and delegation announces.
 - [Legacy artifact retirement](extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役) — removed APIs and the current execution-record contract.

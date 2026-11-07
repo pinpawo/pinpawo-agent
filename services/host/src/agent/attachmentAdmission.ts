@@ -45,8 +45,42 @@ type ClassifiedImage = {
   attachment: AgentLocalAttachment;
   bytes: Buffer;
   mimeType: SupportedLocalImageMimeType;
-  sha256: string;
 };
+
+export function assertImageAttachmentLimits(input: {
+  allowImages: boolean;
+  imageCount: number;
+  byteSize: number;
+  totalBytes: number;
+}) {
+  if (!input.allowImages) {
+    throw new ImageAdmissionError('image_model_unsupported', 'The selected model profile does not support image input.');
+  }
+  if (input.imageCount > MAX_LOCAL_IMAGE_ATTACHMENTS) {
+    throw new ImageAdmissionError('image_count_limit', `A single message may include at most ${MAX_LOCAL_IMAGE_ATTACHMENTS} images.`);
+  }
+  if (input.byteSize > MAX_LOCAL_IMAGE_BYTES) {
+    throw new ImageAdmissionError('image_size_limit', `An image exceeds the ${MAX_LOCAL_IMAGE_BYTES} byte limit.`);
+  }
+  if (input.totalBytes > MAX_LOCAL_IMAGE_TOTAL_BYTES) {
+    throw new ImageAdmissionError('image_total_size_limit', `Image attachments exceed the ${MAX_LOCAL_IMAGE_TOTAL_BYTES} byte total limit.`);
+  }
+}
+
+/** Shared image admission after either a local file or an artifact has supplied bytes. */
+export function admitImageAttachmentBytes(
+  input: { id: string; name: string; bytes: Uint8Array; mimeType: SupportedLocalImageMimeType },
+  options: { allowImages: boolean; imageCount: number; totalBytes: number },
+): AdmittedLocalImageAttachment {
+  assertImageAttachmentLimits({ ...options, byteSize: input.bytes.byteLength });
+  const mimeType = detectSupportedImageMimeType(input.bytes);
+  if (!mimeType || mimeType !== input.mimeType) {
+    throw new ImageAdmissionError('image_invalid', 'Image bytes do not match their declared format.');
+  }
+  return Object.freeze({ id: input.id, source: 'local-image', kind: 'image',
+    data: Buffer.from(input.bytes).toString('base64'), name: input.name, mimeType,
+    byteSize: input.bytes.byteLength, sha256: sha256Digest(input.bytes) });
+}
 
 /**
  * Admits user image attachments as base64 payloads for LangChain standard
@@ -59,45 +93,17 @@ export class ImageAttachmentAdmission {
     attachments: readonly AgentLocalAttachment[],
     options: { allowImages: boolean },
   ): Promise<AdmittedLocalAttachment[]> {
-    const images: ClassifiedImage[] = [];
+    const admittedById = new Map<string, AdmittedLocalImageAttachment>();
+    let imageCount = 0;
     let totalBytes = 0;
     for (const attachment of attachments) {
       const image = await this.classify(attachment);
       if (!image) continue;
-      if (!options.allowImages) {
-        throw new ImageAdmissionError(
-          'image_model_unsupported',
-          'The selected model profile does not support image input.',
-        );
-      }
-      if (images.length >= MAX_LOCAL_IMAGE_ATTACHMENTS) {
-        throw new ImageAdmissionError(
-          'image_count_limit',
-          `A single message may include at most ${MAX_LOCAL_IMAGE_ATTACHMENTS} images.`,
-        );
-      }
+      imageCount += 1;
       totalBytes += image.bytes.length;
-      if (totalBytes > MAX_LOCAL_IMAGE_TOTAL_BYTES) {
-        throw new ImageAdmissionError(
-          'image_total_size_limit',
-          `Image attachments exceed the ${MAX_LOCAL_IMAGE_TOTAL_BYTES} byte total limit.`,
-        );
-      }
-      images.push(image);
-    }
-
-    const admittedById = new Map<string, AdmittedLocalImageAttachment>();
-    for (const image of images) {
-      admittedById.set(image.attachment.id, Object.freeze({
-        id: image.attachment.id,
-        source: 'local-image',
-        kind: 'image',
-        data: image.bytes.toString('base64'),
-        name: image.attachment.name,
-        mimeType: image.mimeType,
-        byteSize: image.bytes.length,
-        sha256: image.sha256,
-      }));
+      admittedById.set(attachment.id, admitImageAttachmentBytes({
+        id: attachment.id, name: attachment.name, bytes: image.bytes, mimeType: image.mimeType,
+      }, { ...options, imageCount, totalBytes }));
     }
     return attachments.map((attachment) => (
       admittedById.get(attachment.id) ?? attachment
@@ -146,7 +152,6 @@ export class ImageAttachmentAdmission {
         attachment,
         bytes,
         mimeType,
-        sha256: sha256Digest(bytes),
       };
     } finally {
       await handle.close();

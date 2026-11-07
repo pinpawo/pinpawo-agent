@@ -3,10 +3,13 @@ import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { atomicWriteFile } from './atomicFile';
 import type { StoredModelProfilesV1 } from './config/modelProfiles';
+import type { ArtifactStorageConfig } from './artifacts';
 
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 
 export type StoredConfig = {
+  /** Published file storage; credentials belong only in this global config or environment. */
+  artifacts?: ArtifactStorageConfig;
   llm_api_key?: string;
   llm_model_preset?: string;
   llm_base_url?: string;

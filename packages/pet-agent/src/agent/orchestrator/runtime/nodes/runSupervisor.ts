@@ -12,6 +12,7 @@ import type { OrchestratorConfig } from '../../types';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { runIterationBudgetReached } from '../guards/runIterationBudget';
 import { getAgentRuntimeContext } from '../../../../runtime/context';
+import { withReplyDeliverables } from '../../replyDeliverables';
 
 export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapabilityTool?: StructuredTool) {
   const runner = config.runSupervisorRunner ?? createRunSupervisorAgent({
@@ -19,9 +20,9 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
   });
   return async (root: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
     if (runIterationBudgetReached(root, runnableConfig)) return new Command({
-      update: { messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(new AIMessage(
+      update: { messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(withReplyDeliverables(new AIMessage(
         '主流程循环已达到上限，任务尚未验收完成。你可以继续当前任务。',
-      )), { runId: root.runId, taskId: root.taskId })], runTerminalError: null },
+      ), root.messages, root.runSupervisorState, root.runId)), { runId: root.runId, taskId: root.taskId })], runTerminalError: null },
       goto: END,
     });
     const catalog = createCapabilityCatalog({
@@ -33,6 +34,12 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
       hint: getAgentRuntimeContext(runnableConfig).hint,
     });
     const result = await runner.invoke(input, runnableConfig);
+    const plan = { ...result.runSupervisorState, runId: root.runId };
+    const messages = [...result.messages];
+    const reply = messages.at(-1);
+    if (AIMessage.isInstance(reply) && !reply.tool_calls?.length) {
+      messages[messages.length - 1] = withReplyDeliverables(reply, [...root.messages, ...messages], plan, root.runId);
+    }
     // Execution leaves through native Command.PARENT; normal return is the final reply.
     return new Command({
       update: {
@@ -40,8 +47,8 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
         // Entering is what the mode records, not committing a plan: a rejected
         // decision still spent this run's Supervisor turn, and re-entering at
         // Entry would repeat it.
-        runSupervisorState: { ...result.runSupervisorState, runId: root.runId },
-        messages: result.messages,
+        runSupervisorState: plan,
+        messages,
       },
       goto: END,
     });

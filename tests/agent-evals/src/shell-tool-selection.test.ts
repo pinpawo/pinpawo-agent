@@ -94,10 +94,14 @@ test('the guard distinguishes exhaustion from completion on the last allowed ite
   assert.equal(limited.model.invocations, 1);
   assert.equal(limited.outputs.shell_selection_status, 'step_limit');
   assert.equal(limited.outputs.has_deliverable, false);
-  assert.equal(limited.executed.score, 1);
+  assert.equal(limited.executed.score, 0, 'the final model call is reserved for a text handoff, so its tool call cannot execute');
+  assert.equal(limited.outputs.calls.length, 0);
   assert.equal(limited.outcome.score, 0);
   const complete = await run('git-status-inspect', [[call('inspect_shell', 'git status --short')], 'Status inspected.'], 2);
+  assert.equal(complete.model.invocations, 2);
   assert.equal(complete.outputs.shell_selection_status, 'completed');
+  assert.equal(complete.outputs.has_deliverable, true);
+  assert.equal(complete.executed.score, 1);
   assert.equal(complete.outcome.score, 1);
 });
 

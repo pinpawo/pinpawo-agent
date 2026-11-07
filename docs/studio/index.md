@@ -37,8 +37,9 @@ Toolkits and state.
   and Plugin injection.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
   types and exact method semantics.
-- [Channel design](../design/studio/channel-addressing-and-execution.md) — current
-  message, session, source and queue-observation semantics.
+- [Channel model](../design/studio/channel-model.md), [addressing and execution](../design/studio/channel-addressing-and-execution.md),
+  and [routing](../design/studio/channel-routing.md) — membership, messages, sessions,
+  and optional routing.
 - [HTTP Plugin design](../design/studio/http-plugin.md) — the single HTTP/SSE
   control plane and contributed-route boundary.
 
@@ -51,9 +52,11 @@ Plugins own domain history, scheduling, trigger policy and knowledge projection.
 In-memory admission records and live events do not provide execution results,
 automatic retry, timeout or durable replay. Exact contracts live in the API reference.
 
-Channel owns goals, public messages and fixed Channel/Pet bindings. Its single
-[current design](../design/studio/channel-addressing-and-execution.md) covers
-participant addressing, default Reply, trusted source and observation limits.
+Channel owns membership, public messages and fixed Channel/Pet session bindings.
+The [Channel model](../design/studio/channel-model.md) describes its data and
+membership rules; [addressing and execution](../design/studio/channel-addressing-and-execution.md)
+covers mentions, Reply, trusted source and observation limits. Optional
+[Channel routing](../design/studio/channel-routing.md) handles eligible unaddressed messages.
 Scheduler/Trigger remain independent Plugins; [queue auditing](../design/studio-dispatch-queue-notices.md)
 is an opt-in policy, not Channel queue ownership.
 

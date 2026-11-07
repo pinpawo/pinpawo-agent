@@ -87,6 +87,14 @@ export class CredentialConflictError extends Error {
   }
 }
 
+/** The session authorizing a self-service change was revoked or expired. */
+export class SessionAuthorizationError extends Error {
+  constructor() {
+    super('The session no longer authorizes this password change.');
+    this.name = 'SessionAuthorizationError';
+  }
+}
+
 /**
  * Row-level access to this Plugin's tables. Rules (locking policy, capability
  * defaults, identity mapping) stay in the Plugin; this is storage only.
@@ -290,10 +298,10 @@ export class StudioAuthRepository {
     return this.db.transaction().execute(async (trx) => {
       const user = await trx
         .selectFrom('studio_auth_user')
-        .select(['credential_version'])
+        .select(['credential_version', 'disabled_at'])
         .where('id', '=', row.userId)
         .executeTakeFirst();
-      if ((user?.credential_version ?? 0) !== row.credentialVersion) return false;
+      if (!user || user.disabled_at || (user.credential_version ?? 0) !== row.credentialVersion) return false;
 
       await trx
         .insertInto('studio_auth_session')
@@ -356,17 +364,18 @@ export class StudioAuthRepository {
    * the change survives, re-stamped with the new version, while every other
    * session of that user is revoked.
    *
-   * `expectedVersion` is the version the caller verified its hash against. When
-   * it is given, the bump only happens if the stored version still matches; a
+   * `expectedVersion` is the version the caller authorized against. The
+   * bump only happens if the stored version still matches; a
    * caller acting on a stale read throws {@link CredentialConflictError} and
-   * leaves the account untouched. Without it (an administrative reset) the
-   * replacement is unconditional, as the operator is not racing their own read.
+   * leaves the account untouched. Self-service changes also lock and validate
+   * their authorizing session in this transaction, so logout and expiry cannot
+   * turn a previously checked request into an unauthorized credential write.
    */
   async replaceCredential(
     userId: string,
     hash: string,
-    options: { keepSessionId?: string; expectedVersion?: number } = {},
-  ): Promise<{ version: number; revoked: number; keptSession: boolean }> {
+    options: { keepSessionId?: string; expectedVersion: number; idleTimeoutMs?: number },
+  ): Promise<{ version: number; revoked: number }> {
     return this.db.transaction().execute(async (trx) => {
       const now = new Date().toISOString();
       const bumped = await trx
@@ -380,15 +389,10 @@ export class StudioAuthRepository {
           updated_at: now,
         }))
         .where('id', '=', userId)
-        .$if(options.expectedVersion !== undefined, (query) =>
-          query.where(
-            sql<number>`COALESCE(credential_version, 0)`,
-            '=',
-            options.expectedVersion ?? 0,
-          ),
-        )
+        .$if(options.keepSessionId !== undefined, (query) => query.where('disabled_at', 'is', null))
+        .where(sql<number>`COALESCE(credential_version, 0)`, '=', options.expectedVersion)
         .executeTakeFirst();
-      if (options.expectedVersion !== undefined && Number(bumped?.numUpdatedRows ?? 0) === 0) {
+      if (Number(bumped.numUpdatedRows ?? 0) === 0) {
         throw new CredentialConflictError();
       }
 
@@ -398,6 +402,23 @@ export class StudioAuthRepository {
         .where('id', '=', userId)
         .executeTakeFirst();
       const version = user?.credential_version ?? 0;
+
+      if (options.keepSessionId) {
+        // A conditional no-op UPDATE locks the session until commit (also on
+        // Postgres). A concurrent logout cannot pass this check and delete it
+        // before the credential write. Keep lock order user -> session, as in
+        // disableAccount. Do not refresh last use until the change commits.
+        const session = await trx
+          .updateTable('studio_auth_session')
+          .set({ credential_version: options.expectedVersion })
+          .where('id', '=', options.keepSessionId)
+          .where('user_id', '=', userId)
+          .where('credential_version', '=', options.expectedVersion)
+          .where('expires_at', '>', now)
+          .where('updated_at', '>', new Date(Date.parse(now) - (options.idleTimeoutMs ?? 0)).toISOString())
+          .executeTakeFirst();
+        if (Number(session.numUpdatedRows ?? 0) === 0) throw new SessionAuthorizationError();
+      }
 
       const updated = await trx
         .updateTable('studio_auth_account')
@@ -422,27 +443,18 @@ export class StudioAuthRepository {
           .where('user_id', '=', userId)
           .execute();
       const revoked = Number(deleted[0]?.numDeletedRows ?? 0);
-      // Re-stamp the staying session only if it is still there and still the
-      // one this change was made under: a session revoked meanwhile (logout,
-      // disable) must not be resurrected with the new version.
-      let keptSession = false;
+      // The authorizing session is locked and validated above. Re-stamp the
+      // existing row, never insert a replacement for a revoked session.
       if (options.keepSessionId) {
-        const restamped = await trx
+        await trx
           .updateTable('studio_auth_session')
           .set({ credential_version: version, updated_at: now })
           .where('id', '=', options.keepSessionId)
           .where('user_id', '=', userId)
-          .$if(options.expectedVersion !== undefined, (query) =>
-            query.where(
-              sql<number>`COALESCE(credential_version, 0)`,
-              '=',
-              options.expectedVersion ?? 0,
-            ),
-          )
+          .where(sql<number>`COALESCE(credential_version, 0)`, '=', options.expectedVersion)
           .executeTakeFirst();
-        keptSession = Number(restamped?.numUpdatedRows ?? 0) > 0;
       }
-      return { version, revoked, keptSession };
+      return { version, revoked };
     });
   }
 

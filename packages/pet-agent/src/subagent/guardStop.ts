@@ -3,10 +3,11 @@ import { setAgentMessageMetadata } from '../agent/messages/metadata';
 
 export const SUBAGENT_GUARD_STOP_MARKER_KEY = 'subagentGuardStop' as const;
 
-export type SubagentGuardStopReason = 'subagent_iteration_limit_reached';
+export type SubagentGuardStopReason = 'subagent_iteration_limit_reached' | 'subagent_context_limit_reached';
 
 const SUBAGENT_GUARD_STOP_REASONS: readonly SubagentGuardStopReason[] = [
   'subagent_iteration_limit_reached',
+  'subagent_context_limit_reached',
 ];
 
 /** Keep the framework's stopping message distinct from a task deliverable. */

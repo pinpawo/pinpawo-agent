@@ -39,5 +39,14 @@ test('authenticated Channel HTTP rejects retired attachment input and still stor
     assert.equal(messages.length, 1);
     assert.equal(messages[0]?.body, posted.body.body);
     assert.equal(Object.hasOwn(messages[0]!, 'artifacts'), false);
+    const deliverables = [{ uri: 'artifact://workspace/session/report/report.pdf', title: 'Report' }];
+    const delivered = await call('/channels/messages', { channelId, body: 'Use this report.', deliverables });
+    assert.equal(delivered.status, 201);
+    assert.deepEqual(delivered.body.deliverables, deliverables);
+    const rejected = await call('/channels/messages', { channelId, body: 'Invalid declaration.', deliverables: [{ uri: 4 }] });
+    assert.equal(rejected.status, 400);
+    const reread = await call(`/channels/context?channelId=${encodeURIComponent(channelId)}`);
+    assert.deepEqual((reread.body.messages as Array<Record<string, unknown>>).at(-1)?.deliverables, deliverables);
+    assert.equal((reread.body.messages as unknown[]).length, 2);
   } finally { await studio.shutdown(); }
 });

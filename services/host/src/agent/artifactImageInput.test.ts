@@ -13,6 +13,7 @@ import { createArtifactChatHumanMessage } from './artifactImageInput';
 import { ImageAdmissionError, MAX_LOCAL_IMAGE_BYTES } from './attachmentAdmission';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jw1sAAAAASUVORK5CYII=', 'base64');
+const webp = Buffer.from('UklGRhwAAABXRUJQVlA4TA8AAAAvAAAAAAcQ/Y/+ByKi/wEA', 'base64');
 const uri = 'artifact://workspace/session/image/pixel.png';
 const signedUrl = 'https://bucket.example/pixel.png?signature=private-test-signature';
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -75,7 +76,6 @@ test('a published PNG becomes an existing standard image block and durable refer
 
 test('Agent-published WebP files reach another workspace as image input without bypassing admission', async () => {
   const root = await mkdtemp(join(tmpdir(), 'artifact-webp-input-'));
-  const webp = Buffer.from('UklGRhwAAABXRUJQVlA4TA8AAAAvAAAAAAcQ/Y/+ByKi/wEA', 'base64');
   const publisher = createLocalArtifactStore({ workspacesDir: root, workspaceId: 'publisher' });
   const receiver = createLocalArtifactStore({ workspacesDir: root, workspaceId: 'receiver' });
   try {
@@ -99,6 +99,52 @@ test('Agent-published WebP files reach another workspace as image input without 
       ...await readArtifactSource({ path: 'invalid.webp', workdir: root }), threadId: 'source-session',
     });
     await fails(input([{ uri: invalid.uri }], receiver), 'image_invalid');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('newly recognized formats retain the existing image allowlist and reference-only behavior', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'artifact-mime-input-'));
+  const publisher = createLocalArtifactStore({ workspacesDir: root, workspaceId: 'publisher' });
+  const receiver = createLocalArtifactStore({ workspacesDir: root, workspaceId: 'receiver' });
+  try {
+    for (const [name, mimeType] of [
+      ['image.gif', 'image/gif'],
+      ['image.avif', 'image/avif'],
+      ['image.bmp', 'image/bmp'],
+    ] as const) {
+      await writeFile(join(root, name), 'opaque file bytes');
+      const published = await publisher.put({
+        ...await readArtifactSource({ path: name, workdir: root }), threadId: 'source-session',
+      });
+      assert.equal(published.mimeType, mimeType);
+      await assert.rejects(input([{ uri: published.uri }], receiver), error => {
+        assert.ok(error instanceof ImageAdmissionError);
+        assert.equal(error.code, 'image_invalid');
+        assert.match(error.message, /Unsupported artifact image format/);
+        return true;
+      });
+    }
+    for (const [name, mimeType] of [
+      ['slides.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+      ['unknown.pinpawo-unknown-extension-8f0e63', 'application/octet-stream'],
+    ] as const) {
+      await writeFile(join(root, name), 'opaque file bytes');
+      const published = await publisher.put({
+        ...await readArtifactSource({ path: name, workdir: root }), threadId: 'source-session',
+      });
+      assert.equal(published.mimeType, mimeType);
+      const references = [{ uri: published.uri }];
+      const message = await input(references, receiver, false);
+      assert.equal(message.contentBlocks.some(block => block.type === 'image'), false);
+      assert.deepEqual(savedReferences(message), references);
+    }
+    const legacy = await publisher.put({ threadId: 'old-session', name: 'old.webp',
+      mimeType: 'application/octet-stream', body: stream(webp) });
+    const message = await input([{ uri: legacy.uri }], receiver, false);
+    assert.equal(message.contentBlocks.some(block => block.type === 'image'), false);
+    const fetched = await receiver.fetch(legacy.uri);
+    assert.equal(fetched.ref.mimeType, 'application/octet-stream');
+    if ('body' in fetched) await fetched.body.cancel();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

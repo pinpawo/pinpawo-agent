@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { readArtifactSource } from './files';
 
-test('artifact source MIME inference recognizes WebP case-insensitively and retains existing fallbacks', async () => {
+test('artifact source MIME inference preserves existing mappings and uses the full extension database', async () => {
   const root = await mkdtemp(join(tmpdir(), 'artifact-source-mime-'));
   const bytes = Buffer.from('source bytes');
   try {
@@ -17,7 +17,21 @@ test('artifact source MIME inference recognizes WebP case-insensitively and reta
       ['image.jpg', 'image/jpeg'],
       ['image.jpeg', 'image/jpeg'],
       ['notes.txt', 'text/plain'],
+      ['notes.md', 'text/markdown'],
+      ['data.json', 'application/json'],
+      ['data.csv', 'text/csv'],
+      ['page.html', 'text/html'],
+      ['report.pdf', 'application/pdf'],
+      ['vector.svg', 'image/svg+xml'],
+      ['archive.zip', 'application/zip'],
+      ['report.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      ['data.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+      ['image.gif', 'image/gif'],
+      ['image.avif', 'image/avif'],
+      ['image.bmp', 'image/bmp'],
+      ['slides.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
       ['unknown.bin', 'application/octet-stream'],
+      ['unknown.pinpawo-unknown-extension-8f0e63', 'application/octet-stream'],
       ['no-extension', 'application/octet-stream'],
     ] as const) {
       await writeFile(join(root, name), bytes);

@@ -10,7 +10,7 @@ import { safeArtifactSegment, writeArtifactBody } from './localStore';
 const MIME_TYPES: Record<string, string> = {
   txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
   html: 'text/html', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  svg: 'image/svg+xml', zip: 'application/zip',
+  webp: 'image/webp', svg: 'image/svg+xml', zip: 'application/zip',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };

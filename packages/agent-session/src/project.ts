@@ -472,15 +472,16 @@ function appendToolCallMessage(
 }
 
 /**
- * Settle by the call's own identity: a call made before a review keeps its
- * entry when the run that answers the review settles it.
+ * Settle within the owning message. Call ids can recur after compaction;
+ * review resume can change the request id without changing the message.
  */
 function settleToolCall(
   session: AgentSession,
   event: Extract<AgentRuntimeEvent, { type: 'tool_call.settled' }>,
 ) {
   const entry = session.timeline.find((candidate): candidate is AgentMessageEntry =>
-    candidate.type === 'message' && Boolean(candidate.toolCalls?.some(call => call.id === event.callId)));
+    candidate.type === 'message' && candidate.id === event.messageId
+    && Boolean(candidate.toolCalls?.some(call => call.id === event.callId)));
   if (!entry) return session;
   return {
     ...session,

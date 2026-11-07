@@ -80,7 +80,7 @@ function looksLikeUtf8Text(buffer: Buffer) {
 
 function readUtf8TextFile(filePath: string) {
   if (!looksLikeUtf8Text(readFileSample(filePath))) {
-    throw new Error('not a UTF-8 text file; use read_file for document analysis');
+    throw new Error('not a UTF-8 text file; use read_file for native image/PDF input or an appropriate document converter');
   }
   return readFileSync(filePath, 'utf-8');
 }
@@ -251,39 +251,7 @@ function resolveCopyTarget(sourcePath: string, destinationPath: string) {
   return resolveMoveTarget(sourcePath, destinationPath);
 }
 
-export const readFileTool = tool(
-  async ({ path }: { path: string }) => {
-    try {
-      const stat = statSync(path);
-      if (!stat.isFile()) {
-        return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${path}`;
-      }
-
-      const extension = extname(path).toLowerCase();
-      if (looksLikeUtf8Text(readFileSample(path))) {
-        return `Error: ${path} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
-      }
-
-      return JSON.stringify({
-        ok: false,
-        path,
-        type: 'document_or_binary',
-        extension: extension || null,
-        size: stat.size,
-        readableAsText: false,
-        reason: 'No document reader is registered for this non-text file.',
-        recommendation: 'Install or enable a document/image reader toolkit that can handle this file type.',
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'read_file',
-    description: '分析非 UTF-8 文本的本地文档或二进制文件。普通代码、Markdown、JSON、配置等可读文本请优先使用 view_file_chunk；只有 view_file_chunk 判断不是可读文本，或已知目标是 PDF、Word、表格、图片等非文本文件时才使用。',
-    schema: z.object({ path: z.string().describe('文件路径') }),
-  },
-);
+export { readFileTool } from './fileAttachment';
 
 export const viewFileChunkTool = tool(
   async ({ path, startLine, endLine }: {

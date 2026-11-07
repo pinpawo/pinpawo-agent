@@ -245,7 +245,7 @@ Toolkit 契约的空壳实现。
 
 | Toolkit | 工具 | 依赖与可用性 | 审核 |
 |---|---|---|---|
-| `files` | `read_file`、`view_file_chunk`、`stat_path`、`list_dir`、`validate_structured_file`、`write_file`、`apply_patch`、`move_path`、`copy_path`、`mkdir_path` | Host 进程内执行，不依赖 RS，始终可用 | 读免审核；写审核（`apply_patch` 改 workdir 内已有文件时自动通过） |
+| `files` | [`read_file`](../local-tools/read-file.md)、`view_file_chunk`、`stat_path`、`list_dir`、`validate_structured_file`、`write_file`、`apply_patch`、`move_path`、`copy_path`、`mkdir_path` | Host 进程内执行，不依赖 RS，始终可用 | 读免审核；写审核（`apply_patch` 改 workdir 内已有文件时自动通过） |
 | `shell` | `inspect_shell`、`run_shell`、`start_process`、`wait_process`、`list_processes`、`terminate_process`、`get_current_time` | ShellRS | `inspect_shell` 免审核加底线黑名单；`run_shell` / `start_process` 审核 |
 | `web` | `http_fetch`、`download_file` | Host 进程内执行，不依赖 RS，始终可用 | 审核（`http_fetch` 按 origin 与方法复用授权） |
 | `git` | `git_add`、`git_commit`、`git_push` | ShellRS | 免审核：schema 排除隐式 `git add .`、强推和删除远端引用 |

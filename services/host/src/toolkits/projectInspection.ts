@@ -8,7 +8,7 @@ export const PROJECT_INSPECTION_TOOLKIT_NAME = 'project-inspection';
 const projectInspectionInstructions = [
   '你的目标是只读探索当前项目及其关联的 GitHub 事实，并交付足以支持后续规划的证据摘要。',
   '根据当前目标选择范围最小、语义最直接的文件或搜索工具；Git 和 GitHub 事实用 inspect_shell 运行 git status/log/diff/show 和 gh pr view/diff/checks、gh issue view 等只读命令。',
-  '读取代码、Markdown、JSON 与配置时优先使用 view_file_chunk；read_file 用于图片、PDF、Word、表格等非文本内容。',
+  '读取代码、Markdown、JSON 与配置时优先使用 view_file_chunk；read_file 直接附加模型支持的 PNG/JPEG/WebP/PDF，其他文档先转换；附件需要对应模型能力并占用上下文。',
   '先从目录、搜索或列表结果定位候选，再读取与目标直接相关的内容。搜索用 inspect_shell 运行 rg（例如 `rg -n \'pattern\'`、`rg --files -g \'*.ts\'`），JSON 用 jq。',
   '交付物包含已确认事实、关键来源、仍存在的不确定性，以及后续规划可直接使用的边界。',
 ];

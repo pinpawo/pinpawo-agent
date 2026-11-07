@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { isJsonObject, parseDeliverables, type ArtifactRef, type Deliverable } from '@pinpawo/agent-contracts';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { ArtifactReader } from '../artifacts/http';
+import { readArtifactSource } from '../artifacts/files';
+import { createLocalArtifactStore } from '../artifacts/localStore';
 import { createArtifactChatHumanMessage } from './artifactImageInput';
 import { ImageAdmissionError, MAX_LOCAL_IMAGE_BYTES } from './attachmentAdmission';
 
@@ -66,6 +71,35 @@ test('a published PNG becomes an existing standard image block and durable refer
   assert.deepEqual(savedReferences(message), references);
   references[0]!.title = 'Changed caller';
   assert.equal(savedReferences(message)[0]!.title, 'Pixel');
+});
+
+test('Agent-published WebP files reach another workspace as image input without bypassing admission', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'artifact-webp-input-'));
+  const webp = Buffer.from('UklGRhwAAABXRUJQVlA4TA8AAAAvAAAAAAcQ/Y/+ByKi/wEA', 'base64');
+  const publisher = createLocalArtifactStore({ workspacesDir: root, workspaceId: 'publisher' });
+  const receiver = createLocalArtifactStore({ workspacesDir: root, workspaceId: 'receiver' });
+  try {
+    for (const name of ['pixel.webp', 'pixel.WEBP']) {
+      await writeFile(join(root, name), webp);
+      const published = await publisher.put({
+        ...await readArtifactSource({ path: name, workdir: root }), threadId: 'source-session',
+      });
+      assert.equal(published.mimeType, 'image/webp');
+      assert.equal(published.sha256, digest(webp));
+      const references = [{ uri: published.uri, title: name }];
+      const message = await input(references, receiver);
+      const image = message.contentBlocks.find(block => block.type === 'image');
+      assert.equal(image?.mimeType, 'image/webp');
+      assert.equal(image?.data, webp.toString('base64'));
+      assert.deepEqual(savedReferences(message), references);
+      await fails(input(references, receiver, false), 'image_model_unsupported');
+    }
+    await writeFile(join(root, 'invalid.webp'), 'not an image');
+    const invalid = await publisher.put({
+      ...await readArtifactSource({ path: 'invalid.webp', workdir: root }), threadId: 'source-session',
+    });
+    await fails(input([{ uri: invalid.uri }], receiver), 'image_invalid');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('non-image artifacts stay reference-only and cancel their unconsumed body', async () => {

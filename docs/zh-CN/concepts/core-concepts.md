@@ -43,7 +43,7 @@ PinPawo Agent 以 `pet-agent` 已实现的可靠单 Agent 机制为基础组织 
 
 Capability 描述“完成什么任务”；Toolkit 提供工具或共享说明，以及相应策略。Capability 的说明可以用 Markdown 或代码编写，可执行工具及其策略定义在 typed Toolkit 中。
 
-旧 Capability Artifact Pipeline 和 Channel 消息附件字段已退役；见[退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)与当前[消息 API](../../reference/api/studio.md#channel-messages-and-addressing)。显式文件发布与下载仍是 [Session Artifacts 草稿](../../design/agent-runtime/session-artifacts.md)中的目标。
+旧 Capability Artifact Pipeline 和 Channel 消息附件字段已退役；见[退役说明](../../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)与当前[消息 API](../../reference/api/studio.md#channel-messages-and-addressing)。[artifacts Toolkit](../../../toolkits/artifacts/README.md) 已实现文件快照发布、当前 session 产物列表和共享 `artifact://` 引用的下载。[Session Artifacts 设计](../../design/agent-runtime/session-artifacts.md)说明交付链路，其中未决问题仍属提案。
 
 Host 创建并持有 Agent runtime，为 Toolkit 声明的执行环境依赖提供实例；多个 Toolkit 可以共享同一环境依赖。详见 [Toolkit RS 契约](../../reference/extensions/toolkit-rs.md)和已接受的[领域关系设计](../../design/host-agent-capability-toolkit.md)。
 

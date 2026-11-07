@@ -59,6 +59,18 @@ test('defineToolkit accepts instructions without tools and preserves their conte
   assert.equal(toolkit.instructions, instructions);
 });
 
+test('Toolkit result getters are optional functions and remain bound to their definition', () => {
+  for (const getResult of [null, 1, 'result', [], {}]) {
+    assert.throws(() => validateToolkitDefinition({
+      name: 'invalid_result_getter', description: 'Project results.', tools: [], instructions: 'Collect results.', getResult,
+    } as never), /Toolkit "invalid_result_getter" getResult must be a function/);
+  }
+  const getResult = () => ({ deliverables: [] });
+  const toolkit = defineToolkit({ name: 'results', description: 'Project results.', tools: [],
+    instructions: 'Collect results.', getResult });
+  assert.strictEqual(toolkit.getResult, getResult);
+});
+
 test('instructions-only toolkits still require an array and string instructions', () => {
   for (const tools of [undefined, null, {}]) {
     assert.throws(() => validateToolkitDefinition({

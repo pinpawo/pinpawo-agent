@@ -120,3 +120,85 @@ Recorded so it is visible rather than rediscovered:
 - **No CI eval and no archived baseline.** Every comparison is manual, which is
   why the regression in this session was nearly merged.
 - **`run-langfuse-*` runners hard-require credentials**, contrary to §2.
+
+## 8. Budget handoff coverage
+
+The context cases in `npm run eval:budget-handoff` run the production graph
+with real Entry, Supervisor and Capability models, plus synthetic read/verify tools. The
+`context-window-handoff` case fills a bounded runtime context budget, observes
+the actual budget notice and partial delivery, and checks continuation of the
+same task and plan item through a fresh delegation. The
+`below-watermark-control` case checks ordinary completion without a handoff.
+`goal-results-verbatim` checks that the first delivery and final answer retain
+the original error text needed by the current goal. Mechanical checks preserve
+its punctuation and line breaks, including text inside Markdown quotations;
+the independent judge checks useful results, unfinished-work boundaries and
+clear technical writing. The test does not require fixed section headings or
+claim full ASD-STE100 compliance.
+
+`context-already-exceeded` returns a tool report that crosses the hard input
+capacity in one step. The next child provider call must be blocked, and the
+checkpoint must contain the native context guard marker. Its first attempt
+must remain `missing_deliverable` with no invented handoff. The real Supervisor
+then retries the same task and plan item; the fresh attempt rereads a bounded
+report and completes verification. Private findings from the stopped attempt
+are not replayed or promoted into a delivery.
+
+`model-call-budget-exhausted` runs real `createSubagent` with a scaled two-call
+limit. After the real final handoff response, an eval-only `afterModel` hook
+requests an additional model step. The native hard guard must block that third
+provider request and all further tool effects, while preserving the valid
+handoff already generated. A manually driven fresh invocation receives only
+that delivery and finishes the actual verification. This controlled re-entry
+case checks the child lifecycle, not Supervisor scheduling. The context cases
+cover the real Supervisor continuation separately. No production budget or
+Supervisor prompt is changed for these fixtures.
+
+This is separate from the existing `major-missing-work-retry` Supervisor case
+and `briefing-discloses-existing-progress` subagent case: those supply partial
+progress as input and do not trigger a runtime context notice. Scripted graph
+regressions check the control mechanism independently of model behavior.
+
+The handoff eval uses a scaled logical window of 16,000 tokens and synthetic
+tool evidence to exercise the configured 85% policy without filling the
+provider's full native window. It is not a native-window capacity or stress
+benchmark. The two-call exhaustion case does not claim real-model coverage of
+the default 100-call limit; scripted production graph regressions cover that
+default boundary separately.
+
+Runs default to three repeats per case. The subject uses the configured default
+model profile; an independent model profile judges semantic acceptance, while
+structural checks own task identity, tool effects and actual handoff evidence.
+Results stay in a local report and do not require a tracing sink. The report
+records model settings, production revision and harness identity. A successful
+run establishes coverage at those settings, not a before/after quality gain.
+The handoff contract requires a continuation briefing that reflects the current
+goal, reusable results and unfinished work. The judge evaluates its meaning,
+not whether it merely differs from the first briefing. Context-case diagnostics
+retain each task objective, Supervisor briefing and actual first model-input
+briefing. Mechanical checks compare the dynamic task and briefing data and the
+exact preceding delivery with that model input. A saved private execution
+artifact alone cannot establish that its result text reached the model.
+
+Repeated reads are efficiency observations, not automatic handoff failures.
+Handoff and recovery cases also allow additional successful delegations of the
+same task. The below-watermark negative control still requires one delegation
+without a budget notice. Efficiency observations appear under
+`diagnostics.efficiency`. Lost results, wrong or missing briefings, leaked
+private history, absent actual verification and unaccepted plans still fail.
+Valid later context notices are allowed when continued work reaches its budget.
+
+Report version 3 records this acceptance definition. Older reports used stricter
+no-reread and exact-attempt assertions; retain them without rewriting their
+results. Their pass rates are not directly comparable. In particular, reports
+without actual model-input briefing evidence cannot be promoted to passes under
+the new contract by simply dropping their repeat-read failures.
+
+Use `npm run eval:budget-handoff -- --list` to list the executable cases.
+`BUDGET_HANDOFF_EVAL_PROFILE` and `BUDGET_HANDOFF_EVAL_JUDGE_PROFILE` select the
+subject and independent judge; `BUDGET_HANDOFF_EVAL_CASES`,
+`BUDGET_HANDOFF_EVAL_REPEATS` and `BUDGET_HANDOFF_EVAL_OUTPUT_DIR` select the
+matrix and local report directory. Provider quota or judge errors are recorded
+as `not_evaluable`, not as semantic passes. When reevaluating saved outputs with
+an available independent judge, retain the original report and record the new
+judge configuration separately without changing the acceptance criteria.

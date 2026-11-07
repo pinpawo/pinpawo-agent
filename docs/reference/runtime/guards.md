@@ -178,10 +178,11 @@ results cross boundaries and private control detail does not:
 | `run_iteration_limit` | `orchestrator.supervisor_boundary_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
 | `subagent_iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
 
-Subagent context summarization and model-call limiting use LangChain middleware,
-with no custom guard predicates. The model-call limiter's native decision is
-projected into the existing guard vocabulary. Capability discovery and delegation
-acceptance likewise have no guard definitions in the current implementation.
+Subagent model-call limiting uses LangChain middleware. Its native decision is
+projected into the existing guard vocabulary. The same middleware composition
+requests a handoff when the call budget or context watermark is reached, without
+rewriting the child's history. Capability discovery and delegation acceptance
+have no guard definitions in the current implementation.
 
 Fresh-run initialization now belongs exclusively to `buildOrchestratorRunInput`;
 `prepare` validates the supplied identity and current-run user message instead of
@@ -209,8 +210,9 @@ Unchanged from the previous design, restated in the new vocabulary:
 
 - Orchestrator compaction **execution** is not the guard. The guard produces
   `maintain`; `compactOrchestratorMessages` is the position-owned effect code.
-- Subagent summarization is not a custom guard. LangChain
-  `summarizationMiddleware` owns its token trigger and persistent state update.
+- A subagent budget handoff is a middleware effect, not a custom guard
+  predicate. It adds a runtime notice and reserves a model call for the handoff;
+  it does not summarize and replace earlier messages within the child.
 - LangGraph `recursionLimit` is not a guard. It stays as a deliberately high
   hard breaker after `stop` guards have had their chance.
   Each Supervisor invocation also runs under its own tighter limit
@@ -238,9 +240,36 @@ other eligible old messages can be summarized. See
 [prepare](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/prepare.ts)
 and [context compaction](../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts).
 
-Subagents use LangChain's pre-model approximate token counting with an absolute
-trigger derived from `contextWindowTokens`; they do not emit a guard decision
-for summarization.
+Subagents check context at the `wrapModelCall` boundary, including Review
+Respond paths that skip `beforeModel`. The handoff watermark is 85% of the total
+`contextWindowTokens`, counting both estimated input and the configured
+output/reasoning reserve. Equivalently, the input trigger is
+`max(1, floor(contextWindowTokens * 0.85) - generationReserveTokens)`.
+The remaining 15% of the total window provides headroom for growth, the runtime
+notice and estimation error. The hard input capacity remains
+`contextWindowTokens - generationReserveTokens`. The estimate includes the
+request's system message, tool definitions and messages. The latest provider
+input usage from the current invocation, plus subsequent message growth,
+provides a conservative calibration when available. Prior main-history usage
+does not stand in for the current child's input size. This remains an estimate,
+especially for multimodal content, rather than an exact provider token count.
+
+Crossing the watermark requests a final handoff instead of compressing the
+child's transcript. The budget notice asks for this attempt's results that
+advance the current task's goal, under the task and Capability's result
+requirements. The result document uses the repository's
+[STE clarity principles](../../contributing.md#write-clear-instructions).
+Necessary source passages remain verbatim quotations, with exact identifiers
+and resource references. The writing guidance applies to the executor's own
+prose, not to quoted source text. Completed results remain separate from
+unfinished work and its next necessary action.
+
+Toolkits still own single-result size limits, and Root
+still owns main-history compaction. A fresh delegation excludes the earlier
+child's private tool history, but still inherits the main history and deliveries.
+If that inherited input is too large, repeatedly delegating does not make it
+smaller. Root's retention of unfinished plan-item evidence can also accumulate
+handoffs for the same item.
 
 ## Stop Semantics
 
@@ -268,6 +297,39 @@ runs before Review, while the check wraps caller-supplied model middleware too.
 Nonpositive or nonfinite limits remain disabled; positive fractions keep their
 existing whole-call allowance. Arbitrary runtime-context limit keys do not
 override `maxIterations`.
+
+When the remaining model-call budget enters the last 10%, rounded up and capped
+at 10 calls, middleware appends one `prepare` notice; before the final available
+call it appends one `finalize` notice. These notices identify their reason as
+`model_calls`. When context reaches its watermark, middleware instead appends a
+`finalize` notice with reason `context_window` and immediately reserves the next
+model call for the handoff. Context growth can jump after a tool result, so this
+path does not grant another ten-call preparation window. Each notice is a paired
+AI tool call and ToolMessage named `runtime_budget_status`, explicitly identified as runtime
+information and persisted in the child messages. This is a notification, not a
+registered or executed tool. Notices are append-only: later calls retain earlier
+notices unchanged. Neither a notice nor the guard's stop message is a deliverable.
+`SubagentBudgetHandoff.afterModel` routes a notification-only step back to the
+model before the native counter or Review runs. The native counter's hook is
+unchanged; only actual model rounds reach it.
+
+The final call is part of the same budget, not an extra call. The system message
+and tool definitions stay stable; where the provider protocol supports it, the
+final request uses `toolChoice: none`, with a local interception as a backstop
+against a returned tool call. A nonempty handoff follows the ordinary delivery
+path and still requires Supervisor review; an empty final response cannot become
+a delivery. Stable prefixes allow provider prompt caching where supported, but do
+not establish that a cache hit occurred. If the context estimate already reaches
+the usable input capacity, the child stops without sending an oversized request
+or fabricating a handoff. The model-call limit guard remains the fallback.
+
+Supervisor uses its existing acceptance mechanism for either handoff reason.
+`returned` means a delivery exists, not that the plan item is complete.
+`review_current` with `completed: false` keeps the current item pending and does
+not execute it. Supervisor can then prepare a new briefing and call
+`delegate_capability` for that same item, with a fresh delegation identity and
+budget. Completion remains a model judgment over the latest valid delivery;
+the runtime neither automatically accepts a handoff nor blindly redelegates it.
 
 Checkpoints created before this counter was introduced contain no durable count
 for earlier rounds. This change does not infer that count from a transcript or

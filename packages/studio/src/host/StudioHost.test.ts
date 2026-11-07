@@ -41,6 +41,7 @@ function fakeCapabilityAssembly(
   } = {},
 ): HostCapabilityAssembly {
   const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-studio-host-test');
+  const artifactStore = { fetch: async () => { throw new Error('Artifact not found'); } };
   const hostCapabilities = [agentCapability('general')];
   let initialized = false;
   const capabilityCatalog = {
@@ -75,6 +76,7 @@ function fakeCapabilityAssembly(
       getSnapshot: () => ({ effectiveToolkits: [] }),
     }) as never,
     getCheckpointer: () => ({}) as never,
+    getArtifactStore: () => artifactStore,
   } as unknown as HostCapabilityAssembly;
 }
 
@@ -117,11 +119,13 @@ function agentCapability(name: string): AgentCapability {
 test('StudioHost owns resident Studio lifecycle and shuts it down before capabilities', async () => {
   const events: string[] = [];
   const studio = fakeStudio(() => { events.push('studio:shutdown'); });
+  const assembly = fakeCapabilityAssembly(events);
   const host = new StudioHost({
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-studio-host-test'),
-    capabilityAssembly: fakeCapabilityAssembly(events),
+    capabilityAssembly: assembly,
     resolveStudioHostConfig: async () => configuration(),
-    buildStudio: async () => {
+    buildStudio: async input => {
+      assert.strictEqual(input.artifactStore, assembly.getArtifactStore());
       events.push('studio:build');
       return result(studio);
     },

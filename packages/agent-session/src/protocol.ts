@@ -1,4 +1,6 @@
 import {
+  parseDeliverables,
+  type Deliverable,
   isOperationBlock,
   isToolAuthorizationMode,
   isToolAuthorizationSafetyLevel,
@@ -580,6 +582,9 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
     const text = readString(record, 'text');
     const messageId = readString(record, 'messageId');
     if (role !== 'assistant' || text == null || !messageId) return null;
+    let deliverables: Deliverable[] | undefined;
+    try { deliverables = record.deliverables === undefined ? undefined : parseDeliverables(record.deliverables); }
+    catch { return null; }
     const usage = parseAgentTokenUsageSnapshot(record.usage);
     return {
       type,
@@ -587,6 +592,7 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       messageId,
       ...(usage ? { usage } : {}),
       ...(record.resultReferences !== undefined ? { resultReferences: parseResultReferences(record.resultReferences) } : {}),
+      ...(deliverables !== undefined ? { deliverables } : {}),
       role,
       text,
     };

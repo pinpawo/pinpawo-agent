@@ -79,7 +79,10 @@ tools and their policies are defined in typed Toolkits.
 The Capability Artifact Pipeline and the old Channel attachment field are retired;
 see the [retirement notes](../reference/extensions/capability-toolkit.md#7-旧-artifact-pipeline-退役)
 and the [current message API](../reference/api/studio.md#channel-messages-and-addressing).
-Explicit file publication and download remain a [Session Artifacts proposal](../design/agent-runtime/session-artifacts.md).
+The [artifacts Toolkit](../../toolkits/artifacts/README.md) now publishes file snapshots,
+lists current-session artifacts, and downloads shared `artifact://` references.
+The [Session Artifacts design](../design/agent-runtime/session-artifacts.md) describes
+the delivery chain; its unresolved questions remain proposals.
 
 A Host creates and retains Agent runtimes and supplies the execution-environment
 dependencies Toolkits declare. Multiple Toolkits can share an environment

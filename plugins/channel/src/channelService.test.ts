@@ -32,6 +32,27 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   }
 
+  test(`${backend}: human and Pet deliverables persist unchanged and invalid declarations do not create a message`, () => withService(async (service) => {
+    const { channelId } = (await service.createChannel(owner, { title: 'Deliverables', pets: ['executor'] })).channel;
+    const deliverables = [{ uri: 'artifact://workspace/session/report/report.pdf', title: 'Report' },
+      { uri: 'https://github.com/example/project/pull/1' }];
+    const first = await service.postMessage(owner, channelId, { body: 'Please use these.', deliverables });
+    const reply = await service.postMessage(executor, channelId, { body: 'Done.', deliverables }, { externalRef: 'reply' });
+    assert.deepEqual(first.message.deliverables, deliverables);
+    assert.deepEqual(reply.message.deliverables, deliverables);
+    deliverables[0]!.title = 'Changed input';
+    assert.equal(first.message.deliverables![0]!.title, 'Report');
+    assert.equal((await service.getMessage(channelId, reply.message.messageId))!.deliverables![0]!.title, 'Report');
+    const duplicate = await service.postMessage(executor, channelId,
+      { body: 'Duplicate', deliverables: [{ uri: 'https://example.com/changed' }] }, { externalRef: 'reply' });
+    assert.deepEqual(duplicate.message, reply.message);
+    for (const invalid of [null, {}, [{ uri: '' }], [{ uri: 4 }], [{ uri: 'https://example.com', title: 4 }]]) {
+      await assert.rejects(service.postMessage(owner, channelId, { body: 'Invalid', deliverables: invalid }));
+    }
+    const history = await service.readContext(owner, channelId);
+    assert.deepEqual(history.messages, [first.message, reply.message]);
+  }));
+
   test(`${backend}: Channel prompt is owned by the Channel, visible to members and can be replaced or cleared`, () => withService(async (service) => {
     const { channel } = await service.createChannel(owner, {
       title: 'Team', description: 'Purpose', prompt: '  Work together.\nAsk when uncertain.  ', pets: ['executor'],

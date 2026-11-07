@@ -110,7 +110,10 @@ and [Supervisor state](../../../packages/pet-agent/src/agent/orchestrator/runSup
 Root evaluates the watermark on a fresh run before Entry. The compaction effect
 retains recent messages and call/result records for unfinished plan items, and
 summarizes eligible older messages. This is based on current execution records,
-not Announce identifiers. Capability summarization is separate. See
+not Announce identifiers. Capability execution keeps its private transcript
+and requests a final handoff when its context or model-call budget is reached;
+it does not summarize and replace that transcript. A fresh delegation gets a
+new execution context. See [subagent budget middleware](../../../packages/pet-agent/src/subagent/budgetMiddleware.ts),
 [prepare and compaction](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/prepare.ts)
 and [compaction implementation](../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts).
 

@@ -20,8 +20,17 @@ import {
   type StudioPluginContext,
 } from '@pinpawo/studio-core';
 import { readWireAuthToken } from 'pinpawo/wire';
-import { parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
+import { parseArtifactUri, parseHumanReviewResponse, type HumanReviewResponse } from '@pinpawo/agent-contracts';
+import { buildHostRuntimeConfig, createHostArtifactStore, MAX_ARTIFACT_BYTES, type ArtifactStore } from 'pinpawo/host-runtime';
 
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  DEFAULT_UPLOAD_TIMEOUT_MS,
+  prepareArtifactUpload,
+  readArtifactUploadMetadata,
+  STUDIO_UPLOAD_THREAD_ID,
+} from './artifactUpload';
+import { HttpRequestError } from './httpRequestError';
 import { createJwtVerifier, looksLikeJwt, type StudioHttpJwtIssuer, type StudioHttpJwtOptions } from './jwtIssuers';
 
 const LOOPBACK_HOST = '127.0.0.1' as const;
@@ -30,6 +39,8 @@ const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
 const RESERVED_ROUTE_PATHS = new Set([
+  '/artifacts/upload',
+  '/agent-session/artifacts',
   '/dispatch',
   '/dispatch/queues',
   '/events',
@@ -48,7 +59,7 @@ const RESERVED_ROUTE_PATHS = new Set([
 ]);
 const DEFAULT_LOCAL_CLIENT_ID = 'local';
 /** Built-in routes every authenticated client may use; the rest are for the local token. */
-const CLIENT_BUILTIN_ROUTES = new Set(['GET /me', 'GET /pets']);
+const CLIENT_BUILTIN_ROUTES = new Set(['GET /me', 'GET /pets', 'GET /agent-session/artifacts']);
 
 /**
  * Who sent an authenticated request. The local Host token is the client with
@@ -100,6 +111,7 @@ export type StudioHttpPluginAddress = {
 };
 
 export type CreateStudioHttpPluginOptions = {
+  artifactStore?: Pick<ArtifactStore, 'fetch'> & Partial<Pick<ArtifactStore, 'put'>>;
   /** `0` asks the OS for an ephemeral port. */
   port: number;
   /** The local Host token. It authenticates as the local client, with `studio` scope. */
@@ -115,6 +127,10 @@ export type CreateStudioHttpPluginOptions = {
   allowedOrigins?: readonly string[];
   name?: string;
   maxBodyBytes?: number;
+  /** Single-file upload limit, independent of the JSON body limit; at most the store's 100 MiB. */
+  maxUploadBytes?: number;
+  /** Receive deadline, at most 15 seconds; not a backend storage commit timeout. */
+  uploadTimeoutMs?: number;
   maxEventClients?: number;
   heartbeatIntervalMs?: number;
 };
@@ -143,15 +159,6 @@ type EventClient = {
   stream: SSEStreamingApi;
   close: () => void;
 };
-
-class HttpRequestError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 function readPositiveInteger(value: number | undefined, fallback: number, name: string): number {
   if (value === undefined) return fallback;
@@ -412,6 +419,18 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     DEFAULT_MAX_EVENT_CLIENTS,
     'Studio HTTP Plugin maxEventClients',
   );
+  const maxUploadBytes = readPositiveInteger(
+    options.maxUploadBytes, DEFAULT_MAX_UPLOAD_BYTES, 'Studio HTTP Plugin maxUploadBytes',
+  );
+  if (maxUploadBytes > MAX_ARTIFACT_BYTES) {
+    throw new Error(`Studio HTTP Plugin maxUploadBytes must not exceed ${MAX_ARTIFACT_BYTES} bytes.`);
+  }
+  const uploadTimeoutMs = readPositiveInteger(
+    options.uploadTimeoutMs, DEFAULT_UPLOAD_TIMEOUT_MS, 'Studio HTTP Plugin uploadTimeoutMs',
+  );
+  if (uploadTimeoutMs > DEFAULT_UPLOAD_TIMEOUT_MS) {
+    throw new Error(`Studio HTTP Plugin uploadTimeoutMs must not exceed ${DEFAULT_UPLOAD_TIMEOUT_MS} ms.`);
+  }
   const heartbeatIntervalMs = readPositiveInteger(
     options.heartbeatIntervalMs,
     DEFAULT_HEARTBEAT_INTERVAL_MS,
@@ -524,13 +543,36 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       requestContext.set('principal', principal);
       await next();
     });
-    app.use('*', bodyLimit({
+    const limitJsonBody = bodyLimit({
       maxSize: maxBodyBytes,
       onError: (requestContext) => requestContext.json(
         { error: `Request body exceeds ${maxBodyBytes.toString()} bytes.` },
         413,
       ),
-    }));
+    });
+    app.use('*', async (requestContext, next) => {
+      // Hono's generic limiter buffers chunked bodies. The upload route owns a
+      // separate streaming limit; every other route retains the existing cap.
+      if (requestContext.req.method === 'POST' && requestContext.req.path === '/artifacts/upload') {
+        await next();
+        return;
+      }
+      return limitJsonBody(requestContext, next);
+    });
+
+    app.post('/artifacts/upload', async (requestContext) => {
+      if (!options.artifactStore?.put) throw new HttpRequestError(503, 'Artifact upload storage is unavailable.');
+      const request = requestContext.req.raw;
+      const metadata = readArtifactUploadMetadata(request);
+      const upload = prepareArtifactUpload(request, { maxBytes: maxUploadBytes, timeoutMs: uploadTimeoutMs });
+      try {
+        const artifact = await options.artifactStore.put({
+          threadId: STUDIO_UPLOAD_THREAD_ID, ...metadata, body: upload.body,
+        });
+        return requestContext.json({ artifact }, 201);
+      } finally { upload.dispose(); }
+    });
+    app.all('/artifacts/upload', (requestContext) => methodNotAllowed(requestContext, ['POST']));
 
     app.post('/dispatch', async (requestContext) => {
       const parsed = parseStudioDispatchRequest(await readJsonBody(requestContext));
@@ -566,6 +608,29 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return requestContext.json({ clientId, scope });
     });
     app.all('/me', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+
+    app.get('/agent-session/artifacts', async (requestContext) => {
+      if (!options.artifactStore) throw new HttpRequestError(503, 'Artifact storage is unavailable.');
+      const uri = requestContext.req.query('uri');
+      try {
+        if (!uri) throw new Error('Missing artifact URI');
+        parseArtifactUri(uri);
+      } catch { throw new HttpRequestError(400, 'Invalid artifact URI.'); }
+      const artifact = await options.artifactStore.fetch(uri).catch((error: { code?: string; statusCode?: number }) => {
+        if (error.code === 'ENOENT' || error.code === 'NoSuchKey' || error.statusCode === 404) {
+          throw new HttpRequestError(404, 'Artifact not found.');
+        }
+        throw error;
+      });
+      if ('url' in artifact) return requestContext.redirect(artifact.url, 302);
+      return new Response(artifact.body, { headers: {
+        'Content-Type': artifact.ref.mimeType,
+        'Content-Length': String(artifact.ref.size),
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(artifact.ref.name)}`,
+        'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+      } });
+    });
+    app.all('/agent-session/artifacts', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/pets', (requestContext) => {
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
@@ -888,13 +953,15 @@ function readInstalledHttpOptions(
     'allowedOrigins',
     'name',
     'maxBodyBytes',
+    'maxUploadBytes',
+    'uploadTimeoutMs',
     'maxEventClients',
     'heartbeatIntervalMs',
     'jwt',
   ]);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Studio HTTP Plugin option "${unknown}" is not supported.`);
-  const numbers = ['port', 'maxBodyBytes', 'maxEventClients', 'heartbeatIntervalMs'] as const;
+  const numbers = ['port', 'maxBodyBytes', 'maxUploadBytes', 'uploadTimeoutMs', 'maxEventClients', 'heartbeatIntervalMs'] as const;
   for (const field of numbers) {
     if (options[field] !== undefined && typeof options[field] !== 'number') {
       throw new Error(`Studio HTTP Plugin option "${field}" must be a number.`);
@@ -919,6 +986,8 @@ function readInstalledHttpOptions(
       : {}),
     ...(typeof options.name === 'string' ? { name: options.name } : {}),
     ...(typeof options.maxBodyBytes === 'number' ? { maxBodyBytes: options.maxBodyBytes } : {}),
+    ...(typeof options.maxUploadBytes === 'number' ? { maxUploadBytes: options.maxUploadBytes } : {}),
+    ...(typeof options.uploadTimeoutMs === 'number' ? { uploadTimeoutMs: options.uploadTimeoutMs } : {}),
     ...(typeof options.maxEventClients === 'number'
       ? { maxEventClients: options.maxEventClients }
       : {}),
@@ -954,7 +1023,7 @@ function readInstalledJwt(value: unknown): StudioHttpJwtOptions {
 /** Installed-package entry used by the standalone Studio Plugin resolver. */
 export function createStudioPlugin(
   options: Record<string, unknown> | undefined,
-  _environment: InstalledStudioHttpPluginEnvironment,
+  environment: InstalledStudioHttpPluginEnvironment,
 ): StudioHttpPlugin {
   const authToken = readWireAuthToken();
   if (!authToken) {
@@ -963,5 +1032,6 @@ export function createStudioPlugin(
   return createStudioHttpPlugin({
     ...readInstalledHttpOptions(options),
     authToken,
+    artifactStore: createHostArtifactStore(buildHostRuntimeConfig(environment.workdir)),
   });
 }

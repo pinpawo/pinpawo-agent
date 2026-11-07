@@ -145,6 +145,7 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[], runOpe
       role: message.role,
       text,
       ...(message.resultReferences?.length ? { resultReferences: message.resultReferences } : {}),
+      ...(message.deliverables?.length ? { deliverables: message.deliverables } : {}),
       ...(toolCalls?.length ? { toolCalls } : {}),
       status: 'completed',
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),

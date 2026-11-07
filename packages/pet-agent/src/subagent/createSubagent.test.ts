@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -53,21 +53,43 @@ class NeverConvergingModel extends BaseChatModel {
   }
 }
 
-class FailingSummaryModel extends BaseChatModel {
-  callCount = 0;
+class ContextHandoffModel extends BaseChatModel {
+  readonly inputs: BaseMessage[][] = [];
+  readonly toolChoices: unknown[] = [];
+  private toolChoice: unknown;
 
-  _llmType() {
-    return 'failing-summary';
+  constructor(private readonly response: string | Error = 'Partial progress; verification remains.') {
+    super({});
   }
 
-  async _generate(): Promise<never> {
-    this.callCount += 1;
-    throw new Error('summary service unavailable');
-  }
+  _llmType() { return 'context-handoff-fixture'; }
 
-  bindTools() {
+  bindTools(_tools: unknown[], options?: Record<string, unknown>) {
+    this.toolChoice = options?.tool_choice;
     return this;
   }
+
+  async _generate(messages: BaseMessage[]) {
+    this.inputs.push([...messages]);
+    this.toolChoices.push(this.toolChoice);
+    if (this.response instanceof Error) throw this.response;
+    const message = new AIMessage(this.response);
+    return { generations: [{ message, text: message.text }] };
+  }
+}
+
+function contextHandoffNotice(messages: BaseMessage[]) {
+  const notice = messages.find((message): message is ToolMessage => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status');
+  assert.ok(notice);
+  const call = messages[messages.indexOf(notice) - 1];
+  assert.ok(AIMessage.isInstance(call));
+  assert.equal(call.tool_calls?.length, 1);
+  assert.equal(call.tool_calls[0].id, notice.tool_call_id);
+  const data = JSON.parse(notice.text);
+  assert.equal(data.reason, 'context_window');
+  assert.equal(data.phase, 'finalize');
+  return notice;
 }
 
 test('subagent output preserves text spacing without exposing reasoning or tool blocks', async () => {
@@ -286,199 +308,95 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
   );
 });
 
-test('createSubagent summarizes persisted history from contextWindowTokens', async () => {
-  const oldContext = `old investigation evidence\n${'x'.repeat(800)}`;
+test('context watermark returns a handoff without summarizing or replacing persisted history', async () => {
+  const model = new ContextHandoffModel();
+  const history = [
+    new HumanMessage({ id: 'old-evidence', content: 'x'.repeat(11_000) }),
+    new AIMessage({ id: 'pending-work', content: 'y'.repeat(11_000) }),
+    new HumanMessage({ id: 'more-evidence', content: 'z'.repeat(11_000) }),
+    new AIMessage({ id: 'verification', content: 'w'.repeat(11_000) }),
+    new HumanMessage({ id: 'continue', content: 'Continue the delegated task.' }),
+  ];
+  const noop = tool(() => 'must not execute', {
+    name: 'noop', description: 'Inspect evidence.', schema: z.object({}),
+  });
   const result = await createSubagent({
-    model: new FakeListChatModel({
-      responses: [
-        'preserved summary with src/a.ts and the pending verification step',
-        'subagent result',
-      ],
-      sleep: 0,
-    }),
-    tools: [],
-    promptSections: [],
-    contextWindowTokens: 1000,
-    messages: [
-      new HumanMessage(oldContext),
-      new AIMessage(`The next step is to verify src/a.ts.\n${'y'.repeat(800)}`),
-      new HumanMessage(`Check the earlier implementation details.\n${'z'.repeat(800)}`),
-      new AIMessage(`The verification step is still pending.\n${'w'.repeat(800)}`),
-      new HumanMessage('Continue the delegated task.'),
-    ],
-    maxIterations: 4,
+    model, tools: [noop], promptSections: [], messages: history,
+    contextWindowTokens: 12_000, maxIterations: 20,
   });
 
-  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.equal(result.output, result.messages.at(-1)?.text);
-  const summary = result.messages.find(
-    (message) => message.additional_kwargs?.lc_source === 'summarization',
-  );
-  assert.ok(summary);
-  assert.match(String(summary.content), /Earlier subagent context summary:/);
-  assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
-  assert.equal(result.messages.some((message) => message.content === oldContext), false);
+  assert.equal(model.inputs.length, 1, 'the handoff does not require a separate summary call');
+  assert.deepEqual(model.toolChoices, ['none']);
+  assert.equal(result.output, 'Partial progress; verification remains.');
+  assert.deepEqual(result.messages.slice(0, history.length).map(message => message.toDict()),
+    history.map(message => message.toDict()));
+  assert.ok(result.messages.every(message => message.additional_kwargs?.lc_source !== 'summarization'));
+  const notice = contextHandoffNotice(result.messages);
+  assert.ok(model.inputs[0].some(message => message.id === notice.id), 'the notice reaches the model after persistence');
+  assert.equal(result.messages.filter(message => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status').length, 1);
 });
 
-test('context summarization renders image payloads through LangChain text projection', async () => {
-  const imageData = 'A'.repeat(4000);
-  const summarizerInputs: string[] = [];
-  class RecordingSummaryModel extends FakeListChatModel {
-    override async _generate(messages: never, options: never, runManager: never) {
-      summarizerInputs.push(JSON.stringify(messages));
-      return super._generate(messages, options, runManager);
-    }
-  }
+test('context handoff preserves original images in both the model input and checkpoint messages', async () => {
+  const imageData = 'A'.repeat(4_000);
   const screenshot = new HumanMessage({
+    id: 'screenshot',
     content: [
       { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
       { type: 'image', mimeType: 'image/png', data: imageData },
     ],
     response_metadata: { output_version: 'v1' },
   });
-
+  const model = new ContextHandoffModel();
   const result = await createSubagent({
-    model: new RecordingSummaryModel({
-      responses: ['summary of the earlier investigation', 'subagent result'],
-      sleep: 0,
-    }),
-    tools: [],
-    promptSections: [],
-    contextWindowTokens: 1000,
-    messages: [
-      new HumanMessage(`old investigation evidence\n${'x'.repeat(1200)}`),
-      new AIMessage(`Looking at the page.\n${'y'.repeat(1200)}`),
-      screenshot,
-      new AIMessage(`The layout is broken.\n${'w'.repeat(1200)}`),
-      new HumanMessage('Continue the delegated task.'),
-    ],
-    maxIterations: 4,
+    model, tools: [], promptSections: [], contextWindowTokens: 12_000,
+    messages: [new HumanMessage('x'.repeat(44_000)), screenshot], maxIterations: 20,
   });
 
-  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.ok(
-    result.messages.some(
-      (message) => message.additional_kwargs?.lc_source === 'summarization',
-    ),
-    'expected summarization to run',
-  );
-  // LangChain's built-in summarizer renders image blocks as `[image]` without
-  // changing messages that survive its keep cutoff.
-  assert.ok(summarizerInputs.length > 0);
-  for (const input of summarizerInputs) {
-    assert.doesNotMatch(input, /A{100}/);
-  }
-  assert.ok(
-    summarizerInputs.some((input) => input.includes('[image]')),
-    'expected LangChain to represent the image as a text placeholder',
-  );
-  assert.doesNotMatch(
-    JSON.stringify(result.messages),
-    /A{100}/,
-    'expected the summarized image message to be folded into the summary',
-  );
+  assert.equal(model.inputs.length, 1);
+  contextHandoffNotice(result.messages);
+  assert.deepEqual(model.inputs[0].find(message => message.id === screenshot.id)?.content, screenshot.content);
+  assert.deepEqual(result.messages.find(message => message.id === screenshot.id)?.content, screenshot.content);
+  assert.ok(result.messages.every(message => message.additional_kwargs?.lc_source !== 'summarization'));
 });
 
-test('summarization preserves the real image when it keeps the message', async () => {
-  const imageData = 'B'.repeat(4000);
-  const screenshot = new HumanMessage({
-    content: [
-      { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
-      { type: 'image', mimeType: 'image/png', data: imageData },
-    ],
-    response_metadata: { output_version: 'v1' },
-  });
-
+test('an oversized context stops locally without deleting history or fabricating a delivery', async () => {
+  const model = new ContextHandoffModel();
+  const oversized = new HumanMessage({ id: 'oversized', content: 'x'.repeat(56_000) });
   const result = await createSubagent({
-    model: new FakeListChatModel({
-      responses: ['summary of the earlier investigation', 'subagent result'],
-      sleep: 0,
-    }),
-    tools: [],
-    promptSections: [],
-    contextWindowTokens: 1000,
-    messages: [
-      new HumanMessage(`old investigation evidence\n${'x'.repeat(1600)}`),
-      new AIMessage(`Older reasoning.\n${'y'.repeat(1600)}`),
-      new HumanMessage('Continue the delegated task.'),
-      screenshot,
-    ],
-    maxIterations: 4,
+    model, tools: [], promptSections: [], contextWindowTokens: 12_000,
+    messages: [oversized], maxIterations: 20,
   });
 
-  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.ok(
-    result.messages.some(
-      (message) => message.additional_kwargs?.lc_source === 'summarization',
-    ),
-    'expected summarization to run',
-  );
-  // A screenshot recent enough to survive the cutoff comes back unchanged from
-  // LangChain's built-in summarization middleware.
-  assert.match(JSON.stringify(result.messages), /B{100}/);
+  assert.equal(model.inputs.length, 0, 'a request already beyond usable input capacity must not reach the provider');
+  assert.equal(result.output, null);
+  assert.deepEqual(result.messages[0].toDict(), oversized.toDict());
+  assert.equal(readSubagentGuardStopReason(result.messages.at(-1)!), 'subagent_context_limit_reached');
 });
 
-test('createSubagent throws instead of committing an error summary', async () => {
-  const model = new FailingSummaryModel({});
+test('an empty context handoff remains missing rather than becoming a synthetic delivery', async () => {
+  const model = new ContextHandoffModel('');
+  const result = await createSubagent({
+    model, tools: [], promptSections: [], contextWindowTokens: 12_000,
+    messages: [new HumanMessage('x'.repeat(44_000))], maxIterations: 20,
+  });
 
-  await assert.rejects(
-    createSubagent({
-      model,
-      tools: [],
-      promptSections: [],
-      contextWindowTokens: 1000,
-      messages: [
-        new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
-        new AIMessage(`pending verification\n${'y'.repeat(800)}`),
-        new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
-        new AIMessage(`more findings\n${'w'.repeat(800)}`),
-        new HumanMessage('Finish the delegated task.'),
-      ],
-      maxIterations: 4,
-    }),
-    /Subagent context summarization failed: Error generating summary: Error: summary service unavailable/,
-  );
-  // The only model call was the failed summary; the main subagent model call
-  // must not continue after an invalid state update.
-  assert.equal(model.callCount, 1);
+  assert.equal(model.inputs.length, 1);
+  assert.equal(result.output, null);
+  contextHandoffNotice(result.messages);
 });
 
-test('createSubagent throws when history cannot be trimmed into a summary', async () => {
-  await assert.rejects(
-    createSubagent({
-      model: new FakeListChatModel({ responses: ['must not continue'], sleep: 0 }),
-      tools: [],
-      promptSections: [],
-      contextWindowTokens: 1000,
-      messages: [
-        new HumanMessage(`single oversized context\n${'x'.repeat(4_000)}`),
-        new AIMessage('Continue.'),
-        new HumanMessage('Finish the delegated task.'),
-      ],
-      maxIterations: 4,
-    }),
-    /Subagent context summarization failed: Previous conversation was too long to summarize/,
-  );
-});
+test('a failed context handoff propagates the model failure without rewriting history', async () => {
+  const model = new ContextHandoffModel(new Error('model unavailable'));
+  const history = [new HumanMessage({ id: 'evidence', content: 'x'.repeat(44_000) })];
+  await assert.rejects(createSubagent({
+    model, tools: [], promptSections: [], contextWindowTokens: 12_000,
+    messages: history, maxIterations: 20,
+  }), /model unavailable/);
 
-test('createSubagent throws on an empty context summary', async () => {
-  await assert.rejects(
-    createSubagent({
-      model: new FakeListChatModel({ responses: ['', 'must not continue'], sleep: 0 }),
-      tools: [],
-      promptSections: [],
-      contextWindowTokens: 1000,
-      messages: [
-        new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
-        new AIMessage(`pending verification\n${'y'.repeat(800)}`),
-        new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
-        new AIMessage(`more findings\n${'w'.repeat(800)}`),
-        new HumanMessage('Finish the delegated task.'),
-      ],
-      maxIterations: 4,
-    }),
-    /Subagent context summarization failed: empty summary/,
-  );
+  assert.equal(model.inputs.length, 1);
+  assert.equal(history.length, 1);
+  assert.equal(history[0].content, 'x'.repeat(44_000));
 });
 
 test('createSubagent leaves single-result sizing to the toolkit below the watermark', async () => {
@@ -505,20 +423,18 @@ test('createSubagent leaves single-result sizing to the toolkit below the waterm
   assert.equal(String(toolResult.content).length, 20_001);
 });
 
-test('createSubagent does not summarize history below the derived token trigger', async () => {
+test('createSubagent continues normally below the context handoff watermark', async () => {
+  const model = new ContextHandoffModel('done');
   const result = await createSubagent({
-    model: new FakeListChatModel({ responses: ['done'], sleep: 0 }),
-    tools: [],
-    promptSections: [],
+    model, tools: [], promptSections: [],
     messages: [new HumanMessage('small delegated task context')],
-    contextWindowTokens: 1000,
-    maxIterations: 4,
+    contextWindowTokens: 12_000, maxIterations: 20,
   });
 
-  assert.equal(
-    result.messages.some((message) => message.additional_kwargs?.lc_source === 'summarization'),
-    false,
-  );
+  assert.equal(model.inputs.length, 1);
+  assert.equal(result.output, 'done');
+  assert.ok(!result.messages.some(message => ToolMessage.isInstance(message)
+    && message.name === 'runtime_budget_status'));
 });
 
 test('createSubagent ignores a stop marker that arrives in the input history', async () => {

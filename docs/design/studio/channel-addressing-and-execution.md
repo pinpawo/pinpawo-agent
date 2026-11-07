@@ -113,6 +113,8 @@ schedule / trigger 经 `inputs` hook 的 `run(channelId, petId, request, origin)
 JSON 字符串隔离正文，围栏长于输入中的反引号；原样公开封装不会让其历史/示例链接寻址。
 `replyTo` 是历史上下文，不是第二条当前请求。模型的内容判断仍需真实验收。
 
+当前消息和被回复消息的结构化文件引用同时随进程内派发传递；Host 将符合准入条件的图片加入模型输入，详见 [Channel 图片输入](./channel-image-input.md)。
+
 默认外部 `PET.md` 定义主对话的来源与最终公开回复规则；外部 `CAPABILITY.md` 定义执行
 寻址与交付边界。Host 在 Entry、Supervisor 和执行侧提供本 Pet 的 PET.md；Capability
 执行提示只在对应执行侧加载。通用 pet-agent 不嵌入 Studio 规则。

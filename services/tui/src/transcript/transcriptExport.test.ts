@@ -25,6 +25,7 @@ test('transcript markdown uses completed canonical user and assistant messages',
     type: 'message',
     role: 'assistant',
     text: 'hi',
+    deliverables: [{ uri: 'artifact://workspace/thread/id/report.md', title: 'Report' }],
     status: 'completed',
     createdAt: '09:00:01',
   }, {
@@ -58,6 +59,8 @@ test('transcript markdown uses completed canonical user and assistant messages',
     '### Assistant · 09:00:01',
     '',
     'hi',
+    '',
+    '- Report: artifact://workspace/thread/id/report.md',
     '',
   ].join('\n'));
 });

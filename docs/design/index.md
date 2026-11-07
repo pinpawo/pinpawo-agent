@@ -21,6 +21,8 @@ See [Reference](../reference/index.md) for the current public reading path.
 - [Session Artifacts](agent-runtime/session-artifacts.md) — draft：第一阶段的显式发布、交付物引用与按需下载；
   交付物随回复到达 Channel，artifacts Toolkit 管存储，Host 提供 local / COS adapter
 - [Review and interrupt semantics](agent-runtime/review.md) — 工具审核策略、执行与恢复
+- [Toolkit 执行状态](toolkits/execution-state.md) — draft：Toolkit 声明原生 state schema，
+  Capability 按 `uses` 装配子代理执行状态
 - Capability / Toolkit 的组合规则见[公共契约](../reference/extensions/capability-toolkit.md)。
 
 ## Local host and interfaces
@@ -44,6 +46,7 @@ See [Reference](../reference/index.md) for the current public reading path.
 
 ## Studio applications and Plugins
 
+- [Channel 图片输入](studio/channel-image-input.md) — draft：结构化附件随消息派发，Host 复用图片输入准入
 - [Channel 协作提示词](studio/channel-collaboration-prompt.md) — draft for Channel-scoped collaboration context and Pet invocation isolation
 - [Channel 模型](studio/channel-model.md) — Channel、成员、消息与存储规则；
   [寻址、执行与状态](studio/channel-addressing-and-execution.md) — 寻址、固定 session、

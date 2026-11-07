@@ -1,4 +1,5 @@
 import type { StructuredTool } from '@langchain/core/tools';
+import { StateSchema, type StateSchemaFields } from '@langchain/langgraph';
 import type {
   AgentToolkit,
   ModelInputModality,
@@ -68,7 +69,19 @@ export async function resolveToolkitExecution(
 
   const tools: StructuredTool[] = [];
   const reviewBindings: ToolkitReviewBinding[] = [];
+  const stateFields: StateSchemaFields = Object.create(null);
+  const stateOwners = new Map<string, string>();
   for (const toolkit of selectedToolkits) {
+    if (toolkit.stateSchema) {
+      for (const [field, definition] of Object.entries(toolkit.stateSchema.fields)) {
+        const owner = stateOwners.get(field);
+        if (owner !== undefined) {
+          throw new Error(`State field "${field}" is declared by Toolkits "${owner}" and "${toolkit.name}"`);
+        }
+        stateOwners.set(field, toolkit.name);
+        stateFields[field] = definition as StateSchemaFields[string];
+      }
+    }
     const boundDefinitions = toolkit.tools.filter((definition) => (
       supportsInputModalities(definition.requiresInputModalities, ctx.modelInputModalities)
     ));
@@ -93,6 +106,7 @@ export async function resolveToolkitExecution(
   return {
     toolkits: selectedToolkits,
     tools,
+    stateSchema: stateOwners.size > 0 ? new StateSchema(stateFields) : undefined,
     middleware: reviewMiddleware ? [reviewMiddleware] : [],
   };
 }

@@ -125,7 +125,11 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     request: string,
     idempotencyKey?: string,
     attachments: readonly Deliverable[] = [],
+    sourceAuthor?: MemberRef,
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
+    if (sourceAuthor?.kind === 'pet' && sourceAuthor.id === petId) {
+      throw new Error('A Channel message cannot be dispatched to its Pet author.');
+    }
     const service = channelService();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
@@ -147,14 +151,18 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const members = new Map((await service.members(message.channelId)).map(member => [member.participantId, member]));
     const request = channelDispatchInput(message, original, participantId => members.get(participantId)?.label);
     const attachments = channelDispatchAttachments(message, original);
+    // Keep mentions on the stored message: a self-only mention is still addressed,
+    // not an unaddressed message for routing to reinterpret.
     const deliveries = await Promise.all(message.mentions
+      .filter(({ participantId }) => message.author.kind !== 'pet'
+        || participantId !== channelParticipantId('pet', message.author.id))
       .map(async ({ participantId }): Promise<ChannelDelivery> => {
         const target = members.get(participantId);
         if (!target) return { participantId, state: 'failed', error: 'Not a current member of this Channel.' };
         if (target.kind !== 'pet') return { participantId, state: 'delivered' };
         try {
           const { invocationId, binding } = await dispatchPet(message.channelId, target.id, request,
-            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments);
+            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments, message.author);
           return { participantId, state: 'accepted', invocationId, sessionId: binding.sessionId };
         } catch (error) {
           return { participantId, state: 'failed', error: error instanceof Error ? error.message : String(error) };
@@ -228,7 +236,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       try {
         const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
           channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing', outcome.focus),
-          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original));
+          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original), message.author);
         delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
       } catch (error) {
         delivery = { participantId: target.participantId, state: 'failed', ...decided, error: error instanceof Error ? error.message : String(error) };

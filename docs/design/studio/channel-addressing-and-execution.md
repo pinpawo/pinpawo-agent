@@ -40,7 +40,7 @@ HTTP 请求的成员身份是认证出的 Studio 客户 `human:<clientId>`（本
 具体兼容边界见 [Studio API](../../reference/api/studio.md#channel-messages-and-addressing)。
 
 - 草稿、普通 `@label`、代码、引用和转述示例不寻址。
-- 有效目标须是当前成员，缺失/无效身份报错；同一消息的重复目标合并。Pet @ 自己同样派发（自我交接）。
+- 有效目标须是当前成员，缺失/无效身份报错；同一消息的重复目标合并。Pet @ 自己保留在公开消息中，但不向作者派发；混合 @ 中的其他成员照常交付。仅 @ 自己的消息也不会回落为无指定目标路由。
 - 多目标独立接纳与失败，不隐含依赖或顺序。Pet 目标调用 dispatch；人目标在 UI 阅读。
 - Pet 的公开回复是普通消息，使用同一解析和投递入口；Pet 自主决定是否、向谁交接。
   其中无法解析的 @ 不阻止保存，消息不带目标，并发布失败的 `channel.delivery` 事件；该消息不会当成无 @ 消息重新路由。
@@ -132,7 +132,7 @@ session/scope 关联，不含请求/模型正文；当前 Bearer 可观察所有
 Channel 不保存执行、审批或投递记录。投递结果在发送响应里返回，并作为全局 `channel.delivery` 事件发布；
 运行过程与审批由持本机 token 的人按 `GET /channels/sessions` 找到 session，经 `/pet-sessions/*` 查看。
 Pet 回复中 @ 的投递失败没有请求方，只有全局事件可见（best-effort 边界）。
-普通下一条输入继续同 session，正常 A↔B / self handoff 不新增次数限制或协作等待状态机。
+普通下一条输入继续同 session，正常 A↔B 交接不新增次数限制或协作等待状态机；Pet 自己的公开消息不派发回作者。
 
 用户在原 Pet TUI/session 或 Console 的 Pet session 视图检查并处理当前审批。dispatch 停在审批时，Host 在该 session 记录
 上保存 `pendingDispatch`（interruptId → 原 dispatchId/request/scope），随 session 注册表持久化。

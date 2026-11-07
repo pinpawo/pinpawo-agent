@@ -4,22 +4,15 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { randomUUID } from 'node:crypto';
+import mime from 'mime';
 import type { ArtifactDownloadWriter, ArtifactSourceReader } from '@pinpawo-toolkit/artifacts';
 import { safeArtifactSegment, writeArtifactBody } from './localStore';
-
-const MIME_TYPES: Record<string, string> = {
-  txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
-  html: 'text/html', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  svg: 'image/svg+xml', zip: 'application/zip',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-};
 
 export const readArtifactSource: ArtifactSourceReader = async ({ path, workdir }) => {
   const target = isAbsolute(path) ? path : resolve(workdir ?? process.cwd(), path);
   if (!(await lstat(target)).isFile()) throw new Error('Only ordinary files can be published.');
   const name = basename(target);
-  return { name, mimeType: MIME_TYPES[name.split('.').at(-1)?.toLowerCase() ?? ''] ?? 'application/octet-stream',
+  return { name, mimeType: mime.getType(name) ?? 'application/octet-stream',
     body: Readable.toWeb(createReadStream(target)) as unknown as ReadableStream<Uint8Array> };
 };
 

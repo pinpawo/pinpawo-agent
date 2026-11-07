@@ -306,7 +306,7 @@ export function createStudioAuthPlugin(
 
   /** Resolve a session token into the Studio principal it stands for. */
   async function verifySession(token: string): Promise<{
-    principal: { clientId: string; scope: 'client'; capabilities: readonly StudioCapability[] };
+    principal: { clientId: string; scope: 'client'; capabilities: readonly StudioCapability[]; expiresAt: number };
     userId: string;
     sessionId: string;
     credentialVersion: number;
@@ -353,6 +353,7 @@ export function createStudioAuthPlugin(
         clientId,
         scope: 'client',
         capabilities: parseStoredCapabilities(row.capabilities),
+        expiresAt,
       },
       userId: row.id,
       sessionId: stored.id,

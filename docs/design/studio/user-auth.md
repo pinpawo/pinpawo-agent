@@ -85,7 +85,7 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 - token 由 `randomBytes(32)` 生成，响应中仅返回一次；`studio_auth_session.token` 只存 SHA-256，验证不调用 Better Auth 的 session API；
 - 绝对有效期 12 小时，不滚动续期；空闲 30 分钟由 `updated_at` 判定，超时删除会话并拒绝认证；
 - 撤销：登出删除当前会话行；改密删除其他会话；管理员禁用删除全部会话并禁止再登录；client 被 `POST /clients/revoke` 吊销后也拒绝认证；
-- `GET /events` 与 `GET /pet-sessions/events` 在每次发送数据、初始快照和心跳前重新认证并检查对应 capability，失效即结束连接并释放订阅。无事件时最迟在下个心跳检测；已发送的数据不会收回；
+- `GET /events` 与 `GET /pet-sessions/events` 建连和发送初始快照前认证；登录客户端声明 `heartbeat=1`，取得连接 ID 后每 10 秒主动调用 `/me?streamId=...`，认证成功续 15 秒租约，事件写入不查库。撤权最坏约 15 秒加调度延迟生效；静默且不续租也会关闭。连接 ID 与原始 Bearer 绑定，反代必须保持同一 Host 亲和，错实例返回 `409`；本机 token 沿用原协议，旧登录客户端明确返回 `426`。详见 [HTTP 心跳与租约](http-plugin.md)；
 - 保持中的事件流算作会话活动，心跳验证会更新最后使用时间，但不会延长绝对有效期；
 - 传输沿用 `Authorization: Bearer`，目前不启用 cookie。Better Auth 的 `secret` 不参与这些随机会话 token 的签发或验证。
 

@@ -101,3 +101,130 @@ test('a receipt delivered after disconnection cannot restore an admission-only r
   assert.equal(appendDispatchRecord([], late)[0]?.observationLost, true);
   assert.equal(appendDispatchRecord([{ ...record('running'), observationLost: false }], late)[0]?.observationLost, false);
 });
+
+for (const path of ['/proxy/events', '/proxy/pet-sessions/events?petId=pet&sessionId=one']) {
+  test(`client originates a heartbeat every 10 seconds for ${path} and stops on abort`, async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const abort = new AbortController();
+    const requests: string[] = [];
+    let connected!: () => void;
+    const ready = new Promise<void>(resolve => { connected = resolve; });
+    const observation = observeStudioEvents({ url: `http://host${path}`, headers: { Authorization: 'Bearer session' }, signal: abort.signal,
+      fetch: async (input, init) => {
+        requests.push(String(input));
+        assert.deepEqual(init?.headers, { Authorization: 'Bearer session' });
+        if (String(input).includes('/me?')) {
+          assert.equal(init?.cache, 'no-store');
+          if (requests.length === 3) abort.abort();
+          return new Response('{}');
+        }
+        assert.equal(new URL(String(input)).searchParams.get('heartbeat'), '1');
+        return new Response(new ReadableStream(), { headers: { 'X-Studio-Stream-Id': 'connection-only' } });
+      },
+      onConnected: connected, onEvent: () => assert.fail('no domain event required'),
+      onDisconnected: () => assert.fail('user abort is not an error'),
+    });
+    try {
+      await ready;
+      assert.equal(requests.length, 2, 'the first heartbeat proves routing before claiming connected');
+      t.mock.timers.tick(9_999);
+      assert.equal(requests.length, 2);
+      t.mock.timers.tick(1);
+      await observation;
+      assert.deepEqual(requests.slice(1), ['http://host/proxy/me?streamId=connection-only', 'http://host/proxy/me?streamId=connection-only']);
+      t.mock.timers.tick(30_000);
+      assert.equal(requests.length, 3);
+    } finally { abort.abort(); t.mock.timers.reset(); }
+  });
+}
+
+for (const status of [401, 403, 409]) {
+  test(`a failed periodic heartbeat (${status}) cancels a quiet reader and reports its retry policy`, async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const abort = new AbortController();
+    let connected!: () => void;
+    const ready = new Promise<void>(resolve => { connected = resolve; });
+    let heartbeats = 0;
+    let cancelled = false;
+    let disconnected = false;
+    const observation = observeStudioEvents({ url: 'http://host/events', headers: {}, signal: abort.signal,
+      fetch: async input => {
+        if (String(input).includes('/me?')) return new Response('{}', { status: ++heartbeats === 1 ? 200 : status });
+        return new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { 'X-Studio-Stream-Id': 'connection' } });
+      },
+      onConnected: connected, onEvent: () => assert.fail('no events'),
+      onDisconnected: (error, retrying) => {
+        assert.match(error.message, new RegExp(String(status)));
+        assert.equal(retrying, status === 409);
+        disconnected = true;
+      },
+      wait: async () => { abort.abort(); },
+    });
+    try {
+      await ready;
+      t.mock.timers.tick(10_000);
+      await observation;
+      assert.equal(cancelled, true);
+      assert.equal(disconnected, true);
+      t.mock.timers.tick(30_000);
+      assert.equal(heartbeats, 2);
+    } finally { abort.abort(); t.mock.timers.reset(); }
+  });
+}
+
+test('an older local-token server without a lease header does not receive client heartbeats', async () => {
+  const abort = new AbortController();
+  let requests = 0;
+  await observeStudioEvents({ url: 'http://host/events', headers: {}, signal: abort.signal,
+    fetch: async () => { requests++; return stream([`data: ${JSON.stringify(event)}\n\n`]); },
+    onConnected: () => undefined, onEvent: () => abort.abort(), onDisconnected: () => assert.fail('valid local stream'),
+  });
+  assert.equal(requests, 1);
+});
+
+test('aborting during the first heartbeat must not call onConnected', async () => {
+  const abort = new AbortController();
+  let connected = 0;
+  await observeStudioEvents({ url: 'http://host/events', headers: {}, signal: abort.signal,
+    fetch: async input => {
+      if (String(input).includes('/me?')) {
+        abort.abort();
+        return new Response('{}');
+      }
+      return new Response(new ReadableStream(), { headers: { 'X-Studio-Stream-Id': 'conn' } });
+    },
+    onConnected: () => connected++, onEvent: () => assert.fail(), onDisconnected: () => assert.fail(),
+  });
+  assert.equal(connected, 0);
+});
+
+for (const status of [401, 403]) {
+  test(`fetch-backed SSE abort must preserve heartbeat ${status} as terminal`, async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const abort = new AbortController();
+    let connected!: () => void;
+    const ready = new Promise<void>(resolve => { connected = resolve; });
+    let heartbeats = 0;
+    let result: { message: string; retrying: boolean } | undefined;
+    const observation = observeStudioEvents({ url: 'http://host/events', headers: {}, signal: abort.signal,
+      fetch: async (input, init) => {
+        if (String(input).includes('/me?')) return new Response('{}', { status: ++heartbeats === 1 ? 200 : status });
+        return new Response(new ReadableStream({ start(controller) {
+          // Unlike an independent ReadableStream, fetch errors its body when
+          // its request signal aborts, so a pending read rejects AbortError.
+          init!.signal!.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')), { once: true });
+        } }), { headers: { 'X-Studio-Stream-Id': 'connection' } });
+      },
+      onConnected: connected, onEvent: () => assert.fail('no events'),
+      onDisconnected: (error, retrying) => { result = { message: error.message, retrying }; },
+      wait: async () => { abort.abort(); },
+    });
+    try {
+      await ready;
+      t.mock.timers.tick(10_000);
+      await observation;
+      assert.equal(result?.retrying, false);
+      assert.match(result?.message ?? '', new RegExp(String(status)));
+    } finally { abort.abort(); t.mock.timers.reset(); }
+  });
+}

@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -37,6 +37,7 @@ const LOOPBACK_HOST = '127.0.0.1' as const;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+const EVENT_LEASE_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
 export const STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME = 'authenticators';
 /**
@@ -97,6 +98,8 @@ export type StudioHttpPrincipal = {
   readonly scope: 'studio' | 'client';
   /** `['*']` for the local Host token; omitted principals fall back to the client defaults. */
   readonly capabilities?: readonly string[];
+  /** Absolute credential expiry in epoch milliseconds, when the issuer supplies one. */
+  readonly expiresAt?: number;
 };
 
 /**
@@ -114,7 +117,7 @@ export type StudioHttpAuthenticatorsHook = {
   register: (authenticator: StudioHttpAuthenticator) => () => void;
 };
 
-type StudioHttpEnvironment = { Bindings: HttpBindings; Variables: { principal?: StudioHttpPrincipal } };
+type StudioHttpEnvironment = { Bindings: HttpBindings; Variables: { principal?: StudioHttpPrincipal; authenticatedAt?: number } };
 type StudioHttpContext = Context<StudioHttpEnvironment>;
 
 export type StudioHttpRouteRequest = {
@@ -589,36 +592,75 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     return undefined;
   }
 
-  // Long-lived responses must not retain the authority they had at connect
-  // time. Serialize verification with each write, including queued snapshots
-  // and heartbeats, so revoked/expired credentials cannot receive later data.
+  // Leases belong to one connection on this Host, never just a client id. A
+  // heartbeat routed to another Host cannot acknowledge renewal here.
+  const eventLeases = new Map<string, {
+    token: string;
+    renew: (principal: StudioHttpPrincipal, authenticatedAt: number) => boolean;
+    close: () => void;
+  }>();
+
+  function requireEventHeartbeat(requestContext: StudioHttpContext): void {
+    if (requestContext.get('principal')!.scope !== 'studio' && requestContext.req.query('heartbeat') !== '1') {
+      throw new HttpRequestError(426, 'This event stream requires a client heartbeat. Update the client to support heartbeat=1.');
+    }
+  }
+
+  async function verifyEventConnection(requestContext: StudioHttpContext, capability: string): Promise<{ principal: StudioHttpPrincipal; authenticatedAt: number }> {
+    if (requestContext.req.raw.signal.aborted) throw new HttpRequestError(499, 'Request canceled.');
+    const authenticatedAt = Date.now();
+    const principal = await authenticate(readBearerToken(requestContext.req.header('authorization')));
+    if (requestContext.req.raw.signal.aborted) throw new HttpRequestError(499, 'Request canceled.');
+    if (!principal) throw new HttpRequestError(401, 'Unauthorized.');
+    if (!hasCapability(principal, capability)) throw new HttpRequestError(403, `This client lacks the "${capability}" capability.`);
+    if (principal.scope !== 'studio' && Date.now() >= Math.min(authenticatedAt + EVENT_LEASE_MS, principal.expiresAt ?? Infinity)) {
+      throw new HttpRequestError(401, 'Event stream authorization expired. Reconnect.');
+    }
+    return { principal, authenticatedAt };
+  }
+
   function createEventClient(
     requestContext: StudioHttpContext,
     stream: SSEStreamingApi,
     capability: string,
+    principal: StudioHttpPrincipal,
+    streamId: string | undefined,
+    authenticatedAt: number,
   ): EventClient {
-    const token = readBearerToken(requestContext.req.header('authorization'));
+    const token = readBearerToken(requestContext.req.header('authorization'))!;
     let stopped = false;
+    let deadline = Infinity;
+    let timer: NodeJS.Timeout | undefined;
     let resolveClosed!: () => void;
     const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
     const close = () => {
       stopped = true;
+      if (timer) clearTimeout(timer);
+      if (streamId) eventLeases.delete(streamId);
       resolveClosed();
     };
+    const renew = (current: StudioHttpPrincipal, verifiedAt: number): boolean => {
+      if (stopped || Date.now() >= deadline || !hasCapability(current, capability)) { close(); return false; }
+      // A slow verifier must not grant another 15 seconds from completion.
+      deadline = Math.min(verifiedAt + EVENT_LEASE_MS, current.expiresAt ?? Infinity);
+      if (!Number.isFinite(deadline) || deadline <= Date.now()) { close(); return false; }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(close, deadline - Date.now());
+      timer.unref();
+      return true;
+    };
+    if (streamId && renew(principal, authenticatedAt)) eventLeases.set(streamId, { token, renew, close });
     let writing = Promise.resolve();
     const write = (chunk: string): Promise<void> => {
       writing = writing.then(async () => {
-        if (stopped) return;
-        const principal = await authenticate(token);
-        if (stopped) return;
-        if (!principal || !hasCapability(principal, capability)) {
-          close();
-          return;
-        }
+        // Event volume never causes database reads. The deadline also guards
+        // writes when a busy event loop delays the lease timeout callback.
+        if (stopped || Date.now() >= deadline) { close(); return; }
         await stream.write(chunk);
       }).catch(close);
       return writing;
     };
+    if (requestContext.req.raw.signal.aborted) close();
     return { write, close, closed };
   }
 
@@ -658,6 +700,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       origin: (origin) => allowedOrigins.has(origin) ? origin : undefined,
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       allowHeaders: ['Authorization', 'Content-Type'],
+      exposeHeaders: ['X-Studio-Stream-Id'],
       maxAge: 600,
     }));
     app.use('*', async (requestContext, next) => {
@@ -666,8 +709,12 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         await next();
         return;
       }
+      const authenticatedAt = Date.now();
       const principal = await authenticate(readBearerToken(requestContext.req.header('authorization')));
       if (!principal) {
+        const lease = eventLeases.get(requestContext.req.query('streamId') ?? '');
+        const token = readBearerToken(requestContext.req.header('authorization'));
+        if (requestContext.req.path === '/me' && lease && token && safeTokenEqual(token, lease.token)) lease.close();
         requestContext.header('WWW-Authenticate', 'Bearer');
         return requestContext.json({ error: 'Unauthorized.' }, 401);
       }
@@ -698,6 +745,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         );
       }
       requestContext.set('principal', principal);
+      requestContext.set('authenticatedAt', authenticatedAt);
       await next();
     });
     const limitJsonBody = bodyLimit({
@@ -761,7 +809,17 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
 
     // Who this token is, so a client can tell what it may do (Console hides the rest).
     app.get('/me', (requestContext) => {
-      const { clientId, scope, capabilities } = requestContext.get('principal')!;
+      const principal = requestContext.get('principal')!;
+      const streamId = requestContext.req.query('streamId');
+      if (streamId !== undefined) {
+        const lease = eventLeases.get(streamId);
+        const token = readBearerToken(requestContext.req.header('authorization'))!;
+        if (!lease || !safeTokenEqual(token, lease.token)) {
+          throw new HttpRequestError(409, 'Event stream is not active on this Host. Reconnect with session affinity.');
+        }
+        if (!lease.renew(principal, requestContext.get('authenticatedAt')!)) throw new HttpRequestError(403, 'Event stream authorization expired or its capability was removed.');
+      }
+      const { clientId, scope, capabilities } = principal;
       // `capabilities` only appears for credentials that declare them, so the
       // Host token and `pps_` keys keep answering exactly what they always did.
       return requestContext.json(capabilities ? { clientId, scope, capabilities } : { clientId, scope });
@@ -844,12 +902,16 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     app.all('/pet-credentials', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
     app.all('/pet-credentials/remove', (requestContext) => methodNotAllowed(requestContext, ['POST']));
 
-    app.get('/events', (requestContext) => {
+    app.get('/events', async (requestContext) => {
+      requireEventHeartbeat(requestContext);
       if (eventClients.size >= maxEventClients) {
         return requestContext.json({ error: 'Too many event clients.' }, 503);
       }
+      const { principal, authenticatedAt } = await verifyEventConnection(requestContext, 'studio.events');
+      if (eventClients.size >= maxEventClients) throw new HttpRequestError(503, 'Too many event clients.');
+      const streamId = principal.scope === 'studio' ? undefined : randomUUID();
       const response = streamSSE(requestContext, async (stream) => {
-        const client = createEventClient(requestContext, stream, 'studio.events');
+        const client = createEventClient(requestContext, stream, 'studio.events', principal, streamId, authenticatedAt);
         const { close, closed } = client;
         const abort = () => close();
         eventClients.add(client);
@@ -862,8 +924,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           eventClients.delete(client);
         }
       });
+      requestContext.header('Cache-Control', 'no-cache, no-transform');
       response.headers.set('Cache-Control', 'no-cache, no-transform');
       response.headers.set('X-Accel-Buffering', 'no');
+      if (streamId) response.headers.set('X-Studio-Stream-Id', streamId);
       return response;
     });
     app.all('/events', (requestContext) => methodNotAllowed(requestContext, ['GET']));
@@ -884,6 +948,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     app.all('/pet-sessions/snapshot', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/pet-sessions/events', async (requestContext) => {
+      requireEventHeartbeat(requestContext);
       const petSessions = context?.petSessions;
       if (!petSessions) throw new HttpRequestError(503, 'Session observation is unavailable.');
       const { petId, sessionId } = readSessionTarget(requestContext);
@@ -905,9 +970,16 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       } catch (error) {
         throw readSessionAccessError(error);
       }
+      let authorization: { principal: StudioHttpPrincipal; authenticatedAt: number };
+      try {
+        authorization = await verifyEventConnection(requestContext, 'pet.session');
+        if (eventClients.size + sessionObservers >= maxEventClients) throw new HttpRequestError(503, 'Too many event clients.');
+      } catch (error) { detach(); throw error; }
+      const { principal, authenticatedAt } = authorization;
+      const streamId = principal.scope === 'studio' ? undefined : randomUUID();
       sessionObservers += 1;
       const response = streamSSE(requestContext, async (stream) => {
-        const client = createEventClient(requestContext, stream, 'pet.session');
+        const client = createEventClient(requestContext, stream, 'pet.session', principal, streamId, authenticatedAt);
         const { close, closed } = client;
         const enqueue = (chunk: string) => { void client.write(chunk); };
         const heartbeatTimer = setInterval(() => enqueue(': heartbeat\n\n'), heartbeatIntervalMs);
@@ -927,8 +999,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           sessionObservers -= 1;
         }
       });
+      requestContext.header('Cache-Control', 'no-cache, no-transform');
       response.headers.set('Cache-Control', 'no-cache, no-transform');
       response.headers.set('X-Accel-Buffering', 'no');
+      if (streamId) response.headers.set('X-Studio-Stream-Id', streamId);
       return response;
     });
     app.all('/pet-sessions/events', (requestContext) => methodNotAllowed(requestContext, ['GET']));

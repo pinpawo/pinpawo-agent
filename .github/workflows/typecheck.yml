@@ -64,3 +64,9 @@ jobs:
           npm run typecheck -w @pinpawo-plugin/studio-auth
           npm run typecheck -w @pinpawo/studio-console
           npm run typecheck -w @pinpawo-tests/studio-e2e
+      - name: Run Studio auth and stream regressions
+        run: |
+          npm run build -w @pinpawo-plugin/studio-http
+          npm test -w @pinpawo-plugin/studio-http
+          npm test -w @pinpawo-plugin/studio-auth
+          npm test -w @pinpawo/studio-console

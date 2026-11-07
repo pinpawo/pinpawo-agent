@@ -981,7 +981,7 @@ for (const path of ['/events', '/pet-sessions/events?petId=pet&sessionId=pet%3A0
           ? { clientId: 'user.ada', scope: 'client', capabilities }
           : undefined;
       } });
-      const response = await fetch(pluginUrl(plugin.address()!.port, path), {
+      const response = await fetch(pluginUrl(plugin.address()!.port, `${path}${path.includes('?') ? '&' : '?'}heartbeat=1`), {
         headers: { Authorization: 'Bearer login-session' }, signal: controller.signal,
       });
       assert.equal(response.status, 200);
@@ -1000,8 +1000,12 @@ for (const path of ['/events', '/pet-sessions/events?petId=pet&sessionId=pet%3A0
       if (invalidation === 'unregister') unregister();
       if (invalidation === 'verifier failure') fail = true;
       if (invalidation === 'idle expiry') expiresAt = Date.now();
-      // No event is needed to discover expiry: an idle stream closes on its heartbeat.
-      if (invalidation !== 'idle expiry') await emit('secret-after-revocation');
+      // The client, not an SSE comment, initiates authorization renewal.
+      const streamId = response.headers.get('x-studio-stream-id');
+      assert.ok(streamId);
+      const heartbeat = await fetch(pluginUrl(plugin.address()!.port, `/me?streamId=${streamId}`), { headers: { Authorization: 'Bearer login-session' } });
+      assert.equal(heartbeat.status, invalidation === 'capability removal' ? 403 : 401);
+      await emit('secret-after-revocation');
       const remaining = await readStreamToEnd(reader);
       assert.ok(!remaining.includes('secret-after-revocation'), remaining);
       assert.equal(listeners.size, 0, 'session observation is detached on authorization loss');
@@ -1036,10 +1040,123 @@ test('HTTP SSE rechecks authorization before releasing a buffered session snapsh
   const hook = exposed.get(STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME) as import('./studioHttpPlugin').StudioHttpAuthenticatorsHook;
   hook.register({ verify: (token) => token === 'login-session' && active
     ? { clientId: 'user.ada', scope: 'client', capabilities: ['pet.session'] } : undefined });
-  const response = await fetch(pluginUrl(plugin.address()!.port, '/pet-sessions/events?petId=pet&sessionId=pet%3A0000000b'), {
+  const response = await fetch(pluginUrl(plugin.address()!.port, '/pet-sessions/events?petId=pet&sessionId=pet%3A0000000b&heartbeat=1'), {
     headers: { Authorization: 'Bearer login-session' }, signal: controller.signal,
   });
-  assert.equal(response.status, 200);
-  assert.equal(await readStreamToEnd(response.body!.getReader()), '');
+  assert.equal(response.status, 401);
+  assert.ok(!(await response.text()).includes('session.snapshot.result'));
   assert.equal(listeners.size, 0);
+});
+
+test('HTTP connection lease boundaries', { concurrency: true }, async (t) => {
+  const cases: Promise<void>[] = [];
+  for (const path of ['/events', '/pet-sessions/events?petId=pet&sessionId=pet%3A0000000b']) {
+    for (const mode of ['silent', 'renewed', 'absolute expiry'] as const) {
+      cases.push(t.test(`HTTP SSE ${path} enforces the ${mode} connection lease without per-event verification`, async (t) => {
+        const { harness, listeners, publish } = sessionHarness();
+        const exposed = new Map<string, unknown>();
+        const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN, heartbeatIntervalMs: 60_000, allowedOrigins: ['http://localhost:3000'] });
+        const controller = new AbortController();
+        try {
+          await plugin.start({ ...harness.context, hooks: {
+            expose: <T>(name: string, hook: T) => { exposed.set(name, hook); return () => exposed.delete(name); },
+            contribute: () => () => undefined,
+          } });
+          let verifications = 0;
+          const hook = exposed.get(STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME) as import('./studioHttpPlugin').StudioHttpAuthenticatorsHook;
+          const expiry = mode === 'absolute expiry' ? Date.now() + 5_000 : Date.now() + 60_000;
+          hook.register({ verify: (token) => {
+            verifications++;
+            return ['session-a', 'session-b'].includes(token) && Date.now() < expiry
+              ? { clientId: 'user.same', scope: 'client', capabilities: ['studio.events', 'pet.session'], expiresAt: expiry }
+              : undefined;
+          } });
+          const url = pluginUrl(plugin.address()!.port, path);
+          const headers = { Authorization: 'Bearer session-a', Origin: 'http://localhost:3000' };
+          // Historical local-token clients need no new protocol; session clients
+          // receive an explicit upgrade error before any observer is attached.
+          assert.equal((await fetch(url, { headers: { Authorization: 'Bearer session-a' } })).status, 426);
+          const response = await fetch(`${url}${path.includes('?') ? '&' : '?'}heartbeat=1`, {
+            headers, signal: controller.signal,
+          });
+          assert.equal(response.status, 200);
+          const streamId = response.headers.get('x-studio-stream-id');
+          assert.ok(streamId);
+          assert.equal(response.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+          assert.match(response.headers.get('access-control-expose-headers') ?? '', /X-Studio-Stream-Id/i);
+          const reader = response.body!.getReader();
+          await readStreamUntil(reader, text => text.includes(path === '/events' ? ': connected' : 'session.snapshot.result'));
+          const initialVerifications = verifications;
+          const emit = async (marker: string) => {
+            if (path === '/events') await harness.emit({ eventId: marker, type: 'test.event', source: 'test', payload: { marker }, occurredAt: new Date().toISOString() });
+            else publish({ type: 'event', marker });
+          };
+          for (let i = 0; i < 20; i++) await emit(`event-${i}`);
+          await readStreamUntil(reader, text => text.includes('event-19'));
+          assert.equal(verifications, initialVerifications, 'domain events never query the authenticator');
+          const heartbeat = (id: string, token = 'session-a') => fetch(pluginUrl(plugin.address()!.port, `/me?streamId=${id}`), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          assert.equal((await heartbeat('unknown-or-another-host')).status, 409);
+          assert.equal((await heartbeat(streamId, 'session-b')).status, 409, 'same client id is not the same credential');
+          if (mode === 'renewed') {
+            await new Promise(resolve => setTimeout(resolve, 10_000));
+            assert.equal((await heartbeat(streamId)).status, 200);
+            await new Promise(resolve => setTimeout(resolve, 5_001));
+            await emit('renewal-kept-stream-open');
+            await readStreamUntil(reader, text => text.includes('renewal-kept-stream-open'));
+            await new Promise(resolve => setTimeout(resolve, 9_999));
+          } else if (mode === 'absolute expiry') {
+            await new Promise(resolve => setTimeout(resolve, 2_000));
+            assert.equal((await heartbeat(streamId)).status, 200);
+            await new Promise(resolve => setTimeout(resolve, 5_000)); // Renewal cannot extend the absolute deadline.
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 10_000));
+            assert.equal((await fetch(pluginUrl(plugin.address()!.port, '/me'), { headers: { Authorization: headers.Authorization } })).status, 200);
+            await new Promise(resolve => setTimeout(resolve, 5_000)); // Ordinary requests do not keep a quiet stream alive.
+          }
+          await emit('secret-after-deadline');
+          const remaining = await readStreamToEnd(reader);
+          assert.ok(!remaining.includes('secret-after-deadline'));
+          assert.equal(listeners.size, 0, 'expired lease detaches the observer');
+          assert.equal((await heartbeat(streamId)).status, mode === 'absolute expiry' ? 401 : 409);
+        } finally {
+          controller.abort();
+          await plugin.stop();
+        }
+      }));
+    }
+  }
+  await Promise.all(cases);
+});
+
+test('a heartbeat on another Host fails closed and legacy local-token streams stay compatible', async (t) => {
+  const instances = await Promise.all([0, 1].map(async () => {
+    const { harness } = sessionHarness();
+    const exposed = new Map<string, unknown>();
+    const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+    await plugin.start({ ...harness.context, hooks: {
+      expose: <T>(name: string, hook: T) => { exposed.set(name, hook); return () => exposed.delete(name); },
+      contribute: () => () => undefined,
+    } });
+    const hook = exposed.get(STUDIO_HTTP_AUTHENTICATORS_HOOK_NAME) as import('./studioHttpPlugin').StudioHttpAuthenticatorsHook;
+    hook.register({ verify: token => token === 'session' ? { clientId: 'user.ada', scope: 'client', capabilities: ['studio.events'] } : undefined });
+    return plugin;
+  }));
+  const controller = new AbortController();
+  t.after(async () => { controller.abort(); await Promise.all(instances.map(plugin => plugin.stop())); });
+  const sessionHeaders = { Authorization: 'Bearer session' };
+  const response = await fetch(pluginUrl(instances[0]!.address()!.port, '/events?heartbeat=1'), { headers: sessionHeaders, signal: controller.signal });
+  const streamId = response.headers.get('x-studio-stream-id');
+  assert.ok(streamId);
+  assert.equal((await fetch(pluginUrl(instances[1]!.address()!.port, `/me?streamId=${streamId}`), { headers: sessionHeaders })).status, 409);
+  assert.equal((await fetch(pluginUrl(instances[0]!.address()!.port, `/me?streamId=${streamId}`), { headers: sessionHeaders })).status, 200);
+  for (const path of ['/events', '/pet-sessions/events?petId=pet&sessionId=pet%3A0000000b']) {
+    const local = await fetch(pluginUrl(instances[0]!.address()!.port, path), {
+      headers: { Authorization: `Bearer ${AUTH_TOKEN}` }, signal: controller.signal,
+    });
+    assert.equal(local.status, 200);
+    assert.equal(local.headers.get('x-studio-stream-id'), null, 'legacy local-token stream has no lease');
+    await readStreamUntil(local.body!.getReader(), text => text.includes(': connected'));
+  }
 });

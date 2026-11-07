@@ -156,7 +156,7 @@ test('an unknown session ends observation with the Host\'s reason instead of ret
     onDisconnected: (error, retrying) => { outcomes.push([error.message, retrying]); },
     onMessage: () => assert.fail('unexpected message'),
   });
-  assert.deepEqual(urls, ['http://host/pet-sessions/events?petId=worker&sessionId=worker%3A0000000b&timelineLimit=100']);
+  assert.deepEqual(urls, ['http://host/pet-sessions/events?petId=worker&sessionId=worker%3A0000000b&timelineLimit=100&heartbeat=1']);
   assert.deepEqual(outcomes, [['SSE failed (404). Session does not exist for this Pet.', false]]);
 });
 

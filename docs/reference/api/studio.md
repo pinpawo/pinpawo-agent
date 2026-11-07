@@ -235,10 +235,17 @@ Administrator routes (local Host token only):
 | `POST /users/disable` | `{ userId, disabled }`; `200 { userId, disabled }`, disabling revokes the user's sessions. |
 
 Sessions are absolute 12 hours and die after 30 idle minutes; only the SHA-256
-of a token is stored. Both SSE routes reauthenticate and check their capability
-before each write (including snapshots and heartbeats), ending the stream on
-revocation, expiry or capability removal. Open streams count as session activity
-but never extend absolute expiry. JWT issuer prefix `user` is reserved for these
+of a token is stored. Both SSE routes authenticate before connection and initial
+snapshot. Session clients request `heartbeat=1`, read `X-Studio-Stream-Id`, then
+call `GET /me?streamId=<id>` immediately and every 10 seconds with the original
+Bearer. Successful authentication renews a 15-second connection lease, bounded
+by credential absolute expiry and measured from authentication start, not finish.
+Event writes do not query the database. No heartbeat closes even a quiet stream;
+revocation takes at most about 15 seconds plus scheduling delay, with in-flight
+data tolerated. Heartbeat renewal counts as activity but never extends absolute
+expiry. Local Studio-token clients keep their existing protocol; unsupported
+session clients receive `426`. A reverse proxy must keep SSE and its heartbeat
+on the same Host: another instance returns `409`, not a renewal acknowledgment. JWT issuer prefix `user` is reserved for these
 login identities and rejected at startup. Capabilities: `channel.read`, `channel.write`,
 `studio.view` (default), `studio.dispatch`, `studio.events`, `pet.session`,
 `studio.manage` (explicit grant). A capability never widens the scope rule for

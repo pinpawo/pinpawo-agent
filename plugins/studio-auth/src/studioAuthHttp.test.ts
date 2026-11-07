@@ -379,7 +379,7 @@ for (const path of ['/events', sessionEventsPath]) {
         token: HOST_TOKEN, body: { userId, capabilities: ['studio.events', 'pet.session'] },
       })).status, 200);
       const token = await h.login('stream-reader');
-      const response = await fetch(`${h.base}${path}`, {
+      const response = await fetch(`${h.base}${path}${path.includes('?') ? '&' : '?'}heartbeat=1`, {
         headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
       });
       assert.equal(response.status, 200);
@@ -416,12 +416,15 @@ for (const path of ['/events', sessionEventsPath]) {
         })).status, 204);
       } else {
         // Move the persisted absolute deadline behind now without sleeping or
-        // replacing the verifier. The idle heartbeat must discover the expiry.
+        // replacing the verifier. The next client heartbeat must discover the expiry.
         const db = await h.inspect();
         await db.updateTable('studio_auth_session')
           .set({ expires_at: new Date(Date.now() - 1_000).toISOString() }).execute();
       }
-      if (invalidation !== 'absolute expiry') await emit('secret-after-invalidation');
+      const streamId = response.headers.get('x-studio-stream-id');
+      assert.ok(streamId);
+      assert.equal((await h.call('GET', `/me?streamId=${streamId}`, { token })).status, invalidation === 'capability removal' ? 403 : 401);
+      await emit('secret-after-invalidation');
       const remaining = await stream.end();
       assert.ok(!remaining.includes('secret-after-invalidation'), remaining);
       assert.equal(h.sessionListeners.size, 0, 'the Pet session observer is released');
@@ -445,11 +448,74 @@ test('real logout during observation attachment suppresses the buffered session 
   logout = async () => {
     assert.equal((await h.call('POST', '/auth/logout', { token })).status, 204);
   };
-  const response = await fetch(`${h.base}${sessionEventsPath}`, {
+  const response = await fetch(`${h.base}${sessionEventsPath}&heartbeat=1`, {
     headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
   });
-  assert.equal(response.status, 200);
-  const remaining = await streamReader(response.body!.getReader()).end();
-  assert.ok(!remaining.includes('session.snapshot.result'), remaining);
+  assert.equal(response.status, 401);
+  assert.ok(!(await response.text()).includes('session.snapshot.result'));
+  assert.equal(h.sessionListeners.size, 0);
+});
+
+test('a slow in-flight heartbeat must not extend authorization beyond 15 seconds after revocation', async (t) => {
+  const now = Date.now();
+  let clock = now;
+  const originalNow = Date.now;
+  Date.now = () => clock;
+  const h = await harness('http-first', { heartbeatIntervalMs: 60_000 });
+  const controller = new AbortController();
+  t.after(async () => { Date.now = originalNow; controller.abort(); await h.stop(); });
+  const userId = await h.createUser('lease-race');
+  assert.equal((await h.call('POST', '/users/capabilities', {
+    token: HOST_TOKEN, body: { userId, capabilities: ['studio.events'] },
+  })).status, 200);
+  const token = await h.login('lease-race');
+  const response = await fetch(`${h.base}/events?heartbeat=1`, {
+    headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+  });
+  const stream = streamReader(response.body!.getReader());
+  await stream.until(': connected');
+  const streamId = response.headers.get('X-Studio-Stream-Id');
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => release = resolve);
+  let entered!: () => void;
+  const blocked = new Promise<void>(resolve => entered = resolve);
+  const originalGet = h.clients.get.bind(h.clients);
+  let armed = true;
+  h.clients.get = async (...args) => {
+    const client = await originalGet(...args);
+    if (armed && args[0] === 'user.lease-race') { armed = false; entered(); await hold; }
+    return client;
+  };
+  const renewing = h.call('GET', `/me?streamId=${streamId}`, { token });
+  await blocked;
+  assert.equal((await h.call('POST', '/auth/logout', { token })).status, 204);
+  clock = now + 14_000;
+  release();
+  const result = await renewing;
+  assert.equal(result.status, 200, 'a verified in-flight request may finish within the original lease');
+  clock = now + 16_000;
+  const marker = 'secret-16-seconds-after-logout';
+  await h.emitEvent({eventId:marker,type:'test.event',source:'test',payload:{marker},occurredAt:new Date(clock).toISOString()});
+  const received = await stream.end();
+  assert.ok(!received.includes(marker), 'stale auth result extended the revocation window beyond 15 seconds');
+});
+
+
+test('canceling a local-token request while observation attaches releases its observer', async (t) => {
+  let attached!: () => void;
+  const observing = new Promise<void>(resolve => { attached = resolve; });
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const h = await harness('http-first', { afterObserve: async () => { attached(); await hold; } });
+  const controller = new AbortController();
+  t.after(async () => { release(); controller.abort(); await h.stop(); });
+  const pending = fetch(`${h.base}${sessionEventsPath}`, {
+    headers: { Authorization: `Bearer ${HOST_TOKEN}` }, signal: controller.signal,
+  }).then(() => assert.fail('canceled before the response'), error => assert.equal(error.name, 'AbortError'));
+  await observing;
+  controller.abort();
+  await pending;
+  release();
+  for (let i = 0; i < 50 && h.sessionListeners.size; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(h.sessionListeners.size, 0);
 });

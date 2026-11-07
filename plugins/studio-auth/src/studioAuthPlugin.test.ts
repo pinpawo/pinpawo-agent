@@ -148,7 +148,7 @@ test('a user created by the Studio signs in with their own credentials as user.<
 
   const signedIn = await h.login('ada');
   assert.equal(signedIn.status, 200);
-  const body = signedIn.body as { token: string; user: { clientId: string; username: string } };
+  const body = signedIn.body as { token: string; expiresAt: string; user: { clientId: string; username: string } };
   assert.ok(body.token.length >= 20);
   assert.equal(body.user.clientId, 'user.ada');
   assert.equal(body.user.username, 'ada');
@@ -170,6 +170,7 @@ test('a user created by the Studio signs in with their own credentials as user.<
     clientId: 'user.ada',
     scope: 'client',
     capabilities: ['channel.read', 'channel.write', 'studio.view'],
+    expiresAt: Date.parse(body.expiresAt),
   });
   assert.equal(await authenticator.verify('not-a-session-token'), undefined);
 

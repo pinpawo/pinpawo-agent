@@ -203,6 +203,7 @@ export function formatModelPicker(
       profile.id === state.selectedProfileId ? 'current' : null,
       profile.id === state.defaultProfileId ? 'default' : null,
       profile.inputModalities.includes('image') ? 'image' : null,
+      profile.inputModalities.includes('file') ? 'file' : null,
       !profile.available
         ? 'unavailable'
         : !profile.compatible

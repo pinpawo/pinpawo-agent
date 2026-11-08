@@ -1,3 +1,4 @@
+import type { ModelInputModality } from '../../../packages/pet-agent/src/types/toolkit.ts';
 import type { StructuredOutputMethod } from '../../../packages/pet-agent/src/utils/structuredOutput.ts';
 import type {
   DecisionStabilityResult,
@@ -32,7 +33,7 @@ export type PromptEvalModelMetadata = {
   temperature: number | null;
   reasoningEffort: string;
   timeoutMs: number;
-  inputModalities: Array<'text' | 'image'>;
+  inputModalities: ModelInputModality[];
 };
 
 export type PromptEvalReport = {

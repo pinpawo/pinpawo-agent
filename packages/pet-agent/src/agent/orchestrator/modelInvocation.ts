@@ -59,8 +59,8 @@ export function assignToolCallIds<T extends BaseMessage>(response: T, history: r
 }
 
 /**
- * Filter incomplete tool pairs only in model input, never in canonical state,
- * and settle the response's tool call IDs.
+ * Filter incomplete tool pairs and order linked attachments only in model input,
+ * never in canonical state, and settle the response's tool call IDs.
  *
  * `uniqueInHistory` checks IDs against the agent's whole history; it is for
  * agents whose calls land in the main history that spans runs. A Capability

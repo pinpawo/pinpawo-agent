@@ -134,6 +134,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
         toolProtocolMiddleware,
       ],
       runtimeContext: {
+        modelInputModalities: options.modelInputModalities ?? ['text'],
         executionScope: {
           threadId,
           taskId: scope.taskId,

@@ -128,6 +128,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     ...childRuntimeContext,
     // Common context belongs to the root invocation, never to a child override.
     ...getAgentRuntimeContext(input.runnableConfig),
+    modelInputModalities: childRuntimeContext.modelInputModalities ?? ['text'],
   };
   const frameworkSections = [
     { id: 'framework:governing', owner: 'framework', content: SUBAGENT_GOVERNING_PROMPT },

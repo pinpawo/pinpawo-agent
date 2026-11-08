@@ -6,7 +6,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { SystemPromptSection } from './systemPrompt';
 import type { AgentRuntimeContext } from '../runtime/context';
-import type { ToolOperationMetadata } from './toolkit';
+import type { ModelInputModality, ToolOperationMetadata } from './toolkit';
 import type { DelegationScope } from './scope';
 
 export type SubagentExecutionScope = DelegationScope & {
@@ -15,6 +15,8 @@ export type SubagentExecutionScope = DelegationScope & {
 
 export type SubagentRuntimeContext = AgentRuntimeContext & {
   executionScope?: SubagentExecutionScope;
+  /** Input formats declared by the selected model profile. */
+  readonly modelInputModalities?: readonly ModelInputModality[];
   [key: string]: unknown;
 };
 

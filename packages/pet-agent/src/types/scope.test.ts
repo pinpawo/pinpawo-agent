@@ -51,3 +51,12 @@ test('subagent runtime context schema accepts and requires every scope layer', (
   const { taskId: _dropped, ...withoutTask } = scope;
   assert.throws(() => subagentRuntimeContextSchema.parse({ executionScope: withoutTask }));
 });
+
+test('subagent runtime context validates optional model modality metadata', () => {
+  const context = { modelInputModalities: ['text', 'file'] };
+  assert.deepEqual(subagentRuntimeContextSchema.parse(context), context);
+  assert.deepEqual(subagentRuntimeContextSchema.parse({}), {});
+  for (const invalid of [
+    { modelInputModalities: ['audio'] }, { modelInputModalities: 'file' },
+  ]) assert.equal(subagentRuntimeContextSchema.safeParse(invalid).success, false);
+});

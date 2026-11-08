@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { markToolResultAttachment } from '@pinpawo/pet-agent';
 import { HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 
 const MAX_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
@@ -131,23 +132,23 @@ export async function buildBrowserScreenshotMessages(
   } catch {
     return [
       toolMessage,
-      new HumanMessage({
+      markToolResultAttachment(new HumanMessage({
         content: 'The browser screenshot could not be loaded. Do not claim to have inspected it; call browser_screenshot again before making a visual judgment.',
-      }),
+      }), toolCallId),
     ];
   }
   return [
     toolMessage,
-    new HumanMessage({
+    markToolResultAttachment(new HumanMessage({
       content: [
         {
           type: 'text',
-          text: 'Browser screenshot from the preceding tool result. Inspect the visible page using this image; to act on what you see, take a browser_snapshot and use its refs rather than coordinates from this image.',
+          text: `Browser screenshot from tool call ${JSON.stringify(toolCallId)}. Inspect the visible page using this image; to act on what you see, take a browser_snapshot and use its refs rather than coordinates from this image.`,
         },
         { type: 'image', mimeType: image.mimeType, data: image.data },
       ],
       response_metadata: { output_version: 'v1' },
-    }),
+    }), toolCallId),
   ];
 }
 

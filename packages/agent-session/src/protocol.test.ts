@@ -442,3 +442,25 @@ test('main tool-call messages and their settlements round-trip; malformed ones a
   const result = { type: 'session.snapshot.result' as const, requestId: 'q', snapshot };
   assert.deepEqual(parseAgentServerMessage(result), result);
 });
+
+test('model protocol and session snapshots preserve explicit native PDF modalities', () => {
+  const list = {
+    type: 'model.list.result', requestId: 'models-pdf', sessionId: 'session-pdf',
+    defaultProfileId: 'pdf', selectedProfileId: 'pdf', requiredInputModalities: ['text', 'file'],
+    profiles: [{ id: 'pdf', label: 'PDF', provider: 'custom', model: 'pdf-model',
+      endpointHost: 'models.example.test', contextWindowTokens: 32_000,
+      inputModalities: ['text', 'image', 'file'], available: true, compatible: true, issues: [] }],
+  };
+  assert.deepEqual(parseAgentServerMessage(list), list);
+  assert.equal(parseAgentServerMessage({ ...list, requiredInputModalities: ['text', 'audio'] }), null);
+  assert.equal(parseAgentServerMessage({ ...list, profiles: [{ ...list.profiles[0], inputModalities: ['text', 'audio'] }] }), null);
+  const selected = {
+    type: 'model.select.result', requestId: 'select-pdf', sessionId: 'session-pdf', selectedProfileId: 'pdf',
+    snapshot: createAgentSessionSnapshot({ sessionId: 'session-pdf', kind: 'chat', timeline: [], activeRun: null,
+      pendingInterrupt: null, runtime: { modelProfileId: 'pdf', inputModalities: ['text', 'file'],
+        requiredInputModalities: ['text', 'file'] } }),
+  };
+  assert.deepEqual(parseAgentServerMessage(selected), selected);
+  selected.snapshot.session.runtime!.inputModalities = ['audio'] as never;
+  assert.equal(parseAgentServerMessage(selected), null);
+});

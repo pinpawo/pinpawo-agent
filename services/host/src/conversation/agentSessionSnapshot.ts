@@ -109,9 +109,7 @@ export function buildHostRuntimeView(
     ],
     ...(runtime.model ? { model: runtime.model } : {}),
     ...(runtime.inputModalities ? {
-      inputModalities: runtime.inputModalities.map((modality) => (
-        modality === 'image' ? 'image' as const : 'text' as const
-      )),
+      inputModalities: [...runtime.inputModalities],
     } : {}),
     requiredInputModalities: [...requiredInputModalities],
     toolAuthorizationMode: runtime.toolAuthorizationMode,

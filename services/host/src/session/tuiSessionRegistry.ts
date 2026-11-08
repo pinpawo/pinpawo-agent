@@ -386,7 +386,7 @@ function readInputModalities(value: unknown): AgentInputModality[] | null {
     !Array.isArray(value)
     || value.length === 0
     || value[0] !== 'text'
-    || !value.every((item) => item === 'text' || item === 'image')
+    || !value.every((item) => item === 'text' || item === 'image' || item === 'file')
   ) {
     return null;
   }

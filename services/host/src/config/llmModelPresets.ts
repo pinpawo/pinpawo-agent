@@ -224,9 +224,9 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     structuredOutputMethod: 'jsonMode',
-    // Shared V4.1 Flash capabilities. Native PDF input was validated through
-    // WASU; PDF acceptance at the official endpoint has not been tested.
-    inputModalities: ['text', 'image', 'file'],
+    // One shared Flash model. The official API accepts images, not native PDF;
+    // a compatible endpoint can opt into file input through its profile.
+    inputModalities: ['text', 'image'],
     thinkingControl: 'thinking_type',
     requiresStreaming: true,
     aliases: [

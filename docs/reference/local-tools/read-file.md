@@ -17,10 +17,13 @@ malformed, encrypted, over-page-limit, or otherwise unsupported inputs.
 
 `file` currently means native PDF input, not arbitrary files. Add it to
 `inputModalities` only after verifying that the configured endpoint and model
-support PDF input. The shared DeepSeek V4.1 Flash preset declares this capability
-based on successful native PDF validation through WASU; no separate WASU model
-is defined. Direct PDF acceptance at the official DeepSeek endpoint has not been
-tested. Other presets require an explicit profile opt-in. API and transport
+support PDF input. Presets do not automatically assert this capability.
+DeepSeek V4.1 Flash uses one shared model preset, including the
+`deepseek-v4.1-flash` alias. A native PDF succeeded through WASU, but a direct
+official API test rejected the same PDF with HTTP 400 and allowed only image
+formats (`webp`, `png`, `jpeg`, `gif`). The shared preset therefore declares
+text/image only. A verified compatible endpoint can opt into `file` through
+its existing profile without defining a separate model. API and transport
 support can differ even when endpoints serve the same underlying model.
 See [Model profiles](../runtime/model-profiles.md).
 

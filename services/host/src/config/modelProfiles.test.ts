@@ -64,11 +64,11 @@ test('DeepSeek V4.1 Flash has its own preset and does not resolve as V4 Pro', ()
   assert.equal(inferLlmModelPreset('deepseek-flash')?.key, 'deepseek-flash');
 });
 
-test('DeepSeek V4.1 Flash declares native image and PDF input and absorbs the retired vision name', () => {
+test('DeepSeek V4.1 Flash declares native image input and absorbs the retired vision name', () => {
   const preset = findLlmModelPresetByKey('deepseek-flash');
 
   assert.equal(preset?.model, 'deepseek-flash');
-  assert.deepEqual(preset?.inputModalities, ['text', 'image', 'file']);
+  assert.deepEqual(preset?.inputModalities, ['text', 'image']);
   // The retired `-vision-exp` model is served by the same V4.1 Flash model, so
   // it must resolve to the one Flash preset instead of a separate vision preset.
   assert.equal(
@@ -468,11 +468,10 @@ test('native file input requires explicit profile or preset metadata', () => {
   assert.deepEqual(parsed.profile?.inputModalities, ['text', 'image', 'file']);
   assert.deepEqual(summarizeModelProfile(parsed.profile!).inputModalities, ['text', 'image', 'file']);
   assert.equal(parseModelProfile(storedProfile({ inputModalities: ['text', 'audio'] })).profile, undefined);
-  assert.deepEqual(listLlmModelPresets().filter(preset => preset.inputModalities.includes('file'))
-    .map(preset => preset.key), ['deepseek-flash']);
+  for (const preset of listLlmModelPresets()) assert.equal(preset.inputModalities.includes('file'), false);
 });
 
-test('DeepSeek V4.1 Flash shares PDF capability across official and gateway profiles', () => {
+test('DeepSeek V4.1 Flash shares one preset without assuming PDF support across endpoints', () => {
   for (const [provider, baseUrl, model] of [
     ['deepseek', 'https://api.deepseek.com', 'deepseek-flash'],
     ['wasu', 'https://wasu.example.test/v1', 'deepseek-v4.1-flash'],
@@ -481,11 +480,21 @@ test('DeepSeek V4.1 Flash shares PDF capability across official and gateway prof
       stored: storedConfig({ primary: storedProfile({ provider, baseUrl, model,
         sourcePreset: 'deepseek-flash', inputModalities: ['text', 'image'] }) }), env: {},
     }) });
-    assert.deepEqual(registry.resolve().inputModalities, ['text', 'image', 'file']);
-    assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text', 'image', 'file']);
+    assert.deepEqual(registry.resolve().inputModalities, ['text', 'image']);
+    assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text', 'image']);
     assert.equal(registry.resolve().baseUrl, baseUrl);
     assert.equal(registry.resolve().model, model);
   }
+});
+
+test('a Flash profile can explicitly opt into PDF input without a separate model preset', () => {
+  const registry = createLocalModelProfileRegistry({ snapshot: buildModelProfileRegistry({
+    stored: storedConfig({ primary: storedProfile({ sourcePreset: 'deepseek-flash',
+      model: 'deepseek-v4.1-flash', inputModalities: ['text', 'image', 'file'] }) }), env: {},
+  }) });
+  assert.deepEqual(registry.resolve().inputModalities, ['text', 'image', 'file']);
+  assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text', 'image', 'file']);
+  assert.equal(registry.resolve().model, 'deepseek-v4.1-flash');
 });
 
 test('preset refresh preserves explicit native PDF opt-in alongside current image support', () => {

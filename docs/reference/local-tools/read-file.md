@@ -17,8 +17,11 @@ malformed, encrypted, over-page-limit, or otherwise unsupported inputs.
 
 `file` currently means native PDF input, not arbitrary files. Add it to
 `inputModalities` only after verifying that the configured endpoint and model
-support PDF input. Existing presets do not automatically assert this capability.
-A compatible gateway can have different support from the upstream provider.
+support PDF input. The shared DeepSeek V4.1 Flash preset declares this capability
+based on successful native PDF validation through WASU; no separate WASU model
+is defined. Direct PDF acceptance at the official DeepSeek endpoint has not been
+tested. Other presets require an explicit profile opt-in. API and transport
+support can differ even when endpoints serve the same underlying model.
 See [Model profiles](../runtime/model-profiles.md).
 
 Use `view_file_chunk` for UTF-8 text. GIF, Office documents, spreadsheets,

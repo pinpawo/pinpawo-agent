@@ -224,12 +224,13 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     structuredOutputMethod: 'jsonMode',
-    // V4.1 Flash is natively multimodal; the retired `-vision-exp` model name
-    // is only a compatibility alias that routes to this same model.
-    inputModalities: ['text', 'image'],
+    // Shared V4.1 Flash capabilities. Native PDF input was validated through
+    // WASU; PDF acceptance at the official endpoint has not been tested.
+    inputModalities: ['text', 'image', 'file'],
     thinkingControl: 'thinking_type',
     requiresStreaming: true,
     aliases: [
+      'deepseek-v4.1-flash',
       'deepseek-v4-flash',
       // Retired model name; requests are served by DeepSeek-V4.1-Flash.
       'deepseek-v4-flash-vision-exp',

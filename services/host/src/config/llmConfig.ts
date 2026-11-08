@@ -53,7 +53,7 @@ function withPresetCompatibility(
   return preset
     ? {
         ...profile,
-        // Presets own text/image refresh; native PDF support remains explicit.
+        // Presets own declared capabilities; preserve explicit profile PDF opt-in.
         inputModalities: [...new Set([
           ...preset.inputModalities,
           ...profile.inputModalities.filter(modality => modality === 'file'),

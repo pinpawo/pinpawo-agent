@@ -40,6 +40,15 @@ export type ChannelMessageRow = {
   deliverables?: Deliverable[];
 };
 
+/** A Pet's progress through the public Timeline, independent of execution sessions. */
+export type ChannelConsumptionRow = {
+  channelId: string;
+  petId: string;
+  /** Replaced on every membership, including a remove/rejoin within one millisecond. */
+  membershipId: string;
+  afterSequence: number;
+};
+
 export type ChannelSessionRow = {
   channelId: string;
   petId: string;
@@ -92,6 +101,11 @@ export interface ChannelStore {
   appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
   getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
   readMessages(channelId: string, range: MessageRange): Promise<MessagePage>;
+  getConsumption(channelId: string, petId: string): Promise<ChannelConsumptionRow | undefined>;
+  /** Start this membership at the supplied committed Timeline position. */
+  resetConsumption(row: ChannelConsumptionRow): Promise<void>;
+  /** Compare-and-set: an old batch cannot acknowledge a new membership or newer progress. */
+  advanceConsumption(expected: ChannelConsumptionRow, throughSequence: number): Promise<boolean>;
   getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined>;
   /** Returns the existing reservation for (channel, pet) if there is one. */
   reserveSession(row: ChannelSessionRow): Promise<ChannelSessionRow>;

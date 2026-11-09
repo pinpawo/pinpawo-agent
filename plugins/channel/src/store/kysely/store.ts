@@ -1,7 +1,7 @@
 import type { Kysely, Selectable } from 'kysely';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
 import type {
-  ChannelMemberRow, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef, MessagePage, MessageRange, Page, PageOf,
+  ChannelConsumptionRow, ChannelMemberRow, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef, MessagePage, MessageRange, Page, PageOf,
 } from '../channelStore';
 import type { ChannelDatabase } from './schema';
 
@@ -150,6 +150,28 @@ export class KyselyChannelStore implements ChannelStore {
       items: items.map(messageRow), nextAfter, hasMore: await beyond('>', nextAfter),
       nextBefore: items[0]?.sequence ?? range.before ?? 1, hasEarlier: records.length > range.limit,
     };
+  }
+
+  async getConsumption(channelId: string, petId: string): Promise<ChannelConsumptionRow | undefined> {
+    const row = await this.db.selectFrom('channel_consumptions').selectAll()
+      .where('channel_id', '=', channelId).where('pet_id', '=', petId).executeTakeFirst();
+    return row ? { channelId: row.channel_id, petId: row.pet_id, membershipId: row.membership_id, afterSequence: row.after_sequence } : undefined;
+  }
+
+  async resetConsumption(row: ChannelConsumptionRow): Promise<void> {
+    await this.db.insertInto('channel_consumptions').values({
+      channel_id: row.channelId, pet_id: row.petId, membership_id: row.membershipId, after_sequence: row.afterSequence,
+    }).onConflict(conflict => conflict.columns(['channel_id', 'pet_id']).doUpdateSet({
+      membership_id: row.membershipId, after_sequence: row.afterSequence,
+    })).execute();
+  }
+
+  async advanceConsumption(expected: ChannelConsumptionRow, throughSequence: number): Promise<boolean> {
+    const result = await this.db.updateTable('channel_consumptions').set({ after_sequence: throughSequence })
+      .where('channel_id', '=', expected.channelId).where('pet_id', '=', expected.petId)
+      .where('membership_id', '=', expected.membershipId).where('after_sequence', '=', expected.afterSequence)
+      .where('after_sequence', '<', throughSequence).executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
   }
 
   async getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined> {

@@ -57,5 +57,22 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
         await db.schema.alterTable('channels').addColumn('prompt', 'text').execute();
       },
     },
+    '0003_channel_consumption': {
+      async up(db: Kysely<unknown>) {
+        await db.schema.createTable('channel_consumptions')
+          .addColumn('channel_id', 'text', column => column.notNull().references('channels.channel_id'))
+          .addColumn('pet_id', 'text', column => column.notNull())
+          .addColumn('membership_id', 'text', column => column.notNull())
+          .addColumn('after_sequence', 'integer', column => column.notNull().check(sql`after_sequence >= 0`))
+          .addPrimaryKeyConstraint('channel_consumptions_pk', ['channel_id', 'pet_id'])
+          .execute();
+        // Establish a baseline, not a replay of historical messages. A later
+        // remove/rejoin replaces this migration-only membership identifier.
+        await sql`insert into channel_consumptions (channel_id, pet_id, membership_id, after_sequence)
+          select m.channel_id, m.member_id, m.joined_at,
+            coalesce((select max(sequence) from channel_messages where channel_id = m.channel_id), 0)
+          from channel_members m where m.member_kind = 'pet' and m.left_at is null`.execute(db);
+      },
+    },
   };
 }

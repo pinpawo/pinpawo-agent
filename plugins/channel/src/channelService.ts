@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
-  ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
+  ChannelConsumptionRow, ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
 } from './store/channelStore';
 
 const identifier = z.string().trim().min(1).max(256);
@@ -173,6 +173,9 @@ export class ChannelService {
       await store.createChannel(channel);
       for (const member of [creator, ...pets.filter(id => creator.kind !== 'pet' || creator.id !== id).map(id => ({ kind: 'pet' as const, id }))]) {
         await store.upsertMember({ channelId: channel.channelId, ...member, joinedAt: now });
+        if (member.kind === 'pet') await store.resetConsumption({
+          channelId: channel.channelId, petId: member.id, membershipId: randomUUID(), afterSequence: 0,
+        });
       }
       return { channel, members: await this.membersIn(store, channel.channelId, labels) };
     });
@@ -233,6 +236,12 @@ export class ChannelService {
       if (existing && !existing.leftAt) return { row: existing, joined: false };
       const row = { channelId: channel.channelId, ...member, joinedAt: new Date().toISOString() };
       await store.upsertMember(row);
+      if (member.kind === 'pet') {
+        const tail = await store.readMessages(channel.channelId, { limit: 1 });
+        await store.resetConsumption({
+          channelId: channel.channelId, petId: member.id, membershipId: randomUUID(), afterSequence: tail.nextAfter,
+        });
+      }
       return { row, joined: true };
     });
     if (result.joined) this.publish({ type: 'channel.member.joined', payload: { channelId: result.row.channelId, member, actor } });
@@ -273,6 +282,10 @@ export class ChannelService {
     const labels = await this.humanLabels(await this.store.listMembers(identifier.parse(channelId)));
     let mentionError: string | undefined;
     const result = await this.store.transaction(async (store) => {
+      // On Postgres, sequence allocation can precede another transaction's
+      // commit. Serialize this Channel's appends so a cursor can never pass
+      // an uncommitted lower sequence. Membership changes use the same lock.
+      await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireMemberIn(store, channelId, trustedAuthor);
       if (value.replyTo && !(await store.getMessage(channel.channelId, value.replyTo))) {
         throw new Error('Message reference does not exist in this Channel.');
@@ -299,6 +312,26 @@ export class ChannelService {
 
   getMessage(channelId: string, messageId: string): Promise<ChannelMessage | undefined> {
     return this.store.getMessage(channelId, messageId);
+  }
+
+  /** Public-message progress for a current Pet, never an execution completion marker. */
+  async consumption(channelId: string, petId: string): Promise<ChannelConsumptionRow> {
+    const channel = await this.requireMember(channelId, { kind: 'pet', id: petId });
+    const row = await this.store.getConsumption(channel.channelId, petId);
+    if (!row) throw new Error('Channel consumption baseline is missing.');
+    return row;
+  }
+
+  /** An obsolete/removed membership cannot acknowledge any public messages. */
+  async advanceConsumption(expected: ChannelConsumptionRow, throughSequence: number): Promise<boolean> {
+    z.number().int().nonnegative().safe().parse(throughSequence);
+    if (throughSequence <= expected.afterSequence) throw new RangeError('Consumption must advance past the prior position.');
+    return this.store.transaction(async store => {
+      await store.lockChannel(expected.channelId);
+      const member = (await store.listMembers(expected.channelId)).find(row => row.kind === 'pet' && row.id === expected.petId);
+      if (!member || member.leftAt) return false;
+      return store.advanceConsumption(expected, throughSequence);
+    });
   }
 
   /** The (Channel, Pet) session, reserved on first use. */

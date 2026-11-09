@@ -51,7 +51,14 @@ function withPresetCompatibility(
 ) {
   const preset = findMatchingSourcePreset(profile);
   return preset
-    ? { ...profile, inputModalities: preset.inputModalities }
+    ? {
+        ...profile,
+        // Presets own declared capabilities; preserve explicit profile PDF opt-in.
+        inputModalities: [...new Set([
+          ...preset.inputModalities,
+          ...profile.inputModalities.filter(modality => modality === 'file'),
+        ])],
+      }
     : profile;
 }
 

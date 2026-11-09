@@ -182,7 +182,7 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     && (
       !Array.isArray(value.inputModalities)
       || value.inputModalities.length === 0
-      || !value.inputModalities.every((item) => item === 'text' || item === 'image')
+      || !value.inputModalities.every((item) => item === 'text' || item === 'image' || item === 'file')
     )
   ) {
     return null;
@@ -193,7 +193,7 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
       !Array.isArray(value.requiredInputModalities)
       || value.requiredInputModalities.length === 0
       || !value.requiredInputModalities.every(
-        (item) => item === 'text' || item === 'image',
+        (item) => item === 'text' || item === 'image' || item === 'file',
       )
     )
   ) {

@@ -203,6 +203,7 @@ export type {
 } from './utils/structuredOutput';
 export {
   getAgentMessageRunId,
+  markToolResultAttachment,
   isMainConversationMessage,
   isPublicConversationMessage,
   isSyntheticAgentMessage,

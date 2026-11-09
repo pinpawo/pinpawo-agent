@@ -12,7 +12,6 @@ import {
   listDirTool,
   mkdirPathTool,
   movePathTool,
-  readFileTool,
   statPathTool,
   validateStructuredFileTool,
   viewFileChunkTool,
@@ -71,10 +70,7 @@ test('file tools write, view, and stat text files', async (t) => {
     content: 'alpha\nbeta\ngamma\n',
   })).ok, true);
 
-  assert.match(
-    String(await readFileTool.invoke({ path: filePath })),
-    /use view_file_chunk/,
-  );
+
   assert.equal(
     await viewFileChunkTool.invoke({ path: filePath, startLine: 2, endLine: 3 }),
     '2: beta\n3: gamma\n\n[lines 2-3 of 4; nextStartLine=4]',
@@ -962,22 +958,6 @@ test('createFilesToolkit registers review policies for file mutation tools', () 
   assert.equal(Boolean(definition(toolkit, 'apply_patch')?.review), true);
 });
 
-test('read_file analyzes non-text documents instead of reading text chunks', async (t) => {
-  const root = createFileFixture(t);
-  const filePath = resolve(root, 'report.pdf');
-  writeFileSync(filePath, Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02]));
-
-  assert.match(
-    String(await viewFileChunkTool.invoke({ path: filePath })),
-    /not a UTF-8 text file/,
-  );
-
-  const result = readJsonOutput(await readFileTool.invoke({ path: filePath }));
-  assert.equal(result.ok, false);
-  assert.equal(result.type, 'document_or_binary');
-  assert.equal(result.readableAsText, false);
-  assert.match(String(result.reason), /No document reader/);
-});
 
 test('file tools validate JSON and manage local paths', async (t) => {
   const root = createFileFixture(t);

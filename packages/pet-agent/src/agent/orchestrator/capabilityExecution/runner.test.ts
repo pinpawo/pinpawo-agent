@@ -2,7 +2,7 @@ import { readFixtureDelivery, createDeliveryResult, withDeliveryCalls } from '..
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { StateSchema } from '@langchain/langgraph';
 import type { Deliverable } from '@pinpawo/agent-contracts';
@@ -11,7 +11,7 @@ import { z as stateZod } from 'zod/v4';
 import type { AgentModels } from '../../../types/agent';
 import { defineInstructionDocument, type CapabilityLifecycle } from '../../../types/capability';
 import { defineToolkit, type AgentToolkit } from '../../../types/toolkit';
-import type { SubagentRunInput } from '../../../types/subagent';
+import type { SubagentRunInput, SubagentRuntimeContext } from '../../../types/subagent';
 import { setAgentMessageMetadata } from '../../messages';
 import { isDelegationBriefingMessage } from '../delegation/briefing';
 
@@ -436,3 +436,27 @@ test('executor forwards invocation usage without reconstructing a transcript', a
   assert.deepEqual(result.tokenUsage, tokenUsage);
   assert.equal('messages' in result, false);
 });
+
+for (const modelInputModalities of [undefined, ['text', 'image', 'file'] as const]) {
+  test(`capability options reach tool runtime with ${modelInputModalities?.join(',') ?? 'text-only default'}`, async () => {
+    let called = false;
+    const probe = tool((_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+      called = true;
+      assert.deepEqual(runtime.context.modelInputModalities, modelInputModalities ?? ['text']);
+      return 'Verified model metadata.';
+    }, { name: 'probe_model', description: 'Inspect model metadata.', schema: z.object({}) });
+    const toolkit = defineToolkit({ name: 'model_probe', description: 'Inspect model.', tools: [{ tool: probe }] });
+    const execute = createCapabilityExecutor({
+      models: { act: new FakeToolCallingModel({ toolCalls: [
+        [{ id: 'probe-call', name: 'probe_model', args: {} }], [],
+      ] }) },
+      modelInputModalities,
+    });
+    const baseContext = hostContext();
+    const context = { ...baseContext, runnableConfig: { ...baseContext.runnableConfig, context: {
+      workdir: '/workspace', modelInputModalities: ['image'],
+    } } };
+    await execute(input('d1', [toolkit]), context);
+    assert.equal(called, true);
+  });
+}

@@ -106,6 +106,7 @@ test('tui session registry drops malformed current records', async () => {
     { ...currentRecord, modelProfileId: undefined },
     { ...currentRecord, requiredInputModalities: undefined },
     { ...currentRecord, requiredInputModalities: ['image'] },
+    { ...currentRecord, requiredInputModalities: ['text', 'audio'] },
     { ...currentRecord, title: undefined },
     { ...currentRecord, messageCount: undefined },
     { ...currentRecord, messageCount: -1 },
@@ -242,3 +243,18 @@ async function clearBackups(dir: string) {
     await rm(path.join(dir, name));
   }
 }
+
+test('tui session registry retains a session with native PDF modality on reload', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-pdf-session-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, 'sessions.json');
+  const state = loadTuiSessionState(filePath);
+  const session = ensureActiveTuiSession(state, 'pdf-pet', 'pdf-profile');
+  session.requiredInputModalities = ['text', 'image', 'file'];
+  saveTuiSessionState(state, filePath);
+
+  const restored = loadTuiSessionState(filePath);
+  assert.deepEqual(restored, state);
+  assert.deepEqual(restored.sessions[session.id]?.requiredInputModalities, ['text', 'image', 'file']);
+  assert.deepEqual(await readBackups(dir), []);
+});

@@ -348,28 +348,3 @@ test('queued dispatches retain separate request and hint snapshots across scopes
     assert.equal(targets.length, 2, 'plain input does not resolve scoped provider context');
   } finally { release.resolve(); await h.close(); }
 });
-
-
-test('failed dispatch publishes bounded cause diagnostics under the exact session and scope once', async () => {
-  const cause = Object.assign(new Error('private provider response'), { name: 'SocketError', code: 'UND_ERR_SOCKET',
-    headers: { authorization: 'private-header' }, request: { url: 'https://private.invalid/?token=value' } });
-  const error = new TypeError('terminated', { cause });
-  let runs = 0;
-  const h = await fixture(async () => { runs++; throw error; });
-  try {
-    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'transport-failure', request: 'work' });
-    await waitFor(() => h.events.some(event => event.state === 'failed'));
-    const failures = h.events.filter(event => event.state === 'failed');
-    assert.equal(failures.length, 1);
-    assert.equal(runs, 1, 'failure observation must not retry execution');
-    const failed = failures[0]!;
-    assert.equal(failed.dispatchId, 'transport-failure');
-    assert.equal(failed.sessionId, sessionId);
-    assert.deepEqual(failed.scope, scope);
-    assert.match(failed.requestId!, /^host-/);
-    assert.equal(failed.error, 'terminated');
-    assert.deepEqual(failed.diagnostics, { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET' }] });
-    assert.doesNotMatch(JSON.stringify(failed), /private|authorization|https/);
-    assert.equal(h.events.some(event => event.state === 'completed' || event.state === 'interrupted'), false);
-  } finally { await h.close(); }
-});

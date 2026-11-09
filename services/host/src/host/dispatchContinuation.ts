@@ -1,6 +1,5 @@
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
-import { describeAgentError } from '../agent/errorDiagnostics';
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import type { ServerTuiSessionService } from '../session/serverTuiSessions';
 import { readPetDispatchMessage, type PetDispatchLifecycleEvent } from './contracts';
@@ -35,7 +34,7 @@ export function continueSuspendedDispatch(options: {
 
     const { dispatchId, request, scope } = suspended;
     const requestId = turn.request.requestId;
-    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'diagnostics' | 'pendingInterrupt' | 'message'>) => publishLifecycle({
+    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'message'>) => publishLifecycle({
       ...event, dispatchId, request, requestId, sessionId: session.id, ...(scope ? { scope } : {}),
     });
     const suspend = (pendingInterrupt: PendingInterruptProjection) => {
@@ -76,7 +75,7 @@ export function continueSuspendedDispatch(options: {
       const pending = await readPending();
       if (pending) suspend(pending);
       else if (turn.setup.input.signal?.aborted || isAbortError(error)) settle({ state: 'interrupted' });
-      else settle({ state: 'failed', error: error instanceof Error ? error.message : 'internal error', diagnostics: describeAgentError(error) });
+      else settle({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
       throw error;
     }
     if (result.status === 'completed') {

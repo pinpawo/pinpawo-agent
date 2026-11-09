@@ -40,8 +40,6 @@ for (const petId of ['alpha', 'beta']) {
     // The Console composer puts a picked @ first; fixture commands follow it.
     const command = last.replace(/^\[@[^\]]*\]\(participant:[^)\s]+\)\s*/, '');
     if (last === 'fail-provider') throw new Error('Deterministic provider denied request (403).');
-    if (command === 'fail-transport') throw new TypeError('terminated', { cause: Object.assign(new Error('private provider response'),
-      { name: 'SocketError', code: 'UND_ERR_SOCKET', status: 502, headers: { authorization: 'private-header' } }) });
     if (command === 'review') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'fixture-review',
       view: { kind: 'plain', body: 'Authorize fixture tool?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' },
         effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],

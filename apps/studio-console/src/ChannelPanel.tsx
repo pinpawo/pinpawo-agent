@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { ChannelDispatchFailures } from './ChannelDispatchFailures';
 import type { DispatchRecord } from './dispatchActivity';
 import { ChannelTimeline } from './ChannelConversation';
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
@@ -33,6 +32,15 @@ type Props = {
   failures?: { channelId: string; petId?: string; error: string }[];
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
+
+export function ChannelDispatchFailures({ channelId, dispatches, pets, petsReady }: {
+  channelId: string; dispatches: DispatchRecord[]; pets: { petId: string; name: string }[]; petsReady: boolean;
+}) {
+  return <>{dispatches.filter(item => item.state === 'failed' && item.scope?.namespace === 'channel'
+    && item.scope.id === channelId).map(item => <p className="channel-record-error" role="alert" key={item.invocationId}>
+      {channelPetIdentity(item.petId, pets, petsReady).name} execution failed: {item.error ?? 'Unknown error'}
+    </p>)}</>;
+}
 
 export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], dispatches = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);

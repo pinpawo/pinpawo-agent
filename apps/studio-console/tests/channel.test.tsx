@@ -7,9 +7,8 @@ import {
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
-import { ChannelTimeline } from '../src/ChannelPanel';
+import { ChannelDispatchFailures, ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
-import { ChannelDispatchFailures } from '../src/ChannelDispatchFailures';
 import { dispatchRecordFromEvent } from '../src/dispatchActivity';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
@@ -273,19 +272,17 @@ test('the timeline ends with the Pets running a turn in the Channel, earliest fi
   assert.doesNotMatch(renderToStaticMarkup(<ChannelTimeline messages={[message]} pending={false} onReply={() => undefined} members={all} />), /channel-working/);
 });
 
-
-test('Channel shows only its own observed execution failures with correlation and no retry action', () => {
+test('Channel shows its own execution error without internal IDs or unrelated failures', () => {
   const failure = dispatchRecordFromEvent({ type: 'dispatch.failed', source: 'resident-pet', occurredAt: 'now', payload: {
-    invocationId: 'd1', petId: 'worker', request: 'work', requestId: 'host-1', sessionId: 'worker:one',
+    invocationId: 'internal-invocation', petId: 'worker', request: 'work', requestId: 'internal-request', sessionId: 'internal-session',
     scope: { namespace: 'channel', id: 'a' }, error: 'terminated',
-    diagnostics: { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET', status: 502 }] },
   } })!;
   const markup = renderToStaticMarkup(<ChannelDispatchFailures channelId="a" pets={[{ petId: 'worker', name: 'Analyst' }]} petsReady={true}
     dispatches={[failure, { ...failure, invocationId: 'other', scope: { namespace: 'channel', id: 'b' }, error: 'Other Channel private' },
       { ...failure, invocationId: 'not-channel', scope: { namespace: 'other', id: 'a' }, error: 'Other scope private' },
+      { ...failure, invocationId: 'unscoped', scope: undefined, error: 'Unscoped private' },
       { ...failure, invocationId: 'waiting', state: 'waiting', error: 'Still waiting private' }]} />);
   assert.match(markup, /role="alert"/);
-  assert.match(markup, /Analyst execution failed/);
-  for (const text of ['terminated', 'UND_ERR_SOCKET', 'HTTP 502', 'host-1', 'worker:one', 'd1']) assert.ok(markup.includes(text));
-  assert.doesNotMatch(markup, /private|<button|reply was not saved|Message was not delivered/);
+  assert.match(markup, /Analyst execution failed: terminated/);
+  assert.doesNotMatch(markup, /internal-|private|<button|reply was not saved|Message was not delivered/);
 });

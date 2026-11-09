@@ -207,8 +207,17 @@ try {
   }, 'other Channel output');
   assert.notEqual((await sessions(secondId))[0].sessionId, originalSession);
   assert.ok(other.messages.find(item => item.author.kind === 'pet').body.includes('Prior public deliveries read: 0.'));
+  // Execution can fail after admission; show the error only in its own Channel.
+  const failed = await apiPost('/channels/messages', { channelId: secondId, body: 'fail-provider', mentions: [{ participantId: 'pet:alpha' }] });
+  assert.equal(failed.deliveries[0].state, 'accepted');
+  const failureAlert = page.getByRole('alert').filter({ hasText: 'Alpha execution failed' });
+  await failureAlert.waitFor();
+  assert.ok((await failureAlert.innerText()).includes('Deterministic provider denied request (403).'));
+  assert.doesNotMatch(await failureAlert.innerText(), /Invocation:|Request:|Session:/);
+  assert.equal(await failureAlert.count(), 1);
   await page.locator('.channel-list button').filter({ hasText: 'Customer records' }).click();
   await page.getByRole('heading', { name: 'Customer records', exact: true }).waitFor();
+  assert.equal(await failureAlert.count(), 0, 'execution errors stay in their own Channel');
   const beforeReconnect = (await publicMessages()).map(item => item.messageId);
   await page.reload();
   await page.locator('.connection-state.connected').waitFor();
@@ -421,7 +430,7 @@ try {
   await page.getByText('History 0', { exact: true }).waitFor();
   assert.equal(await shown(), 110, 'nothing is missing between the pages');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['Channel instructions create, edit, cancel, clear and isolation', 'explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['Channel instructions create, edit, cancel, clear and isolation', 'explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'Channel execution failure display and isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

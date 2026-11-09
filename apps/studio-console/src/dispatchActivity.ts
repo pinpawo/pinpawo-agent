@@ -1,5 +1,3 @@
-import { parseAgentServerMessage, type AgentErrorDiagnostics } from '@pinpawo/agent-session';
-
 export type LiveEvent = { type: string; source: string; occurredAt: string; payload?: unknown };
 export type DispatchState = 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
 export type DispatchRecord = {
@@ -11,9 +9,6 @@ export type DispatchRecord = {
   updatedAt: string;
   source: 'admission_receipt' | 'lifecycle';
   error?: string;
-  diagnostics?: AgentErrorDiagnostics;
-  requestId?: string;
-  sessionId?: string;
   scope?: { namespace: string; id: string };
   observationLost?: boolean;
 };
@@ -38,10 +33,6 @@ export function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null
     || typeof payload.request !== 'string') {
     return null;
   }
-  // Use the Agent Session decoder for the same bounded diagnostics contract.
-  const parsed = parseAgentServerMessage({ type: 'event', requestId: payload.invocationId,
-    event: { type: 'error', requestId: payload.invocationId, message: '', diagnostics: payload.diagnostics } });
-  const diagnostics = parsed?.type === 'event' && parsed.event.type === 'error' ? parsed.event.diagnostics : undefined;
   const scope = payload.scope as Record<string, unknown> | undefined;
   return {
     invocationId: payload.invocationId,
@@ -52,9 +43,6 @@ export function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null
     updatedAt: event.occurredAt,
     source,
     observationLost: false,
-    ...(diagnostics ? { diagnostics } : {}),
-    ...(typeof payload.requestId === 'string' ? { requestId: payload.requestId } : {}),
-    ...(typeof payload.sessionId === 'string' ? { sessionId: payload.sessionId } : {}),
     ...(scope && typeof scope.namespace === 'string' && typeof scope.id === 'string'
       ? { scope: { namespace: scope.namespace, id: scope.id } } : {}),
     ...(typeof payload.error === 'string' && payload.error.trim()

@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  appendChannelDeliveries, channelCanEditPrompt, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
+  appendChannelDeliveries, channelDeliveryLabel, channelCanEditPrompt, channelInlineMentionIds, channelJoinablePets, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
-import { ChannelDispatchFailures, ChannelTimeline } from '../src/ChannelPanel';
+import { ChannelDispatchFailures, ChannelProcessingFailures, ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
 import { dispatchRecordFromEvent } from '../src/dispatchActivity';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
@@ -285,4 +285,19 @@ test('Channel shows its own execution error without internal IDs or unrelated fa
   assert.match(markup, /role="alert"/);
   assert.match(markup, /Analyst execution failed: terminated/);
   assert.doesNotMatch(markup, /internal-|private|<button|reply was not saved|Message was not delivered/);
+});
+
+
+test('a Head processing failure is separate from an execution or unsaved-reply failure', () => {
+  const markup = renderToStaticMarkup(<ChannelProcessingFailures pets={[{ petId: 'alpha', name: 'Alpha' }]} petsReady={true}
+    failures={[{ channelId: 'a', petId: 'alpha', kind: 'head', error: 'The range remains pending.' }]} />);
+  assert.match(markup, /Alpha Head needs attention/);
+  assert.match(markup, /The range remains pending/);
+  assert.doesNotMatch(markup, /execution failed|reply was not saved/);
+});
+
+
+test('Head admission labels do not claim execution completion', () => {
+  assert.equal(channelDeliveryLabel({ channelId: 'a', state: 'accepted', via: 'head' }), 'Head dispatch accepted');
+  assert.equal(channelDeliveryLabel({ channelId: 'a', state: 'failed', via: 'head' }), 'Head handoff unconfirmed');
 });

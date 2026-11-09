@@ -7,3 +7,4 @@ export * from './channelDispatchInput';
 export * from './channelRouting';
 
 export * from './channelTimelineConsumer';
+export * from './channelPetHead';

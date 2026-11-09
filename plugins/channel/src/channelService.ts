@@ -269,15 +269,17 @@ export class ChannelService {
   /**
    * Save one member's message. Mentions are resolved against current members.
    * A human's unknown mention rejects the message; a Pet's reply has no one to
-   * reject it to, so it is kept without mentions and `mentionError` says why.
+   * reject it to, so it is kept without mentions and `addressingError` says why.
+   * Head replies instead reject invalid addressing and may not address Pets.
    * With an externalRef already saved for this author, the earlier message
    * is returned and `created` is false.
    */
-  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string } = {}): Promise<{
+  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; source?: 'pet-agent' | 'pet-head'; membershipId?: string } = {}): Promise<{
     message: ChannelMessage; created: boolean; mentionError?: string;
   }> {
     const value = channelMessageSchema.parse(input);
     const trustedAuthor = memberRefSchema.parse(author);
+    if (options.source && trustedAuthor.kind !== 'pet') throw new ChannelAccessError('Only Pets may use Agent or Head provenance.');
     // Mentions record labels; read them first (a member who joins meanwhile is labelled by id).
     const labels = await this.humanLabels(await this.store.listMembers(identifier.parse(channelId)));
     let mentionError: string | undefined;
@@ -287,20 +289,31 @@ export class ChannelService {
       // an uncommitted lower sequence. Membership changes use the same lock.
       await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireMemberIn(store, channelId, trustedAuthor);
+      if (options.membershipId !== undefined) {
+        const consumption = trustedAuthor.kind === 'pet' ? await store.getConsumption(channel.channelId, trustedAuthor.id) : undefined;
+        if (!consumption || consumption.membershipId !== options.membershipId) {
+          throw new ChannelAccessError('Channel membership changed before the reply was saved.');
+        }
+      }
       if (value.replyTo && !(await store.getMessage(channel.channelId, value.replyTo))) {
         throw new Error('Message reference does not exist in this Channel.');
       }
       let mentions: ChannelMention[];
       try { mentions = parseChannelMentions(value.body, value.mentions, await this.membersIn(store, channel.channelId, labels)); }
       catch (error) {
-        if (trustedAuthor.kind !== 'pet') throw error;
+        if (trustedAuthor.kind !== 'pet' || options.source === 'pet-head') throw error;
         mentionError = error instanceof Error ? error.message : String(error);
         mentions = [];
+      }
+      if (options.source === 'pet-head' && mentions.some(mention => mention.participantId.startsWith('pet:'))) {
+        throw new Error('Channel Head replies cannot address Pets.');
       }
       const messageId = randomUUID();
       const message = await store.appendMessage({
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),
         ...(options.externalRef ? { externalRef: options.externalRef } : {}),
+        source: options.source ?? 'member',
+        ...(mentionError ? { addressingError: mentionError } : {}),
         body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}), mentions,
         ...(value.deliverables !== undefined ? { deliverables: value.deliverables } : {}),
       });
@@ -312,6 +325,31 @@ export class ChannelService {
 
   getMessage(channelId: string, messageId: string): Promise<ChannelMessage | undefined> {
     return this.store.getMessage(channelId, messageId);
+  }
+
+  /** Activate locally without replaying Router-era or disabled-period history. */
+  async configureHeadConsumption(enabled: boolean): Promise<void> {
+    await this.store.transaction(async store => {
+      const previous = await store.getHeadEnabled();
+      if (enabled && previous !== true) {
+        let after = 0;
+        for (;;) {
+          const page = await store.listChannels({}, { after, limit: 200 });
+          for (const channel of page.items) {
+            await store.lockChannel(channel.channelId);
+            const tail = await store.readMessages(channel.channelId, { limit: 1 });
+            for (const member of await store.listMembers(channel.channelId)) {
+              if (member.kind === 'pet' && !member.leftAt) await store.resetConsumption({
+                channelId: channel.channelId, petId: member.id, membershipId: randomUUID(), afterSequence: tail.nextAfter,
+              });
+            }
+          }
+          if (!page.hasMore) break;
+          after = page.nextAfter;
+        }
+      }
+      await store.setHeadEnabled(enabled);
+    });
   }
 
   /** Public-message progress for a current Pet, never an execution completion marker. */

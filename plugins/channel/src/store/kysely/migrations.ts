@@ -74,5 +74,13 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
           from channel_members m where m.member_kind = 'pet' and m.left_at is null`.execute(db);
       },
     },
+    '0004_channel_head_state': {
+      async up(db: Kysely<unknown>) {
+        await db.schema.createTable('channel_head_state')
+          .addColumn('singleton', 'integer', column => column.primaryKey().check(sql`singleton = 1`))
+          .addColumn('enabled', 'integer', column => column.notNull().check(sql`enabled in (0, 1)`))
+          .execute();
+      },
+    },
   };
 }

@@ -23,7 +23,7 @@ function readFenced(text: string): Record<string, unknown> {
   const input = JSON.parse(lines.join('\n')) as Record<string, unknown>;
   assert.equal(input.version, 1);
   assert.equal(typeof input.channelId, 'string');
-  assert.equal(typeof input.body, 'string');
+  if (input.type !== 'channel_batch') assert.equal(typeof input.body, 'string');
   return input;
 }
 
@@ -41,5 +41,19 @@ export function readChannelTestTask(text: string): ChannelTestTask {
   assert.equal(input.type, 'channel_task');
   assert.ok(!Object.hasOwn(input, 'author') && !Object.hasOwn(input, 'messageId'));
   assert.ok(input.origin.kind && input.origin.id);
+  return input;
+}
+
+export type ChannelTestBatch = {
+  type: 'channel_batch'; version: 1; channelId: string; petParticipantId: string; membershipId: string;
+  range: { after: number; through: number };
+  messages: Array<{ messageId: string; sequence: number; author: Author; body: string; mentions: Array<{ participantId: string }>; replyTo?: { messageId: string; author: Author; body: string }; deliverables?: unknown[]; source?: string }>;
+  headReply?: { messageId: string; author: Author; body: string; source?: string };
+  contextHint: { source: 'channel-head'; action: 'read-latest-channel'; focus?: string };
+};
+export function readChannelTestBatch(text: string): ChannelTestBatch {
+  const input = readFenced(text) as ChannelTestBatch;
+  assert.equal(input.type, 'channel_batch');
+  assert.ok(input.membershipId && input.petParticipantId && input.messages.length);
   return input;
 }

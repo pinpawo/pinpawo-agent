@@ -34,8 +34,8 @@ test('a separate Channel hint reaches planning and Channel context is read befor
   const root = await mkdtemp(join(tmpdir(), 'channel-hint-'));
   const goal = randomUUID(), focus = randomUUID(), original = randomUUID(), evidence = randomUUID(), final = randomUUID();
   const bridge = createInvocationContextBridge();
-  const channel = createChannelPlugin({ httpRoute: false, routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:reviewer', confidence: 1, focus }),
+  const channel = createChannelPlugin({ httpRoute: false, routing: { enabled: true, cooldownMs: 0 },
+    headDecider: async () => ({ action: 'dispatch', confidence: 1, reason: '', reply: '', focus }),
   });
   let host: Awaited<ReturnType<typeof createResidentPetHost>> | undefined;
   let studio: Awaited<ReturnType<typeof createStudioWithPets>> | undefined;

@@ -242,6 +242,24 @@ for (const [backend, config] of backends) {
     assert.equal(alphaCalls, 2);
   });
 
+  test(`${backend}: the sole new message wake retries the frozen failed range then consumes the new message`, async t => {
+    const { service, channelId, consumer, post } = await fixture(t, ['alpha']);
+    let fail = true;
+    const batches: number[][] = [];
+    const queue = consumer({ consume: async batch => {
+      batches.push(batch.messages.map(row => row.sequence));
+      if (fail) throw new Error('try later');
+    }, onError: () => {} });
+    const first = (await post('first')).message;
+    await queue.start();
+    await until(() => batches.length === 1);
+    await delay(30);
+    fail = false;
+    const second = (await post('only new wake')).message;
+    await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === second.sequence);
+    assert.deepEqual(batches, [[first.sequence], [first.sequence], [second.sequence]]);
+  });
+
   test(`${backend}: leaving aborts an in-flight batch and a rejoin starts after the current tail`, async t => {
     const hold = deferred();
     t.after(() => hold.resolve());

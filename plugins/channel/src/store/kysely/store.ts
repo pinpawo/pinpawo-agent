@@ -23,11 +23,13 @@ function memberRow(record: Record<'channel_members'>): ChannelMemberRow {
   };
 }
 function messageRow(record: Record<'channel_messages'>): ChannelMessageRow {
-  const data = JSON.parse(record.data) as Pick<ChannelMessageRow, 'body' | 'replyTo' | 'mentions' | 'deliverables'>;
+  const data = JSON.parse(record.data) as Pick<ChannelMessageRow, 'body' | 'replyTo' | 'mentions' | 'deliverables' | 'source' | 'addressingError'>;
   return {
     sequence: record.sequence, messageId: record.message_id, channelId: record.channel_id,
     author: { kind: record.author_kind, id: record.author_id }, occurredAt: record.occurred_at,
     ...(record.external_ref === null ? {} : { externalRef: record.external_ref }),
+    ...(data.source !== undefined ? { source: data.source } : {}),
+    ...(data.addressingError !== undefined ? { addressingError: data.addressingError } : {}),
     body: data.body, ...(data.replyTo ? { replyTo: data.replyTo } : {}), mentions: data.mentions,
     ...(data.deliverables !== undefined ? { deliverables: parseDeliverables(data.deliverables) } : {}),
   };
@@ -105,11 +107,11 @@ export class KyselyChannelStore implements ChannelStore {
   }
 
   async appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow> {
-    const { body, replyTo, mentions, deliverables } = row;
+    const { body, replyTo, mentions, deliverables, source, addressingError } = row;
     const inserted = await this.db.insertInto('channel_messages').values({
       message_id: row.messageId, channel_id: row.channelId, author_kind: row.author.kind, author_id: row.author.id,
       occurred_at: row.occurredAt, external_ref: row.externalRef ?? null,
-      data: JSON.stringify({ body, ...(replyTo ? { replyTo } : {}), mentions,
+      data: JSON.stringify({ body, source, addressingError, ...(replyTo ? { replyTo } : {}), mentions,
         ...(deliverables !== undefined ? { deliverables } : {}),
       }),
     }).onConflict(conflict => conflict.columns(['author_kind', 'author_id', 'external_ref']).doNothing())
@@ -126,6 +128,23 @@ export class KyselyChannelStore implements ChannelStore {
     const record = await this.db.selectFrom('channel_messages').selectAll()
       .where('channel_id', '=', channelId).where('message_id', '=', messageId).executeTakeFirst();
     return record ? messageRow(record) : undefined;
+  }
+
+  async getMessageByExternalRef(author: MemberRef, externalRef: string): Promise<ChannelMessageRow | undefined> {
+    const record = await this.db.selectFrom('channel_messages').selectAll()
+      .where('author_kind', '=', author.kind).where('author_id', '=', author.id)
+      .where('external_ref', '=', externalRef).executeTakeFirst();
+    return record ? messageRow(record) : undefined;
+  }
+
+  async getHeadEnabled(): Promise<boolean | undefined> {
+    const row = await this.db.selectFrom('channel_head_state').select('enabled').where('singleton', '=', 1).executeTakeFirst();
+    return row ? !!row.enabled : undefined;
+  }
+
+  async setHeadEnabled(enabled: boolean): Promise<void> {
+    await this.db.insertInto('channel_head_state').values({ singleton: 1, enabled: enabled ? 1 : 0 })
+      .onConflict(conflict => conflict.column('singleton').doUpdateSet({ enabled: enabled ? 1 : 0 })).execute();
   }
 
   async readMessages(channelId: string, range: MessageRange): Promise<MessagePage> {

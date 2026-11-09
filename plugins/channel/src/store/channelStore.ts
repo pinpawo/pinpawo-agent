@@ -34,6 +34,10 @@ export type ChannelMessageRow = {
   occurredAt: string;
   /** The message's id in the system it came from (an Agent Session message id); unique per author. */
   externalRef?: string;
+  /** Server-owned provenance; absent only on historical messages. */
+  source?: 'member' | 'pet-agent' | 'pet-head';
+  /** A retained Pet message could not resolve its addressing. */
+  addressingError?: string;
   body: string;
   replyTo?: string;
   mentions: ChannelMention[];
@@ -100,6 +104,9 @@ export interface ChannelStore {
   /** With an externalRef the author already recorded, returns that earlier row unchanged. */
   appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
   getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
+  getMessageByExternalRef(author: MemberRef, externalRef: string): Promise<ChannelMessageRow | undefined>;
+  getHeadEnabled(): Promise<boolean | undefined>;
+  setHeadEnabled(enabled: boolean): Promise<void>;
   readMessages(channelId: string, range: MessageRange): Promise<MessagePage>;
   getConsumption(channelId: string, petId: string): Promise<ChannelConsumptionRow | undefined>;
   /** Start this membership at the supplied committed Timeline position. */

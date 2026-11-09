@@ -90,9 +90,14 @@ PET.md 只定义自身职责和边界，团队分工由公告说明。公告只�
 既有工作区不自动迁移。保留定制后集中共享定义，移除迁移 Pet 的同名私有副本并添加引用；
 保留私有定义时则不添加同名共享引用。两者同时存在会报冲突。Pet 或 Capability 文件编辑后重启生效。
 
-人类发的、没有 @ 任何人的 Channel 消息只保存，不唤醒 Pet。把 Channel Plugin 的 `options.routing.enabled`
-设为 `true` 后，会用一次模型调用为这类消息选一个 Pet 或不选（`decider: {kind:'llm', modelProfileId}`，
-引用 Host 的模型配置）。见 [Channel 路由](../../design/studio/channel-routing.md)。
+Channel 消息立即保存。`options.routing.enabled: true` 现在启用各 Pet 独立的轻量 Head，
+对合法无 @ 消息选择跳过、直接回应或交给自己的 Pet 执行，不再由中央 Router 只选一个胜者。
+职责沿用 `routing.pets`，模型沿用 `decider: {kind:'llm', modelProfileId}`。Head 回应不创建 session，
+也不唤醒其他 Head；显式 @ 仍维持即时直达。
+
+`cooldownMs` 默认 300（0–60000 ms），`batchLimit` 默认 50（1–200），固定窗口不随新消息延长。
+首次启用及关闭后重开从当前尾部开始；正常启用状态重启保留未处理进度。
+见 [Head 实现及恢复边界](../../design/studio/channel-pet-head.md)。
 
 ## 旧 Kanban 工作区迁移
 

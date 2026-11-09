@@ -1,6 +1,6 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import { channelParticipantId } from './channelParticipants';
-import type { ChannelMessageRow } from './store/channelStore';
+import type { ChannelMessageRow, ChannelConsumptionRow } from './store/channelStore';
 
 /** Who started a Pet's spontaneous run in a Channel. */
 export type ChannelRunOrigin = { kind: 'scheduler' | 'trigger'; id: string };
@@ -69,4 +69,55 @@ export function channelDispatchInput(
 /** A scheduled or triggered instruction for a Pet in its Channel. It has no author and is not a Channel message. */
 export function channelTaskInput(channelId: string, origin: ChannelRunOrigin, body: string): string {
   return fenced({ type: 'channel_task', version: 1, channelId, origin: { kind: origin.kind, id: origin.id }, body });
+}
+
+/** Full stored messages for one Head-selected Pet; model suggestions never replace their authors. */
+export function channelBatchInput(options: {
+  progress: ChannelConsumptionRow;
+  throughSequence: number;
+  messages: readonly ChannelMessageRow[];
+  originals: ReadonlyMap<string, ChannelMessageRow>;
+  labelOf: (participantId: string) => string | undefined;
+  headReply?: ChannelMessageRow;
+  focus?: string;
+}): string {
+  const view = (row: ChannelMessageRow, includeReply = true): Record<string, unknown> => {
+    const participantId = channelParticipantId(row.author.kind, row.author.id);
+    const label = options.labelOf(participantId);
+    const original = row.replyTo ? options.originals.get(row.replyTo) : undefined;
+    return {
+      sequence: row.sequence, messageId: row.messageId,
+      author: { participantId, kind: row.author.kind, ...(label ? { label } : {}) },
+      body: row.body, mentions: row.mentions,
+      ...(row.source ? { source: row.source } : {}),
+      ...(row.addressingError ? { addressingError: row.addressingError } : {}),
+      ...(row.deliverables !== undefined ? { deliverables: row.deliverables } : {}),
+      ...(includeReply && original ? { replyTo: view(original, false) } : {}),
+    };
+  };
+  return fenced({
+    type: 'channel_batch', version: 1, channelId: options.progress.channelId,
+    petParticipantId: channelParticipantId('pet', options.progress.petId),
+    membershipId: options.progress.membershipId,
+    range: { after: options.progress.afterSequence, through: options.throughSequence },
+    messages: options.messages.map(row => view(row)),
+    ...(options.headReply ? { headReply: view(options.headReply) } : {}),
+    contextHint: { source: 'channel-head', action: 'read-latest-channel', ...(options.focus ? { focus: options.focus } : {}) },
+  });
+}
+
+/** Read only the complete Channel-owned outer envelope, never copied body text. */
+export function readChannelBatchContext(channelId: string, request?: string): { membershipId: string; petParticipantId: string; focus?: string } | undefined {
+  const match = request && /^(`{3,})json\n([\s\S]*)\n\1$/.exec(request);
+  if (!match) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(match[2]!); } catch { return undefined; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const hint = input.contextHint as Record<string, unknown> | undefined;
+  if (input.type !== 'channel_batch' || input.version !== 1 || input.channelId !== channelId
+    || typeof input.membershipId !== 'string' || !input.membershipId || typeof input.petParticipantId !== 'string'
+    || !hint || hint.source !== 'channel-head' || hint.action !== 'read-latest-channel') return undefined;
+  const focus = typeof hint.focus === 'string' && hint.focus.trim().length <= 500 ? hint.focus.trim() : '';
+  return { membershipId: input.membershipId, petParticipantId: input.petParticipantId, ...(focus ? { focus } : {}) };
 }

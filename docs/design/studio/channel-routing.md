@@ -1,6 +1,6 @@
 # Channel 路由
 
-> 状态：`llm` 决策器已实现（配置读 `studio.json`）；`jev` 决策器和 Console 设置页未实现
+> 状态：历史中央路由设计；当前运行路径已由 [每 Pet Head](channel-pet-head.md) 替代。旧独立决策器/比较 eval 尚留存，不在 Plugin 消息路径调用。
 > 更新：2026-11-02
 
 ## 问题

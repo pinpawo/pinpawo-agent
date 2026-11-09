@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { format } from 'node:util';
 import { buildReviewSpec, projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import type { HumanReviewResponse, InterruptResumeMessage } from '@pinpawo/agent-session';
 import { isToolProtocolHistoryError, ServerChatHandler } from './serverChatHandler';
@@ -66,6 +67,61 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
   assert.equal(isToolProtocolHistoryError('insufficient tool messages following tool_calls message'), true);
   assert.equal(isToolProtocolHistoryError(new Error('ordinary model error')), false);
 });
+
+for (const source of ['chat', 'host'] as const) {
+  test(`${source} failure logs the existing bounded cause diagnostics once`, async (t) => {
+    const logs = t.mock.method(console, 'error', () => {});
+    const cause = Object.assign(new Error('private provider response'), {
+      name: 'SocketError',
+      code: 'UND_ERR_SOCKET',
+      headers: { authorization: 'private-header' },
+    });
+    const error = Object.assign(new TypeError('terminated', { cause }), {
+      request: { url: 'https://private.invalid/?token=value' },
+    });
+    const sent: unknown[] = [];
+    const peer = createFakePeer(sent);
+    const handler = new ServerChatHandler({
+      graphService: {} as never,
+      tuiSessions: {
+        getChatThreadId: () => 'thread-x',
+        buildChatSetup: () => ({ graphConfig: {}, input: { messages: [] } }),
+        refreshActiveSessionSummary: async () => undefined,
+      } as never,
+      inflightRequests: new InflightRequestController({
+        emitOperation: () => undefined,
+        sendControl: () => undefined,
+      }),
+      loadContext: async () => ({} as never),
+      runAgentTurn: async () => { throw error; },
+    });
+    const requestId = 'request-transport-failure';
+    const deps = { petId: 'pet-1' } as never;
+    if (source === 'host') {
+      const result = await handler.runHostTurn(peer, { requestId, message: 'continue' }, deps);
+      assert.equal(result.outcome, 'failed');
+      assert.equal(result.error, error);
+    } else {
+      await handler.handleChatRequest(peer, { type: 'chat_request', requestId, message: 'continue' }, deps);
+    }
+
+    const diagnostics = { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET' }] };
+    assert.equal(logs.mock.callCount(), 1);
+    const args = logs.mock.calls[0]!.arguments as unknown[];
+    assert.deepEqual(JSON.parse(args[2] as string), { requestId, diagnostics });
+    const output = format(...args);
+    assert.match(output, /TypeError: terminated/);
+    assert.match(output, /UND_ERR_SOCKET/);
+    assert.doesNotMatch(output, /private|authorization|https/);
+    const errors = sent.flatMap((item) => {
+      const envelope = item as { type?: string; event?: { type?: string; message?: string; diagnostics?: unknown } };
+      return envelope.type === 'event' && envelope.event?.type === 'error' ? [envelope.event] : [];
+    });
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]!.message, 'terminated');
+    assert.deepEqual(errors[0]!.diagnostics, diagnostics);
+  });
+}
 
 for (const switchFails of [false, true]) {
   test(`a tool protocol error ${switchFails ? 'that cannot switch' : 'switches to a new session and'} keeps the original session (#680)`, async () => {

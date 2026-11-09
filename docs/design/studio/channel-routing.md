@@ -3,6 +3,9 @@
 > 状态：`llm` 决策器已实现（配置读 `studio.json`）；`jev` 决策器和 Console 设置页未实现
 > 更新：2026-11-02
 
+> 后续目标设计见 [Channel Timeline 消费与 Pet Head](channel-timeline-pet-head.md)。
+> 该草稿拟用每 Pet 的 Head 替代统一 Router；本文仍记录当前已实现行为，未因草稿发布而切换。
+
 ## 问题
 
 Channel 里没有 @ 的消息只写入时间线，不会派发给任何 Pet（[Channel 模型](channel-model.md) §交接）。

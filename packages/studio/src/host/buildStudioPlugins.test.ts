@@ -17,6 +17,7 @@ import { createLocalModelProfileRegistry } from '../../../../services/host/src/c
 import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
+  definePetDocument,
   type AgentCapability,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
@@ -24,6 +25,7 @@ import type { StudioPlugin, StudioPluginContext } from '../studioContract';
 import {
   buildHostRuntimeConfig,
   FileSaver,
+  loadPetDocument,
 } from 'pinpawo/host-runtime';
 import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
 
@@ -110,6 +112,49 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   );
   return root;
 }
+
+test('buildStudio reuses loaded Pet documents for live, later-created, and restored Pets', async () => {
+  const workdir = await writeStudioConfig([{ id: 'reader' }]);
+  const petsDir = path.join(workdir, '.pinpawo', 'pets');
+  const documentPath = path.join(petsDir, 'planner', 'PET.md');
+  const original = definePetDocument({ content: '# Planner\n\nPlan work.' });
+  const updated = definePetDocument({ content: '# Planner\n\nReview work.' });
+  await mkdir(path.dirname(documentPath), { recursive: true });
+  await writeFile(documentPath, original.content);
+  const loaded = await loadPetDocument(petsDir, 'planner');
+  assert.ok(loaded);
+  const documents = new Map([['planner', loaded]]);
+  let context!: StudioPluginContext;
+  const configuration = await resolveStudioHostConfig({ workdir, resolvePlugin: () => ({
+    name: 'reader', toolkits: [], start: (value) => { context = value; },
+  }) });
+  const make = () => buildStudio({
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    hostCapabilities: [generalCapability()], petCapabilities: new Map(), petDocuments: documents,
+    ...residentBuildResources(workdir),
+  });
+  const first = await make();
+  try {
+    await first.studio.pets.create({ petId: 'planner-a', definitionId: 'planner', name: 'Planner A' });
+    assert.deepEqual(context.getPetDocument('planner-a'), { content: original.content });
+    await writeFile(documentPath, updated.content);
+    documents.set('planner', updated);
+    await first.studio.pets.create({ petId: 'planner-b', definitionId: 'planner', name: 'Planner B' });
+    assert.deepEqual(context.getPetDocument('planner-a'), { content: original.content });
+    assert.deepEqual(context.getPetDocument('planner-b'), { content: original.content });
+    assert.equal(context.getPetDocument('planner'), undefined);
+    assert.equal(Object.isFrozen(context.getPetDocument('planner-b')), true);
+  } finally { await first.studio.shutdown(); }
+
+  documents.set('planner', (await loadPetDocument(petsDir, 'planner'))!);
+  const restarted = await make();
+  try {
+    assert.deepEqual(restarted.studio.listPets().map(({ petId }) => petId), ['planner-a', 'planner-b']);
+    assert.deepEqual(context.getPetDocument('planner-a'), { content: updated.content });
+    assert.deepEqual(context.getPetDocument('planner-b'), { content: updated.content });
+  } finally { await restarted.studio.shutdown(); }
+});
 
 test('a Host-selected shared Capability can serve as a resident Pet default', async () => {
   const workdir = await writeStudioConfig([]);

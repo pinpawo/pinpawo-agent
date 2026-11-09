@@ -8,7 +8,7 @@ import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, cha
 import { channelSystemContext } from './channelSystemContext';
 import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
-import { channelPetHeadOptionsSchema, createChannelPetHead, boundedHeadInput, headError, type ChannelPetHead, type ChannelPetHeadOptions, type PetHeadDecider, type HeadInput, type HeadMessage } from './channelPetHead';
+import { channelPetHeadOptionsSchema, createChannelPetHead, boundedHeadInput, headError, type ChannelPetHead, type ChannelPetHeadOptions, type PetHeadDecider, type HeadInput, type HeadMessage, type HeadRequestMessage } from './channelPetHead';
 import { ChannelTimelineConsumer, type ChannelTimelineBatch } from './channelTimelineConsumer';
 import {
   ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelMessagePageSchema,
@@ -90,6 +90,7 @@ const petMessageEventSchema = z.object({
 const channelRunEventSchema = z.object({
   invocationId: z.string().min(1),
   petId: z.string().min(1),
+  request: z.string().optional(),
   scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }),
 });
 
@@ -109,6 +110,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let consumer: ChannelTimelineConsumer | undefined;
   /** Pet runs in a Channel that are executing now, by invocation. */
   const running = new Map<string, { channelId: string; participantId: string; since: string }>();
+  // Correlation only for messages Channel itself dispatched, never a Host queue read.
+  const publicRequests = new Map<string, HeadRequestMessage[]>();
+  const admittingRequests = new Map<string, { messages: HeadRequestMessage[]; finished: Set<string> }>();
+  const requestKey = (channelId: string, petId: string, request: string) => JSON.stringify([channelId, petId, request]);
   function host(): StudioPluginContext {
     if (!context) throw new Error('Channel Plugin is not started.');
     return context;
@@ -122,18 +127,28 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     idempotencyKey?: string,
     attachments: readonly Deliverable[] = [],
     batch?: ChannelTimelineBatch,
+    requestMessages: readonly ChannelMessageRow[] = [],
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
     if (batch) await requireCurrentBatch(batch);
-    const receipt = await host().dispatch({
-      petId, request,
-      ...(attachments.length ? { attachments } : {}),
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-      session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
-      scope: { namespace: 'channel', id: channelId },
-    });
+    const key = requestKey(channelId, petId, request);
+    const admission = { messages: requestMessages.map(({ messageId, occurredAt }) => ({ messageId, occurredAt })), finished: new Set<string>() };
+    admittingRequests.set(key, admission);
+    let receipt;
+    try {
+      receipt = await host().dispatch({
+        petId, request,
+        ...(attachments.length ? { attachments } : {}),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
+        scope: { namespace: 'channel', id: channelId },
+      });
+      // Subscriber callbacks may lag admission; the receipt gives a stable
+      // correlation even when queued/running events have not been handled yet.
+      if (!admission.finished.has(receipt.invocationId)) publicRequests.set(receipt.invocationId, admission.messages);
+    } finally { if (admittingRequests.get(key) === admission) admittingRequests.delete(key); }
     return { invocationId: receipt.invocationId, binding: await service.confirmSession(binding) };
   }
 
@@ -152,7 +167,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (target.kind !== 'pet') return { participantId, state: 'delivered' };
         try {
           const { invocationId, binding } = await dispatchPet(message.channelId, target.id, request,
-            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments);
+            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments, undefined, [message]);
           return { participantId, state: 'accepted', invocationId, sessionId: binding.sessionId };
         } catch (error) {
           return { participantId, state: 'failed', error: error instanceof Error ? error.message : String(error) };
@@ -198,12 +213,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const target = members.find(member => member.kind === 'pet' && member.id === petId);
     if (!target) throw new ChannelAccessError('Pet left before its Head decision.');
     const labels = new Map(members.map(member => [member.participantId, member.label]));
-    const originals = new Map<string, ChannelMessageRow>();
-    for (const row of messages) {
-      if (!row.replyTo || originals.has(row.replyTo)) continue;
-      const original = await service.getMessage(channelId, row.replyTo);
-      if (original) originals.set(original.messageId, original);
-    }
     const effectKey = `channel-head:${JSON.stringify([channelId, petId, batch.progress.membershipId, batch.progress.afterSequence])}`;
     let headReply = await service.store.getMessageByExternalRef({ kind: 'pet', id: petId }, effectKey);
     if (headReply && (headReply.channelId !== channelId || headReply.source !== 'pet-head')) {
@@ -213,30 +222,47 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const participantId = channelParticipantId(row.author.kind, row.author.id);
       return { participantId, kind: row.author.kind, ...(labels.get(participantId) ? { label: labels.get(participantId)! } : {}) };
     };
+    const contextRows = batch.messages.filter(row => !messages.includes(row));
+    if (headReply) contextRows.push(headReply);
+    // Select the recent window before dividing its body budget.
+    const selectedContext = contextRows.slice(-20);
+    const historyRows = active.settings.historyLimit ? publicContext.messages.slice(-20) : [];
+    const originals = new Map<string, ChannelMessageRow>();
+    const readReferences = new Set<string>();
+    for (const row of [...messages, ...selectedContext, ...historyRows]) {
+      if (!row.replyTo || readReferences.has(row.replyTo)) continue;
+      readReferences.add(row.replyTo);
+      const original = await service.getMessage(channelId, row.replyTo);
+      if (original) originals.set(original.messageId, original);
+    }
     const views = (rows: readonly ChannelMessageRow[], budget: number): HeadMessage[] => {
       const limit = Math.min(2_000, Math.floor(budget / Math.max(1, rows.length)));
       const clip = (row: ChannelMessageRow, maximum = limit) => ({ body: row.body.slice(0, maximum), ...(row.body.length > maximum ? { bodyTruncated: true } : {}) });
       return rows.map(row => {
         const original = row.replyTo ? originals.get(row.replyTo) : undefined;
         return {
-          messageId: row.messageId, sequence: row.sequence, author: author(row), ...clip(row), mentions: row.mentions,
-          ...(row.source ? { source: row.source } : {}), ...(row.addressingError ? { addressingError: row.addressingError } : {}),
+          messageId: row.messageId, sequence: row.sequence, occurredAt: row.occurredAt, author: author(row), ...clip(row), mentions: row.mentions,
+          source: row.source ?? 'unknown', ...(row.addressingError ? { addressingError: row.addressingError } : {}),
           ...(row.deliverables ? { deliverables: row.deliverables } : {}),
-          ...(original ? { replyTo: { messageId: original.messageId, author: author(original), ...clip(original, 500),
-            ...(original.deliverables ? { deliverables: original.deliverables } : {}) } } : {}),
+          ...(row.replyTo ? { replyTo: original ? { messageId: original.messageId, occurredAt: original.occurredAt,
+            source: original.source ?? 'unknown', author: author(original), ...clip(original, 500),
+            ...(original.deliverables ? { deliverables: original.deliverables } : {}) } : { messageId: row.replyTo, missing: true as const } } : {}),
         };
       });
     };
-    const contextRows = batch.messages.filter(row => !messages.includes(row));
-    if (headReply) contextRows.push(headReply);
+    const document = host().getPetDocument(petId);
+    const observedRuns = [...running].filter(([, run]) => run.channelId === channelId && run.participantId === target.participantId)
+      .map(([invocationId, run]) => ({ startedAt: run.since, requestMessages: publicRequests.get(invocationId) ?? [] }));
     const input: HeadInput = {
+      currentTime: new Date().toISOString(),
       channel: { channelId, title: channel.title, ...(channel.description ? { description: channel.description } : {}), ...(channel.prompt ? { prompt: channel.prompt } : {}) },
-      pet: { participantId: target.participantId, name: target.label,
+      pet: { participantId: target.participantId, name: target.label, document: document ? { content: document.content } : { missing: true },
         ...(active.settings.pets[petId] ? { description: active.settings.pets[petId] } : {}) },
       members: members.slice(0, 200).map(({ participantId, kind, label }) => ({ participantId, kind, label })),
-      messages: views(messages, 24_000), context: views(contextRows, 8_000),
-      history: views(active.settings.historyLimit ? publicContext.messages : [], 8_000),
-      execution: { state: workingIn(channelId).some(item => item.participantId === target.participantId) ? 'running' : 'unknown' },
+      messages: views(messages, 24_000), context: views(selectedContext, 8_000),
+      history: views(historyRows, 8_000),
+      ...(contextRows.length > selectedContext.length || publicContext.messages.length > historyRows.length ? { inputTruncated: true } : {}),
+      execution: observedRuns.length ? { state: 'running', runs: observedRuns } : { state: 'unknown' },
     };
     const decision = await active.decide(boundedHeadInput(input), batch.signal);
     await requireCurrentBatch(batch);
@@ -258,7 +284,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const { invocationId, binding } = await dispatchPet(channelId, petId, channelBatchInput({
         progress: batch.progress, throughSequence: batch.throughSequence, messages, originals,
         labelOf: participantId => labels.get(participantId), ...(headReply ? { headReply } : {}), ...(decision.focus ? { focus: decision.focus } : {}),
-      }), effectKey, uniqueAttachments, batch);
+      }), effectKey, uniqueAttachments, batch, messages);
       host().notify({ type: 'channel.delivery', payload: { channelId, messageId: messages.at(-1)!.messageId,
         participantId: target.participantId, via: 'head', state: 'accepted', invocationId, sessionId: binding.sessionId,
         confidence: decision.confidence, reason: decision.reason } });
@@ -323,12 +349,17 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     if (type === 'dispatch.message') return;
     const parsed = channelRunEventSchema.safeParse(payload);
     if (!parsed.success) return;
-    const { invocationId, petId, scope: { id: channelId } } = parsed.data;
+    const { invocationId, petId, request, scope: { id: channelId } } = parsed.data;
+    const admission = request === undefined ? undefined : admittingRequests.get(requestKey(channelId, petId, request));
+    if (['dispatch.completed', 'dispatch.interrupted', 'dispatch.failed'].includes(type)) {
+      publicRequests.delete(invocationId);
+      admission?.finished.add(invocationId);
+    } else if (admission) publicRequests.set(invocationId, admission.messages);
     const participantId = channelParticipantId('pet', petId);
     const isWorking = () => workingIn(channelId).some(item => item.participantId === participantId);
     const before = isWorking();
-    if (type !== 'dispatch.running') running.delete(invocationId);
-    else if (!running.has(invocationId)) running.set(invocationId, { channelId, participantId, since: occurredAt });
+    if (['dispatch.waiting', 'dispatch.completed', 'dispatch.interrupted', 'dispatch.failed'].includes(type)) running.delete(invocationId);
+    else if (type === 'dispatch.running' && !running.has(invocationId)) running.set(invocationId, { channelId, participantId, since: occurredAt });
     const working = isWorking();
     if (working !== before) host().notify({ type: 'channel.working', payload: { channelId, participantId, working } });
   }
@@ -388,6 +419,11 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         ...(options.headDecider ? { decider: options.headDecider } : {}), resolveModel: studio.models.resolve,
       });
       await service.configureHeadConsumption(!!head);
+      unsubscribeHost = studio.subscribe(async (event) => {
+        if (event.source !== 'resident-pet' || !event.type.startsWith('dispatch.')) return;
+        observeRun(event.type, event.payload, event.occurredAt);
+        if (event.type === 'dispatch.message') await recordPetMessage(event.payload);
+      });
       if (head) {
         consumer = new ChannelTimelineConsumer({ service, cooldownMs: head.settings.cooldownMs,
           batchLimit: head.settings.batchLimit, consume: processHeadBatch, shouldWake: message => message.source !== 'pet-head',
@@ -397,11 +433,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         });
         await consumer.start();
       }
-      unsubscribeHost = studio.subscribe(async (event) => {
-        if (event.source !== 'resident-pet' || !event.type.startsWith('dispatch.')) return;
-        observeRun(event.type, event.payload, event.occurredAt);
-        if (event.type === 'dispatch.message') await recordPetMessage(event.payload);
-      });
       unexposeInputs = studio.hooks.expose(CHANNEL_INPUTS_HOOK_NAME, inputs);
       unsubscribe = service.subscribe(event => studio.notify(event));
       if (options.httpRoute === false) return;
@@ -476,6 +507,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       current = undefined;
       head = undefined;
       running.clear();
+      publicRequests.clear();
+      admittingRequests.clear();
     },
   };
 }

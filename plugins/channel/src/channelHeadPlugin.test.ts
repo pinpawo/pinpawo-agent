@@ -3,6 +3,8 @@ import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { definePetDocument } from '@pinpawo/pet-agent';
+import type { PetDispatchLifecycleEvent } from 'pinpawo/host-runtime';
 import { type StudioEvent } from '@pinpawo/studio-core';
 import { createStudioWithPets } from '../../../tests/support/livePets';
 import { readChannelTestBatch, readChannelTestInput } from '../../../tests/support/channelDispatchInput';
@@ -18,30 +20,40 @@ async function until(check: () => boolean | Promise<boolean>) {
 function decision(action: HeadDecision['action'], reply = '', focus = ''): HeadDecision {
   return { action, confidence: 1, reason: 'Public context supports this decision.', reply, focus };
 }
-type Dispatch = { petId: string; request: string; session?: { id: string; create?: boolean }; scope?: { namespace: string; id: string }; attachments?: readonly unknown[] };
+type Dispatch = { petId: string; request: string; dispatchId?: string; session?: { id: string; create?: boolean }; scope?: { namespace: string; id: string }; attachments?: readonly unknown[] };
 async function setup(t: test.TestContext, decide: PetHeadDecider, options: {
-  path?: string; dispatch?: (input: Dispatch) => Promise<void>; enabled?: boolean;
+  path?: string; dispatch?: (input: Dispatch) => Promise<void>; enabled?: boolean; historyLimit?: number; petDocument?: string; lifecycleOnDispatch?: boolean;
 } = {}) {
   const dispatched: Dispatch[] = [];
   const seen: HeadInput[] = [];
   let privateReads = 0;
+  const lifecycleListeners = new Map<string, (event: PetDispatchLifecycleEvent) => void>();
+  const lifecycle = (input: Dispatch, state: PetDispatchLifecycleEvent['state'], extra: Partial<PetDispatchLifecycleEvent> = {}) => lifecycleListeners.get(input.petId)?.({
+    dispatchId: input.dispatchId!, request: input.request, state, ...(input.scope ? { scope: input.scope } : {}),
+    ...(input.session ? { sessionId: input.session.id } : {}), ...extra,
+  });
   const channel = createChannelPlugin({ httpRoute: false,
-    routing: { enabled: options.enabled ?? true, cooldownMs: 10, pets: { alpha: 'Implement work.', beta: 'Review public evidence.' } },
+    routing: { enabled: options.enabled ?? true, cooldownMs: 10, ...(options.historyLimit === undefined ? {} : { historyLimit: options.historyLimit }), pets: { alpha: 'Implement work.', beta: 'Review public evidence.' } },
     headDecider: async (input, signal) => { seen.push(input); return decide(input, signal); },
   });
   const studio = await createStudioWithPets({ studioId: 'heads', plugins: [channel],
+    ...(options.petDocument === undefined ? {} : { petDocuments: new Map([['alpha', definePetDocument({ content: options.petDocument })]]) }),
     ...(options.path ? { storage: { kind: 'sqlite', path: options.path } } : {}),
     pets: ['alpha', 'beta'].map(petId => ({ registration: { petId, name: petId }, dispatch: {
       getQueueSnapshot: () => { privateReads++; throw new Error('Head must not sample Host queues or sessions.'); },
-      onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
-      dispatch: async (input: Omit<Dispatch, 'petId'>) => { const value = { petId, ...input }; dispatched.push(value); await options.dispatch?.(value); },
+      onQueueChange: () => () => {}, onDispatchLifecycle: listener => { lifecycleListeners.set(petId, listener); return () => lifecycleListeners.delete(petId); },
+      dispatch: async (input: Omit<Dispatch, 'petId'>) => {
+        const value = { petId, ...input }; dispatched.push(value);
+        if (options.lifecycleOnDispatch) { lifecycle(value, 'queued'); lifecycle(value, 'running'); }
+        await options.dispatch?.(value);
+      },
     }, sessions: { snapshot: async () => { privateReads++; throw new Error('Private session must not be read.'); } } as never })),
   });
   t.after(() => studio.shutdown());
   const events: StudioEvent[] = [];
   studio.subscribe(event => { if (event.type.startsWith('channel.')) events.push(event); });
   const create = async () => (await channel.service.createChannel(me, { title: 'Team', prompt: 'Use public evidence.', pets: ['alpha', 'beta'] }, { studio: true })).channel.channelId;
-  return { studio, channel, dispatched, seen, events, create, privateReads: () => privateReads };
+  return { studio, channel, dispatched, seen, events, create, lifecycle, privateReads: () => privateReads };
 }
 
 test('each Pet can reply directly; replies have trusted provenance and cannot start acknowledgement loops or sessions', async t => {
@@ -209,11 +221,104 @@ test('model-only input bounds include attachment metadata and quoted references 
   assert.equal(input.inputTruncated, true);
   assert.equal(input.messages[0]!.deliverableCount, 120);
   assert.equal(input.messages[0]!.deliverables?.length, 3);
-  assert.equal(input.messages[0]!.replyTo?.deliverables?.length, 3);
+  const reference = input.messages[0]!.replyTo!;
+  assert.ok(!('missing' in reference));
+  assert.equal(reference.deliverables?.length, 3);
   assert.ok(input.channel.prompt!.length <= 6_000 && input.channel.description!.length <= 2_000);
   const batch = readChannelTestBatch(fixture.dispatched[0]!.request);
   assert.equal(batch.messages[0]!.body, current.body);
   assert.equal(batch.messages[0]!.replyTo?.body, prior.body);
   assert.deepEqual(batch.messages[0]!.deliverables, attachments);
   assert.deepEqual(fixture.dispatched[0]!.attachments, attachments);
+});
+
+
+test('Heads receive the Host PET.md snapshot with operating rules, or an explicit missing marker', async t => {
+  const content = '# Alpha\nImplement work. Never merge or deploy.\n' + 'Use isolated worktrees. '.repeat(500);
+  const fixture = await setup(t, async () => decision('skip'), { petDocument: content });
+  const id = await fixture.create();
+  await fixture.channel.sendMessage(id, { body: 'What is your role?' }, me);
+  await until(() => fixture.seen.length === 2);
+  assert.deepEqual(fixture.seen.find(input => input.pet.participantId === 'pet:alpha')!.pet.document, { content: content.slice(0, 8_000), truncated: true });
+  assert.deepEqual(fixture.seen.find(input => input.pet.participantId === 'pet:beta')!.pet.document, { missing: true });
+  assert.equal(fixture.privateReads(), 0);
+});
+
+test('recent history gets its body budget after selection, and all public views expand references only once', async t => {
+  const fixture = await setup(t, async () => decision('skip'), { historyLimit: 200 });
+  const id = (await fixture.channel.service.createChannel(me, { title: 'History', pets: [] }, { studio: true })).channel.channelId;
+  const grandparent = (await fixture.channel.service.postMessage(me, id, { body: 'Grandparent.' })).message;
+  const original = (await fixture.channel.service.postMessage(me, id, { body: 'Original evidence.', replyTo: grandparent.messageId })).message;
+  for (let i = 0; i < 25; i++) await fixture.channel.service.postMessage(me, id, { body: `${i}: ` + 'history '.repeat(150), replyTo: original.messageId });
+  await fixture.channel.service.addMember(me, id, { kind: 'pet', id: 'alpha' });
+  const posted = (await fixture.channel.sendMessage(id, { body: 'Check the recent evidence.', replyTo: original.messageId }, me)).message;
+  await until(() => fixture.seen.length === 1);
+  const view = fixture.seen[0]!;
+  assert.equal(view.history.length, 20);
+  assert.ok(view.history.every(row => row.body.length === 400 && row.bodyTruncated));
+  assert.ok(view.history[0]!.body.startsWith('5: '));
+  const reference = { messageId: original.messageId, occurredAt: original.occurredAt, source: 'member',
+    author: { participantId: 'human:local', kind: 'human', label: 'local' }, body: original.body };
+  assert.deepEqual(view.messages[0]!.replyTo, reference);
+  assert.ok(view.history.every(row => JSON.stringify(row.replyTo) === JSON.stringify(reference)));
+  assert.equal(view.messages[0]!.occurredAt, posted.occurredAt);
+  assert.ok(Date.parse(view.currentTime) >= Date.parse(posted.occurredAt));
+  assert.equal(view.inputTruncated, true);
+  assert.equal(fixture.privateReads(), 0);
+});
+
+test('unreadable quoted originals retain their reference ID and explicit missing status', async t => {
+  const fixture = await setup(t, async () => decision('skip'));
+  const id = await fixture.create();
+  const original = (await fixture.channel.service.postMessage({ kind: 'pet', id: 'alpha' }, id, { body: 'Original.' }, { source: 'pet-head' })).message;
+  const read = fixture.channel.service.getMessage.bind(fixture.channel.service);
+  fixture.channel.service.getMessage = async (channelId, messageId) => messageId === original.messageId ? undefined : read(channelId, messageId);
+  await fixture.channel.sendMessage(id, { body: 'What about this?', replyTo: original.messageId }, me);
+  await until(() => fixture.seen.length === 2);
+  assert.ok(fixture.seen.every(input => JSON.stringify(input.messages[0]!.replyTo) === JSON.stringify({ messageId: original.messageId, missing: true })));
+});
+
+test('observed running work carries only Channel-owned public request IDs and times, then becomes unknown', async t => {
+  const fixture = await setup(t, async () => decision('skip'), { lifecycleOnDispatch: true });
+  const id = await fixture.create();
+  const explicit = (await fixture.channel.sendMessage(id, { body: 'Inspect this.', mentions: [{ participantId: 'pet:alpha' }] }, me)).message;
+  await fixture.channel.sendMessage(id, { body: 'Any confirmed public context?' }, me);
+  await until(() => fixture.seen.length === 2);
+  const alpha = fixture.seen.find(input => input.pet.participantId === 'pet:alpha')!;
+  assert.equal(alpha.execution.state, 'running');
+  assert.equal(alpha.execution.runs?.length, 1);
+  assert.deepEqual(alpha.execution.runs![0]!.requestMessages, [{ messageId: explicit.messageId, occurredAt: explicit.occurredAt }]);
+  assert.ok(Number.isFinite(Date.parse(alpha.execution.runs![0]!.startedAt)));
+  assert.ok(Date.parse(alpha.execution.runs![0]!.startedAt) <= Date.parse(alpha.currentTime));
+  assert.deepEqual(fixture.seen.find(input => input.pet.participantId === 'pet:beta')!.execution, { state: 'unknown' });
+  fixture.lifecycle(fixture.dispatched[0]!, 'completed');
+  await fixture.channel.sendMessage(id, { body: 'What else is visible?' }, me);
+  await until(() => fixture.seen.length === 4);
+  assert.ok(fixture.seen.slice(2).every(input => JSON.stringify(input.execution) === JSON.stringify({ state: 'unknown' })));
+  assert.equal(fixture.privateReads(), 0);
+});
+
+
+test('delayed lifecycle delivery still correlates admitted public requests after the receipt returns', async t => {
+  const fixture = await setup(t, async () => decision('skip'), { lifecycleOnDispatch: true });
+  const id = await fixture.create();
+  const first = (await fixture.channel.sendMessage(id, { body: 'First work.', mentions: [{ participantId: 'pet:alpha' }] }, me)).message;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  let entered = false;
+  const getSession = fixture.channel.service.getSession.bind(fixture.channel.service);
+  fixture.channel.service.getSession = async (...args) => { entered = true; await gate; return getSession(...args); };
+  fixture.lifecycle(fixture.dispatched[0]!, 'message', { message: { type: 'message.completed', messageId: 'held-agent-output', role: 'assistant', text: 'Public interim finding.' } });
+  await until(() => entered);
+  const second = (await fixture.channel.sendMessage(id, { body: 'Second work.', mentions: [{ participantId: 'pet:alpha' }] }, me)).message;
+  release();
+  const followup = (await fixture.channel.sendMessage(id, { body: 'Which public requests are running?' }, me)).message;
+  await until(() => fixture.seen.some(input => input.pet.participantId === 'pet:alpha' && input.messages.some(row => row.messageId === followup.messageId)));
+  const view = fixture.seen.find(input => input.pet.participantId === 'pet:alpha' && input.messages.some(row => row.messageId === followup.messageId))!;
+  assert.equal(view.execution.state, 'running');
+  assert.deepEqual(view.execution.runs!.flatMap(run => run.requestMessages), [
+    { messageId: first.messageId, occurredAt: first.occurredAt }, { messageId: second.messageId, occurredAt: second.occurredAt },
+  ]);
+  assert.equal(fixture.privateReads(), 0);
 });

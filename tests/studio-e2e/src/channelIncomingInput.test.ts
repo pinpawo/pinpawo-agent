@@ -160,7 +160,7 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
       });
       const cid = (await channel.service.createChannel(me, { title: 'Incoming input', prompt: announcement,
         pets: ['worker', 'reviewer'] }, { studio: true })).channel.channelId;
-      await channel.sendMessage(cid, { body: 'Start the controlled work.' }, me);
+      const initial = (await channel.sendMessage(cid, { body: 'Start the controlled work.' }, me)).message;
       await waitFor(() => started);
       assert.equal(decisions.find(input => input.pet.participantId === 'pet:worker')?.execution.state, 'unknown',
         'the initial Head decision does not infer execution from absent Channel bindings');
@@ -176,6 +176,9 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
           && input.messages.some(message => message.body === update));
         assert.equal(decision.length, 1, 'the incoming reply makes one decision for its eligible Pet');
         assert.equal(decision[0]!.execution.state, 'running');
+        assert.deepEqual(decision[0]!.execution.runs?.flatMap(run => run.requestMessages),
+          [{ messageId: initial.messageId, occurredAt: initial.occurredAt }]);
+        assert.ok(decision[0]!.execution.runs?.every(run => Date.parse(run.startedAt) <= Date.parse(decision[0]!.currentTime)));
         assert.equal(aborted, false, 'ordinary input waits for the delegation');
         assert.equal(entryCalls, 1);
         release();

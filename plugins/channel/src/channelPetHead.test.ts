@@ -11,18 +11,19 @@ import {
 } from './channelPetHead';
 
 const input: HeadInput = {
+  currentTime: '2026-11-09T12:00:00.000Z',
   channel: { channelId: 'release-room', title: 'Release', description: 'Public release planning', prompt: 'Reviewer checks releases.' },
-  pet: { participantId: 'pet:reviewer', name: 'Reviewer', description: 'Reviews public changes.' },
+  pet: { participantId: 'pet:reviewer', name: 'Reviewer', description: 'Reviews public changes.', document: { content: '# Reviewer\nReview independently. Never implement the reviewed change.' } },
   members: [
     { participantId: 'human:owner', kind: 'human', label: 'Owner' },
     { participantId: 'pet:reviewer', kind: 'pet', label: 'Reviewer' },
     { participantId: 'pet:executor', kind: 'pet', label: 'Executor' },
   ],
-  messages: [{ sequence: 9, messageId: 'new-message', author: { participantId: 'human:owner', kind: 'human' },
+  messages: [{ sequence: 9, messageId: 'new-message', occurredAt: '2026-11-09T11:59:00.000Z', author: { participantId: 'human:owner', kind: 'human' },
     body: 'Review the release', mentions: [], source: 'member', bodyTruncated: true,
-    replyTo: { messageId: 'earlier-message', author: { participantId: 'pet:executor', kind: 'pet' }, body: 'Public summary' } }],
-  context: [{ sequence: 8, messageId: 'background-message', author: { participantId: 'pet:executor', kind: 'pet' }, body: 'Background only', mentions: [] }],
-  history: [{ sequence: 7, messageId: 'history-message', author: { participantId: 'pet:reviewer', kind: 'pet' }, body: 'Earlier public review', mentions: [], source: 'pet-head' }],
+    replyTo: { messageId: 'earlier-message', occurredAt: '2026-11-09T11:58:00.000Z', source: 'pet-agent', author: { participantId: 'pet:executor', kind: 'pet' }, body: 'Public summary' } }],
+  context: [{ sequence: 8, messageId: 'background-message', occurredAt: '2026-11-09T11:57:00.000Z', author: { participantId: 'pet:executor', kind: 'pet' }, body: 'Background only', mentions: [] }],
+  history: [{ sequence: 7, messageId: 'history-message', occurredAt: '2026-11-09T11:56:00.000Z', author: { participantId: 'pet:reviewer', kind: 'pet' }, body: 'Earlier public review', mentions: [], source: 'pet-head' }],
   execution: { state: 'unknown' },
 };
 const endpoint = { profileId: 'head-profile', baseUrl: 'https://models.test/v1', apiKey: 'PRIVATE_API_KEY', model: 'small' };
@@ -180,7 +181,7 @@ test('structured model receives only public Head input, an own-Pet schema and on
     assert.equal(messages[1]!._getType(), 'human');
     assert.deepEqual(JSON.parse(String(messages[1]!.content)), input);
     assert.equal(observedSignal, cancellation);
-    const changed: HeadInput = { ...input, pet: { participantId: 'pet:new', name: 'New' }, execution: { state: 'running' } };
+    const changed: HeadInput = { ...input, pet: { participantId: 'pet:new', name: 'New', document: { missing: true } }, execution: { state: 'running' } };
     await decider(changed, cancellation);
     assert.deepEqual(JSON.parse(String(messages[1]!.content)), changed);
     assert.equal(calls, 2);
@@ -266,4 +267,39 @@ test('large mixed metadata never removes an older actionable trigger to fit newe
   assert.equal(bounded.messages.length, rows.length);
   assert.deepEqual(bounded.messages.map(row => row.messageId), rows.map(row => row.messageId));
   assert.ok(bounded.messages[0]!.body.startsWith('ACTION: inspect the release.'));
+});
+
+
+test('PET.md snapshots are bounded, explicitly missing or truncated, and never mutate the Host input', () => {
+  const content = '# Role and operating rules\n' + 'Use isolated worktrees. '.repeat(1_000);
+  const value = { ...input, pet: { ...input.pet, document: { content } } };
+  const bounded = boundedHeadInput(value);
+  assert.deepEqual(bounded.pet.document, { content: content.slice(0, 8_000), truncated: true });
+  assert.equal(bounded.inputTruncated, true);
+  assert.deepEqual(value.pet.document, { content });
+  assert.deepEqual(boundedHeadInput({ ...input, pet: { ...input.pet, document: { missing: true } } }).pet.document, { missing: true });
+  assert.deepEqual(boundedHeadInput(input).pet.document, input.pet.document);
+});
+
+test('message and one-level reference timestamps, provenance and missing IDs survive input bounding', () => {
+  const bounded = boundedHeadInput({ ...input, messages: [...input.messages, {
+    ...input.messages[0]!, messageId: 'missing-reference', replyTo: { messageId: 'unavailable-original', missing: true },
+  }] });
+  assert.equal(bounded.currentTime, input.currentTime);
+  assert.equal(bounded.messages[0]!.occurredAt, input.messages[0]!.occurredAt);
+  assert.deepEqual(bounded.messages[0]!.replyTo, input.messages[0]!.replyTo);
+  assert.deepEqual(bounded.messages[1]!.replyTo, { messageId: 'unavailable-original', missing: true });
+});
+
+test('observed run summaries have bounded public references with explicit omission markers', () => {
+  const runs = Array.from({ length: 12 }, (_, i) => ({ startedAt: `2026-11-09T12:00:${String(i).padStart(2, '0')}.000Z`,
+    requestMessages: Array.from({ length: 201 }, (_, n) => ({ messageId: `${i}:${n}`, occurredAt: input.currentTime })) }));
+  const bounded = boundedHeadInput({ ...input, execution: { state: 'running', runs } });
+  assert.equal(bounded.execution.state, 'running');
+  assert.equal(bounded.execution.runs?.length, 10);
+  assert.equal(bounded.execution.runsTruncated, true);
+  assert.ok(bounded.execution.runs!.every(run => run.requestMessages.length <= 200 && run.requestMessagesTruncated));
+  assert.equal(bounded.inputTruncated, true);
+  assert.ok(JSON.stringify(bounded).length <= 96_000);
+  assert.equal(runs[0]!.requestMessages.length, 201);
 });

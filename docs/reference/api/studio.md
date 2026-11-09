@@ -3,9 +3,10 @@
 > Status: current contract. The public API is exported by
 > [`@pinpawo/studio-core`](../../../packages/studio/src/index.ts).
 
-Studio is a small one-way dispatch and Plugin-event substrate. It receives only
-Pet registration metadata and `PetDispatchPort`; it does not receive Agent
-Session, checkpoint, Capability inventory, or private actor data.
+Studio is a small one-way dispatch and Plugin-event substrate. It receives Pet
+registration metadata, Host-provided dispatch and session ports, and optional
+authored `PET.md` snapshots. It does not own Agent Session state, checkpoints,
+or the Capability inventory.
 
 ```ts
 type StudioPetBinding = {
@@ -52,6 +53,18 @@ migrations in the shared Studio database (SQLite or Postgres, set by `studio.jso
 and returns a Kysely instance. Each Plugin owns its tables and its `<name>_migrations` history;
 Studio closes the database after every Plugin has stopped. `allocateSessionId(petId)` names a new
 session for `dispatch({ session: { id, create: true } })` without creating it.
+
+`context.getPetDocument(petId)` synchronously returns a frozen, read-only
+`{ content: string }` snapshot for a live Pet, or `undefined` if the Pet or its
+document is unavailable. Studio resolves the Pet's definition and reuses the
+`PET.md` loaded by the Host at startup, including for Pets created later.
+The accessor exposes no filesystem path, Capability inventory, session or queue
+state and performs no file reads. Embedded callers supply the definition-keyed
+`petDocuments` to `prepareStudio` or `createStudio` if they need this accessor.
+`PET.md` is authored root context, including operating rules, not only a role
+description. Changes require a Host restart; this API does not grant tools or
+change authorization.
+
 Capability definitions and selection belong to the Host. Studio's Pet configuration
 may explicitly reference shared definitions with `sharedCapabilities`; the existing
 Host catalog assembles these with the Pet's private directory. Plugins do not

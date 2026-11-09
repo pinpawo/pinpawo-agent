@@ -44,7 +44,7 @@ const message = (sequence: number, participantId: string, body: string): Message
   const member = members.find(item => item.participantId === participantId);
   if (!member) throw new Error(`Unknown fixture member: ${participantId}`);
   return {
-    messageId: `head-eval-${sequence}`, sequence,
+    messageId: `head-eval-${sequence}`, sequence, occurredAt: new Date(Date.UTC(2026, 10, 9, 10, sequence)).toISOString(),
     author: { ...member }, body, mentions: [],
   };
 };
@@ -85,7 +85,7 @@ const cases: Case[] = [
   },
   {
     id: 'confirmation-closeout', pet: 'issuer', expected: 'skip',
-    execution: { state: 'completed' },
+    execution: { state: 'unknown' },
     history: [
       message(1, 'pet:reviewer', 'PR #410 passed review, remains unmerged.'),
       message(2, 'pet:issuer', 'The public progress summary already says reviewed and unmerged. Only the human merge decision remains; no further summary is needed.'),
@@ -108,11 +108,12 @@ const cases: Case[] = [
 ];
 function inputFor(item: Case): Input {
   return {
+    currentTime: '2026-11-09T12:00:00.000Z',
     channel: {
       channelId: 'head-eval', title: 'CSV delivery',
       prompt: 'Collaborate using public evidence and your own role. Executor implements; Reviewer independently reviews; Wiki maintains documentation; Issuer tracks progress. Do not repeat completed work or acknowledgements. Reviewed, merged, and deployed are distinct. Respect human restrictions.',
     },
-    pet: { participantId: `pet:${item.pet}`, name: item.pet, description: routing.pets[item.pet] },
+    pet: { participantId: `pet:${item.pet}`, name: item.pet, description: routing.pets[item.pet], document: { missing: true } },
     members, messages: item.messages, history: item.history ?? [],
     execution: item.execution ?? { state: 'unknown' },
   };

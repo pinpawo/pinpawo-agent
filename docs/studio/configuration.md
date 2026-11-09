@@ -99,7 +99,10 @@ PET.md defines identity, responsibilities, principles and durable conventions;
 CAPABILITY.md owns executable responsibilities and Toolkit dependencies, JSON owns
 machine settings, and repository AGENTS.md owns project development rules.
 The full model-scope contract is in [Pet root document](../design/pet-document.md).
-Studio snapshots PET.md at startup; restart after edits. Tools and Capabilities
+Studio snapshots PET.md at startup; restart after edits. Plugins can read that
+same startup content through [`context.getPetDocument(petId)`](../reference/api/studio.md),
+including for Pets created later from the same definition. This is a read-only
+content snapshot, not filesystem or private-session access. Tools and Capabilities
 still come from the compiled registry, and framework security remains authoritative.
 
 ## Per-Pet Capability directory

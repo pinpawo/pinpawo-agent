@@ -290,6 +290,157 @@ for (const [backend, config] of backends) {
     assert.deepEqual(batches[1]!.messages, [message]);
   });
 
+  test(`${backend}: 100 wakes during processing coalesce while another Pet remains independent`, async t => {
+    const hold = deferred();
+    t.after(() => hold.resolve());
+    const { service, channelId, consumer, post } = await fixture(t);
+    const batches: ChannelTimelineBatch[] = [];
+    let alphaRunning = 0;
+    const queue = consumer({ consume: async batch => {
+      batches.push(batch);
+      if (batch.progress.petId !== 'alpha') return;
+      assert.equal(++alphaRunning, 1);
+      if (batches.filter(value => value.progress.petId === 'alpha').length === 1) await hold.promise;
+      alphaRunning--;
+    } });
+    const first = (await post('first')).message;
+    await queue.start();
+    await until(() => alphaRunning === 1);
+    const last = (await post('during alpha processing')).message;
+    await Promise.all(Array.from({ length: 100 }, () => queue.wake(channelId)));
+    await until(async () => (await service.consumption(channelId, 'beta')).afterSequence === last.sequence);
+    assert.equal(batches.filter(batch => batch.progress.petId === 'alpha').length, 1);
+    assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, 0);
+    hold.resolve();
+    await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === last.sequence);
+    await delay(30);
+    assert.deepEqual(batches.filter(batch => batch.progress.petId === 'alpha')
+      .map(batch => batch.messages.map(message => message.sequence)), [[first.sequence], [last.sequence]]);
+  });
+
+  test(`${backend}: a wake during a failed attempt waits for a later explicit wake`, async t => {
+    const hold = deferred();
+    t.after(() => hold.resolve());
+    const { service, channelId, consumer, post } = await fixture(t, ['alpha']);
+    let calls = 0;
+    let fail = true;
+    const failures: unknown[] = [];
+    const queue = consumer({
+      consume: async () => { calls++; if (fail) { await hold.promise; throw new Error('failed after wake'); } },
+      onError: ({ error }) => { failures.push(error); },
+    });
+    await post('first');
+    await queue.start();
+    await until(() => calls === 1);
+    const last = (await post('dirty while failing')).message;
+    await queue.wake(channelId);
+    hold.resolve();
+    await until(() => failures.length === 1);
+    await delay(30);
+    assert.equal(calls, 1, 'the failed attempt does not requeue its dirty wake');
+    assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, 0);
+    fail = false;
+    await queue.wake(channelId);
+    await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === last.sequence);
+    assert.equal(failures.length, 1);
+  });
+
+  test(`${backend}: an ignored abort retains the key until the old callback actually settles`, async t => {
+    const hold = deferred();
+    t.after(() => hold.resolve());
+    const { service, channelId, consumer, post } = await fixture(t, ['alpha']);
+    const batches: ChannelTimelineBatch[] = [];
+    let running = 0;
+    const queue = consumer({ consume: async batch => {
+      assert.equal(++running, 1);
+      batches.push(batch);
+      if (batches.length === 1) await hold.promise;
+      running--;
+    } });
+    await post('old membership');
+    await queue.start();
+    await until(() => batches.length === 1);
+    await service.removeMember(owner, channelId, alpha);
+    await service.addMember(owner, channelId, alpha);
+    const baseline = await service.consumption(channelId, 'alpha');
+    const last = (await post('new membership')).message;
+    await queue.wake(channelId);
+    await delay(30);
+    assert.equal(batches[0]!.signal.aborted, true);
+    assert.equal(batches.length, 1, 'aborting the signal does not release real processing');
+    hold.resolve();
+    await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === last.sequence);
+    assert.equal(batches[1]!.progress.membershipId, baseline.membershipId);
+    assert.deepEqual(batches[1]!.messages, [last]);
+  });
+
+  for (const cancellation of ['leave', 'stop'] as const) {
+    test(`${backend}: ${cancellation} during the final membership read never starts the callback`, async t => {
+      const paused = deferred();
+      const release = deferred();
+      t.after(() => release.resolve());
+      const { service, store, channelId, consumer, post } = await fixture(t, ['alpha']);
+      const message = (await post('pending')).message;
+      const getConsumption = store.getConsumption.bind(store);
+      let reads = 0;
+      t.mock.method(store, 'getConsumption', async (...args: Parameters<typeof getConsumption>) => {
+        const snapshot = await getConsumption(...args);
+        if (++reads === 2) { paused.resolve(); await release.promise; }
+        return snapshot;
+      });
+      let calls = 0;
+      const queue = consumer({ consume: async () => { calls++; } });
+      await queue.start();
+      await paused.promise;
+      if (cancellation === 'leave') {
+        await service.removeMember(owner, channelId, alpha);
+        release.resolve();
+        await delay(30);
+        assert.equal(calls, 0, 'leave alone fences the callback, before stopping the consumer');
+        assert.equal((await store.getConsumption(channelId, 'alpha'))?.afterSequence, 0);
+        await assert.rejects(service.consumption(channelId, 'alpha'));
+        return;
+      }
+      let stopped = false;
+      const stopping = queue.stop().then(() => { stopped = true; });
+      await delay(15);
+      assert.equal(stopped, false, 'stop waits for real preparation to settle');
+      release.resolve();
+      await stopping;
+      assert.equal(calls, 0);
+      assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, 0);
+      const restarted = consumer({ consume: async batch => { assert.deepEqual(batch.messages, [message]); calls++; } });
+      await restarted.start();
+      await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === message.sequence);
+      assert.equal(calls, 1);
+    });
+  }
+
+  test(`${backend}: stopping clears waiting windows and waits for an ignoring callback`, async t => {
+    const hold = deferred();
+    t.after(() => hold.resolve());
+    const { service, channelId, consumer, post } = await fixture(t, ['alpha']);
+    const other = (await service.createChannel(owner, { title: 'Waiting', pets: ['alpha'] })).channel;
+    let calls = 0;
+    let batch: ChannelTimelineBatch | undefined;
+    const queue = consumer({ cooldownMs: 40, consume: async value => { calls++; batch = value; await hold.promise; } });
+    const message = (await post('running')).message;
+    await queue.start();
+    await until(() => calls === 1);
+    await service.postMessage(owner, other.channelId, { body: 'waiting' });
+    await queue.wake(other.channelId);
+    let stopped = false;
+    const stopping = queue.stop().then(() => { stopped = true; });
+    await delay(60);
+    assert.equal(batch!.signal.aborted, true);
+    assert.equal(stopped, false);
+    assert.equal(calls, 1, 'the waiting Channel must not begin after stop');
+    hold.resolve();
+    await stopping;
+    assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, 0);
+    assert.ok(message.sequence > 0);
+  });
+
   test(`${backend}: stopping aborts processing without acknowledging, and a new consumer finds pending rows`, async t => {
     const hold = deferred();
     t.after(() => hold.resolve());
@@ -311,7 +462,7 @@ for (const [backend, config] of backends) {
   });
 }
 
-test('SQLite progress survives closing the actual database and re-opening it without replaying acknowledged rows', async t => {
+test('SQLite restart preserves independent Pet cursors without replaying acknowledged rows', async t => {
   const root = await mkdtemp(join(tmpdir(), 'channel-consumption-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const config = { kind: 'sqlite' as const, path: join(root, 'studio.sqlite') };
@@ -321,7 +472,7 @@ test('SQLite progress survives closing the actual database and re-opening it wit
     return { storage, service: new ChannelService({ store, pets, humans }) };
   };
   const first = await open();
-  const { channel } = await first.service.createChannel(owner, { title: 'Persistent', pets: ['alpha'] });
+  const { channel } = await first.service.createChannel(owner, { title: 'Persistent', pets: ['alpha', 'beta'] });
   const old = (await first.service.postMessage(owner, channel.channelId, { body: 'acknowledged' })).message;
   await first.service.advanceConsumption(await first.service.consumption(channel.channelId, 'alpha'), old.sequence);
   const pending = (await first.service.postMessage(owner, channel.channelId, { body: 'still pending' })).message;
@@ -331,8 +482,10 @@ test('SQLite progress survives closing the actual database and re-opening it wit
   const consumer = new ChannelTimelineConsumer({ service: second.service, cooldownMs: 0, consume: async batch => { seen.push(batch); } });
   try {
     await consumer.start();
-    await until(async () => (await second.service.consumption(channel.channelId, 'alpha')).afterSequence === pending.sequence);
-    assert.deepEqual(seen.flatMap(batch => batch.messages), [pending]);
+    await until(async () => (await second.service.consumption(channel.channelId, 'alpha')).afterSequence === pending.sequence
+      && (await second.service.consumption(channel.channelId, 'beta')).afterSequence === pending.sequence);
+    assert.deepEqual(seen.filter(batch => batch.progress.petId === 'alpha').flatMap(batch => batch.messages), [pending]);
+    assert.deepEqual(seen.filter(batch => batch.progress.petId === 'beta').flatMap(batch => batch.messages), [old, pending]);
   } finally { await consumer.stop(); await second.storage.close(); }
 });
 

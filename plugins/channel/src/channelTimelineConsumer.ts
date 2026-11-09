@@ -20,13 +20,13 @@ export type ChannelTimelineConsumerOptions = {
   onError?: (failure: { channelId: string; petId: string; error: unknown }) => void;
 };
 
-type PendingHead = {
+type HeadState = {
   channelId: string;
   petId: string;
-  pending: boolean;
+  // Repeated wakes coalesce, including while processing owns this key.
+  dirty: boolean;
   timer?: ReturnType<typeof setTimeout>;
-  running?: Promise<void>;
-  controller?: AbortController;
+  processing?: { controller: AbortController; done: Promise<void> };
 };
 
 /**
@@ -37,7 +37,7 @@ type PendingHead = {
  * Not installed by the Channel Plugin until its Head policy is supplied.
  */
 export class ChannelTimelineConsumer {
-  private readonly heads = new Map<string, PendingHead>();
+  private readonly heads = new Map<string, HeadState>();
   private readonly cooldownMs: number;
   private readonly batchLimit: number;
   private unsubscribe?: () => void;
@@ -93,10 +93,10 @@ export class ChannelTimelineConsumer {
       const key = this.key(channelId, member.id);
       let head = this.heads.get(key);
       if (!head) {
-        head = { channelId, petId: member.id, pending: false };
+        head = { channelId, petId: member.id, dirty: false };
         this.heads.set(key, head);
       }
-      head.pending = true;
+      head.dirty = true;
       this.schedule(head);
     }
   }
@@ -109,7 +109,7 @@ export class ChannelTimelineConsumer {
     this.unsubscribe = undefined;
     for (const head of this.heads.values()) this.cancel(head.channelId, head.petId);
     await this.starting?.catch(() => {});
-    await Promise.all([...this.heads.values()].map(head => head.running));
+    await Promise.all([...this.heads.values()].map(head => head.processing?.done));
     this.heads.clear();
   }
 
@@ -128,34 +128,39 @@ export class ChannelTimelineConsumer {
   private cancel(channelId: string, petId: string): void {
     const head = this.heads.get(this.key(channelId, petId));
     if (!head) return;
-    head.pending = false;
+    head.dirty = false;
     clearTimeout(head.timer);
     head.timer = undefined;
-    head.controller?.abort();
+    head.processing?.controller.abort();
   }
 
-  private schedule(head: PendingHead): void {
-    if (!this.active || head.timer || head.running || !head.pending) return;
+  private schedule(head: HeadState): void {
+    // A key is either waiting on its fixed window or processing, never both.
+    if (!this.active || head.timer || head.processing || !head.dirty) return;
     head.timer = setTimeout(() => {
       head.timer = undefined;
-      head.pending = false;
-      head.controller = new AbortController();
-      head.running = this.consume(head, head.controller.signal).catch(error => {
-        // Do not hot-loop or silently acknowledge a failed range, even when
-        // another post arrived during the failed attempt.
-        if (!head.controller?.signal.aborted) {
-          head.pending = false;
-          this.report(head.channelId, head.petId, error);
-        }
-      }).finally(() => {
-        head.running = undefined;
-        head.controller = undefined;
-        this.schedule(head);
-      });
+      // Taking the key clears dirty. A wake during processing marks it again;
+      // only real settlement releases the key and permits one follow-up window.
+      head.dirty = false;
+      const controller = new AbortController();
+      head.processing = {
+        controller,
+        done: this.consume(head, controller.signal).catch(error => {
+          // Failure consumes wakes from this attempt, so it cannot hot-loop.
+          // An aborted old membership must preserve a fresh rejoin wake.
+          if (!controller.signal.aborted) {
+            head.dirty = false;
+            this.report(head.channelId, head.petId, error);
+          }
+        }).finally(() => {
+          head.processing = undefined;
+          this.schedule(head);
+        }),
+      };
     }, this.cooldownMs);
   }
 
-  private async consume(head: PendingHead, signal: AbortSignal): Promise<void> {
+  private async consume(head: HeadState, signal: AbortSignal): Promise<void> {
     const service = this.options.service;
     let progress: ChannelConsumptionRow;
     try { progress = await service.consumption(head.channelId, head.petId); }
@@ -163,8 +168,10 @@ export class ChannelTimelineConsumer {
     const page = await service.store.readMessages(head.channelId, { after: progress.afterSequence, limit: this.batchLimit });
     if (signal.aborted || !page.items.length) return;
     const current = await service.store.getConsumption(head.channelId, head.petId);
+    // Leave/stop may happen during the final awaited membership read.
+    if (signal.aborted || !this.active) return;
     if (current?.membershipId !== progress.membershipId || current.afterSequence !== progress.afterSequence) {
-      head.pending = true;
+      head.dirty = true;
       return;
     }
     // Capture before processing: a callback's public reply or a concurrent
@@ -175,7 +182,7 @@ export class ChannelTimelineConsumer {
     }));
     if (signal.aborted || !this.active) return;
     const advanced = await service.advanceConsumption(progress, throughSequence);
-    if (advanced && page.hasMore) head.pending = true;
+    if (advanced && page.hasMore) head.dirty = true;
   }
 
   private report(channelId: string, petId: string | undefined, error: unknown): void {

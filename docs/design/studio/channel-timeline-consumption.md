@@ -26,13 +26,30 @@
 - 同 Channel 的消息追加、成员变动与确认复用现有 Channel 行锁。PostgreSQL 的 sequence 分配
   不代表事务提交顺序，因此追加必须串行，防止低序号消息稍后提交却已被消费进度越过。
 
+## 单实例调度状态
+
+调度保留在 Channel 自己的代码中，借鉴 workqueue 的 dirty/processing 模型，
+不引入 p-queue、MQ 或全局并发队列。每个 Channel/Pet 只有一份状态：
+
+- 唤醒设置 `dirty`；同一固定窗口内重复唤醒不新增定时器，也不延长窗口。
+- 窗口到期取走这次唤醒并清除 `dirty`，`processing` 持有真实处理 Promise 和取消信号。
+- 处理期间的新唤醒只重新标记 `dirty`，不并行处理同一个 key。
+- 成功处理后，如果又有唤醒或还有下一页，真实 Promise 结束才启动一个后续固定窗口。
+- 失败清除本次处理期间累积的唤醒，保留 cursor；失败后的新唤醒才允许再试。
+  旧 membership 已取消时，不清除重入新 membership 产生的唤醒。
+
+`processing` 的结束以真实 Promise 完成为准，abort 不提前释放同一个 key。
+不同 Channel/Pet 不共享全局排队或并发上限。
+
 ## 错误与退出
 
 callback 抛错不推进进度，不自动重试；下一次新唤醒或新消费者启动可以再尝试。
 一个 Pet 失败不阻塞其他 Pet。读取失败和进度写入失败采用相同的保留进度策略。
 没有轮询、异常队列或分布式租约；通知是提交后的 best effort，遗漏通知可能需要后续唤醒或重启。
 
-成员退出或消费者停止会 abort 当前 callback 的 signal。callback 必须在产生外部效果前尊重取消，
+成员退出或消费者停止会清除等待窗口，并 abort 在途处理的 signal。
+消费者在末次 membership 读取后再次检查取消，已取消时不再开始 callback。
+callback 已开始后，仍必须在产生外部效果前尊重取消，
 消费者无法撤销 callback 已产生的效果。旧 membership 不能确认重入后的新进度。
 `stop()` 等待在途 callback 结束；callback 若忽略 signal 且一直不结束，停止也会一直等待。
 已停止的实例不能重新启动，应新建消费者。配置关闭/重开时的起点留待真正的 Head 配置接入决定。
@@ -48,5 +65,7 @@ callback 抛错不推进进度，不自动重试；下一次新唤醒或新消�
 直接回应、先回应后 dispatch、执行事件关联与故障窗口验收仍未完成。
 
 测试覆盖 SQLite 和 PGlite PostgreSQL 方言、真实 SQLite 文件关闭重开、并发唤醒、失败隔离、
-批次期间新消息、分页、重复输入和成员重入。可选的真实 PostgreSQL 多连接测试需要
+批次期间新消息、分页、重复输入和成员重入；还覆盖运行中 100 次合并唤醒、失败期间唤醒、
+忽略 abort 的真实占用、末次 membership 读取时取消和停止清除等待窗口。
+可选的真实 PostgreSQL 多连接测试需要
 `PINPAWO_TEST_POSTGRES_URL`；PGlite 单连接测试不能替代它。

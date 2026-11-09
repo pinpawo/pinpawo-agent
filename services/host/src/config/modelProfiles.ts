@@ -14,7 +14,8 @@ export const LEGACY_DEFAULT_MODEL_PROFILE_ID = 'legacy-default';
 
 export type ModelProtocol = 'openai-compatible' | 'anthropic-compatible';
 
-export type ModelInputModality = 'text' | 'image';
+/** `file` currently means native PDF input, not arbitrary binary formats. */
+export type ModelInputModality = 'text' | 'image' | 'file';
 
 export function missingInputModalities(
   required: readonly ModelInputModality[],
@@ -108,7 +109,7 @@ export class ModelProfileConfigError extends Error {
 type EnvMap = Record<string, string | undefined>;
 
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,63})$/;
-const INPUT_MODALITIES = new Set<ModelInputModality>(['text', 'image']);
+const INPUT_MODALITIES = new Set<ModelInputModality>(['text', 'image', 'file']);
 const STRUCTURED_OUTPUT_METHODS = new Set<StructuredOutputMethod>([
   'functionCalling',
   'jsonMode',

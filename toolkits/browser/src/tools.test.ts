@@ -43,6 +43,7 @@ function invocation(
   workdir = process.cwd(),
 ) {
   return {
+    toolCallId: 'browser-call',
     context: {
       executionScope: {
         threadId,

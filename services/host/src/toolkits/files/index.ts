@@ -42,7 +42,8 @@ const fileInspectionTools = [readFileTool, viewFileChunkTool, statPathTool, list
 
 const filesToolkitInstructions = [
   '你可以读取、编辑、移动和复制工作区文件。',
-  '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
+  '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 将 PNG/JPEG/WebP/PDF 原样作为模型附件，需要模型 profile 明确声明对应 image/file 能力；其他文档需先转换。',
+  '先用 list_dir 或搜索定位候选，按需逐个 read_file；不递归装入目录，附件会占用上下文。',
   '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir、stat_path。',
   '编辑已有文件一律使用 apply_patch（每次调用只更新一个已存在文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   '修改文件前先读取现状；修改结构化文件后用 validate_structured_file 验证。',

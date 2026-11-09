@@ -1,4 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import type { BaseMessage, HumanMessage } from '@langchain/core/messages';
 
 export type CapabilityMessageLane = `capability:${string}`;
 
@@ -25,6 +25,13 @@ export function setAgentMessageMetadata(
     ...message.additional_kwargs,
     pinpawo: { ...getAgentMessageMetadata(message), ...patch },
   };
+  return message;
+}
+
+/** Link native user-message content to its tool receipt for model-input ordering. */
+export function markToolResultAttachment(message: HumanMessage, toolCallId: string): HumanMessage {
+  if (!toolCallId.trim()) throw new Error('A tool-result attachment requires a nonblank tool call ID.');
+  setAgentMessageMetadata(message, { toolResultAttachmentCallId: toolCallId });
   return message;
 }
 

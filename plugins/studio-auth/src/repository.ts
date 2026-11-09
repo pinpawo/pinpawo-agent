@@ -355,6 +355,19 @@ export class StudioAuthRepository {
       .execute();
   }
 
+  /** A stale authentication read must not delete a session another request refreshed. */
+  async deleteSessionIfUnchanged(
+    snapshot: Pick<StudioAuthSessionRow, 'id' | 'credential_version' | 'updated_at' | 'expires_at'>,
+  ): Promise<void> {
+    await this.db
+      .deleteFrom('studio_auth_session')
+      .where('id', '=', snapshot.id)
+      .where(sql<number>`COALESCE(credential_version, 0)`, '=', snapshot.credential_version ?? 0)
+      .where('updated_at', '=', snapshot.updated_at)
+      .where('expires_at', '=', snapshot.expires_at)
+      .execute();
+  }
+
   /**
    * Replace the password and revoke everything issued under the old one, in a
    * single transaction. The version bump is what makes a concurrent login

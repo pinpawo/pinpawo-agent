@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { getAgentMessageMetadata, makeToolProtocolSafe } from '../agent/messages';
+import { getAgentMessageMetadata, makeToolProtocolSafe, markToolResultAttachment } from '../agent/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, interrupt, MemorySaver, MessagesAnnotation, START, StateGraph } from '@langchain/langgraph';
 import { countTokensApproximately, createMiddleware } from 'langchain';
 import { z } from 'zod';
 import { createSubagent, SUBAGENT_BUDGET_HANDOFF_EVENT } from './createSubagent';
 import { readSubagentGuardStopReason } from './guardStop';
+import { toolProtocolMiddleware } from '../agent/orchestrator/modelInvocation';
 
 class RecordingModel extends BaseChatModel {
-  calls: Array<{ tools: number; system: string; toolChoice?: unknown; messages: unknown[] }> = [];
+  calls: Array<{ tools: number; system: string; toolChoice?: unknown; messages: ReturnType<BaseMessage['toDict']>[] }> = [];
   private boundTools = 0;
   private toolChoice: unknown;
   constructor(private readonly respond: (iteration: number) => AIMessage) { super({}); }
@@ -280,4 +281,63 @@ test('a later missing usage report retains the provider anchor plus all interven
   const data = JSON.parse(notice.text);
   assert.equal(data.reason, 'context_window');
   assert.ok(data.estimatedInputTokens >= 14_000);
+});
+
+const oneMiBImageData = Buffer.alloc(1024 * 1024, 0x61).toString('base64');
+
+for (const format of ['standard', 'image_url'] as const) {
+  test(`a 1 MiB ${format} image reaches the model unchanged within a 128k context`, async () => {
+    const image = new HumanMessage({ id: `large-${format}`, content: [
+      { type: 'text', text: 'Inspect this image.' },
+      format === 'standard'
+        ? { type: 'image', mimeType: 'image/png', data: oneMiBImageData }
+        : { type: 'image_url', image_url: { url: `data:image/png;base64,${oneMiBImageData}` } },
+    ], ...(format === 'standard' ? { response_metadata: { output_version: 'v1' } } : {}) });
+    const original = image.toDict();
+    const model = new RecordingModel(() => new AIMessage('Image inspected.'));
+    const result = await createSubagent({
+      model, tools: [], middleware: [toolProtocolMiddleware], promptSections: [],
+      contextWindowTokens: 128_000, generationReserveTokens: 4_000, messages: [image],
+    });
+
+    assert.equal(result.output, 'Image inspected.');
+    assert.equal(model.calls.length, 1);
+    assert.deepEqual(model.calls[0].messages.find(message => message.data.id === image.id), original);
+    assert.deepEqual(result.messages.find(message => message.id === image.id)?.toDict(), original);
+    assert.equal(result.messages.some(message => getAgentMessageMetadata(message).runtimeNotice === 'subagent_budget'), false);
+  });
+}
+
+test('a 1 MiB screenshot tool result reaches the next model call after provider-reported usage', async () => {
+  const screenshot = markToolResultAttachment(new HumanMessage({ id: 'large-screenshot', content: [
+    { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
+    { type: 'image', mimeType: 'image/png', data: oneMiBImageData },
+  ], response_metadata: { output_version: 'v1' } }), 'call-1');
+  const original = screenshot.toDict();
+  const takeScreenshot = tool((_args, runtime: ToolRuntime) => new Command({ update: { messages: [
+    new ToolMessage({ id: 'screenshot-receipt', name: 'browser_screenshot', tool_call_id: runtime.toolCallId!,
+      content: JSON.stringify({ mimeType: 'image/png', byteLength: 1024 * 1024 }) }),
+    screenshot,
+  ] } }), { name: 'browser_screenshot', description: 'Take a browser screenshot.', schema: z.object({}) });
+  const model = new RecordingModel(iteration => {
+    if (iteration === 2) return new AIMessage('Screenshot inspected.');
+    const message = call(iteration, 'browser_screenshot');
+    message.usage_metadata = { input_tokens: 64_000, output_tokens: 10, total_tokens: 64_010 };
+    return message;
+  });
+  const result = await createSubagent({
+    model, tools: [takeScreenshot], middleware: [toolProtocolMiddleware], promptSections: [],
+    contextWindowTokens: 128_000, generationReserveTokens: 4_000,
+    messages: [new HumanMessage('Inspect the browser.')],
+  });
+
+  assert.equal(result.output, 'Screenshot inspected.');
+  assert.equal(model.calls.length, 2);
+  assert.deepEqual(model.calls[1].messages.find(message => message.data.id === screenshot.id), original);
+  assert.deepEqual(result.messages.find(message => message.id === screenshot.id)?.toDict(), original);
+  assert.equal(model.calls[1].messages.some(message => message.data.id === 'screenshot-receipt'), true);
+  const providerResponse = result.messages.find(message => AIMessage.isInstance(message) && message.tool_calls?.length);
+  assert.ok(providerResponse && AIMessage.isInstance(providerResponse));
+  assert.equal(providerResponse.usage_metadata?.input_tokens, 64_000);
+  assert.equal(result.messages.some(message => getAgentMessageMetadata(message).runtimeNotice === 'subagent_budget'), false);
 });

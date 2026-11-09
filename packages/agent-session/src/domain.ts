@@ -137,7 +137,8 @@ export type AgentActorView = {
   summary: string;
 };
 
-export type AgentInputModality = 'text' | 'image';
+/** `file` currently means native PDF input, not arbitrary binary formats. */
+export type AgentInputModality = 'text' | 'image' | 'file';
 
 export type AgentModelProfileSummary = {
   id: string;

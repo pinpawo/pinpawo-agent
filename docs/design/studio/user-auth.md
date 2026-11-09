@@ -72,11 +72,15 @@ Studio 目前只有「凭证」，没有「人」。本文设计一层最小的�
 
 - Better Auth 的 `emailAndPassword` 负责 scrypt 哈希与校验，`username` 插件负责登录名（大小写不敏感、唯一）；
 - Studio 只保留策略：密码长度 ≥ 12（上限 256），管理员建号时必须给初始密码，不强制首登改密，但支持自助改密；
-- 用户名是登录句柄，Better Auth 仍要求 email，因此内部用 `<username>@studio-auth.invalid` 合成，用户永远看不到也不会用到它；
+- 用户名是登录句柄，Better Auth 仍要求 email，因此内部用规范化用户名的 SHA-256 十六进制值作为
+  local-part，合成 `<64 位哈希>@studio-auth.invalid`。这让合法的末尾点、连续点用户名不受邮箱规则限制；
+  用户不会使用这个内部地址，Studio 不向它发邮件；
 - 用户名校验 `^[A-Za-z0-9][A-Za-z0-9._-]{0,57}$`（留出 `user.` 前缀后仍满足 Studio client id 的 64 字符上限）；
   同一条规则以 `usernameValidator` 传给 Better Auth 的 username 插件（并把其最短长度从默认 3 调到 1），
   否则 `ab`、`ada-lovelace` 这类合法名字会"本地通过、Better Auth 拒绝"，最后变成误导性的 409。
   校验统一在创建 Studio client **之前**，失败直接 `400`，不会留下孤儿 client。
+- 建号写完 `client_id` 与管理员指定的 `capabilities` 后才允许登录。初始化中的账号统一返回 `401`，
+  调用方可以在建号完成后重试；登录只读取授权，不用旧快照补写默认权限，因此空权限 `[]` 不会被首次登录覆盖。
 
 ### 3.3 会话凭证
 
@@ -222,7 +226,8 @@ alter table studio_auth_session add column credential_version integer not null d
 - `studio_auth_user.credential_version` 在每次改密/重置时于同一事务内 +1；
 - 登录用一次读取拿到的 `{hash, version}` 作为快照去校验；签发会话时在事务内重新比对版本，不一致
   就不签发（对外仍是 `401 Invalid username or password.`，审计 `reason=credential-changed`）；
-- 会话行记录签发时的版本，`verifySession` 发现版本落后即删除该会话并拒绝；
+- 会话行记录签发时的版本，`verifySession` 发现版本落后即拒绝该次认证。清理过期、禁用或旧版本会话时，
+  删除条件同时匹配所读版本、最后使用时间与绝对期限，避免旧认证快照误删并发改密保留下来的新版本会话；
 - 管理员重置 = 递增版本 + 写新哈希 + 删除该用户全部会话，同一事务；
 - 自助改密 = 递增版本 + 写新哈希 + 删除其它会话，并把**当前会话**重标为新版本（发起改密的这台
   设备继续可用），其余设备立即失效。

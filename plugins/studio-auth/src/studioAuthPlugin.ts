@@ -319,34 +319,34 @@ export function createStudioAuthPlugin(
     const now = Date.now();
     const expiresAt = Date.parse(stored.expires_at);
     if (!Number.isFinite(expiresAt) || expiresAt <= now) {
-      await repo().deleteSessionById(stored.id);
+      await repo().deleteSessionIfUnchanged(stored);
       return undefined;
     }
     // `updated_at` is this session's last use: it drives the idle timeout.
     const lastUsed = Date.parse(stored.updated_at);
     if (Number.isFinite(lastUsed) && now - lastUsed > idleTimeoutMinutes * 60_000) {
-      await repo().deleteSessionById(stored.id);
+      await repo().deleteSessionIfUnchanged(stored);
       return undefined;
     }
-    if (!Number.isFinite(lastUsed) || now - lastUsed > IDLE_TOUCH_INTERVAL_MS) {
-      await repo().touchSession(stored.id, new Date(now));
-    }
-
     const row = await repo().findUserById(stored.user_id);
     if (!row || row.disabled_at) {
       // A disabled account must not keep a working session around.
-      await repo().deleteSessionById(stored.id);
+      await repo().deleteSessionIfUnchanged(stored);
       return undefined;
     }
     // A session minted from a credential that has since been replaced is dead,
     // even if it slipped in after the revocation pass of the password change.
     if ((stored.credential_version ?? 0) !== (row.credential_version ?? 0)) {
-      await repo().deleteSessionById(stored.id);
+      await repo().deleteSessionIfUnchanged(stored);
       return undefined;
     }
     const clientId = row.client_id ?? clientIdForUsername(row.username ?? '');
     const client = await requireStudio().clients.get(clientId);
     if (!client || client.revokedAt) return undefined;
+
+    if (!Number.isFinite(lastUsed) || now - lastUsed > IDLE_TOUCH_INTERVAL_MS) {
+      await repo().touchSession(stored.id, new Date(now));
+    }
 
     return {
       principal: {
@@ -396,9 +396,10 @@ export function createStudioAuthPlugin(
 
     // Disabled accounts, unknown usernames and wrong passwords answer the same
     // way, so a caller cannot use the login endpoint to enumerate accounts.
-    if (!row || !passwordOk || row.disabled_at) {
-      const reason = !row || !passwordOk ? 'invalid-credentials' : 'disabled';
-      const lockedUntil = row && !row.disabled_at
+    if (!row || !passwordOk || row.disabled_at || !row.client_id || !row.capabilities) {
+      const reason = !row || !passwordOk ? 'invalid-credentials'
+        : row.disabled_at ? 'disabled' : 'identity-pending';
+      const lockedUntil = row && !row.disabled_at && !passwordOk
         ? await repo().recordFailedAttempt(row.id, { maxAttempts: maxFailedAttempts, lockMinutes: lockoutMinutes })
         : null;
       await audit('login', 'denied', {
@@ -410,20 +411,16 @@ export function createStudioAuthPlugin(
       return error(401, 'Invalid username or password.');
     }
 
-    const clientId = row.client_id ?? clientIdForUsername(username);
-    let client = await requireStudio().clients.get(clientId);
-    if (!client) client = await requireStudio().clients.ensure({ clientId, label: row.name });
-    if (client.revokedAt) {
+    // Creation writes the identity and the requested grants before login is
+    // allowed. Login must never initialize grants from an older user snapshot.
+    const clientId = row.client_id;
+    const client = await requireStudio().clients.get(clientId);
+    if (!client || client.revokedAt) {
       await audit('login', 'denied', { request, userId: row.id, username, clientId, reason: 'client-revoked' });
       return error(403, 'This client has been revoked.');
     }
 
-    const capabilities = row.capabilities
-      ? parseStoredCapabilities(row.capabilities)
-      : [...DEFAULT_USER_CAPABILITIES];
-    if (!row.client_id || !row.capabilities) {
-      await repo().setIdentity(row.id, { clientId, capabilities });
-    }
+    const capabilities = parseStoredCapabilities(row.capabilities);
     await repo().clearFailedAttempts(row.id);
     if (beforeSessionCreate) await beforeSessionCreate();
     const session = await createSession(row.id, request, credentialVersion);
@@ -603,7 +600,11 @@ export function createStudioAuthPlugin(
     try {
       created = await authApi().signUpEmail({
         body: {
-          email: `${username}@${INTERNAL_EMAIL_DOMAIN}`,
+          // Usernames may contain trailing or repeated dots, which are not
+          // valid email local-parts. This private, deterministic 64-character
+          // encoding meets Better Auth's email contract without narrowing the
+          // username contract. Studio never sends mail to this address.
+          email: `${createHash('sha256').update(username).digest('hex')}@${INTERNAL_EMAIL_DOMAIN}`,
           password,
           name: displayName ?? username,
           username,

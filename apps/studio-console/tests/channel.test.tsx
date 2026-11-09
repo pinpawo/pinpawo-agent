@@ -7,8 +7,9 @@ import {
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
-import { ChannelTimeline } from '../src/ChannelPanel';
+import { ChannelDispatchFailures, ChannelTimeline } from '../src/ChannelPanel';
 import { ChannelMessageMarkdown } from '../src/ChannelConversation';
+import { dispatchRecordFromEvent } from '../src/dispatchActivity';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
 const message: ChannelMessage = { channelId: 'a', sequence: 2, messageId: 'm', body: 'Full public delivery.\n\nMissing work remains.\n\n```ts\nconst evidence = 42;\n```',
@@ -269,4 +270,19 @@ test('the timeline ends with the Pets running a turn in the Channel, earliest fi
   assert.match(markup, /<div class="channel-working" role="status">.*Analyst and Reviewer are typing…/);
   assert.ok(markup.indexOf('channel-working') > markup.indexOf('Full public delivery'), 'shown after the newest message');
   assert.doesNotMatch(renderToStaticMarkup(<ChannelTimeline messages={[message]} pending={false} onReply={() => undefined} members={all} />), /channel-working/);
+});
+
+test('Channel shows its own execution error without internal IDs or unrelated failures', () => {
+  const failure = dispatchRecordFromEvent({ type: 'dispatch.failed', source: 'resident-pet', occurredAt: 'now', payload: {
+    invocationId: 'internal-invocation', petId: 'worker', request: 'work', requestId: 'internal-request', sessionId: 'internal-session',
+    scope: { namespace: 'channel', id: 'a' }, error: 'terminated',
+  } })!;
+  const markup = renderToStaticMarkup(<ChannelDispatchFailures channelId="a" pets={[{ petId: 'worker', name: 'Analyst' }]} petsReady={true}
+    dispatches={[failure, { ...failure, invocationId: 'other', scope: { namespace: 'channel', id: 'b' }, error: 'Other Channel private' },
+      { ...failure, invocationId: 'not-channel', scope: { namespace: 'other', id: 'a' }, error: 'Other scope private' },
+      { ...failure, invocationId: 'unscoped', scope: undefined, error: 'Unscoped private' },
+      { ...failure, invocationId: 'waiting', state: 'waiting', error: 'Still waiting private' }]} />);
+  assert.match(markup, /role="alert"/);
+  assert.match(markup, /Analyst execution failed: terminated/);
+  assert.doesNotMatch(markup, /internal-|private|<button|reply was not saved|Message was not delivered/);
 });

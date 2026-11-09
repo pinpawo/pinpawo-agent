@@ -9,6 +9,7 @@ import {
   createStudioStorage,
   type ClientDatabase,
   type StudioPluginContext,
+  type StudioStorageConfig,
 } from '@pinpawo/studio-core';
 import type {
   StudioHttpAuthenticator,
@@ -19,17 +20,26 @@ import type {
 } from '@pinpawo-plugin/studio-http';
 
 import { createStudioAuthPlugin, type CreateStudioAuthPluginOptions } from './studioAuthPlugin';
-import type { StudioAuthDatabase } from './repository';
+import { StudioAuthRepository, type StudioAuthDatabase } from './repository';
+import { createPglitePool } from '../../../tests/support/pglitePool';
 
 const SECRET = 'test-secret-with-at-least-32-characters';
 const PASSWORD = 'correct-horse-battery-staple';
+const regressionBackends: Array<[string, () => StudioStorageConfig]> = [
+  ['sqlite', () => ({ kind: 'sqlite', path: ':memory:' })],
+  ['postgres', () => ({ kind: 'postgres', pool: createPglitePool() })],
+];
 
 /**
- * A Plugin running against a throwaway SQLite database, with the two HTTP
+ * A Plugin running against a throwaway database, with the two HTTP
  * extension points it consumes captured instead of attached to a live server.
  */
-async function harness(options: CreateStudioAuthPluginOptions = {}, autoStart = true) {
-  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+async function harness(
+  options: CreateStudioAuthPluginOptions = {},
+  autoStart = true,
+  storageConfig: StudioStorageConfig = { kind: 'sqlite', path: ':memory:' },
+) {
+  const storage = createStudioStorage(storageConfig);
   const clients = new StudioClients(async () => new KyselyClientStore(
     await storage.open<ClientDatabase>('clients', clientMigrations),
   ));
@@ -179,6 +189,75 @@ test('a user created by the Studio signs in with their own credentials as user.<
   assert.equal(await authenticator.verify(body.token), undefined);
 });
 
+for (const [backend, storageConfig] of regressionBackends) {
+  test(`${backend}: a first login cannot overwrite the grants being initialized by account creation`, async (t) => {
+    const h = await harness({}, true, storageConfig());
+    t.after(h.stop);
+    let releaseCreation!: () => void;
+    const creationGate = new Promise<void>((resolve) => { releaseCreation = resolve; });
+    let creationReached!: () => void;
+    const creationPaused = new Promise<void>((resolve) => { creationReached = resolve; });
+    let releaseLogin!: () => void;
+    const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+    let loginReached!: () => void;
+    const loginPaused = new Promise<void>((resolve) => { loginReached = resolve; });
+    const setIdentity = StudioAuthRepository.prototype.setIdentity;
+    const findUser = StudioAuthRepository.prototype.findUserByUsername;
+    let holdCreation = true;
+    let holdLogin = true;
+    t.mock.method(StudioAuthRepository.prototype, 'setIdentity', async function (
+      this: StudioAuthRepository,
+      ...args: Parameters<StudioAuthRepository['setIdentity']>
+    ) {
+      if (holdCreation) {
+        holdCreation = false;
+        creationReached();
+        await creationGate;
+      }
+      return setIdentity.apply(this, args);
+    });
+    t.mock.method(StudioAuthRepository.prototype, 'findUserByUsername', async function (
+      this: StudioAuthRepository,
+      username: string,
+    ) {
+      const row = await findUser.call(this, username);
+      if (row && row.capabilities === null && holdLogin) {
+        holdLogin = false;
+        loginReached();
+        await loginGate;
+      }
+      return row;
+    });
+
+    const creation = h.createUser('restricted', { capabilities: [] });
+    await creationPaused;
+    const pendingLogin = h.login('restricted');
+    await loginPaused;
+    try {
+      releaseCreation();
+      const created = await creation;
+      assert.equal(created.status, 201);
+      assert.deepEqual((created.body as { capabilities: string[] }).capabilities, []);
+    } finally {
+      releaseCreation();
+      releaseLogin();
+    }
+    assert.equal((await pendingLogin).status, 401, 'an incomplete identity snapshot cannot authorize login');
+    const db = await h.inspect();
+    const user = await db.selectFrom('studio_auth_user').selectAll().where('username', '=', 'restricted').executeTakeFirstOrThrow();
+    assert.equal(user.capabilities, '[]', 'the requested empty grant must remain persisted');
+    assert.equal(user.failed_attempts ?? 0, 0, 'initialization is not a wrong password');
+    assert.equal(user.locked_until, null);
+    assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), []);
+    const retry = await h.login('restricted');
+    assert.equal(retry.status, 200);
+    const token = (retry.body as { token: string }).token;
+    const me = await h.call('GET /auth/me', { token });
+    assert.equal(me.status, 200);
+    assert.deepEqual((me.body as { capabilities: string[] }).capabilities, []);
+  });
+}
+
 test('a wrong password is rejected and repeated failures lock the account', async (t) => {
   const h = await harness({ maxFailedAttempts: 2, lockoutMinutes: 15 });
   t.after(h.stop);
@@ -286,6 +365,76 @@ test('changing a password requires the current one and revokes the other session
   assert.equal((await h.login('barbara')).status, 401);
   assert.equal((await h.login('barbara', 'an-even-longer-password')).status, 200);
 });
+
+for (const [backend, storageConfig] of regressionBackends) {
+  test(`${backend}: a stale authentication read cannot delete the current session preserved by a password change`, async (t) => {
+    const h = await harness({}, true, storageConfig());
+    t.after(h.stop);
+    await h.createUser('concurrent');
+    const { token } = (await h.login('concurrent')).body as { token: string };
+    const findSession = StudioAuthRepository.prototype.findSessionByTokenHash;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const paused = new Promise<void>((resolve) => { reached = resolve; });
+    let holdFirstRead = true;
+    t.mock.method(StudioAuthRepository.prototype, 'findSessionByTokenHash', async function (
+      this: StudioAuthRepository,
+      hash: string,
+    ) {
+      const row = await findSession.call(this, hash);
+      if (row && holdFirstRead) {
+        holdFirstRead = false;
+        reached();
+        await gate;
+      }
+      return row;
+    });
+    const staleAuthentication = h.call('GET /auth/me', { token });
+    await paused;
+    try {
+      const changed = await h.call('POST /auth/password', {
+        token,
+        body: { currentPassword: PASSWORD, newPassword: 'a-new-concurrent-password' },
+      });
+      assert.equal(changed.status, 204);
+    } finally {
+      release();
+    }
+    assert.equal((await staleAuthentication).status, 401, 'the old snapshot itself is refused');
+    const db = await h.inspect();
+    const sessions = await db.selectFrom('studio_auth_session').selectAll().execute();
+    assert.equal(sessions.length, 1, 'cleanup of the old snapshot must preserve the updated row');
+    assert.equal(sessions[0]?.credential_version, 1);
+    assert.equal((await h.call('GET /auth/me', { token })).status, 200);
+  });
+}
+
+for (const [backend, storageConfig] of regressionBackends) {
+  test(`${backend}: session cleanup preserves a same-version row whose idle timestamp or expiry changed`, async (t) => {
+    const h = await harness({}, true, storageConfig());
+    t.after(h.stop);
+    await h.createUser('refreshed');
+    assert.equal((await h.login('refreshed')).status, 200);
+    const db = await h.inspect();
+    const repository = new StudioAuthRepository(db);
+    const stored = await db.selectFrom('studio_auth_session').selectAll().executeTakeFirstOrThrow();
+    for (const field of ['updated_at', 'expires_at'] as const) {
+      await db.updateTable('studio_auth_session')
+        .set({ [field]: new Date(Date.parse(stored[field]) + 1_000).toISOString() })
+        .where('id', '=', stored.id).execute();
+      await repository.deleteSessionIfUnchanged(stored);
+      assert.ok(await db.selectFrom('studio_auth_session').select('id').where('id', '=', stored.id).executeTakeFirst(),
+        `a change to ${field} must prevent stale cleanup`);
+      await db.updateTable('studio_auth_session')
+        .set({ updated_at: stored.updated_at, expires_at: stored.expires_at })
+        .where('id', '=', stored.id).execute();
+    }
+    await repository.deleteSessionIfUnchanged(stored);
+    assert.deepEqual(await db.selectFrom('studio_auth_session').selectAll().execute(), [],
+      'an unchanged invalid snapshot remains removable');
+  });
+}
 
 test('a revoked Studio client can no longer sign in', async (t) => {
   const h = await harness();
@@ -521,6 +670,25 @@ test('the usernames this Plugin accepts are the ones Better Auth accepts', async
   assert.equal(await h.clients.get('user.bad name'), undefined);
   assert.equal(await h.clients.get('user.-abc'), undefined);
 });
+
+for (const [backend, storageConfig] of regressionBackends) {
+  test(`${backend}: valid dotted usernames and maximum-length names do not inherit email validation rules`, async (t) => {
+    const h = await harness({}, true, storageConfig());
+    t.after(h.stop);
+    const usernames = ['ada.', 'ada..b', 'a'.repeat(58)];
+    for (const username of usernames) {
+      const created = await h.createUser(username);
+      assert.equal(created.status, 201, `${username} is a valid Studio username`);
+      assert.equal((created.body as { clientId: string }).clientId, `user.${username}`);
+      assert.equal((await h.login(username)).status, 200);
+      assert.equal((await h.createUser(username)).status, 409, 'duplicate usernames remain refused');
+    }
+    const db = await h.inspect();
+    const users = await db.selectFrom('studio_auth_user').selectAll().execute();
+    assert.equal(users.length, usernames.length);
+    assert.equal(new Set(users.map(user => user.email)).size, usernames.length);
+  });
+}
 
 test('a self-service password change cannot overwrite an administrative reset', async (t) => {
   let release!: () => void;

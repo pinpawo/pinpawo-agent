@@ -9,7 +9,12 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { Command } from '@langchain/langgraph';
 import { createAgent, createMiddleware } from 'langchain';
+import { z } from 'zod';
+import { createSubagent } from '../../subagent/createSubagent';
+import { markToolResultAttachment } from '../messages';
 
 import {
   assignToolCallIds,
@@ -135,6 +140,43 @@ test('Agent invocation applies after earlier middleware without mutating state',
   assert.equal(result.messages.includes(call), true);
   assert.equal(result.messages.includes(delivery), true);
   assert.equal(result.messages.includes(invocationInput), false);
+});
+
+test('parallel native file results and an unrelated tool retain linkage under production middleware', async () => {
+  class ParallelAttachmentModel extends RecordingModel {
+    async _generate(messages: BaseMessage[]) {
+      this.invocations.push(messages);
+      const message = this.invocations.length === 1 ? new AIMessage({ id: 'parallel-calls', content: '', tool_calls: [
+        { id: 'file-a', name: 'read_file', args: { path: 'a.pdf' } },
+        { id: 'file-b', name: 'read_file', args: { path: 'b.pdf' } },
+        { id: 'inspect', name: 'inspect', args: {} },
+      ] }) : new AIMessage('Both files inspected.');
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
+  const readFile = tool(({ path }: { path: string }, runtime: ToolRuntime) => new Command({ update: { messages: [
+    new ToolMessage({ id: `receipt:${runtime.toolCallId}`, tool_call_id: runtime.toolCallId!, content: path }),
+    markToolResultAttachment(new HumanMessage({ id: `attachment:${runtime.toolCallId}`, content: [
+      { type: 'file', mimeType: 'application/pdf', data: Buffer.from(path).toString('base64') },
+    ], response_metadata: { output_version: 'v1' } }), runtime.toolCallId!),
+  ] } }), { name: 'read_file', description: 'Read a native PDF.', schema: z.object({ path: z.string() }) });
+  const inspect = tool(() => 'Independent evidence.', { name: 'inspect', description: 'Inspect.', schema: z.object({}) });
+  const model = new ParallelAttachmentModel({});
+  const result = await createSubagent({ model, tools: [readFile, inspect], middleware: [toolProtocolMiddleware],
+    messages: [new HumanMessage({ id: 'user', content: 'Inspect two PDFs and other evidence.' })], promptSections: [],
+  });
+
+  assert.equal(model.invocations.length, 2);
+  const projection = model.invocations[1].filter(message => message._getType() !== 'system');
+  assert.deepEqual(projection.map(message => message._getType()), ['human', 'ai', 'tool', 'tool', 'tool', 'human', 'human']);
+  assert.deepEqual(projection.filter(ToolMessage.isInstance).map(message => message.tool_call_id), ['file-a', 'file-b', 'inspect']);
+  assert.deepEqual(projection.filter(HumanMessage.isInstance).slice(1).map(message => message.id), ['attachment:file-a', 'attachment:file-b']);
+  // Native Commands stay interleaved in canonical state; only the request is reordered.
+  assert.deepEqual(result.messages.slice(0, -1).map(message => message._getType()),
+    ['human', 'ai', 'tool', 'human', 'tool', 'human', 'tool']);
+  for (const message of result.messages.slice(0, -1)) {
+    assert.deepEqual(projection.find(projected => projected.id === message.id)?.toDict(), message.toDict());
+  }
 });
 
 test('tool call IDs are settled once, keeping provider IDs that are already unique', () => {

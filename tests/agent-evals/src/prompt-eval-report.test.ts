@@ -55,7 +55,7 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
       temperature: 0,
       reasoningEffort: 'low',
       timeoutMs: 1000,
-      inputModalities: ['text'],
+      inputModalities: ['text', 'file'],
     },
     structuredOutputMethod: 'jsonSchema',
     evaluator: {
@@ -99,6 +99,7 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
 test('report totals preserve usage and cost coverage', () => {
   const value = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
   assert.equal(value.reportVersion, 4);
+  assert.deepEqual(value.model.inputModalities, ['text', 'file']);
   assert.deepEqual(value.totals, {
     runs: 1,
     goalsAchieved: 1,

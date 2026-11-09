@@ -228,3 +228,20 @@ for (const status of [401, 403]) {
     } finally { abort.abort(); t.mock.timers.reset(); }
   });
 }
+
+test('failed dispatch keeps its Channel and error across duplicate observations and a late receipt', () => {
+  const failed = dispatchRecordFromEvent({ source: 'resident-pet', type: 'dispatch.failed', occurredAt: 'now', payload: {
+    ...record('failed'), scope: { namespace: 'channel', id: 'a' }, error: 'terminated',
+  } })!;
+  const records = appendDispatchRecord(appendDispatchRecord([], failed), failed);
+  assert.equal(records.length, 1);
+  const merged = appendDispatchRecord(records, { ...record('queued'), source: 'admission_receipt' })[0]!;
+  assert.equal(merged.state, 'failed');
+  assert.equal(merged.error, 'terminated');
+  assert.deepEqual(merged.scope, { namespace: 'channel', id: 'a' });
+  const invalid = dispatchRecordFromEvent({ source: 'resident-pet', type: 'dispatch.failed', occurredAt: 'now', payload: {
+    ...record('failed'), error: 'terminated', scope: { namespace: 1, id: 'a' },
+  } })!;
+  assert.equal(invalid.scope, undefined);
+  assert.equal(invalid.error, 'terminated');
+});

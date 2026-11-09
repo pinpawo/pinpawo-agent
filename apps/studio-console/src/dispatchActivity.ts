@@ -9,6 +9,7 @@ export type DispatchRecord = {
   updatedAt: string;
   source: 'admission_receipt' | 'lifecycle';
   error?: string;
+  scope?: { namespace: string; id: string };
   observationLost?: boolean;
 };
 
@@ -32,6 +33,7 @@ export function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null
     || typeof payload.request !== 'string') {
     return null;
   }
+  const scope = payload.scope as Record<string, unknown> | undefined;
   return {
     invocationId: payload.invocationId,
     petId: payload.petId,
@@ -41,6 +43,8 @@ export function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null
     updatedAt: event.occurredAt,
     source,
     observationLost: false,
+    ...(scope && typeof scope.namespace === 'string' && typeof scope.id === 'string'
+      ? { scope: { namespace: scope.namespace, id: scope.id } } : {}),
     ...(typeof payload.error === 'string' && payload.error.trim()
       ? { error: payload.error }
       : {}),

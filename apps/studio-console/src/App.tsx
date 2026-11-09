@@ -633,7 +633,7 @@ export function App() {
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
-            deliveries={channelDeliveries} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode}
+            deliveries={channelDeliveries} dispatches={dispatches} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode}
             onOpenKnowledge={identity?.scope === 'studio' ? () => setPage('knowledge') : undefined} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">

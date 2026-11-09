@@ -6,6 +6,7 @@ import { snapshotInvocationContext, withInvocationContext } from './invocationSy
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
+import { describeAgentError } from '../agent/errorDiagnostics';
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import { readPetDispatchMessage, type PetDispatchPort, type ResidentPet } from './contracts';
 import {
@@ -154,6 +155,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               requestId,
               state: 'failed',
               error: failure instanceof Error ? failure.message : 'internal error',
+              diagnostics: describeAgentError(failure),
             });
             throw failure;
           } finally {

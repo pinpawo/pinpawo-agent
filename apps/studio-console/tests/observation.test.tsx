@@ -101,3 +101,24 @@ test('a receipt delivered after disconnection cannot restore an admission-only r
   assert.equal(appendDispatchRecord([], late)[0]?.observationLost, true);
   assert.equal(appendDispatchRecord([{ ...record('running'), observationLost: false }], late)[0]?.observationLost, false);
 });
+
+
+test('execution failure retains exact attribution and bounded diagnostics after a late admission receipt', () => {
+  const failed = dispatchRecordFromEvent({ source: 'resident-pet', type: 'dispatch.failed', occurredAt: 'now', payload: {
+    ...record('failed'), requestId: 'host-one', sessionId: 'wiki:one', scope: { namespace: 'channel', id: 'a' }, error: 'terminated',
+    diagnostics: { chain: [{ name: 'TypeError', message: 'private payload' }, { name: 'SocketError', code: 'UND_ERR_SOCKET', status: 502 }], headers: 'private' },
+  } })!;
+  assert.deepEqual(failed.diagnostics, { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET', status: 502 }] });
+  assert.deepEqual(failed.scope, { namespace: 'channel', id: 'a' });
+  assert.equal(failed.requestId, 'host-one');
+  assert.equal(failed.sessionId, 'wiki:one');
+  const merged = appendDispatchRecord([failed], { ...record('queued'), source: 'admission_receipt' })[0]!;
+  assert.equal(merged.state, 'failed');
+  assert.deepEqual(merged.diagnostics, failed.diagnostics);
+  assert.doesNotMatch(JSON.stringify(merged), /private/);
+  const malformed = dispatchRecordFromEvent({ source: 'resident-pet', type: 'dispatch.failed', occurredAt: 'now', payload: {
+    ...record('failed'), error: 'terminated', diagnostics: { chain: [{ name: 'SocketError', code: 'https://private.invalid' }] },
+  } })!;
+  assert.equal(malformed.error, 'terminated');
+  assert.equal(malformed.diagnostics, undefined, 'invalid diagnostics do not hide the actual failure');
+});

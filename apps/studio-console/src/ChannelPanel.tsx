@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { ChannelDispatchFailures } from './ChannelDispatchFailures';
+import type { DispatchRecord } from './dispatchActivity';
 import { ChannelTimeline } from './ChannelConversation';
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
 import { ChannelDispatchQueues } from './ChannelDispatchQueues';
@@ -23,6 +25,8 @@ type Props = {
   petsReady?: boolean;
   /** Delivery outcomes observed on the Studio event stream. */
   deliveries?: ChannelDelivery[];
+  /** Live execution failures, distinct from admission and saving a reply. */
+  dispatches?: DispatchRecord[];
   /** Unaddressed messages Channel routing gave to nobody. */
   routingSkips?: ChannelRoutingSkip[];
   /** Pet replies the Host could not save into a Channel. */
@@ -30,7 +34,7 @@ type Props = {
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], dispatches = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<OpenChannel | null>(null);
@@ -341,6 +345,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                   const author = mentionCandidates.find(member => member.participantId === channelReplyRecipientId(item.author, members));
                   composer.current?.reset(author);
                 }} />
+              <ChannelDispatchFailures channelId={selected} dispatches={dispatches} pets={pets} petsReady={petsReady} />
               {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}
               {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>
                 {item.petId ? `${channelPetIdentity(item.petId, pets, petsReady).name} reply was not saved` : 'Pet reply was not saved'}: {item.error}</p>)}

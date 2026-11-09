@@ -129,6 +129,7 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
         requestId: 'host-1',
         state: 'failed',
         error: 'Connection error',
+        diagnostics: { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET' }] },
       });
     },
   };
@@ -163,6 +164,7 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
     request: 'draft',
     requestId: 'host-1',
     error: 'Connection error',
+    diagnostics: { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET' }] },
   });
   await studio.shutdown();
   assert.equal(lifecycleListener, undefined);

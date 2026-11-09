@@ -2,6 +2,7 @@ import type { PetInvocationScope } from './petInvocationContext';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import type {
   PendingInterruptProjection,
+  AgentErrorDiagnostics,
   AgentClientMessage,
   AgentRuntimeEvent,
   AgentServerMessage,
@@ -95,6 +96,8 @@ export type PetDispatchLifecycleEvent = {
   state: PetDispatchLifecycleState;
   requestId?: string;
   error?: string;
+  /** Bounded classifications from the same failed turn, never raw causes. */
+  diagnostics?: AgentErrorDiagnostics;
   sessionId?: string;
   reply?: string;
   /** Present only on `message`, which never changes the dispatch's state. */

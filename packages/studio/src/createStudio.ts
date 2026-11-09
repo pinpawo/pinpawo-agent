@@ -166,6 +166,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           ...(event.reply !== undefined ? { reply: event.reply } : {}),
           ...(event.message ? { message: structuredClone(event.message) } : {}),
           ...(event.error ? { error: event.error } : {}),
+          ...(event.diagnostics ? { diagnostics: structuredClone(event.diagnostics) } : {}),
         },
       });
     });

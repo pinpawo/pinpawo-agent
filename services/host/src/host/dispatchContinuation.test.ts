@@ -189,3 +189,19 @@ test('resuming a persisted dispatch after restart restores its original prompt a
   assert.ok(Object.isFrozen(session.pendingDispatch?.hint));
   assert.equal(restarted.sessions[session.id]?.pendingDispatch, undefined);
 });
+
+
+test('a failed review continuation carries bounded diagnostics on the original dispatch', async () => {
+  const h = harness();
+  const cause = Object.assign(new Error('private provider payload'), { name: 'SocketError', code: 'UND_ERR_SOCKET', status: 502 });
+  const error = new TypeError('terminated', { cause });
+  await assert.rejects(h.continueWith(async () => { throw error; })(h.turn('review-1')), error);
+  const failed = h.events.at(-1)!;
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.dispatchId, 'dispatch-1');
+  assert.equal(failed.requestId, 'req-2');
+  assert.equal(failed.sessionId, 'pet:00000001');
+  assert.deepEqual(failed.scope, { namespace: 'channel', id: 'ch-1' });
+  assert.deepEqual(failed.diagnostics, { chain: [{ name: 'TypeError' }, { name: 'SocketError', code: 'UND_ERR_SOCKET', status: 502 }] });
+  assert.doesNotMatch(JSON.stringify(failed), /private/);
+});

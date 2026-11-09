@@ -17,6 +17,8 @@ export type ChannelTimelineConsumerOptions = {
   cooldownMs?: number;
   /** Original messages per batch, including rows the processing policy may skip. Default: 50, maximum: 200. */
   batchLimit?: number;
+  /** Non-trigger records remain readable background but need not wake failed work. */
+  shouldWake?: (message: ChannelMessage) => boolean;
   onError?: (failure: { channelId: string; petId: string; error: unknown }) => void;
 };
 
@@ -27,6 +29,8 @@ type PendingHead = {
   timer?: ReturnType<typeof setTimeout>;
   running?: Promise<void>;
   controller?: AbortController;
+  /** Preserve the attempted range across in-process retries, even when new rows arrive. */
+  attempt?: { progress: ChannelConsumptionRow; messages: ChannelMessage[]; throughSequence: number };
 };
 
 /**
@@ -34,7 +38,7 @@ type PendingHead = {
  * processing callback owns relevance and effects. One instance serializes each
  * (Channel, Pet); it is not a distributed worker lease. Failed callbacks retain
  * progress and wait for another wake or a new start, without automatic retries.
- * Not installed by the Channel Plugin until its Head policy is supplied.
+ * The Channel Plugin supplies its Head policy; dispatch remains outside this class.
  */
 export class ChannelTimelineConsumer {
   private readonly heads = new Map<string, PendingHead>();
@@ -63,6 +67,7 @@ export class ChannelTimelineConsumer {
     if (this.active) return Promise.resolve();
     this.active = true;
     this.unsubscribe = this.options.service.subscribe(event => {
+      if (event.type === 'channel.message.created' && this.options.shouldWake && !this.options.shouldWake(event.payload)) return;
       if (event.type === 'channel.member.left' && event.payload.member.kind === 'pet') {
         this.cancel(event.payload.channelId, event.payload.member.id);
         return;
@@ -132,6 +137,7 @@ export class ChannelTimelineConsumer {
     clearTimeout(head.timer);
     head.timer = undefined;
     head.controller?.abort();
+    head.attempt = undefined;
   }
 
   private schedule(head: PendingHead): void {
@@ -160,22 +166,36 @@ export class ChannelTimelineConsumer {
     let progress: ChannelConsumptionRow;
     try { progress = await service.consumption(head.channelId, head.petId); }
     catch (error) { if (error instanceof ChannelAccessError) return; throw error; }
-    const page = await service.store.readMessages(head.channelId, { after: progress.afterSequence, limit: this.batchLimit });
-    if (signal.aborted || !page.items.length) return;
+    let attempt = head.attempt;
+    if (attempt && (attempt.progress.membershipId !== progress.membershipId || attempt.progress.afterSequence !== progress.afterSequence)) {
+      head.attempt = undefined;
+      attempt = undefined;
+    }
+    if (!attempt) {
+      const page = await service.store.readMessages(head.channelId, { after: progress.afterSequence, limit: this.batchLimit });
+      if (signal.aborted || !page.items.length) return;
+      attempt = { progress, messages: page.items, throughSequence: page.items.at(-1)!.sequence };
+      head.attempt = attempt;
+    }
     const current = await service.store.getConsumption(head.channelId, head.petId);
+    if (signal.aborted) return;
     if (current?.membershipId !== progress.membershipId || current.afterSequence !== progress.afterSequence) {
+      head.attempt = undefined;
       head.pending = true;
       return;
     }
-    // Capture before processing: a callback's public reply or a concurrent
-    // post must never move this acknowledgement past the frozen batch end.
-    const throughSequence = page.items.at(-1)!.sequence;
+    const { throughSequence, messages } = attempt;
     await this.options.consume(Object.freeze({
-      progress: Object.freeze({ ...progress }), throughSequence, messages: page.items, signal,
+      progress: Object.freeze({ ...progress }), throughSequence, messages, signal,
     }));
     if (signal.aborted || !this.active) return;
     const advanced = await service.advanceConsumption(progress, throughSequence);
-    if (advanced && page.hasMore) head.pending = true;
+    if (advanced) {
+      head.attempt = undefined;
+      // A retry's frozen range may predate the wake that retried it. Always
+      // check once beyond an acknowledged range, even if its old page ended.
+      head.pending = true;
+    }
   }
 
   private report(channelId: string, petId: string | undefined, error: unknown): void {

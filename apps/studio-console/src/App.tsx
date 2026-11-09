@@ -134,7 +134,7 @@ export function App() {
   const [petsReady, setPetsReady] = useState(false);
   const [channelVersion, setChannelVersion] = useState(0);
   const [channelDeliveries, setChannelDeliveries] = useState<ChannelDelivery[]>([]);
-  const [channelFailures, setChannelFailures] = useState<{ channelId: string; petId?: string; error: string }[]>([]);
+  const [channelFailures, setChannelFailures] = useState<{ channelId: string; petId?: string; error: string; kind?: 'head' }[]>([]);
   const [routingSkips, setRoutingSkips] = useState<ChannelRoutingSkip[]>([]);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
   const [notices, setNotices] = useState<Resource<Notice[]>>(empty);
@@ -271,6 +271,13 @@ export function App() {
           const skip = event.payload as Partial<ChannelRoutingSkip> | undefined;
           if (event.type === 'channel.routing.skipped' && skip?.channelId && skip.messageId && skip.reason) {
             setRoutingSkips(current => [...current.slice(-199), skip as ChannelRoutingSkip]);
+          }
+          if (event.type === 'channel.head.failed' && payload?.channelId && payload.petId && payload.error) {
+            setChannelFailures(current => [...current.filter(item => item.kind !== 'head' || item.channelId !== payload.channelId || item.petId !== payload.petId),
+              { channelId: String(payload.channelId), petId: String(payload.petId), error: String(payload.error), kind: 'head' as const }].slice(-100));
+          }
+          if (event.type === 'channel.head.decided' && payload?.channelId && payload.petId) {
+            setChannelFailures(current => current.filter(item => item.kind !== 'head' || item.channelId !== payload.channelId || item.petId !== payload.petId));
           }
           if (event.type === 'channel.message_failed' && payload?.channelId && payload.error) {
             const failure = { channelId: payload.channelId, petId: payload.petId, error: payload.error };

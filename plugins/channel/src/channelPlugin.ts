@@ -4,20 +4,17 @@ import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
+import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, channelBatchInput, readChannelBatchContext, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
 import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
-import { collectChannelRoutingState, type RoutePetRuntime } from './channelRoutingState';
-import {
-  channelRoutingOptionsSchema, createChannelRouter, routeInput,
-  type ChannelRouter, type ChannelRoutingOptions, type RouteDecider,
-} from './channelRouting';
+import { channelPetHeadOptionsSchema, createChannelPetHead, boundedHeadInput, headError, type ChannelPetHead, type ChannelPetHeadOptions, type PetHeadDecider, type HeadInput, type HeadMessage, type HeadRequestMessage } from './channelPetHead';
+import { ChannelTimelineConsumer, type ChannelTimelineBatch } from './channelTimelineConsumer';
 import {
   ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelMessagePageSchema,
   memberRefSchema, type ChannelMessage, type ChannelSessionBinding,
 } from './channelService';
-import type { ChannelStore, MemberRef } from './store/channelStore';
+import type { ChannelStore, MemberRef, ChannelMessageRow } from './store/channelStore';
 import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
 function requireChannelInvocation() {
@@ -32,23 +29,21 @@ export type CreateChannelPluginOptions = {
   /** Defaults to the Channel tables in the Studio database. */
   store?: ChannelStore;
   httpRoute?: false | { pluginName?: string };
-  /** Who should attend to an unaddressed member message. Off by default. */
-  routing?: ChannelRoutingOptions;
-  /** Replaces the configured decider; for embedders and tests. */
-  routeDecider?: RouteDecider;
+  /** Independent Pet Heads for unaddressed messages. Off by default. */
+  routing?: ChannelPetHeadOptions;
+  /** Replaces the configured per-Pet Head call; for embedders and tests. */
+  headDecider?: PetHeadDecider;
 };
 /** What happened to one addressed member. Not stored: returned to the poster and published as `channel.delivery`. */
 export type ChannelDelivery = {
   participantId: string;
   state: 'delivered' | 'accepted' | 'failed';
-  /** Set when Channel routing, not a mention, chose this member. */
-  via?: 'routing';
+  /** Set when this Pet's Channel Head chose to dispatch. */
+  via?: 'head';
   confidence?: number;
   reason?: string;
   /** The routing model's suggested focus, delivered as context rather than an instruction from the author. */
   focus?: string;
-  /** Observation supplied to the routing model, not the target's later admission state. */
-  runtime?: RoutePetRuntime;
   invocationId?: string;
   sessionId?: string;
   error?: string;
@@ -95,6 +90,7 @@ const petMessageEventSchema = z.object({
 const channelRunEventSchema = z.object({
   invocationId: z.string().min(1),
   petId: z.string().min(1),
+  request: z.string().optional(),
   scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }),
 });
 
@@ -110,9 +106,14 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let removeHttp: (() => void) | undefined;
   let removeContextProvider: (() => void) | undefined;
   let unexposeInputs: (() => void) | undefined;
-  let router: ChannelRouter | undefined;
+  let head: ChannelPetHead | undefined;
+  let consumer: ChannelTimelineConsumer | undefined;
   /** Pet runs in a Channel that are executing now, by invocation. */
   const running = new Map<string, { channelId: string; participantId: string; since: string }>();
+  // Correlation only for messages Channel itself dispatched, never a Host queue read.
+  const publicRequests = new Map<string, HeadRequestMessage[]>();
+  const admittingRequests = new Map<string, { messages: HeadRequestMessage[]; finished: Set<string> }>();
+  const requestKey = (channelId: string, petId: string, request: string) => JSON.stringify([channelId, petId, request]);
   function host(): StudioPluginContext {
     if (!context) throw new Error('Channel Plugin is not started.');
     return context;
@@ -125,17 +126,29 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     request: string,
     idempotencyKey?: string,
     attachments: readonly Deliverable[] = [],
+    batch?: ChannelTimelineBatch,
+    requestMessages: readonly ChannelMessageRow[] = [],
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
-    const receipt = await host().dispatch({
-      petId, request,
-      ...(attachments.length ? { attachments } : {}),
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-      session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
-      scope: { namespace: 'channel', id: channelId },
-    });
+    if (batch) await requireCurrentBatch(batch);
+    const key = requestKey(channelId, petId, request);
+    const admission = { messages: requestMessages.map(({ messageId, occurredAt }) => ({ messageId, occurredAt })), finished: new Set<string>() };
+    admittingRequests.set(key, admission);
+    let receipt;
+    try {
+      receipt = await host().dispatch({
+        petId, request,
+        ...(attachments.length ? { attachments } : {}),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
+        scope: { namespace: 'channel', id: channelId },
+      });
+      // Subscriber callbacks may lag admission; the receipt gives a stable
+      // correlation even when queued/running events have not been handled yet.
+      if (!admission.finished.has(receipt.invocationId)) publicRequests.set(receipt.invocationId, admission.messages);
+    } finally { if (admittingRequests.get(key) === admission) admittingRequests.delete(key); }
     return { invocationId: receipt.invocationId, binding: await service.confirmSession(binding) };
   }
 
@@ -154,7 +167,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (target.kind !== 'pet') return { participantId, state: 'delivered' };
         try {
           const { invocationId, binding } = await dispatchPet(message.channelId, target.id, request,
-            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments);
+            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments, undefined, [message]);
           return { participantId, state: 'accepted', invocationId, sessionId: binding.sessionId };
         } catch (error) {
           return { participantId, state: 'failed', error: error instanceof Error ? error.message : String(error) };
@@ -166,76 +179,119 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     return deliveries;
   }
 
-  /** Both member posts and new public Pet replies use the same delivery path. */
-  async function deliverAndRoute(message: ChannelMessage): Promise<ChannelDelivery[]> {
-    const deliveries = await deliver(message);
-    // Routing waits on a model; the poster does not. Its outcome arrives as an event.
-    if (router && message.mentions.length === 0) void route(router, message);
-    return deliveries;
-  }
-
   async function sendMessage(channelId: string, input: unknown, author: MemberRef) {
     const { message, created, mentionError } = await channelService().postMessage(author, channelId, input);
-    const deliveries = created && !mentionError ? await deliverAndRoute(message) : [];
-    if (mentionError) {
-      host().notify({ type: 'channel.delivery', payload: { channelId, messageId: message.messageId, state: 'failed', error: mentionError } });
-    }
+    // Explicit @ remains the immediate delivery path. The consumer only
+    // considers legal unaddressed messages and never replays this delivery.
+    const deliveries = created && !mentionError ? await deliver(message) : [];
+    if (mentionError) host().notify({ type: 'channel.delivery', payload: { channelId, messageId: message.messageId, state: 'failed', error: mentionError } });
     return { message, deliveries };
   }
 
-  /** Let routing choose one other Pet to attend to an unaddressed public message. */
-  async function route(active: ChannelRouter, message: ChannelMessage): Promise<void> {
-    const studio = host();
-    let candidateStates: Array<{ participantId: string; runtime: RoutePetRuntime | undefined }> | undefined;
-    const skip = (payload: Record<string, unknown>) => studio.notify({
-      type: 'channel.routing.skipped', payload: {
-        channelId: message.channelId, messageId: message.messageId,
-        ...(candidateStates ? { candidateStates } : {}), ...payload,
-      },
-    });
+  async function requireCurrentBatch(batch: ChannelTimelineBatch): Promise<void> {
+    batch.signal.throwIfAborted();
+    const row = await channelService().consumption(batch.progress.channelId, batch.progress.petId);
+    batch.signal.throwIfAborted();
+    if (row.membershipId !== batch.progress.membershipId || row.afterSequence !== batch.progress.afterSequence) {
+      throw new ChannelAccessError('Channel membership or consumption changed before the Head effect.');
+    }
+  }
+
+  /** Channel owns the decision and direct reply; only a dispatch enters the Pet runtime. */
+  async function processHeadBatch(batch: ChannelTimelineBatch): Promise<void> {
+    const active = head;
+    if (!active) return;
+    const { channelId, petId } = batch.progress;
+    const messages = batch.messages.filter(row => !row.mentions.length && !row.addressingError && row.source !== 'pet-head'
+      && (row.author.kind !== 'pet' || row.author.id !== petId));
+    if (!messages.length) return;
+    await requireCurrentBatch(batch);
+    const service = channelService();
+    const publicContext = await service.readContext({ kind: 'pet', id: petId }, channelId,
+      { before: batch.messages[0]!.sequence, limit: Math.max(1, active.settings.historyLimit) });
+    const { channel, members } = publicContext;
+    const target = members.find(member => member.kind === 'pet' && member.id === petId);
+    if (!target) throw new ChannelAccessError('Pet left before its Head decision.');
+    const labels = new Map(members.map(member => [member.participantId, member.label]));
+    const effectKey = `channel-head:${JSON.stringify([channelId, petId, batch.progress.membershipId, batch.progress.afterSequence])}`;
+    let headReply = await service.store.getMessageByExternalRef({ kind: 'pet', id: petId }, effectKey);
+    if (headReply && (headReply.channelId !== channelId || headReply.source !== 'pet-head')) {
+      throw new Error('Head reply identity conflicts with an existing public message.');
+    }
+    const author = (row: ChannelMessageRow): HeadMessage['author'] => {
+      const participantId = channelParticipantId(row.author.kind, row.author.id);
+      return { participantId, kind: row.author.kind, ...(labels.get(participantId) ? { label: labels.get(participantId)! } : {}) };
+    };
+    const contextRows = batch.messages.filter(row => !messages.includes(row));
+    if (headReply) contextRows.push(headReply);
+    // Select the recent window before dividing its body budget.
+    const selectedContext = contextRows.slice(-20);
+    const historyRows = active.settings.historyLimit ? publicContext.messages.slice(-20) : [];
+    const originals = new Map<string, ChannelMessageRow>();
+    const readReferences = new Set<string>();
+    for (const row of [...messages, ...selectedContext, ...historyRows]) {
+      if (!row.replyTo || readReferences.has(row.replyTo)) continue;
+      readReferences.add(row.replyTo);
+      const original = await service.getMessage(channelId, row.replyTo);
+      if (original) originals.set(original.messageId, original);
+    }
+    const views = (rows: readonly ChannelMessageRow[], budget: number): HeadMessage[] => {
+      const limit = Math.min(2_000, Math.floor(budget / Math.max(1, rows.length)));
+      const clip = (row: ChannelMessageRow, maximum = limit) => ({ body: row.body.slice(0, maximum), ...(row.body.length > maximum ? { bodyTruncated: true } : {}) });
+      return rows.map(row => {
+        const original = row.replyTo ? originals.get(row.replyTo) : undefined;
+        return {
+          messageId: row.messageId, sequence: row.sequence, occurredAt: row.occurredAt, author: author(row), ...clip(row), mentions: row.mentions,
+          source: row.source ?? 'unknown', ...(row.addressingError ? { addressingError: row.addressingError } : {}),
+          ...(row.deliverables ? { deliverables: row.deliverables } : {}),
+          ...(row.replyTo ? { replyTo: original ? { messageId: original.messageId, occurredAt: original.occurredAt,
+            source: original.source ?? 'unknown', author: author(original), ...clip(original, 500),
+            ...(original.deliverables ? { deliverables: original.deliverables } : {}) } : { messageId: row.replyTo, missing: true as const } } : {}),
+        };
+      });
+    };
+    const document = host().getPetDocument(petId);
+    const observedRuns = [...running].filter(([, run]) => run.channelId === channelId && run.participantId === target.participantId)
+      .map(([invocationId, run]) => ({ startedAt: run.since, requestMessages: publicRequests.get(invocationId) ?? [] }));
+    const input: HeadInput = {
+      currentTime: new Date().toISOString(),
+      channel: { channelId, title: channel.title, ...(channel.description ? { description: channel.description } : {}), ...(channel.prompt ? { prompt: channel.prompt } : {}) },
+      pet: { participantId: target.participantId, name: target.label, document: document ? { content: document.content } : { missing: true },
+        ...(active.settings.pets[petId] ? { description: active.settings.pets[petId] } : {}) },
+      members: members.slice(0, 200).map(({ participantId, kind, label }) => ({ participantId, kind, label })),
+      messages: views(messages, 24_000), context: views(selectedContext, 8_000),
+      history: views(historyRows, 8_000),
+      ...(contextRows.length > selectedContext.length || publicContext.messages.length > historyRows.length ? { inputTruncated: true } : {}),
+      execution: observedRuns.length ? { state: 'running', runs: observedRuns } : { state: 'unknown' },
+    };
+    const decision = await active.decide(boundedHeadInput(input), batch.signal);
+    await requireCurrentBatch(batch);
+    if (decision.action !== 'skip' && decision.reply && !headReply) {
+      headReply = (await service.postMessage({ kind: 'pet', id: petId }, channelId, { body: decision.reply },
+        { source: 'pet-head', membershipId: batch.progress.membershipId, externalRef: effectKey })).message;
+    }
+    host().notify({ type: 'channel.head.decided', payload: {
+      channelId, petId, participantId: target.participantId, afterSequence: batch.progress.afterSequence, throughSequence: batch.throughSequence,
+      action: decision.action, confidence: decision.confidence, reason: decision.reason,
+      ...(headReply ? { replyMessageId: headReply.messageId } : {}),
+    } });
+    if (decision.action !== 'dispatch') return;
+    await requireCurrentBatch(batch);
+    const attachments = messages.flatMap(row => channelDispatchAttachments(row, row.replyTo ? originals.get(row.replyTo) : undefined));
+    const seen = new Set<string>();
+    const uniqueAttachments = attachments.filter(item => !seen.has(item.uri) && !!seen.add(item.uri));
     try {
-      const service = channelService();
-      const members = await service.members(message.channelId);
-      if (!active.applies(message, members)) return;
-      const context = await service.readContext(message.author, message.channelId,
-        active.historyLimit > 0 ? { before: message.sequence, limit: active.historyLimit } : { limit: 1 });
-      const history = active.historyLimit > 0 ? context.messages : [];
-      const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
-      const input = routeInput(context.channel, message, original, history, members);
-      const eligible = new Set(input.pets.map(pet => pet.participantId));
-      const candidateMembers = members.filter(member => member.kind === 'pet' && eligible.has(member.participantId));
-      const states = await collectChannelRoutingState(message.channelId, candidateMembers.map(member => member.id), { host: studio, channels: service });
-      const petIds = new Map(candidateMembers.map(member => [member.participantId, member.id]));
-      const pets = input.pets.map(pet => ({ ...pet, runtime: states[petIds.get(pet.participantId)!] }));
-      candidateStates = pets.map(({ participantId, runtime }) => ({ participantId, runtime }));
-      const outcome = await active.decide({ ...input, pets });
-      if (outcome.kind === 'skip') {
-        const { kind: _kind, ...rest } = outcome;
-        return skip(rest);
-      }
-      const target = members.find(member => member.participantId === outcome.participantId);
-      if (!target || target.kind !== 'pet' || target.participantId === channelParticipantId(message.author.kind, message.author.id)) {
-        return skip({ reason: 'invalid', detail: outcome.participantId });
-      }
-      const labels = new Map(members.map(member => [member.participantId, member.label]));
-      const decided = {
-        via: 'routing' as const, confidence: outcome.confidence,
-        ...(outcome.reason ? { reason: outcome.reason } : {}),
-        ...(outcome.focus ? { focus: outcome.focus } : {}),
-        runtime: pets.find(pet => pet.participantId === target.participantId)?.runtime,
-      };
-      let delivery: ChannelDelivery;
-      try {
-        const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
-          channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing', outcome.focus),
-          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original));
-        delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
-      } catch (error) {
-        delivery = { participantId: target.participantId, state: 'failed', ...decided, error: error instanceof Error ? error.message : String(error) };
-      }
-      studio.notify({ type: 'channel.delivery', payload: { channelId: message.channelId, messageId: message.messageId, ...delivery } });
-    } catch (error) {
-      skip({ reason: 'error', detail: error instanceof Error ? error.message : String(error) });
+      const { invocationId, binding } = await dispatchPet(channelId, petId, channelBatchInput({
+        progress: batch.progress, throughSequence: batch.throughSequence, messages, originals,
+        labelOf: participantId => labels.get(participantId), ...(headReply ? { headReply } : {}), ...(decision.focus ? { focus: decision.focus } : {}),
+      }), effectKey, uniqueAttachments, batch, messages);
+      host().notify({ type: 'channel.delivery', payload: { channelId, messageId: messages.at(-1)!.messageId,
+        participantId: target.participantId, via: 'head', state: 'accepted', invocationId, sessionId: binding.sessionId,
+        confidence: decision.confidence, reason: decision.reason } });
+    } catch {
+      host().notify({ type: 'channel.delivery', payload: { channelId, messageId: messages.at(-1)!.messageId,
+        participantId: target.participantId, via: 'head', state: 'failed', error: 'Pet Head could not confirm the handoff. The Host may already have accepted it.' } });
+      throw new Error('Pet Head dispatch failed.');
     }
   }
 
@@ -262,14 +318,14 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const { message: saved, created, mentionError } = await service.postMessage(
         { kind: 'pet', id: petId }, channelId,
         { body: message.text, ...(message.deliverables !== undefined ? { deliverables: message.deliverables } : {}) },
-        { externalRef: message.messageId },
+        { externalRef: message.messageId, source: 'pet-agent' },
       );
       if (mentionError) {
         studio.notify({ type: 'channel.delivery', payload: { channelId, messageId: saved.messageId, state: 'failed', error: mentionError } });
       }
       // Invalid mentions were retained for observation; they are not a new
-      // unaddressed conversation for the router to repair or reinterpret.
-      if (created && !mentionError) await deliverAndRoute(saved);
+      // unaddressed conversation for a Head to repair or reinterpret.
+      if (created && !mentionError) await deliver(saved);
     } catch (error) {
       // Nobody waits on this write; observers are the only ones who can see it failed.
       studio.notify({ type: 'channel.message_failed', payload: {
@@ -293,12 +349,17 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     if (type === 'dispatch.message') return;
     const parsed = channelRunEventSchema.safeParse(payload);
     if (!parsed.success) return;
-    const { invocationId, petId, scope: { id: channelId } } = parsed.data;
+    const { invocationId, petId, request, scope: { id: channelId } } = parsed.data;
+    const admission = request === undefined ? undefined : admittingRequests.get(requestKey(channelId, petId, request));
+    if (['dispatch.completed', 'dispatch.interrupted', 'dispatch.failed'].includes(type)) {
+      publicRequests.delete(invocationId);
+      admission?.finished.add(invocationId);
+    } else if (admission) publicRequests.set(invocationId, admission.messages);
     const participantId = channelParticipantId('pet', petId);
     const isWorking = () => workingIn(channelId).some(item => item.participantId === participantId);
     const before = isWorking();
-    if (type !== 'dispatch.running') running.delete(invocationId);
-    else if (!running.has(invocationId)) running.set(invocationId, { channelId, participantId, since: occurredAt });
+    if (['dispatch.waiting', 'dispatch.completed', 'dispatch.interrupted', 'dispatch.failed'].includes(type)) running.delete(invocationId);
+    else if (type === 'dispatch.running' && !running.has(invocationId)) running.set(invocationId, { channelId, participantId, since: occurredAt });
     const working = isWorking();
     if (working !== before) host().notify({ type: 'channel.working', payload: { channelId, participantId, working } });
   }
@@ -344,20 +405,34 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           throw new ChannelAccessError('Channel scope does not match the Pet session binding.');
         }
         const channel = await service.requireMember(binding.channelId, { kind: 'pet', id: petId });
+        const batchContext = readChannelBatchContext(channel.channelId, request);
+        if (batchContext && (batchContext.petParticipantId !== channelParticipantId('pet', petId)
+          || (await service.consumption(channel.channelId, petId)).membershipId !== batchContext.membershipId)) {
+          throw new ChannelAccessError('Head batch belongs to an obsolete Channel membership.');
+        }
         return {
           systemPromptSections: channelSystemContext(channel),
           hint: channelInvocationHint(channel.channelId, request),
         };
       });
-      router = createChannelRouter(options.routing, {
-        ...(options.routeDecider ? { decider: options.routeDecider } : {}),
-        resolveModel: studio.models.resolve,
+      head = createChannelPetHead(options.routing, {
+        ...(options.headDecider ? { decider: options.headDecider } : {}), resolveModel: studio.models.resolve,
       });
+      await service.configureHeadConsumption(!!head);
       unsubscribeHost = studio.subscribe(async (event) => {
         if (event.source !== 'resident-pet' || !event.type.startsWith('dispatch.')) return;
         observeRun(event.type, event.payload, event.occurredAt);
         if (event.type === 'dispatch.message') await recordPetMessage(event.payload);
       });
+      if (head) {
+        consumer = new ChannelTimelineConsumer({ service, cooldownMs: head.settings.cooldownMs,
+          batchLimit: head.settings.batchLimit, consume: processHeadBatch, shouldWake: message => message.source !== 'pet-head',
+          onError: ({ channelId, petId, error }) => studio.notify({ type: 'channel.head.failed', payload: {
+            channelId, petId, participantId: channelParticipantId('pet', petId), error: `${headError(error).message} The range remains pending.`,
+          } }),
+        });
+        await consumer.start();
+      }
       unexposeInputs = studio.hooks.expose(CHANNEL_INPUTS_HOOK_NAME, inputs);
       unsubscribe = service.subscribe(event => studio.notify(event));
       if (options.httpRoute === false) return;
@@ -421,7 +496,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         return () => { for (const release of remove.reverse()) release(); };
       });
     },
-    stop: () => {
+    stop: async () => {
+      await consumer?.stop(); consumer = undefined;
       removeContextProvider?.(); removeContextProvider = undefined;
       removeHttp?.(); removeHttp = undefined;
       unexposeInputs?.(); unexposeInputs = undefined;
@@ -429,8 +505,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       unsubscribeHost?.(); unsubscribeHost = undefined;
       context = undefined;
       current = undefined;
-      router = undefined;
+      head = undefined;
       running.clear();
+      publicRequests.clear();
+      admittingRequests.clear();
     },
   };
 }
@@ -438,7 +516,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
 export function createStudioPlugin(value: Record<string, unknown> | undefined): ChannelPlugin {
   const options = z.object({
     httpRoute: z.union([z.literal(false), z.object({ pluginName: z.string().min(1).optional() }).strict()]).optional(),
-    routing: channelRoutingOptionsSchema.optional(),
+    routing: channelPetHeadOptionsSchema.optional(),
   }).strict().parse(value ?? {});
   return createChannelPlugin(options);
 }

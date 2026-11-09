@@ -74,6 +74,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
     notify: (event) => { events.push(event); },
     subscribe: () => () => undefined,
     listPets: () => [{ petId: 'worker', name: 'Worker', definitionId: 'worker' }],
+    getPetDocument: () => undefined,
     pets: {} as Parameters<typeof plugin.start>[0]['pets'],
     listDispatchQueues: () => [{
       petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 2,

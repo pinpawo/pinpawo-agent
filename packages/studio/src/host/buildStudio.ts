@@ -177,6 +177,9 @@ export async function resolveStudioHostConfig(
 export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioResult> {
   const { resolved, plugins } = input.configuration;
   const { studio: studioConfig } = resolved;
+  const petDocuments = new Map([...(input.petDocuments ?? [])].map(([definitionId, document]) => (
+    [definitionId, Object.freeze({ content: document.content, digest: document.digest })] as const
+  )));
 
   const hostCapabilitiesByName = new Map<string, AgentCapability>();
   for (const capability of input.hostCapabilities) {
@@ -238,7 +241,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     const definition = definitions.get(pet.definitionId);
     if (!definition) throw new Error(`Pet "${pet.petId}" uses unknown definition "${pet.definitionId}"`);
     const { config } = definition;
-    const document = input.petDocuments?.get(pet.definitionId);
+    const document = petDocuments.get(pet.definitionId);
     const resident = await createResidentPetHost({
       petId: pet.petId,
       petName: pet.name,
@@ -278,6 +281,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     studioId: studioConfig.studioId,
     definitions: resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
     assemblePet,
+    petDocuments,
     plugins,
     storage: resolveStudioStorage(studioConfig.storage, input.configuration.workdir),
     ...(studioConfig.credentials

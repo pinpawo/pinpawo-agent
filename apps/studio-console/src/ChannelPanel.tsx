@@ -29,7 +29,7 @@ type Props = {
   /** Unaddressed messages Channel routing gave to nobody. */
   routingSkips?: ChannelRoutingSkip[];
   /** Pet replies the Host could not save into a Channel. */
-  failures?: { channelId: string; petId?: string; error: string }[];
+  failures?: { channelId: string; petId?: string; error: string; kind?: 'head' }[];
 };
 type OpenChannel = Omit<ChannelContext, 'messages' | 'nextAfter' | 'hasMore' | 'nextBefore' | 'hasEarlier'>;
 
@@ -40,6 +40,16 @@ export function ChannelDispatchFailures({ channelId, dispatches, pets, petsReady
     && item.scope.id === channelId).map(item => <p className="channel-record-error" role="alert" key={item.invocationId}>
       {channelPetIdentity(item.petId, pets, petsReady).name} execution failed: {item.error ?? 'Unknown error'}
     </p>)}</>;
+}
+
+export function ChannelProcessingFailures({ failures, pets, petsReady }: {
+  failures: { channelId: string; petId?: string; error: string; kind?: 'head' }[];
+  pets: { petId: string; name: string }[]; petsReady: boolean;
+}) {
+  return <>{failures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>
+    {item.kind === 'head' ? `${channelPetIdentity(item.petId ?? '', pets, petsReady).name} Head needs attention`
+      : item.petId ? `${channelPetIdentity(item.petId, pets, petsReady).name} reply was not saved` : 'Pet reply was not saved'}: {item.error}
+  </p>)}</>;
 }
 
 export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], dispatches = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge }: Props) {
@@ -355,8 +365,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 }} />
               <ChannelDispatchFailures channelId={selected} dispatches={dispatches} pets={pets} petsReady={petsReady} />
               {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}
-              {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>
-                {item.petId ? `${channelPetIdentity(item.petId, pets, petsReady).name} reply was not saved` : 'Pet reply was not saved'}: {item.error}</p>)}
+              <ChannelProcessingFailures failures={selectedFailures} pets={pets} petsReady={petsReady} />
             </div>
             {!atLatest && <button className="channel-jump" type="button" onClick={() => {
               followLatest.current = true; setAtLatest(true);
@@ -376,7 +385,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 onSubmit={() => { if (body.trim() && connected && !pending) composerForm.current?.requestSubmit(); }} />
               <div className="channel-composer-controls">
                 <p className="channel-composer-hint"><kbd>@</kbd> mention · <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line
-                  · Without an @, no Pet is woken unless Channel routing picks one.</p>
+                  · Without an @, enabled Pet Heads decide independently whether to reply or act.</p>
                 <button className="channel-send" disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
               </div>
             </div>

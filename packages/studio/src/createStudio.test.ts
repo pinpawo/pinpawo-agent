@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
+import { definePetDocument } from '@pinpawo/pet-agent';
 
 import { prepareStudio, type CreateStudioInput, type PreparedStudio } from './createStudio';
 import { StudioPetError } from './pets/studioPets';
@@ -434,6 +435,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'allocateSessionId',
     'clients',
     'dispatch',
+    'getPetDocument',
     'hooks',
     'listDispatchQueues',
     'listPets',
@@ -691,6 +693,62 @@ test('Plugins read model profiles through context.models, and a Studio without t
   const bare = await createStudio({ studioId: 'bare', pets: [binding('worker')], plugins: [plugin] });
   assert.throws(() => models!.resolve(), /has no model profiles/);
   await bare.shutdown();
+});
+
+test('Plugins read only immutable startup document content for the exact live Pet definition', async () => {
+  const document = { ...definePetDocument({ content: '# Developer\n\nOwn implementation.' }), path: '/private/PET.md' };
+  const documents = new Map([['developer', document]]);
+  let context!: StudioPluginContext;
+  const prepared = prepareStudio({
+    studioId: 'documents',
+    definitions: [{ definitionId: 'developer', name: 'Developer' }, { definitionId: 'plain', name: 'Plain' }],
+    petDocuments: documents,
+    assemblePet: async ({ petId }) => {
+      const { dispatch } = binding(petId);
+      dispatch.getQueueSnapshot = () => { throw new Error('Document access must not read queues'); };
+      return {
+        dispatch,
+        sessions: {
+          snapshot: async () => { throw new Error('Document access must not read sessions'); },
+          observe: async () => { throw new Error('Document access must not observe sessions'); },
+          review: async () => { throw new Error('Document access must not review sessions'); },
+        },
+        close: async () => undefined,
+      };
+    },
+    plugins: [{ name: 'reader', toolkits: [], start: (value) => { context = value; } }],
+  });
+  const { studio } = prepared;
+  try {
+    await prepared.activatePlugins();
+    assert.equal(context.getPetDocument('developer'), undefined, 'a definition is not a live Pet');
+    const expected = { content: document.content };
+    document.content = 'Changed after preparation';
+    documents.clear();
+    await studio.pets.create({ petId: 'dev-a', definitionId: 'developer', name: 'Dev A' });
+    await studio.pets.create({ petId: 'dev-b', definitionId: 'developer', name: 'Dev B' });
+    await studio.pets.create({ petId: 'plain-a', definitionId: 'plain', name: 'Plain' });
+    const snapshot = context.getPetDocument('dev-a');
+    assert.deepEqual(snapshot, expected);
+    assert.equal(Object.isFrozen(snapshot), true);
+    assert.equal(Reflect.set(snapshot!, 'content', 'Plugin edit'), false);
+    assert.deepEqual(context.getPetDocument('dev-b'), expected);
+    assert.equal(context.getPetDocument('plain-a'), undefined);
+    assert.equal(context.getPetDocument('unknown'), undefined);
+    await studio.pets.rename('dev-a', 'Renamed');
+    assert.deepEqual(context.getPetDocument('dev-a'), expected);
+  } finally { await studio.shutdown(); }
+  assert.equal(context.getPetDocument('dev-a'), undefined, 'closed Pets are not exposed');
+});
+
+test('Plugin document access is optional for embedded Studio callers', async () => {
+  let getPetDocument!: StudioPluginContext['getPetDocument'];
+  const studio = await createStudio({
+    studioId: 'no-documents', pets: [binding('worker')],
+    plugins: [{ name: 'reader', toolkits: [], start: (context) => { getPetDocument = context.getPetDocument; } }],
+  });
+  try { assert.equal(getPetDocument('worker'), undefined); }
+  finally { await studio.shutdown(); }
 });
 
 /** Pets assembled from definitions: every assemble call and close is recorded. */

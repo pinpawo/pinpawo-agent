@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { StudioContextProvider, StudioInvocationContext } from '@pinpawo/studio-core';
 import type { AgentInvocationHint, SystemPromptSection } from '@pinpawo/pet-agent';
 import { createStudioWithPets } from '../../../tests/support/livePets';
-import { readChannelTestInput, readChannelTestTask } from '../../../tests/support/channelDispatchInput';
+import { readChannelTestBatch, readChannelTestInput, readChannelTestTask } from '../../../tests/support/channelDispatchInput';
 import { createChannelPlugin } from './channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -31,8 +31,8 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
   let resolver!: StudioContextProvider;
   const channel = createChannelPlugin({
     httpRoute: false,
-    routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:one', confidence: 1, reason: routingReason, focus: routingFocus }),
+    routing: { enabled: true, cooldownMs: 0 },
+    headDecider: async () => ({ action: 'dispatch', confidence: 1, reason: routingReason, reply: '', focus: routingFocus }),
   });
   const studio = await createStudioWithPets({
     studioId: 'channel-prompt', plugins: [channel],
@@ -96,18 +96,18 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     await channel.run(a, 'one', 'cleared', { kind: 'scheduler', id: 's2' });
     assert.deepEqual(resolved[4]?.map(section => section.id), ['channel:protocol', 'channel:metadata'], 'clearing the announcement keeps the Plugin context');
 
-    // An unaddressed human message takes the router path, not the mention path.
+    // An unaddressed human message takes the Head path, not the mention path.
     await channel.sendMessage(b, { body: 'route this' }, human);
     for (let i = 0; i < 200 && dispatched.length < 6; i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(dispatched.length, 6);
-    const routed = readChannelTestInput(dispatched[5]!.request);
-    assert.equal(routed.addressedBy, 'routing');
-    assert.equal(routed.contextHint?.source, 'channel-routing');
+    const routed = readChannelTestBatch(dispatched[5]!.request);
+    assert.equal(routed.petParticipantId, 'pet:one');
+    assert.equal(routed.contextHint?.source, 'channel-head');
     assert.equal(routed.contextHint?.action, 'read-latest-channel');
     assert.equal(routed.contextHint?.focus, routingFocus);
     assert.equal(hints[5]?.focus, routingFocus, 'the provider exposes model advice independently of the goal');
     assert.equal(hints[4]?.focus, undefined);
-    assert.equal(routed.body, 'route this');
+    assert.deepEqual(routed.messages.map(message => message.body), ['route this']);
     assert.equal(dispatched[5]!.request.includes(routingReason), false, 'the decision reason remains outside the Pet request');
     assert.ok(resolved[5]?.every(section => !section.content.includes(routingFocus)), 'dynamic attention stays outside the system context');
     assert.equal(dispatched[5]!.request.includes('Beta'), false, 'the announcement remains in the provider context');

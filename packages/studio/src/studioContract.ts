@@ -124,6 +124,12 @@ export type StudioPluginContext = {
   subscribe: (handler: StudioEventHandler) => () => void;
   /** The live Pets. */
   listPets: () => StudioPetRegistration[];
+  /**
+   * The live Pet's authored PET.md content, snapshotted at Host startup.
+   * Undefined for an unknown Pet or a missing document. Contains no paths,
+   * Capability inventory, or session state; restart the Host after edits.
+   */
+  getPetDocument: (petId: string) => Readonly<{ content: string }> | undefined;
   /** Create and rename Pets, and read their records. */
   pets: StudioPets;
   /**

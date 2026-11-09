@@ -7,7 +7,9 @@ import path from 'node:path';
 import type { Studio } from '../studioContract';
 import {
   defineInstructionDocument,
+  definePetDocument,
   type AgentCapability,
+  type PetDocument,
 } from '@pinpawo/pet-agent';
 import {
   buildHostRuntimeConfig,
@@ -313,6 +315,47 @@ Complete the work assigned to this Pet.
 
   await host.init();
   await host.shutdown();
+});
+
+test('StudioHost reloads authored documents only when a new Host starts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-host-documents-'));
+  const petsDir = path.join(root, '.pinpawo', 'pets');
+  const documentPath = path.join(petsDir, 'worker', 'PET.md');
+  const original = definePetDocument({ content: '# Worker\n\nImplement changes.' });
+  const updated = definePetDocument({ content: '# Worker\n\nReview changes.' });
+  await mkdir(path.dirname(documentPath), { recursive: true });
+  await writeFile(documentPath, original.content);
+  const configured = {
+    ...configuration([], ['worker', 'plain']),
+    workdir: root,
+    studioConfigPath: path.join(root, '.pinpawo', 'studio.json'),
+    petsDir,
+  };
+  const snapshots: ReadonlyMap<string, PetDocument>[] = [];
+  const make = () => new StudioHost({
+    capabilityAssembly: fakeCapabilityAssembly([]),
+    resolveStudioHostConfig: async () => configured,
+    buildStudio: async (input) => {
+      assert.ok(input.petDocuments);
+      snapshots.push(input.petDocuments);
+      return result(fakeStudio(() => undefined));
+    },
+  });
+  const first = make();
+  try {
+    await first.init();
+    await writeFile(documentPath, updated.content);
+    await first.init();
+    assert.equal(snapshots.length, 1);
+    assert.deepEqual(snapshots[0]?.get('worker'), original);
+    assert.equal(snapshots[0]?.has('plain'), false);
+  } finally { await first.shutdown(); }
+  const restarted = make();
+  try {
+    await restarted.init();
+    assert.equal(snapshots.length, 2);
+    assert.deepEqual(snapshots[1]?.get('worker'), updated);
+  } finally { await restarted.shutdown(); }
 });
 
 test('StudioHost resolves shared capabilities through the Host catalog only for Pets that reference them', async () => {

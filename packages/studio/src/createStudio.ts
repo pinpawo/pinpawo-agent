@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
+import type { PetDocument } from '@pinpawo/pet-agent';
 import { allocatePetSessionId, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
@@ -35,6 +36,8 @@ export type CreateStudioInput = {
   definitions: StudioPetDefinition[];
   /** Builds one Pet's runtime; Studio calls it for each active Pet and for each Pet it creates. */
   assemblePet: StudioPetAssembler;
+  /** Host-loaded PET.md snapshots keyed by definition id; no filesystem access. */
+  petDocuments?: ReadonlyMap<string, PetDocument>;
   plugins?: StudioPlugin[];
   /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
   storage?: StudioStorageConfig;
@@ -59,6 +62,9 @@ export type PreparedStudio = {
 /** Prepare the Studio registry without running executable Plugin lifecycles. */
 export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const plugins = input.plugins ?? [];
+  const petDocuments = new Map([...(input.petDocuments ?? [])].map(([definitionId, document]) => (
+    [definitionId, Object.freeze({ content: document.content })] as const
+  )));
   const pluginNames = new Set<string>();
   for (const plugin of plugins) {
     if (!plugin.name.trim()) throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
@@ -308,6 +314,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       }),
       subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
       listPets,
+      getPetDocument: (petId) => {
+        const pet = registry.getLive(petId);
+        return pet ? petDocuments.get(pet.registration.definitionId) : undefined;
+      },
       pets: registry,
       listDispatchQueues,
       petSessions,

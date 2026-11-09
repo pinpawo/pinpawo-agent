@@ -99,7 +99,10 @@ PET.md defines identity, responsibilities, principles and durable conventions;
 CAPABILITY.md owns executable responsibilities and Toolkit dependencies, JSON owns
 machine settings, and repository AGENTS.md owns project development rules.
 The full model-scope contract is in [Pet root document](../design/pet-document.md).
-Studio snapshots PET.md at startup; restart after edits. Tools and Capabilities
+Studio snapshots PET.md at startup; restart after edits. Plugins can read that
+same startup content through [`context.getPetDocument(petId)`](../reference/api/studio.md),
+including for Pets created later from the same definition. This is a read-only
+content snapshot, not filesystem or private-session access. Tools and Capabilities
 still come from the compiled registry, and framework security remains authoritative.
 
 ## Per-Pet Capability directory
@@ -203,7 +206,7 @@ and any configured announcement in its system prompt. This does not change
 the Pet's `PET.md`; a prompt
 edit applies to a subsequent dispatch, not to a run already in progress or its
 approval continuation. Use it to describe the current team's roles and how members
-collaborate. The routing model can also see it; routing still only considers human
+collaborate. Each enabled Pet Head can also see it; its decision considers public
 messages with no @. It does not grant permissions or override Host / PET safety
 rules, and does not guarantee model compliance. A Pet can still use `channel_read_context`
 to inspect messages; the prompt does not automatically include conversation history.
@@ -242,21 +245,24 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-A human's message that addresses nobody is stored and wakes no Pet. Setting the Channel
-Plugin option `routing.enabled` to `true` lets one model call choose a single Pet, or
-nobody, for such a message:
+Messages that address nobody are stored immediately. With `routing.enabled: true`, each Pet's lightweight
+Channel Head independently decides whether to skip, reply directly, or dispatch its own Pet. Explicit @ delivery
+is unchanged. Head replies do not create sessions or wake other Heads.
 
 ```json
 { "id": "@pinpawo-plugin/channel", "options": { "routing": {
   "enabled": true,
-  "decider": { "kind": "llm", "modelProfileId": "deepseek-v4-flash" },
-  "pets": { "executor": "Runs code, commands and delivery requests." }
+  "decider": { "kind": "llm", "modelProfileId": "fast-model" },
+  "cooldownMs": 300, "batchLimit": 50, "historyLimit": 20,
+  "pets": { "executor": "Implement changes and report public progress." }
 } } }
 ```
 
-`modelProfileId` names a Host model profile (omit it for the Host default); `threshold`
-(default 0.5), `timeoutMs` (default 10000) and `historyLimit` (default 20) are optional.
-See [Channel routing](../design/studio/channel-routing.md).
+`modelProfileId` names a Host profile (omitted: default); `threshold` defaults to 0.5 for the uncalibrated
+self-reported confidence. `timeoutMs` defaults to 10000. A fixed cooldown (0–60000 ms) does not extend on new posts;
+batches contain up to 200 original messages. First enable and re-enable baseline at the current tail; ordinary
+enabled restart retains pending progress. These settings are read at Host start. See
+[Head implementation and recovery limits](../design/studio/channel-pet-head.md).
 
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source

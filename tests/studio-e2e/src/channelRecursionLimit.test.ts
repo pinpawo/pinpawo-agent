@@ -9,7 +9,7 @@ import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
@@ -52,7 +52,7 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
   });
   try {
-    const id = (await channel.service.createChannel(me, { title: 'Goal', pets: ['one'] })).channel.channelId;
+    const id = (await createChannelWithPets(studio!, channel.service, me, { title: 'Goal', pets: ['one'] })).channel.channelId;
     const completed: string[] = [];
     studio.subscribe(event => { if (event.type === 'dispatch.completed') completed.push((event.payload as { invocationId: string }).invocationId); });
     const { deliveries } = await channel.sendMessage(id, { body: 'Inspect.', mentions: [{ participantId: 'pet:one' }] }, me);

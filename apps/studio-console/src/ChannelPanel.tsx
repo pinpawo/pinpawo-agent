@@ -7,10 +7,10 @@ import { ChannelMessageInput, type ChannelMessageInputHandle } from './ChannelMe
 import { PetSessionView } from './PetSessionView';
 import type { PetSessionTarget } from './petSession';
 import {
-  appendChannelDeliveries, channelCanEditPrompt, channelJoinablePets, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
+  appendChannelDeliveries, channelCanEditPrompt, channelInactivePets, channelMemberRemovalInput, channelPetCreateInput, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
   channelPetSession, channelReplyRecipientId, channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages,
   readChannelContext, readChannelLater, readChannelPages, type ChannelWindow,
-  type ChannelContext, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
+  type ChannelPetDefinition, type ChannelPetRecord, type ChannelContext, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
 } from './channelData';
 
 type Props = {
@@ -19,6 +19,7 @@ type Props = {
   clientMode?: boolean;
   /** Open the local project's existing Wiki; not available to Channel-only clients. */
   onOpenKnowledge?: () => void;
+  onPetsChanged?: () => void;
   active?: boolean;
   pets: { petId: string; name: string }[];
   petsReady?: boolean;
@@ -42,7 +43,7 @@ export function ChannelDispatchFailures({ channelId, dispatches, pets, petsReady
     </p>)}</>;
 }
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], dispatches = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], dispatches = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge, onPetsChanged }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<OpenChannel | null>(null);
@@ -61,7 +62,11 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [promptEditing, setPromptEditing] = useState(false);
   const [promptDraft, setPromptDraft] = useState('');
   const [promptError, setPromptError] = useState('');
-  const [createPets, setCreatePets] = useState<string[]>([]);
+  const [definitions, setDefinitions] = useState<ChannelPetDefinition[]>([]);
+  const [definitionError, setDefinitionError] = useState('');
+  const [petRecords, setPetRecords] = useState<ChannelPetRecord[]>([]);
+  const [petRecordsError, setPetRecordsError] = useState('');
+  const [lifecycleStatus, setLifecycleStatus] = useState('');
   const [body, setBody] = useState('');
   const [joiningPet, setJoiningPet] = useState('');
   const [joiningHuman, setJoiningHuman] = useState('');
@@ -111,6 +116,30 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     return value;
   }, [url, token]);
   const refresh = () => setLocalVersion(value => value + 1);
+
+  useEffect(() => {
+    setDefinitions([]); setDefinitionError('');
+    if (!connected || clientMode) return;
+    const abort = new AbortController();
+    void read('/pet-definitions', abort.signal).then(value => {
+      if (!abort.signal.aborted) setDefinitions(value.definitions ?? []);
+    }).catch(reason => { if (!abort.signal.aborted) setDefinitionError(String(reason)); });
+    return () => abort.abort();
+  }, [connected, clientMode, read]);
+
+  useEffect(() => {
+    if (!connected || clientMode) { setPetRecords([]); setPetRecordsError(''); return; }
+    const abort = new AbortController();
+    void read('/pets/records', abort.signal).then(value => {
+      if (!Array.isArray(value.pets)) throw new Error('Invalid Pet records response.');
+      if (!abort.signal.aborted) { setPetRecords(value.pets); setPetRecordsError(''); }
+    }).catch(reason => { if (!abort.signal.aborted) setPetRecordsError(String(reason)); });
+    return () => abort.abort();
+  }, [connected, clientMode, refreshVersion, localVersion, read]);
+
+  useEffect(() => {
+    setSessionView(current => current && petRecords.some(pet => pet.petId === current.petId && (pet.closedAt || pet.removedAt)) ? null : current);
+  }, [petRecords]);
 
   useEffect(() => {
     if (!connected || !active || clientMode) return;
@@ -194,7 +223,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     // The loader only reruns when the selection changes, so the open Channel keeps its view.
     if (id === selected) { setNavigationOpen(false); return; }
     setSelected(id); setContext(null); setMessages([]); setSessions([]); updateHeld(null);
-    setReply(undefined); setBody(''); setError(''); setMemberError(''); setJoiningHuman('');
+    setReply(undefined); setBody(''); setError(''); setMemberError(''); setLifecycleStatus(''); setJoiningHuman('');
     setPromptEditing(false); setPromptDraft(''); setPromptError('');
     setHighlightedMessage(''); setNavigationOpen(false);
     followLatest.current = true; setAtLatest(true);
@@ -221,13 +250,13 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     void submit(async () => {
       const value = await post('/channels', {
         title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}),
-        ...(!clientMode && createPrompt.trim() ? { prompt: createPrompt.trim() } : {}), pets: createPets,
+        ...(!clientMode && createPrompt.trim() ? { prompt: createPrompt.trim() } : {}), pets: [],
       }) as { channel: ChannelRow; members: ChannelMember[] };
       setChannels(current => [...current, value.channel]); setSelected(value.channel.channelId);
       setContext(null); setMessages([]); setSessions([]); updateHeld(null); setReply(undefined); setBody('');
       followLatest.current = true; focusComposer.current = true; setAtLatest(true);
       setHighlightedMessage(''); setNavigationOpen(false);
-      setCreating(false); setTitle(''); setDescription(''); setCreatePrompt(''); setCreatePets([]);
+      setCreating(false); setTitle(''); setDescription(''); setCreatePrompt(''); setActivityOpen(true);
       setPromptEditing(false); setPromptDraft(''); setPromptError('');
     });
   };
@@ -261,6 +290,35 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     }, setMemberError);
   };
 
+  const confirmPetStop = (name: string, action: 'close' | 'remove') => window.confirm(action === 'close'
+    ? `Close ${name}? This will interrupt its current task, cancel unstarted queued tasks, and wait for it to stop before automatically closing it. History is retained and you can reopen this instance. Pending approvals will not be answered or resumed.`
+    : `Permanently remove ${name}? This will interrupt its current task, cancel unstarted queued tasks, and wait for it to stop before automatically removing it. History is retained. Pending approvals will not be answered or resumed. This cannot be undone.`);
+  const removeMember = (member: ChannelMember) => {
+    if (submitting.current || !connected) return;
+    if (member.kind === 'pet' && !confirmPetStop(member.label, 'remove')) return;
+    void submit(async () => {
+      if (member.kind === 'pet') setLifecycleStatus('Stopping current work and canceling unstarted tasks. Waiting for permanent removal…');
+      await post('/channels/members/remove', channelMemberRemovalInput(selected, member, true));
+      if (member.kind === 'pet') {
+        setSessionView(current => current?.petId === member.id ? null : current);
+        setLifecycleStatus('Pet permanently removed. History retained.'); onPetsChanged?.();
+      }
+    }, message => { setLifecycleStatus(''); setMemberError(member.kind === 'pet' ? `Removal not confirmed: ${message} Check its state before retrying.` : message); });
+  };
+  const managePet = (pet: ChannelPetRecord, action: 'close' | 'reopen' | 'remove') => {
+    if (submitting.current || !connected || clientMode) return;
+    if (action !== 'reopen' && !confirmPetStop(pet.name, action)) return;
+    void submit(async () => {
+      setLifecycleStatus(action === 'remove' ? 'Waiting for permanent removal…'
+        : action === 'close' ? 'Stopping current work and canceling unstarted tasks. Waiting to close…' : 'Reopening Pet…');
+      await post(`/pets/${action}`, { petId: pet.petId, ...(action !== 'reopen' ? { confirmStop: true } : {}) });
+      if (action !== 'reopen') setSessionView(current => current?.petId === pet.petId ? null : current);
+      setLifecycleStatus(action === 'remove' ? 'Pet permanently removed. History retained.'
+        : action === 'close' ? 'Pet closed. It can be reopened here. History retained.' : 'Pet reopened in its owner Channel.');
+      onPetsChanged?.();
+    }, message => { setLifecycleStatus(''); setMemberError(`${action === 'remove' ? 'Removal' : action === 'close' ? 'Close' : 'Reopen'} not confirmed: ${message} Check its state before retrying.`); });
+  };
+
   const lastSequence = messages.at(-1)?.sequence;
   const working = context?.working ?? [];
   useEffect(() => {
@@ -288,8 +346,9 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const viewerParticipantId = context?.viewerParticipantId;
   const memberName = (member: ChannelMember) => member.participantId === viewerParticipantId ? 'Me' : member.label;
   const mentionCandidates = members.map(member => ({ participantId: member.participantId, kind: member.kind, label: memberName(member) }));
-  const joinable = channelJoinablePets(pets, members);
-  const petToAdd = joinable.some(pet => pet.petId === joiningPet) ? joiningPet : joinable[0]?.petId ?? '';
+  const inactivePets = channelInactivePets(petRecords, selected);
+  const identityPets = [...petRecords.filter(record => !pets.some(pet => pet.petId === record.petId)), ...pets];
+  const definitionToAdd = definitions.find(item => item.definitionId === joiningPet) ?? definitions[0];
   return <div className={'channel-layout' + (activityOpen && !activityDrawer ? ' with-activity' : '')}>
     {(navigationModal || activityModal) && <button className="channel-scrim" type="button" tabIndex={-1} aria-label="Close panel"
       onClick={() => { setNavigationOpen(false); setActivityOpen(false); }} />}
@@ -334,7 +393,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               }}>
               {held?.hasEarlier && <button className="channel-earlier" type="button" disabled={loadingEarlier || !connected}
                 onClick={() => { void loadEarlier(); }}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
-              <ChannelTimeline messages={messages} pets={pets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage} artifactSource={{ url, token }}
+              <ChannelTimeline messages={messages} pets={identityPets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage} artifactSource={{ url, token }}
                 members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)} routingSkips={routingSkips} working={working}
                 sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
                 onViewerChange={open => {
@@ -423,20 +482,29 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               <div className="channel-member-actions">
                 {session && !clientMode && <button type="button" disabled={!connected} aria-label="View session" onClick={() => viewSession(session)}>Session</button>}
                 {member.kind === 'pet' && !session && <span>No session yet</span>}
+                {member.kind === 'pet' && !clientMode && <button type="button" disabled={!connected || pending} aria-label={'Close Pet ' + name}
+                  onClick={() => managePet({ petId: member.id, name, channelId: selected }, 'close')}>Close Pet</button>}
                 {/* The Console cannot remove its own member. */}
-                {!self && <button type="button" className="channel-member-remove" aria-label={'Remove ' + name} disabled={!connected || pending}
-                  onClick={() => manageMember('/channels/members/remove', member)}>Remove</button>}
+                {!self && <button type="button" className="channel-member-remove" aria-label={(member.kind === 'pet' ? 'Permanently remove Pet ' : 'Remove ') + name} disabled={!connected || pending}
+                  onClick={() => removeMember(member)}>{member.kind === 'pet' ? 'Remove Pet' : 'Remove'}</button>}
               </div>
             </li>;
           })}</ul>
           <div className="channel-member-adders">
-            <form className="channel-member-add" onSubmit={event => { event.preventDefault(); if (petToAdd) manageMember('/channels/members', { kind: 'pet', id: petToAdd }); }}>
-              <select aria-label="Pet to add" disabled={pending || !joinable.length} value={petToAdd} onChange={event => setJoiningPet(event.target.value)}>
-                {!joinable.length && <option value="">Every Pet is a member</option>}
-                {joinable.map(pet => <option key={pet.petId} value={pet.petId}>{channelPetIdentity(pet.petId, pets).optionLabel}</option>)}
+            {!clientMode && <form className="channel-member-add" onSubmit={event => {
+              event.preventDefault();
+              if (definitionToAdd) void submit(async () => {
+                await post('/pets', channelPetCreateInput(selected, definitionToAdd, clientMode));
+              }, message => setMemberError(message + ' Check members before creating another instance.'));
+            }}>
+              <select aria-label="Pet definition" disabled={pending || !definitions.length} value={definitionToAdd?.definitionId ?? ''} onChange={event => setJoiningPet(event.target.value)}>
+                {!definitions.length && <option value="">No Pet definitions available</option>}
+                {definitions.map(definition => <option key={definition.definitionId} value={definition.definitionId}>{definition.name} ({definition.definitionId})</option>)}
               </select>
-              <button disabled={!connected || pending || !petToAdd}>Add Pet</button>
-            </form>
+              <button disabled={!connected || pending || !definitionToAdd}>Create Pet here</button>
+            </form>}
+            {!clientMode && definitionError && <p className="channel-record-error" role="alert">{definitionError}</p>}
+            <p className="channel-history-hint">Each Pet belongs only to this Channel. Close is temporary and can be reopened. Remove is permanent and retains history.</p>
             <form className="channel-member-add" onSubmit={event => {
               event.preventDefault();
               if (joiningHuman.trim()) manageMember('/channels/members', { kind: 'human', id: joiningHuman.trim() }, () => setJoiningHuman(''));
@@ -445,7 +513,21 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               <button disabled={!connected || pending || !joiningHuman.trim()}>Add human</button>
             </form>
           </div>
+          {lifecycleStatus && <p className="channel-history-hint" role="status">{lifecycleStatus}</p>}
           {memberError && <p className="channel-record-error" role="alert">{memberError}</p>}
+        </section>}
+        {!clientMode && <section className="channel-activity-section" aria-label="Inactive Pets">
+          <div className="channel-section-label"><h3>Inactive Pets</h3></div>
+          {petRecordsError && <p className="channel-record-error" role="alert">{petRecordsError}</p>}
+          {!inactivePets.length && !petRecordsError && <p className="channel-history-hint">No closed or permanently removed Pets in this Channel.</p>}
+          <ul className="channel-members">{inactivePets.map(pet => <li className="channel-member" key={pet.petId}>
+            <div className="channel-member-main"><strong>{pet.name}</strong><code>{pet.petId}</code>
+              <span>{pet.removedAt ? 'Permanently removed · history retained' : 'Closed · can reopen'}</span></div>
+            {!pet.removedAt && <div className="channel-member-actions">
+              <button type="button" disabled={!connected || pending} aria-label={'Reopen Pet ' + pet.name} onClick={() => managePet(pet, 'reopen')}>Reopen</button>
+              <button type="button" disabled={!connected || pending} aria-label={'Permanently remove Pet ' + pet.name} onClick={() => managePet(pet, 'remove')}>Remove Pet</button>
+            </div>}
+          </li>)}</ul>
         </section>}
         {messages.length > 0 && !clientMode && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
         <button className="channel-refresh" type="button" disabled={!connected || pending}
@@ -457,18 +539,12 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     {creating && <div className="modal-layer" role="presentation" onMouseDown={event => {
       if (event.target === event.currentTarget && !submitting.current) setCreating(false);
     }}><form ref={createDialog} aria-label="Create Channel" aria-modal="true" role="dialog" className="connection-modal channel-create-dialog" onSubmit={create}>
-      <div className="modal-title"><span>New Channel</span><strong>A conversation with the Pets you choose</strong></div>
+      <div className="modal-title"><span>New Channel</span><strong>Start a shared conversation</strong></div>
       {error && <div className="modal-error" role="alert">{error}</div>}
       <label><span>Title</span><input data-initial-focus aria-label="Channel title" required maxLength={160} value={title} onChange={event => setTitle(event.target.value)} /></label>
       <label><span>Description (optional)</span><textarea aria-label="Channel description" maxLength={50_000} value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
       {!clientMode && <label><span>Channel instructions (optional)</span><textarea aria-label="Channel instructions" maxLength={50_000} value={createPrompt} onChange={event => setCreatePrompt(event.target.value)} rows={3} placeholder="How should members work together?" /></label>}
-      <fieldset className="channel-create-pets"><legend>Pets</legend>
-        {pets.map(pet => <label key={pet.petId}><input type="checkbox" checked={createPets.includes(pet.petId)}
-          onChange={event => setCreatePets(current => event.target.checked ? [...current, pet.petId] : current.filter(id => id !== pet.petId))} />
-          <span>{channelPetIdentity(pet.petId, pets).optionLabel}</span></label>)}
-        {!pets.length && <span>{petsReady ? 'This Studio Host has no Pets.' : 'Loading Pets…'}</span>}
-        <p>Selected Pets join with you. You can add or remove members later.</p>
-      </fieldset>
+      <p>{clientMode ? 'A Studio operator can create Pet instances here after the Channel is created.' : 'Create the Channel first, then create its Pet instances from definitions in the members panel.'}</p>
       <div className="modal-actions"><button type="button" disabled={pending} onClick={() => setCreating(false)}>Cancel</button>
         <button disabled={pending || !connected || !title.trim()}>{pending ? 'Creating…' : 'Create Channel'}</button></div>
     </form></div>}

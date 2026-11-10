@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { createStudioStorage, type StudioDispatchRequest } from '@pinpawo/studio-core';
+import { createStudioStorage, type StudioDispatchRequest, type Studio } from '@pinpawo/studio-core';
 import {
   ChannelService, KyselyChannelStore, channelMigrations, createChannelPlugin, type ChannelDatabase,
 } from '@pinpawo-plugin/channel';
@@ -17,9 +17,13 @@ async function seedChannel(t: TestContext, petIds: string[]) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-  const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })), humans: async () => undefined });
-  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: petIds });
-  return { channelId, channel: createChannelPlugin({ store, httpRoute: false }), service };
+  const service = new ChannelService({ store, pets: () => [], removePet: async () => { throw new Error('No Pet exists in this seed service.'); }, humans: async () => undefined });
+  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: [] });
+  return { channelId, channel: createChannelPlugin({ store, httpRoute: false }), service,
+    provisionPets: async (studio: Studio) => {
+      for (const petId of petIds) await studio.pets.create({ petId, definitionId: petId, name: petId, channelId });
+    },
+  };
 }
 
 /** The task body inside the channel_task input a Channel run hands the Pet. */
@@ -80,7 +84,7 @@ test('Trigger projects direct service mutations through Studio events', async (t
 
 test('Trigger dispatches when a configured Studio event condition matches', async (t) => {
   const requests: string[] = [];
-  const { channelId, channel } = await seedChannel(t, ['wiki']);
+  const { channelId, channel, provisionPets } = await seedChannel(t, ['wiki']);
   const plugin = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -110,6 +114,7 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
     plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
+  await provisionPets(studio);
 
   studio.notify({
     source: 'example-work',
@@ -132,7 +137,7 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
 
 test('Trigger keys event deliveries by event identity, not by the millisecond', async (t) => {
   const requests: string[] = [];
-  const { channelId, channel } = await seedChannel(t, ['wiki']);
+  const { channelId, channel, provisionPets } = await seedChannel(t, ['wiki']);
   const plugin = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -159,6 +164,7 @@ test('Trigger keys event deliveries by event identity, not by the millisecond', 
     plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
+  await provisionPets(studio);
 
   const occurredAt = '2026-10-18T00:00:00.000Z';
   studio.notify({ source: 'notice', type: 'notice.created', payload: { noticeId: 'n-1' }, occurredAt });
@@ -175,7 +181,7 @@ test('Trigger keys event deliveries by event identity, not by the millisecond', 
 
 test('Trigger resolves an explicit event payload target and records a retryable failed delivery', async (t) => {
   let attempts = 0;
-  const { channelId, channel } = await seedChannel(t, ['executor']);
+  const { channelId, channel, provisionPets } = await seedChannel(t, ['executor']);
   const plugin = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -204,6 +210,7 @@ test('Trigger resolves an explicit event payload target and records a retryable 
     plugins: [plugin, channel],
   });
   t.after(() => studio.shutdown());
+  await provisionPets(studio);
   studio.notify({
     source: 'example-work', type: 'task.assigned', occurredAt: '2026-09-02T00:00:00.000Z',
     payload: { taskId: 'task-1', assigneeId: 'executor', sequence: 1 },
@@ -257,7 +264,7 @@ test('a Trigger rule names the Channel its Pet runs in', () => {
 
 test('a channel-bound Trigger runs its Pet in the Channel without posting there, and keeps the receipt', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const { channelId, channel, service } = await seedChannel(t, ['reporter']);
+  const { channelId, channel, service, provisionPets } = await seedChannel(t, ['reporter']);
   const trigger = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -275,6 +282,7 @@ test('a channel-bound Trigger runs its Pet in the Channel without posting there,
     plugins: [trigger, channel],
   });
   t.after(() => studio.shutdown());
+  await provisionPets(studio);
 
   studio.notify({
     source: 'example-work', type: 'task.done', occurredAt: '2026-10-09T00:00:00.000Z',
@@ -327,7 +335,7 @@ test('a channel-bound Trigger fails its delivery when no Channel Plugin runs', a
 
 test('event data in a channel-bound request addresses nobody: it reaches only the rule target', async (t) => {
   const dispatched: StudioDispatchRequest[] = [];
-  const { channelId, channel, service } = await seedChannel(t, ['reporter', 'other']);
+  const { channelId, channel, service, provisionPets } = await seedChannel(t, ['reporter', 'other']);
   const trigger = createTriggerPlugin({
     httpRoute: false,
     triggers: [{
@@ -344,6 +352,7 @@ test('event data in a channel-bound request addresses nobody: it reaches only th
     plugins: [channel, trigger],
   });
   t.after(() => studio.shutdown());
+  await provisionPets(studio);
 
   studio.notify({
     source: 'example-work', type: 'task.done', occurredAt: '2026-10-09T00:00:00.000Z',

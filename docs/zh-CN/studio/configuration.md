@@ -2,17 +2,43 @@
 
 [English](../../studio/configuration.md)
 
-一个 workdir 的配置位于 `.pinpawo/studio.json`，Pet 文件位于
-`.pinpawo/pets/<definitionId>.json`，每个 Pet 的 Capability 目录约定为
+一个 workdir 的配置位于 `.pinpawo/studio.json`，Pet 定义文件位于
+`.pinpawo/pets/<definitionId>.json`，每份定义的 Capability 目录约定为
 `.pinpawo/pets/<definitionId>/capabilities/<name>/CAPABILITY.md`。Pet 还可以在
 `.pinpawo/pets/<definitionId>/PET.md` 中定义跨 Capability 保持一致的工作方式。
 
 默认模板统一维护 Issuer、Executor、Reviewer 和 Wiki，并在 `definitions` 中加载这四份
 定义。JSON 沿用 `pets/<definitionId>.json`，PET.md 和专用 Capability 放在相应定义目录中。
 Issuer 的默认能力为 `studio_issue`，保留 files、shell、web、git、github 和 channel 工具。
-Host 启动时加载定义不会自动新增实例；`init` 会为默认模板的每份定义创建一个初始实例。
-给已有工作区补充定义后，显式执行 `pinpawo-studio pets create issuer --definition issuer --name Issuer`
-创建实例，再将它加入目标 Channel。
+`init` 只安装定义，不创建 Pet 实例；Host 启动时加载定义也不会自动新增实例。
+Host 运行后，先创建只有人类创建者的 Channel，再使用本地 Host token 创建实例：
+
+```sh
+pinpawo-studio channels create --title "Project"
+# 用返回的 channel.channelId 替换 CHANNEL_ID。
+pinpawo-studio pets definitions
+pinpawo-studio pets create issuer --definition issuer --name Issuer --channel CHANNEL_ID
+```
+
+定义可复用，每个实例只有一个不可变的 owner `channelId`，存活实例自动投影为该 Channel
+的 Pet 成员，不能把实例加入其他 Channel。
+
+Close 是临时关闭；Reopen 恢复同一 `petId`、owner Channel、session 和凭证。
+Remove（包括移除 Channel 的 Pet 成员）是永久移除，不能恢复或复用该 id。
+对 resident 实例，两种操作都需明确确认停止当前工作、取消尚未开始的排队任务。
+后端等待业务工作实际停止后，才写入各自的 `closedAt` 或 `removedAt`，无需再点一次移除。
+停止失败或结果不明时不报告最终操作成功；待审批内容不会被自动回答或恢复。
+两种操作都保留身份和历史。正常重启 Studio 只恢复未关闭且未移除的实例。
+本地 authority 可用 `pets records` 查看保留记录；关闭实例的 session 检查入口仍留待后续实现。
+普通 client key 可以管理有权限的 Channel 人类成员或移除 Pet，但不能读取定义或创建实例。
+完整接口见 [Pet lifecycle API](../../reference/api/studio.md#pet-instances)。
+
+本次 ownership schema 仅支持新数据库或没有 Pet 记录的旧数据库。若旧 `studio_pets`
+表已有记录，迁移会在修改 ownership schema 或写入本次迁移历史前拒绝；原版本仍可读取
+同一数据库。目前没有原地 ownership 升级：该 Studio 继续使用原版本，或使用独立的新数据库。
+保留凭证、session 和历史，不要为绕过拒绝而删除或重置它们。
+详见[完整配置指引](../../studio/configuration.md#pet-instance-setup)。
+
 已有工作区需保留定制后补充定义、合并 `definitions` 并重启 Host，不会因初始化自动升级，
 也不会自动获得 Issue 写权限或创建定时巡检。
 

@@ -7,10 +7,10 @@ Plugin packages. The core imports no concrete Plugins. Plugins are resolved
 through `StudioPluginResolver`; Plugin-defined Toolkits enter the Host inventory,
 while Agent Capabilities remain independently owned and registered.
 
-Each Pet selects its Agent Capabilities through its conventional directory:
+Each Pet definition selects its Agent Capabilities through its conventional directory:
 
 ```text
-.pinpawo/pets/<petId>/capabilities/<capability>/CAPABILITY.md
+.pinpawo/pets/<definitionId>/capabilities/<capability>/CAPABILITY.md
 ```
 
 ```bash
@@ -18,17 +18,30 @@ npm install --global @pinpawo/studio
 
 WORKDIR=/path/to/project
 pinpawo-studio init --workdir "$WORKDIR"
-pinpawo-studio --workdir "$WORKDIR"
+# Keep the Host running in this terminal; --pet-port is optional.
 pinpawo-studio --workdir "$WORKDIR" --pet-port 3212
+```
 
-# Connect tiled Pet TUIs to the already-running Host. Read its Pet listener
-# port from Host startup output; Pets are discovered through Studio HTTP.
-pinpawo-studio tmux --pet-port 3212 --console
+In another terminal, open the standalone Console first. From a source checkout,
+this command starts its server if needed (default: `http://127.0.0.1:5173`). For a
+separately deployed Console, add `--url <origin>`.
 
-# Start the separately served Studio Console Web if needed, then open it
-# (default: http://127.0.0.1:5173).
+```bash
 pinpawo-studio console
 ```
+
+The Host and standalone Console work with no Pet instances. Create a Channel and
+its instances in Console using the local Host token, or use the
+[operator commands](#operate-a-running-host) below. Once at least one instance
+exists, connect tiled Pet TUIs to the running Host:
+
+```bash
+# Use the Pet listener port printed by Host startup; discovery uses Studio HTTP.
+pinpawo-studio tmux --pet-port 3212 --console
+```
+
+On a fresh Studio, `tmux --console` rejects empty Pet discovery before opening
+Console. Use the standalone `console` command for first-time setup.
 
 Configured Plugin IDs are installed package names. Each package exposes its
 Plugin through `createStudioPlugin()`; Studio Core does not import concrete
@@ -50,8 +63,8 @@ host Agent Session listener is only for direct conversation with a
 resident Pet. The workdir must contain
 `.pinpawo/studio.json` and the referenced `.pinpawo/pets/*.json` files.
 Each Pet's authored identity and working conventions belong in
-`.pinpawo/pets/<petId>/PET.md` (or `<petsDir>/<petId>/PET.md` when using a custom
-Pet configuration directory). The Host loads the document at startup; restart
+`.pinpawo/pets/<definitionId>/PET.md` (or `<petsDir>/<definitionId>/PET.md` with
+a custom Pet configuration directory). The Host loads the document at startup; restart
 it after changing the document.
 
 Pet JSON and directory rules are defined in [Studio configuration](../../docs/studio/configuration.md).
@@ -75,12 +88,13 @@ a home directory inside a Git worktree also requires an external data root. In t
 cases, select a parent with `pinpawo-studio init --workdir "$HOME" --studio-data-root /path/outside/home/studio-data`.
 This option applies only to initialization; the resulting absolute Wiki path is stored
 in the Studio configuration.
-Existing files are not overwritten. The package template itself contains no
-`.pinpawo/` runtime directory or generated state.
+Existing files are not overwritten. Init installs definitions, not Pet instances.
+Create an empty Channel, then create its instances as shown below. The package
+template itself contains no `.pinpawo/` runtime directory or generated state.
 
 The default template enables the Trigger Plugin with no Triggers. A Trigger runs
-its Pet in a Channel, so create the Channel first, then add the Trigger with
-that `channelId` to `.pinpawo/studio.json`.
+its Pet in its owner Channel, so create the Channel and that Pet instance first.
+Then add the Trigger with the instance's `petId` and `channelId` to `.pinpawo/studio.json`.
 The independent Studio Console remains a separate frontend application. From a
 source checkout, `pinpawo-studio console` starts its local development server
 when it is not already running, then opens the page. A published Studio CLI can
@@ -98,6 +112,9 @@ explicit request; dispatch completion is not acceptance.
 Existing workdirs are never rewritten by startup or `init`. Follow the single
 [configuration migration guide](../../docs/studio/configuration.md#retired-kanban-workdirs),
 preserving local instructions and historical databases, snapshots and Wiki files.
+The [Pet ownership upgrade limit](../../docs/studio/configuration.md#pet-instance-setup)
+requires a fresh database or an earlier database with no Pet rows; populated
+pre-ownership databases remain on the previous version.
 
 ## Operate a running Host
 
@@ -106,14 +123,19 @@ start a Host, open Console, or connect an exclusive TUI client:
 
 ```sh
 pinpawo-studio channels list
-pinpawo-studio channels create --title "Release" --pet executor --pet reviewer
+pinpawo-studio channels create --title "Release"
+# Use channel.channelId from the result as CHANNEL_ID.
+pinpawo-studio pets definitions
+pinpawo-studio pets create executor --definition executor --name Executor --channel CHANNEL_ID
+pinpawo-studio pets create reviewer --definition reviewer --name Reviewer --channel CHANNEL_ID
 pinpawo-studio channels read CHANNEL_ID --after 0 --limit 50
 pinpawo-studio channels members CHANNEL_ID
-pinpawo-studio channels add-member CHANNEL_ID --member pet:wiki
+# alice must already be a registered, active Studio client.
+pinpawo-studio channels add-member CHANNEL_ID --member human:alice
 pinpawo-studio channels send CHANNEL_ID --file message.md --mention PARTICIPANT_ID
 pinpawo-studio channels sessions CHANNEL_ID
 pinpawo-studio queues
-pinpawo-studio pets
+pinpawo-studio pets list
 pinpawo-studio snapshot executor --full
 pinpawo-studio events executor --seconds 30
 pinpawo-studio dispatch executor --file task.txt
@@ -126,6 +148,30 @@ Host and existing Bearer authority. Defaults are `http://127.0.0.1:3211`,
 may precede or follow operator commands; `--file -` reads stdin. Repeat
 `--mention` for current members' participant IDs; `--reply-to` supplies a message
 reference. `channels --help` lists the operator command contract.
+
+The local Host token is required to list definitions or create instances. Client
+keys may use Channel commands and live-only `pets list`. Each Pet has one immutable
+owner Channel; reuse its definition with a new `petId` for another Channel.
+`channels add-member` manages humans.
+
+Close is temporary; Reopen restores the same identity, owner, sessions and
+credentials. Remove is permanent and never permits id reuse. After explicit
+consent to stop current work and cancel unstarted queued tasks, use:
+
+```sh
+pinpawo-studio pets close executor --confirm-stop
+pinpawo-studio pets records
+pinpawo-studio pets reopen executor
+# Permanent removal; alternatively use channels remove-member with --confirm-stop.
+pinpawo-studio pets remove executor --confirm-stop
+```
+
+For a resident instance, both Close and Remove require this stop confirmation.
+The backend stops business work, then saves the final state in the same operation.
+Failed or uncertain stop is not success; neither operation answers or resumes
+pending reviews. Both retain history. Normal Studio restart restores only open,
+unremoved instances. `pets records` is local-authority-only and includes closed
+and removed identities; closed-session inspection remains deferred.
 
 Output is JSON, with bounded live SSE observations emitted as JSON lines.
 Reads return one page and preserve `nextAfter`/`hasMore`; `channels read`

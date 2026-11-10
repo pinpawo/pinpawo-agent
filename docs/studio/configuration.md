@@ -8,10 +8,10 @@
 > [`packages/studio/src/host/buildStudio.ts`](../../packages/studio/src/host/buildStudio.ts).
 
 One workdir has one Studio configuration at
-`<workdir>/.pinpawo/studio.json`. Pet files live beside it in
-`<workdir>/.pinpawo/pets/<definitionId>.json`. Each Pet owns a conventional
+`<workdir>/.pinpawo/studio.json`. Pet definitions live beside it in
+`<workdir>/.pinpawo/pets/<definitionId>.json`. Each definition owns a conventional
 Capability collection at
-`<workdir>/.pinpawo/pets/<definitionId>/capabilities/`. A Pet can also define stable,
+`<workdir>/.pinpawo/pets/<definitionId>/capabilities/`. A definition can also specify stable,
 cross-Capability behavior in `<workdir>/.pinpawo/pets/<definitionId>/PET.md`.
 
 ## `studio.json`
@@ -165,14 +165,46 @@ The default template includes Issuer, Executor, Reviewer and Wiki definitions in
 live in `pets/<definitionId>/`. Issuer uses `studio_issue` as its default and
 retains the shared files, shell, web, git, github and channel Toolkits.
 
-Loading a definition on Host startup does not create a new Pet instance.
-`init` seeds one instance per default template definition; adding a definition to
-an existing workdir requires explicit instance creation, for example
-`pinpawo-studio pets create issuer --definition issuer --name Issuer`. Add the
-instance to the intended Channel separately. Existing workdirs are not upgraded by initialization;
-copy missing definitions and merge the `definitions` list while preserving local
-customizations, then restart the Host. Role definitions do not grant Issue write
-permissions or configure a polling schedule.
+## Pet instance setup
+
+`init` installs definitions but creates no Pet instances. Loading definitions on
+Host startup does not create instances either. With the Host running, use its
+local token to create instances in an existing Channel:
+
+```sh
+pinpawo-studio channels create --title "Project"
+# Use channel.channelId from the result as CHANNEL_ID.
+pinpawo-studio pets definitions
+pinpawo-studio pets create issuer --definition issuer --name Issuer --channel CHANNEL_ID
+```
+
+A Channel starts with its human creator and no Pets. A definition is reusable;
+each concrete instance has one immutable owner `channelId`. Its live record
+supplies Pet membership automatically; it cannot join another Channel.
+
+Close is temporary. Reopen restores the same `petId`, owner Channel, sessions and
+credentials. Remove, including Channel Pet member removal, is permanent; that id
+cannot reopen or be reused. For a resident instance, either action requires
+explicit consent to stop current work and cancel unstarted queued tasks.
+The backend awaits business stop before saving `closedAt` or `removedAt`, without
+a second action. A failed or uncertain stop is not success. Pending reviews are
+not answered or resumed. Both actions retain identity and history. Normal Studio
+restart restores only open, unremoved instances. Use local-authority `pets records`
+for retained records; closed-session inspection remains deferred.
+See [Pet lifecycle API](../reference/api/studio.md#pet-instances).
+
+This ownership schema supports fresh databases or earlier databases with no Pet
+rows. For a populated pre-ownership `studio_pets` table, the migration refuses
+before changing the ownership schema or recording its migration. The previous
+version can still read the same database. No in-place ownership upgrade is
+provided: keep that Studio on the previous version or use a separate fresh Studio
+database. Preserve credentials, sessions and history; do not delete or reset them
+to bypass the refusal. See the [ownership migration](../../packages/studio/src/pets/store/kysely/migrations.ts).
+
+Existing workdirs are not upgraded by initialization. Copy missing definitions
+and merge the `definitions` list while preserving local customizations, then
+restart the Host. Role definitions do not grant Issue write permissions or
+configure a polling schedule.
 
 ## Plugin assembly
 
@@ -321,10 +353,12 @@ For an existing workdir, manually compare its files with the shipped template:
 4. Keep the three roles and their valid defaults: `studio_execution`,
    `studio_review`, and `wiki_maintenance`. The template no longer ships a
    `planner` Pet, and the Host no longer provides the `studio-context` Toolkit
-   (`studio_pet_list`). Remove the `planner` Pet (and point `entryPetId` and any
-   Trigger `petId` at another Pet), or drop `studio-context` from its Capabilities'
-   `uses`; a Capability that still names it is unavailable. Explicitly request
-   work through a Pet session, generic dispatch, or Channel execution. Request
+   (`studio_pet_list`). Remove legacy `entryPetId`; use `definitions` instead of
+   the old `pets` configuration list. Remove the unused `planner` definition, or
+   drop `studio-context` from its Capabilities' `uses`; a Capability that still
+   names it is unavailable. Any Trigger must name an existing Pet instance and
+   its owner Channel. Explicitly request work through a Pet session, generic
+   dispatch, or Channel execution. Request
    Wiki maintenance with the changes and evidence that should be reconciled.
 5. Preserve `.pinpawo/kanban/`, any `kanban.json`, existing Wiki, and other user data.
    Restart the Host after reviewing the configuration changes.

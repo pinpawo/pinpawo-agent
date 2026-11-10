@@ -32,7 +32,7 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
 
 ## 职责与限制
 
-Studio 校验存活 Pet 和 entryPetId、接纳输入并分配 invocation identity、管理 Plugin
+Studio 校验存活 Pet 实例及其 owner Channel、接纳输入并分配 invocation identity、管理 Plugin
 生命周期与事件广播。resident 拥有运行槽/队列、对话、checkpoint 与 session 恢复；
 Plugin 拥有领域历史、调度与知识投影。精确接口以 API 为准，进程内幂等和 live 事件
 不提供执行结果、自动重试、超时或持久重放。

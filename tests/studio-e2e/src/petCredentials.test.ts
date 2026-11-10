@@ -1,3 +1,4 @@
+import { createChannelPlugin } from '@pinpawo-plugin/channel';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -58,7 +59,9 @@ test('real graph review/resume injects the running Pet\'s credential only at She
     t.after(() => rm(root, { recursive: true, force: true }));
     const secret = `fake-credential-${randomUUID()}`;
     const deploymentKey = Buffer.alloc(32, 0x6b);
+    const channel = createChannelPlugin({ httpRoute: false });
     const prepared = prepareStudio({
+      plugins: [channel],
       studioId: 'credential-integration', credentialsKey: deploymentKey,
       storage: { kind: 'sqlite', path: join(root, 'studio.sqlite') },
       definitions: [{ definitionId: 'shared', name: 'Shared' }],
@@ -142,7 +145,9 @@ test('real graph review/resume injects the running Pet\'s credential only at She
       } as HostGraphService,
     });
     t.after(() => host.close());
-    await prepared.studio.pets.create({ petId: 'credential-pet', definitionId: 'shared', name: 'Credential Pet' });
+    await prepared.activatePlugins();
+    const channelId = (await channel.service.createChannel({ kind: 'human', id: 'local' }, { title: 'Credentials' })).channel.channelId;
+    await prepared.studio.pets.create({ petId: 'credential-pet', definitionId: 'shared', name: 'Credential Pet', channelId });
     await prepared.studio.pets.credentials.set({ petId: 'credential-pet', envName: 'PET_TEST_TOKEN', value: secret });
     const events: AgentServerMessage[] = [];
     host.interaction.subscribe(message => events.push(message));

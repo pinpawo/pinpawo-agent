@@ -43,10 +43,18 @@ The mapping is owned by Studio's initialization API. Template files never
 contain checkpoint data, SQLite databases, resident-session files, or generated
 runtime outputs.
 
-After copying, `init` creates one Pet per template definition in the new Studio
-database, each with its definition's id and name (see [Pet instances](pet-instance.md)),
-so the template's own references, such as the trigger's target `executor`, resolve
-on first start. It refuses to reuse an existing database.
+`init` installs reusable Pet definitions, configuration, initial Wiki files and
+the credentials key; it does not create a Studio database or seed Pet instances.
+Start the Host normally, then open the standalone Console with `pinpawo-studio
+console`. Both work before any Pet exists. Create a Channel first, then create
+its instances with the local Host token (see [Pet instance setup](../../studio/configuration.md#pet-instance-setup)
+and [Pet instances](pet-instance.md)). The default template has no Triggers;
+add one only after its target instance and owner Channel exist.
+
+After creating an instance, `pinpawo-studio tmux --pet-port <port> --console`
+can open its TUI and the Console. On a fresh Studio, tmux rejects empty Pet
+discovery before opening the Console; use the standalone Console for bootstrap.
+See the [startup commands](../../../services/studio/README.md).
 
 ## One initialization path
 

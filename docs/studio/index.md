@@ -45,8 +45,8 @@ Toolkits and state.
 
 ## Ownership and limits
 
-Studio validates the live registry and entryPetId, admits dispatch and allocates
-invocation identities, starts/stops Plugins and broadcasts their events.
+Studio validates live Pet instances and their owner Channels, admits dispatch,
+allocates invocation identities, starts/stops Plugins and broadcasts their events.
 Resident runtime owns queue/gate, conversation, checkpoints and session recovery.
 Plugins own domain history, scheduling, trigger policy and knowledge projection.
 In-memory admission records and live events do not provide execution results,

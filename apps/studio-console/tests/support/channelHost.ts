@@ -7,13 +7,13 @@ import { Annotation, Command, END, START, StateGraph, interrupt } from '@langcha
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
 
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
+import { prepareStudio, type StudioPetAssembler } from '@pinpawo/studio-core';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../../services/host/src/agent/agentGraphService';
-import { createStudioWithPets } from '../../../../tests/support/livePets';
 
 function fixtureReply(text: string) {
   return new AIMessage({ content: text, usage_metadata: {
@@ -27,9 +27,11 @@ const token = 'console-browser-test-only';
 const http = createStudioHttpPlugin({ port: Number(process.env.CHANNEL_HOST_TEST_PORT ?? 0), authToken: token, allowedOrigins: ['http://127.0.0.1:5199'] });
 const channel = createChannelPlugin();
 const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
-const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
 const petNames = process.env.CHANNEL_HOST_TEST_DUPLICATE_NAMES ? ['Analyst', 'Analyst'] : ['Alpha', 'Beta'];
-for (const petId of ['alpha', 'beta']) {
+// The real Console creates an owner Channel first, then assembles independent
+// instances from these reusable definitions. Runtime state is keyed by instance.
+const definitions = ['alpha', 'beta'].map((definitionId, index) => ({ definitionId, name: petNames[index]! }));
+const assemblePet: StudioPetAssembler = async ({ petId, name }) => {
   const runtimeConfig = buildHostRuntimeConfig(join(root, petId));
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
   const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
@@ -49,11 +51,14 @@ for (const petId of ['alpha', 'beta']) {
     if (invocation.scope?.namespace !== 'channel') {
       return { messages: [fixtureReply('Standalone deterministic reply. Inspect this Pet session for the result.')] };
     }
-    if (command === 'handoff' || last === 'handoff [@Alpha](participant:pet:alpha)') return { messages: [fixtureReply('[@Beta](participant:pet:beta) Please inspect this delivery.')] };
-    if (last === '[@Beta](participant:pet:beta) Please inspect this delivery.') {
-      return { messages: [fixtureReply('[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.')] };
+    const siblings = (await prepared.studio.pets.list()).filter(pet => pet.channelId === invocation.scope!.id && !pet.closedAt);
+    const alpha = siblings.find(pet => pet.definitionId === 'alpha');
+    const beta = siblings.find(pet => pet.definitionId === 'beta');
+    if (command === 'handoff' && beta) return { messages: [fixtureReply(`[@Beta](participant:pet:${beta.petId}) Please inspect this delivery.`)] };
+    if (beta && alpha && last === `[@Beta](participant:pet:${beta.petId}) Please inspect this delivery.`) {
+      return { messages: [fixtureReply(`[@Alpha](participant:pet:${alpha.petId}) Inspection complete; deliver the result.`)] };
     }
-    if (last === '[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.') {
+    if (alpha && last === `[@Alpha](participant:pet:${alpha.petId}) Inspection complete; deliver the result.`) {
       return { messages: [fixtureReply('[@Me](participant:human:local) Result delivered.')] };
     }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string) as { messages: Array<{ author: { kind: string } }> };
@@ -61,9 +66,10 @@ for (const petId of ['alpha', 'beta']) {
     return { messages: [fixtureReply(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nInput source: ${input?.author.participantId}. Message: ${input?.messageId}. Referenced message: ${input?.replyTo?.messageId ?? 'none'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the Channel title, members and messages. Remaining work: user acceptance.`)] };
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
-  hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,
+  const host = await createResidentPetHost({ petId, petName: name, runtimeConfig,
     modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
     capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), checkpointer, sessionStatePath: runtimeConfig.tuiSessionPath,
+    resolveInvocationContext: async target => prepared.resolveInvocationContext(target),
     graphService: {
       async readThreadState(setup: AgentChannelSetup) {
         const snapshot = await graph.getState(config(setup));
@@ -75,17 +81,22 @@ for (const petId of ['alpha', 'beta']) {
           { ...config(setup), version: 'v3' });
       },
     } as never,
-  }));
-}
-const studio = await createStudioWithPets({ studioId: 'console-browser', plugins: [channel, http],
+  });
+  return { dispatch: host.resident.dispatch, sessions: host.sessions, close: () => host.close() };
+};
+const prepared = prepareStudio({ studioId: 'console-browser', plugins: [channel, http],
   storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
-  pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: petNames[index]! },
-    dispatch: host.resident.dispatch, sessions: host.sessions })),
+  definitions, assemblePet,
 });
+const studio = prepared.studio;
+await prepared.restorePets();
+await prepared.activatePlugins();
 // Historical fixture data lives only in this temporary database. No model calls.
 if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
   const { channel: seeded } = await channel.service.createChannel({ kind: 'human', id: 'local' },
-    { title: 'Layout investigation', description: 'Review public evidence and choose the next round.', pets: ['alpha', 'beta'] });
+    { title: 'Layout investigation', description: 'Review public evidence and choose the next round.', pets: [] });
+  for (const definition of definitions) await studio.pets.create({ petId: definition.definitionId, definitionId: definition.definitionId,
+    name: definition.name, channelId: seeded.channelId });
   // A former member whose Pet is no longer registered; its message stays as written.
   const joinedAt = new Date().toISOString();
   await channel.service.store.upsertMember({ channelId: seeded.channelId, kind: 'pet', id: 'retired-pet', joinedAt, leftAt: joinedAt });
@@ -96,7 +107,7 @@ console.log(JSON.stringify({ ready: true, url: `http://127.0.0.1:${http.address(
 let closing = false;
 const close = async () => {
   if (closing) return; closing = true;
-  await Promise.all(hosts.map(host => host.close())); await studio.shutdown();
+  await studio.shutdown();
   if (!process.env.CHANNEL_HOST_TEST_ROOT) await rm(root, { recursive: true, force: true });
   process.exit(0);
 };

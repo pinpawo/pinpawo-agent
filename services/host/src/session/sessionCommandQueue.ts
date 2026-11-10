@@ -1,3 +1,5 @@
+import { ResidentPetOperationCancelledError } from '../host/contracts';
+
 /**
  * Serializes the commands a client issues.
  *
@@ -19,18 +21,32 @@
  */
 export class SessionCommandQueue {
   private tail: Promise<void> = Promise.resolve();
+  private closed = false;
 
   /** Run `command` after everything already queued has settled. */
   enqueue(command: () => Promise<void>): Promise<void> {
     // The tail follows settlement rather than the value, so one failed
     // command does not block every command after it.
-    const next = this.tail.then(command, command);
+    const next = this.tail.then(() => {
+      this.assertOpen();
+      return command();
+    });
     this.tail = next.then(() => undefined, () => undefined);
     return next;
   }
 
   /** Resolve once the queued commands have settled. */
-  waitForIdle(): Promise<void> {
-    return this.tail;
+  async waitForIdle(): Promise<void> {
+    await this.tail;
+    this.assertOpen();
+  }
+
+  /** Refuse future/queued commands without interrupting the executing one. */
+  close(): void {
+    this.closed = true;
+  }
+
+  assertOpen(): void {
+    if (this.closed) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
   }
 }

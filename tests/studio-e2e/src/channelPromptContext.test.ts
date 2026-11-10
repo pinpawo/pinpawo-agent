@@ -12,7 +12,7 @@ import { createTestModelProfiles } from '../../../services/host/src/testing/mode
 import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
 class ObservingModel extends BaseChatModel {
@@ -51,7 +51,7 @@ test('Channel instructions reach the actual Pet model per invocation without rep
   });
   const channel = createChannelPlugin({ httpRoute: false });
   const contextBridge = createInvocationContextBridge();
-  let host: Awaited<ReturnType<typeof createResidentPetHost>> | undefined;
+  const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   let studio: Awaited<ReturnType<typeof createStudioWithPets>> | undefined;
   try {
     const config = buildHostRuntimeConfig(root);
@@ -68,25 +68,28 @@ Pet identity marker: ${petMarker}
     const modelSetup = (setup: AgentChannelSetup): AgentChannelSetup => ({ ...setup,
       graphConfig: { ...setup.graphConfig, models: { act: model, answer: model, subagent: model } },
     });
-    host = await createResidentPetHost({ petId: 'worker', petName: 'Worker', runtimeConfig: config,
+    for (const petId of ['worker', 'worker-b']) {
+      const runtimeConfig = buildHostRuntimeConfig(join(root, petId));
+      hosts.push(await createResidentPetHost({ petId, petName: 'Worker', runtimeConfig,
       resolveInvocationContext: contextBridge.resolveInvocationContext,
       modelProfiles: createTestModelProfiles(), toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
       capabilities: [], petDocument, toolkitInventory: new HostToolkitInventoryStore(inventory),
-      checkpointer: new FileSaver(config.checkpointPath), sessionStatePath: config.tuiSessionPath,
+      checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
       graphService: {
         readThreadState: (setup: AgentChannelSetup) => graph.readThreadState(modelSetup(setup)),
         streamEvents: (setup: AgentChannelSetup) => graph.streamEvents(modelSetup(setup)),
       } as never,
-    });
+      }));
+    }
     studio = await createStudioWithPets({ studioId: 'prompt-e2e', plugins: [channel],
       onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
-      pets: [{ registration: { petId: 'worker', name: 'Worker' }, dispatch: host.resident.dispatch }],
+      pets: hosts.map((host, index) => ({ registration: { petId: ['worker', 'worker-b'][index]!, name: 'Worker' }, dispatch: host.resident.dispatch })),
     });
-    const a = (await channel.service.createChannel(me, { title: titleA, description: descriptionA, prompt: alpha, pets: ['worker'] }, { studio: true })).channel.channelId;
-    const b = (await channel.service.createChannel(me, { title: titleB, prompt: beta, pets: ['worker'] }, { studio: true })).channel.channelId;
+    const a = (await createChannelWithPets(studio!, channel.service, me, { title: titleA, description: descriptionA, prompt: alpha, pets: ['worker'] }, { studio: true })).channel.channelId;
+    const b = (await createChannelWithPets(studio!, channel.service, me, { title: titleB, prompt: beta, pets: ['worker-b'] }, { studio: true })).channel.channelId;
     const sendAndWait = async (id: string, expectedCount: number) => {
-      await channel.sendMessage(id, { body: 'Please respond.', mentions: [{ participantId: 'pet:worker' }] }, me);
+      await channel.sendMessage(id, { body: 'Please respond.', mentions: [{ participantId: id === a ? 'pet:worker' : 'pet:worker-b' }] }, me);
       await waitFor(async () => (await channel.service.readContext(me, id, { limit: 100 })).messages.filter(m => m.author.kind === 'pet').length === expectedCount);
     };
     await sendAndWait(a, 1);
@@ -108,26 +111,26 @@ Pet identity marker: ${petMarker}
       }
     }
 
-    // A queued run keeps the prompt snapshot from admission, even if another
-    // Channel's prompt changes before this same Pet gets to execute it.
+    // A queued run keeps its owner's prompt snapshot from admission even if
+    // that Channel's prompt changes before the same instance executes it.
     const queuedRevision = randomUUID();
     const holding = new Promise<void>(resolve => { modelStarted = resolve; });
     holdNext = true;
     const held = channel.sendMessage(a, { body: 'Hold this run.', mentions: [{ participantId: 'pet:worker' }] }, me);
     await holding;
-    await channel.sendMessage(b, { body: 'Run after the held task.', mentions: [{ participantId: 'pet:worker' }] }, me);
-    await channel.service.updateChannel(me, b, { prompt: queuedRevision }, { studio: true });
+    await channel.sendMessage(a, { body: 'Run after the held task.', mentions: [{ participantId: 'pet:worker' }] }, me);
+    await channel.service.updateChannel(me, a, { prompt: queuedRevision }, { studio: true });
     releaseModel!();
     await held;
-    await waitFor(async () => (await channel.service.readContext(me, b, { limit: 100 })).messages.filter(m => m.author.kind === 'pet').length === 2);
+    await waitFor(async () => (await channel.service.readContext(me, a, { limit: 100 })).messages.filter(m => m.author.kind === 'pet').length === 5);
     assert.equal(observed.length, 6);
     assert.ok(observed[4]!.includes(revised));
-    assert.ok(observed[5]!.includes(beta));
+    assert.ok(observed[5]!.includes(revised));
     assert.ok(!observed[5]!.includes(queuedRevision));
-    await sendAndWait(b, 3);
+    await sendAndWait(a, 6);
     assert.ok(observed[6]!.includes(queuedRevision));
     await channel.service.updateChannel(me, a, { prompt: null }, { studio: true });
-    await sendAndWait(a, 5);
+    await sendAndWait(a, 7);
     assert.ok(observed[7]!.includes(titleA), 'Channel metadata remains available without an announcement');
     assert.ok(!observed[7]!.includes(revised));
     assert.ok(nonSystemMessages.every(messages => messages.every(message =>
@@ -135,7 +138,7 @@ Pet identity marker: ${petMarker}
     'shared Channel context is not appended to conversation history');
   } finally {
     releaseModel?.();
-    await host?.close(); await studio?.shutdown();
+    await Promise.all(hosts.map(host => host.close())); await studio?.shutdown();
     await rm(root, { recursive: true, force: true });
   }
 });

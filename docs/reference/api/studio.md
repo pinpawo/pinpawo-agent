@@ -8,12 +8,18 @@ Pet registration metadata and `PetDispatchPort`; it does not receive Agent
 Session, checkpoint, Capability inventory, or private actor data.
 
 ```ts
-type StudioPetBinding = {
-  registration: {
-    petId: string;
-    name: string;
-  };
+type StudioPetRegistration = {
+  petId: string;
+  definitionId: string;
+  channelId: string;
+  name: string;
+  createdAt: string;
+};
+
+type StudioPetRuntime = {
   dispatch: PetDispatchPort;
+  sessions?: PetSessionPort;
+  close: () => Promise<void>;
 };
 
 type StudioDispatchRequest = {
@@ -121,12 +127,12 @@ A human joins only as an active Studio client, and its label is the client's lab
 | Route | Input / result |
 |---|---|
 | `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. With `all=true`, the local Host token lists every Channel. |
-| `POST /channels` | `title`, optional `description` and `prompt`, required `pets: [...]`; only Studio authority may supply a non-empty prompt. Ordinary clients can create a Channel without one. The creator and those Pets are the initial members. `201 { channel, members }`. |
+| `POST /channels` | `title`, optional `description` and `prompt`; `pets` may be omitted or `[]`, and non-empty arrays are rejected. Only Studio authority may supply a non-empty prompt. The human creator is the only initial member; no Pet instances are created. `201 { channel, members }`. |
 | `POST /channels/update` | `channelId`, optional `title`, optional `description` and `prompt` (`null` clears the corresponding field). Members may edit title and description; only Studio authority may modify or clear prompt, even when the caller created the Channel. Non-member Studio authority may update prompt alone; mixed updates still require membership. |
 | `GET /channels/context?channelId=...` | Channel, current members, a page of messages (the newest by default; `before` reads older, `after` newer), `viewerParticipantId`. |
 | `GET /channels/members?channelId=...` | Current members. The local Host token may read any Channel's members. |
-| `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins a member. Any member, or the local Host token for any Channel. |
-| `POST /channels/members/remove` | `channelId`, `kind`, `id`; the member leaves, its messages stay. `409` for the last human member. Any member, or the local Host token for any Channel. |
+| `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins an active human client. An already-live Pet in its owner Channel returns its projected membership. Pet creation or reopen uses the lifecycle API; instances cannot join another Channel. Any member, or the local Host token for any Channel. |
+| `POST /channels/members/remove` | `channelId`, `kind`, `id`, optional `confirmStop`; a human leaves, or a Pet instance is permanently removed. Resident Pet removal requires `confirmStop: true` and awaits business stop before final removal. Identity and history remain. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; message plus per-target deliveries. |
 
@@ -168,6 +174,67 @@ same way. The model is specified in [Channel model](../../design/studio/channel-
 addressing syntax and fixed sessions in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
 Delivery acceptance is not execution completion.
 
+## Pet instances
+
+A reusable definition describes how a Pet works. Each concrete instance has its
+own `petId`, runtime and sessions, and exactly one immutable owner `channelId`.
+Create an empty Channel first, then use the local Host token for these routes:
+
+| Route | Input / result |
+|---|---|
+| `GET /pet-definitions` | `{ definitions: [{ definitionId, name }] }`. |
+| `POST /pets` | Required `petId`, `definitionId`, `name`, `channelId`; the definition and owner Channel must exist. `201 { pet }`. |
+| `GET /pets/records` | `{ pets: [...] }`, all retained instance records, including `closedAt` or `removedAt` when set. Local authority only. |
+| `POST /pets/close` | `{ petId, confirmStop? }`; temporarily closes after confirmed business stop, returning `{ pet }` with `closedAt`. |
+| `POST /pets/reopen` | `{ petId }`; restores a temporarily closed instance with the same id, owner, sessions and credentials. Removed instances cannot reopen. |
+| `POST /pets/remove` | `{ petId, confirmStop? }`; permanently removes after confirmed business stop, returning `{ pet }` with `removedAt`. History remains. |
+
+For example, after creating a Channel, send this body to `POST /pets`:
+
+```json
+{
+  "petId": "executor-release",
+  "definitionId": "executor",
+  "name": "Executor",
+  "channelId": "CHANNEL_ID"
+}
+```
+
+Live instance records supply Channel Pet membership; there is no separate Pet
+join. Close is temporary; Remove, including Channel Pet member removal, is
+permanent. Both retain id, owner, credentials, sessions and messages. Only Remove
+prevents reopening forever; a replacement then requires a new `petId`.
+Ordinary client keys cannot read definitions, create instances or call these
+local-authority management routes. Channel members may manage humans and remove
+a Pet member under the existing Channel permissions.
+
+For a resident instance, both Close and Remove require `confirmStop: true`.
+This confirms stopping current work and cancelling unstarted queued tasks.
+The backend waits for business work to stop, then persists the distinct final
+state in the same operation; a second removal request is not needed. Without
+confirmation the action is refused. Stop failure or an uncertain outcome is not
+final-action success: retain the instance and history, inspect state before
+retrying. Neither action answers or resumes a pending review. A closed instance
+can be removed without another resident stop.
+
+The CLI supports `pets definitions`, `pets records` and creation with
+`pets create <petId> --definition <definitionId> --name <name> --channel <channelId>`.
+After explicit stop consent, use:
+
+```sh
+pinpawo-studio pets close executor-release --confirm-stop
+pinpawo-studio pets records
+pinpawo-studio pets reopen executor-release
+pinpawo-studio pets remove executor-release --confirm-stop
+```
+
+Channel removal uses `channels remove-member <channelId> --member pet:<petId>
+--confirm-stop`. `GET /pets` remains live-only. Local-authority record metadata
+enables retained identity display, but does not add closed-session inspection;
+client history names may still fall back to ids.
+See the [ownership upgrade limit](../../studio/configuration.md#pet-instance-setup)
+before opening an existing database with this version.
+
 ## Studio clients
 
 Every HTTP request is authenticated as a Studio client. The local Host token is
@@ -179,7 +246,7 @@ SHA-256 hashes.
 | Route | Input / result |
 |---|---|
 | `GET /me` | `{ clientId, scope }` for the token, `scope` is `studio` or `client`. |
-| `GET /pets` | `{ pets: [{ petId, name }] }`, the Pet directory a client needs to create a Channel. |
+| `GET /pets` | `{ pets: [{ petId, definitionId, channelId, name, createdAt }] }`, the live Pet instance directory. It does not list closed instances or attach Pets to Channels. |
 
 `/events`, `/dispatch`, `/dispatch/queues` and `/pet-sessions/*` stay with the
 local Host token, so a client follows its Channels by polling the Channel
@@ -206,9 +273,12 @@ with `POST /clients/revoke` refuses its later tokens. See the
 
 ## Host lifecycle
 
-`StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls
-the whole Host back. `startStudioHost()` also starts the host Pet-scoped
-Agent Session listener. Configured HTTP Plugins provide the Studio control plane;
+`StudioHost` loads configured definitions and restores the still-open Pet
+instances stored in the Studio database. Any Pet startup failure rolls the whole
+Host back. Normal process shutdown is separate from explicit Close or Remove:
+a later startup restores only instances with neither `closedAt` nor `removedAt`.
+Closed instances require Reopen; removed instances cannot return.
+`startStudioHost()` also starts the host Pet-scoped Agent Session listener. Configured HTTP Plugins provide the Studio control plane;
 Studio has no built-in WebSocket or stdio dispatch protocol.
 
 ## Host Agent Session HTTP
@@ -238,7 +308,7 @@ is not an HTTP command; use the current `session.new` protocol instead.
 
 The repository's [Studio skill](../../../skills/studio/SKILL.md) provides
 usage guidance for the project Node.js CLI. `pinpawo-studio channels`,
-`pets`, `queues`, `snapshot`, `events`, `dispatch`, and `send` wrap existing
+`pets list`, `queues`, `snapshot`, `events`, `dispatch`, and `send` wrap existing
 HTTP endpoints; they do not start a Host. The former Python helper has been
 replaced. See the [CLI commands](../../../services/studio/README.md#operate-a-running-host)
 for connection flags and pagination.

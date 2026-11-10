@@ -16,7 +16,7 @@ import { HostGraphService } from '../../../services/host/src/agent/agentGraphSer
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
-import { createStudioWithPets } from '../../support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../support/livePets';
 import { readChannelTestInput } from '../../support/channelDispatchInput';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
@@ -154,7 +154,7 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
             onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
           } }],
       });
-      const cid = (await channel.service.createChannel(me, { title: 'Incoming input', prompt: announcement,
+      const cid = (await createChannelWithPets(studio!, channel.service, me, { title: 'Incoming input', prompt: announcement,
         pets: ['worker', 'reviewer'] }, { studio: true })).channel.channelId;
       await channel.sendMessage(cid, { body: 'Start the controlled work.' }, me);
       await waitFor(() => started);

@@ -306,7 +306,7 @@ try {
   assert.deepEqual(await composerMentions(), ['pet:alpha']);
   assert.equal(rejectedWrites, 1, 'rejected submission is not retried');
   await page.unroute(first.url + '/channels/messages');
-  const { channel: other } = await api('/channels', { title: 'Separate layout', description: 'A separate conversation.', pets: ['alpha'] });
+  const { channel: other } = await api('/channels', { title: 'Separate layout', description: 'A separate conversation.', pets: [] });
   await page.locator('.channel-list button').filter({ hasText: other.title }).waitFor();
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
   await page.keyboard.type('Channel A draft must not cross Channels.');

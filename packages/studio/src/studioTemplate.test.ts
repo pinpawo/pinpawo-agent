@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadCapabilityDirectory, loadPetConfigs, loadPetDocument } from 'pinpawo/host-runtime';
@@ -133,6 +133,7 @@ test('shipped Pet definitions support Issue, execution, review, and Wiki request
     'utf8',
   )) as { definitions: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
   assert.deepEqual(studioConfig.definitions, ['issuer', 'executor', 'reviewer', 'wiki']);
+  await assert.rejects(access(path.join(workdir, '.pinpawo', 'studio', 'studio.sqlite')), { code: 'ENOENT' });
   const petsDir = path.join(workdir, '.pinpawo', 'pets');
   const definitions = await loadPetConfigs(petsDir);
   assert.deepEqual(definitions.map(({ definitionId }) => definitionId).sort(), [...studioConfig.definitions].sort());

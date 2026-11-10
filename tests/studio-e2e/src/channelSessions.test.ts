@@ -14,7 +14,7 @@ import { createTestModelProfiles } from '../../../services/host/src/testing/mode
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
@@ -85,7 +85,7 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 async function outputs(f: Fixture, channelId: string) {
   return (await f.channel.service.readContext(me, channelId, { limit: 200 })).messages.filter(m => m.author.kind === 'pet');
 }
-const open = async (f: Fixture) => (await f.channel.service.createChannel(me, { title: 'Goal', pets: f.pets })).channel.channelId;
+const open = async (f: Fixture) => (await createChannelWithPets(f.studio, f.channel.service, me, { title: 'Goal', pets: f.pets })).channel.channelId;
 const ask = (f: Fixture, channelId: string, petId: string, body: string, replyTo?: string) =>
   f.channel.sendMessage(channelId, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: `pet:${petId}` }] }, me);
 /** The dispatch.message event a Channel message was written from. */
@@ -113,7 +113,7 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
   let f = await fixture(root, pets);
   try {
     const a = await open(f);
-    const b = await open(f);
+    const b = (await f.channel.service.createChannel(me, { title: 'Other', pets: [] })).channel.channelId;
     const first = await f.channel.sendMessage(` \t${a}\n `, { body: 'ask', mentions: pets.map(p => ({ participantId: `pet:${p}` })) }, me);
     await waitFor(async () => (await outputs(f, a)).length === 4);
     const bindings = (await Promise.all(pets.map(p => f.channel.service.getSession(a, p)))).map(binding => binding!);
@@ -125,16 +125,15 @@ test('Channel pair sessions survive new messages, replies and restart; four Pets
     await waitFor(async () => (await outputs(f, a)).length === 5);
     assert.equal((await outputs(f, a)).at(-1)!.body, 'Answer 2: staging');
     assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
-      messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet', label: 'one' }, body: question.body,
+      messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet', label: 'one' }, body: question.body, deliverables: [],
     });
     assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:local', kind: 'human', label: 'local' });
     assert.deepEqual((await f.channel.sendMessage(a, { body: 'no recipient', replyTo: question.messageId }, me)).deliveries, []);
     await assert.rejects(ask(f, b, 'one', 'wrong Channel', question.messageId), /reference/);
     await assert.rejects(ask(f, a, 'missing', 'unknown target', question.messageId), /Unknown/);
-    await ask(f, b, 'one', 'new Channel');
-    await waitFor(async () => (await outputs(f, b)).length === 1);
-    assert.equal(f.calls.length, 6, 'an unaddressed reply dispatches nobody');
-    assert.notEqual((await f.channel.service.getSession(b, 'one'))!.sessionId, bindings[0]!.sessionId);
+    await assert.rejects(ask(f, b, 'one', 'new Channel'));
+    assert.equal(f.calls.length, 5, 'unaddressed replies and other Channels dispatch nobody');
+    assert.equal(await f.channel.service.getSession(b, 'one'), undefined);
     await f.close();
     f = await fixture(root, pets);
     assert.deepEqual(await Promise.all(pets.map(p => f.channel.service.getSession(a, p))), bindings);
@@ -164,7 +163,7 @@ test('waiting target is skipped; background execution does not pollute active TU
     const observed: unknown[] = [];
     host.interaction.subscribe(m => observed.push(m));
     const a = await open(f);
-    const b = await open(f);
+    const b = (await f.channel.service.createChannel(me, { title: 'Other', pets: [] })).channel.channelId;
     const waiting: string[] = [];
     const stop = host.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
     const { deliveries: [approval] } = await ask(f, a, 'one', 'approval');
@@ -174,8 +173,9 @@ test('waiting target is skipped; background execution does not pollute active TU
     assert.equal((await outputs(f, a)).length, 0, 'a pending review is not a Channel message');
     assert.ok(!JSON.stringify(await f.channel.service.readContext(me, a)).includes('Authorize?'));
     await ask(f, a, 'one', 'after approval');
-    await ask(f, b, 'one', 'other session');
-    await waitFor(async () => (await outputs(f, b)).length === 1);
+    await f.studio.dispatch({ petId: 'one', request: 'other session', session: { id: 'one:bbbbbbbb', create: true } });
+    await waitFor(() => f.calls.length === 1);
+    assert.equal((await outputs(f, b)).length, 0);
     assert.equal(f.calls.length, 1);
     assert.equal(observed.length, 0, 'background run does not enter active-session stream');
     const snapshot = await host.interaction.snapshot();
@@ -191,8 +191,9 @@ test('waiting target is skipped; background execution does not pollute active TU
     const pending = selected.snapshot.session.pendingInterrupt;
     assert.ok(pending);
     assert.equal(pending.payload.kind, 'human_review');
-    await ask(f, b, 'one', 'while active session awaits approval');
-    await waitFor(async () => (await outputs(f, b)).length === 2);
+    await f.studio.dispatch({ petId: 'one', request: 'while active session awaits approval', session: { id: 'one:bbbbbbbb' } });
+    await waitFor(() => f.calls.length === 2);
+    assert.equal((await outputs(f, b)).length, 0);
     const stillWaiting = await host.interaction.snapshot();
     if (stillWaiting.type !== 'session.snapshot.result') throw Error('snapshot');
     assert.equal(stillWaiting.snapshot.session.pendingInterrupt?.interruptId, pending.interruptId);
@@ -243,7 +244,7 @@ test('concurrent first use reserves one session; queued targets survive a TUI sw
   f.barrier.wait = new Promise<void>(resolve => { release = resolve; });
   try {
     const a = await open(f);
-    const b = await open(f);
+    const b = (await f.channel.service.createChannel(me, { title: 'Other', pets: [] })).channel.channelId;
     const sent = await Promise.all([ask(f, a, 'one', 'first'), ask(f, a, 'one', 'second')]);
     await waitFor(() => f.active() === 1);
     const binding = (await f.channel.service.getSession(a, 'one'))!;
@@ -251,12 +252,13 @@ test('concurrent first use reserves one session; queued targets survive a TUI sw
     const snapshot = await f.hosts[0]!.interaction.snapshot();
     if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
     assert.equal(snapshot.snapshot.session.activeRun, null);
-    await ask(f, b, 'one', 'third');
+    await ask(f, a, 'one', 'third');
     const switched = f.hosts[0]!.interaction.request({ type: 'session.new', requestId: 'new-tui' });
     f.barrier.wait = undefined; release();
     await switched;
-    await waitFor(async () => (await outputs(f, a)).length === 2 && (await outputs(f, b)).length === 1);
-    assert.deepEqual(f.calls.map(c => c.thread), [binding.sessionId, binding.sessionId, (await f.channel.service.getSession(b, 'one'))!.sessionId]);
+    await waitFor(async () => (await outputs(f, a)).length === 3);
+    assert.equal((await outputs(f, b)).length, 0);
+    assert.deepEqual(f.calls.map(c => c.thread), [binding.sessionId, binding.sessionId, binding.sessionId]);
     assert.equal(f.maxActive(), 1);
     await assert.rejects(f.hosts[0]!.resident.dispatch.dispatch({ request: 'wrong pet', session: { id: 'other:12345678', create: true } }), /identity/);
   } finally { release(); await f.close(); await rm(root, { recursive: true, force: true }); }
@@ -277,7 +279,7 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
   }] });
   let studio = await create();
   try {
-    const id = (await channel.service.createChannel(me, { title: 'Goal', pets: ['one'] })).channel.channelId;
+    const id = (await createChannelWithPets(studio!, channel.service, me, { title: 'Goal', pets: ['one'] })).channel.channelId;
     const start = { body: 'start', mentions: [{ participantId: 'pet:one' }] };
     const { deliveries: [failed] } = await channel.sendMessage(id, start, me);
     assert.equal(failed!.state, 'failed');
@@ -306,11 +308,11 @@ test('failed first admission keeps the reserved identity for retry; a replayed p
 
 test('a bound session alone does not publish; invalid scopes and late replies fail; native review is not a message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-destination-'));
-  const f = await fixture(root);
+  const f = await fixture(root, ['one', 'two']);
   try {
     assert.deepEqual(f.channel.toolkits.flatMap(t => t.tools).map(t => t.tool.name), ['channel_read_context']);
     const a = await open(f);
-    const b = await open(f);
+    const b = (await f.channel.service.createChannel(me, { title: 'Other', pets: [] })).channel.channelId;
     const { deliveries: [first] } = await ask(f, a, 'one', 'ask');
     const sessionId = first!.sessionId!;
     await waitFor(async () => (await outputs(f, a)).length === 1);
@@ -330,8 +332,8 @@ test('a bound session alone does not publish; invalid scopes and late replies fa
     assert.deepEqual([failures(f)[0].channelId, failures(f)[0].sessionId], [b, sessionId]);
     assert.match(failures(f)[0].error, /session does not match/);
     assert.equal((await outputs(f, b)).length, 0);
-    await f.channel.service.removeMember(me, a, { kind: 'pet', id: 'one' });
-    await assert.rejects(f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } }), /not a member/);
+    await f.channel.service.removeMember(me, a, { kind: 'pet', id: 'one' }, { confirmStop: true });
+    await assert.rejects(f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } }), /unknown petId/);
     assert.equal(f.calls.length, acceptedCalls, 'former members are rejected before a run is queued');
     lateReply(a, 'former-member');
     await waitFor(() => failures(f).length === 2);
@@ -339,10 +341,10 @@ test('a bound session alone does not publish; invalid scopes and late replies fa
     assert.match(failures(f)[1].error, /not a member/);
     assert.equal((await outputs(f, a)).length, 1);
     const waiting: string[] = [];
-    f.hosts[0]!.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
-    await ask(f, b, 'one', 'approval');
+    f.hosts[1]!.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
+    await ask(f, a, 'two', 'approval');
     await waitFor(() => waiting.length === 1);
-    assert.equal((await outputs(f, b)).length, 0);
-    assert.ok(!/interruptId|Authorize\?/.test(JSON.stringify(await f.channel.service.readContext(me, b))));
+    assert.equal((await outputs(f, a)).length, 1);
+    assert.ok(!/interruptId|Authorize\?/.test(JSON.stringify(await f.channel.service.readContext(me, a))));
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -18,7 +18,7 @@ import { createTestModelProfiles } from '../../../services/host/src/testing/mode
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import type { InterruptResume } from '../../../services/host/src/agent/agentGraphService';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
@@ -103,7 +103,7 @@ for (const decision of ['reject', 'cancel'] as const) {
     const events: Array<{ type: string; payload?: any }> = [];
     studio.subscribe(event => { events.push(event); });
     try {
-      const id = (await channel.service.createChannel(me, { title: 'Goal', pets: ['one'] })).channel.channelId;
+      const id = (await createChannelWithPets(studio!, channel.service, me, { title: 'Goal', pets: ['one'] })).channel.channelId;
       const ask = (body: string, replyTo?: string) => channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] }, me);
       await ask('Which destination?');
       await waitFor(async () => (await outputs(id)).length === 1);

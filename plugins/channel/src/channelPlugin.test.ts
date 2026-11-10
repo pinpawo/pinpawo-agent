@@ -10,6 +10,8 @@ test('mentions dispatch explicit current and reply attachments without guessing 
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const dispatched: StudioDispatchRequest[] = [];
+  const live: ReturnType<StudioPluginContext['listPets']> = [];
+  const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
   const plugin = createChannelPlugin({ httpRoute: false });
   const context = {
     dispatch: async (request: StudioDispatchRequest) => {
@@ -20,7 +22,8 @@ test('mentions dispatch explicit current and reply attachments without guessing 
     registerContextProvider: () => () => undefined,
     notify: () => undefined,
     subscribe: () => () => undefined,
-    listPets: () => [{ petId: 'writer', name: 'Writer', definitionId: 'writer' }],
+    listPets: () => live,
+    pets: { removeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
     clients: { get: async (clientId: string) => ({ clientId, label: clientId }) },
     storage: { dialect: 'sqlite', open: (migrations: Parameters<typeof storage.open>[1]) => storage.open('channel', migrations) },
     hooks: { expose: () => () => undefined },
@@ -31,7 +34,8 @@ test('mentions dispatch explicit current and reply attachments without guessing 
 
   const owner = { kind: 'human' as const, id: 'owner' };
   const former = { kind: 'human' as const, id: 'former' };
-  const channelId = (await plugin.service.createChannel(owner, { title: 'Images', pets: ['writer'] })).channel.channelId;
+  const channelId = (await plugin.service.createChannel(owner, { title: 'Images', pets: [] })).channel.channelId;
+  live.push({ petId: 'writer', name: 'Writer', definitionId: 'writer', channelId, createdAt: new Date().toISOString() });
   await plugin.service.addMember(owner, channelId, former);
   const original = await plugin.sendMessage(channelId, { body: 'Previously shared images.', deliverables: [
     { uri: 'artifact://workspace/shared.png', title: 'Old shared title' },
@@ -64,7 +68,7 @@ test('mentions dispatch explicit current and reply attachments without guessing 
   }, owner);
   assert.equal(Object.hasOwn(dispatched[2]!, 'attachments'), false);
 
-  const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: ['writer'] })).channel.channelId;
+  const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: [] })).channel.channelId;
   const otherMessage = (await plugin.sendMessage(other, { body: 'Elsewhere.', deliverables: current }, owner)).message;
   await assert.rejects(plugin.sendMessage(channelId, { body: 'Wrong reply.', replyTo: otherMessage.messageId,
     mentions: [{ participantId: 'pet:writer' }],
@@ -84,6 +88,8 @@ test('a Pet works in a Channel only while its run there is running, and context 
   const notified: Array<{ type: string; payload?: unknown }> = [];
   const listeners: Array<(event: StudioEvent) => unknown> = [];
   const routes = new Map<string, StudioHttpRoute>();
+  const live: ReturnType<StudioPluginContext['listPets']> = [];
+  const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
   const plugin = createChannelPlugin();
   const context: StudioPluginContext = {
     dispatch: async () => { throw new Error('not used'); },
@@ -91,8 +97,8 @@ test('a Pet works in a Channel only while its run there is running, and context 
     allocateSessionId: () => 'unused',
     notify: (event) => { notified.push(event); },
     subscribe: (listener) => { listeners.push(listener); return () => undefined; },
-    listPets: () => ['writer', 'reviewer'].map(petId => ({ petId, name: petId, definitionId: petId })),
-    pets: {} as StudioPluginContext['pets'],
+    listPets: () => live,
+    pets: { removeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
     listDispatchQueues: () => [],
     petSessions: {
       snapshot: async () => { throw new Error('not used'); },
@@ -113,8 +119,10 @@ test('a Pet works in a Channel only while its run there is running, and context 
   t.after(() => plugin.stop?.());
 
   const owner = { kind: 'human' as const, id: 'local' };
-  const { channel: { channelId } } = await plugin.service.createChannel(owner, { title: 'Release', pets: ['writer'] });
-  const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: ['writer'] })).channel.channelId;
+  const { channel: { channelId } } = await plugin.service.createChannel(owner, { title: 'Release', pets: [] });
+  const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: [] })).channel.channelId;
+  live.push({ petId: 'writer', name: 'Writer', definitionId: 'writer', channelId, createdAt: new Date().toISOString() },
+    { petId: 'writer-other', name: 'Writer', definitionId: 'writer', channelId: other, createdAt: new Date().toISOString() });
   const protectedChannel = (await plugin.service.createChannel(owner, { title: 'Protected', prompt: 'Original', pets: [] }, { studio: true })).channel.channelId;
   await plugin.service.addMember(owner, protectedChannel, { kind: 'human', id: 'guest' });
   const update = (clientId: string, scope: 'studio' | 'client', patch: Record<string, unknown>) => routes.get('POST /channels/update')!.handle({
@@ -150,10 +158,10 @@ test('a Pet works in a Channel only while its run there is running, and context 
   assert.deepEqual(await working(), []);
   await lifecycle('running', 'a');
   // A run elsewhere, or one without a Channel scope, says nothing about this Channel.
-  await lifecycle('running', 'b', 'writer', { namespace: 'channel', id: other });
+  await lifecycle('running', 'b', 'writer-other', { namespace: 'channel', id: other });
   await lifecycle('running', 'c', 'writer', null);
   assert.deepEqual(await working(), [{ participantId: 'pet:writer', since: '2026-10-28T00:00:01.000Z' }]);
-  assert.deepEqual(await working(other), [{ participantId: 'pet:writer', since: '2026-10-28T00:00:02.000Z' }]);
+  assert.deepEqual(await working(other), [{ participantId: 'pet:writer-other', since: '2026-10-28T00:00:02.000Z' }]);
   // A reply mid-run does not end the run; a review wait does, and resuming works again.
   await lifecycle('message', 'a');
   assert.equal((await working()).length, 1);
@@ -168,7 +176,7 @@ test('a Pet works in a Channel only while its run there is running, and context 
 
   assert.deepEqual(changes(), [
     { channelId, participantId: 'pet:writer', working: true },
-    { channelId: other, participantId: 'pet:writer', working: true },
+    { channelId: other, participantId: 'pet:writer-other', working: true },
     { channelId, participantId: 'pet:writer', working: false },
     { channelId, participantId: 'pet:writer', working: true },
     { channelId, participantId: 'pet:writer', working: false },
@@ -181,7 +189,7 @@ test('a Pet works in a Channel only while its run there is running, and context 
   const reply = async (messageId: string, refs: unknown) => {
     for (const listener of listeners) await listener({
       eventId: messageId, type: 'dispatch.message', source: 'resident-pet', occurredAt: '2026-11-05T00:00:00Z',
-      payload: { petId: 'writer', sessionId: binding.sessionId, scope: { namespace: 'channel', id: channelId },
+      payload: { petId: 'writer', invocationId: messageId, sessionId: binding.sessionId, scope: { namespace: 'channel', id: channelId },
         message: { type: 'message.completed', messageId, text: 'Ready.', deliverables: refs } },
     });
   };

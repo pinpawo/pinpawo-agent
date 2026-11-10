@@ -46,6 +46,10 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/events',
   '/pets',
   '/pets/rename',
+  '/pets/close',
+  '/pets/reopen',
+  '/pets/remove',
+  '/pets/records',
   '/pet-credentials',
   '/pet-credentials/remove',
   '/pet-definitions',
@@ -647,14 +651,35 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         return await work();
       } catch (error) {
         if (!(error instanceof StudioPetError)) throw error;
-        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404, locked: 503 }[error.code], error.message);
+        throw new HttpRequestError({ invalid: 400, exists: 409, not_found: 404, locked: 503, busy: 409, confirmation_required: 409 }[error.code], error.message);
       }
     };
     app.post('/pets', async (requestContext) => {
-      const body = await readJsonBody(requestContext) as { petId?: unknown; definitionId?: unknown; name?: unknown } | null;
+      const body = await readJsonBody(requestContext) as { petId?: unknown; definitionId?: unknown; name?: unknown; channelId?: unknown } | null;
       return requestContext.json({
-        pet: await petRequest(() => pets().create({ petId: body?.petId, definitionId: body?.definitionId, name: body?.name })),
+        pet: await petRequest(() => pets().create({ petId: body?.petId, definitionId: body?.definitionId, name: body?.name, channelId: body?.channelId })),
       }, 201);
+    });
+    app.get('/pets/records', async (requestContext) => requestContext.json({ pets: await petRequest(() => pets().list()) }));
+    app.post('/pets/reopen', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown } | null;
+      return requestContext.json({ pet: await petRequest(() => pets().reopenInstance(body?.petId)) });
+    });
+    app.post('/pets/remove', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown; confirmStop?: unknown } | null;
+      const confirmStop = body?.confirmStop;
+      if (confirmStop !== undefined && typeof confirmStop !== 'boolean') {
+        throw new HttpRequestError(400, 'confirmStop must be a boolean.');
+      }
+      return requestContext.json({ pet: await petRequest(() => pets().removeInstance(body?.petId, { confirmStop })) });
+    });
+    app.post('/pets/close', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown; confirmStop?: unknown } | null;
+      const confirmStop = body?.confirmStop;
+      if (confirmStop !== undefined && typeof confirmStop !== 'boolean') {
+        throw new HttpRequestError(400, 'confirmStop must be a boolean.');
+      }
+      return requestContext.json({ pet: await petRequest(() => pets().closeInstance(body?.petId, { confirmStop })) });
     });
     app.post('/pets/rename', async (requestContext) => {
       const body = await readJsonBody(requestContext) as { petId?: unknown; name?: unknown } | null;
@@ -680,6 +705,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return requestContext.json(await petRequest(() => pets().credentials.remove({ petId: body?.petId, envName: body?.envName })));
     });
     app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
+    app.all('/pets/records', (requestContext) => methodNotAllowed(requestContext, ['GET']));
+    app.all('/pets/reopen', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+    app.all('/pets/remove', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+    app.all('/pets/close', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pets/rename', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pet-definitions', (requestContext) => methodNotAllowed(requestContext, ['GET']));
     app.all('/pet-credentials', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));

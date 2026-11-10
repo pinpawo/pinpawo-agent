@@ -23,7 +23,7 @@ const pageItems: { page: Page; label: string; Icon: LucideIcon }[] = [
   { page: 'knowledge', label: 'Knowledge', Icon: BookOpen },
 ];
 type ConnectionState = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'error';
-type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
+type Pet = { petId: string; channelId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Schedule = {
   scheduleId: string; petId: string; channelId: string; request: string; runAt: string;
   status: 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled'; note?: string;
@@ -262,6 +262,7 @@ export function App() {
         if (['scheduler', 'notice', 'trigger'].includes(event.source)
           || (event.source === 'studio' && event.type.startsWith('pet.'))
           || (event.source === 'channel' && (event.type === 'channel.created' || event.type === 'channel.updated'))) refreshInBackground();
+        if (event.source === 'studio' && event.type.startsWith('pet.')) setChannelVersion(value => value + 1);
         if (event.source === 'channel') {
           setChannelVersion(value => value + 1);
           const payload = event.payload as Partial<ChannelDelivery> & { petId?: string } | undefined;
@@ -634,6 +635,7 @@ export function App() {
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
             deliveries={channelDeliveries} dispatches={dispatches} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode}
+            onPetsChanged={() => { void refreshRef.current().catch(reason => setNotice(connectionErrorMessage(reason))); }}
             onOpenKnowledge={identity?.scope === 'studio' ? () => setPage('knowledge') : undefined} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">

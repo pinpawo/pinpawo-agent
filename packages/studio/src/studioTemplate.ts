@@ -15,14 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseConfigDocument } from '@pinpawo/pet-agent';
-import { loadPetConfigs } from 'pinpawo/host-runtime';
-import { studioLocalConfigSchema } from './configSchema';
-import { resolveStudioStorage } from './host/buildStudio';
 import { createStudioCredentialsKey } from './host/credentialsKey';
-import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
-import { studioCoreMigrations } from './storage/coreMigrations';
-import { createStudioStorage } from './storage/studioStorage';
 
 export type InitStudioWorkdirOptions = {
   workdir: string;
@@ -163,44 +156,6 @@ function withStudioData(content: string, wikiDirectory: string, keyFile: string)
 
 type CreatedFile = { path: string; dev: number; ino: number; content: Buffer };
 
-/**
- * Give a new workdir one Pet per template definition, each under its
- * definition's id and name, so the template's own references (a trigger's
- * target, say) resolve on first start. Records the database files it is
- * about to create in `createdFiles`, so a failed init can remove them.
- */
-async function createTemplatePets(
-  workdir: string,
-  configPath: string,
-  configText: string,
-  createdFiles: string[],
-): Promise<void> {
-  // A custom template may name no definitions; then there is no Pet to create.
-  if (!Array.isArray((JSON.parse(configText) as { definitions?: unknown }).definitions)) return;
-  const config = parseConfigDocument({ content: configText, source: configPath, schema: studioLocalConfigSchema });
-  const storageConfig = resolveStudioStorage(config.storage, workdir);
-  const databaseFiles = storageConfig.kind === 'sqlite'
-    ? ['', '-wal', '-shm'].map(suffix => `${storageConfig.path}${suffix}`)
-    : [];
-  const existing = await Promise.all(databaseFiles.map(exists));
-  if (existing.some(Boolean)) throw new Error(`Studio init refuses to reuse the existing database ${databaseFiles[0]}.`);
-  createdFiles.push(...databaseFiles);
-  const definitions = new Map((await loadPetConfigs(path.join(path.dirname(configPath), 'pets')))
-    .map(definition => [definition.definitionId, definition]));
-  const storage = createStudioStorage(storageConfig);
-  try {
-    const store = new KyselyPetStore(await storage.open<PetDatabase>('studio', studioCoreMigrations));
-    const createdAt = new Date().toISOString();
-    for (const definitionId of config.definitions) {
-      const definition = definitions.get(definitionId);
-      if (!definition) throw new Error(`Studio template definition "${definitionId}" has no file.`);
-      await store.createPet({ petId: definitionId, definitionId, name: definition.name, createdAt });
-    }
-  } finally {
-    await storage.close();
-  }
-}
-
 /** Initialize a project configuration and a separate, durable Studio data directory (Wiki and credentials key). */
 export async function initStudioWorkdir(
   options: InitStudioWorkdirOptions,
@@ -239,7 +194,6 @@ export async function initStudioWorkdir(
   if (conflict) throw new Error(`Studio init refuses to overwrite ${path.join(workdir, conflict)}.`);
 
   const created: CreatedFile[] = [];
-  const databaseFiles: string[] = [];
   const knowledgeDirs = new Set<string>();
   const remember = async (file: string) => {
     const info = await lstat(file);
@@ -269,10 +223,9 @@ export async function initStudioWorkdir(
       else await copyFile(path.join(templateRoot, file.source), destination, constants.COPYFILE_EXCL);
       await remember(destination);
     }
-    await createTemplatePets(workdir, path.join(workdir, '.pinpawo/studio.json'), config, databaseFiles);
+    // Definitions are reusable templates. Instances are created only after an
+    // owner Channel exists, never as standalone init side effects.
   } catch (error) {
-    // The database is new (createTemplatePets refuses an existing one).
-    for (const file of databaseFiles) await unlink(file).catch(() => undefined);
     // Only remove files created here that have not been replaced or modified.
     for (const file of created.reverse()) {
       try {

@@ -41,7 +41,19 @@ export type DispatchQueue = {
   petId: string; state: 'open' | 'busy' | 'waiting' | 'blocked'; activeOperation: 'conversation' | 'dispatch' | null;
   queuedConversations: number; queuedDispatches: number; entries?: DispatchQueueEntry[]; activeDispatch?: DispatchQueueEntry;
 };
-export type ChannelPet = { petId: string; name: string };
+export type ChannelPet = { petId: string; name: string; closedAt?: string; removedAt?: string };
+export type ChannelPetRecord = ChannelPet & { channelId: string };
+
+/** Inactive management stays in the instance's immutable owner Channel. */
+export function channelInactivePets(records: ChannelPetRecord[], channelId: string) {
+  return records.filter(pet => pet.channelId === channelId && (pet.closedAt || pet.removedAt));
+}
+
+/** Pet removal is destructive; human membership removal keeps its normal behavior. */
+export function channelMemberRemovalInput(channelId: string, member: Pick<ChannelMember, 'kind' | 'id'>, confirmed: boolean) {
+  if (member.kind === 'pet' && !confirmed) throw new Error('Confirm permanent Pet removal first.');
+  return { channelId, kind: member.kind, id: member.id, ...(member.kind === 'pet' ? { confirmStop: true } : {}) };
+}
 
 /** Same encoding as the Channel Plugin, so every identity is safe in a direct Markdown link. */
 export function channelParticipantId(author: ChannelAuthor): string {
@@ -107,7 +119,7 @@ export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKn
   const pet = pets.find(item => item.petId === petId);
   const name = pet?.name.trim() || petId;
   const duplicate = pets.filter(item => (item.name.trim() || item.petId) === name).length > 1;
-  return { name, removed: registryKnown && !pet, optionLabel: duplicate ? `${name} (${petId})` : name };
+  return { name, removed: registryKnown && Boolean(pet?.removedAt), optionLabel: duplicate ? `${name} (${petId})` : name };
 }
 
 /** Authors are stored as written; a former member keeps its id and is named from the registry when possible. */
@@ -127,9 +139,14 @@ export function channelPetSession(petId: string, sessions: ChannelSession[]): Ch
   return sessions.find(item => item.petId === petId && item.registered);
 }
 
-/** Pets that can still join: registered with Studio and not current members. */
-export function channelJoinablePets(pets: ChannelPet[], members: ChannelMember[]): ChannelPet[] {
-  return pets.filter(pet => !members.some(member => member.kind === 'pet' && member.id === pet.petId));
+export type ChannelPetDefinition = { definitionId: string; name: string };
+
+/** Only Studio authority creates a fresh instance in an existing Channel. */
+export function channelPetCreateInput(channelId: string, definition: ChannelPetDefinition, clientMode: boolean,
+  newId: () => string = () => crypto.randomUUID()) {
+  if (clientMode) throw new Error('Only Studio authority can create Pet instances.');
+  if (!channelId.trim()) throw new Error('Create or select a Channel first.');
+  return { petId: newId(), channelId, definitionId: definition.definitionId, name: (definition.name.trim() || definition.definitionId).slice(0, 80) };
 }
 
 export function channelMessageSummary(message: Pick<ChannelMessage, 'body'>): string {

@@ -60,8 +60,10 @@ export class PetInstance {
     this.resident = live;
     try { this.options.onLive(live); }
     catch (error) {
-      this.resident = undefined;
-      try { await live.runtime.close(); } finally { this.options.onClosed(this.petId); }
+      // onLive may have partially exposed this runtime. Fence admission and
+      // retain its handle/observation until cleanup proves it actually stopped.
+      this.unavailable = true;
+      await this.stop();
       throw error;
     }
   }

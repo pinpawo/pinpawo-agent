@@ -162,3 +162,40 @@ test('registry keeps restoration, cross-instance scheduling, pending dedupe and 
     assert.equal(rows.get(row.petId)?.closedAt, undefined, 'shutdown does not write Close');
   } finally { stopping.resolve(); activating.resolve(); await registry.close(); }
 });
+
+test('failed activation cleanup retains the only runtime until a confirmed stop actually settles', async () => {
+  let recorded: StudioPet | undefined, assembled = 0, failActivation = true, failStop = true, detached = 0;
+  const running = new Set<number>();
+  const store = {
+    listPets: async () => [], getPet: async () => recorded && { ...recorded },
+    createPet: async (pet: StudioPet) => { recorded = { ...pet }; return true; },
+    closePet: async (_id: string, closedAt: string) => { recorded!.closedAt = closedAt; },
+    reopenPet: async () => { delete recorded!.closedAt; },
+  } as unknown as PetStore;
+  const registry = new StudioPetRegistry({ studioId: 'failed-activation', store: async () => store, credentials: {} as StudioPetCredentials,
+    definitions: [{ definitionId: row.definitionId, name: 'Worker' }], requireChannel: async () => {},
+    assemble: async () => {
+      const handle = ++assembled; running.add(handle);
+      return { dispatch: {}, close: async () => { if (failStop) throw new Error('cleanup unknown'); running.delete(handle); } } as StudioPetRuntime;
+    }, onLive: () => { if (failActivation) throw new Error('activation callback failed'); },
+    onClosed: () => { detached++; }, onChange: () => {},
+  });
+  try {
+    await assert.rejects(registry.create(row), /cleanup unknown/);
+    assert.ok(recorded?.closedAt);
+    assert.equal(registry.getLive(row.petId), undefined);
+    assert.equal(assembled, 1); assert.deepEqual([...running], [1]);
+    failActivation = false;
+    await assert.rejects(registry.reopenInstance(row.petId), busy);
+    assert.equal(detached, 0, 'do not stop observing an unsettled runtime');
+    await assert.rejects(registry.closeInstance(row.petId), (e: { code?: string }) => e.code === 'confirmation_required');
+    await assert.rejects(registry.closeInstance(row.petId, { confirmStop: true }), /cleanup unknown/);
+    assert.equal(assembled, 1, 'neither Reopen nor an older closed marker loses the first handle');
+    failStop = false;
+    await registry.closeInstance(row.petId, { confirmStop: true });
+    assert.equal(running.size, 0); assert.equal(detached, 1);
+    const reopened = await registry.reopenInstance(row.petId);
+    assert.equal(reopened.petId, row.petId); assert.equal(reopened.channelId, row.channelId);
+    assert.equal(assembled, 2); assert.deepEqual([...running], [2]);
+  } finally { failStop = false; await registry.close(); }
+});

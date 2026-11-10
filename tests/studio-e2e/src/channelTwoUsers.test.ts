@@ -100,17 +100,17 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
 
     // Alice, over HTTP: who am I, which Pets exist, then a Channel with Alpha.
     assert.deepEqual(await ok(keys.alice!, '/me'), { clientId: 'alice', scope: 'client' });
-    assert.deepEqual((await ok(keys.alice!, '/pets')).pets, pets);
-    const channelId = (await ok(keys.alice!, '/channels', { title: 'Launch', pets: ['alpha'] })).channel.channelId as string;
+    assert.deepEqual((await ok(keys.alice!, '/pets')).pets, []);
+    const channelId = (await ok(keys.alice!, '/channels', { title: 'Launch', pets: [] })).channel.channelId as string;
     await ok(keys.alice!, '/channels/members', { channelId, kind: 'human', id: 'bob' });
-    await ok(keys.alice!, '/channels/members', { channelId, kind: 'pet', id: 'beta' });
+    for (const pet of pets) await ok(LOCAL_TOKEN, '/pets', { ...pet, definitionId: pet.petId, channelId });
 
     // Bob, over the CLI with his own key: sees the Channel and the Pets, and asks Alpha.
     assert.deepEqual((await cli(bobKeyFile, ['channels', 'list'])).channels.map((item: any) => item.channelId), [channelId]);
     assert.deepEqual((await cli(bobKeyFile, ['pets', 'list'])).pets.map((pet: any) => pet.petId), ['alpha', 'beta']);
     const members = (await cli(bobKeyFile, ['channels', 'members', channelId])).members;
     assert.deepEqual(members.map((member: any) => [member.participantId, member.label]),
-      [['human:alice', 'Alice'], ['pet:alpha', 'Alpha'], ['human:bob', 'Bob'], ['pet:beta', 'Beta']]);
+      [['human:alice', 'Alice'], ['human:bob', 'Bob'], ['pet:alpha', 'Alpha'], ['pet:beta', 'Beta']]);
     const fromBob = await cli(bobKeyFile, ['channels', 'send', channelId, '--file', '-', '--mention', 'pet:alpha'], 'Is the build green?');
     assert.deepEqual(fromBob.author, { kind: 'human', id: 'bob' });
 
@@ -147,7 +147,7 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
     await assert.rejects(cli(bobKeyFile, ['queues']), /HTTP 403/);
 
     // A Channel Bob makes for himself stays his; only the local token lists every Channel.
-    const bobsOwn = (await cli(bobKeyFile, ['channels', 'create', '--title', 'Bob notes', '--pet', 'beta'])).channel.channelId;
+    const bobsOwn = (await cli(bobKeyFile, ['channels', 'create', '--title', 'Bob notes'])).channel.channelId;
     assert.deepEqual((await ok(keys.alice!, '/channels')).channels.map((item: any) => item.channelId), [channelId]);
     assert.deepEqual(new Set((await ok(LOCAL_TOKEN, '/channels?all=true')).channels.map((item: any) => item.channelId)), new Set([channelId, bobsOwn]));
 

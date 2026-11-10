@@ -237,6 +237,10 @@ export type StudioDispatchQueue = {
  */
 export type StudioPlugin = {
   name: string;
+  /** Channel Plugin's storage-only ownership check, available before resident restoration. */
+  petChannels?: {
+    requireChannel: (channelId: string, storage: StudioPluginStorage) => Promise<void>;
+  };
   /** Scope namespaces for which this Plugin must register invocation context providers. */
   contextNamespaces?: readonly string[];
   /** Toolkit definitions owned by this Plugin and consumed only by Agent runtimes. */

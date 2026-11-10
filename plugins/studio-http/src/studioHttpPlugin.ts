@@ -46,6 +46,7 @@ const RESERVED_ROUTE_PATHS = new Set([
   '/events',
   '/pets',
   '/pets/rename',
+  '/pets/close',
   '/pet-credentials',
   '/pet-credentials/remove',
   '/pet-definitions',
@@ -651,10 +652,14 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       }
     };
     app.post('/pets', async (requestContext) => {
-      const body = await readJsonBody(requestContext) as { petId?: unknown; definitionId?: unknown; name?: unknown } | null;
+      const body = await readJsonBody(requestContext) as { petId?: unknown; definitionId?: unknown; name?: unknown; channelId?: unknown } | null;
       return requestContext.json({
-        pet: await petRequest(() => pets().create({ petId: body?.petId, definitionId: body?.definitionId, name: body?.name })),
+        pet: await petRequest(() => pets().create({ petId: body?.petId, definitionId: body?.definitionId, name: body?.name, channelId: body?.channelId })),
       }, 201);
+    });
+    app.post('/pets/close', async (requestContext) => {
+      const body = await readJsonBody(requestContext) as { petId?: unknown } | null;
+      return requestContext.json({ pet: await petRequest(() => pets().closeInstance(body?.petId)) });
     });
     app.post('/pets/rename', async (requestContext) => {
       const body = await readJsonBody(requestContext) as { petId?: unknown; name?: unknown } | null;
@@ -680,6 +685,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return requestContext.json(await petRequest(() => pets().credentials.remove({ petId: body?.petId, envName: body?.envName })));
     });
     app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));
+    app.all('/pets/close', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pets/rename', (requestContext) => methodNotAllowed(requestContext, ['POST']));
     app.all('/pet-definitions', (requestContext) => methodNotAllowed(requestContext, ['GET']));
     app.all('/pet-credentials', (requestContext) => methodNotAllowed(requestContext, ['GET', 'POST']));

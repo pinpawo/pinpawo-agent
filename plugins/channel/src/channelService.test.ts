@@ -12,7 +12,27 @@ import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './s
 const owner: MemberRef = { kind: 'human', id: 'owner' };
 const guest: MemberRef = { kind: 'human', id: 'guest' };
 const executor: MemberRef = { kind: 'pet', id: 'executor' };
-const pets = () => [{ petId: 'executor', name: 'Executor' }, { petId: 'reviewer', name: 'Reviewer' }];
+type LivePet = { petId: string; name: string; channelId: string; createdAt: string };
+const liveByService = new WeakMap<ChannelService, LivePet[]>();
+function fixtureService(options: Omit<ConstructorParameters<typeof ChannelService>[0], 'pets' | 'closePet'>) {
+  const live: LivePet[] = [];
+  const service = new ChannelService({ ...options, pets: () => live,
+    closePet: async petId => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); } });
+  liveByService.set(service, live);
+  return service;
+}
+/** Create the Channel first, then explicitly provision new owned fixture instances. */
+async function createChannelWithInstances(service: ChannelService, actor: MemberRef,
+  input: { title: string; description?: string; prompt?: string }, instanceIds: string[],
+  authority?: { studio: boolean }) {
+  const result = await service.createChannel(actor, { ...input, pets: [] }, authority);
+  const live = liveByService.get(service)!;
+  for (const petId of instanceIds) {
+    assert.ok(!live.some(pet => pet.petId === petId), 'fixture instances cannot be reparented');
+    live.push({ petId, name: petId === 'executor' ? 'Executor' : petId, channelId: result.channel.channelId, createdAt: result.channel.createdAt });
+  }
+  return { ...result, members: (await service.readContext(actor, result.channel.channelId)).members };
+}
 /** Studio clients as Channel sees them: `retired` is revoked. */
 const clients = new Map([['owner', 'owner'], ['guest', 'guest'], ['retired', 'Retired']]);
 const humans = async (id: string) => clients.has(id) ? { label: clients.get(id)!, active: id !== 'retired' } : undefined;
@@ -28,12 +48,12 @@ for (const [backend, config] of backends) {
     const storage = createStudioStorage(config());
     try {
       const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-      await run(new ChannelService({ store: wrap(store), pets, humans }), store);
+      await run(fixtureService({ store: wrap(store), humans }), store);
     } finally { await storage.close(); }
   }
 
   test(`${backend}: human and Pet deliverables persist unchanged and invalid declarations do not create a message`, () => withService(async (service) => {
-    const { channelId } = (await service.createChannel(owner, { title: 'Deliverables', pets: ['executor'] })).channel;
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Deliverables' }, ['executor'])).channel;
     const deliverables = [{ uri: 'artifact://workspace/session/report/report.pdf', title: 'Report' },
       { uri: 'https://github.com/example/project/pull/1' }];
     const first = await service.postMessage(owner, channelId, { body: 'Please use these.', deliverables });
@@ -54,9 +74,8 @@ for (const [backend, config] of backends) {
   }));
 
   test(`${backend}: Channel prompt is owned by the Channel, visible to members and can be replaced or cleared`, () => withService(async (service) => {
-    const { channel } = await service.createChannel(owner, {
-      title: 'Team', description: 'Purpose', prompt: '  Work together.\nAsk when uncertain.  ', pets: ['executor'],
-    }, { studio: true });
+    const { channel } = await createChannelWithInstances(service, owner, {
+      title: 'Team', description: 'Purpose', prompt: '  Work together.\nAsk when uncertain.  ' }, ['executor'], { studio: true });
     assert.equal(channel.prompt, 'Work together.\nAsk when uncertain.');
     assert.equal((await service.readContext(executor, channel.channelId)).channel.prompt, channel.prompt);
     assert.equal((await service.listChannels(owner)).channels[0]?.prompt, channel.prompt);
@@ -71,8 +90,8 @@ for (const [backend, config] of backends) {
   }));
 
   test(`${backend}: only Studio authority can set or change a Channel prompt`, () => withService(async (service) => {
-    await assert.rejects(service.createChannel(owner, { title: 'Team', prompt: 'Forged', pets: ['executor'] }), ChannelAccessError);
-    const { channelId } = (await service.createChannel(owner, { title: 'Team', prompt: 'Original', pets: ['executor'] }, { studio: true })).channel;
+    await assert.rejects(service.createChannel(owner, { title: 'Team', prompt: 'Forged', pets: [] }), ChannelAccessError);
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Team', prompt: 'Original' }, ['executor'], { studio: true })).channel;
     await service.addMember(owner, channelId, guest);
     assert.equal((await service.updateChannel(guest, channelId, { title: 'Renamed', description: 'Updated' })).title, 'Renamed');
     await assert.rejects(service.updateChannel(guest, channelId, { title: 'Should not apply', prompt: 'Forged' }), ChannelAccessError);
@@ -102,7 +121,7 @@ for (const [backend, config] of backends) {
       await sql`insert into channel_messages (message_id, channel_id, author_kind, author_id, occurred_at, data)
         values ('old-msg', 'old', 'human', 'owner', 'then', ${JSON.stringify({ body: 'Keep this', mentions: [] })})`.execute(legacy);
       const db = await storage.open<ChannelDatabase>('channel', migrations);
-      const service = new ChannelService({ store: new KyselyChannelStore(db), pets, humans });
+      const service = fixtureService({ store: new KyselyChannelStore(db), humans });
       const context = await service.readContext(owner, 'old');
       assert.equal(context.channel.description, 'Preserved');
       assert.equal(context.channel.prompt, undefined);
@@ -115,8 +134,8 @@ for (const [backend, config] of backends) {
     const storage = createStudioStorage(config());
     try {
       const db = await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect));
-      const service = new ChannelService({ store: new KyselyChannelStore(db), pets, humans });
-      const { channelId } = (await service.createChannel(owner, { title: 'History', pets: ['executor'] })).channel;
+      const service = fixtureService({ store: new KyselyChannelStore(db), humans });
+      const { channelId } = (await createChannelWithInstances(service, owner, { title: 'History' }, ['executor'])).channel;
       const original = (await service.postMessage(owner, channelId, { body: 'Original question.' })).message;
       const historical = {
         body: 'Historical reply remains visible.', replyTo: original.messageId,
@@ -152,13 +171,13 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   });
 
-  test(`${backend}: a Channel starts with its creator and the Pets it names, and lists only for its members`, () => withService(async (service) => {
-    const { channel, members } = await service.createChannel(owner, { title: 'Release', description: 'Ship 1.0', pets: ['executor', 'executor'] });
+  test(`${backend}: a Channel starts with its creator and acquires only newly owned Pet instances, and lists only for its members`, () => withService(async (service) => {
+    const { channel, members } = await createChannelWithInstances(service, owner, { title: 'Release', description: 'Ship 1.0' }, ['executor']);
     assert.equal(channel.title, 'Release');
     assert.deepEqual(channel.createdBy, owner);
     assert.deepEqual(members.map(member => [member.participantId, member.label]), [['human:owner', 'owner'], ['pet:executor', 'Executor']]);
-    await assert.rejects(service.createChannel(owner, { title: 'No pets field' }));
-    await assert.rejects(service.createChannel(owner, { title: 'Unknown', pets: ['ghost'] }), /Unknown Pet/);
+    assert.deepEqual((await service.createChannel(guest, { title: 'No pets field' })).members.map(member => member.participantId), ['human:guest']);
+    await assert.rejects(service.createChannel(owner, { title: 'Unknown', pets: ['ghost'] }));
     await assert.rejects(service.createChannel(owner, { title: 'Old shape', goal: 'g', scope: 's', pets: [] }));
     const second = (await service.createChannel(owner, { title: 'Second', pets: [] })).channel;
     await service.createChannel(guest, { title: 'Guest only', pets: [] });
@@ -175,12 +194,12 @@ for (const [backend, config] of backends) {
   }));
 
   test(`${backend}: only current members read, speak and manage members; leaving keeps history and rejoining restores access`, () => withService(async (service) => {
-    const { channelId } = (await service.createChannel(owner, { title: 'Release', pets: ['executor'] })).channel;
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Release' }, ['executor'])).channel;
     await assert.rejects(service.readContext(guest, channelId), ChannelAccessError);
     await assert.rejects(service.postMessage(guest, channelId, { body: 'hi' }), ChannelAccessError);
     await assert.rejects(service.addMember(guest, channelId, guest), ChannelAccessError);
     await assert.rejects(service.readContext(owner, 'missing'), ChannelNotFoundError);
-    await assert.rejects(service.addMember(owner, channelId, { kind: 'pet', id: 'ghost' }), /Unknown Pet/);
+    await assert.rejects(service.addMember(owner, channelId, { kind: 'pet', id: 'ghost' }));
     await assert.rejects(service.addMember(owner, channelId, { kind: 'human', id: 'stranger' }), /Unknown Studio client/);
     await assert.rejects(service.addMember(owner, channelId, { kind: 'human', id: 'retired' }), /Unknown Studio client/);
 
@@ -199,13 +218,13 @@ for (const [backend, config] of backends) {
     // A human's label is the Studio client's current label.
     clients.set('guest', 'Guest');
     try {
-      assert.deepEqual((await service.listMembers(owner, channelId)).map(member => member.label), ['owner', 'Executor', 'Guest']);
+      assert.deepEqual((await service.listMembers(owner, channelId)).map(member => member.label), ['owner', 'Guest', 'Executor']);
     } finally { clients.set('guest', 'guest'); }
     assert.deepEqual(events, ['channel.member.joined', 'channel.message.created', 'channel.member.left', 'channel.member.joined']);
   }));
 
   test(`${backend}: the last human member cannot be removed, and Studio authority manages any Channel`, () => withService(async (service) => {
-    const { channelId } = (await service.createChannel(owner, { title: 'Release', pets: ['executor'] })).channel;
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Release' }, ['executor'])).channel;
     await service.createChannel(guest, { title: 'Guest only', pets: [] });
     // The only human can neither be removed nor leave; a Pet can.
     await assert.rejects(service.removeMember(owner, channelId, owner), ChannelLastHumanError);
@@ -230,8 +249,8 @@ for (const [backend, config] of backends) {
   }));
 
   test(`${backend}: messages keep their author as stored, resolve mentions against current members and reject cross-Channel or spoofed input`, () => withService(async (service) => {
-    const a = (await service.createChannel(owner, { title: 'A', pets: ['executor'] })).channel.channelId;
-    const b = (await service.createChannel(owner, { title: 'B', pets: ['executor'] })).channel.channelId;
+    const a = (await createChannelWithInstances(service, owner, { title: 'A' }, ['executor'])).channel.channelId;
+    const b = (await createChannelWithInstances(service, owner, { title: 'B' }, ['executor-b'])).channel.channelId;
     const { message } = await service.postMessage(owner, a, { body: 'Please [@Executor](participant:pet:executor) check.' });
     assert.deepEqual(message.author, owner);
     assert.deepEqual(message.mentions, [{ participantId: 'pet:executor', label: 'Executor' }]);
@@ -251,7 +270,7 @@ for (const [backend, config] of backends) {
   }));
 
   test(`${backend}: a Pet message is idempotent by its external id and keeps a reply whose mention cannot be resolved`, () => withService(async (service) => {
-    const { channelId } = (await service.createChannel(owner, { title: 'A', pets: ['executor'] })).channel;
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'A' }, ['executor'])).channel;
     const first = await service.postMessage(executor, channelId, { body: 'Done. [@Owner](participant:human:owner)' }, { externalRef: 'session-message-1' });
     assert.equal(first.created, true);
     assert.deepEqual(first.message.mentions, [{ participantId: 'human:owner', label: 'owner' }]);
@@ -339,11 +358,11 @@ for (const [backend, config] of backends) {
       await clients.ensure({ clientId: 'owner', label: 'Owner' });
       await clients.create({ clientId: 'guest', label: 'Guest' });
       const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-      const service = new ChannelService({ store, pets, humans: async (id) => {
+      const service = fixtureService({ store, humans: async (id) => {
         const client = await clients.get(id);
         return client && { label: client.label, active: !client.revokedAt };
       } });
-      const { channel, members } = await service.createChannel(owner, { title: 'A', pets: ['executor'] });
+      const { channel, members } = await createChannelWithInstances(service, owner, { title: 'A' }, ['executor']);
       assert.deepEqual(members.map(member => member.label), ['Owner', 'Executor']);
       assert.equal((await service.addMember(owner, channel.channelId, guest)).label, 'Guest');
       const { message } = await service.postMessage(owner, channel.channelId, { body: 'Hi [@g](participant:human:guest)' });
@@ -355,7 +374,7 @@ for (const [backend, config] of backends) {
   });
 
   test(`${backend}: a session reservation is made once per (Channel, Pet), unique per Pet session, and normalizes Channel ids`, () => withService(async (service) => {
-    const { channelId } = (await service.createChannel(owner, { title: 'A', pets: ['executor'] })).channel;
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'A' }, ['executor'])).channel;
     const [binding, same] = await Promise.all([
       service.reserveSession(` \t${channelId}\n `, 'executor', () => 'executor:12345678'),
       service.reserveSession(channelId, 'executor', () => 'executor:87654321'),
@@ -367,7 +386,7 @@ for (const [backend, config] of backends) {
     assert.deepEqual(await service.listSessions(owner, channelId), [{ ...binding, registered: true }]);
     await assert.rejects(service.listSessions(guest, channelId), ChannelAccessError);
     await assert.rejects(service.confirmSession({ ...binding, sessionId: 'executor:other' }), /binding changed/);
-    const other = (await service.createChannel(owner, { title: 'B', pets: ['executor'] })).channel.channelId;
+    const other = (await createChannelWithInstances(service, owner, { title: 'B' }, ['executor-b'])).channel.channelId;
     await assert.rejects(service.reserveSession(other, 'executor', () => binding.sessionId));
   }));
 }
@@ -387,8 +406,8 @@ test('postgres server: concurrent removals cannot remove every human', { skip: !
   const storage = createStudioStorage({ kind: 'postgres', pool: new pg.Pool({ connectionString: url.href, max: 4 }) });
   try {
     const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-    const service = new ChannelService({ store, pets, humans });
-    const { channelId } = (await service.createChannel(owner, { title: 'Race', pets: ['executor'] })).channel;
+    const service = fixtureService({ store, humans });
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Race' }, ['executor'])).channel;
     await service.addMember(owner, channelId, guest);
     // Hold each removal after it reads the members until the other has read
     // them too (or is blocked from reading), so both decide on the same count.
@@ -405,7 +424,7 @@ test('postgres server: concurrent removals cannot remove every human', { skip: !
         } },
       }))) },
     });
-    const racer = new ChannelService({ store: racing, pets, humans });
+    const racer = fixtureService({ store: racing, humans });
     const results = await Promise.allSettled([
       racer.removeMember(owner, channelId, owner, { studio: true }),
       racer.removeMember(owner, channelId, guest, { studio: true }),

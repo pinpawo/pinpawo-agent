@@ -63,6 +63,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   for (const plugin of plugins) {
     if (!plugin.name.trim()) throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
     // `studio` is the core's own event source and storage owner.
+    if (plugin.petChannels && plugin.name !== 'channel') throw new Error('Only the Channel Plugin may validate Pet ownership.');
     if (plugin.name === 'studio') throw new Error(`studio "${input.studioId}": plugin name "studio" is reserved`);
     if (pluginNames.has(plugin.name)) {
       throw new Error(`studio "${input.studioId}": duplicate plugin "${plugin.name}"`);
@@ -115,6 +116,14 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     credentials,
     definitions: input.definitions,
     assemble: input.assemblePet,
+    requireChannel: async (channelId) => {
+      const channel = plugins.find(plugin => plugin.name === 'channel');
+      if (!channel?.petChannels) throw new StudioPetError('The Channel Plugin is required to own Pet instances.', 'invalid');
+      await channel.petChannels.requireChannel(channelId, {
+        dialect: storage.dialect,
+        open: migrations => storage.open('channel', migrations),
+      });
+    },
     onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
     onClosed: (petId) => {
       lifecycleObservers.get(petId)?.();

@@ -127,9 +127,14 @@ export function channelPetSession(petId: string, sessions: ChannelSession[]): Ch
   return sessions.find(item => item.petId === petId && item.registered);
 }
 
-/** Pets that can still join: registered with Studio and not current members. */
-export function channelJoinablePets(pets: ChannelPet[], members: ChannelMember[]): ChannelPet[] {
-  return pets.filter(pet => !members.some(member => member.kind === 'pet' && member.id === pet.petId));
+export type ChannelPetDefinition = { definitionId: string; name: string };
+
+/** Only Studio authority creates a fresh instance in an existing Channel. */
+export function channelPetCreateInput(channelId: string, definition: ChannelPetDefinition, clientMode: boolean,
+  newId: () => string = () => crypto.randomUUID()) {
+  if (clientMode) throw new Error('Only Studio authority can create Pet instances.');
+  if (!channelId.trim()) throw new Error('Create or select a Channel first.');
+  return { petId: newId(), channelId, definitionId: definition.definitionId, name: (definition.name.trim() || definition.definitionId).slice(0, 80) };
 }
 
 export function channelMessageSummary(message: Pick<ChannelMessage, 'body'>): string {

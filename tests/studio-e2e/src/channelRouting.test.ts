@@ -5,7 +5,7 @@ import { type StudioEvent } from '@pinpawo/studio-core';
 import type { PetDispatchQueueSnapshot, PetInvocationScope, PetSessionPort } from 'pinpawo/host-runtime';
 import { createChannelPlugin, type RouteDecision, type RouteInput } from '@pinpawo-plugin/channel';
 import { readChannelTestInput } from '../../support/channelDispatchInput';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 
 const me = { kind: 'human' as const, id: 'local' };
 
@@ -40,7 +40,7 @@ async function routedStudio(decide: (input: RouteInput) => RouteDecision | Promi
   });
   const events: StudioEvent[] = [];
   studio.subscribe(event => { if (event.type.startsWith('channel.')) events.push(event); });
-  const { channel: { channelId } } = await channel.service.createChannel(me, { title: 'Release', pets: ['executor', 'reviewer'] });
+  const { channel: { channelId } } = await createChannelWithPets(studio!, channel.service, me, { title: 'Release', pets: ['executor', 'reviewer'] });
   return { studio, channel, channelId, dispatched, seen, events };
 }
 
@@ -225,12 +225,13 @@ test('one routing decision observes only bound Channel sessions and cannot resum
   t.after(() => studio.shutdown());
   const events: StudioEvent[] = [];
   studio.subscribe(event => { if (event.type === 'channel.routing.skipped') events.push(event); });
-  const cid = (await channel.service.createChannel(me, { title: 'Current', pets: ['executor', 'reviewer', 'wiki'] })).channel.channelId;
-  const otherCid = (await channel.service.createChannel(me, { title: 'Other', pets: ['executor'] })).channel.channelId;
+  const cid = (await createChannelWithPets(studio!, channel.service, me, { title: 'Current', pets: ['executor', 'reviewer', 'wiki'] })).channel.channelId;
+  const otherCid = (await createChannelWithPets(studio!, channel.service, me, { title: 'Other', pets: [] })).channel.channelId;
   const executor = await channel.service.reserveSession(cid, 'executor', () => 'executor:00000001');
-  const otherExecutor = await channel.service.reserveSession(otherCid, 'executor', () => 'executor:00000002');
+  // Synthetic unrelated queue scope, not a second ownership/session binding.
+  const otherExecutor = { ...executor, channelId: otherCid, sessionId: 'executor:00000002' };
   const reviewer = await channel.service.reserveSession(cid, 'reviewer', () => 'reviewer:00000001');
-  for (const binding of [executor, otherExecutor, reviewer]) await channel.service.confirmSession(binding);
+  for (const binding of [executor, reviewer]) await channel.service.confirmSession(binding);
   const pending = { interruptId: `private-review-${randomUUID()}`, payload: { kind: 'human_review' as const, interactions: [{
     interactionId: privateMarker, schemaVersion: 2 as const, view: { kind: 'plain' as const, body: privateMarker },
     options: [{ id: 'approve', label: 'Approve', batchSubmission: 'immediate' as const }],
@@ -302,7 +303,7 @@ test('without routing an unaddressed message wakes no Pet', async (t) => {
   const channel = createChannelPlugin({ httpRoute: false });
   const studio = await createStudioWithPets({ studioId: 'test', plugins: [channel], pets: [fakePet('executor', dispatched)] });
   t.after(() => studio.shutdown());
-  const { channel: { channelId } } = await channel.service.createChannel(me, { title: 'Quiet', pets: ['executor'] });
+  const { channel: { channelId } } = await createChannelWithPets(studio!, channel.service, me, { title: 'Quiet', pets: ['executor'] });
   await channel.sendMessage(channelId, { body: 'Who is handling #1003?' }, me);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(dispatched.length, 0);

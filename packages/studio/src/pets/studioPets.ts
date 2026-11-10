@@ -16,7 +16,7 @@ export class StudioPetError extends Error {
   }
 }
 
-/** Creating and renaming this Studio's Pets. */
+/** Creating, naming and terminally closing Channel-owned Pet instances. */
 export type StudioPets = {
   /** In creation order. */
   list: () => Promise<StudioPet[]>;
@@ -24,7 +24,9 @@ export type StudioPets = {
   /** The definitions this Studio may create Pets from. */
   definitions: () => StudioPetDefinition[];
   /** Record a new Pet and assemble its runtime; it takes work as soon as this resolves. */
-  create: (input: { petId: unknown; definitionId: unknown; name: unknown }) => Promise<StudioPet>;
+  create: (input: { petId: unknown; definitionId: unknown; name: unknown; channelId: unknown }) => Promise<StudioPet>;
+  /** Terminally close one instance; preserve its identity, credentials and sessions. */
+  closeInstance: (petId: unknown) => Promise<StudioPet>;
   rename: (petId: unknown, name: unknown) => Promise<StudioPet>;
   /** Each Pet's own environment variables for its commands; values are write-only. */
   credentials: StudioPetCredentials;
@@ -57,7 +59,7 @@ function toPet(row: PetRow): StudioPet {
 }
 
 function registration(row: PetRow): StudioPetRegistration {
-  return { petId: row.petId, name: row.name, definitionId: row.definitionId };
+  return { petId: row.petId, name: row.name, definitionId: row.definitionId, channelId: row.channelId, createdAt: row.createdAt };
 }
 
 /**
@@ -65,6 +67,7 @@ function registration(row: PetRow): StudioPetRegistration {
  * Changes run one at a time, so a Pet id is never assembled twice.
  */
 export class StudioPetRegistry implements StudioPets {
+  private readonly closing = new Map<string, Promise<StudioPet>>();
   private readonly live = new Map<string, LiveStudioPet>();
   private readonly definitionsById: ReadonlyMap<string, StudioPetDefinition>;
   private changes: Promise<unknown> = Promise.resolve();
@@ -78,12 +81,13 @@ export class StudioPetRegistry implements StudioPets {
     credentials: StudioPetCredentials;
     definitions: readonly StudioPetDefinition[];
     assemble: StudioPetAssembler;
+    requireChannel: (channelId: string) => Promise<void>;
     /** A Pet became live (restored or created). */
     onLive: (pet: LiveStudioPet) => void;
     /** A live Pet's runtime has closed. */
     onClosed: (petId: string) => void;
     /** A record changed; Studio publishes it. */
-    onChange: (type: 'pet.created' | 'pet.renamed', pet: StudioPet) => void;
+    onChange: (type: 'pet.created' | 'pet.renamed' | 'pet.closed', pet: StudioPet) => void;
   }) {
     const definitions = new Map<string, StudioPetDefinition>();
     for (const definition of options.definitions) {
@@ -98,28 +102,36 @@ export class StudioPetRegistry implements StudioPets {
 
   /** The live Pet with this id. */
   getLive(petId: string): LiveStudioPet | undefined {
-    return this.live.get(petId);
+    return this.closing.has(petId) ? undefined : this.live.get(petId);
   }
 
   listLive(): LiveStudioPet[] {
-    return [...this.live.values()];
+    return [...this.live.values()].filter(pet => !this.closing.has(pet.registration.petId));
   }
 
-  /** Assemble every Pet once. Fails, naming the Pet, when its definition is gone. */
+  /** Assemble every active, owned Pet once. Fails, naming the Pet, when its definition is gone. */
   restore(): Promise<void> {
-    this.restored ??= this.serialize(() => this.restoreNow());
+    this.restored ??= this.serialize(() => this.restoreSafely());
     return this.restored;
+  }
+
+  private async restoreSafely(): Promise<void> {
+    try { await this.restoreNow(); }
+    catch (error) { await this.closeLive(); throw error; }
   }
 
   private async restoreNow(): Promise<void> {
     const rows = await (await this.options.store()).listPets();
-    for (const row of rows) {
-      if (this.live.has(row.petId)) continue;
+    // Validate every active identity before assembling any resident.
+    for (const row of rows.filter(row => !row.closedAt)) {
+      if (!row.channelId) throw new Error(`Pet "${row.petId}" has no owner Channel. This active record has no valid ownership. Do not delete data or infer an owner; restore an ownership-consistent backup or use a new Studio database.`);
+      await this.options.requireChannel(row.channelId);
       if (!this.definitionsById.has(row.definitionId)) {
-        throw new Error(
-          `studio "${this.options.studioId}": Pet "${row.petId}" uses definition "${row.definitionId}", which this Studio no longer lists`,
-        );
+        throw new Error(`studio "${this.options.studioId}": Pet "${row.petId}" uses definition "${row.definitionId}", which this Studio no longer lists`);
       }
+    }
+    for (const row of rows.filter(row => !row.closedAt)) {
+      if (this.live.has(row.petId)) continue;
       await this.goLive(row);
     }
   }
@@ -137,30 +149,65 @@ export class StudioPetRegistry implements StudioPets {
     return [...this.definitionsById.values()].map(definition => ({ ...definition }));
   }
 
-  async create(input: { petId: unknown; definitionId: unknown; name: unknown }): Promise<StudioPet> {
+  async create(input: { petId: unknown; definitionId: unknown; name: unknown; channelId: unknown }): Promise<StudioPet> {
     const petId = readPetId(input.petId);
     const name = readName(input.name);
+    const channelId = typeof input.channelId === 'string' ? input.channelId.trim() : '';
+    if (!channelId || channelId.length > 256) throw new StudioPetError('An existing owner Channel is required.', 'invalid');
     const definitionId = typeof input.definitionId === 'string' ? input.definitionId.trim() : '';
     if (!this.definitionsById.has(definitionId)) {
       throw new StudioPetError(`No Pet definition "${definitionId}" in this Studio.`, 'invalid');
     }
     return this.serialize(async () => {
       // Already inside the queue: restore inline rather than wait behind ourselves.
-      this.restored ??= this.restoreNow();
+      this.restored ??= this.restoreSafely();
       await this.restored;
       const store = await this.options.store();
-      const row: PetRow = { petId, definitionId, name, createdAt: new Date().toISOString() };
+      await this.options.requireChannel(channelId);
+      const row: PetRow = { petId, definitionId, name, channelId, createdAt: new Date().toISOString() };
       if (!(await store.createPet(row))) throw new StudioPetError(`Pet "${petId}" already exists.`, 'exists');
       try {
         await this.goLive(row);
       } catch (error) {
-        // A Pet that never ran leaves no history; free its id for another try.
-        await store.deletePet(petId);
+        // Assembly may already have created Host state. Retain the identity and
+        // its owner rather than recycle an id with another instance's history.
+        await store.closePet(petId, new Date().toISOString());
         throw error;
       }
       this.options.onChange('pet.created', toPet(row));
       return toPet(row);
     });
+  }
+
+  async closeInstance(petId: unknown): Promise<StudioPet> {
+    const target = readPetId(petId);
+    const transition = await this.serialize(async () => {
+      const store = await this.options.store();
+      const row = await store.getPet(target);
+      if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
+      if (row.closedAt) return { closing: this.closing.get(target) ?? Promise.resolve(toPet(row)) };
+      const closed = { ...row, closedAt: new Date().toISOString() };
+      await store.closePet(target, closed.closedAt);
+      const live = this.live.get(target);
+      const closing = Promise.resolve().then(async () => {
+        try {
+          // The Host rejects queued work and waits for active work. Its close
+          // must not hold up unrelated Pet/Channel registry changes.
+          await live?.runtime.close();
+        } finally {
+          this.live.delete(target);
+          this.closing.delete(target);
+          this.options.onClosed(target);
+          this.options.onChange('pet.closed', toPet(closed));
+        }
+        return toPet(closed);
+      });
+      this.closing.set(target, closing);
+      // Observe rejection immediately even if the caller is interrupted.
+      void closing.catch(() => undefined);
+      return { closing };
+    });
+    return transition.closing;
   }
 
   async rename(petId: unknown, name: unknown): Promise<StudioPet> {
@@ -183,14 +230,19 @@ export class StudioPetRegistry implements StudioPets {
   async close(): Promise<void> {
     this.closed = true;
     await this.changes.catch(() => undefined);
-    const live = [...this.live.values()];
-    this.live.clear();
+    await this.closeLive();
+  }
+
+  private async closeLive(): Promise<void> {
+    const closing = [...this.closing.values()];
+    const live = [...this.live.values()].filter(pet => !this.closing.has(pet.registration.petId));
+    for (const pet of live) this.live.delete(pet.registration.petId);
     // Keep observing until each runtime has closed, so its last lifecycle
     // events still reach Studio.
-    const results = await Promise.allSettled(live.map(async ({ registration: { petId }, runtime }) => {
+    const results = await Promise.allSettled([...closing, ...live.map(async ({ registration: { petId }, runtime }) => {
       try { await runtime.close(); }
       finally { this.options.onClosed(petId); }
-    }));
+    })]);
     for (const result of results) {
       if (result.status === 'rejected') {
         console.error('[studio] Pet runtime failed to close:', result.reason instanceof Error ? result.reason.message : result.reason);
@@ -201,7 +253,12 @@ export class StudioPetRegistry implements StudioPets {
   private async goLive(row: PetRow): Promise<void> {
     const live: LiveStudioPet = { registration: registration(row), runtime: await this.options.assemble(registration(row)) };
     this.live.set(row.petId, live);
-    this.options.onLive(live);
+    try { this.options.onLive(live); }
+    catch (error) {
+      this.live.delete(row.petId);
+      try { await live.runtime.close(); } finally { this.options.onClosed(row.petId); }
+      throw error;
+    }
   }
 
   private serialize<T>(work: () => Promise<T>): Promise<T> {

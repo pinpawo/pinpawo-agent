@@ -2,7 +2,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { readStudioInvocation, type StudioPlugin, type StudioPluginContext } from '@pinpawo/studio-core';
+import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
@@ -86,6 +86,7 @@ export type ChannelPlugin = StudioPlugin & {
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
 const petMessageEventSchema = z.object({
+  invocationId: z.string().min(1),
   petId: z.string().min(1),
   sessionId: z.string().min(1),
   scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }),
@@ -99,6 +100,10 @@ const channelRunEventSchema = z.object({
 });
 
 export function createChannelPlugin(options: CreateChannelPluginOptions = {}): ChannelPlugin {
+  // Studio owns database/open caching. Do not retain a connection here across
+  // stop/reuse of this Plugin object with a different Studio lifecycle.
+  const openStore = async (storage: StudioPluginStorage): Promise<ChannelStore> => options.store
+    ?? new KyselyChannelStore(await storage.open<ChannelDatabase>(channelMigrations(storage.dialect)));
   let context: StudioPluginContext | undefined;
   let current: ChannelService | undefined;
   function channelService(): ChannelService {
@@ -251,11 +256,18 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   async function recordPetMessage(payload: unknown): Promise<void> {
     const parsed = petMessageEventSchema.safeParse(payload);
     if (!parsed.success) return;
-    const { petId, sessionId, scope: { id: channelId }, message } = parsed.data;
+    const { invocationId, petId, sessionId, scope: { id: channelId }, message } = parsed.data;
     if (!message.text.trim()) return;
     const studio = host();
     try {
       const service = channelService();
+      const pet = await studio.pets.get(petId);
+      if (pet?.closedAt) {
+        const active = running.get(invocationId);
+        if (active?.channelId !== channelId || active.participantId !== channelParticipantId('pet', petId)) {
+          throw new ChannelAccessError('Closed Pet is not a member and has no active accepted Channel work.');
+        }
+      }
       if ((await service.getSession(channelId, petId))?.sessionId !== sessionId) {
         throw new Error('Pet message session does not match its Channel binding.');
       }
@@ -269,7 +281,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       }
       // Invalid mentions were retained for observation; they are not a new
       // unaddressed conversation for the router to repair or reinterpret.
-      if (created && !mentionError) await deliverAndRoute(saved);
+      // A closed instance may finish already accepted work. Retain that
+      // output, but its historical author cannot start fresh handoff/routing.
+      if (created && !mentionError && !(await studio.pets.get(petId))?.closedAt) await deliverAndRoute(saved);
     } catch (error) {
       // Nobody waits on this write; observers are the only ones who can see it failed.
       studio.notify({ type: 'channel.message_failed', payload: {
@@ -321,14 +335,20 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   const inputs: ChannelInputsHook = { run };
 
   return {
+    petChannels: {
+      requireChannel: async (channelId, storage) => {
+        if (!await (await openStore(storage)).getChannel(channelId)) throw new StudioPetError(`No owner Channel "${channelId}".`, 'invalid');
+      },
+    },
     name: 'channel', contextNamespaces: ['channel'], sendMessage, run, toolkits: [toolkit],
     get service() { return channelService(); },
     start: async (studio) => {
-      const store = options.store
-        ?? new KyselyChannelStore(await studio.storage.open<ChannelDatabase>(channelMigrations(studio.storage.dialect)));
+      const store = await openStore(studio.storage);
       current = new ChannelService({
         store,
-        pets: () => studio.listPets().map(pet => ({ petId: pet.petId, name: pet.name })),
+        pets: () => studio.listPets(),
+        closePet: petId => studio.pets.closeInstance(petId),
+        petOwner: async petId => (await studio.pets.get(petId))?.channelId,
         humans: async (clientId) => {
           const client = await studio.clients.get(clientId);
           return client && { label: client.label, active: !client.revokedAt };

@@ -41,12 +41,17 @@ HostCapabilityCatalog 统一装配；未引用的共享能力不会进入该 Pet
 
 - 首次 init 一次性提供 Toolkit sources，随后新增 source 明确失败，不能静默复用半装配 inventory。
 - 并发 init 共用初始化；shutdown 与 init 串行，开始关闭后不允许重新 init。
-- 所有配置 Pet 在监听前 eager start，无 lazy/disabled 回退。任一 Pet/interaction 启动失败，
+- init 只准备定义；实例由 Studio authority 在既有 Channel 中创建。每实例的 Channel 不可变，
+  runtime、运行槽与 Session 随实例固定归属，定义可以复用。Head 尚未在本次实现；
+  后续设计必须保持 Head 与实例归属一致。
+- 所有未关闭实例在监听前 eager start，无 lazy/disabled 回退。任一 Pet/interaction 启动失败，
   关闭本轮已建资源；Pet 启停不定义次序，但等待所有 close settle。
 - Plugin 按配置顺序 start；失败时包含失败者的已启动前缀逆序 stop。
 - Studio core shutdown 停止接纳并逆序停止 Plugin、关闭总线，不取消已接纳的执行。
   StudioHost 随后 close 所有 resident，最后释放共享 Toolkit/lease；durable interrupt
   已结束当前 invocation，shutdown 不删除 checkpoint continuation。
+- 从 Channel 移除 Pet 成员会终态关闭该实例及 runtime；保留实例行、历史、凭据与 Session，
+  不允许重新打开或改绑 Channel，重启也不恢复关闭实例。
 - transport 断开只删除其连接路由，不关闭 resident；SIGINT/SIGTERM 关闭本 Host 并等待资源释放。
 
 启动顺序是：取得 writer lease → 解析配置/已安装扩展 → 装配 inventory 和所有 resident →
@@ -78,7 +83,7 @@ receipt 只确认接纳，不能作为 completion/status/output/error、取消�
 producer metadata 仅用于相关数据，不提供工具身份或 transport 路由。
 
 每 resident Pet 只有一个运行槽；活动操作不抢占，空闲时 conversation 优先于 dispatch。
-Studio registry/listPets 只含存活 Pet 的 id/name 与 dispatch port，不公开能力清单或活动 thread。
+Studio registry/listPets 只含存活 Pet 的 id/name/channelId 与 dispatch port，不公开能力清单或活动 thread。
 全局队列是 resident 的只读瞬时投影；Channel 的消费语义见[统一设计](channel-addressing-and-execution.md)。
 
 Studio 事件总线按 subscriber 隔离 FIFO，并按 Plugin lifecycle owner 释放订阅。

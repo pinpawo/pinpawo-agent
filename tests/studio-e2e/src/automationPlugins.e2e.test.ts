@@ -20,8 +20,8 @@ async function seedChannel(t: TestContext, petIds: string[]) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-  const service = new ChannelService({ store, pets: () => petIds.map((petId) => ({ petId, name: petId })), humans: async () => undefined });
-  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: petIds });
+  const service = new ChannelService({ store, pets: () => [], closePet: async () => {}, humans: async () => undefined });
+  const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: [] });
   return { channelId, channel: createChannelPlugin({ store, httpRoute: false }) };
 }
 
@@ -68,6 +68,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
     pets: [worker],
     plugins: [scheduler, trigger, channel, http],
   });
+  await studio.pets.create({ petId: worker.registration.petId, definitionId: worker.registration.petId, name: worker.registration.name, channelId });
   t.after(() => studio.shutdown());
   const address = http.address();
   assert.ok(address);
@@ -222,6 +223,7 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
     pets: [worker],
     plugins: [trigger, channel, http],
   });
+  await studio.pets.create({ petId: worker.registration.petId, definitionId: worker.registration.petId, name: worker.registration.name, channelId });
   t.after(() => studio.shutdown());
   const address = http.address();
   assert.ok(address);

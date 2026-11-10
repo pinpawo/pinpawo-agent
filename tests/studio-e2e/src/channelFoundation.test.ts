@@ -15,7 +15,7 @@ import {
   ChannelAccessError, createChannelPlugin, type ChannelDelivery, type ChannelMessage,
 } from '@pinpawo-plugin/channel';
 import { readChannelTestInput, readChannelTestTask } from '../../support/channelDispatchInput';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
 /** The local Host token's Studio client, as a Channel member. */
@@ -54,12 +54,13 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     assert.equal((await fetch(base + '/channels')).status, 401);
     assert.equal((await fetch(base + '/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
     assert.equal((await post('/channels', { title: 'Old shape', goal: 'Long term', scope: 'Round one', pets: [] })).status, 400);
-    assert.equal((await post('/channels', { title: 'No Pets named' })).status, 400);
-    assert.equal((await post('/channels', { title: 'Unknown', pets: ['ghost'] })).status, 409);
-    const created = await post('/channels', { title: 'Release', description: 'Ship 1.0', pets: ['reviewer'] });
+    assert.equal((await post('/channels', { title: '' })).status, 400);
+    assert.equal((await post('/channels', { title: 'Unknown', pets: ['ghost'] })).status, 400);
+    const created = await post('/channels', { title: 'Release', description: 'Ship 1.0', pets: [] });
     assert.equal(created.status, 201);
     const { channel: { channelId }, members } = await created.json() as { channel: { channelId: string }; members: Array<{ participantId: string }> };
-    assert.deepEqual(members.map(member => member.participantId), ['human:local', 'pet:reviewer']);
+    assert.deepEqual(members.map(member => member.participantId), ['human:local']);
+    assert.equal((await post('/pets', { petId: 'reviewer', definitionId: 'reviewer', name: 'Reviewer', channelId })).status, 201);
     assert.equal(dispatched.length, 0);
     for (const forged of [
       { author: { kind: 'pet', id: 'reviewer' } },
@@ -103,7 +104,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     const guest = await post('/channels/members', { channelId, kind: 'human', id: 'guest' });
     assert.equal(guest.status, 201);
     assert.equal((await guest.json() as { participantId: string }).participantId, 'human:guest');
-    assert.equal((await post('/channels/members', { channelId, kind: 'pet', id: 'writer' })).status, 201);
+    assert.equal((await post('/pets', { petId: 'writer', definitionId: 'writer', name: 'Writer', channelId })).status, 201);
     assert.equal((await post('/channels/members', { channelId, kind: 'pet', id: 'ghost' })).status, 409);
     assert.equal((await post('/channels/members', { channelId, kind: 'bot', id: 'x' })).status, 400);
     assert.equal((await post('/channels/members/remove', { channelId, kind: 'pet', id: 'reviewer' })).status, 200);
@@ -132,7 +133,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     assert.equal((await fetch(base + '/channels', { headers: asGuest })).status, 401);
 
     // A Channel the local client never joined is closed to its messages; the local token may still manage its members.
-    const other = (await channel.service.createChannel({ kind: 'human', id: 'someone-else' }, { title: 'Private', pets: ['reviewer'] })).channel.channelId;
+    const other = (await createChannelWithPets(studio!, channel.service, { kind: 'human', id: 'someone-else' }, { title: 'Private', pets: [] })).channel.channelId;
     const listing = await (await get('/channels')).json() as { channels: Array<{ channelId: string }>; viewerParticipantId: string };
     assert.deepEqual(listing.channels.map(item => item.channelId), [channelId]);
     const everything = await (await get('/channels?all=true')).json() as { channels: Array<{ channelId: string }> };
@@ -197,29 +198,30 @@ test('real resident queue binds tools to current Channel and Pet, rejects spoofi
   });
   try {
     const owner = { kind: 'human', id: 'owner' } as const;
-    const a = (await channel.service.createChannel(owner, { title: 'A', pets: ['executor'] })).channel.channelId;
-    const b = (await channel.service.createChannel(owner, { title: 'B', description: 'B before', pets: ['executor'] })).channel.channelId;
-    const outside = (await channel.service.createChannel(owner, { title: 'Not joined', pets: [] })).channel.channelId;
+    const a = (await createChannelWithPets(studio!, channel.service, owner, { title: 'A', pets: ['executor'] })).channel.channelId;
+    const b = a; // The instance has one owner; queued turns share its Channel session.
+    const outside = (await createChannelWithPets(studio!, channel.service, owner, { title: 'Not joined', pets: [] })).channel.channelId;
     await assert.rejects(read.invoke({}), /Host-admitted/);
     // A Channel scope must name its persisted Pet/session binding. Reserve
     // separate sessions before exercising the queue and tool context.
     const aBinding = await channel.service.reserveSession(a, 'executor', () => 'executor:11111111');
-    const bBinding = await channel.service.reserveSession(b, 'executor', () => 'executor:22222222');
-    const outsideBinding = await channel.service.reserveSession(outside, 'executor', () => 'executor:33333333');
+    const bBinding = aBinding;
+    await assert.rejects(channel.service.reserveSession(outside, 'executor', () => 'executor:33333333'), ChannelAccessError);
+    const outsideBinding = aBinding;
     const scope: PetInvocationScope = { namespace: 'channel', id: a };
     await studio.dispatch({ petId: 'executor', request: 'first', session: { id: aBinding.sessionId, create: true }, scope });
     await waitFor(() => started);
     await studio.dispatch({ petId: 'executor', request: 'second', session: { id: bBinding.sessionId, create: true }, scope: { namespace: 'channel', id: b } });
     await studio.dispatch({ petId: 'executor', request: 'unscoped', metadata: { channelId: a } });
     await assert.rejects(studio.dispatch({ petId: 'executor', request: 'not a member', session: { id: outsideBinding.sessionId, create: true }, scope: { namespace: 'channel', id: outside } }), ChannelAccessError);
-    (scope as { id: string }).id = b;
+    (scope as { id: string }).id = outside;
     await channel.service.updateChannel(owner, b, { description: 'B revised while queued' });
     release();
     await waitFor(() => snapshots.length + failures.length === 3);
     assert.deepEqual(snapshots.map(item => item.channel.channelId), [a, b]);
     assert.equal(snapshots[1]?.channel.description, 'B revised while queued');
     assert.deepEqual(snapshots[0]?.members.map(member => member.participantId), ['human:owner', 'pet:executor']);
-    assert.equal(new Set(threads.slice(0, 2)).size, 2, 'Channel scopes use separate sessions');
+    assert.equal(new Set(threads.slice(0, 2)).size, 1, 'queued owner-Channel turns share the stable instance session');
     assert.equal(failures.length, 1);
     assert.match(String(failures[0]), /Host-admitted/);
     await assert.rejects(read.invoke({}), /Host-admitted/);
@@ -236,7 +238,7 @@ test('a Pet message is its Channel session public reply, written once, handed of
   studio.subscribe(event => { events.push(event); });
   try {
     const operator = me;
-    const id = (await channel.service.createChannel(operator, { title: 'Goal', pets: ['one', 'two'] })).channel.channelId;
+    const id = (await createChannelWithPets(studio!, channel.service, operator, { title: 'Goal', pets: ['one', 'two'] })).channel.channelId;
     const { deliveries: [delivery] } = await channel.sendMessage(id, { body: 'Start', mentions: [{ participantId: 'pet:one' }] }, me);
     const sessionId = delivery!.sessionId!;
     const petMessages = async () => (await channel.service.readContext(operator, id)).messages.filter(message => message.author.kind === 'pet');
@@ -271,10 +273,14 @@ test('a Pet message is its Channel session public reply, written once, handed of
       [['reply-2', 'one', 'one:forged'], ['reply-4', 'one', sessionId]]);
     assert.match(failures()[0].error, /session does not match/);
     assert.match(failures()[1].error, /not a member/);
-    await channel.service.addMember(operator, id, { kind: 'pet', id: 'one' });
+    await assert.rejects(channel.service.addMember(operator, id, { kind: 'pet', id: 'one' }));
+    const postMessage = channel.service.postMessage.bind(channel.service);
     channel.service.postMessage = async () => { throw new Error('disk unavailable'); };
-    emit(completed('reply-5', 'Not saved.'));
+    studio.notify({ source: 'resident-pet', type: 'dispatch.message', occurredAt: new Date().toISOString(),
+      payload: { petId: 'two', invocationId: 'two-reply', sessionId: (await channel.service.getSession(id, 'two'))!.sessionId,
+        scope: { namespace: 'channel', id }, message: completed('reply-5', 'Not saved.') } });
     await waitFor(() => failures().length === 3);
+    channel.service.postMessage = postMessage;
     assert.equal(failures()[2].error, 'disk unavailable');
     assert.deepEqual((await petMessages()).map(message => message.externalRef), ['reply-1'], 'replays, tool calls and failed writes leave no message');
     assert.equal(dispatched.length, 2, 'a replayed reply hands off once');
@@ -287,7 +293,7 @@ test('run sends a channel_task to a member Pet session without writing a Channel
   const studio = await createStudioWithPets({ studioId: 'run', plugins: [channel],
     pets: [fakePet('one', dispatched), fakePet('two', dispatched)] });
   try {
-    const id = (await channel.service.createChannel(me, { title: 'Ops', pets: ['one'] })).channel.channelId;
+    const id = (await createChannelWithPets(studio!, channel.service, me, { title: 'Ops', pets: ['one'] })).channel.channelId;
     const origin = { kind: 'scheduler', id: 'nightly' } as const;
     const receipt = await channel.run(` ${id} `, 'one', 'Nightly check', origin, { idempotencyKey: 'nightly:1' });
     assert.equal(receipt.sessionId, (await channel.service.getSession(id, 'one'))!.sessionId);

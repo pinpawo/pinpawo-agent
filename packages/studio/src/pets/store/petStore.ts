@@ -9,6 +9,8 @@ export type PetCredentialRow = {
 export type PetRow = {
   petId: string;
   definitionId: string;
+  channelId: string;
+  closedAt?: string;
   name: string;
   createdAt: string;
 };
@@ -22,8 +24,8 @@ export interface PetStore {
   transaction<T>(work: (store: PetStore) => Promise<T>): Promise<T>;
   /** Inserts the Pet; returns false when the id is already taken. */
   createPet(row: PetRow): Promise<boolean>;
-  /** Removes a Pet whose runtime could not be assembled, so its id can be used again. */
-  deletePet(petId: string): Promise<void>;
+  /** Terminal closure never deletes identity, credentials or history. */
+  closePet(petId: string, closedAt: string): Promise<void>;
   getPet(petId: string): Promise<PetRow | undefined>;
   /** In creation order. */
   listPets(): Promise<PetRow[]>;

@@ -78,9 +78,10 @@ export class KyselyChannelStore implements ChannelStore {
     return Number(result.numUpdatedRows) === 1;
   }
 
-  async listChannels(filter: { member?: MemberRef }, page: Page): Promise<PageOf<ChannelRow>> {
+  async listChannels(filter: { member?: MemberRef; channelId?: string }, page: Page): Promise<PageOf<ChannelRow>> {
     let query = this.db.selectFrom('channels').selectAll('channels')
       .where('channels.seq', '>', page.after).orderBy('channels.seq').limit(page.limit + 1);
+    if (filter.channelId !== undefined) query = query.where('channels.channel_id', '=', filter.channelId);
     if (filter.member) {
       const { kind, id } = filter.member;
       query = query.innerJoin('channel_members', 'channel_members.channel_id', 'channels.channel_id')

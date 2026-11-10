@@ -25,6 +25,9 @@ test('operator parser accepts connection flags on either side and rejects incomp
     ['events', 'p', '--seconds', '0'], ['events', 'p', '--seconds', '61'],
     ['pets', 'list', '--studio-url', 'https://user:secret@example.com'],
     ['pets', 'list', '--agent-url', 'http://localhost/path'],
+    ['pets', 'create', 'a', '--definition', 'd', '--name', 'A'],
+    ['channels', 'create', '--title', 'C', '--pet', 'a'],
+    ['channels', 'add-member', 'c', '--member', 'pet:a'],
     ['pets'], ['pets', 'show'], ['pets', 'list', 'a'], ['pets', 'create', 'a', '--name', 'A'],
     ['pets', 'create', 'a', '--definition', 'd'], ['pets', 'rename', 'a'], ['pets', 'archive', 'a'], ['pets', 'list', '--archived'],
     ['pets', 'set-credential', 'a', '--file', 'v'], ['pets', 'set-credential', 'a', '--env', 'X'], ['pets', 'unset-credential', 'a'],
@@ -102,8 +105,8 @@ test('operator commands send the existing wire protocol without retries or start
     assert.equal(seen.at(-1)?.auth, 'Bearer test-local-authority');
     assert.deepEqual(JSON.parse(output), { accepted: true, nextAfter: 7, hasMore: true });
   }
-  await run(['pets', 'create', 'dev-a', '--definition', 'developer', '--name', 'Dev A']);
-  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A' }]);
+  await run(['pets', 'create', 'dev-a', '--definition', 'developer', '--name', 'Dev A', '--channel', 'c']);
+  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A', channelId: 'c' }]);
   await run(['pets', 'rename', 'dev-a', '--name', 'Dev']);
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/pets/rename', { petId: 'dev-a', name: 'Dev' }]);
   await writeFile(join(dir, 'token.txt'), 'fake-gh-token\n');
@@ -115,8 +118,8 @@ test('operator commands send the existing wire protocol without retries or start
   assert.deepEqual(seen.at(-1)?.body, { channelId: 'c', body: '**Hello**\n\n```text\n@label\n```',
     mentions: [{ participantId: 'pet:reviewer' }, { participantId: 'human:operator' }], replyTo: 'original' });
   assert.equal(seen.at(-1)?.method, 'POST');
-  await run(['channels', 'create', '--title', 'Release', '--pet', 'executor', '--pet', 'reviewer', '--pet', 'executor']);
-  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/channels', { title: 'Release', pets: ['executor', 'reviewer'] }]);
+  await run(['channels', 'create', '--title', 'Release']);
+  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/channels', { title: 'Release', pets: [] }]);
   await run(['channels', 'add-member', 'c', '--member', 'human:a%20b']);
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/channels/members', { channelId: 'c', kind: 'human', id: 'a b' }]);
   await run(['channels', 'remove-member', 'c', '--member', 'pet:reviewer']);

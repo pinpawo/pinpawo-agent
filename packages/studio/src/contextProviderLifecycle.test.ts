@@ -1,3 +1,4 @@
+import { withTestPetChannel } from './testing/petChannel';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort } from 'pinpawo/host-runtime';
@@ -55,13 +56,13 @@ test('a failed Plugin start rolls back its context provider and a new Studio can
     studioId: 'fresh',
     definitions: [{ definitionId: 'worker', name: 'Worker' }],
     assemblePet: async () => ({ dispatch: withContextResolver(() => fresh, dispatch, value => { resolved.push(value); }), close: async () => undefined }),
-    plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
+    plugins: withTestPetChannel([{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
       context.registerContextProvider('channel', () => [{ id: 'channel:test', content: 'second' }]);
-    } }],
+    } }]),
   });
   try {
     await fresh.restorePets();
-    await fresh.studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker' });
+    await fresh.studio.pets.create({ channelId: 'one', petId: 'worker', definitionId: 'worker', name: 'Worker' });
     await fresh.activatePlugins();
     await fresh.studio.dispatch({ petId: 'worker', request: 'work', scope: { namespace: 'channel', id: 'one' } });
     assert.deepEqual(resolved[0], [{ id: 'channel:test', content: 'second' }]);
@@ -83,13 +84,13 @@ test('a declared context namespace fails closed until its provider is active', a
     studioId: 'not-yet-active',
     definitions: [{ definitionId: 'worker', name: 'Worker' }],
     assemblePet: async () => ({ dispatch: withContextResolver(() => prepared, dispatch), close: async () => undefined }),
-    plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
+    plugins: withTestPetChannel([{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
       context.registerContextProvider('channel', () => []);
-    } }],
+    } }]),
   });
   try {
     await prepared.restorePets();
-    await prepared.studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker' });
+    await prepared.studio.pets.create({ channelId: 'one', petId: 'worker', definitionId: 'worker', name: 'Worker' });
     const request = { petId: 'worker', request: 'work', scope: { namespace: 'channel', id: 'one' } };
     await assert.rejects(prepared.studio.dispatch(request), /provider.*unavailable/i);
     assert.equal(received, 0);
@@ -107,7 +108,7 @@ test('activation rejects a Plugin that omits its declared provider', async () =>
     studioId: 'missing-provider',
     definitions: [],
     assemblePet: async () => { throw new Error('unused'); },
-    plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start() {}, stop() { stopped++; } }],
+    plugins: withTestPetChannel([{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start() {}, stop() { stopped++; } }]),
   });
   await assert.rejects(prepared.activatePlugins(), /did not register context provider/i);
   assert.equal(stopped, 1);
@@ -132,17 +133,17 @@ for (const action of ['unregister', 'shutdown'] as const) {
       studioId: `provider-${action}`,
       definitions: [{ definitionId: 'worker', name: 'Worker' }],
       assemblePet: async () => ({ dispatch: withContextResolver(() => prepared, dispatch), close: async () => undefined }),
-      plugins: [{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
+      plugins: withTestPetChannel([{ name: 'channel', contextNamespaces: ['channel'], toolkits: [], start(context) {
         remove = context.registerContextProvider('channel', async () => {
           markStarted();
           await wait;
           return [{ id: 'channel:test', content: 'original' }];
         });
-      } }],
+      } }]),
     });
     try {
       await prepared.restorePets();
-      await prepared.studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker' });
+      await prepared.studio.pets.create({ channelId: 'one', petId: 'worker', definitionId: 'worker', name: 'Worker' });
       await prepared.activatePlugins();
       const pending = prepared.studio.dispatch({ petId: 'worker', request: 'work', scope: { namespace: 'channel', id: 'one' } });
       await started;

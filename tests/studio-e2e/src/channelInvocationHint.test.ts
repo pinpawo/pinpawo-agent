@@ -13,7 +13,7 @@ import { HostGraphService } from '../../../services/host/src/agent/agentGraphSer
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
-import { createStudioWithPets } from '../../support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 
 class Model extends BaseChatModel {
@@ -106,7 +106,7 @@ test('a separate Channel hint reaches planning and Channel context is read befor
       pets: [{ registration: { petId: 'reviewer', name: 'Reviewer' }, dispatch: host.resident.dispatch, sessions: host.sessions }],
     });
     const me = { kind: 'human' as const, id: 'local' };
-    const cid = (await channel.service.createChannel(me, { title: 'Preparation', pets: ['reviewer'] })).channel.channelId;
+    const cid = (await createChannelWithPets(studio!, channel.service, me, { title: 'Preparation', pets: ['reviewer'] })).channel.channelId;
     await channel.sendMessage(cid, { body: original }, me);
     for (let i = 0; i < 1000 && !settled; i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(settled, true);

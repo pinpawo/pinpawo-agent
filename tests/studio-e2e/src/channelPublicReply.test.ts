@@ -14,7 +14,7 @@ import { createTestModelProfiles } from '../../../services/host/src/testing/mode
 import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 import { HostGraphService } from '../../../services/host/src/agent/agentGraphService';
 import type { AgentChannelSetup } from '../../../services/host/src/agent/agentChannel';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { createInvocationContextBridge } from './invocationContextBridge';
 import type { Studio } from '@pinpawo/studio-core';
 
@@ -183,7 +183,7 @@ test('capability handoff reaches Channel only through the selected final root re
       pets: hosts.map((host, index) => ({ registration: { petId: ['acceptance-a', 'acceptance-b'][index]!, name: index ? 'B · Reviewer' : 'A' },
         dispatch: host.resident.dispatch })),
     });
-    const id = (await channel.service.createChannel(me, {
+    const id = (await createChannelWithPets(studio!, channel.service, me, {
       title: channelTitle, description: channelDescription, prompt: initialAnnouncement, pets: ['acceptance-a', 'acceptance-b'],
     }, { studio: true })).channel.channelId;
     const outputs = async () => (await channel.service.readContext(me, id, { limit: 200 })).messages.filter(message => message.author.kind === 'pet');

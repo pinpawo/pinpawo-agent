@@ -84,7 +84,7 @@ export interface ChannelStore {
    */
   lockChannel(channelId: string): Promise<boolean>;
   /** Pages in creation order. With `member`, only Channels where it is current. */
-  listChannels(filter: { member?: MemberRef }, page: Page): Promise<PageOf<ChannelRow>>;
+  listChannels(filter: { member?: MemberRef; channelId?: string }, page: Page): Promise<PageOf<ChannelRow>>;
   /** Current and former members. */
   listMembers(channelId: string): Promise<ChannelMemberRow[]>;
   upsertMember(row: ChannelMemberRow): Promise<void>;

@@ -266,7 +266,7 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
     pets: [{
       petId: 'planner',
       name: 'Planner',
-      definitionId: 'planner',
+      definitionId: 'planner', channelId: 'channel-one', createdAt: 't',
     }],
   });
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
@@ -292,10 +292,11 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
     create: async (input) => {
       calls.push(['create', input]);
       if (records.some(pet => pet.petId === input.petId)) throw new StudioPetError('exists', 'exists');
-      const pet = { petId: input.petId as string, definitionId: input.definitionId as string, name: input.name as string, createdAt: 't' };
+      const pet = { petId: input.petId as string, definitionId: input.definitionId as string, name: input.name as string, channelId: input.channelId as string, createdAt: 't' };
       records.push(pet);
       return pet;
     },
+    closeInstance: async () => { throw new Error('not used'); },
     rename: async (petId, name) => { calls.push(['rename', petId, name]); throw new StudioPetError('missing', 'not_found'); },
     credentials: {
       unlocked: () => true,
@@ -319,10 +320,13 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
-  const created = await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A' });
+  const created = await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A', channelId: 'channel-one' });
   assert.equal(created.status, 201);
-  assert.equal((await created.json()).pet.petId, 'dev-a');
-  assert.equal((await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Again' })).status, 409);
+  const createdPet = (await created.json()).pet;
+  assert.equal(createdPet.petId, 'dev-a');
+  assert.equal(createdPet.channelId, 'channel-one');
+  assert.deepEqual(calls[0], ['create', { petId: 'dev-a', definitionId: 'developer', name: 'Dev A', channelId: 'channel-one' }]);
+  assert.equal((await send('/pets', { petId: 'dev-a', definitionId: 'developer', name: 'Again', channelId: 'channel-one' })).status, 409);
   assert.equal((await send('/pets/rename', { petId: 'ghost', name: 'X' })).status, 404);
   assert.deepEqual(calls.map(([action]) => action), ['create', 'create', 'rename']);
 

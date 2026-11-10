@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { StudioContextProvider, StudioInvocationContext } from '@pinpawo/studio-core';
 import type { AgentInvocationHint, SystemPromptSection } from '@pinpawo/pet-agent';
-import { createStudioWithPets } from '../../../tests/support/livePets';
+import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
 import { readChannelTestInput, readChannelTestTask } from '../../../tests/support/channelDispatchInput';
 import { createChannelPlugin } from './channelPlugin';
 
@@ -22,7 +22,7 @@ function contextObject(value: Context): StudioInvocationContext | undefined {
   return Array.isArray(value) ? { systemPromptSections: value } : value as Exclude<Context, readonly SystemPromptSection[]>;
 }
 
-test('each Channel dispatch supplies only its own current prompt to the same Pet', async () => {
+test('each Channel dispatch supplies only its own current prompt to its own Pet instance', async () => {
   const dispatched: Dispatched[] = [];
   const resolved: Sections[] = [];
   const hints: Array<AgentInvocationHint | undefined> = [];
@@ -32,31 +32,32 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
   const channel = createChannelPlugin({
     httpRoute: false,
     routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:one', confidence: 1, reason: routingReason, focus: routingFocus }),
+    routeDecider: async () => ({ target: 'pet:two', confidence: 1, reason: routingReason, focus: routingFocus }),
   });
   const studio = await createStudioWithPets({
     studioId: 'channel-prompt', plugins: [channel],
     onPreparedContextResolver: value => { resolver = value; },
-    pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: {
+    pets: ['one', 'two'].map(petId => ({ registration: { petId, name: petId }, dispatch: {
       getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
       dispatch: async (input: Dispatched) => {
-        const context = contextObject(input.scope ? await resolver({ petId: 'one', sessionId: input.session?.id, scope: input.scope, request: input.request }) : undefined);
+        const context = contextObject(input.scope ? await resolver({ petId, sessionId: input.session?.id, scope: input.scope, request: input.request }) : undefined);
         resolved.push(context?.systemPromptSections);
         hints.push(context?.hint);
         dispatched.push(input);
       },
-    } }],
+    } })),
   });
   try {
-    const a = (await channel.service.createChannel(human, {
+    const a = (await createChannelWithPets(studio!, channel.service, human, {
       title: 'A', prompt: 'Alpha ]]> collaboration', pets: ['one'],
     }, { studio: true })).channel.channelId;
-    const b = (await channel.service.createChannel(human, { title: 'B', pets: ['one'] })).channel.channelId;
+    const b = (await createChannelWithPets(studio!, channel.service, human, { title: 'B', pets: ['two'] })).channel.channelId;
     const first = await channel.sendMessage(a, { body: 'hello', mentions: [{ participantId: 'pet:one' }] }, human);
     assert.equal(first.deliveries[0]?.state, 'accepted');
-    await channel.sendMessage(b, { body: 'hello', mentions: [{ participantId: 'pet:one' }] }, human);
+    await channel.sendMessage(b, { body: 'hello', mentions: [{ participantId: 'pet:two' }] }, human);
     assert.equal(dispatched.length, 2);
+    await assert.rejects(channel.run(b, 'one', 'wrong owner', { kind: 'scheduler', id: 'wrong' }));
     assert.equal(Object.hasOwn(readChannelTestInput(dispatched[0]!.request), 'contextHint'), false);
     assert.equal(Object.hasOwn(readChannelTestInput(dispatched[1]!.request), 'contextHint'), false);
     const aSection = resolved[0]?.find(section => section.id === 'channel:context');
@@ -76,7 +77,7 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     await channel.service.updateChannel(human, a, { prompt: 'Updated A' }, { studio: true });
     await channel.service.updateChannel(human, b, { prompt: 'Beta' }, { studio: true });
     await channel.run(a, 'one', 'scheduled', { kind: 'scheduler', id: 's' });
-    await channel.run(b, 'one', 'triggered', { kind: 'trigger', id: 't' });
+    await channel.run(b, 'two', 'triggered', { kind: 'trigger', id: 't' });
     assert.equal(dispatched.length, 4);
     assert.equal(hints[2]?.source, 'channel');
     assert.equal(hints[3]?.source, 'channel');
@@ -114,7 +115,7 @@ test('each Channel dispatch supplies only its own current prompt to the same Pet
     assert.match(resolved[5]!.find(section => section.id === 'channel:context')!.content, /Beta/);
     assert.deepEqual(resolved[5]?.map(section => section.id), ['channel:protocol', 'channel:metadata', 'channel:context']);
     assert.equal(dispatched[5]!.session?.id, dispatched[1]!.session?.id);
-    await channel.run(b, 'one', 'after routing', { kind: 'trigger', id: 'after-routing' });
+    await channel.run(b, 'two', 'after routing', { kind: 'trigger', id: 'after-routing' });
     assert.equal(hints[6]?.source, 'channel');
     assert.equal(hints[6]?.focus, undefined, 'a later non-routed task has no old focus');
     assert.equal(hints[5]?.focus, routingFocus, 'the earlier invocation snapshot keeps its own focus');
@@ -142,10 +143,10 @@ test('provider uses the persisted binding and current membership after Studio re
     let channel = createChannelPlugin({ httpRoute: false });
     studio = await createStudioWithPets({ studioId: 'persistent-prompt', storage, plugins: [channel], pets,
       onPreparedContextResolver: value => { resolver = value; } });
-    const a = (await channel.service.createChannel(human, { title: 'A', prompt: marker, pets: ['one'] }, { studio: true })).channel.channelId;
-    const b = (await channel.service.createChannel(human, { title: 'B', pets: ['one'] })).channel.channelId;
+    const a = (await createChannelWithPets(studio!, channel.service, human, { title: 'A', prompt: marker, pets: ['one'] }, { studio: true })).channel.channelId;
+    const b = (await createChannelWithPets(studio!, channel.service, human, { title: 'B', pets: ['two'] })).channel.channelId;
     await channel.run(a, 'one', 'one', { kind: 'scheduler', id: 'a' });
-    await channel.run(b, 'one', 'two', { kind: 'scheduler', id: 'b' });
+    await channel.run(b, 'two', 'two', { kind: 'scheduler', id: 'b' });
     const aSession = observed[0]!.session!.id;
     const bSession = observed[1]!.session!.id;
     assert.notEqual(aSession, bSession);

@@ -65,12 +65,21 @@ try {
   const apiPost = async (path, body) => {
     const response = await fetch(`${ready.url}${path}`, { method: 'POST',
       headers: { Authorization: `Bearer ${ready.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    assert.ok(response.ok); return response.json();
+    assert.ok(response.ok, `${path}: ${response.status} ${await response.clone().text()}`); return response.json();
+  };
+  const rejectedPost = async (path, body, status, token = ready.token) => {
+    const response = await fetch(`${ready.url}${path}`, { method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal(response.status, status, `${path}: ${await response.text()}`);
   };
   const sessions = async channelId => (await api(`/channels/sessions?channelId=${channelId}`)).sessions;
   browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_EXECUTABLE ? { executablePath: process.env.CHANNEL_BROWSER_EXECUTABLE } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
+  const channelCreates = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/channels' && request.method() === 'POST') channelCreates.push(request.postDataJSON());
+  });
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('http://127.0.0.1:5199');
   await page.getByLabel('Studio HTTP URL').fill(ready.url);
@@ -78,21 +87,40 @@ try {
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'Channel', exact: true }).click();
-  const create = async (title, petNames, instructions = '') => {
+  const createPet = async (channelId, definitionId) => {
+    const before = new Set((await api('/pets')).pets.map(pet => pet.petId));
+    const members = page.getByRole('region', { name: 'Channel members' });
+    await members.getByLabel('Pet definition').selectOption(definitionId);
+    await members.getByRole('button', { name: 'Create Pet here', exact: true }).click();
+    const pet = await waitFor(async () => (await api('/pets')).pets.find(pet => !before.has(pet.petId)), 'new owned Pet instance');
+    assert.match(pet.petId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(pet.definitionId, definitionId);
+    assert.equal(pet.channelId, channelId);
+    await members.getByText(`pet:${pet.petId}`, { exact: true }).waitFor();
+    return pet.petId;
+  };
+  const create = async (title, definitionIds, instructions = '') => {
     await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Create Channel' });
     await dialog.getByLabel('Channel title').fill(title);
     await dialog.getByLabel('Channel description').fill('Auditable public messages between members.');
     if (instructions) await dialog.getByLabel('Channel instructions', { exact: true }).fill(instructions);
-    for (const name of petNames) await dialog.getByRole('checkbox', { name, exact: true }).check();
+    assert.equal(await dialog.getByRole('checkbox').count(), 0, 'Channel creation never selects global Pet instances');
     await dialog.evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
     await page.getByRole('heading', { name: title, exact: true }).waitFor();
+    const channel = (await api('/channels')).channels.find(channel => channel.title === title);
+    assert.deepEqual(channelCreates.at(-1).pets, [], 'Channel is persisted empty before any instance is assembled');
+    assert.deepEqual((await api(`/channels/members?channelId=${channel.channelId}`)).members.map(member => member.participantId), ['human:local']);
+    const instances = {};
+    for (const definitionId of definitionIds) instances[definitionId] = await createPet(channel.channelId, definitionId);
+    return instances;
   };
   await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
-  assert.equal(await page.getByRole('checkbox', { checked: true }).count(), 0, 'no Pet joins without an explicit choice');
+  assert.equal(await page.getByRole('checkbox').count(), 0, 'no Pet selection on Channel creation');
   assert.equal(await page.getByLabel('Channel goal').count(), 0, 'no goal or scope is asked for');
   await page.keyboard.press('Escape');
-  await create('Customer records', ['Alpha', 'Beta'], 'Discuss records together.');
+  const { alpha: firstAlpha, beta: firstBeta } = await create('Customer records', ['alpha', 'beta'], 'Discuss records together.');
+  await page.screenshot({ path: resolve(screenshotDir, '00-owned-channel-members.png'), fullPage: true });
   let listed = await api('/channels');
   assert.equal(listed.channels.length, 1, 'duplicate form submission creates one Channel');
   const firstId = listed.channels[0].channelId;
@@ -116,7 +144,7 @@ try {
   await waitFor(async () => !(await context()).channel.prompt, 'cleared Channel instructions');
   await instructions.getByText('No shared instructions yet.', { exact: true }).waitFor();
   const publicMessages = async () => (await context()).messages.filter(item => item.author.kind === 'pet');
-  assert.deepEqual((await context()).members.map(item => item.participantId), ['human:local', 'pet:alpha', 'pet:beta']);
+  assert.deepEqual((await context()).members.map(item => item.participantId), ['human:local', `pet:${firstAlpha}`, `pet:${firstBeta}`]);
   const memberPanel = page.getByRole('region', { name: 'Channel members' });
   // The composer is a rich-text editor: @ opens the member list and a picked member becomes an inline mention.
   const input = page.getByLabel('Message', { exact: true });
@@ -130,13 +158,13 @@ try {
     await mentionList.getByRole('option').filter({ hasText: participantId }).click();
     await mentionList.waitFor({ state: 'detached' });
   };
-  await memberPanel.getByText('pet:beta', { exact: true }).waitFor();
+  await memberPanel.getByText(`pet:${firstBeta}`, { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
   await page.getByLabel('Message', { exact: true }).fill('A note mentioning @beta without addressing anyone.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('A note mentioning @beta without addressing anyone.', { exact: true }).waitFor();
   assert.deepEqual(await sessions(firstId), [], 'a note wakes no Pet');
-  await mention('pet:alpha');
+  await mention(`pet:${firstAlpha}`);
   await page.keyboard.type('Investigate the current state.');
   await page.locator('.channel-composer').evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
   await waitFor(async () => (await publicMessages()).length === 1, 'first Pet message');
@@ -144,10 +172,10 @@ try {
   await page.locator('.channel-inline-state').filter({ hasText: 'Alpha · dispatch accepted' }).first().waitFor();
   await new Promise(resolve => setTimeout(resolve, 1000));
   assert.equal((await publicMessages()).length, 1, 'duplicate form submission starts one dispatch');
-  const originalSession = (await sessions(firstId)).find(item => item.petId === 'alpha').sessionId;
+  const originalSession = (await sessions(firstId)).find(item => item.petId === firstAlpha).sessionId;
   assert.equal((await publicMessages())[0].externalRef !== undefined, true, 'a Pet message keeps its session message id');
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
-  assert.deepEqual(await composerMentions(), ['pet:alpha'], 'Reply preselects the original author without manual selection');
+  assert.deepEqual(await composerMentions(), [`pet:${firstAlpha}`], 'Reply preselects the original author without manual selection');
   await waitFor(() => input.evaluate(element => document.activeElement === element), 'reply focuses the message editor');
   await page.keyboard.type('Continue with the same evidence.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -156,22 +184,22 @@ try {
   assert.ok((await publicMessages())[1].body.includes('Continue with the same evidence.'));
   assert.ok((await publicMessages())[1].body.includes(`Referenced message: ${(await publicMessages())[0].messageId}.`));
   assert.ok((await publicMessages())[1].body.includes('Input source: human:local.'));
-  await mention('pet:beta');
+  await mention(`pet:${firstBeta}`);
   await page.keyboard.type('Read prior public evidence and review the delivery.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 3, 'second Pet completed');
   assert.ok((await publicMessages())[2].body.includes('Prior public deliveries read: 2.'));
-  assert.notEqual((await sessions(firstId)).find(item => item.petId === 'beta').sessionId, originalSession);
+  assert.notEqual((await sessions(firstId)).find(item => item.petId === firstBeta).sessionId, originalSession);
   await page.screenshot({ path: resolve(screenshotDir, '01-channel-timeline.png'), fullPage: true });
   // Override and clear the default through the real UI and inspect what the Host did.
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
-  assert.deepEqual(await composerMentions(), ['pet:alpha']);
+  assert.deepEqual(await composerMentions(), [`pet:${firstAlpha}`]);
   await clearComposer();
-  await mention('pet:beta');
+  await mention(`pet:${firstBeta}`);
   await page.keyboard.type('Changed recipient, same quoted Alpha message.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 4, 'changed reply target runs Beta');
-  assert.equal((await publicMessages()).at(-1).author.id, 'beta');
+  assert.equal((await publicMessages()).at(-1).author.id, firstBeta);
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
   await clearComposer();
   assert.deepEqual(await composerMentions(), []);
@@ -190,15 +218,17 @@ try {
   await new Promise(resolve => setTimeout(resolve, 1000));
   assert.equal((await publicMessages()).length, 4, 'cleared and human recipients wake no Pet');
 
-  await create('Separate investigation', ['Alpha']);
+  const { alpha: secondAlpha } = await create('Separate investigation', ['alpha']);
+  assert.notEqual(secondAlpha, firstAlpha, 'one definition creates independent instances in different Channels');
   await page.getByRole('region', { name: 'Channel instructions' }).getByText('No shared instructions yet.', { exact: true }).waitFor();
   assert.deepEqual(await composerMentions(), [], 'new Channel requires a fresh explicit recipient');
-  assert.deepEqual(await mentionable(), ['human:local', 'pet:alpha'], 'only members can be addressed');
+  assert.deepEqual(await mentionable(), ['human:local', `pet:${secondAlpha}`], 'only members can be addressed');
   await page.screenshot({ path: resolve(screenshotDir, '06-channel-mention-autocomplete.png') });
   listed = await api('/channels');
   assert.equal(listed.channels.length, 2);
   const secondId = listed.channels.find(item => item.title === 'Separate investigation').channelId;
-  await mention('pet:alpha');
+  await rejectedPost('/channels/members', { channelId: secondId, kind: 'pet', id: firstAlpha }, 409);
+  await mention(`pet:${secondAlpha}`);
   await page.keyboard.type('Check the isolated Channel.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const other = await waitFor(async () => {
@@ -208,7 +238,7 @@ try {
   assert.notEqual((await sessions(secondId))[0].sessionId, originalSession);
   assert.ok(other.messages.find(item => item.author.kind === 'pet').body.includes('Prior public deliveries read: 0.'));
   // Execution can fail after admission; show the error only in its own Channel.
-  const failed = await apiPost('/channels/messages', { channelId: secondId, body: 'fail-provider', mentions: [{ participantId: 'pet:alpha' }] });
+  const failed = await apiPost('/channels/messages', { channelId: secondId, body: 'fail-provider', mentions: [{ participantId: `pet:${secondAlpha}` }] });
   assert.equal(failed.deliveries[0].state, 'accepted');
   const failureAlert = page.getByRole('alert').filter({ hasText: 'Alpha execution failed' });
   await failureAlert.waitFor();
@@ -234,26 +264,37 @@ try {
   await startHost(Number(new URL(ready.url).port));
   await page.locator('.connection-state.connected').waitFor();
   assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect, 'Host restart and SSE reconnect create no dispatch');
-  await mention('pet:alpha');
+  await mention(`pet:${firstAlpha}`);
   await page.keyboard.type('Continue after Host restart.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 5, 'Pet message after Host restart');
   assert.ok((await publicMessages())[4].body.includes(`Session: ${originalSession}`), 'restart keeps the Channel session');
   await page.screenshot({ path: resolve(screenshotDir, '02-channel-host-restart.png'), fullPage: true });
 
-  // Members: removing a Pet stops it being addressed; adding it back restores the same session.
-  await memberPanel.getByRole('button', { name: 'Remove Beta', exact: true }).click();
-  await waitFor(async () => !(await api(`/channels/members?channelId=${firstId}`)).members.some(item => item.participantId === 'pet:beta'), 'Beta left');
-  await memberPanel.getByText('pet:beta', { exact: true }).waitFor({ state: 'detached' });
-  assert.ok(!(await mentionable()).includes('pet:beta'), 'Beta is no longer addressable');
+  // Removing an instance closes it permanently; a replacement has a new identity and session.
+  const originalBetaSession = (await sessions(firstId)).find(item => item.petId === firstBeta).sessionId;
+  await memberPanel.getByRole('button', { name: 'Close Pet Beta', exact: true }).click();
+  await waitFor(async () => !(await api(`/channels/members?channelId=${firstId}`)).members.some(item => item.participantId === `pet:${firstBeta}`), 'Beta left');
+  await memberPanel.getByText(`pet:${firstBeta}`, { exact: true }).waitFor({ state: 'detached' });
+  assert.ok(!(await mentionable()).includes(`pet:${firstBeta}`), 'closed Beta is no longer addressable');
   await page.keyboard.press('Escape');
   await clearComposer();
   assert.equal(await memberPanel.getByRole('button', { name: 'Remove Me', exact: true }).count(), 0, 'the Console cannot remove its own member');
-  await page.locator('[data-message-id]').filter({ hasText: 'Public delivery from beta.' }).first().getByText('Beta', { exact: true }).first().waitFor();
-  await memberPanel.getByLabel('Pet to add').selectOption('beta');
-  await memberPanel.getByRole('button', { name: 'Add Pet', exact: true }).click();
-  await memberPanel.getByText('pet:beta', { exact: true }).waitFor();
-  assert.equal(await memberPanel.getByLabel('Pet to add').isDisabled(), true, 'every Pet is a member again');
+  assert.ok(!(await api('/pets')).pets.some(pet => pet.petId === firstBeta), 'closed instance leaves the live directory');
+  assert.equal((await sessions(firstId)).find(item => item.petId === firstBeta).sessionId, originalBetaSession, 'terminal closure retains session identity');
+  await rejectedPost('/channels/members', { channelId: firstId, kind: 'pet', id: firstBeta }, 409);
+  await rejectedPost('/channels/members', { channelId: secondId, kind: 'pet', id: firstBeta }, 409);
+  await rejectedPost('/pets', { petId: firstBeta, definitionId: 'beta', name: 'Beta', channelId: firstId }, 409);
+  const historicalBeta = page.locator('[data-message-id]').filter({ hasText: `Public delivery from ${firstBeta}.` }).first();
+  await historicalBeta.getByText('Removed Pet', { exact: true }).waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, '10-terminal-instance-removal.png'), fullPage: true });
+  const replacementBeta = await createPet(firstId, 'beta');
+  assert.notEqual(replacementBeta, firstBeta, 'creating the same definition never revives its closed instance');
+  await mention(`pet:${replacementBeta}`);
+  await page.keyboard.type('New instance, new head.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await waitFor(async () => (await publicMessages()).some(message => message.author.id === replacementBeta), 'replacement instance replies');
+  assert.notEqual((await sessions(firstId)).find(item => item.petId === replacementBeta).sessionId, originalBetaSession, 'replacement has its own session');
   // A human member is a Studio client; it must be registered before it can join.
   await apiPost('/clients', { clientId: 'reviewer-1', label: 'Reviewer One' });
   await memberPanel.getByLabel('Human member ID').fill('reviewer-1');
@@ -267,13 +308,13 @@ try {
   await memberPanel.getByRole('button', { name: 'Remove Reviewer One', exact: true }).click();
   await waitFor(async () => !(await api(`/channels/members?channelId=${firstId}`)).members.some(item => item.id === 'reviewer-1'), 'human left');
   // A Pet's session opens from the member list.
-  await memberPanel.locator('.channel-member').filter({ hasText: 'pet:alpha' }).getByRole('button', { name: 'View session', exact: true }).click();
+  await memberPanel.locator('.channel-member').filter({ hasText: `pet:${firstAlpha}` }).getByRole('button', { name: 'View session', exact: true }).click();
   const viewer = page.getByRole('dialog', { name: /session/ });
   await viewer.getByText(originalSession, { exact: true }).first().waitFor();
   await viewer.getByRole('button', { name: 'Close session view' }).click();
   await viewer.waitFor({ state: 'detached' });
 
-  await create('Participant loop', ['Alpha', 'Beta']);
+  const { alpha: loopAlpha, beta: loopBeta } = await create('Participant loop', ['alpha', 'beta']);
   const loopId = (await api('/channels')).channels.find(item => item.title === 'Participant loop').channelId;
   const loopContext = () => api(`/channels/context?channelId=${loopId}&limit=200`);
   const loopOutputs = async () => (await loopContext()).messages.filter(item => item.author.kind === 'pet');
@@ -281,29 +322,35 @@ try {
   // Keyboard only: filter the @ list by typing, Enter picks the highlighted member, Enter again sends.
   await input.click();
   await page.keyboard.type('@Alp');
-  assert.deepEqual(await mentionList.locator('code').allTextContents(), ['pet:alpha']);
+  assert.deepEqual(await mentionList.locator('code').allTextContents(), [`pet:${loopAlpha}`]);
   await page.keyboard.press('Enter');
   await page.keyboard.type('handoff');
-  assert.deepEqual(await composerMentions(), ['pet:alpha']);
+  assert.deepEqual(await composerMentions(), [`pet:${loopAlpha}`]);
   await page.keyboard.press('Enter');
   await waitFor(async () => (await loopOutputs()).length === 3, 'normal Alpha → Beta → Alpha loop');
-  assert.deepEqual((await loopOutputs()).map(item => item.author.id), ['alpha', 'beta', 'alpha']);
-  assert.deepEqual((await loopOutputs()).map(item => item.mentions[0].participantId), ['pet:beta', 'pet:alpha', 'human:local']);
+  assert.deepEqual((await loopOutputs()).map(item => item.author.id), [loopAlpha, loopBeta, loopAlpha]);
+  assert.deepEqual((await loopOutputs()).map(item => item.mentions[0].participantId), [`pet:${loopBeta}`, `pet:${loopAlpha}`, 'human:local']);
   await page.locator('.channel-message-body .channel-mention').getByText('@Me', { exact: true }).waitFor();
   assert.equal(await page.locator('.channel-mentions').count(), 0, 'an inline @ is not repeated above the message');
   await page.locator('.channel-message-head').getByText('Me', { exact: true }).first().waitFor();
   const memberIds = (await api(`/channels/members?channelId=${loopId}`)).members.map(item => item.participantId);
-  assert.deepEqual(new Set(memberIds), new Set(['human:local', 'pet:alpha', 'pet:beta']));
-  await apiPost('/channels/messages', { channelId: secondId, body: 'queue-hold', mentions: [{ participantId: 'pet:alpha' }] });
-  await waitFor(async () => (await api('/dispatch/queues')).queues.find(item => item.petId === 'alpha')?.activeDispatch?.scope?.id === secondId, 'global active work from another Channel');
-  await mention('pet:alpha');
+  assert.deepEqual(new Set(memberIds), new Set(['human:local', `pet:${loopAlpha}`, `pet:${loopBeta}`]));
+  await apiPost('/channels/messages', { channelId: secondId, body: 'queue-hold', mentions: [{ participantId: `pet:${secondAlpha}` }] });
+  await waitFor(async () => (await api('/dispatch/queues')).queues.find(item => item.petId === secondAlpha)?.activeDispatch?.scope?.id === secondId, 'other instance works in its owner Channel');
+  assert.equal(await page.locator('.channel-working').count(), 0, 'another instance from the same definition does not type here');
+  await apiPost('/channels/messages', { channelId: loopId, body: 'queue-hold', mentions: [{ participantId: `pet:${loopAlpha}` }] });
+  await waitFor(async () => (await api('/dispatch/queues')).queues.find(item => item.petId === loopAlpha)?.activeDispatch?.scope?.id === loopId, 'this owned instance starts independent work');
+  await mention(`pet:${loopAlpha}`);
   await page.keyboard.type('queue-next');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  const alphaQueue = page.locator('.channel-queue').filter({ hasText: 'Alpha' });
+  const loopQueue = (await api('/dispatch/queues')).queues.findIndex(item => item.petId === loopAlpha);
+  const otherQueue = (await api('/dispatch/queues')).queues.findIndex(item => item.petId === secondAlpha);
+  const alphaQueue = page.locator('.channel-queue').nth(loopQueue);
   await alphaQueue.getByText('1 queued', { exact: true }).waitFor();
-  await alphaQueue.getByText('Working · Separate investigation', { exact: true }).waitFor();
+  await alphaQueue.getByText('Working · Participant loop', { exact: true }).waitFor();
+  await page.locator('.channel-queue').nth(otherQueue).getByText('Working · Separate investigation', { exact: true }).waitFor();
   await alphaQueue.locator('li').getByText('Participant loop', { exact: true }).waitFor();
-  assert.equal(await page.locator('.channel-working').count(), 0, 'a Pet at work in another Channel, queued here, is not typing here');
+  await page.locator('.channel-working').getByText('Alpha is typing…', { exact: true }).waitFor();
   assert.ok(!/working|busy|queued/.test((await page.locator('.channel-composer').innerText()).toLowerCase()), 'composer has no pre-send busy hints');
   await page.screenshot({ path: resolve(screenshotDir, '03-channel-global-queue.png'), fullPage: true });
   await page.getByRole('button', { name: 'Scheduler', exact: true }).hover();
@@ -315,7 +362,7 @@ try {
   await page.getByRole('dialog', { name: 'Channel details', exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: resolve(screenshotDir, '04-channel-members-mobile.png'), fullPage: true });
-  await waitFor(async () => (await loopOutputs()).length === 4, 'queued input starts after global work finishes');
+  await waitFor(async () => (await loopOutputs()).length === 5, 'queued input starts after this instance finishes');
   // A second person connects with their own client key: only their Channels, polled, no local-token views.
   const { key: bobKey } = await apiPost('/clients', { clientId: 'bob', label: 'Bob' });
   await apiPost('/channels/members', { channelId: loopId, kind: 'human', id: 'bob' });
@@ -344,6 +391,11 @@ try {
   await bob.getByRole('heading', { name: 'Participant loop', exact: true }).waitFor();
   assert.equal(await bob.getByRole('button', { name: 'Separate investigation', exact: false }).count(), 0, 'a client lists only its own Channels');
   assert.equal(await bob.getByRole('button', { name: 'View session', exact: true }).count(), 0, 'Pet sessions stay with the local token');
+  assert.equal(await bob.getByLabel('Pet definition').count(), 0, 'ordinary clients never choose definitions');
+  assert.equal(await bob.getByRole('button', { name: 'Create Pet here', exact: true }).count(), 0, 'ordinary clients cannot assemble instances');
+  const forbiddenDefinitions = await fetch(`${ready.url}/pet-definitions`, { headers: { Authorization: `Bearer ${bobKey}` } });
+  assert.equal(forbiddenDefinitions.status, 403);
+  await rejectedPost('/pets', { petId: 'bob-forged', definitionId: 'alpha', name: 'Alpha', channelId: loopId }, 403, bobKey);
   assert.equal(await bob.locator('.channel-queue').count(), 0, 'dispatch queues stay with the local token');
   await bob.getByLabel('Message', { exact: true }).fill('Bob checking in.');
   await bob.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -356,21 +408,19 @@ try {
   for (let index = 0; index < 105; index += 1) await apiPost('/channels/messages', { channelId: long.channelId, body: `History ${index}` });
   await page.setViewportSize({ width: 1440, height: 1000 });
   // A Pet running a turn in the Channel shows as typing after the newest message: the local token by event, a client by its poll.
-  await apiPost('/channels/messages', { channelId: loopId, body: 'queue-hold', mentions: [{ participantId: 'pet:alpha' }] });
+  await apiPost('/channels/messages', { channelId: loopId, body: 'queue-hold', mentions: [{ participantId: `pet:${loopAlpha}` }] });
   await page.locator('.channel-working').getByText('Alpha is typing…', { exact: true }).waitFor();
   await bob.locator('.channel-working').getByText('Alpha is typing…', { exact: true }).waitFor({ timeout: 10000 });
   await page.screenshot({ path: resolve(screenshotDir, '08-channel-typing.png'), fullPage: true });
   await bob.screenshot({ path: resolve(screenshotDir, '09-channel-typing-client.png'), fullPage: true });
-  await waitFor(async () => (await loopOutputs()).length === 5, 'the typing Pet replies');
+  await waitFor(async () => (await loopOutputs()).length === 6, 'the typing Pet replies');
   await page.locator('.channel-working').waitFor({ state: 'detached', timeout: 5000 });
   await bob.locator('.channel-working').waitFor({ state: 'detached', timeout: 10000 });
   // A renamed Pet shows its new name without reconnecting: the local token through pet.* events, a client through its poll.
-  await apiPost('/pets/rename', { petId: 'beta', name: 'Beta Renamed' });
-  await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Create Channel' }).getByRole('checkbox', { name: 'Beta Renamed', exact: true }).waitFor({ timeout: 5000 });
-  await page.keyboard.press('Escape');
+  await apiPost('/pets/rename', { petId: loopBeta, name: 'Beta Renamed' });
+  await memberPanel.getByText('Beta Renamed', { exact: true }).waitFor({ timeout: 5000 });
   await bob.getByText('Beta Renamed', { exact: false }).first().waitFor({ timeout: 10000 });
-  await apiPost('/pets/rename', { petId: 'beta', name: 'Beta' });
+  await apiPost('/pets/rename', { petId: loopBeta, name: 'Beta' });
   await page.getByRole('navigation', { name: 'Channel navigation' }).getByRole('button', { name: /Long history/ }).click();
   await page.getByText('History 104', { exact: true }).waitFor();
   const shown = () => page.locator('.channel-message').count();
@@ -430,7 +480,7 @@ try {
   await page.getByText('History 0', { exact: true }).waitFor();
   assert.equal(await shown(), 110, 'nothing is missing between the pages');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['Channel instructions create, edit, cancel, clear and isolation', 'explicit Pet selection on create', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'Channel execution failure display and isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'remove and re-add Pet and human members', 'session view from member list', 'client key sees only its Channels and polls', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['Channel instructions create, edit, cancel, clear and isolation', 'empty Channel creation followed by local definition-driven UUID instance assembly', 'members-only addressing', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'independent instances work across Channels, owned instance queue stays within its Channel', 'typing Pet for local token and client', 'desktop and mobile member panel', 'no pre-send status hint', 'create duplicate guard', 'note does not wake a Pet', 'default Reply without manual recipient selection', 'inline @ autocomplete with mouse and keyboard', 'changed and cleared Reply recipients', 'human Reply without Pet dispatch', 'same-session reply', 'cross-Channel isolation', 'Channel execution failure display and isolation', 'reload and Host restart create no dispatch', 'disconnect disables submission', 'restart preserves session identity', 'terminal Pet removal rejects re-add, reparent and ID reuse; new instance has new session; human removal', 'session view from member list', 'client key sees only its Channels, polls, and cannot read definitions or assemble Pets', 'renamed Pet refreshes by event and by poll', 'newest page first, load earlier, incremental new messages', 'overlapping Channel reads keep a gapless window'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

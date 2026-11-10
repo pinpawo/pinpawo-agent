@@ -13,7 +13,7 @@ export const channelCreateSchema = z.object({
   description: z.string().trim().max(50_000).optional(),
   prompt: z.string().trim().max(50_000).optional(),
   /** The Pets that join with the creator. Required: no Pet joins implicitly. */
-  pets: z.array(identifier).max(100),
+  pets: z.array(identifier).max(0).default([]),
 }).strict();
 export const channelUpdateSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
@@ -68,7 +68,11 @@ export class ChannelLastHumanError extends Error {}
 export type ChannelServiceOptions = {
   store: ChannelStore;
   /** The Studio's Pets; only these can join. */
-  pets: () => Array<{ petId: string; name: string }>;
+  pets: () => Array<{ petId: string; name: string; channelId: string; createdAt: string }>;
+  /** Closing an instance is the Pet registry's lifecycle, never a membership-row edit. */
+  closePet: (petId: string) => Promise<unknown>;
+  /** Immutable owner, including closed records, for trusted resident reply persistence. */
+  petOwner?: (petId: string) => Promise<string | undefined>;
   /** A Studio client by id; only active clients can be added as human members. */
   humans: (clientId: string) => Promise<{ label: string; active: boolean } | undefined>;
 };
@@ -83,6 +87,8 @@ export type ChannelServiceOptions = {
 export class ChannelService {
   readonly store: ChannelStore;
   private readonly pets: ChannelServiceOptions['pets'];
+  private readonly closePet: ChannelServiceOptions['closePet'];
+  private readonly petOwner: ChannelServiceOptions['petOwner'];
   private readonly humans: ChannelServiceOptions['humans'];
   private readonly listeners = new Set<(event: ChannelEvent) => void>();
 
@@ -90,6 +96,8 @@ export class ChannelService {
     this.store = options.store;
     this.pets = options.pets;
     this.humans = options.humans;
+    this.closePet = options.closePet;
+    this.petOwner = options.petOwner;
   }
 
   subscribe(listener: (event: ChannelEvent) => void): () => void {
@@ -111,7 +119,7 @@ export class ChannelService {
   }
   private async requireMemberIn(store: ChannelStore, channelId: string, member: MemberRef): Promise<ChannelRow> {
     const channel = await this.requireChannel(store, channelId);
-    const row = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
+    const row = (await this.memberRows(store, channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
     if (!row || row.leftAt) throw new ChannelAccessError(`${member.kind}:${member.id} is not a member of Channel "${channel.channelId}".`);
     return channel;
   }
@@ -123,12 +131,21 @@ export class ChannelService {
   requireMember(channelId: string, member: MemberRef): Promise<ChannelRow> {
     return this.requireMemberIn(this.store, channelId, member);
   }
-  private requirePet(petId: string): void {
-    if (!this.pets().some(pet => pet.petId === petId)) throw new Error(`Unknown Pet "${petId}".`);
+  private requirePet(petId: string, channelId: string): void {
+    const pet = this.pets().find(pet => pet.petId === petId);
+    if (!pet || pet.channelId !== channelId) throw new Error(`Pet "${petId}" is not an instance in Channel "${channelId}". Create a separate instance from its definition.`);
   }
-  private async requireJoinable(member: MemberRef): Promise<void> {
-    if (member.kind === 'pet') return this.requirePet(member.id);
+  private async requireJoinable(member: MemberRef, channelId: string): Promise<void> {
+    if (member.kind === 'pet') return this.requirePet(member.id, channelId);
     if (!(await this.humans(member.id))?.active) throw new Error(`Unknown Studio client "${member.id}".`);
+  }
+  /** Pet membership is solely a projection of the registry's immutable owner. */
+  private async memberRows(store: ChannelStore, channelId: string): Promise<ChannelMemberRow[]> {
+    const humans = (await store.listMembers(channelId)).filter(row => row.kind === 'human');
+    const pets = this.pets().filter(pet => pet.channelId === channelId).map(pet => ({
+      channelId, kind: 'pet' as const, id: pet.petId, joinedAt: pet.createdAt,
+    }));
+    return [...humans, ...pets];
   }
   /**
    * Labels of these humans, read when shown so a renamed client shows its
@@ -147,11 +164,11 @@ export class ChannelService {
   }
   /** Current members of a Channel, with human labels read before any transaction began. */
   private async membersIn(store: ChannelStore, channelId: string, humans: Map<string, string>): Promise<ChannelMember[]> {
-    return (await store.listMembers(channelId)).filter(row => !row.leftAt).map(row => this.memberView(row, humans));
+    return (await this.memberRows(store, channelId)).filter(row => !row.leftAt).map(row => this.memberView(row, humans));
   }
   /** Current members, as messages address them. */
   async members(channelId: string): Promise<ChannelMember[]> {
-    const rows = (await this.store.listMembers(channelId)).filter(row => !row.leftAt);
+    const rows = (await this.memberRows(this.store, channelId)).filter(row => !row.leftAt);
     const labels = await this.humanLabels(rows);
     return rows.map(row => this.memberView(row, labels));
   }
@@ -160,8 +177,7 @@ export class ChannelService {
     const value = channelCreateSchema.parse(input);
     if (value.prompt && !access.studio) throw new ChannelAccessError('Only Studio authority may set a Channel prompt.');
     const creator = memberRefSchema.parse(actor);
-    const pets = [...new Set(value.pets)];
-    for (const petId of pets) this.requirePet(petId);
+    if (creator.kind !== 'human') throw new ChannelAccessError('Only a human may create a Channel; a Pet instance already has its owner.');
     const labels = await this.humanLabels([creator]);
     const now = new Date().toISOString();
     const channel: ChannelRow = {
@@ -171,7 +187,7 @@ export class ChannelService {
     };
     const result = await this.store.transaction(async (store) => {
       await store.createChannel(channel);
-      for (const member of [creator, ...pets.filter(id => creator.kind !== 'pet' || creator.id !== id).map(id => ({ kind: 'pet' as const, id }))]) {
+      for (const member of [creator]) {
         await store.upsertMember({ channelId: channel.channelId, ...member, joinedAt: now });
       }
       return { channel, members: await this.membersIn(store, channel.channelId, labels) };
@@ -203,7 +219,9 @@ export class ChannelService {
 
   /** The actor's Channels; with `all` and Studio authority, every Channel. */
   async listChannels(actor: MemberRef, page: unknown = {}, access: ChannelManageAccess & { all?: boolean } = {}): Promise<{ channels: ChannelRow[]; nextAfter: number; hasMore: boolean }> {
-    const filter = access.all && access.studio ? {} : { member: memberRefSchema.parse(actor) };
+    const filter = access.all && access.studio ? {} : actor.kind === 'pet'
+      ? { channelId: this.pets().find(pet => pet.petId === actor.id)?.channelId ?? '' }
+      : { member: memberRefSchema.parse(actor) };
     const { items, ...rest } = await this.store.listChannels(filter, channelPageSchema.parse(page));
     return { channels: items, ...rest };
   }
@@ -225,11 +243,11 @@ export class ChannelService {
 
   async addMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<ChannelMember> {
     const member = memberRefSchema.parse(value);
-    await this.requireJoinable(member);
+    await this.requireJoinable(member, channelId);
     const result = await this.store.transaction(async (store) => {
       await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireManagerIn(store, channelId, actor, access);
-      const existing = (await store.listMembers(channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
+      const existing = (await this.memberRows(store, channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
       if (existing && !existing.leftAt) return { row: existing, joined: false };
       const row = { channelId: channel.channelId, ...member, joinedAt: new Date().toISOString() };
       await store.upsertMember(row);
@@ -241,11 +259,19 @@ export class ChannelService {
 
   async removeMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<void> {
     const member = memberRefSchema.parse(value);
+    if (member.kind === 'pet') {
+      await this.requireManagerIn(this.store, channelId, actor, access);
+      const pet = this.pets().find(pet => pet.petId === member.id && pet.channelId === channelId);
+      if (!pet) return;
+      await this.closePet(pet.petId);
+      this.publish({ type: 'channel.member.left', payload: { channelId, member, actor } });
+      return;
+    }
     const left = await this.store.transaction(async (store) => {
       // Two removals counting the same humans must not both pass the last-human check.
       await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireManagerIn(store, channelId, actor, access);
-      const current = (await store.listMembers(channel.channelId)).filter(item => !item.leftAt);
+      const current = (await this.memberRows(store, channel.channelId)).filter(item => !item.leftAt);
       const existing = current.find(item => item.kind === member.kind && item.id === member.id);
       if (!existing) return null;
       if (existing.kind === 'human' && current.filter(item => item.kind === 'human').length === 1) {
@@ -269,11 +295,17 @@ export class ChannelService {
   }> {
     const value = channelMessageSchema.parse(input);
     const trustedAuthor = memberRefSchema.parse(author);
+    // Only the internal resident-reply path supplies an external reference.
+    // Its final event may be handled after close settled; ownership and the
+    // Plugin's exact persisted session binding remain valid history authority.
+    const retainedPetReply = trustedAuthor.kind === 'pet' && !!options.externalRef
+      && await this.petOwner?.(trustedAuthor.id) === identifier.parse(channelId);
     // Mentions record labels; read them first (a member who joins meanwhile is labelled by id).
     const labels = await this.humanLabels(await this.store.listMembers(identifier.parse(channelId)));
     let mentionError: string | undefined;
     const result = await this.store.transaction(async (store) => {
-      const channel = await this.requireMemberIn(store, channelId, trustedAuthor);
+      const channel = retainedPetReply ? await this.requireChannel(store, channelId)
+        : await this.requireMemberIn(store, channelId, trustedAuthor);
       if (value.replyTo && !(await store.getMessage(channel.channelId, value.replyTo))) {
         throw new Error('Message reference does not exist in this Channel.');
       }
@@ -304,7 +336,7 @@ export class ChannelService {
   /** The (Channel, Pet) session, reserved on first use. */
   reserveSession(channelId: string, petId: string, allocate: () => string): Promise<ChannelSessionBinding> {
     return this.store.transaction(async (store) => {
-      const channel = await this.requireChannel(store, channelId);
+      const channel = await this.requireMemberIn(store, channelId, { kind: 'pet', id: petId });
       return await store.getSession(channel.channelId, petId)
         ?? await store.reserveSession({ channelId: channel.channelId, petId, sessionId: identifier.parse(allocate()), registered: false });
     });

@@ -3,6 +3,8 @@ export type PetDatabase = {
   studio_pets: {
     pet_id: string;
     definition_id: string;
+    channel_id: string;
+    closed_at: string | null;
     name: string;
     created_at: string;
   };

@@ -11,7 +11,7 @@ async function setup(t: import('node:test').TestContext) {
   const db = await storage.open<PetDatabase>('studio', studioCoreMigrations);
   const store = new KyselyPetStore(db);
   for (const petId of ['dev-a', 'dev-b']) {
-    await store.createPet({ petId, definitionId: 'developer', name: petId, createdAt: 't' });
+    await store.createPet({ channelId: 'one', petId, definitionId: 'developer', name: petId, createdAt: 't' });
   }
   const vault = (key?: Uint8Array) => new StudioPetCredentialVault({ store: async () => store, key });
   return { db, vault };

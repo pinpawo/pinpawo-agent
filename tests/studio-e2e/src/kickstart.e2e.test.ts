@@ -103,7 +103,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     }
   }
   const received: Array<{ petId: string; request: string }> = [];
-  // The workdir's own database: init created one Pet per template definition.
+  // The workdir's own database starts with definitions only.
   const studio = await createStudio({
     studioId: configuration.resolved.studio.studioId,
     plugins: configuration.plugins,
@@ -125,7 +125,8 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   });
   const base = `http://127.0.0.1:${http.address()!.port}`;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['executor', 'issuer', 'reviewer', 'wiki']);
+  assert.deepEqual(studio.listPets(), [], 'init installs definitions, not orphan instances');
+  assert.deepEqual(studio.pets.definitions().map(({ definitionId }) => definitionId).sort(), ['executor', 'issuer', 'reviewer', 'wiki']);
   for (const route of ['/kanban', '/kanban/events']) {
     assert.equal((await fetch(base + route, { headers })).status, 404);
   }
@@ -177,6 +178,10 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(received, [], 'Invocation completion does not dispatch Wiki maintenance');
+  const owner = await (await fetch(base + '/channels', { method: 'POST', headers,
+    body: JSON.stringify({ title: 'Wiki work', pets: [] }),
+  })).json() as { channel: { channelId: string } };
+  await studio.pets.create({ petId: 'wiki', definitionId: 'wiki', name: 'Wiki', channelId: owner.channel.channelId });
   const request = 'Reconcile Wiki from the supplied review evidence.';
   assert.equal((await fetch(base + '/dispatch', {
     method: 'POST', headers, body: JSON.stringify({ petId: 'wiki', request }),

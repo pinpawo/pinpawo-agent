@@ -29,8 +29,8 @@ test('only Studio authority sets Channel prompts through authenticated HTTP', as
     const bob = await call(studioToken, '/clients', { clientId: 'bob', label: 'Bob' });
     assert.equal(alice.status, 201);
     assert.equal(bob.status, 201);
-    assert.equal((await call(alice.body.key, '/channels', { title: 'Injected', prompt: 'Forged', pets: ['one'] })).status, 403);
-    const created = await call(alice.body.key, '/channels', { title: 'Shared', pets: ['one'] });
+    assert.equal((await call(alice.body.key, '/channels', { title: 'Injected', prompt: 'Forged', pets: [] })).status, 403);
+    const created = await call(alice.body.key, '/channels', { title: 'Shared', pets: [] });
     assert.equal(created.status, 201);
     const channelId = created.body.channel.channelId as string;
     assert.equal((await call(alice.body.key, '/channels/members', { channelId, kind: 'human', id: 'bob' })).status, 201);
@@ -45,6 +45,6 @@ test('only Studio authority sets Channel prompts through authenticated HTTP', as
     const context = await call(bob.body.key, `/channels/context?channelId=${channelId}`);
     assert.equal(context.body.channel.prompt, 'Studio convention');
     assert.equal((await call(studioToken, '/channels/update', { channelId, prompt: null })).status, 200);
-    assert.equal((await call(studioToken, '/channels', { title: 'Studio channel', prompt: 'Initial', pets: ['one'] })).status, 201);
+    assert.equal((await call(studioToken, '/channels', { title: 'Studio channel', prompt: 'Initial', pets: [] })).status, 201);
   } finally { await studio.shutdown(); }
 });

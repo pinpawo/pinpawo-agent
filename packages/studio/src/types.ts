@@ -11,17 +11,17 @@ export type StudioPetDefinition = {
 export type StudioPet = {
   petId: string;
   definitionId: string;
+  /** Immutable owner. A definition may have separate instances in other Channels. */
+  channelId: string;
+  /** Terminal closure preserves this identity and its history. */
+  closedAt?: string;
   /** Display only; never used to address the Pet. */
   name: string;
   createdAt: string;
 };
 
 /** Studio-owned metadata used to target a currently live resident Pet. */
-export type StudioPetRegistration = {
-  petId: string;
-  name: string;
-  definitionId: string;
-};
+export type StudioPetRegistration = Pick<StudioPet, 'petId' | 'name' | 'definitionId' | 'channelId' | 'createdAt'>;
 
 /**
  * What the composing Host returns for one assembled Pet. Studio core keeps

@@ -1,3 +1,4 @@
+import { withTestPetChannel } from '../testing/petChannel';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -120,14 +121,14 @@ test('a Host-selected shared Capability can serve as a resident Pet default', as
   }));
   const configuration = await resolveStudioHostConfig({ workdir });
   const input = {
-    configuration,
+    configuration: { ...configuration, plugins: withTestPetChannel(configuration.plugins) },
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()], petCapabilities: new Map([['planner', [capability]]]),
     ...residentBuildResources(workdir),
   };
   const { studio, residentPets } = await buildStudio(input);
   try {
-    await studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
+    await studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
     assert.ok(residentPets.has('planner'));
   } finally { await studio.shutdown(); }
   await assert.rejects(buildStudio({ ...input, petCapabilities: new Map() }), /default Capability .* is not available/);
@@ -175,7 +176,7 @@ test('buildStudio wires a Plugin context provider into new and restored resident
   };
   const configuration = await resolveStudioHostConfig({ workdir, resolvePlugin: () => plugin });
   const make = () => buildStudio({
-    configuration,
+    configuration: { ...configuration, plugins: withTestPetChannel(configuration.plugins) },
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()],
     petCapabilities: new Map(),
@@ -183,7 +184,7 @@ test('buildStudio wires a Plugin context provider into new and restored resident
   });
   const first = await make();
   try {
-    await first.studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
+    await first.studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
     await assert.rejects(first.studio.dispatch({
       petId: 'planner', request: 'new resident', session: { id: 'planner:00000001', create: true },
       scope: { namespace: 'project', id: 'first' },
@@ -304,7 +305,7 @@ test('Capability names are scoped per Pet rather than globally across Studio', a
   });
 
   const { studio } = await buildStudio({
-    configuration,
+    configuration: { ...configuration, plugins: withTestPetChannel(configuration.plugins) },
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()],
     petCapabilities: new Map([
@@ -314,8 +315,8 @@ test('Capability names are scoped per Pet rather than globally across Studio', a
     ...residentBuildResources(root),
   });
   assert.deepEqual(studio.listPets(), []);
-  await studio.pets.create({ petId: 'planner', definitionId: 'planner', name: 'Planner' });
-  await studio.pets.create({ petId: 'writer', definitionId: 'writer', name: 'Writer' });
+  await studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
+  await studio.pets.create({ channelId: 'one', petId: 'writer', definitionId: 'writer', name: 'Writer' });
   assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['planner', 'writer']);
   await studio.shutdown();
 });

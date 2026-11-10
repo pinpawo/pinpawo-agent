@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host is started):
   pinpawo-studio channels list [--after N] [--limit N]
-  pinpawo-studio channels create --title <text> [--description <text>] [--pet <petId>]...
+  pinpawo-studio channels create --title <text> [--description <text>]
   pinpawo-studio channels read <channelId> [--before N | --after N] [--limit N]
   pinpawo-studio channels send <channelId> --file <markdown|-> [--mention <participantId>] [--reply-to <messageId>]
   pinpawo-studio channels members <channelId>
@@ -18,7 +18,7 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
   pinpawo-studio clients revoke <clientId>
   pinpawo-studio pets list
   pinpawo-studio pets definitions
-  pinpawo-studio pets create <petId> --definition <definitionId> --name <name>
+  pinpawo-studio pets create <petId> --definition <definitionId> --name <name> --channel <channelId>
   pinpawo-studio pets rename <petId> --name <name>
   pinpawo-studio pets credentials <petId>
   pinpawo-studio pets set-credential <petId> --env <NAME> --file <value|->
@@ -42,11 +42,10 @@ reads further back while hasEarlier, --after nextAfter reads newer ones. Channel
 not completion. No request is retried automatically. Read actual state before
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
-Each --pet joins the new Channel with you; no other Pet joins implicitly.
-A Pet is one instance of a definition: create gives it a fixed petId that work
-is addressed to and a display name that can change; several Pets may share one
-definition. Archiving stops new work, lets a running turn finish and keeps the
-Pet's history.
+Create a Channel first, then create each Pet in that Channel with --channel.
+A Pet has one immutable Channel and its own runtime and sessions. Definitions
+can be reused for new instances; existing instances cannot join other Channels.
+Removing a Pet member terminally closes it and preserves its history.
 A Pet's credentials are environment variables its own shell, git and gh
 commands receive; other Pets never see them. Values are write-only (credentials
 lists names); set-credential stores the --file or stdin content exactly as read
@@ -80,7 +79,7 @@ export type StudioOperatorOptions = {
   definition?: string;
   name?: string;
   env?: string;
-  pets: string[];
+  channelId?: string;
   member?: { kind: 'human' | 'pet'; id: string };
   idempotencyKey?: string;
   seconds: number;
@@ -104,7 +103,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   if (!COMMANDS.has(args[start])) return null;
   const command = args[start] as OperatorCommand;
   if (args.includes('--help') || args.includes('-h')) {
-    return { help: true, command, studioUrl: '', agentUrl: '', tokenFile: '', mentions: [], pets: [], seconds: 30, full: false };
+    return { help: true, command, studioUrl: '', agentUrl: '', tokenFile: '', mentions: [], seconds: 30, full: false };
   }
   const allowed = new Set(CONNECTION_OPTIONS);
   const hasAction = command === 'channels' || command === 'clients' || command === 'pets';
@@ -119,7 +118,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     if (!PET_ACTIONS.includes(action ?? '')) {
       throw new Error(`Expected pets ${PET_ACTIONS.slice(0, -1).join(', ')}, or ${PET_ACTIONS.at(-1)}.`);
     }
-    if (action === 'create') { allowed.add('--definition'); allowed.add('--name'); }
+    if (action === 'create') { allowed.add('--definition'); allowed.add('--name'); allowed.add('--channel'); }
     if (action === 'rename') allowed.add('--name');
     if (action === 'set-credential' || action === 'unset-credential') allowed.add('--env');
     if (action === 'set-credential') allowed.add('--file');
@@ -136,7 +135,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
       allowed.add('--file'); allowed.add('--mention'); allowed.add('--reply-to');
     }
     if (action === 'create') {
-      allowed.add('--title'); allowed.add('--description'); allowed.add('--pet');
+      allowed.add('--title'); allowed.add('--description');
     }
     if (action === 'add-member' || action === 'remove-member') allowed.add('--member');
   }
@@ -146,21 +145,19 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   if (command === 'dispatch') allowed.add('--idempotency-key');
   const values = new Map<string, string>();
   const mentions: string[] = [];
-  const pets: string[] = [];
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     if (index === start || (hasAction && index === start + 1)) continue;
     const argument = args[index];
     if (!argument.startsWith('-')) { positional.push(argument); continue; }
     if (!allowed.has(argument)) throw new Error(`Unknown option for ${command}: ${argument}`);
-    if (values.has(argument) && argument !== '--mention' && argument !== '--pet') throw new Error(`Duplicate option: ${argument}`);
+    if (values.has(argument) && argument !== '--mention') throw new Error(`Duplicate option: ${argument}`);
     if (argument === '--full') { values.set(argument, 'true'); continue; }
     const value = args[++index];
     if (!value?.trim() || (value.startsWith('-') && !(argument === '--file' && value === '-'))) {
       throw new Error(`${argument} requires a value.`);
     }
     if (argument === '--mention') mentions.push(value);
-    else if (argument === '--pet') pets.push(value);
     else values.set(argument, value);
   }
   const needsId = command !== 'queues'
@@ -172,6 +169,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     throw new Error(needsId ? `Expected one ${noun} id.` : 'Unexpected positional argument.');
   }
   if (command === 'clients' && action === 'add' && !values.has('--label')) throw new Error('--label is required.');
+  if (command === 'pets' && action === 'create' && !values.has('--channel')) throw new Error('--channel is required.');
   if (command === 'pets' && action === 'create' && !values.has('--definition')) throw new Error('--definition is required.');
   if (command === 'pets' && (action === 'create' || action === 'rename') && !values.has('--name')) throw new Error('--name is required.');
   if (command === 'pets' && (action === 'set-credential' || action === 'unset-credential') && !values.has('--env')) throw new Error('--env is required.');
@@ -181,6 +179,9 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   }
   if (command === 'channels' && action === 'create' && !values.has('--title')) throw new Error('--title is required.');
   if ((action === 'add-member' || action === 'remove-member') && !values.has('--member')) throw new Error('--member is required.');
+  if (command === 'channels' && action === 'add-member' && memberRef(values.get('--member')!).kind === 'pet') {
+    throw new Error('Create a new Pet with pets create --channel instead; Pet instances cannot be joined or reopened.');
+  }
   function integer(option: string, min: number, max: number, fallback?: number) {
     if (!values.has(option)) return fallback;
     const raw = values.get(option)!;
@@ -200,7 +201,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     seconds: integer('--seconds', 1, 60, 30)!, full: values.has('--full'),
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
-    title: values.get('--title'), description: values.get('--description'), pets: [...new Set(pets)],
+    title: values.get('--title'), description: values.get('--description'), channelId: values.get('--channel'),
     label: values.get('--label'), definition: values.get('--definition'), name: values.get('--name'), env: values.get('--env'),
     ...(values.has('--member') ? { member: memberRef(values.get('--member')!) } : {}),
   };
@@ -256,7 +257,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
       list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename',
       credentials: '/pet-credentials', 'set-credential': '/pet-credentials', 'unset-credential': '/pet-credentials/remove',
     }[action!]!;
-    if (action === 'create') body = { petId: id, definitionId: options.definition, name: options.name };
+    if (action === 'create') body = { petId: id, definitionId: options.definition, name: options.name, channelId: options.channelId };
     else if (action === 'rename') body = { petId: id, name: options.name };
     else if (action === 'unset-credential') body = { petId: id, envName: options.env };
   } else if (['snapshot', 'events', 'send'].includes(command)) {
@@ -270,7 +271,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (command === 'channels' && id && ['read', 'members', 'sessions'].includes(action!)) url.searchParams.set('channelId', id);
   if (command === 'pets' && action === 'credentials') url.searchParams.set('petId', id!);
   if (command === 'channels' && action === 'create') {
-    body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: options.pets };
+    body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: [] };
   } else if (action === 'add-member' || action === 'remove-member') {
     body = { channelId: id, ...options.member };
   }

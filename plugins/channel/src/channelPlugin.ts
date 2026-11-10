@@ -6,6 +6,7 @@ import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPlu
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
+import { enrollChannelInstance, revokeChannelInstance } from './channelInstanceConsumption';
 import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
 import { collectChannelRoutingState, type RoutePetRuntime } from './channelRoutingState';
@@ -344,6 +345,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
 
   return {
     petChannels: {
+      prepareInstance: async (pet, storage) => { await enrollChannelInstance(await openStore(storage), pet); },
+      deactivateInstance: (pet, storage) => {
+        // Do not wait for a DB query or final pet.closed/member.left event to abort.
+        current?.invalidateConsumption(pet.channelId, pet.petId);
+        return openStore(storage).then(store => revokeChannelInstance(store, pet));
+      },
       requireChannel: async (channelId, storage) => {
         if (!await (await openStore(storage)).getChannel(channelId)) throw new StudioPetError(`No owner Channel "${channelId}".`, 'invalid');
       },

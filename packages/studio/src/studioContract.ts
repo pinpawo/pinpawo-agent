@@ -240,6 +240,10 @@ export type StudioPlugin = {
   /** Channel Plugin's storage-only ownership check, available before resident restoration. */
   petChannels?: {
     requireChannel: (channelId: string, storage: StudioPluginStorage) => Promise<void>;
+    /** Prepare Channel-owned progress and activation before a runtime becomes live. */
+    prepareInstance?: (pet: StudioPetRegistration, storage: StudioPluginStorage) => Promise<void>;
+    /** Synchronously cancel Channel admission, then await only its short storage fence. */
+    deactivateInstance?: (pet: StudioPetRegistration, storage: StudioPluginStorage) => Promise<void>;
   };
   /** Scope namespaces for which this Plugin must register invocation context providers. */
   contextNamespaces?: readonly string[];

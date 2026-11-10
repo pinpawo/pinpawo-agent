@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
-  ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
+  ChannelConsumptionRow, ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
 } from './store/channelStore';
 
 const identifier = z.string().trim().min(1).max(256);
@@ -91,6 +91,7 @@ export class ChannelService {
   private readonly petOwner: ChannelServiceOptions['petOwner'];
   private readonly humans: ChannelServiceOptions['humans'];
   private readonly listeners = new Set<(event: ChannelEvent) => void>();
+  private readonly consumptionInvalidations = new Set<(channelId: string, petId: string) => void>();
 
   constructor(options: ChannelServiceOptions) {
     this.store = options.store;
@@ -103,6 +104,20 @@ export class ChannelService {
   subscribe(listener: (event: ChannelEvent) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+  /** Internal synchronous cancellation, before a lifecycle operation awaits storage/Host stop. */
+  invalidateConsumption(channelId: string, petId: string): void {
+    for (const listener of this.consumptionInvalidations) listener(channelId, petId);
+  }
+  subscribeConsumptionInvalidation(listener: (channelId: string, petId: string) => void): () => void {
+    this.consumptionInvalidations.add(listener);
+    return () => { this.consumptionInvalidations.delete(listener); };
+  }
+  /** Must be called after the last awaited read, immediately before effects or acknowledgement. */
+  isConsumptionCurrent(expected: ChannelConsumptionRow, current: ChannelConsumptionRow | undefined): boolean {
+    return current?.channelId === expected.channelId && current.petId === expected.petId
+      && current.activationId === expected.activationId && current.afterSequence === expected.afterSequence
+      && this.pets().some(pet => pet.petId === expected.petId && pet.channelId === expected.channelId);
   }
   private publish(event: ChannelEvent): void {
     for (const listener of this.listeners) {
@@ -312,6 +327,9 @@ export class ChannelService {
     const labels = await this.humanLabels(await this.store.listMembers(identifier.parse(channelId)));
     let mentionError: string | undefined;
     const result = await this.store.transaction(async (store) => {
+      // Sequence allocation can precede another Postgres transaction's commit.
+      // Enrollment and appends take the same owner Channel lock.
+      await store.lockChannel(identifier.parse(channelId));
       const channel = retainedPetReply ? await this.requireChannel(store, channelId)
         : await this.requireMemberIn(store, channelId, trustedAuthor);
       if (value.replyTo && !(await store.getMessage(channel.channelId, value.replyTo))) {
@@ -339,6 +357,26 @@ export class ChannelService {
 
   getMessage(channelId: string, messageId: string): Promise<ChannelMessage | undefined> {
     return this.store.getMessage(channelId, messageId);
+  }
+
+  /** Public-message progress for a current Pet, never an execution completion marker. */
+  async consumption(channelId: string, petId: string): Promise<ChannelConsumptionRow> {
+    const channel = await this.requireMember(channelId, { kind: 'pet', id: petId });
+    const row = await this.store.getConsumption(channel.channelId, petId);
+    if (!row) throw new Error('Channel consumption baseline is missing.');
+    return row;
+  }
+
+  /** An obsolete activation or unavailable instance cannot acknowledge any public messages. */
+  async advanceConsumption(expected: ChannelConsumptionRow, throughSequence: number): Promise<boolean> {
+    z.number().int().nonnegative().safe().parse(throughSequence);
+    if (throughSequence <= expected.afterSequence) throw new RangeError('Consumption must advance past the prior position.');
+    return this.store.transaction(async store => {
+      await store.lockChannel(expected.channelId);
+      // Raw Pet membership rows are historical data, never current authority.
+      if (!this.pets().some(pet => pet.petId === expected.petId && pet.channelId === expected.channelId)) return false;
+      return store.advanceConsumption(expected, throughSequence);
+    });
   }
 
   /** The (Channel, Pet) session, reserved on first use. */

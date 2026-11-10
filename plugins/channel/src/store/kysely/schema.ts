@@ -32,6 +32,12 @@ export type ChannelDatabase = {
     /** body, replyTo and mentions, as JSON text. */
     data: string;
   };
+  channel_consumptions: {
+    channel_id: string;
+    pet_id: string;
+    activation_id: string;
+    after_sequence: number;
+  };
   channel_sessions: {
     channel_id: string;
     pet_id: string;

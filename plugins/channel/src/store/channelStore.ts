@@ -40,6 +40,15 @@ export type ChannelMessageRow = {
   deliverables?: Deliverable[];
 };
 
+/** A Pet's progress through the public Timeline, independent of execution sessions. */
+export type ChannelConsumptionRow = {
+  channelId: string;
+  petId: string;
+  /** Opaque token for one consumption activation, separate from stable instance progress. */
+  activationId: string;
+  afterSequence: number;
+};
+
 export type ChannelSessionRow = {
   channelId: string;
   petId: string;
@@ -92,6 +101,13 @@ export interface ChannelStore {
   appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
   getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
   readMessages(channelId: string, range: MessageRange): Promise<MessagePage>;
+  getConsumption(channelId: string, petId: string): Promise<ChannelConsumptionRow | undefined>;
+  /** Create missing instance progress only; never overwrite an existing cursor or activation. */
+  enrollConsumption(row: ChannelConsumptionRow): Promise<void>;
+  /** Replace only the activation fence; preserve the stable instance cursor. */
+  setConsumptionActivation(channelId: string, petId: string, activationId: string): Promise<void>;
+  /** Compare-and-set: an old batch cannot acknowledge another activation or newer progress. */
+  advanceConsumption(expected: ChannelConsumptionRow, throughSequence: number): Promise<boolean>;
   getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined>;
   /** Returns the existing reservation for (channel, pet) if there is one. */
   reserveSession(row: ChannelSessionRow): Promise<ChannelSessionRow>;

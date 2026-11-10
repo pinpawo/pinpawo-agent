@@ -87,6 +87,9 @@ export class StudioPetRegistry implements StudioPets {
     definitions: readonly StudioPetDefinition[];
     assemble: StudioPetAssembler;
     requireChannel: (channelId: string) => Promise<void>;
+    /** Storage-only enrollment/fence before exposing any resident activation. */
+    prepareInstance?: (pet: StudioPetRegistration) => Promise<void>;
+    deactivateInstance?: (pet: StudioPetRegistration) => Promise<void>;
     /** A Pet became live (restored or created). */
     onLive: (pet: LiveStudioPet) => void;
     /** A live Pet's runtime has closed. */
@@ -218,7 +221,15 @@ export class StudioPetRegistry implements StudioPets {
         this.unavailable.add(target);
         // No lifecycle marker is committed until the runtime proves quiescence.
         // A thrown close or uncertain DB acknowledgment must reach the caller.
-        await live?.runtime.close();
+        // Cancel Channel-local admission synchronously, but never make Host
+        // stop wait behind storage or an arbitrary consumer callback.
+        let revoking: Promise<void>;
+        try { revoking = Promise.resolve(this.options.deactivateInstance?.(registration(row))); }
+        catch (error) { revoking = Promise.reject(error); }
+        const stopping = Promise.resolve().then(() => live?.runtime.close());
+        const settled = await Promise.allSettled([revoking, stopping]);
+        const failed = settled.find(result => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
         if (live) {
           this.live.delete(target);
           this.options.onClosed(target);
@@ -325,6 +336,7 @@ export class StudioPetRegistry implements StudioPets {
   }
 
   private async goLive(row: PetRow): Promise<void> {
+    await this.options.prepareInstance?.(registration(row));
     const live: LiveStudioPet = { registration: registration(row), runtime: await this.options.assemble(registration(row)) };
     this.live.set(row.petId, live);
     try { this.options.onLive(live); }

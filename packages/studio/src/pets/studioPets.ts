@@ -144,10 +144,13 @@ export class StudioPetRegistry implements StudioPets {
     if (!this.definitionsById.has(definitionId)) {
       throw new StudioPetError(`No Pet definition "${definitionId}" in this Studio.`, 'invalid');
     }
+    // Reserve startup before creation enters the queue. A concurrent restore()
+    // must never be queued behind a create that is waiting for that restore.
+    const restored = this.restore();
+    // Shutdown can reject creation before its queued callback observes startup.
+    void restored.catch(() => undefined);
     return this.serialize(async () => {
-      // Already inside the queue: restore inline rather than wait behind ourselves.
-      this.restored ??= this.restoreSafely();
-      await this.restored;
+      await restored;
       const store = await this.options.store();
       await this.options.requireChannel(channelId);
       const row: PetRow = { petId, definitionId, name, channelId, createdAt: new Date().toISOString() };
@@ -246,7 +249,9 @@ export class StudioPetRegistry implements StudioPets {
     let instance = this.instances.get(row.petId);
     if (!instance) {
       const created: PetInstance = new PetInstance(row, {
-        ...this.options,
+        assemble: this.options.assemble,
+        onClosed: this.options.onClosed,
+        onChange: this.options.onChange,
         onLive: pet => {
           // Preserve the live collection's activation order after Reopen.
           this.instances.delete(row.petId);

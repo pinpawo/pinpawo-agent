@@ -130,10 +130,17 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     request: string,
     idempotencyKey?: string,
     attachments: readonly Deliverable[] = [],
+    author?: MemberRef,
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
+    // This synchronous check is the source's handoff admission point. Reads
+    // and routing decisions may outlive its close; already admitted work is
+    // not canceled, but a historical author cannot start another handoff.
+    if (author?.kind === 'pet' && !host().listPets().some(pet => pet.petId === author.id && pet.channelId === channelId)) {
+      throw new ChannelAccessError('Channel message author is not a live Pet in this Channel.');
+    }
     const receipt = await host().dispatch({
       petId, request,
       ...(attachments.length ? { attachments } : {}),
@@ -159,7 +166,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (target.kind !== 'pet') return { participantId, state: 'delivered' };
         try {
           const { invocationId, binding } = await dispatchPet(message.channelId, target.id, request,
-            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments);
+            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments, message.author);
           return { participantId, state: 'accepted', invocationId, sessionId: binding.sessionId };
         } catch (error) {
           return { participantId, state: 'failed', error: error instanceof Error ? error.message : String(error) };
@@ -233,7 +240,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       try {
         const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
           channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing', outcome.focus),
-          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original));
+          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original), message.author);
         delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
       } catch (error) {
         delivery = { participantId: target.participantId, state: 'failed', ...decided, error: error instanceof Error ? error.message : String(error) };
@@ -262,10 +269,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     try {
       const service = channelService();
       const pet = await studio.pets.get(petId);
-      if (pet?.closedAt) {
+      if (pet?.closedAt || pet?.removedAt) {
         const active = running.get(invocationId);
         if (active?.channelId !== channelId || active.participantId !== channelParticipantId('pet', petId)) {
-          throw new ChannelAccessError('Closed Pet is not a member and has no active accepted Channel work.');
+          throw new ChannelAccessError('Inactive Pet is not a member and has no active accepted Channel work.');
         }
       }
       if ((await service.getSession(channelId, petId))?.sessionId !== sessionId) {
@@ -281,9 +288,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       }
       // Invalid mentions were retained for observation; they are not a new
       // unaddressed conversation for the router to repair or reinterpret.
-      // A closed instance may finish already accepted work. Retain that
+      // An inactive instance may finish already accepted work. Retain that
       // output, but its historical author cannot start fresh handoff/routing.
-      if (created && !mentionError && !(await studio.pets.get(petId))?.closedAt) await deliverAndRoute(saved);
+      const currentPet = await studio.pets.get(petId);
+      if (created && !mentionError && !currentPet?.closedAt && !currentPet?.removedAt) await deliverAndRoute(saved);
     } catch (error) {
       // Nobody waits on this write; observers are the only ones who can see it failed.
       studio.notify({ type: 'channel.message_failed', payload: {
@@ -347,7 +355,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       current = new ChannelService({
         store,
         pets: () => studio.listPets(),
-        closePet: petId => studio.pets.closeInstance(petId),
+        removePet: (petId, options) => studio.pets.removeInstance(petId, options),
         petOwner: async petId => (await studio.pets.get(petId))?.channelId,
         humans: async (clientId) => {
           const client = await studio.clients.get(clientId);
@@ -428,8 +436,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
             return { kind: 'json', status: 201, body: await service.addMember(actor, channelId, member, access) };
           }),
           register('POST', '/channels/members/remove', async ({ readJson }, actor, access) => {
-            const { channelId, ...member } = withChannel.parse(await readJson());
-            await service.removeMember(actor, channelId, member, access);
+            const { channelId, confirmStop, ...member } = withChannel.extend({ confirmStop: z.boolean().optional() }).parse(await readJson());
+            await service.removeMember(actor, channelId, member, { ...access, confirmStop });
             return { kind: 'json', body: { removed: true } };
           }),
           register('POST', '/channels/messages', async ({ readJson }, actor) => {

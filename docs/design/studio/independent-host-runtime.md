@@ -44,14 +44,19 @@ HostCapabilityCatalog 统一装配；未引用的共享能力不会进入该 Pet
 - init 只准备定义；实例由 Studio authority 在既有 Channel 中创建。每实例的 Channel 不可变，
   runtime、运行槽与 Session 随实例固定归属，定义可以复用。Head 尚未在本次实现；
   后续设计必须保持 Head 与实例归属一致。
-- 所有未关闭实例在监听前 eager start，无 lazy/disabled 回退。任一 Pet/interaction 启动失败，
+- 所有未关闭且未移除实例在监听前 eager start，无 lazy/disabled 回退。任一 Pet/interaction 启动失败，
   关闭本轮已建资源；Pet 启停不定义次序，但等待所有 close settle。
 - Plugin 按配置顺序 start；失败时包含失败者的已启动前缀逆序 stop。
 - Studio core shutdown 停止接纳并逆序停止 Plugin、关闭总线，不取消已接纳的执行。
   StudioHost 随后 close 所有 resident，最后释放共享 Toolkit/lease；durable interrupt
   已结束当前 invocation，shutdown 不删除 checkpoint continuation。
-- 从 Channel 移除 Pet 成员会终态关闭该实例及 runtime；保留实例行、历史、凭据与 Session，
-  不允许重新打开或改绑 Channel，重启也不恢复关闭实例。
+- Close 是临时关闭，Remove（包括移除 Channel 的 Pet 成员）是永久移除。对 resident 实例，
+  两者都先明确确认停止当前工作、取消未开始的排队任务，等待业务工作实际停止后才保存各自最终状态。
+  一次确认完成后端操作；停止失败或结果不明不报告最终操作成功，保留实例与历史。
+- Reopen 恢复关闭实例的同一 id、owner Channel、Session 与凭据；移除实例不可重开或复用 id。
+  Close 与 Remove 不自动回答或恢复待审批内容；实例不能改绑 Channel，正常重启只恢复未关闭且未移除实例。
+  停止判据针对业务工作；关闭实例的 Session 检查、外部 observer 和其元数据写入的清理仍留待后续。
+  具体管理接口见 [Studio API](../../reference/api/studio.md#pet-instances)。
 - transport 断开只删除其连接路由，不关闭 resident；SIGINT/SIGTERM 关闭本 Host 并等待资源释放。
 
 启动顺序是：取得 writer lease → 解析配置/已安装扩展 → 装配 inventory 和所有 resident →

@@ -20,7 +20,7 @@ async function seedChannel(t: TestContext, petIds: string[]) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const store = new KyselyChannelStore(await storage.open<ChannelDatabase>('channel', channelMigrations(storage.dialect)));
-  const service = new ChannelService({ store, pets: () => [], closePet: async () => {}, humans: async () => undefined });
+  const service = new ChannelService({ store, pets: () => [], removePet: async () => {}, humans: async () => undefined });
   const { channel: { channelId } } = await service.createChannel({ kind: 'human', id: 'local' }, { title: 'Ops', pets: [] });
   return { channelId, channel: createChannelPlugin({ store, httpRoute: false }) };
 }

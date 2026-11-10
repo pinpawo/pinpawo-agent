@@ -21,10 +21,14 @@ pinpawo-studio --studio-url http://127.0.0.1:3291 --agent-url http://127.0.0.1:3
 
 ```sh
 pinpawo-studio channels list --limit 50
-pinpawo-studio channels create --title "Release 1.0" --description "Ship it" --pet executor --pet reviewer
+pinpawo-studio channels create --title "Release 1.0" --description "Ship it"
+# Use channel.channelId from the result as CHANNEL_ID.
+pinpawo-studio pets definitions
+pinpawo-studio pets create executor --definition executor --name Executor --channel CHANNEL_ID
+pinpawo-studio pets create reviewer --definition reviewer --name Reviewer --channel CHANNEL_ID
 pinpawo-studio channels read CHANNEL_ID --after 0 --limit 50
 pinpawo-studio channels members CHANNEL_ID
-pinpawo-studio channels add-member CHANNEL_ID --member pet:wiki
+pinpawo-studio channels add-member CHANNEL_ID --member human:alice
 pinpawo-studio channels remove-member CHANNEL_ID --member human:alice
 pinpawo-studio channels send CHANNEL_ID --file /tmp/message.md --mention PARTICIPANT_ID
 pinpawo-studio channels sessions CHANNEL_ID
@@ -33,14 +37,43 @@ pinpawo-studio queues
 
 A Channel is a conversation among its members (humans and Pets); it has a title
 and optional description, not a goal. Only current members can read it, speak or
-be addressed, and only listed `--pet`s join a new Channel with you. Read the
-description, members and relevant history before acting. Reads return one page;
+be addressed. A new Channel initially contains only its human creator. Create
+each Pet from a reusable definition with `--channel`; the instance belongs to
+that one Channel permanently. Only the local Host token can list definitions
+or create instances. Human membership can be added or rejoined; Pet membership
+is projected from live instances, not added separately. Read the description,
+members and relevant history before acting. Reads return one page;
 `channels read` starts from the newest messages, reads back with
 `--before <nextBefore>` while `hasEarlier`, and on with `--after <nextAfter>`
 while `hasMore`. The Channel holds only members' public
 messages: a Pet's message is its final reply without tool calls; its tool calls,
 progress and reviews stay in its Agent Session, which `channels sessions` locates
 for each Pet. Check artifacts and public replies for acceptance evidence.
+
+Close is temporary; Remove is permanent. Use `--confirm-stop` only after explicit
+consent to stop current work and cancel unstarted queued tasks:
+
+```sh
+pinpawo-studio pets close executor --confirm-stop
+pinpawo-studio pets records
+pinpawo-studio pets reopen executor
+```
+
+Reopen restores the same id, owner Channel, sessions and credentials. To remove
+an instance permanently, use `pets remove executor --confirm-stop` or:
+
+```sh
+pinpawo-studio channels remove-member CHANNEL_ID --member pet:executor --confirm-stop
+```
+
+Both Close and Remove wait for actual business work to stop before saving their
+final state. One confirmed operation completes the action; no second removal is
+needed. A failed or uncertain stop is not success: inspect state before retrying.
+Neither operation answers or resumes a pending review. Both retain identity,
+credentials, sessions and messages; a removed id cannot reopen or be reused.
+Normal Studio shutdown is separate: restart restores only open, unremoved instances.
+`pets records` requires the local token and includes closed and removed records;
+it does not provide closed-session inspection.
 
 Resolve `participantId` from `channels members`; labels are display names. Repeat
 `--mention` for multiple targets. `--reply-to MESSAGE_ID` supplies a reference,
@@ -68,8 +101,9 @@ Each person or external program that connects is a Studio client; in a Channel
 it is the member `human:<clientId>`, and the local token is `human:local`. Only
 a registered, unrevoked client can be added as a human member. `add` and
 `add-key` print a key once; hand it to that client and do not log it. A client
-key works as `--token-file` for `channels` commands only; everything else needs
-the local token. `revoke` stops all of a client's keys and keeps its history.
+key works as `--token-file` for `channels` commands and `pets list`; everything
+else needs the local token. `revoke` stops all of a client's keys and keeps its
+history.
 
 The Pet snapshot command observes its active interactive session, which may
 not be the Channel's session. Check session identity and use the original Pet
@@ -79,7 +113,7 @@ not switch sessions or approve a different review merely to unblock a queue.
 ## Inspect and coordinate
 
 ```sh
-pinpawo-studio pets
+pinpawo-studio pets list
 pinpawo-studio snapshot executor
 pinpawo-studio events executor --seconds 30
 pinpawo-studio dispatch executor --file /tmp/task.txt

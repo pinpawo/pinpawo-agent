@@ -67,3 +67,21 @@ test('a human message waits for queued commands to drain', async () => {
   await Promise.all([compact, message]);
   assert.deepEqual(seen, ['compact:start', 'compact:end', 'message']);
 });
+
+test('close cancels queued and future commands but lets the executing command settle', async () => {
+  const queue = new SessionCommandQueue();
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const calls: string[] = [];
+  const first = queue.enqueue(async () => { calls.push('active'); await blocked; throw new Error('active failed'); });
+  const failed = assert.rejects(first, /active failed/);
+  await Promise.resolve();
+  const queued = assert.rejects(queue.enqueue(async () => { calls.push('queued'); }), /clos/i);
+  const idle = assert.rejects(queue.waitForIdle(), /clos/i);
+  queue.close();
+  queue.close();
+  const future = assert.rejects(queue.enqueue(async () => { calls.push('future'); }), /clos/i);
+  release();
+  await Promise.all([failed, queued, idle, future]);
+  assert.deepEqual(calls, ['active']);
+});

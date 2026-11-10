@@ -347,16 +347,18 @@ export async function createResidentPetRuntime(
 
   const close = () => {
     closing ??= (async () => {
+      // Fence both scheduling layers before any await or abort callback.
+      localHandlers.close();
+      const quiescent = coordinator.close();
       const peer = interactivePeer.current;
       interactivePeer.current = null;
       if (peer) await peerHandlers.onClose(peer);
       await peerHandlers.onClose(hostPeer);
       for (const sessionPeer of openSessionPeers) await peerHandlers.onClose(sessionPeer);
       openSessionPeers.clear();
-      await coordinator.close();
+      await quiescent;
       messageListeners.clear();
       sessionListeners.clear();
-      localHandlers.close();
     })();
     return closing;
   };

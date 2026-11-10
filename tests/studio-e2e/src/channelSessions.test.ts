@@ -332,7 +332,7 @@ test('a bound session alone does not publish; invalid scopes and late replies fa
     assert.deepEqual([failures(f)[0].channelId, failures(f)[0].sessionId], [b, sessionId]);
     assert.match(failures(f)[0].error, /session does not match/);
     assert.equal((await outputs(f, b)).length, 0);
-    await f.channel.service.removeMember(me, a, { kind: 'pet', id: 'one' });
+    await f.channel.service.removeMember(me, a, { kind: 'pet', id: 'one' }, { confirmStop: true });
     await assert.rejects(f.studio.dispatch({ petId: 'one', request: 'after leaving', session: { id: sessionId }, scope: { namespace: 'channel', id: a } }), /unknown petId/);
     assert.equal(f.calls.length, acceptedCalls, 'former members are rejected before a run is queued');
     lateReply(a, 'former-member');

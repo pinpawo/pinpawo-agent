@@ -636,6 +636,7 @@ export function createChatHostHandlers(
       return;
     }
     await sessionAdmission.runInSession(async () => {
+      sessionCommands.assertOpen();
       if (!peer.isConnected()) {
         return;
       }
@@ -870,7 +871,7 @@ export function createChatHostHandlers(
       }
     },
     interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
-    close: () => {},
+    close: () => { sessionCommands.close(); },
     handleHttpRequest: (req, res, authToken) => handleLocalHttpRequest(req, res, {
       authToken, artifactStore: initialDeps.artifactStore,
     }),

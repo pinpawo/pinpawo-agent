@@ -11,7 +11,7 @@ test('mentions dispatch explicit current and reply attachments without guessing 
   t.after(() => storage.close());
   const dispatched: StudioDispatchRequest[] = [];
   const live: ReturnType<StudioPluginContext['listPets']> = [];
-  const closeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
+  const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
   const plugin = createChannelPlugin({ httpRoute: false });
   const context = {
     dispatch: async (request: StudioDispatchRequest) => {
@@ -23,7 +23,7 @@ test('mentions dispatch explicit current and reply attachments without guessing 
     notify: () => undefined,
     subscribe: () => () => undefined,
     listPets: () => live,
-    pets: { closeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
+    pets: { removeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
     clients: { get: async (clientId: string) => ({ clientId, label: clientId }) },
     storage: { dialect: 'sqlite', open: (migrations: Parameters<typeof storage.open>[1]) => storage.open('channel', migrations) },
     hooks: { expose: () => () => undefined },
@@ -89,7 +89,7 @@ test('a Pet works in a Channel only while its run there is running, and context 
   const listeners: Array<(event: StudioEvent) => unknown> = [];
   const routes = new Map<string, StudioHttpRoute>();
   const live: ReturnType<StudioPluginContext['listPets']> = [];
-  const closeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
+  const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
   const plugin = createChannelPlugin();
   const context: StudioPluginContext = {
     dispatch: async () => { throw new Error('not used'); },
@@ -98,7 +98,7 @@ test('a Pet works in a Channel only while its run there is running, and context 
     notify: (event) => { notified.push(event); },
     subscribe: (listener) => { listeners.push(listener); return () => undefined; },
     listPets: () => live,
-    pets: { closeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
+    pets: { removeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
     listDispatchQueues: () => [],
     petSessions: {
       snapshot: async () => { throw new Error('not used'); },

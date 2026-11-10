@@ -34,4 +34,9 @@ export const petMigrations: StudioMigrations = {
       await db.schema.alterTable('studio_pets').addColumn('closed_at', 'text').execute();
     },
   },
+  '0005_pet_removal': {
+    async up(db: Kysely<unknown>) {
+      await db.schema.alterTable('studio_pets').addColumn('removed_at', 'text').execute();
+    },
+  },
 };

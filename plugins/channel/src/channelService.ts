@@ -52,7 +52,7 @@ export type ChannelMember = ChannelParticipant & { joinedAt: string };
  * token). It may list every Channel and manage any Channel's members or
  * prompt without being a member, so a Channel can always be recovered.
  */
-export type ChannelManageAccess = { studio?: boolean };
+export type ChannelManageAccess = { studio?: boolean; confirmStop?: boolean };
 export type ChannelEvent =
   | { type: 'channel.created'; payload: { channel: ChannelRow; members: ChannelMember[] } }
   | { type: 'channel.updated'; payload: { channel: ChannelRow } }
@@ -69,8 +69,8 @@ export type ChannelServiceOptions = {
   store: ChannelStore;
   /** The Studio's Pets; only these can join. */
   pets: () => Array<{ petId: string; name: string; channelId: string; createdAt: string }>;
-  /** Closing an instance is the Pet registry's lifecycle, never a membership-row edit. */
-  closePet: (petId: string) => Promise<unknown>;
+  /** Permanent removal is the Pet registry's lifecycle, never a membership-row edit. */
+  removePet: (petId: string, options?: { confirmStop?: boolean }) => Promise<unknown>;
   /** Immutable owner, including closed records, for trusted resident reply persistence. */
   petOwner?: (petId: string) => Promise<string | undefined>;
   /** A Studio client by id; only active clients can be added as human members. */
@@ -87,7 +87,7 @@ export type ChannelServiceOptions = {
 export class ChannelService {
   readonly store: ChannelStore;
   private readonly pets: ChannelServiceOptions['pets'];
-  private readonly closePet: ChannelServiceOptions['closePet'];
+  private readonly removePet: ChannelServiceOptions['removePet'];
   private readonly petOwner: ChannelServiceOptions['petOwner'];
   private readonly humans: ChannelServiceOptions['humans'];
   private readonly listeners = new Set<(event: ChannelEvent) => void>();
@@ -96,7 +96,7 @@ export class ChannelService {
     this.store = options.store;
     this.pets = options.pets;
     this.humans = options.humans;
-    this.closePet = options.closePet;
+    this.removePet = options.removePet;
     this.petOwner = options.petOwner;
   }
 
@@ -131,12 +131,13 @@ export class ChannelService {
   requireMember(channelId: string, member: MemberRef): Promise<ChannelRow> {
     return this.requireMemberIn(this.store, channelId, member);
   }
-  private requirePet(petId: string, channelId: string): void {
+  private requirePet(petId: string, channelId: string) {
     const pet = this.pets().find(pet => pet.petId === petId);
     if (!pet || pet.channelId !== channelId) throw new Error(`Pet "${petId}" is not an instance in Channel "${channelId}". Create a separate instance from its definition.`);
+    return pet;
   }
   private async requireJoinable(member: MemberRef, channelId: string): Promise<void> {
-    if (member.kind === 'pet') return this.requirePet(member.id, channelId);
+    if (member.kind === 'pet') { this.requirePet(member.id, channelId); return; }
     if (!(await this.humans(member.id))?.active) throw new Error(`Unknown Studio client "${member.id}".`);
   }
   /** Pet membership is solely a projection of the registry's immutable owner. */
@@ -243,10 +244,16 @@ export class ChannelService {
 
   async addMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<ChannelMember> {
     const member = memberRefSchema.parse(value);
-    await this.requireJoinable(member, channelId);
+    await this.requireJoinable(member, identifier.parse(channelId));
     const result = await this.store.transaction(async (store) => {
       await store.lockChannel(identifier.parse(channelId));
       const channel = await this.requireManagerIn(store, channelId, actor, access);
+      if (member.kind === 'pet') {
+        // Pets are a projection, never raw membership rows. Revalidate after
+        // awaited access/locking rather than admitting a Pet that closed meanwhile.
+        const pet = this.requirePet(member.id, channel.channelId);
+        return { row: { channelId: channel.channelId, ...member, joinedAt: pet.createdAt }, joined: false };
+      }
       const existing = (await this.memberRows(store, channel.channelId)).find(item => item.kind === member.kind && item.id === member.id);
       if (existing && !existing.leftAt) return { row: existing, joined: false };
       const row = { channelId: channel.channelId, ...member, joinedAt: new Date().toISOString() };
@@ -260,11 +267,12 @@ export class ChannelService {
   async removeMember(actor: MemberRef, channelId: string, value: unknown, access: ChannelManageAccess = {}): Promise<void> {
     const member = memberRefSchema.parse(value);
     if (member.kind === 'pet') {
-      await this.requireManagerIn(this.store, channelId, actor, access);
-      const pet = this.pets().find(pet => pet.petId === member.id && pet.channelId === channelId);
-      if (!pet) return;
-      await this.closePet(pet.petId);
-      this.publish({ type: 'channel.member.left', payload: { channelId, member, actor } });
+      const channel = await this.requireManagerIn(this.store, channelId, actor, access);
+      const pet = this.pets().find(pet => pet.petId === member.id && pet.channelId === channel.channelId);
+      const owner = pet?.channelId ?? await this.petOwner?.(member.id);
+      if (owner !== channel.channelId) return;
+      await this.removePet(member.id, { confirmStop: access.confirmStop });
+      this.publish({ type: 'channel.member.left', payload: { channelId: channel.channelId, member, actor } });
       return;
     }
     const left = await this.store.transaction(async (store) => {

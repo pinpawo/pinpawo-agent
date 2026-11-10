@@ -297,6 +297,8 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
       return pet;
     },
     closeInstance: async () => { throw new Error('not used'); },
+    reopenInstance: async () => { throw new Error('not used'); },
+    removeInstance: async () => { throw new Error('not used'); },
     rename: async (petId, name) => { calls.push(['rename', petId, name]); throw new StudioPetError('missing', 'not_found'); },
     credentials: {
       unlocked: () => true,
@@ -348,6 +350,109 @@ test('HTTP Plugin manages Pets through Studio and maps Pet errors to statuses', 
   assert.deepEqual(await (await send('/pet-definitions')).json(), { definitions: [{ definitionId: 'developer', name: 'Developer' }] });
   // The listing is the live Pets Studio reports, not the management records.
   assert.deepEqual(await (await send('/pets')).json(), { pets: [] });
+});
+
+test('HTTP Pet lifecycle routes distinguish records and await confirmed Close and permanent Remove', async (t) => {
+  const records: StudioPet[] = [
+    { petId: 'open', definitionId: 'developer', channelId: 'one', name: 'Open', createdAt: 't' },
+    { petId: 'closed', definitionId: 'developer', channelId: 'one', name: 'Closed', createdAt: 't', closedAt: 't2' },
+    { petId: 'to-close', definitionId: 'developer', channelId: 'one', name: 'To close', createdAt: 't' },
+    { petId: 'removed', definitionId: 'developer', channelId: 'one', name: 'Removed', createdAt: 't', removedAt: 't3' },
+  ];
+  let finishStop!: () => void;
+  const stopped = new Promise<void>(resolve => { finishStop = resolve; });
+  let finishClose!: () => void;
+  const closedStop = new Promise<void>(resolve => { finishClose = resolve; });
+  const calls: unknown[][] = [];
+  const get = (petId: unknown) => {
+    const pet = records.find(item => item.petId === petId);
+    if (!pet) throw new StudioPetError('missing', 'not_found');
+    return pet;
+  };
+  const pets: StudioPets = {
+    list: async () => records, get: async id => get(id), definitions: () => [],
+    create: async () => { throw new Error('not used'); },
+    rename: async () => { throw new Error('not used'); },
+    closeInstance: async (id, options) => {
+      calls.push(['close', id, options]);
+      if (id === 'busy') throw new StudioPetError('stop failed; not closed', 'busy');
+      const pet = get(id);
+      if (!options?.confirmStop) throw new StudioPetError('confirmation required', 'confirmation_required');
+      await closedStop; pet.closedAt = 't5'; return pet;
+    },
+    reopenInstance: async id => {
+      calls.push(['reopen', id]); const pet = get(id);
+      if (pet.removedAt) throw new StudioPetError('permanently removed', 'invalid');
+      delete pet.closedAt; return pet;
+    },
+    removeInstance: async (id, options) => {
+      calls.push(['remove', id, options]);
+      if (id === 'busy') throw new StudioPetError('stop failed; not removed', 'busy');
+      const pet = get(id);
+      if (!pet.closedAt && !options?.confirmStop) throw new StudioPetError('confirmation required', 'confirmation_required');
+      if (id === 'open') await stopped;
+      pet.removedAt = 't4'; return pet;
+    },
+    credentials: {
+      unlocked: () => false, list: async () => [],
+      set: async () => { throw new Error('not used'); }, remove: async () => ({ removed: false }),
+    },
+  };
+  const harness = createContext({ pets: [{ petId: 'open', name: 'Open', channelId: 'one', definitionId: 'developer', createdAt: 't' }] });
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start({ ...harness.context, pets }); t.after(() => plugin.stop());
+  const port = plugin.address()!.port;
+  const send = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => fetch(pluginUrl(port, path), {
+    method, headers: { Authorization: `Bearer ${AUTH_TOKEN}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  assert.deepEqual(await (await send('/pets')).json(), { pets: harness.context.listPets() });
+  assert.deepEqual(await (await send('/pets/records')).json(), { pets: records });
+  assert.equal((await send('/pets/records', {})).status, 405);
+  for (const path of ['/pets/close', '/pets/reopen', '/pets/remove']) assert.equal((await send(path)).status, 405);
+  assert.equal((await send('/pets/remove', { petId: 'open' })).status, 409);
+  assert.equal((await send('/pets/remove', { petId: 'open', confirmStop: 'true' })).status, 400);
+  assert.equal((await send('/pets/close', { petId: 'to-close' })).status, 409);
+  assert.equal((await send('/pets/close', { petId: 'to-close', confirmStop: 'true' })).status, 400);
+  assert.equal((await send('/pets/close', { petId: 'busy', confirmStop: true })).status, 409);
+  assert.equal((await send('/pets/reopen', { petId: 'missing' })).status, 404);
+  assert.equal((await send('/pets/reopen', { petId: 'removed' })).status, 400);
+  assert.equal((await send('/pets/remove', { petId: 'busy', confirmStop: true })).status, 409);
+  assert.equal(get('open').removedAt, undefined);
+  let completed = false;
+  const removal = send('/pets/remove', { petId: 'open', confirmStop: true }).then(response => { completed = true; return response; });
+  for (let i = 0; i < 100 && !calls.some(call => call[0] === 'remove' && call[1] === 'open' && (call[2] as { confirmStop?: boolean })?.confirmStop); i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.ok(calls.some(call => call[0] === 'remove' && call[1] === 'open' && (call[2] as { confirmStop?: boolean })?.confirmStop), 'confirmed removal reached the registry');
+  assert.equal(completed, false, 'HTTP does not claim removal after merely requesting a stop');
+  assert.equal(get('open').removedAt, undefined);
+  finishStop();
+  const removed = await removal;
+  assert.equal(removed.status, 200);
+  assert.equal((await removed.json()).pet.removedAt, 't4');
+  let closeCompleted = false;
+  const closing = send('/pets/close', { petId: 'to-close', confirmStop: true }).then(response => { closeCompleted = true; return response; });
+  for (let i = 0; i < 100 && !calls.some(call => call[0] === 'close' && (call[2] as { confirmStop?: boolean })?.confirmStop && call[1] === 'to-close'); i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.ok(calls.some(call => call[0] === 'close' && call[1] === 'to-close' && (call[2] as { confirmStop?: boolean })?.confirmStop));
+  assert.equal(closeCompleted, false, 'HTTP does not claim Close while the stop is unsettled');
+  assert.equal(get('to-close').closedAt, undefined);
+  assert.equal(get('to-close').removedAt, undefined);
+  finishClose();
+  const closed = await closing;
+  assert.equal(closed.status, 200);
+  const closedPet = (await closed.json()).pet;
+  assert.equal(closedPet.closedAt, 't5');
+  assert.equal(closedPet.removedAt, undefined);
+  const reopenedClose = await send('/pets/reopen', { petId: 'to-close' });
+  assert.equal(reopenedClose.status, 200);
+  assert.equal((await reopenedClose.json()).pet.closedAt, undefined);
+  const reopened = await send('/pets/reopen', { petId: 'closed' });
+  assert.equal(reopened.status, 200);
+  assert.equal((await reopened.json()).pet.closedAt, undefined);
+  assert.deepEqual(calls.at(-1), ['reopen', 'closed']);
 });
 
 test('HTTP Plugin requires bearer auth and an explicitly allowed browser origin', async (t) => {
@@ -841,10 +946,10 @@ test('HTTP Plugin authenticates Studio clients: the Host token has the global AP
   assert.equal((await call('/clients', AUTH_TOKEN, { clientId: 'bad id', label: 'Bad' })).status, 400);
 
   assert.deepEqual(await (await call('/whoami', key)).json(), { clientId: 'alice', scope: 'client' });
-  for (const path of ['/studio-only', '/clients', '/dispatch/queues', '/events', '/pet-sessions/snapshot', '/pet-credentials?petId=local']) {
+  for (const path of ['/studio-only', '/clients', '/dispatch/queues', '/events', '/pet-sessions/snapshot', '/pet-credentials?petId=local', '/pets/records']) {
     assert.equal((await call(path, key)).status, 403, path);
   }
-  for (const path of ['/pet-credentials', '/pet-credentials/remove']) {
+  for (const path of ['/pet-credentials', '/pet-credentials/remove', '/pets/close', '/pets/reopen', '/pets/remove']) {
     assert.equal((await call(path, key, { petId: 'local', envName: 'GH_TOKEN', value: 'fake' })).status, 403, path);
   }
   // A client may learn who it is and read the Pet directory (registration only).

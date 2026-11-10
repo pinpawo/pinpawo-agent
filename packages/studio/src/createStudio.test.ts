@@ -886,7 +886,7 @@ test('trusted provider context snapshots request, sections and hint without chan
 });
 
 
-test('Pet ownership rejects missing Channels and closing retains identity without restoring runtime', async () => {
+test('Pet ownership rejects missing Channels and permanent removal retains identity without restoring runtime', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
@@ -898,20 +898,20 @@ test('Pet ownership rejects missing Channels and closing retains identity withou
     await assert.rejects(first.studio.pets.create({ channelId: 'missing', petId: 'dev', definitionId: 'developer', name: 'Dev' }), /Unknown test Channel/);
     assert.equal(await first.studio.pets.get('dev'), undefined);
     await first.studio.pets.create({ channelId: 'one', petId: 'dev', definitionId: 'developer', name: 'Dev' });
-    const closed = await first.studio.pets.closeInstance('dev');
+    const closed = await first.studio.pets.removeInstance('dev', { confirmStop: true });
     assert.equal(closed.channelId, 'one');
-    assert.ok(closed.closedAt);
+    assert.ok(closed.removedAt);
     assert.deepEqual(first.closed, ['dev']);
     assert.deepEqual(first.studio.listPets(), []);
-    await first.studio.pets.closeInstance('dev');
-    assert.deepEqual(first.closed, ['dev'], 'terminal close is idempotent');
+    await first.studio.pets.removeInstance('dev', { confirmStop: true });
+    assert.deepEqual(first.closed, ['dev'], 'permanent removal is idempotent');
     await assert.rejects(first.studio.dispatch({ petId: 'dev', request: 'closed' }));
     await assert.rejects(first.studio.pets.create({ channelId: 'one', petId: 'dev', definitionId: 'developer', name: 'New' }), /already exists/);
     await first.studio.shutdown();
     const second = instanceStudio({ storage });
     await second.prepared.restorePets();
     assert.deepEqual(second.assembled, []);
-    assert.equal((await second.studio.pets.get('dev'))?.closedAt, closed.closedAt);
+    assert.equal((await second.studio.pets.get('dev'))?.removedAt, closed.removedAt);
     await second.studio.shutdown();
   } finally { await rm(root, { recursive: true, force: true }); }
 });

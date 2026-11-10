@@ -14,10 +14,10 @@ const guest: MemberRef = { kind: 'human', id: 'guest' };
 const executor: MemberRef = { kind: 'pet', id: 'executor' };
 type LivePet = { petId: string; name: string; channelId: string; createdAt: string };
 const liveByService = new WeakMap<ChannelService, LivePet[]>();
-function fixtureService(options: Omit<ConstructorParameters<typeof ChannelService>[0], 'pets' | 'closePet'>) {
+function fixtureService(options: Omit<ConstructorParameters<typeof ChannelService>[0], 'pets' | 'removePet'>) {
   const live: LivePet[] = [];
   const service = new ChannelService({ ...options, pets: () => live,
-    closePet: async petId => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); } });
+    removePet: async petId => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); } });
   liveByService.set(service, live);
   return service;
 }

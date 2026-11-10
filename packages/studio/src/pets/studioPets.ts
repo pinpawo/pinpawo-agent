@@ -10,13 +10,13 @@ import type { StudioPetCredentials } from './petCredentials';
 
 /** Thrown for a request that names an unknown Pet or breaks a Pet rule. */
 export class StudioPetError extends Error {
-  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found' | 'locked') {
+  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found' | 'locked' | 'busy' | 'confirmation_required') {
     super(message);
     this.name = 'StudioPetError';
   }
 }
 
-/** Creating, naming and terminally closing Channel-owned Pet instances. */
+/** Creating and managing Channel-owned Pet instances without recycling identity. */
 export type StudioPets = {
   /** In creation order. */
   list: () => Promise<StudioPet[]>;
@@ -25,8 +25,11 @@ export type StudioPets = {
   definitions: () => StudioPetDefinition[];
   /** Record a new Pet and assemble its runtime; it takes work as soon as this resolves. */
   create: (input: { petId: unknown; definitionId: unknown; name: unknown; channelId: unknown }) => Promise<StudioPet>;
-  /** Terminally close one instance; preserve its identity, credentials and sessions. */
-  closeInstance: (petId: unknown) => Promise<StudioPet>;
+  /** Temporarily close one instance; preserve its identity, credentials and sessions. */
+  closeInstance: (petId: unknown, options?: { confirmStop?: boolean }) => Promise<StudioPet>;
+  reopenInstance: (petId: unknown) => Promise<StudioPet>;
+  /** Stop, wait for quiescence, then permanently remove. Never deletes history. */
+  removeInstance: (petId: unknown, options?: { confirmStop?: boolean }) => Promise<StudioPet>;
   rename: (petId: unknown, name: unknown) => Promise<StudioPet>;
   /** Each Pet's own environment variables for its commands; values are write-only. */
   credentials: StudioPetCredentials;
@@ -67,7 +70,9 @@ function registration(row: PetRow): StudioPetRegistration {
  * Changes run one at a time, so a Pet id is never assembled twice.
  */
 export class StudioPetRegistry implements StudioPets {
-  private readonly closing = new Map<string, Promise<StudioPet>>();
+  private readonly closing = new Map<string, { kind: 'close' | 'remove' | 'reopen'; promise: Promise<StudioPet> }>();
+  /** A failed/uncertain teardown is not permission to dispatch or reassemble. */
+  private readonly unavailable = new Set<string>();
   private readonly live = new Map<string, LiveStudioPet>();
   private readonly definitionsById: ReadonlyMap<string, StudioPetDefinition>;
   private changes: Promise<unknown> = Promise.resolve();
@@ -87,7 +92,7 @@ export class StudioPetRegistry implements StudioPets {
     /** A live Pet's runtime has closed. */
     onClosed: (petId: string) => void;
     /** A record changed; Studio publishes it. */
-    onChange: (type: 'pet.created' | 'pet.renamed' | 'pet.closed', pet: StudioPet) => void;
+    onChange: (type: 'pet.created' | 'pet.renamed' | 'pet.closed' | 'pet.reopened' | 'pet.removed', pet: StudioPet) => void;
   }) {
     const definitions = new Map<string, StudioPetDefinition>();
     for (const definition of options.definitions) {
@@ -102,11 +107,11 @@ export class StudioPetRegistry implements StudioPets {
 
   /** The live Pet with this id. */
   getLive(petId: string): LiveStudioPet | undefined {
-    return this.closing.has(petId) ? undefined : this.live.get(petId);
+    return this.closing.has(petId) || this.unavailable.has(petId) ? undefined : this.live.get(petId);
   }
 
   listLive(): LiveStudioPet[] {
-    return [...this.live.values()].filter(pet => !this.closing.has(pet.registration.petId));
+    return [...this.live.values()].filter(pet => !this.closing.has(pet.registration.petId) && !this.unavailable.has(pet.registration.petId));
   }
 
   /** Assemble every active, owned Pet once. Fails, naming the Pet, when its definition is gone. */
@@ -123,15 +128,15 @@ export class StudioPetRegistry implements StudioPets {
   private async restoreNow(): Promise<void> {
     const rows = await (await this.options.store()).listPets();
     // Validate every active identity before assembling any resident.
-    for (const row of rows.filter(row => !row.closedAt)) {
+    for (const row of rows.filter(row => !row.closedAt && !row.removedAt)) {
       if (!row.channelId) throw new Error(`Pet "${row.petId}" has no owner Channel. This active record has no valid ownership. Do not delete data or infer an owner; restore an ownership-consistent backup or use a new Studio database.`);
       await this.options.requireChannel(row.channelId);
       if (!this.definitionsById.has(row.definitionId)) {
         throw new Error(`studio "${this.options.studioId}": Pet "${row.petId}" uses definition "${row.definitionId}", which this Studio no longer lists`);
       }
     }
-    for (const row of rows.filter(row => !row.closedAt)) {
-      if (this.live.has(row.petId)) continue;
+    for (const row of rows.filter(row => !row.closedAt && !row.removedAt)) {
+      if (this.live.has(row.petId) || this.closing.has(row.petId) || this.unavailable.has(row.petId)) continue;
       await this.goLive(row);
     }
   }
@@ -179,41 +184,108 @@ export class StudioPetRegistry implements StudioPets {
     });
   }
 
-  async closeInstance(petId: unknown): Promise<StudioPet> {
+  async closeInstance(petId: unknown, options: { confirmStop?: boolean } = {}): Promise<StudioPet> {
+    return this.endInstance(petId, 'close', options.confirmStop === true);
+  }
+
+  async removeInstance(petId: unknown, options: { confirmStop?: boolean } = {}): Promise<StudioPet> {
+    return this.endInstance(petId, 'remove', options.confirmStop === true);
+  }
+
+  private async endInstance(petId: unknown, kind: 'close' | 'remove', confirmStop = false): Promise<StudioPet> {
     const target = readPetId(petId);
     const transition = await this.serialize(async () => {
+      const pending = this.closing.get(target);
+      if (pending) {
+        if (pending.kind !== kind) throw new StudioPetError(`Pet "${target}" has another lifecycle operation in progress.`, 'busy');
+        return pending;
+      }
       const store = await this.options.store();
       const row = await store.getPet(target);
       if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
-      if (row.closedAt) return { closing: this.closing.get(target) ?? Promise.resolve(toPet(row)) };
-      const closed = { ...row, closedAt: new Date().toISOString() };
-      await store.closePet(target, closed.closedAt);
+      if (row.removedAt) {
+        if (kind === 'close') throw new StudioPetError(`Pet "${target}" was permanently removed.`, 'invalid');
+        return { promise: Promise.resolve(toPet(row)) };
+      }
       const live = this.live.get(target);
-      const closing = Promise.resolve().then(async () => {
-        try {
-          // The Host rejects queued work and waits for active work. Its close
-          // must not hold up unrelated Pet/Channel registry changes.
-          await live?.runtime.close();
-        } finally {
+      // A failed Reopen cleanup can retain a runtime beside an older closed
+      // marker. That marker alone is not proof that this runtime has stopped.
+      if (kind === 'close' && row.closedAt && !live) return { promise: Promise.resolve(toPet(row)) };
+      if (live && !confirmStop) {
+        throw new StudioPetError(`Confirm ${kind === 'remove' ? 'permanent removal' : 'temporary Close'}: stop current task and cancel unstarted queued tasks, retain history.`, 'confirmation_required');
+      }
+      const promise = Promise.resolve().then(async () => {
+        this.unavailable.add(target);
+        // No lifecycle marker is committed until the runtime proves quiescence.
+        // A thrown close or uncertain DB acknowledgment must reach the caller.
+        await live?.runtime.close();
+        if (live) {
           this.live.delete(target);
-          this.closing.delete(target);
           this.options.onClosed(target);
-          this.options.onChange('pet.closed', toPet(closed));
         }
-        return toPet(closed);
-      });
-      this.closing.set(target, closing);
-      // Observe rejection immediately even if the caller is interrupted.
-      void closing.catch(() => undefined);
-      return { closing };
+        const ended = kind === 'remove' ? { ...row, removedAt: new Date().toISOString() }
+          : { ...row, closedAt: new Date().toISOString() };
+        if (kind === 'remove') await store.removePet(target, ended.removedAt!);
+        else await store.closePet(target, ended.closedAt!);
+        this.options.onChange(kind === 'remove' ? 'pet.removed' : 'pet.closed', toPet(ended));
+        return toPet(ended);
+      }).finally(() => { this.closing.delete(target); });
+      this.closing.set(target, { kind, promise });
+      void promise.catch(() => undefined);
+      return { promise };
     });
-    return transition.closing;
+    return transition.promise;
+  }
+
+  async reopenInstance(petId: unknown): Promise<StudioPet> {
+    const target = readPetId(petId);
+    const transition = await this.serialize(async () => {
+      const pending = this.closing.get(target);
+      if (pending) {
+        if (pending.kind !== 'reopen') throw new StudioPetError(`Pet "${target}" has another lifecycle operation in progress.`, 'busy');
+        return pending;
+      }
+      const store = await this.options.store();
+      const row = await store.getPet(target);
+      if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
+      if (row.removedAt) throw new StudioPetError(`Pet "${target}" was permanently removed and cannot reopen.`, 'invalid');
+      if (this.unavailable.has(target) && this.live.has(target)) {
+        throw new StudioPetError(`Pet "${target}" still has an unsettled runtime teardown. Stop it before reopening.`, 'busy');
+      }
+      if (!row.closedAt) {
+        if (this.unavailable.has(target)) throw new StudioPetError(`Pet "${target}" has an unsettled lifecycle outcome. Check its state before retrying.`, 'busy');
+        return { promise: Promise.resolve(toPet(row)) };
+      }
+      await this.options.requireChannel(row.channelId);
+      if (!this.definitionsById.has(row.definitionId)) throw new StudioPetError(`No Pet definition "${row.definitionId}" in this Studio.`, 'invalid');
+      const { closedAt: _closedAt, ...reopened } = row;
+      const promise = Promise.resolve().then(async () => {
+        await this.goLive(reopened);
+        try { await store.reopenPet(target); }
+        catch (error) {
+          this.unavailable.add(target);
+          const live = this.live.get(target);
+          await live?.runtime.close();
+          this.live.delete(target);
+          this.options.onClosed(target);
+          throw error;
+        }
+        this.unavailable.delete(target);
+        this.options.onChange('pet.reopened', toPet(reopened));
+        return toPet(reopened);
+      }).finally(() => { this.closing.delete(target); });
+      this.closing.set(target, { kind: 'reopen', promise });
+      void promise.catch(() => undefined);
+      return { promise };
+    });
+    return transition.promise;
   }
 
   async rename(petId: unknown, name: unknown): Promise<StudioPet> {
     const target = readPetId(petId);
     const next = readName(name);
     return this.serialize(async () => {
+      if (this.closing.has(target)) throw new StudioPetError(`Pet "${target}" has a lifecycle operation in progress.`, 'busy');
       const store = await this.options.store();
       const row = await store.getPet(target);
       if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
@@ -234,16 +306,18 @@ export class StudioPetRegistry implements StudioPets {
   }
 
   private async closeLive(): Promise<void> {
-    const closing = [...this.closing.values()];
-    const live = [...this.live.values()].filter(pet => !this.closing.has(pet.registration.petId));
+    // A reopen may still be assembling. Wait for each registry transition
+    // before taking the remaining live runtimes, or shutdown could miss it.
+    const transitions = await Promise.allSettled([...this.closing.values()].map(operation => operation.promise));
+    const live = [...this.live.values()];
     for (const pet of live) this.live.delete(pet.registration.petId);
-    // Keep observing until each runtime has closed, so its last lifecycle
-    // events still reach Studio.
-    const results = await Promise.allSettled([...closing, ...live.map(async ({ registration: { petId }, runtime }) => {
+    // Observe each runtime through settlement so final lifecycle events still
+    // reach Studio. A failed teardown is retained in the database, not removed.
+    const results = await Promise.allSettled(live.map(async ({ registration: { petId }, runtime }) => {
       try { await runtime.close(); }
       finally { this.options.onClosed(petId); }
-    })]);
-    for (const result of results) {
+    }));
+    for (const result of [...transitions, ...results]) {
       if (result.status === 'rejected') {
         console.error('[studio] Pet runtime failed to close:', result.reason instanceof Error ? result.reason.message : result.reason);
       }

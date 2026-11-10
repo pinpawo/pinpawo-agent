@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  appendChannelDeliveries, channelCanEditPrompt, channelInlineMentionIds, channelPetCreateInput, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
+  appendChannelDeliveries, channelCanEditPrompt, channelInactivePets, channelMemberRemovalInput, channelInlineMentionIds, channelPetCreateInput, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
@@ -195,8 +195,10 @@ test('registered names are consistent while routing IDs, duplicates and former m
   assert.deepEqual(channelPetIdentity('worker', pets), { name: 'Analyst', removed: false, optionLabel: 'Analyst (worker)' });
   assert.equal(channelPetIdentity('planner', pets).optionLabel, 'Planner');
   assert.equal(channelMessageIdentity(message, pets).name, 'Analyst');
-  assert.deepEqual(channelPetIdentity('retired', pets), { name: 'retired', removed: true, optionLabel: 'retired' });
+  assert.deepEqual(channelPetIdentity('retired', pets), { name: 'retired', removed: false, optionLabel: 'retired' });
   assert.equal(channelPetIdentity('worker', [], false).removed, false, 'a registry still loading is not proof of removal');
+  assert.equal(channelPetIdentity('worker', [{ petId: 'worker', name: 'Analyst', closedAt: 't' }]).removed, false);
+  assert.equal(channelPetIdentity('worker', [{ petId: 'worker', name: 'Analyst', removedAt: 't' }]).removed, true);
   const current = [
     { participantId: 'human:operator%29', kind: 'human', id: 'operator)', label: 'operator)' },
     { participantId: 'pet:a%29b', kind: 'pet', id: 'a)b', label: 'Analyst' },
@@ -304,4 +306,18 @@ test('Pet creation bounds and normalizes the definition display name', () => {
   assert.equal(channelPetCreateInput('c', { definitionId: 'worker', name: '  Worker  ' }, false, () => 'one').name, 'Worker');
   assert.equal(channelPetCreateInput('c', { definitionId: 'worker', name: '   ' }, false, () => 'two').name, 'worker');
   assert.equal(channelPetCreateInput('c', { definitionId: 'worker', name: 'x'.repeat(100) }, false, () => 'three').name, 'x'.repeat(80));
+});
+
+
+test('inactive Pets stay in their owner Channel and Pet removal alone carries explicit stop consent', () => {
+  const records = [
+    { petId: 'live', channelId: 'one', name: 'Live' },
+    { petId: 'closed', channelId: 'one', name: 'Closed', closedAt: 't' },
+    { petId: 'removed', channelId: 'one', name: 'Removed', removedAt: 't' },
+    { petId: 'elsewhere', channelId: 'two', name: 'Elsewhere', closedAt: 't' },
+  ];
+  assert.deepEqual(channelInactivePets(records, 'one').map(pet => pet.petId), ['closed', 'removed']);
+  assert.throws(() => channelMemberRemovalInput('one', { kind: 'pet', id: 'live' }, false), /Confirm/);
+  assert.deepEqual(channelMemberRemovalInput('one', { kind: 'pet', id: 'live' }, true), { channelId: 'one', kind: 'pet', id: 'live', confirmStop: true });
+  assert.deepEqual(channelMemberRemovalInput('one', { kind: 'human', id: 'alice' }, false), { channelId: 'one', kind: 'human', id: 'alice' });
 });

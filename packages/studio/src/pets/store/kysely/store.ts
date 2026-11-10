@@ -6,6 +6,7 @@ function petRow(record: Selectable<PetDatabase['studio_pets']>): PetRow {
   return {
     petId: record.pet_id, definitionId: record.definition_id, name: record.name, createdAt: record.created_at,
     channelId: record.channel_id, ...(record.closed_at ? { closedAt: record.closed_at } : {}),
+    ...(record.removed_at ? { removedAt: record.removed_at } : {}),
   };
 }
 
@@ -21,13 +22,21 @@ export class KyselyPetStore implements PetStore {
   async createPet(row: PetRow): Promise<boolean> {
     const inserted = await this.db.insertInto('studio_pets').values({
       pet_id: row.petId, definition_id: row.definitionId, name: row.name, created_at: row.createdAt,
-      channel_id: row.channelId, closed_at: row.closedAt ?? null,
+      channel_id: row.channelId, closed_at: row.closedAt ?? null, removed_at: row.removedAt ?? null,
     }).onConflict(conflict => conflict.column('pet_id').doNothing()).executeTakeFirst();
     return Number(inserted.numInsertedOrUpdatedRows ?? 0) === 1;
   }
 
   async closePet(petId: string, closedAt: string): Promise<void> {
     await this.db.updateTable('studio_pets').set({ closed_at: closedAt }).where('pet_id', '=', petId).execute();
+  }
+
+  async reopenPet(petId: string): Promise<void> {
+    await this.db.updateTable('studio_pets').set({ closed_at: null }).where('pet_id', '=', petId).where('removed_at', 'is', null).execute();
+  }
+
+  async removePet(petId: string, removedAt: string): Promise<void> {
+    await this.db.updateTable('studio_pets').set({ removed_at: removedAt }).where('pet_id', '=', petId).execute();
   }
 
   async getPet(petId: string): Promise<PetRow | undefined> {

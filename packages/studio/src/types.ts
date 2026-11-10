@@ -13,8 +13,10 @@ export type StudioPet = {
   definitionId: string;
   /** Immutable owner. A definition may have separate instances in other Channels. */
   channelId: string;
-  /** Terminal closure preserves this identity and its history. */
+  /** Temporarily unavailable; reopen preserves the same instance. */
   closedAt?: string;
+  /** Permanent tombstone; the identity is never reused. */
+  removedAt?: string;
   /** Display only; never used to address the Pet. */
   name: string;
   createdAt: string;

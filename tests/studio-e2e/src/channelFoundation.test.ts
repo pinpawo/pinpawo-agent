@@ -107,7 +107,7 @@ test('HTTP acts as the authenticated client: rejects spoofing and non-members, m
     assert.equal((await post('/pets', { petId: 'writer', definitionId: 'writer', name: 'Writer', channelId })).status, 201);
     assert.equal((await post('/channels/members', { channelId, kind: 'pet', id: 'ghost' })).status, 409);
     assert.equal((await post('/channels/members', { channelId, kind: 'bot', id: 'x' })).status, 400);
-    assert.equal((await post('/channels/members/remove', { channelId, kind: 'pet', id: 'reviewer' })).status, 200);
+    assert.equal((await post('/channels/members/remove', { channelId, kind: 'pet', id: 'reviewer', confirmStop: true })).status, 200);
     const listed = await (await get(`/channels/members?channelId=${channelId}`)).json() as { members: Array<{ participantId: string }> };
     assert.deepEqual(listed.members.map(member => member.participantId), ['human:local', 'human:guest', 'pet:writer']);
     assert.equal((await post('/channels/messages', { channelId, body: 'gone', mentions: [{ participantId: 'pet:reviewer' }] })).status, 409);
@@ -266,7 +266,7 @@ test('a Pet message is its Channel session public reply, written once, handed of
     emit(completed('reply-3', 'Not a Channel run.'), { scope: undefined });
     emit(completed('reply-2', 'Not from the bound session.'), { sessionId: 'one:forged' });
     await waitFor(() => failures().length === 1);
-    await channel.service.removeMember(operator, id, { kind: 'pet', id: 'one' });
+    await channel.service.removeMember(operator, id, { kind: 'pet', id: 'one' }, { confirmStop: true });
     emit(completed('reply-4', 'After leaving.'));
     await waitFor(() => failures().length === 2);
     assert.deepEqual(failures().map(payload => [payload.externalRef, payload.petId, payload.sessionId]),

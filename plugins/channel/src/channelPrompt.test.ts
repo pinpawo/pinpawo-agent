@@ -165,7 +165,7 @@ test('provider uses the persisted binding and current membership after Studio re
     await assert.rejects(studio.dispatch({ petId: 'one', request: 'missing session', scope: { namespace: 'channel', id: a } }));
     await assert.rejects(studio.dispatch({ petId: 'two', request: 'wrong Pet', session: { id: aSession }, scope: { namespace: 'channel', id: a } }));
     await assert.rejects(studio.dispatch({ petId: 'one', request: 'unknown channel', session: { id: aSession }, scope: { namespace: 'channel', id: randomUUID() } }));
-    await channel.service.removeMember(human, a, { kind: 'pet', id: 'one' });
+    await channel.service.removeMember(human, a, { kind: 'pet', id: 'one' }, { confirmStop: true });
     await assert.rejects(studio.dispatch({ petId: 'one', request: 'former member', session: { id: aSession }, scope: { namespace: 'channel', id: a } }));
     assert.equal(observed.length, count);
   } finally {

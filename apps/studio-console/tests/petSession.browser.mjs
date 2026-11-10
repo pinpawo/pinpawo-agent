@@ -59,6 +59,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   const writes = [];
+  const abortedSessionStreams = [];
+  page.on('requestfailed', request => { if (new URL(request.url()).pathname === '/pet-sessions/events') abortedSessionStreams.push(request.url()); });
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (request.method() === 'POST') writes.push(new URL(request.url()).pathname); });
   await page.goto('http://127.0.0.1:5199');
@@ -139,6 +141,32 @@ try {
   await viewer.getByRole('button', { name: 'Close session view' }).click();
   await viewer.waitFor({ state: 'detached' });
   assert.equal((await outputs()).length, 2, 'reading sessions created no message');
+  // Authoritative Close and Remove events unmount this Console's reader and abort its owned SSE request.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await alphaMessage.getByRole('button', { name: 'View Alpha session', exact: true }).click();
+  await viewer.getByText('Idle', { exact: true }).waitFor();
+  const abortedBeforeClose = abortedSessionStreams.length;
+  const closed = await fetch(`${ready.url}/pets/close`, { method: 'POST',
+    headers: { Authorization: `Bearer ${ready.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ petId: alphaId, confirmStop: true }) });
+  assert.equal(closed.status, 200);
+  const closedPet = (await closed.json()).pet;
+  assert.ok(closedPet.closedAt); assert.equal(closedPet.removedAt, undefined);
+  await viewer.waitFor({ state: 'detached' });
+  await waitFor(() => abortedSessionStreams.slice(abortedBeforeClose).some(url => new URL(url).searchParams.get('petId') === alphaId), 'closed Pet owned observer aborted');
+  const reopened = await fetch(`${ready.url}/pets/reopen`, { method: 'POST',
+    headers: { Authorization: `Bearer ${ready.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ petId: alphaId }) });
+  assert.equal(reopened.status, 200);
+  assert.equal((await reopened.json()).pet.petId, alphaId);
+  await alphaMessage.getByRole('button', { name: 'View Alpha session', exact: true }).click();
+  await viewer.getByText('Idle', { exact: true }).waitFor();
+  const abortedBeforeRemoval = abortedSessionStreams.length;
+  const removed = await fetch(`${ready.url}/pets/remove`, { method: 'POST',
+    headers: { Authorization: `Bearer ${ready.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ petId: alphaId, confirmStop: true }) });
+  assert.equal(removed.status, 200);
+  assert.ok((await removed.json()).pet.removedAt);
+  await viewer.waitFor({ state: 'detached' });
+  await waitFor(() => abortedSessionStreams.slice(abortedBeforeRemoval).some(url => new URL(url).searchParams.get('petId') === alphaId), 'owned session observer aborted');
+  assert.equal((await outputs()).length, 2, 'permanent removal does not resume a task or create a reply');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'passed', modelCalls: 0, screenshots: screenshotDir }));
 } finally {

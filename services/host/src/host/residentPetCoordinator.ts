@@ -18,6 +18,7 @@ export class ResidentPetCoordinator {
   private readonly dispatchQueue: QueuedOperation[] = [];
   /** Conversations currently holding the gate busy; they never enter a queue. */
   private conversations = 0;
+  private readonly conversationHolds = new Set<Promise<void>>();
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
@@ -100,41 +101,47 @@ export class ResidentPetCoordinator {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    // The hold is claimed synchronously, before waiting out an active
-    // dispatch. A queued dispatch reads Session state when it starts, so a
-    // session switch already in flight has to land first — waiting before
-    // claiming would let that dispatch drain against the old thread.
+    // Claim both admission and lifetime synchronously, including the wait for
+    // an active dispatch. Close cancels a hold that has not started its work.
     this.conversations += 1;
+    let release!: () => void;
+    const settled = new Promise<void>(resolve => { release = resolve; });
+    this.conversationHolds.add(settled);
     try {
-      while (this.active) {
-        await this.active;
+      try {
+        while (this.active) await this.active;
+      } catch {
+        // The active operation's own caller owns its failure.
       }
-    } catch {
-      // The active operation's own caller owns its failure.
-    }
-    this.setState('busy');
-    this.publishQueueSnapshot();
-    let value: T;
-    try {
-      value = await operation();
+      if (this.closing) {
+        throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+      }
+      this.setState('busy');
+      this.publishQueueSnapshot();
+      if (this.closing) {
+        throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+      }
+      return await operation();
     } finally {
       this.conversations -= 1;
-      if (this.conversations === 0) {
-        this.publishQueueSnapshot();
-      }
-    }
-    // Awaited, not fire-and-forget: callers rely on the gate being settled by
-    // the time the operation resolves, the way the queue's own run() refreshed
-    // before resolving. A failed refresh leaves the gate `blocked` and is
-    // logged rather than failing the conversation, which already succeeded.
-    if (this.conversations === 0) {
       try {
-        await this.refreshState();
-      } catch (error) {
-        this.logError('[resident-pet] failed to refresh state after a conversation:', error);
+        if (this.conversations === 0) {
+          this.publishQueueSnapshot();
+          // Await refresh before releasing the lifetime hold, including when
+          // the operation failed. Close itself must not start another read.
+          if (!this.closing) {
+            try {
+              await this.refreshState();
+            } catch (error) {
+              this.logError('[resident-pet] failed to refresh state after a conversation:', error);
+            }
+          }
+        }
+      } finally {
+        this.conversationHolds.delete(settled);
+        release();
       }
     }
-    return value;
   }
 
   enqueueDispatch<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
@@ -186,7 +193,8 @@ export class ResidentPetCoordinator {
       this.closing = true;
       this.cancelQueue(this.dispatchQueue);
     }
-    await Promise.all([this.active, this.refreshing]);
+    // Execution failures belong to their callers, not to resource cleanup.
+    await Promise.allSettled([this.active, this.refreshing, ...this.conversationHolds]);
   }
 
   private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry): Promise<T> {
@@ -276,6 +284,12 @@ export class ResidentPetCoordinator {
   }
 
   private async run(entry: QueuedOperation): Promise<void> {
+    // Selection reserves the slot before execution's first microtask. Stop
+    // must also cancel that selected-but-unstarted entry, not only the queue.
+    if (this.closing) {
+      entry.reject(new ResidentPetOperationCancelledError('Resident Pet Host is closing.'));
+      return;
+    }
     let value: unknown;
     let operationError: unknown;
     try {

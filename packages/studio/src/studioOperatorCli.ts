@@ -10,13 +10,17 @@ export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host 
   pinpawo-studio channels send <channelId> --file <markdown|-> [--mention <participantId>] [--reply-to <messageId>]
   pinpawo-studio channels members <channelId>
   pinpawo-studio channels add-member <channelId> --member <participantId>
-  pinpawo-studio channels remove-member <channelId> --member <participantId>
+  pinpawo-studio channels remove-member <channelId> --member <participantId> [--confirm-stop]
   pinpawo-studio channels sessions <channelId>
   pinpawo-studio clients list
   pinpawo-studio clients add <clientId> --label <name>
   pinpawo-studio clients add-key <clientId>
   pinpawo-studio clients revoke <clientId>
   pinpawo-studio pets list
+  pinpawo-studio pets records
+  pinpawo-studio pets close <petId> [--confirm-stop]
+  pinpawo-studio pets reopen <petId>
+  pinpawo-studio pets remove <petId> [--confirm-stop]
   pinpawo-studio pets definitions
   pinpawo-studio pets create <petId> --definition <definitionId> --name <name> --channel <channelId>
   pinpawo-studio pets rename <petId> --name <name>
@@ -45,7 +49,13 @@ resubmitting an uncertain mutation. --mention and --member take a participantId
 Create a Channel first, then create each Pet in that Channel with --channel.
 A Pet has one immutable Channel and its own runtime and sessions. Definitions
 can be reused for new instances; existing instances cannot join other Channels.
-Removing a Pet member terminally closes it and preserves its history.
+Close is temporary; reopen restores the same instance in its owner Channel.
+Remove permanently ends the instance and preserves its history. Closing or
+removing a live Pet requires --confirm-stop: interrupt its
+current task, cancel unstarted queued tasks, wait for it to stop, then close or remove it.
+Pending approvals are never answered or resumed. An unsuccessful stop does not
+close or remove the instance. channels remove-member permanently removes a Pet
+and uses the same --confirm-stop consent. pets records includes closed and removed instances.
 A Pet's credentials are environment variables its own shell, git and gh
 commands receive; other Pets never see them. Values are write-only (credentials
 lists names); set-credential stores the --file or stdin content exactly as read
@@ -84,6 +94,7 @@ export type StudioOperatorOptions = {
   idempotencyKey?: string;
   seconds: number;
   full: boolean;
+  confirmStop?: boolean;
 };
 
 function origin(value: string, option: string) {
@@ -120,6 +131,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     }
     if (action === 'create') { allowed.add('--definition'); allowed.add('--name'); allowed.add('--channel'); }
     if (action === 'rename') allowed.add('--name');
+    if (action === 'close' || action === 'remove') allowed.add('--confirm-stop');
     if (action === 'set-credential' || action === 'unset-credential') allowed.add('--env');
     if (action === 'set-credential') allowed.add('--file');
   }
@@ -138,6 +150,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
       allowed.add('--title'); allowed.add('--description');
     }
     if (action === 'add-member' || action === 'remove-member') allowed.add('--member');
+    if (action === 'remove-member') allowed.add('--confirm-stop');
   }
   if (command === 'snapshot') allowed.add('--full');
   if (command === 'events') allowed.add('--seconds');
@@ -152,7 +165,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     if (!argument.startsWith('-')) { positional.push(argument); continue; }
     if (!allowed.has(argument)) throw new Error(`Unknown option for ${command}: ${argument}`);
     if (values.has(argument) && argument !== '--mention') throw new Error(`Duplicate option: ${argument}`);
-    if (argument === '--full') { values.set(argument, 'true'); continue; }
+    if (argument === '--full' || argument === '--confirm-stop') { values.set(argument, 'true'); continue; }
     const value = args[++index];
     if (!value?.trim() || (value.startsWith('-') && !(argument === '--file' && value === '-'))) {
       throw new Error(`${argument} requires a value.`);
@@ -163,7 +176,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   const needsId = command !== 'queues'
     && !(command === 'channels' && ['list', 'create'].includes(action!))
     && !(command === 'clients' && action === 'list')
-    && !(command === 'pets' && ['list', 'definitions'].includes(action!));
+    && !(command === 'pets' && ['list', 'records', 'definitions'].includes(action!));
   if (positional.length !== (needsId ? 1 : 0) || positional.some(value => !value.trim())) {
     const noun = command === 'channels' ? 'Channel' : command === 'clients' ? 'client' : 'Pet';
     throw new Error(needsId ? `Expected one ${noun} id.` : 'Unexpected positional argument.');
@@ -180,7 +193,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
   if (command === 'channels' && action === 'create' && !values.has('--title')) throw new Error('--title is required.');
   if ((action === 'add-member' || action === 'remove-member') && !values.has('--member')) throw new Error('--member is required.');
   if (command === 'channels' && action === 'add-member' && memberRef(values.get('--member')!).kind === 'pet') {
-    throw new Error('Create a new Pet with pets create --channel instead; Pet instances cannot be joined or reopened.');
+    throw new Error('Create a new Pet with pets create --channel instead; Pet instances cannot join other Channels; use pets reopen for a temporarily closed instance in its owner Channel.');
   }
   function integer(option: string, min: number, max: number, fallback?: number) {
     if (!values.has(option)) return fallback;
@@ -199,6 +212,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     after: integer('--after', 0, Number.MAX_SAFE_INTEGER), before: integer('--before', 1, Number.MAX_SAFE_INTEGER),
     limit: integer('--limit', 1, 200),
     seconds: integer('--seconds', 1, 60, 30)!, full: values.has('--full'),
+    ...(values.has('--confirm-stop') ? { confirmStop: true } : {}),
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
     title: values.get('--title'), description: values.get('--description'), channelId: values.get('--channel'),
@@ -209,7 +223,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
 
 const CHANNEL_ACTIONS = ['list', 'create', 'read', 'send', 'members', 'add-member', 'remove-member', 'sessions'];
 const CLIENT_ACTIONS = ['list', 'add', 'add-key', 'revoke'];
-const PET_ACTIONS = ['list', 'definitions', 'create', 'rename', 'credentials', 'set-credential', 'unset-credential'];
+const PET_ACTIONS = ['list', 'records', 'definitions', 'create', 'close', 'reopen', 'remove', 'rename', 'credentials', 'set-credential', 'unset-credential'];
 
 /** A participantId names one member: its kind and its URI-encoded id. */
 function memberRef(participantId: string): { kind: 'human' | 'pet'; id: string } {
@@ -254,10 +268,13 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
     else if (action !== 'list') body = { clientId: id };
   } else if (command === 'pets') {
     route = {
-      list: '/pets', definitions: '/pet-definitions', create: '/pets', rename: '/pets/rename',
+      list: '/pets', records: '/pets/records', definitions: '/pet-definitions', create: '/pets',
+      close: '/pets/close', reopen: '/pets/reopen', remove: '/pets/remove', rename: '/pets/rename',
       credentials: '/pet-credentials', 'set-credential': '/pet-credentials', 'unset-credential': '/pet-credentials/remove',
     }[action!]!;
     if (action === 'create') body = { petId: id, definitionId: options.definition, name: options.name, channelId: options.channelId };
+    else if (action === 'reopen') body = { petId: id };
+    else if (action === 'close' || action === 'remove') body = { petId: id, ...(options.confirmStop ? { confirmStop: true } : {}) };
     else if (action === 'rename') body = { petId: id, name: options.name };
     else if (action === 'unset-credential') body = { petId: id, envName: options.env };
   } else if (['snapshot', 'events', 'send'].includes(command)) {
@@ -273,7 +290,7 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (command === 'channels' && action === 'create') {
     body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: [] };
   } else if (action === 'add-member' || action === 'remove-member') {
-    body = { channelId: id, ...options.member };
+    body = { channelId: id, ...options.member, ...(action === 'remove-member' && options.member?.kind === 'pet' && options.confirmStop ? { confirmStop: true } : {}) };
   }
   if (options.file) {
     const text = options.file === '-' ? await (dependencies.readStdin ?? stdinText)() : await read(options.file);

@@ -53,6 +53,13 @@ CREATE TABLE studio_pets (
 API 不自动生成；Console 为每个新实例生成唯一 id。这样 `studio.json` 里的 trigger、CLI 和日志能写出可读的目标；名称另起，
 不参与寻址。
 
+实现入口：`StudioPetRegistry.instance(row)` 为一个身份显式 `new PetInstance(...)`；创建和启动恢复走
+`PetInstance.activate()`，临时关闭后的恢复走 `PetInstance.reopen()`。这个薄对象持有不可变身份与
+owner Channel、当前 runtime handle、进行中的生命周期操作和失败不可用状态，执行 Close/Remove 的确认、
+停止与最终状态顺序，以及 Reopen 和改名的单实例约束。Registry 保留集合、身份唯一性、定义与 Channel
+校验、数据库协调、恢复和整体 shutdown；最终关闭/移除标记始终重新读库，不在对象中维护第二份真相。
+Host 仍由 `buildStudio.assemblePet` 调用 `createResidentPetHost` 装配；这里尚未接入 Head lifecycle。
+
 ## 定义
 
 - 文件位置不变：`<workdir>/.pinpawo/pets/<definitionId>.json` 加同名目录下的 PET.md 与 `capabilities/`。

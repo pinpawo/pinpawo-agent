@@ -1,0 +1,164 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { PetInstance, type LiveStudioPet } from './petInstance';
+import { StudioPetRegistry } from './studioPets';
+import type { PetStore } from './store/petStore';
+import type { StudioPetCredentials } from './petCredentials';
+import type { StudioPet, StudioPetRegistration, StudioPetRuntime } from '../types';
+
+const row: StudioPet = { petId: 'pet', definitionId: 'worker', channelId: 'one', name: 'Pet', createdAt: '2026-11-10' };
+const busy = (error: { code?: string }) => error.code === 'busy';
+const tick = () => new Promise(resolve => setImmediate(resolve));
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+function fixture(close: () => Promise<void> = async () => {}) {
+  const assembled: StudioPetRegistration[] = [], events: string[] = [];
+  let observed: LiveStudioPet | undefined, closes = 0;
+  const source = { ...row };
+  const instance = new PetInstance(source, {
+    assemble: async pet => {
+      assembled.push(pet);
+      return { close: async () => { closes++; await close(); }, dispatch: {} } as StudioPetRuntime;
+    },
+    onLive: pet => { observed = pet; }, onClosed: () => { events.push('stopped'); },
+    onChange: type => { events.push(type); },
+  });
+  return { instance, source, assembled, events, observed: () => observed, closes: () => closes };
+}
+
+test('one identity owns activation and runtime rename, using fresh names on Reopen', async () => {
+  const { instance, source, assembled, observed } = fixture();
+  source.channelId = 'another'; source.petId = 'another';
+  await instance.activate(row.name);
+  await assert.rejects(instance.activate(row.name), busy);
+  const live = observed();
+  instance.rename('Renamed');
+  assert.equal(live?.registration.name, 'Renamed', 'update the already-observed registration');
+  let closed!: StudioPet;
+  await instance.end(row, 'close', true, async ended => { closed = ended; }).promise;
+  const fresh = { ...closed, name: 'Persisted name' };
+  await instance.reopen(fresh, async () => {}).promise;
+  assert.equal(instance.petId, row.petId);
+  assert.equal(instance.ownerChannelId, row.channelId);
+  assert.deepEqual(assembled.map(pet => [pet.petId, pet.channelId, pet.createdAt]), [
+    [row.petId, row.channelId, row.createdAt], [row.petId, row.channelId, row.createdAt],
+  ]);
+  assert.equal(assembled[1].name, fresh.name, 'mutable persisted metadata is not a second cached authority');
+  await instance.shutdown();
+});
+
+for (const kind of ['close', 'remove'] as const) {
+  test(`${kind} owns consent, admission fencing, coalescing, busy rules and stop-before-commit`, async () => {
+    const stop = deferred();
+    const { instance, events, closes } = fixture(() => stop.promise);
+    await instance.activate(row.name);
+    assert.throws(() => instance.end(row, kind, false, async () => {}), (e: { code?: string }) => e.code === 'confirmation_required');
+    assert.ok(instance.live); assert.equal(instance.pending, undefined);
+    let persisted: StudioPet | undefined;
+    const first = instance.end(row, kind, true, async ended => { persisted = ended; events.push('persisted'); });
+    const duplicate = instance.end(row, kind, false, async () => { assert.fail('duplicate persistence'); });
+    assert.equal(duplicate.promise, first.promise);
+    assert.equal(instance.live, undefined);
+    assert.throws(() => instance.end(row, kind === 'close' ? 'remove' : 'close', true, async () => {}), busy);
+    assert.throws(() => instance.reopen(row, async () => {}), busy);
+    assert.throws(() => instance.rename('Busy'), busy);
+    await tick();
+    assert.equal(closes(), 1); assert.equal(persisted, undefined); assert.deepEqual(events, []);
+    stop.resolve();
+    const ended = await first.promise;
+    assert.ok(ended[kind === 'close' ? 'closedAt' : 'removedAt']);
+    assert.deepEqual(events, ['stopped', 'persisted', kind === 'close' ? 'pet.closed' : 'pet.removed']);
+    assert.equal(instance.pending, undefined);
+    if (kind === 'remove') assert.throws(() => instance.reopen(ended, async () => {}), /permanently removed/);
+  });
+
+  test(`uncertain ${kind} persistence uses the fresh final record on explicit retry without a success event`, async () => {
+    const { instance, events, closes } = fixture();
+    await instance.activate(row.name);
+    let persisted!: StudioPet;
+    await assert.rejects(instance.end(row, kind, true, async ended => {
+      persisted = ended; throw new Error('ack lost');
+    }).promise, /ack lost/);
+    assert.deepEqual(events, ['stopped']);
+    assert.equal(instance.live, undefined);
+    assert.deepEqual(await instance.end(persisted, kind, false, async () => { assert.fail('already committed'); }).promise, persisted);
+    assert.equal(closes(), 1);
+  });
+}
+
+test('failed stop and failed-Reopen cleanup retain the runtime until a confirmed stop settles', async () => {
+  let fail = true;
+  const { instance, assembled, events } = fixture(async () => { if (fail) throw new Error('stop unknown'); });
+  await instance.activate(row.name);
+  await assert.rejects(instance.end(row, 'close', true, async () => { assert.fail('not settled'); }).promise, /stop unknown/);
+  await assert.rejects(instance.activate(row.name), busy);
+  assert.throws(() => instance.reopen(row, async () => {}), busy);
+  fail = false;
+  let closed!: StudioPet;
+  await instance.end(row, 'close', true, async ended => { closed = ended; }).promise;
+  fail = true;
+  await assert.rejects(instance.reopen(closed, async () => { throw new Error('write failed'); }).promise, /stop unknown/);
+  assert.throws(() => instance.reopen(closed, async () => {}), busy);
+  assert.throws(() => instance.end(closed, 'close', false, async () => {}), (e: { code?: string }) => e.code === 'confirmation_required');
+  assert.equal(assembled.length, 2); assert.equal(instance.live, undefined);
+  assert.equal(events.includes('pet.reopened'), false);
+  fail = false;
+  await instance.end(closed, 'close', true, async () => {}).promise;
+  await instance.reopen(closed, async () => {}).promise;
+  assert.equal(assembled.length, 3);
+  await instance.shutdown();
+});
+
+
+test('registry keeps restoration, cross-instance scheduling, pending dedupe and shutdown order', { timeout: 5000 }, async () => {
+  const stopping = deferred(), activating = deferred();
+  const rows = new Map([[row.petId, { ...row }], ['closed', { ...row, petId: 'closed', closedAt: 'closed' }]]);
+  let failRead = false, reopening = false, closes = 0;
+  const assembled: StudioPetRegistration[] = [];
+  const store = {
+    listPets: async () => [...rows.values()].map(pet => ({ ...pet })),
+    getPet: async (id: string) => { if (failRead && id === row.petId) throw new Error('read failed'); return rows.get(id); },
+    createPet: async (pet: StudioPet) => { if (rows.has(pet.petId)) return false; rows.set(pet.petId, { ...pet }); return true; },
+    renamePet: async (id: string, name: string) => { rows.get(id)!.name = name; },
+    closePet: async (id: string, closedAt: string) => { rows.get(id)!.closedAt = closedAt; },
+    reopenPet: async (id: string) => { delete rows.get(id)!.closedAt; },
+  } as PetStore;
+  const registry = new StudioPetRegistry({ studioId: 'entity-test', store: async () => store, credentials: {} as StudioPetCredentials,
+    definitions: [{ definitionId: row.definitionId, name: 'Worker' }], requireChannel: async () => {},
+    assemble: async pet => {
+      assembled.push(pet);
+      if (reopening && pet.petId === row.petId) await activating.promise;
+      return { dispatch: {}, close: async () => { closes++; if (!reopening && pet.petId === row.petId) await stopping.promise; } } as StudioPetRuntime;
+    }, onLive: () => {}, onClosed: () => {}, onChange: () => {},
+  });
+  try {
+    await Promise.all([registry.restore(), registry.restore()]);
+    assert.equal(assembled.length, 1, 'restore only active identities once');
+    await registry.create({ ...row, petId: 'other', channelId: 'two' });
+    await assert.rejects(registry.closeInstance(row.petId), (e: { code?: string }) => e.code === 'confirmation_required');
+    assert.ok(registry.getLive(row.petId));
+    const closing = registry.closeInstance(row.petId, { confirmStop: true });
+    await tick(); failRead = true;
+    const duplicate = registry.closeInstance(row.petId);
+    await assert.rejects(registry.removeInstance(row.petId, { confirmStop: true }), busy);
+    await registry.rename('other', 'Other renamed');
+    assert.equal(closes, 1, 'slow stop does not block another instance or repeat a stop');
+    failRead = false; stopping.resolve();
+    assert.deepEqual(await closing, await duplicate, 'pending dedupe never consults the failing store');
+    reopening = true;
+    const reopened = registry.reopenInstance(row.petId), again = registry.reopenInstance(row.petId);
+    await tick();
+    const shutdown = registry.close();
+    assert.equal(closes, 1, 'shutdown waits for the pending activation');
+    activating.resolve();
+    assert.deepEqual(await reopened, await again);
+    await shutdown;
+    assert.equal(assembled.length, 3, 'repeated Reopen assembles only once');
+    assert.equal(closes, 3, 'shutdown closes both remaining runtimes');
+    assert.equal(registry.listLive().length, 0);
+    assert.equal(rows.get(row.petId)?.closedAt, undefined, 'shutdown does not write Close');
+  } finally { stopping.resolve(); activating.resolve(); await registry.close(); }
+});

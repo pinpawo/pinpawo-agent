@@ -428,7 +428,12 @@ export class ServerChatHandler {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
       hooks.onFailure?.(err);
-      console.error('[chat-host] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
+      const diagnostics = describeAgentError(err);
+      console.error(
+        '[chat-host] chat error:',
+        err instanceof Error ? (err.stack ?? err.message) : err,
+        JSON.stringify({ requestId, diagnostics }),
+      );
       // A history the provider rejects is switched away from, never deleted: the old
       // session stays in the session list. A targeted turn never switches sessions.
       const detail = err instanceof Error ? err.message : 'internal error';
@@ -449,7 +454,6 @@ export class ServerChatHandler {
         const notice = protocolRecovery
           ?? (failure.kind === 'fatal' ? fatalAgentRunNotice(failure) : null)
           ?? (err instanceof AgentNoticeError ? err.notice : null);
-        const diagnostics = describeAgentError(err);
         this.publishRuntimeEvent(peer, notice
           ? agentErrorEvent(requestId, notice, { diagnostics })
           : { type: 'error', requestId, message: detail, diagnostics });

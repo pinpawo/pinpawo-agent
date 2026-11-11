@@ -25,6 +25,7 @@ CREATE TABLE channels (
   title           TEXT NOT NULL,
   description     TEXT,
   prompt          TEXT,                            -- 可选的 Channel 协作提示词
+  workdir         TEXT,                            -- 可选的 Host 侧执行目录，创建后不可变
   created_by_kind TEXT NOT NULL CHECK(created_by_kind IN ('human','pet')),
   created_by_id   TEXT NOT NULL,
   created_at      TEXT NOT NULL,
@@ -73,6 +74,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 
 - **访问**：请求必须带 Studio 认证后的 principal。不是当前成员的请求返回 403；下述 Studio authority 管理例外不授予读消息或发言权限。
 - **协作提示词**：当前成员可读；仅 Studio authority 可在创建时设置非空提示词，或在之后修改、清空提示词。普通客户端可以创建无提示词的 Channel，但创建者仍不可修改提示词。Studio authority 不在成员中时仅可单独修改提示词；同时修改标题或说明仍要求成员身份。它只表达协作意图，不改变 Host / PET 安全边界、工具权限或用户授权，也不保证模型遵循。
+- **执行目录**：Studio authority 可在创建 Channel 时设置 `workdir`；同一 Channel 的 Pet 使用同一目录，不支持 Pet 覆盖或后续修改。Host 在装配 Pet 时相对 Studio workdir 解析并校验；未设置时使用 Studio workdir。目录无效时装配报错，不降级。它只是路径基准，不是文件系统隔离；Studio 状态与独立配置的 Plugin 根不随之移动。参见 [Channel API](../../reference/api/studio.md#channel-messages-and-addressing)。
 - **发言**：作者来自 principal，请求正文不能指定作者。
 - **寻址**：只能 @ 当前成员；Pet 回复里的 @ 也按当前 Channel 的成员解析。
 - **创建 Channel、增删成员**：Studio 的访问层决定谁能调用；Channel 要求操作者是成员。

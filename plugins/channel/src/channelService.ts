@@ -12,6 +12,7 @@ export const channelCreateSchema = z.object({
   title: z.string().trim().min(1).max(160),
   description: z.string().trim().max(50_000).optional(),
   prompt: z.string().trim().max(50_000).optional(),
+  workdir: z.string().min(1).max(4096).refine(value => value.trim().length > 0).optional(),
   /** The Pets that join with the creator. Required: no Pet joins implicitly. */
   pets: z.array(identifier).max(0).default([]),
 }).strict();
@@ -177,6 +178,7 @@ export class ChannelService {
   async createChannel(actor: MemberRef, input: unknown, access: ChannelManageAccess = {}): Promise<{ channel: ChannelRow; members: ChannelMember[] }> {
     const value = channelCreateSchema.parse(input);
     if (value.prompt && !access.studio) throw new ChannelAccessError('Only Studio authority may set a Channel prompt.');
+    if (value.workdir !== undefined && !access.studio) throw new ChannelAccessError('Only Studio authority may set a Channel workdir.');
     const creator = memberRefSchema.parse(actor);
     if (creator.kind !== 'human') throw new ChannelAccessError('Only a human may create a Channel; a Pet instance already has its owner.');
     const labels = await this.humanLabels([creator]);
@@ -184,6 +186,7 @@ export class ChannelService {
     const channel: ChannelRow = {
       channelId: randomUUID(), title: value.title, ...(value.description ? { description: value.description } : {}),
       ...(value.prompt ? { prompt: value.prompt } : {}),
+      ...(value.workdir !== undefined ? { workdir: value.workdir } : {}),
       createdBy: creator, createdAt: now, updatedAt: now,
     };
     const result = await this.store.transaction(async (store) => {

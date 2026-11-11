@@ -109,6 +109,20 @@ for (const [backend, config] of backends) {
     await assert.rejects(service.updateChannel(admin, channelId, { title: 'Other metadata', prompt: 'Mixed' }, { studio: true }), ChannelAccessError);
   }));
 
+  test(`${backend}: Channel workdir is selected by Studio authority once and persists`, () => withService(async (service, store) => {
+    await assert.rejects(service.createChannel(owner, { title: 'Forbidden', workdir: '/host/project' }), ChannelAccessError);
+    await assert.rejects(service.createChannel(owner, { title: 'Blank', workdir: '   ' }, { studio: true }));
+    const { channel } = await service.createChannel(owner, { title: 'Project', workdir: ' project dir ' }, { studio: true });
+    assert.equal(channel.workdir, ' project dir ');
+    assert.equal((await store.getChannel(channel.channelId))?.workdir, ' project dir ');
+    assert.equal((await service.readContext(owner, channel.channelId)).channel.workdir, ' project dir ');
+    assert.equal((await service.listChannels(owner)).channels[0]?.workdir, ' project dir ');
+    await assert.rejects(service.updateChannel(owner, channel.channelId, { workdir: '/other' }, { studio: true }));
+    assert.equal((await store.getChannel(channel.channelId))?.workdir, ' project dir ');
+    const fallback = (await service.createChannel(owner, { title: 'Fallback' })).channel;
+    assert.equal((await store.getChannel(fallback.channelId))?.workdir, undefined);
+  }));
+
   test(`${backend}: upgrading an existing Channel keeps its messages and does not invent a prompt`, async () => {
     const storage = createStudioStorage(config());
     try {
@@ -125,6 +139,7 @@ for (const [backend, config] of backends) {
       const context = await service.readContext(owner, 'old');
       assert.equal(context.channel.description, 'Preserved');
       assert.equal(context.channel.prompt, undefined);
+      assert.equal(context.channel.workdir, undefined);
       assert.equal(context.messages[0]?.body, 'Keep this');
       assert.equal((await service.updateChannel(owner, 'old', { prompt: 'New prompt' }, { studio: true })).prompt, 'New prompt');
     } finally { await storage.close(); }

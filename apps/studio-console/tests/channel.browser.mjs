@@ -10,6 +10,8 @@ const app = fileURLToPath(new URL('..', import.meta.url));
 const root = resolve(app, '../..');
 const screenshotDir = process.env.CHANNEL_SCREENSHOTS ?? '/tmp/channel-console-screenshots';
 const hostRoot = await mkdtemp(resolve(tmpdir(), 'channel-console-host-'));
+const channelWorkdir = resolve(hostRoot, ' project ');
+await mkdir(channelWorkdir);
 await mkdir(screenshotDir, { recursive: true });
 const children = [];
 let browser;
@@ -103,17 +105,20 @@ try {
     await members.getByText(`pet:${pet.petId}`, { exact: true }).waitFor();
     return pet.petId;
   };
-  const create = async (title, definitionIds, instructions = '') => {
+  const create = async (title, definitionIds, instructions = '', workdir = '') => {
     await page.getByRole('button', { name: '+ New Channel', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Create Channel' });
     await dialog.getByLabel('Channel title').fill(title);
     await dialog.getByLabel('Channel description').fill('Auditable public messages between members.');
     if (instructions) await dialog.getByLabel('Channel instructions', { exact: true }).fill(instructions);
+    if (workdir) await dialog.getByLabel('Host directory', { exact: true }).fill(workdir);
     assert.equal(await dialog.getByRole('checkbox').count(), 0, 'Channel creation never selects global Pet instances');
     await dialog.evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
     await page.getByRole('heading', { name: title, exact: true }).waitFor();
     const channel = (await api('/channels')).channels.find(channel => channel.title === title);
     assert.deepEqual(channelCreates.at(-1).pets, [], 'Channel is persisted empty before any instance is assembled');
+    if (workdir) assert.equal(channelCreates.at(-1).workdir, workdir, 'the Host path is submitted without changing whitespace');
+    else assert.equal('workdir' in channelCreates.at(-1), false, 'an empty Host path is omitted');
     assert.deepEqual((await api(`/channels/members?channelId=${channel.channelId}`)).members.map(member => member.participantId), ['human:local']);
     const instances = {};
     for (const definitionId of definitionIds) instances[definitionId] = await createPet(channel.channelId, definitionId);
@@ -123,12 +128,13 @@ try {
   assert.equal(await page.getByRole('checkbox').count(), 0, 'no Pet selection on Channel creation');
   assert.equal(await page.getByLabel('Channel goal').count(), 0, 'no goal or scope is asked for');
   await page.keyboard.press('Escape');
-  const { alpha: firstAlpha, beta: firstBeta } = await create('Customer records', ['alpha', 'beta'], 'Discuss records together.');
+  const { alpha: firstAlpha, beta: firstBeta } = await create('Customer records', ['alpha', 'beta'], 'Discuss records together.', channelWorkdir);
   await page.screenshot({ path: resolve(screenshotDir, '00-owned-channel-members.png'), fullPage: true });
   let listed = await api('/channels');
   assert.equal(listed.channels.length, 1, 'duplicate form submission creates one Channel');
   const firstId = listed.channels[0].channelId;
   assert.equal(listed.channels[0].description, 'Auditable public messages between members.');
+  assert.equal(listed.channels[0].workdir, channelWorkdir);
   const context = () => api(`/channels/context?channelId=${firstId}&limit=200`);
   const instructions = page.getByRole('region', { name: 'Channel instructions' });
   assert.equal(listed.channels[0].prompt, 'Discuss records together.');
@@ -472,6 +478,7 @@ try {
   await bob.getByRole('button', { name: '+ New Channel', exact: true }).click();
   const bobCreate = bob.getByRole('dialog', { name: 'Create Channel' });
   assert.equal(await bobCreate.getByLabel('Channel instructions', { exact: true }).count(), 0, 'a client cannot set instructions on a new Channel');
+  assert.equal(await bobCreate.getByLabel('Host directory', { exact: true }).count(), 0, 'a client cannot select a Host directory');
   await bobCreate.getByLabel('Channel title').fill('Bob created Channel');
   await bobCreate.getByRole('button', { name: 'Create Channel', exact: true }).click();
   await bob.getByRole('heading', { name: 'Bob created Channel', exact: true }).waitFor();

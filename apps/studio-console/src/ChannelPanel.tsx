@@ -59,6 +59,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [createPrompt, setCreatePrompt] = useState('');
+  const [createWorkdir, setCreateWorkdir] = useState('');
   const [promptEditing, setPromptEditing] = useState(false);
   const [promptDraft, setPromptDraft] = useState('');
   const [promptError, setPromptError] = useState('');
@@ -250,13 +251,14 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     void submit(async () => {
       const value = await post('/channels', {
         title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}),
-        ...(!clientMode && createPrompt.trim() ? { prompt: createPrompt.trim() } : {}), pets: [],
+        ...(!clientMode && createPrompt.trim() ? { prompt: createPrompt.trim() } : {}),
+        ...(!clientMode && createWorkdir.trim() ? { workdir: createWorkdir } : {}), pets: [],
       }) as { channel: ChannelRow; members: ChannelMember[] };
       setChannels(current => [...current, value.channel]); setSelected(value.channel.channelId);
       setContext(null); setMessages([]); setSessions([]); updateHeld(null); setReply(undefined); setBody('');
       followLatest.current = true; focusComposer.current = true; setAtLatest(true);
       setHighlightedMessage(''); setNavigationOpen(false);
-      setCreating(false); setTitle(''); setDescription(''); setCreatePrompt(''); setActivityOpen(true);
+      setCreating(false); setTitle(''); setDescription(''); setCreatePrompt(''); setCreateWorkdir(''); setActivityOpen(true);
       setPromptEditing(false); setPromptDraft(''); setPromptError('');
     });
   };
@@ -544,6 +546,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       <label><span>Title</span><input data-initial-focus aria-label="Channel title" required maxLength={160} value={title} onChange={event => setTitle(event.target.value)} /></label>
       <label><span>Description (optional)</span><textarea aria-label="Channel description" maxLength={50_000} value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
       {!clientMode && <label><span>Channel instructions (optional)</span><textarea aria-label="Channel instructions" maxLength={50_000} value={createPrompt} onChange={event => setCreatePrompt(event.target.value)} rows={3} placeholder="How should members work together?" /></label>}
+      {!clientMode && <label><span>Host directory (optional)</span><input aria-label="Host directory" value={createWorkdir} onChange={event => setCreateWorkdir(event.target.value)} aria-describedby="channel-workdir-hint" />
+        <small id="channel-workdir-hint">All Pets in this Channel use this directory on the Studio Host. Leave blank to use the Studio directory. It cannot be changed after creation.</small></label>}
       <p>{clientMode ? 'A Studio operator can create Pet instances here after the Channel is created.' : 'Create the Channel first, then create its Pet instances from definitions in the members panel.'}</p>
       <div className="modal-actions"><button type="button" disabled={pending} onClick={() => setCreating(false)}>Cancel</button>
         <button disabled={pending || !connected || !title.trim()}>{pending ? 'Creating…' : 'Create Channel'}</button></div>

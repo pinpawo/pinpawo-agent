@@ -30,6 +30,7 @@ test('only Studio authority sets Channel prompts through authenticated HTTP', as
     assert.equal(alice.status, 201);
     assert.equal(bob.status, 201);
     assert.equal((await call(alice.body.key, '/channels', { title: 'Injected', prompt: 'Forged', pets: [] })).status, 403);
+    assert.equal((await call(alice.body.key, '/channels', { title: 'Injected path', workdir: '/host/project', pets: [] })).status, 403);
     const created = await call(alice.body.key, '/channels', { title: 'Shared', pets: [] });
     assert.equal(created.status, 201);
     const channelId = created.body.channel.channelId as string;
@@ -46,5 +47,9 @@ test('only Studio authority sets Channel prompts through authenticated HTTP', as
     assert.equal(context.body.channel.prompt, 'Studio convention');
     assert.equal((await call(studioToken, '/channels/update', { channelId, prompt: null })).status, 200);
     assert.equal((await call(studioToken, '/channels', { title: 'Studio channel', prompt: 'Initial', pets: [] })).status, 201);
+    const withWorkdir = await call(studioToken, '/channels', { title: 'Project', workdir: '/host/project', pets: [] });
+    assert.equal(withWorkdir.status, 201);
+    assert.equal(withWorkdir.body.channel.workdir, '/host/project');
+    assert.equal((await call(studioToken, '/channels/update', { channelId: withWorkdir.body.channel.channelId, workdir: '/other' })).status, 400);
   } finally { await studio.shutdown(); }
 });

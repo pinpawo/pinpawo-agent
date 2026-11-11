@@ -40,7 +40,7 @@ export async function createStudioWithPets(input: CreateStudioWithPetsInput): Pr
       ...(rest.plugins ?? []),
       { name: 'channel', toolkits: [], petChannels: { requireChannel: async channelId => {
         if (channelId !== 'fixture') throw new Error('Unknown fixture Channel.');
-      } }, start: () => undefined } satisfies StudioPlugin,
+      }, getChannelWorkdir: async () => undefined }, start: () => undefined } satisfies StudioPlugin,
     ],
     definitions: [...definitions.values()],
     assemblePet: async ({ petId }) => {

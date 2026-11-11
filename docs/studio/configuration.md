@@ -186,6 +186,23 @@ A Channel starts with its human creator and no Pets. A definition is reusable;
 each concrete instance has one immutable owner `channelId`. Its live record
 supplies Pet membership automatically; it cannot join another Channel.
 
+To use a different project directory for all Pets in a Channel, create it with
+the local Host token and `pinpawo-studio channels create --title "Project" --workdir /path/to/project`.
+The path refers to the machine running the Host, not necessarily the CLI machine.
+Relative paths resolve against the Studio workdir; omission uses that workdir.
+The directory binding is set only at Channel creation and cannot be overridden
+per Pet. The Host validates it during Pet assembly. An invalid or inaccessible
+directory makes create, reopen or startup restoration fail with the Channel and
+directory in the error; it does not silently fall back. A failed first Pet create
+retains its identity and attempts to mark it closed; a failed reopen remains closed.
+If the initial close marker cannot be persisted, the record may remain active in
+storage and require explicit recovery.
+
+The execution directory is a path base, not a filesystem sandbox. Studio
+configuration, databases, checkpoints and session records remain under their
+configured management roots. Plugin roots such as Project Files and Wiki remain
+independently configured. See the [Channel API](../reference/api/studio.md#channel-messages-and-addressing).
+
 Close is temporary. Reopen restores the same `petId`, owner Channel, sessions and
 credentials. Remove, including Channel Pet member removal, is permanent; that id
 cannot reopen or be reused. For a resident instance, either action requires

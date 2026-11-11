@@ -50,6 +50,8 @@ export type PreparedStudio = {
   credentialSource: PetCredentialSource;
   /** Resolve a trusted invocation's Plugin context for the composing Host. */
   resolveInvocationContext: StudioContextProvider;
+  /** Read the owning Channel's execution-directory binding. */
+  getChannelWorkdir: (channelId: string) => Promise<string | undefined>;
   /** Assemble the Studio's active Pets. Idempotent; activatePlugins runs it first. */
   restorePets: () => Promise<void>;
   /** Start Plugin lifecycles after the composing Host has opened interaction transports. */
@@ -110,6 +112,16 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const lifecycleObservers = new Map<string, () => void>();
   const petStore = async () => new KyselyPetStore(await openCore<PetDatabase>());
   const credentials = new StudioPetCredentialVault({ store: petStore, key: input.credentialsKey });
+  const channelStorage = {
+    dialect: storage.dialect,
+    open: <DB>(migrations: Parameters<typeof storage.open<DB>>[1]) => storage.open<DB>('channel', migrations),
+  };
+  const channelPort = () => {
+    const channel = plugins.find(plugin => plugin.name === 'channel');
+    if (!channel?.petChannels) throw new StudioPetError('The Channel Plugin is required to own Pet instances.', 'invalid');
+    return channel.petChannels;
+  };
+  const getChannelWorkdir = (channelId: string) => channelPort().getChannelWorkdir(channelId, channelStorage);
   const registry = new StudioPetRegistry({
     studioId: input.studioId,
     store: petStore,
@@ -117,12 +129,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     definitions: input.definitions,
     assemble: input.assemblePet,
     requireChannel: async (channelId) => {
-      const channel = plugins.find(plugin => plugin.name === 'channel');
-      if (!channel?.petChannels) throw new StudioPetError('The Channel Plugin is required to own Pet instances.', 'invalid');
-      await channel.petChannels.requireChannel(channelId, {
-        dialect: storage.dialect,
-        open: migrations => storage.open('channel', migrations),
-      });
+      await channelPort().requireChannel(channelId, channelStorage);
     },
     onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
     onClosed: (petId) => {
@@ -415,7 +422,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     pets: registry,
     shutdown,
   };
-  return { studio, credentialSource: credentials.source, resolveInvocationContext, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, credentialSource: credentials.source, resolveInvocationContext, getChannelWorkdir, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

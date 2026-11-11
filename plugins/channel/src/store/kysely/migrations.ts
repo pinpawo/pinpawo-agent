@@ -57,5 +57,10 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
         await db.schema.alterTable('channels').addColumn('prompt', 'text').execute();
       },
     },
+    '0003_channel_workdir': {
+      async up(db: Kysely<unknown>) {
+        await db.schema.alterTable('channels').addColumn('workdir', 'text').execute();
+      },
+    },
   };
 }

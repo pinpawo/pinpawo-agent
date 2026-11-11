@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { access, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
@@ -102,6 +104,20 @@ export type StudioPluginResolver = (
   id: string,
   options?: Record<string, unknown>,
 ) => Promise<StudioPlugin> | StudioPlugin;
+
+/** Resolve a Channel binding on the Host, relative to the Studio management root. */
+export async function resolveChannelWorkdir(channelId: string, configured: string | undefined, studioWorkdir: string): Promise<string> {
+  if (configured === undefined) return studioWorkdir;
+  const workdir = path.resolve(studioWorkdir, configured);
+  try {
+    if (!configured.trim()) throw new Error('empty path');
+    if (!(await stat(workdir)).isDirectory()) throw new Error('not a directory');
+    await access(workdir, constants.R_OK | constants.X_OK);
+  } catch (cause) {
+    throw new Error(`Channel "${channelId}" workdir "${workdir}" is not an accessible directory.`, { cause });
+  }
+  return workdir;
+}
 
 function validateResolvedPlugins(studioId: string, plugins: readonly StudioPlugin[]): void {
   const names = new Set<string>();
@@ -239,6 +255,16 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     if (!definition) throw new Error(`Pet "${pet.petId}" uses unknown definition "${pet.definitionId}"`);
     const { config } = definition;
     const document = input.petDocuments?.get(pet.definitionId);
+    const workdir = await resolveChannelWorkdir(
+      pet.channelId, await prepared.getChannelWorkdir(pet.channelId), input.runtimeConfig.workdir,
+    );
+    const runtimeConfig = {
+      ...input.runtimeConfig,
+      workdir,
+      ...(input.runtimeConfig.workspace
+        ? { workspace: { ...input.runtimeConfig.workspace, rootPath: workdir } }
+        : {}),
+    };
     const resident = await createResidentPetHost({
       petId: pet.petId,
       petName: pet.name,
@@ -251,7 +277,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       toolkitInventory: input.toolkitInventory,
       artifactStore: input.artifactStore,
       checkpointer: input.checkpoint,
-      runtimeConfig: input.runtimeConfig,
+      runtimeConfig,
       toolAuthorizationMode: input.toolAuthorizationMode,
       autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
       sessionStatePath: path.join(

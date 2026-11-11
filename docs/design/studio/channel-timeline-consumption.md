@@ -6,7 +6,8 @@
 本阶段落实 [#1078](https://github.com/pinpawo/pinpawo-agent/issues/1078) 的后端消费基础，
 并对齐 Channel-owned Pet instance，供后续 Pet Head 接入。
 当前 @ 与旧 Router 的行为不变。Channel Plugin 不创建或启动 `ChannelTimelineConsumer`，
-没有新增 Head 配置或 Reopen cutoff 策略；新路径接入时必须替换旧 Router，不能重复派发。
+没有新增 Head 配置或生产 Reopen backlog 策略；Reopen 保留 cursor 并在真正 live 后唤醒。
+新路径接入时必须替换旧 Router，不能重复派发；策略未确定前不能将 Head 用于生产。
 
 ## 实例进度与 activation
 
@@ -41,7 +42,7 @@ live 实例及进度；不依赖 Console 在线。固定窗口默认 300 ms，�
 
 - 唤醒设置 `dirty`；同一固定窗口内重复唤醒不新增定时器，也不延长窗口。
 - 窗口到期清除这次 `dirty`，`processing` 持有真实处理 Promise 和取消信号。
-- 处理期间的新唤醒只重新标记 `dirty`，同一个 key 不并行处理，不同实例独立推进。
+- 处理期间的新唤醒只重新标记 `dirty`，同一 activation 不并行处理，不同实例独立推进。
 - 成功后如果有新唤醒或下一页，真实 Promise 结束才启动一个后续固定窗口。
 - 失败清除本次处理期间累积的唤醒，保留 cursor；后续显式唤醒才能再试。
   旧 activation 已取消时，不清除后续有效 activation 的显式唤醒。

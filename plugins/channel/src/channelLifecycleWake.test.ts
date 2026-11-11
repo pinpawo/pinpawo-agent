@@ -47,7 +47,7 @@ test('ordinary restart discovers a message written while a restored Pet is assem
   const starting = restored.activatePlugins();
   await entered.promise;
   const pending = (await writer.postMessage(owner, channel.channelId, { body: 'during restore' })).message;
-  assert.equal(restored.studio.pets.getLive('pet'), undefined);
+  assert.equal(restored.studio.listPets().some(pet => pet.petId === 'pet'), false);
   release.resolve();
   await starting;
   const batches: ChannelTimelineBatch[] = [];
@@ -125,7 +125,7 @@ for (const [backend, storage] of [
     await rejected;
     await delay(35);
     assert.ok((await prepared.studio.pets.get('pet'))?.closedAt);
-    assert.equal(prepared.studio.pets.getLive('pet'), undefined);
+    assert.equal(prepared.studio.listPets().some(pet => pet.petId === 'pet'), false);
     assert.equal(calls, 0);
     const progress = await service.store.getConsumption(channel.channelId, 'pet');
     assert.ok(progress && progress.afterSequence < message.sequence, 'failed creation does not discard the message');

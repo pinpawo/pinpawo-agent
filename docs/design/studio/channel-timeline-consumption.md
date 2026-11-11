@@ -6,7 +6,7 @@
 本阶段落实 [#1078](https://github.com/pinpawo/pinpawo-agent/issues/1078) 的后端消费基础，
 并对齐 Channel-owned Pet instance，供后续 Pet Head 接入。
 当前 @ 与旧 Router 的行为不变。Channel Plugin 不创建或启动 `ChannelTimelineConsumer`，
-没有新增 Head 配置、Reopen 自动唤醒或 Reopen cutoff 策略；新路径接入时必须替换旧 Router，不能重复派发。
+没有新增 Head 配置或 Reopen cutoff 策略；新路径接入时必须替换旧 Router，不能重复派发。
 
 ## 实例进度与 activation
 
@@ -27,8 +27,9 @@
 保存旧 cursor 只是基础存储能力，**不表示已经决定生产 Reopen 消费策略**。
 Reopen 后补读全部未消费消息、跳至恢复时 cutoff，或区分关闭前积压与关闭期间消息，
 仍需在生产 Head 可触发前确定。当前没有永久 inactive/policy 状态，也没有新增产品恢复操作。
-准备发生在 live 之前，不发成员加入事件来假装完成 activation wake；assembly 期间的积压何时唤醒
-属于后续生产接入。基础消费者的显式 `wake()`/`start()` 不能直接当作已定义的 Reopen 产品行为。
+准备发生在 live 之前，不发成员加入事件来假装完成 activation wake；成功装配和持久化且 transition
+结束后，内部通知补唤醒消费器。Reopen 目前同样保留 cursor 并补唤醒，这只是基础机制，不能当作已定义的
+生产 backlog 策略；在策略与历史消息来源保护确定前不能将 Head 用于生产。
 
 ## 单个 consumer 对象内的调度
 
@@ -59,7 +60,7 @@ Close/Remove 的 admission fence 开始后，Channel 内部同步清除等待窗
 
 registry 不等待任意 consumer callback，仍由既有 Host runtime close 证明停止。
 callback 必须在每个外部 effect 前核实取消及 exact activation；abort 无法撤销已经产生的效果。
-即使 callback 忽略 abort，也不会提前释放同一个 processing key，或让旧 batch 确认新 activation。
+即使 callback 忽略 abort，旧代际也不能阻塞或改写新 activation 的调度，更不能确认新 activation。
 独立的 `consumer.stop()` 会等待真实 callback Promise；callback 一直不结束时，这个 stop 也一直等待。
 已 stop 的 consumer 对象不能重新 start；Pet 临时 Close 可以 Reopen，永久 Remove 不可复用。
 

@@ -1,0 +1,16 @@
+{
+  "id": "@pinpawo-plugin/studio-http",
+  "options": {
+    "port": 3211,
+    "jwt": {
+      "issuers": [
+        {
+          "issuer": "http://localhost:3001/oidc",
+          "audience": "https://studio.local/api",
+          "jwksUrl": "http://localhost:3001/oidc/jwks",
+          "clientPrefix": "logto"
+        }
+      ]
+    }
+  }
+}

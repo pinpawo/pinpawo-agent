@@ -3,18 +3,13 @@ import type {
   StudioPetAssembler,
   StudioPetDefinition,
   StudioPetRegistration,
-  StudioPetRuntime,
 } from '../types';
 import type { PetRow, PetStore } from './store/petStore';
 import type { StudioPetCredentials } from './petCredentials';
+import { PetInstance, StudioPetError, type LiveStudioPet } from './petInstance';
 
-/** Thrown for a request that names an unknown Pet or breaks a Pet rule. */
-export class StudioPetError extends Error {
-  constructor(message: string, readonly code: 'invalid' | 'exists' | 'not_found' | 'locked' | 'busy' | 'confirmation_required') {
-    super(message);
-    this.name = 'StudioPetError';
-  }
-}
+export { StudioPetError } from './petInstance';
+export type { LiveStudioPet } from './petInstance';
 
 /** Creating and managing Channel-owned Pet instances without recycling identity. */
 export type StudioPets = {
@@ -33,12 +28,6 @@ export type StudioPets = {
   rename: (petId: unknown, name: unknown) => Promise<StudioPet>;
   /** Each Pet's own environment variables for its commands; values are write-only. */
   credentials: StudioPetCredentials;
-};
-
-/** A live Pet: its registration and the runtime ports the Host lent Studio. */
-export type LiveStudioPet = {
-  registration: StudioPetRegistration;
-  runtime: StudioPetRuntime;
 };
 
 const PET_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -61,19 +50,12 @@ function toPet(row: PetRow): StudioPet {
   return { ...row };
 }
 
-function registration(row: PetRow): StudioPetRegistration {
-  return { petId: row.petId, name: row.name, definitionId: row.definitionId, channelId: row.channelId, createdAt: row.createdAt };
-}
-
 /**
  * The Studio's Pets: the records in the Studio database and their runtimes.
  * Changes run one at a time, so a Pet id is never assembled twice.
  */
 export class StudioPetRegistry implements StudioPets {
-  private readonly closing = new Map<string, { kind: 'close' | 'remove' | 'reopen'; promise: Promise<StudioPet> }>();
-  /** A failed/uncertain teardown is not permission to dispatch or reassemble. */
-  private readonly unavailable = new Set<string>();
-  private readonly live = new Map<string, LiveStudioPet>();
+  private readonly instances = new Map<string, PetInstance>();
   private readonly definitionsById: ReadonlyMap<string, StudioPetDefinition>;
   private changes: Promise<unknown> = Promise.resolve();
   private restored: Promise<void> | null = null;
@@ -90,6 +72,7 @@ export class StudioPetRegistry implements StudioPets {
     /** Storage-only enrollment/fence before exposing any resident activation. */
     prepareInstance?: (pet: StudioPetRegistration) => Promise<void>;
     deactivateInstance?: (pet: StudioPetRegistration) => Promise<void>;
+    activateInstance?: (pet: StudioPetRegistration) => void;
     /** A Pet became live (restored or created). */
     onLive: (pet: LiveStudioPet) => void;
     /** A live Pet's runtime has closed. */
@@ -110,11 +93,11 @@ export class StudioPetRegistry implements StudioPets {
 
   /** The live Pet with this id. */
   getLive(petId: string): LiveStudioPet | undefined {
-    return this.closing.has(petId) || this.unavailable.has(petId) ? undefined : this.live.get(petId);
+    return this.instances.get(petId)?.live;
   }
 
   listLive(): LiveStudioPet[] {
-    return [...this.live.values()].filter(pet => !this.closing.has(pet.registration.petId) && !this.unavailable.has(pet.registration.petId));
+    return [...this.instances.values()].flatMap(instance => instance.live ? [instance.live] : []);
   }
 
   /** Assemble every active, owned Pet once. Fails, naming the Pet, when its definition is gone. */
@@ -139,8 +122,8 @@ export class StudioPetRegistry implements StudioPets {
       }
     }
     for (const row of rows.filter(row => !row.closedAt && !row.removedAt)) {
-      if (this.live.has(row.petId) || this.closing.has(row.petId) || this.unavailable.has(row.petId)) continue;
-      await this.goLive(row);
+      const instance = this.instance(row);
+      if (instance.needsRestore) await instance.restore(row);
     }
   }
 
@@ -166,22 +149,18 @@ export class StudioPetRegistry implements StudioPets {
     if (!this.definitionsById.has(definitionId)) {
       throw new StudioPetError(`No Pet definition "${definitionId}" in this Studio.`, 'invalid');
     }
+    // Reserve startup before creation enters the queue. A concurrent restore()
+    // must never be queued behind a create that is waiting for that restore.
+    const restored = this.restore();
+    // Shutdown can reject creation before its queued callback observes startup.
+    void restored.catch(() => undefined);
     return this.serialize(async () => {
-      // Already inside the queue: restore inline rather than wait behind ourselves.
-      this.restored ??= this.restoreSafely();
-      await this.restored;
+      await restored;
       const store = await this.options.store();
       await this.options.requireChannel(channelId);
       const row: PetRow = { petId, definitionId, name, channelId, createdAt: new Date().toISOString() };
       if (!(await store.createPet(row))) throw new StudioPetError(`Pet "${petId}" already exists.`, 'exists');
-      try {
-        await this.goLive(row);
-      } catch (error) {
-        // Assembly may already have created Host state. Retain the identity and
-        // its owner rather than recycle an id with another instance's history.
-        await store.closePet(petId, new Date().toISOString());
-        throw error;
-      }
+      await this.instance(row).create(row, closed => store.closePet(petId, closed.closedAt!));
       this.options.onChange('pet.created', toPet(row));
       return toPet(row);
     });
@@ -198,52 +177,15 @@ export class StudioPetRegistry implements StudioPets {
   private async endInstance(petId: unknown, kind: 'close' | 'remove', confirmStop = false): Promise<StudioPet> {
     const target = readPetId(petId);
     const transition = await this.serialize(async () => {
-      const pending = this.closing.get(target);
-      if (pending) {
-        if (pending.kind !== kind) throw new StudioPetError(`Pet "${target}" has another lifecycle operation in progress.`, 'busy');
-        return pending;
-      }
+      const pending = this.instances.get(target)?.pendingFor(kind);
+      if (pending) return pending;
       const store = await this.options.store();
       const row = await store.getPet(target);
       if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
-      if (row.removedAt) {
-        if (kind === 'close') throw new StudioPetError(`Pet "${target}" was permanently removed.`, 'invalid');
-        return { promise: Promise.resolve(toPet(row)) };
-      }
-      const live = this.live.get(target);
-      // A failed Reopen cleanup can retain a runtime beside an older closed
-      // marker. That marker alone is not proof that this runtime has stopped.
-      if (kind === 'close' && row.closedAt && !live) return { promise: Promise.resolve(toPet(row)) };
-      if (live && !confirmStop) {
-        throw new StudioPetError(`Confirm ${kind === 'remove' ? 'permanent removal' : 'temporary Close'}: stop current task and cancel unstarted queued tasks, retain history.`, 'confirmation_required');
-      }
-      const promise = Promise.resolve().then(async () => {
-        this.unavailable.add(target);
-        // No lifecycle marker is committed until the runtime proves quiescence.
-        // A thrown close or uncertain DB acknowledgment must reach the caller.
-        // Cancel Channel-local admission synchronously, but never make Host
-        // stop wait behind storage or an arbitrary consumer callback.
-        let revoking: Promise<void>;
-        try { revoking = Promise.resolve(this.options.deactivateInstance?.(registration(row))); }
-        catch (error) { revoking = Promise.reject(error); }
-        const stopping = Promise.resolve().then(() => live?.runtime.close());
-        const settled = await Promise.allSettled([revoking, stopping]);
-        const failed = settled.find(result => result.status === 'rejected');
-        if (failed?.status === 'rejected') throw failed.reason;
-        if (live) {
-          this.live.delete(target);
-          this.options.onClosed(target);
-        }
-        const ended = kind === 'remove' ? { ...row, removedAt: new Date().toISOString() }
-          : { ...row, closedAt: new Date().toISOString() };
+      return this.instance(row).end(row, kind, confirmStop, async ended => {
         if (kind === 'remove') await store.removePet(target, ended.removedAt!);
         else await store.closePet(target, ended.closedAt!);
-        this.options.onChange(kind === 'remove' ? 'pet.removed' : 'pet.closed', toPet(ended));
-        return toPet(ended);
-      }).finally(() => { this.closing.delete(target); });
-      this.closing.set(target, { kind, promise });
-      void promise.catch(() => undefined);
-      return { promise };
+      });
     });
     return transition.promise;
   }
@@ -251,43 +193,16 @@ export class StudioPetRegistry implements StudioPets {
   async reopenInstance(petId: unknown): Promise<StudioPet> {
     const target = readPetId(petId);
     const transition = await this.serialize(async () => {
-      const pending = this.closing.get(target);
-      if (pending) {
-        if (pending.kind !== 'reopen') throw new StudioPetError(`Pet "${target}" has another lifecycle operation in progress.`, 'busy');
-        return pending;
-      }
+      const pending = this.instances.get(target)?.pendingFor('reopen');
+      if (pending) return pending;
       const store = await this.options.store();
       const row = await store.getPet(target);
       if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
-      if (row.removedAt) throw new StudioPetError(`Pet "${target}" was permanently removed and cannot reopen.`, 'invalid');
-      if (this.unavailable.has(target) && this.live.has(target)) {
-        throw new StudioPetError(`Pet "${target}" still has an unsettled runtime teardown. Stop it before reopening.`, 'busy');
-      }
-      if (!row.closedAt) {
-        if (this.unavailable.has(target)) throw new StudioPetError(`Pet "${target}" has an unsettled lifecycle outcome. Check its state before retrying.`, 'busy');
-        return { promise: Promise.resolve(toPet(row)) };
-      }
+      const instance = this.instance(row);
+      if (!instance.needsReopen(row)) return { promise: Promise.resolve(toPet(row)) };
       await this.options.requireChannel(row.channelId);
       if (!this.definitionsById.has(row.definitionId)) throw new StudioPetError(`No Pet definition "${row.definitionId}" in this Studio.`, 'invalid');
-      const { closedAt: _closedAt, ...reopened } = row;
-      const promise = Promise.resolve().then(async () => {
-        await this.goLive(reopened);
-        try { await store.reopenPet(target); }
-        catch (error) {
-          this.unavailable.add(target);
-          const live = this.live.get(target);
-          await live?.runtime.close();
-          this.live.delete(target);
-          this.options.onClosed(target);
-          throw error;
-        }
-        this.unavailable.delete(target);
-        this.options.onChange('pet.reopened', toPet(reopened));
-        return toPet(reopened);
-      }).finally(() => { this.closing.delete(target); });
-      this.closing.set(target, { kind: 'reopen', promise });
-      void promise.catch(() => undefined);
-      return { promise };
+      return instance.reopen(row, () => store.reopenPet(target));
     });
     return transition.promise;
   }
@@ -296,14 +211,13 @@ export class StudioPetRegistry implements StudioPets {
     const target = readPetId(petId);
     const next = readName(name);
     return this.serialize(async () => {
-      if (this.closing.has(target)) throw new StudioPetError(`Pet "${target}" has a lifecycle operation in progress.`, 'busy');
+      this.instances.get(target)?.assertRenameable();
       const store = await this.options.store();
       const row = await store.getPet(target);
       if (!row) throw new StudioPetError(`No Pet "${target}".`, 'not_found');
       await store.renamePet(target, next);
       const renamed = { ...row, name: next };
-      const live = this.live.get(target);
-      if (live) live.registration.name = next;
+      this.instances.get(target)?.rename(next);
       this.options.onChange('pet.renamed', toPet(renamed));
       return toPet(renamed);
     });
@@ -319,15 +233,9 @@ export class StudioPetRegistry implements StudioPets {
   private async closeLive(): Promise<void> {
     // A reopen may still be assembling. Wait for each registry transition
     // before taking the remaining live runtimes, or shutdown could miss it.
-    const transitions = await Promise.allSettled([...this.closing.values()].map(operation => operation.promise));
-    const live = [...this.live.values()];
-    for (const pet of live) this.live.delete(pet.registration.petId);
-    // Observe each runtime through settlement so final lifecycle events still
-    // reach Studio. A failed teardown is retained in the database, not removed.
-    const results = await Promise.allSettled(live.map(async ({ registration: { petId }, runtime }) => {
-      try { await runtime.close(); }
-      finally { this.options.onClosed(petId); }
-    }));
+    const transitions = await Promise.allSettled([...this.instances.values()].flatMap(instance => instance.pending ? [instance.pending] : []));
+    // Keep observing each runtime until its final lifecycle events settle.
+    const results = await Promise.allSettled([...this.instances.values()].map(instance => instance.shutdown()));
     for (const result of [...transitions, ...results]) {
       if (result.status === 'rejected') {
         console.error('[studio] Pet runtime failed to close:', result.reason instanceof Error ? result.reason.message : result.reason);
@@ -335,16 +243,27 @@ export class StudioPetRegistry implements StudioPets {
     }
   }
 
-  private async goLive(row: PetRow): Promise<void> {
-    await this.options.prepareInstance?.(registration(row));
-    const live: LiveStudioPet = { registration: registration(row), runtime: await this.options.assemble(registration(row)) };
-    this.live.set(row.petId, live);
-    try { this.options.onLive(live); }
-    catch (error) {
-      this.live.delete(row.petId);
-      try { await live.runtime.close(); } finally { this.options.onClosed(row.petId); }
-      throw error;
+  private instance(row: PetRow): PetInstance {
+    let instance = this.instances.get(row.petId);
+    if (!instance) {
+      const created: PetInstance = new PetInstance(row, {
+        assemble: this.options.assemble,
+        prepare: this.options.prepareInstance,
+        deactivate: this.options.deactivateInstance,
+        onAvailable: pet => this.options.activateInstance?.(pet.registration),
+        onClosed: this.options.onClosed,
+        onChange: this.options.onChange,
+        onLive: pet => {
+          // Preserve the live collection's activation order after Reopen.
+          this.instances.delete(row.petId);
+          this.instances.set(row.petId, created);
+          this.options.onLive(pet);
+        },
+      });
+      instance = created;
+      this.instances.set(row.petId, instance);
     }
+    return instance;
   }
 
   private serialize<T>(work: () => Promise<T>): Promise<T> {

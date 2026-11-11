@@ -242,6 +242,8 @@ export type StudioPlugin = {
     requireChannel: (channelId: string, storage: StudioPluginStorage) => Promise<void>;
     /** Prepare Channel-owned progress and activation before a runtime becomes live. */
     prepareInstance?: (pet: StudioPetRegistration, storage: StudioPluginStorage) => Promise<void>;
+    /** Wake retained work only after the Pet is live and its lifecycle transition settled. */
+    activateInstance?: (pet: StudioPetRegistration, storage: StudioPluginStorage) => void;
     /** Synchronously cancel Channel admission, then await only its short storage fence. */
     deactivateInstance?: (pet: StudioPetRegistration, storage: StudioPluginStorage) => Promise<void>;
   };

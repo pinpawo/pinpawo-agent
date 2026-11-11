@@ -1,0 +1,36 @@
+# Local quickstart only. PostgreSQL data is retained in a named volume.
+name: pinpawo-logto
+
+services:
+  logto:
+    image: ghcr.io/logto-io/logto:1.46.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]
+    ports:
+      - "127.0.0.1:${LOGTO_CORE_PORT:-3001}:3001"
+      - "127.0.0.1:${LOGTO_ADMIN_PORT:-3002}:3002"
+    environment:
+      DB_URL: postgres://logto:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in infra/logto/.env}@postgres:5432/logto
+      ENDPOINT: ${LOGTO_ENDPOINT:-http://localhost:3001}
+      ADMIN_ENDPOINT: ${LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: logto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in infra/logto/.env}
+      POSTGRES_DB: logto
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U logto -d logto"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

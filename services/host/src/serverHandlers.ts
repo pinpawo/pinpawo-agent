@@ -871,7 +871,7 @@ export function createChatHostHandlers(
       }
     },
     interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
-    close: () => { sessionCommands.close(); },
+    close: () => { sessionCommands.close(); chatHandler.close(); },
     handleHttpRequest: (req, res, authToken) => handleLocalHttpRequest(req, res, {
       authToken, artifactStore: initialDeps.artifactStore,
     }),

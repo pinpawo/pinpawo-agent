@@ -42,6 +42,8 @@ export class ChannelTimelineConsumer {
   private readonly batchLimit: number;
   private unsubscribe?: () => void;
   private unsubscribeInvalidation?: () => void;
+  private unsubscribeActivation?: () => void;
+  private readonly processing = new Set<Promise<void>>();
   private active = false;
   private stopped = false;
   private starting?: Promise<void>;
@@ -64,6 +66,7 @@ export class ChannelTimelineConsumer {
     if (this.active) return Promise.resolve();
     this.active = true;
     this.unsubscribeInvalidation = this.options.service.subscribeConsumptionInvalidation((channelId, petId) => this.cancel(channelId, petId));
+    this.unsubscribeActivation = this.options.service.subscribeConsumptionActivation((channelId, petId) => this.wakeInstance(channelId, petId));
     this.unsubscribe = this.options.service.subscribe(event => {
       if (event.type === 'channel.member.left' && event.payload.member.kind === 'pet') {
         this.cancel(event.payload.channelId, event.payload.member.id);
@@ -81,6 +84,8 @@ export class ChannelTimelineConsumer {
       this.unsubscribe = undefined;
       this.unsubscribeInvalidation?.();
       this.unsubscribeInvalidation = undefined;
+      this.unsubscribeActivation?.();
+      this.unsubscribeActivation = undefined;
       for (const head of this.heads.values()) this.cancel(head.channelId, head.petId);
       throw error;
     }).finally(() => { this.starting = undefined; });
@@ -94,15 +99,20 @@ export class ChannelTimelineConsumer {
     if (!this.active) return;
     for (const member of members) {
       if (member.kind !== 'pet') continue;
-      const key = this.key(channelId, member.id);
-      let head = this.heads.get(key);
-      if (!head) {
-        head = { channelId, petId: member.id, dirty: false };
-        this.heads.set(key, head);
-      }
-      head.dirty = true;
-      this.schedule(head);
+      this.wakeInstance(channelId, member.id);
     }
+  }
+
+  private wakeInstance(channelId: string, petId: string): void {
+    if (!this.active || !this.options.service.isLiveOwner(channelId, petId)) return;
+    const key = this.key(channelId, petId);
+    let head = this.heads.get(key);
+    if (!head) {
+      head = { channelId, petId, dirty: false };
+      this.heads.set(key, head);
+    }
+    head.dirty = true;
+    this.schedule(head);
   }
 
   /** Stop waiting timers, abort in-flight callbacks, and wait for those callbacks to settle. */
@@ -113,9 +123,11 @@ export class ChannelTimelineConsumer {
     this.unsubscribe = undefined;
     this.unsubscribeInvalidation?.();
     this.unsubscribeInvalidation = undefined;
-    for (const head of this.heads.values()) this.cancel(head.channelId, head.petId);
+    this.unsubscribeActivation?.();
+    this.unsubscribeActivation = undefined;
+    for (const head of [...this.heads.values()]) this.cancel(head.channelId, head.petId);
     await this.starting?.catch(() => {});
-    await Promise.all([...this.heads.values()].map(head => head.processing?.done));
+    await Promise.all([...this.processing]);
     this.heads.clear();
   }
 
@@ -138,6 +150,9 @@ export class ChannelTimelineConsumer {
     clearTimeout(head.timer);
     head.timer = undefined;
     head.processing?.controller.abort();
+    // A callback may ignore abort. Detach its generation immediately so a
+    // later activation is never blocked by, or modified by, that callback.
+    this.heads.delete(this.key(channelId, petId));
   }
 
   private schedule(head: HeadState): void {
@@ -145,24 +160,23 @@ export class ChannelTimelineConsumer {
     if (!this.active || head.timer || head.processing || !head.dirty) return;
     head.timer = setTimeout(() => {
       head.timer = undefined;
-      // Taking the key clears dirty. A wake during processing marks it again;
-      // only real settlement releases the key and permits one follow-up window.
+      // Taking the key clears dirty. A wake during this activation marks it
+      // again; settlement permits one follow-up window for the same generation.
       head.dirty = false;
       const controller = new AbortController();
-      head.processing = {
-        controller,
-        done: this.consume(head, controller.signal).catch(error => {
-          // Failure consumes wakes from this attempt, so it cannot hot-loop.
-          // An aborted old activation must preserve a fresh explicit wake.
-          if (!controller.signal.aborted) {
-            head.dirty = false;
-            this.report(head.channelId, head.petId, error);
-          }
-        }).finally(() => {
-          head.processing = undefined;
-          this.schedule(head);
-        }),
-      };
+      const done = this.consume(head, controller.signal).catch(error => {
+        // Failure consumes wakes from this attempt, so it cannot hot-loop.
+        if (!controller.signal.aborted) {
+          head.dirty = false;
+          this.report(head.channelId, head.petId, error);
+        }
+      }).finally(() => {
+        this.processing.delete(done);
+        head.processing = undefined;
+        if (this.heads.get(this.key(head.channelId, head.petId)) === head) this.schedule(head);
+      });
+      this.processing.add(done);
+      head.processing = { controller, done };
     }, this.cooldownMs);
   }
 

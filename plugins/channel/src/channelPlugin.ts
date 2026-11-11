@@ -346,6 +346,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   return {
     petChannels: {
       prepareInstance: async (pet, storage) => { await enrollChannelInstance(await openStore(storage), pet); },
+      activateInstance: (pet) => { current?.activateConsumption(pet.channelId, pet.petId); },
       deactivateInstance: (pet, storage) => {
         // Do not wait for a DB query or final pet.closed/member.left event to abort.
         current?.invalidateConsumption(pet.channelId, pet.petId);

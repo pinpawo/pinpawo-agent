@@ -138,6 +138,13 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         open: migrations => storage.open('channel', migrations),
       }) ?? Promise.resolve();
     },
+    activateInstance: (pet) => {
+      const channel = plugins.find(plugin => plugin.name === 'channel');
+      channel?.petChannels?.activateInstance?.(pet, {
+        dialect: storage.dialect,
+        open: migrations => storage.open('channel', migrations),
+      });
+    },
     onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
     onClosed: (petId) => {
       lifecycleObservers.get(petId)?.();

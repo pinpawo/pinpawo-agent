@@ -92,6 +92,7 @@ export class ChannelService {
   private readonly humans: ChannelServiceOptions['humans'];
   private readonly listeners = new Set<(event: ChannelEvent) => void>();
   private readonly consumptionInvalidations = new Set<(channelId: string, petId: string) => void>();
+  private readonly consumptionActivations = new Set<(channelId: string, petId: string) => void>();
 
   constructor(options: ChannelServiceOptions) {
     this.store = options.store;
@@ -113,11 +114,25 @@ export class ChannelService {
     this.consumptionInvalidations.add(listener);
     return () => { this.consumptionInvalidations.delete(listener); };
   }
+  /** Wake pending progress only after the Pet's lifecycle is fully live. */
+  activateConsumption(channelId: string, petId: string): void {
+    for (const listener of this.consumptionActivations) {
+      try { listener(channelId, petId); }
+      catch (error) { console.error('[channel] consumption activation notification failed:', error); }
+    }
+  }
+  subscribeConsumptionActivation(listener: (channelId: string, petId: string) => void): () => void {
+    this.consumptionActivations.add(listener);
+    return () => { this.consumptionActivations.delete(listener); };
+  }
+  isLiveOwner(channelId: string, petId: string): boolean {
+    return this.pets().some(pet => pet.petId === petId && pet.channelId === channelId);
+  }
   /** Must be called after the last awaited read, immediately before effects or acknowledgement. */
   isConsumptionCurrent(expected: ChannelConsumptionRow, current: ChannelConsumptionRow | undefined): boolean {
     return current?.channelId === expected.channelId && current.petId === expected.petId
       && current.activationId === expected.activationId && current.afterSequence === expected.afterSequence
-      && this.pets().some(pet => pet.petId === expected.petId && pet.channelId === expected.channelId);
+      && this.isLiveOwner(expected.channelId, expected.petId);
   }
   private publish(event: ChannelEvent): void {
     for (const listener of this.listeners) {

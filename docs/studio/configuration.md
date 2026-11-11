@@ -53,6 +53,10 @@ The same Plugin ID may appear more than once with different options. Each
 resolved Plugin instance must still expose a unique `name`, because that name
 is its lifecycle and event-source identity inside Studio.
 
+For an optional local Logto issuer with persistent PostgreSQL, see the
+[Logto quickstart](../../infra/logto/README.md). It configures the HTTP Plugin
+through `plugins[].options.jwt` and retains the local Host token.
+
 ## Pet configuration
 
 ```json

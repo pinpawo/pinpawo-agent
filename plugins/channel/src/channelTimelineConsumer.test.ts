@@ -261,7 +261,7 @@ for (const [backend, config] of backends) {
     t.after(() => hold.resolve());
     const { service, store, channelId, consumer, post, closePet, reopenPet } = await fixture(t, ['alpha']);
     const batches: ChannelTimelineBatch[] = [];
-    const queue = consumer({ consume: async batch => { batches.push(batch); await hold.promise; } });
+    const queue = consumer({ consume: async batch => { batches.push(batch); if (batches.length === 1) await hold.promise; } });
     const message = (await post('old activation')).message;
     await queue.start();
     await until(() => batches.length === 1);
@@ -274,10 +274,12 @@ for (const [backend, config] of backends) {
     assert.notEqual(fresh.activationId, old.activationId);
     assert.equal(fresh.afterSequence, old.afterSequence);
     assert.equal(await service.advanceConsumption(old, message.sequence), false);
+    await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === message.sequence);
+    assert.equal(batches.length, 2, 'Reopen wakes the preserved backlog after becoming live');
+    assert.equal(batches[1]!.progress.activationId, fresh.activationId);
     hold.resolve();
     await delay(30);
-    assert.equal(batches.length, 1, 'the foundation does not automatically wake on Reopen');
-    assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, old.afterSequence);
+    assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, message.sequence, 'the stale callback cannot acknowledge or reset fresh progress');
   });
 
   test(`${backend}: an aborted activation rejecting cannot erase an explicit fresh activation wake`, async t => {
@@ -362,17 +364,14 @@ for (const [backend, config] of backends) {
     assert.equal(failures.length, 1);
   });
 
-  test(`${backend}: an ignored abort retains the key until the old callback actually settles`, async t => {
+  test(`${backend}: an ignored abort cannot block or corrupt a fresh activation`, async t => {
     const hold = deferred();
     t.after(() => hold.resolve());
     const { service, channelId, consumer, post } = await fixture(t, ['alpha']);
     const batches: ChannelTimelineBatch[] = [];
-    let running = 0;
     const queue = consumer({ consume: async batch => {
-      assert.equal(++running, 1);
       batches.push(batch);
       if (batches.length === 1) await hold.promise;
-      running--;
     } });
     await post('old activation');
     await queue.start();
@@ -383,13 +382,14 @@ for (const [backend, config] of backends) {
     const baseline = await service.consumption(channelId, 'alpha');
     const last = (await post('new activation')).message;
     await queue.wake(channelId);
-    await delay(30);
-    assert.equal(batches[0]!.signal.aborted, true);
-    assert.equal(batches.length, 1, 'aborting the signal does not release real processing');
-    hold.resolve();
     await until(async () => (await service.consumption(channelId, 'alpha')).afterSequence === last.sequence);
+    assert.equal(batches[0]!.signal.aborted, true);
+    assert.equal(batches.length, 2, 'fresh activation proceeds even while the old callback is blocked');
     assert.equal(batches[1]!.progress.activationId, baseline.activationId);
     assert.equal(batches[1]!.messages.at(-1)!.messageId, last.messageId);
+    hold.resolve();
+    await delay(30);
+    assert.equal((await service.consumption(channelId, 'alpha')).afterSequence, last.sequence);
   });
 
   for (const cancellation of ['close', 'stop'] as const) {

@@ -125,6 +125,7 @@ export class ServerChatHandler {
   ) => void;
   private readonly interruptHostRun?: (requestId: string) => boolean;
   private readonly threadInvocations = new ThreadInvocationCoordinator();
+  private closed = false;
 
   constructor(options: {
     graphService: HostGraphService;
@@ -148,6 +149,10 @@ export class ServerChatHandler {
         sendAgentSessionPeerEvent(peer, event);
       });
     this.interruptHostRun = options.interruptHostRun;
+  }
+
+  close(): void {
+    this.closed = true;
   }
 
   private buildPendingInterruptRoute(params: {
@@ -336,6 +341,10 @@ export class ServerChatHandler {
     target?: ChatTurnTarget,
     hooks: ChatTurnHooks = {},
   ): Promise<ChatRunOutcome> {
+    // Resume validation awaits checkpoint reads before registering an inflight
+    // run. Close may already have aborted every registered run in that gap.
+    // Fence this final admission synchronously; an unstarted review stays pending.
+    if (this.closed) return 'interrupted';
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
     const runAgentTurn = hooks.runAgentTurn ?? this.runAgentTurn;

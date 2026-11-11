@@ -118,7 +118,7 @@ export class StudioPetRegistry implements StudioPets {
     }
     for (const row of rows.filter(row => !row.closedAt && !row.removedAt)) {
       const instance = this.instance(row);
-      if (instance.needsRestore) await instance.activate(row.name);
+      if (instance.needsRestore) await instance.restore(row);
     }
   }
 
@@ -155,14 +155,7 @@ export class StudioPetRegistry implements StudioPets {
       await this.options.requireChannel(channelId);
       const row: PetRow = { petId, definitionId, name, channelId, createdAt: new Date().toISOString() };
       if (!(await store.createPet(row))) throw new StudioPetError(`Pet "${petId}" already exists.`, 'exists');
-      try {
-        await this.instance(row).activate(row.name);
-      } catch (error) {
-        // Assembly may already have created Host state. Retain the identity and
-        // its owner rather than recycle an id with another instance's history.
-        await store.closePet(petId, new Date().toISOString());
-        throw error;
-      }
+      await this.instance(row).create(row, closed => store.closePet(petId, closed.closedAt!));
       this.options.onChange('pet.created', toPet(row));
       return toPet(row);
     });

@@ -32,8 +32,8 @@ function fixture(close: () => Promise<void> = async () => {}) {
 test('one identity owns activation and runtime rename, using fresh names on Reopen', async () => {
   const { instance, source, assembled, observed } = fixture();
   source.channelId = 'another'; source.petId = 'another';
-  await instance.activate(row.name);
-  await assert.rejects(instance.activate(row.name), busy);
+  await instance.restore(row);
+  await assert.rejects(instance.restore(row), busy);
   const live = observed();
   instance.rename('Renamed');
   assert.equal(live?.registration.name, 'Renamed', 'update the already-observed registration');
@@ -54,7 +54,7 @@ for (const kind of ['close', 'remove'] as const) {
   test(`${kind} owns consent, admission fencing, coalescing, busy rules and stop-before-commit`, async () => {
     const stop = deferred();
     const { instance, events, closes } = fixture(() => stop.promise);
-    await instance.activate(row.name);
+    await instance.restore(row);
     assert.throws(() => instance.end(row, kind, false, async () => {}), (e: { code?: string }) => e.code === 'confirmation_required');
     assert.ok(instance.live); assert.equal(instance.pending, undefined);
     let persisted: StudioPet | undefined;
@@ -77,7 +77,7 @@ for (const kind of ['close', 'remove'] as const) {
 
   test(`uncertain ${kind} persistence uses the fresh final record on explicit retry without a success event`, async () => {
     const { instance, events, closes } = fixture();
-    await instance.activate(row.name);
+    await instance.restore(row);
     let persisted!: StudioPet;
     await assert.rejects(instance.end(row, kind, true, async ended => {
       persisted = ended; throw new Error('ack lost');
@@ -92,9 +92,9 @@ for (const kind of ['close', 'remove'] as const) {
 test('failed stop and failed-Reopen cleanup retain the runtime until a confirmed stop settles', async () => {
   let fail = true;
   const { instance, assembled, events } = fixture(async () => { if (fail) throw new Error('stop unknown'); });
-  await instance.activate(row.name);
+  await instance.restore(row);
   await assert.rejects(instance.end(row, 'close', true, async () => { assert.fail('not settled'); }).promise, /stop unknown/);
-  await assert.rejects(instance.activate(row.name), busy);
+  await assert.rejects(instance.restore(row), busy);
   assert.throws(() => instance.reopen(row, async () => {}), busy);
   fail = false;
   let closed!: StudioPet;
@@ -198,4 +198,113 @@ test('failed activation cleanup retains the only runtime until a confirmed stop 
     assert.equal(reopened.petId, row.petId); assert.equal(reopened.channelId, row.channelId);
     assert.equal(assembled, 2); assert.deepEqual([...running], [2]);
   } finally { failStop = false; await registry.close(); }
+});
+
+for (const field of ['petId', 'definitionId', 'channelId', 'createdAt'] as const) {
+  test(`fresh records cannot change immutable ${field} through lifecycle controls`, async () => {
+    const { instance, assembled, closes } = fixture();
+    const foreign = { ...row, [field]: 'different' };
+    const invalid = (error: { code?: string }) => error.code === 'invalid';
+    await assert.rejects(instance.restore(foreign), invalid);
+    await assert.rejects(instance.create(foreign, async () => { assert.fail('must not persist'); }), invalid);
+    await instance.restore(row);
+    assert.throws(() => instance.end(foreign, 'close', true, async () => { assert.fail('must not persist'); }), invalid);
+    assert.throws(() => instance.reopen({ ...foreign, closedAt: 'closed' }, async () => {}), invalid);
+    assert.equal(assembled.length, 1);
+    assert.equal(closes(), 0);
+    await instance.shutdown();
+  });
+}
+
+test('loading closed or removed rows never activates or rewrites them', async () => {
+  const { instance, assembled } = fixture();
+  for (const ended of [{ ...row, closedAt: 'closed' }, { ...row, removedAt: 'removed' }]) {
+    await assert.rejects(instance.restore(ended), /not active/);
+    await assert.rejects(instance.create(ended, async () => { assert.fail('must not persist'); }), /not active/);
+  }
+  assert.deepEqual(assembled, []);
+});
+
+test('first activation reserves the instance before assembly and rejects competing controls', async () => {
+  const { instance, assembled } = fixture();
+  const created = instance.create(row, async () => { assert.fail('successful assembly'); });
+  assert.ok(instance.pending);
+  const restoring = assert.rejects(instance.restore(row), busy);
+  const creating = assert.rejects(instance.create(row, async () => { assert.fail('must not mark a live instance closed'); }), busy);
+  assert.throws(() => instance.end(row, 'close', true, async () => {}), busy);
+  await Promise.all([created, restoring, creating]);
+  assert.equal(instance.pending, undefined);
+  assert.equal(assembled.length, 1);
+  assert.ok(instance.live);
+  await instance.shutdown();
+});
+
+test('failed first assembly retains identity for explicit recovery even when closing the record fails', async () => {
+  let attempts = 0;
+  const instance = new PetInstance(row, {
+    assemble: async () => {
+      if (++attempts === 1) throw new Error('assembly failed');
+      return { dispatch: {}, close: async () => {} } as StudioPetRuntime;
+    },
+    onLive: () => {}, onClosed: () => {}, onChange: () => {},
+  });
+  let closed!: StudioPet;
+  await assert.rejects(instance.create(row, async ended => {
+    closed = ended;
+    throw new Error('write acknowledgment lost');
+  }), /write acknowledgment lost/);
+  assert.equal(closed.petId, row.petId);
+  assert.equal(closed.channelId, row.channelId);
+  assert.ok(closed.closedAt);
+  assert.equal(instance.live, undefined);
+  await assert.rejects(instance.restore(row), busy);
+  assert.throws(() => instance.reopen(row, async () => {}), busy);
+  await instance.reopen(closed, async () => {}).promise;
+  assert.equal(attempts, 2);
+  assert.ok(instance.live);
+  await instance.shutdown();
+});
+
+test('registry recovers a failed create whose closed marker was never committed', async () => {
+  let recorded: StudioPet | undefined, assemblies = 0, rejectClose = true;
+  const events: string[] = [];
+  const store = {
+    listPets: async () => [],
+    getPet: async () => recorded && { ...recorded },
+    createPet: async (pet: StudioPet) => {
+      if (recorded) return false;
+      recorded = { ...pet };
+      return true;
+    },
+    closePet: async (_id: string, closedAt: string) => {
+      if (rejectClose) throw new Error('close not committed');
+      recorded!.closedAt = closedAt;
+    },
+    reopenPet: async () => { delete recorded!.closedAt; },
+  } as unknown as PetStore;
+  const registry = new StudioPetRegistry({
+    studioId: 'failed-create-write', store: async () => store, credentials: {} as StudioPetCredentials,
+    definitions: [{ definitionId: row.definitionId, name: 'Worker' }], requireChannel: async () => {},
+    assemble: async () => {
+      if (++assemblies === 1) throw new Error('assembly failed');
+      return { dispatch: {}, close: async () => {} } as StudioPetRuntime;
+    },
+    onLive: () => {}, onClosed: () => {}, onChange: type => { events.push(type); },
+  });
+  try {
+    await assert.rejects(registry.create(row), /close not committed/);
+    assert.equal(recorded?.closedAt, undefined);
+    assert.equal(registry.getLive(row.petId), undefined);
+    await assert.rejects(registry.create(row), (error: { code?: string }) => error.code === 'exists');
+    await assert.rejects(registry.reopenInstance(row.petId), busy);
+    assert.equal(assemblies, 1);
+    assert.deepEqual(events, []);
+    rejectClose = false;
+    await registry.closeInstance(row.petId);
+    await registry.reopenInstance(row.petId);
+    assert.equal(assemblies, 2);
+    assert.deepEqual(events, ['pet.closed', 'pet.reopened']);
+    assert.ok(registry.getLive(row.petId));
+    assert.equal(recorded?.channelId, row.channelId);
+  } finally { await registry.close(); }
 });

@@ -53,12 +53,16 @@ CREATE TABLE studio_pets (
 API 不自动生成；Console 为每个新实例生成唯一 id。这样 `studio.json` 里的 trigger、CLI 和日志能写出可读的目标；名称另起，
 不参与寻址。
 
-实现入口：`StudioPetRegistry.instance(row)` 为一个身份显式 `new PetInstance(...)`；创建和启动恢复走
-`PetInstance.activate()`，临时关闭后的恢复走 `PetInstance.reopen()`。这个薄对象持有不可变身份与
-owner Channel、当前 runtime handle、进行中的生命周期操作和失败不可用状态，执行 Close/Remove 的确认、
+实现入口：`StudioPetRegistry.instance(row)` 从已持久化的行，为一个身份显式 `new PetInstance(...)`。
+Registry 先通过数据库唯一约束保留新身份，再交给 `PetInstance.create(row, persistClosed)` 完成首次装配和失败收口；
+启动加载走 `PetInstance.restore(row)`，不新增或改写记录；临时关闭后的恢复走 `PetInstance.reopen(row, persist)`。
+这些入口和 Close/Remove 都校验行中的 `petId`、`definitionId`、`channelId`、`createdAt` 与实例身份一致，
+名称和关闭标记仍取操作时的新记录。首次装配期间也占用该实例的生命周期操作，不能并发再次装配或关闭。
+这个薄对象持有不可变身份与 owner Channel、当前 runtime handle、进行中的生命周期操作和失败不可用状态，执行 Close/Remove 的确认、
 停止与最终状态顺序，以及 Reopen 和改名的单实例约束。Registry 保留集合、身份唯一性、定义与 Channel
 校验、数据库协调、恢复和整体 shutdown；最终关闭/移除标记始终重新读库，不在对象中维护第二份真相。
 Host 仍由 `buildStudio.assemblePet` 调用 `createResidentPetHost` 装配；这里尚未接入 Head lifecycle。
+
 
 ## 定义
 

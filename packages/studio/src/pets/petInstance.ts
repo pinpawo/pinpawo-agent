@@ -10,7 +10,7 @@ export class StudioPetError extends Error {
 
 /** The registration and runtime ports the Host lent Studio. */
 export type LiveStudioPet = { registration: StudioPetRegistration; runtime: StudioPetRuntime };
-type LifecycleKind = 'close' | 'remove' | 'reopen';
+type LifecycleKind = 'create' | 'restore' | 'close' | 'remove' | 'reopen';
 type Transition = { kind: LifecycleKind; promise: Promise<StudioPet> };
 
 /**
@@ -24,7 +24,7 @@ export class PetInstance {
   /** Failed/uncertain teardown is not permission to dispatch or reassemble. */
   private unavailable = false;
 
-  constructor(pet: StudioPetRegistration, private readonly options: {
+  constructor(pet: StudioPet, private readonly options: {
     assemble: StudioPetAssembler;
     onLive: (pet: LiveStudioPet) => void;
     onClosed: (petId: string) => void;
@@ -49,9 +49,35 @@ export class PetInstance {
     return this.transition;
   }
 
-  async activate(name: string): Promise<void> {
+  /** Load an active persisted identity; restoration never inserts or rewrites it. */
+  async restore(row: StudioPet): Promise<void> {
+    this.assertActivatable(row);
+    await this.begin('restore', async () => {
+      await this.activateRuntime(row.name);
+      return { ...row };
+    }).promise;
+  }
+
+  /** The registry must reserve the new identity in storage before calling. */
+  async create(row: StudioPet, persistClosed: (closed: StudioPet) => Promise<void>): Promise<void> {
+    this.assertActivatable(row);
+    await this.begin('create', async () => {
+      try { await this.activateRuntime(row.name); }
+      catch (error) {
+        // Host history may already exist. Never recycle this identity; recovery
+        // is explicit Reopen, and an uncertain cleanup retains its runtime.
+        this.unavailable = true;
+        await persistClosed({ ...row, closedAt: new Date().toISOString() });
+        throw error;
+      }
+      return { ...row };
+    }).promise;
+  }
+
+  private assertActivatable(row: StudioPet): void {
+    this.assertIdentity(row);
+    if (row.closedAt || row.removedAt) throw new StudioPetError(`Pet "${this.petId}" is not active.`, 'invalid');
     if (!this.needsRestore) throw new StudioPetError(`Pet "${this.petId}" already has a resident lifecycle.`, 'busy');
-    await this.activateRuntime(name);
   }
 
   private async activateRuntime(name: string): Promise<void> {
@@ -69,6 +95,7 @@ export class PetInstance {
   }
 
   end(row: StudioPet, kind: 'close' | 'remove', confirmStop: boolean, persist: (ended: StudioPet) => Promise<void>): { promise: Promise<StudioPet> } {
+    this.assertIdentity(row);
     const pending = this.pendingFor(kind);
     if (pending) return pending;
     if (row.removedAt) {
@@ -95,6 +122,7 @@ export class PetInstance {
 
   /** Whether this fresh record needs activation; all other outcomes are final or busy. */
   needsReopen(row: StudioPet): boolean {
+    this.assertIdentity(row);
     if (row.removedAt) throw new StudioPetError(`Pet "${this.petId}" was permanently removed and cannot reopen.`, 'invalid');
     if (this.unavailable && this.resident) {
       throw new StudioPetError(`Pet "${this.petId}" still has an unsettled runtime teardown. Stop it before reopening.`, 'busy');
@@ -106,6 +134,7 @@ export class PetInstance {
   }
 
   reopen(row: StudioPet, persist: () => Promise<void>): { promise: Promise<StudioPet> } {
+    this.assertIdentity(row);
     const pending = this.pendingFor('reopen');
     if (pending) return pending;
     if (!this.needsReopen(row)) return { promise: Promise.resolve({ ...row }) };
@@ -144,6 +173,13 @@ export class PetInstance {
     if (live) {
       try { await live.runtime.close(); }
       finally { this.options.onClosed(this.petId); }
+    }
+  }
+
+  private assertIdentity(row: StudioPet): void {
+    const { petId, definitionId, channelId, createdAt } = this.identity;
+    if (row.petId !== petId || row.definitionId !== definitionId || row.channelId !== channelId || row.createdAt !== createdAt) {
+      throw new StudioPetError(`Record does not belong to Pet "${this.petId}".`, 'invalid');
     }
   }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prepareStudio } from '../../../packages/studio/src/createStudio';
-import { createPetHead, type HeadDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
+import { bindPetHeadChannel, createPetHead, type HeadDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -38,7 +38,11 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
         dispatch: async request => { dispatched.push(request); },
       }, close: async () => {},
     }),
-    createPetHead: ({ registration }) => createPetHead({ pet: registration, subscribe: prepared.studio.subscribe, channel: channel.head, decide }),
+    subscribePetTimeline: ({ registration }, signal) => {
+      const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
+      const handle = createPetHead({ pet: registration, channel: bound, decide });
+      return bound.subscribe(message => handle(message, signal));
+    },
   });
   const studio = prepared.studio;
   try {
@@ -82,9 +86,13 @@ test('duplicate Pet externalRef emits only one event to another live Head', asyn
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
       }, close: async () => {},
     }),
-    createPetHead: ({ registration }) => createPetHead({ pet: registration, subscribe: prepared.studio.subscribe, channel: channel.head,
-      decide: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { action: 'ignore' }; },
-    }),
+    subscribePetTimeline: ({ registration }, signal) => {
+      const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
+      const handle = createPetHead({ pet: registration, channel: bound,
+        decide: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { action: 'ignore' }; },
+      });
+      return bound.subscribe(message => handle(message, signal));
+    },
   });
   const studio = prepared.studio;
   try {
@@ -117,16 +125,20 @@ test('a live Head writes a reply to the Timeline and dispatches source attachmen
         dispatch: async request => { dispatched.push(request); },
       }, close: async () => {},
     }),
-    createPetHead: ({ registration }) => createPetHead({ pet: registration, subscribe: prepared.studio.subscribe, channel: channel.head,
-      decide: async (input) => {
-        const { message } = input;
-        observed.push(message.body);
-        if (message.body === 'inspect attachment') triggerInput = input;
-        if (message.body === 'short question') return { action: 'reply', text: 'Short answer' };
-        if (message.body === 'inspect attachment') return { action: 'dispatch', text: 'Inspect the attachment' };
-        return { action: 'ignore' };
-      },
-    }),
+    subscribePetTimeline: ({ registration }, signal) => {
+      const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
+      const handle = createPetHead({ pet: registration, channel: bound,
+        decide: async (input) => {
+          const { message } = input;
+          observed.push(message.body);
+          if (message.body === 'inspect attachment') triggerInput = input;
+          if (message.body === 'short question') return { action: 'reply', text: 'Short answer' };
+          if (message.body === 'inspect attachment') return { action: 'dispatch', text: 'Inspect the attachment' };
+          return { action: 'ignore' };
+        },
+      });
+      return bound.subscribe(message => handle(message, signal));
+    },
   });
   const studio = prepared.studio;
   try {

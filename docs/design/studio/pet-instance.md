@@ -61,7 +61,7 @@ Registry 先通过数据库唯一约束保留新身份，再交给 `PetInstance.
 这个薄对象持有不可变身份与 owner Channel、当前 runtime handle、进行中的生命周期操作和失败不可用状态，执行 Close/Remove 的确认、
 停止与最终状态顺序，以及 Reopen 和改名的单实例约束。Registry 保留集合、身份唯一性、定义与 Channel
 校验、数据库协调、恢复和整体 shutdown；最终关闭/移除标记始终重新读库，不在对象中维护第二份真相。
-Host 仍由 `buildStudio.assemblePet` 调用 `createResidentPetHost` 装配；每个在线实例拥有独立的 Head，停止开始时同步取消订阅。
+Host 仍由 `buildStudio.assemblePet` 调用 `createResidentPetHost` 装配；每个实例激活时订阅所属 Channel Timeline，停用开始时同步取消订阅并取消在途判断。
 
 
 ## 定义
@@ -181,7 +181,7 @@ Studio 关闭时，先停 Plugin，再关闭所有 Pet 的 runtime。
 - Console 和 CLI 遵守相同创建顺序；普通客户不获得定义创建权限。
 - Close 可恢复，Remove（包括移除 Pet 成员）永久生效；共用明确确认后的先停止、再持久化路径。
 - 保留身份与历史，关闭可原身份恢复，移除不可重开或复用 id；两者都不能搬迁至其他 Channel。
-- Head 随实例生命周期启动和停止；不新增持久消费队列或改变 dispatch/event-core 语义。
+- 实例激活和停用控制 Timeline 订阅；不新增独立 Head 服务、持久消费队列或改变 dispatch/event-core 语义。
 
 ## 验收
 

@@ -26,7 +26,7 @@ import { StudioClients } from './clients/studioClients';
 import { KyselyClientStore, type ClientDatabase } from './clients/store/kysely';
 import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
 import { StudioPetError, StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
-import type { StudioPetHeadFactory } from './pets/petInstance';
+import type { SubscribePetTimeline } from './pets/petInstance';
 import { StudioPetCredentialVault } from './pets/petCredentials';
 import { studioCoreMigrations } from './storage/coreMigrations';
 
@@ -36,8 +36,8 @@ export type CreateStudioInput = {
   definitions: StudioPetDefinition[];
   /** Builds one Pet's runtime; Studio calls it for each active Pet and for each Pet it creates. */
   assemblePet: StudioPetAssembler;
-  /** Builds an independent live observer owned by each resident Pet instance. */
-  createPetHead?: StudioPetHeadFactory;
+  /** Subscribe each active Pet to its owner Channel's live Timeline. */
+  subscribePetTimeline?: SubscribePetTimeline;
   plugins?: StudioPlugin[];
   /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
   storage?: StudioStorageConfig;
@@ -119,7 +119,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     credentials,
     definitions: input.definitions,
     assemble: input.assemblePet,
-    createHead: input.createPetHead,
+    subscribePetTimeline: input.subscribePetTimeline,
     requireChannel: async (channelId) => {
       const channel = plugins.find(plugin => plugin.name === 'channel');
       if (!channel?.petChannels) throw new StudioPetError('The Channel Plugin is required to own Pet instances.', 'invalid');
@@ -396,7 +396,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         notify({ type: 'plugins.activated', source: 'studio', occurredAt: new Date().toISOString() });
       } catch (error) {
         stopped = true;
-        registry.stopHeads();
+        registry.unsubscribeTimelines();
         await stopStartedPlugins();
         await closeCore();
         throw error;
@@ -409,7 +409,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   async function shutdown(): Promise<void> {
     if (shutdownPromise) return shutdownPromise;
     stopped = true;
-    registry.stopHeads();
+    registry.unsubscribeTimelines();
     const pending = (async () => {
       await activationPromise?.catch(() => undefined);
       await stopStartedPlugins();

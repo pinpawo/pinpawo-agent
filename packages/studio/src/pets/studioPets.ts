@@ -5,7 +5,7 @@ import type {
 } from '../types';
 import type { PetRow, PetStore } from './store/petStore';
 import type { StudioPetCredentials } from './petCredentials';
-import { PetInstance, StudioPetError, type LiveStudioPet, type StudioPetHeadFactory } from './petInstance';
+import { PetInstance, StudioPetError, type LiveStudioPet, type SubscribePetTimeline } from './petInstance';
 
 export { StudioPetError } from './petInstance';
 export type { LiveStudioPet } from './petInstance';
@@ -59,7 +59,7 @@ export class StudioPetRegistry implements StudioPets {
   private changes: Promise<unknown> = Promise.resolve();
   private restored: Promise<void> | null = null;
   private closed = false;
-  private headsStopped = false;
+  private timelineSubscriptionsDisabled = false;
   readonly credentials: StudioPetCredentials;
 
   constructor(private readonly options: {
@@ -68,7 +68,7 @@ export class StudioPetRegistry implements StudioPets {
     credentials: StudioPetCredentials;
     definitions: readonly StudioPetDefinition[];
     assemble: StudioPetAssembler;
-    createHead?: StudioPetHeadFactory;
+    subscribePetTimeline?: SubscribePetTimeline;
     requireChannel: (channelId: string) => Promise<void>;
     /** A Pet became live (restored or created). */
     onLive: (pet: LiveStudioPet) => void;
@@ -223,15 +223,15 @@ export class StudioPetRegistry implements StudioPets {
   /** Close every live runtime; later changes are refused. */
   async close(): Promise<void> {
     this.closed = true;
-    this.stopHeads();
+    this.unsubscribeTimelines();
     await this.changes.catch(() => undefined);
     await this.closeLive();
   }
 
   /** Fence observation immediately, even while startup or other changes wait. */
-  stopHeads(): void {
-    this.headsStopped = true;
-    for (const instance of this.instances.values()) instance.stopHead();
+  unsubscribeTimelines(): void {
+    this.timelineSubscriptionsDisabled = true;
+    for (const instance of this.instances.values()) instance.unsubscribeTimeline();
   }
 
   private async closeLive(): Promise<void> {
@@ -252,8 +252,8 @@ export class StudioPetRegistry implements StudioPets {
     if (!instance) {
       const created: PetInstance = new PetInstance(row, {
         assemble: this.options.assemble,
-        createHead: this.options.createHead,
-        canStartHead: () => !this.headsStopped,
+        subscribePetTimeline: this.options.subscribePetTimeline,
+        canSubscribeTimeline: () => !this.timelineSubscriptionsDisabled,
         onClosed: this.options.onClosed,
         onChange: this.options.onChange,
         onLive: pet => {

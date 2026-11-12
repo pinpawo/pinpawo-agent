@@ -26,7 +26,7 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
-import { createHeadDecision, createPetHead, type HeadChannel } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, createPetHead } from './petHead';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -297,7 +297,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       };
     },
   };
-  const channelHead = (plugins.find(plugin => plugin.name === 'channel') as (StudioPlugin & { head?: HeadChannel }) | undefined)?.head;
+  const channelHead = (plugins.find(plugin => plugin.name === 'channel') as (StudioPlugin & { head?: Parameters<typeof bindPetHeadChannel>[1] }) | undefined)?.head;
 
   prepared = prepareStudio({
     studioId: studioConfig.studioId,
@@ -309,22 +309,23 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ? { credentialsKey: await readStudioCredentialsKey(studioConfig.credentials.keyFile) }
       : {}),
     models,
-    ...(channelHead ? { createPetHead: ({ registration }: { registration: StudioPetRegistration }) => {
+    ...(channelHead ? { subscribePetTimeline: ({ registration }: { registration: StudioPetRegistration }, signal: AbortSignal) => {
       const definition = definitions.get(registration.definitionId);
       const description = input.petDocuments?.get(registration.definitionId)?.content;
       // Resolve and create the model lazily, so a restored Pet subscribes before
       // Plugin activation without making model availability a startup requirement.
       let decide: ReturnType<typeof createHeadDecision> | undefined;
-      return createPetHead({
+      const channel = bindPetHeadChannel(registration.channelId, channelHead, handler => prepared.studio.subscribe(handler));
+      const handleMessage = createPetHead({
         pet: registration,
         ...(description ? { description } : {}),
-        subscribe: handler => prepared.studio.subscribe(handler),
-        channel: channelHead,
+        channel,
         decide: (value, signal) => {
           decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId));
           return decide(value, signal);
         },
       });
+      return channel.subscribe(message => handleMessage(message, signal));
     } } : {}),
   });
   try {

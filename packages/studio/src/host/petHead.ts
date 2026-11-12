@@ -1,5 +1,5 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { StudioEvent, StudioEventHandler, StudioModelEndpoint } from '../studioContract';
+import type { StudioEventHandler, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 
 /** The committed Timeline message as seen by a Pet. */
@@ -19,28 +19,50 @@ export type HeadContext = { messages: HeadMessage[]; [key: string]: unknown };
 export type HeadDecision = { action: 'ignore' } | { action: 'reply' | 'dispatch'; text: string };
 export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext };
 
-/** Narrow Channel operations; the Channel knows nothing about its subscribers. */
-export type HeadChannel = {
+/** The Head's narrow view of its owner Channel. */
+export type PetHeadChannel = {
+  subscribe(handler: (message: HeadMessage) => Promise<void>): () => void;
+  readContext(petId: string, before: number, replyTo?: string): Promise<HeadContext>;
+  reply(petId: string, messageId: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }): Promise<unknown>;
+  dispatch(petId: string, message: HeadMessage, request: string, signal: AbortSignal): Promise<unknown>;
+};
+
+type PetHeadChannelOperations = {
   readContext(channelId: string, petId: string, before: number, replyTo?: string): Promise<HeadContext>;
   reply(channelId: string, petId: string, messageId: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }): Promise<unknown>;
   dispatch(channelId: string, petId: string, message: HeadMessage, request: string, signal: AbortSignal): Promise<unknown>;
 };
 
+/** Bind Channel operations and the Studio live bus to this instance's owner Channel. */
+export function bindPetHeadChannel(
+  channelId: string,
+  operations: PetHeadChannelOperations,
+  subscribe: (handler: StudioEventHandler) => () => void,
+): PetHeadChannel {
+  return {
+    subscribe: handler => subscribe(async event => {
+      if (event.source !== 'channel' || event.type !== 'channel.message.created') return;
+      const message = event.payload as HeadMessage | undefined;
+      if (!message || message.channelId !== channelId || !message.author) return;
+      await handler(message);
+    }),
+    readContext: (petId, before, replyTo) => operations.readContext(channelId, petId, before, replyTo),
+    reply: (petId, messageId, body, signal, options) => operations.reply(channelId, petId, messageId, body, signal, options),
+    dispatch: (petId, message, request, signal) => operations.dispatch(channelId, petId, message, request, signal),
+  };
+}
+
+/** Create the judgment for an instance; the instance owns the subscription. */
 export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
-  subscribe: (handler: StudioEventHandler) => () => void;
-  channel: HeadChannel;
+  channel: PetHeadChannel;
   decide: (input: HeadInput, signal: AbortSignal) => Promise<HeadDecision>;
-}): { stop(): void } {
-  const controller = new AbortController();
-  const { signal } = controller;
-  const unsubscribe = options.subscribe(async (event: StudioEvent) => {
-    if (signal.aborted || event.source !== 'channel' || event.type !== 'channel.message.created') return;
-    const message = event.payload as HeadMessage;
-    if (!message || message.channelId !== options.pet.channelId || !message.author ||
+}): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
+  return async (message, signal) => {
+    if (signal.aborted || message.channelId !== options.pet.channelId || !message.author ||
       (message.author.kind === 'pet' && message.author.id === options.pet.petId)) return;
-    const context = await options.channel.readContext(message.channelId, options.pet.petId, message.sequence + 1, message.replyTo);
+    const context = await options.channel.readContext(options.pet.petId, message.sequence + 1, message.replyTo);
     if (signal.aborted) return;
     const decision = await options.decide({ pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context }, signal);
     if (signal.aborted || decision.action === 'ignore') return;
@@ -53,12 +75,11 @@ export function createPetHead(options: {
         // the Channel checks that the answer does not address another Pet.
         const id = encodeURIComponent(options.pet.petId).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
         if (!message.mentions.some(mention => mention.participantId === `pet:${id}`)) return;
-        await options.channel.reply(message.channelId, options.pet.petId, message.messageId, text, signal, { preventPetMentions: true });
-      } else await options.channel.reply(message.channelId, options.pet.petId, message.messageId, text, signal);
+        await options.channel.reply(options.pet.petId, message.messageId, text, signal, { preventPetMentions: true });
+      } else await options.channel.reply(options.pet.petId, message.messageId, text, signal);
     }
-    else await options.channel.dispatch(message.channelId, options.pet.petId, message, text, signal);
-  });
-  return { stop() { controller.abort(); unsubscribe(); } };
+    else await options.channel.dispatch(options.pet.petId, message, text, signal);
+  };
 }
 
 /** Model-only judgment. The Head does not execute tools or plan a run. */

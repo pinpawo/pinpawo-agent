@@ -70,7 +70,10 @@ no import from `pinpawo/host-runtime`.
 
 Every published `StudioEvent` carries an `eventId` that Studio assigns at `notify()`, along with
 `source` and `occurredAt`; subscribers can use it to tell two events apart even when they share a
-millisecond.
+millisecond. The process-local event bus serializes handler work per subscriber,
+while different subscribers proceed independently. A slow online subscriber may
+therefore have pending events in memory. Unsubscribing drops its pending work that
+has not started; the bus does not persist or replay missed events.
 
 ## Global dispatch observation
 
@@ -169,7 +172,9 @@ share one parser and address only current members; request-body author, source a
 scope claims are rejected. A Pet's public final reply in its Channel session is
 saved as a message with its verified author and an external reference for
 deduplication. A newly committed message publishes a live
-`channel.message.created` event; missed events are not replayed, though history
+`channel.message.created` event through `ChannelService.subscribe`, without
+awaiting asynchronous listeners; the Channel Plugin also forwards it to the
+Studio event bus described above. Missed events are not replayed, though history
 remains queryable. Messages and mentions do not automatically start a Pet: the
 future Pet Head is not implemented. Explicit Host dispatch and scheduler/trigger
 entry points remain independent. See the [Channel model](../../design/studio/channel-model.md)

@@ -1,35 +1,81 @@
+import createMessageQueue from 'mqemitter';
+
 import type { StudioEvent, StudioEventHandler } from './studioContract';
+
+const STUDIO_EVENT_TOPIC = 'studio/event';
+
+type MessageQueue = ReturnType<typeof createMessageQueue>;
+type MessageQueueListener = Parameters<MessageQueue['on']>[1];
+type StudioEventMessage = Parameters<MessageQueue['emit']>[0] & {
+  topic: typeof STUDIO_EVENT_TOPIC;
+  event: StudioEvent;
+};
 
 type StudioEventSubscription = {
   owner?: string;
-  handler: StudioEventHandler;
   active: boolean;
+  listener: MessageQueueListener;
+  deliveryTail: Promise<void>;
 };
 
-/** Process-local, best-effort broadcast; it does not retain or replay events. */
+/** Process-local Plugin event bus owned by Studio core. */
 export class StudioEventBus {
+  private readonly queue = createMessageQueue({ concurrency: 1 });
+  private readonly pendingDeliveries = new Set<Promise<void>>();
   private readonly subscriptions = new Set<StudioEventSubscription>();
   private closed = false;
 
   publish(event: StudioEvent): void {
     if (this.closed) throw new Error('Studio event bus is closed.');
-    // Snapshot membership at publication. A handler may unsubscribe another
-    // subscriber, but a new subscription must not receive this event.
-    for (const subscription of [...this.subscriptions]) {
-      if (!subscription.active) continue;
-      try {
-        const result = subscription.handler(event);
-        void Promise.resolve(result).catch((error: unknown) => this.reportError(event, error));
-      } catch (error) {
-        this.reportError(event, error);
-      }
-    }
+    const delivery = new Promise<void>((resolve, reject) => {
+      this.queue.emit({ topic: STUDIO_EVENT_TOPIC, event }, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    this.pendingDeliveries.add(delivery);
+    void delivery
+      .catch((error) => {
+        console.error(
+          `[studio] event delivery failed (type=${event.type}, source=${event.source}):`,
+          error instanceof Error ? error.message : error,
+        );
+      })
+      .finally(() => this.pendingDeliveries.delete(delivery));
   }
 
   subscribe(handler: StudioEventHandler, owner?: string): () => void {
     if (this.closed) throw new Error('Studio event bus is closed.');
-    const subscription: StudioEventSubscription = { ...(owner ? { owner } : {}), handler, active: true };
+    let subscription: StudioEventSubscription;
+    const listener: MessageQueueListener = (message, done) => {
+      if (!subscription.active) {
+        done();
+        return;
+      }
+      const { event } = message as StudioEventMessage;
+      subscription.deliveryTail = subscription.deliveryTail.then(async () => {
+        if (!subscription.active) return;
+        try {
+          await handler(event);
+        } catch (error) {
+          console.error(
+            `[studio] event handler failed (type=${event.type}, source=${event.source}):`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      });
+      // mqemitter coordinates publication only. Handler work stays on this
+      // subscriber's FIFO so a slow transport cannot block unrelated Plugins.
+      done();
+    };
+    subscription = {
+      ...(owner ? { owner } : {}),
+      active: true,
+      listener,
+      deliveryTail: Promise.resolve(),
+    };
     this.subscriptions.add(subscription);
+    this.queue.on(STUDIO_EVENT_TOPIC, listener);
     return () => this.removeSubscription(subscription);
   }
 
@@ -40,20 +86,19 @@ export class StudioEventBus {
   }
 
   private removeSubscription(subscription: StudioEventSubscription): void {
+    if (!subscription.active) return;
     subscription.active = false;
     this.subscriptions.delete(subscription);
-  }
-
-  private reportError(event: StudioEvent, error: unknown): void {
-    console.error(
-      `[studio] event handler failed (type=${event.type}, source=${event.source}):`,
-      error instanceof Error ? error.message : error,
-    );
+    this.queue.removeListener(STUDIO_EVENT_TOPIC, subscription.listener);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    for (const subscription of [...this.subscriptions]) this.removeSubscription(subscription);
+    await new Promise<void>((resolve) => this.queue.close(resolve));
+    await Promise.allSettled([...this.pendingDeliveries]);
+    for (const subscription of [...this.subscriptions]) {
+      this.removeSubscription(subscription);
+    }
   }
 }

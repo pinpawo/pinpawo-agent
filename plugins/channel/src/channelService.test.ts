@@ -5,7 +5,7 @@ import {
   KyselyClientStore, StudioClients, clientMigrations, createStudioStorage, type ClientDatabase, type StudioStorageConfig,
 } from '@pinpawo/studio-core';
 import { createPglitePool } from '../../../tests/support/pglitePool';
-import { ChannelAccessError, ChannelLastHumanError, ChannelNotFoundError, ChannelService } from './channelService';
+import { ChannelAccessError, ChannelLastHumanError, ChannelNotFoundError, ChannelService, type ChannelEvent } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';
 import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
@@ -337,24 +337,27 @@ for (const [backend, config] of backends) {
         after.message.messageId]);
   }));
 
-  test(`${backend}: subscription changes during publication take effect on the next event`, () => withService(async service => {
+  test(`${backend}: unsubscribe stops a not-yet-started callback, even when it is resubscribed`, () => withService(async service => {
     const { channelId } = (await service.createChannel(owner, { title: 'Snapshot' })).channel;
     const calls: string[] = [];
     let removeSecond = () => {};
     let added = false;
+    const second = (event: ChannelEvent) => {
+      if (event.type === 'channel.message.created') calls.push(`second:${event.payload.body}`);
+    };
     service.subscribe(event => {
       if (event.type !== 'channel.message.created') return;
       calls.push(`first:${event.payload.body}`);
       removeSecond();
       if (!added) {
         added = true;
-        service.subscribe(next => { if (next.type === 'channel.message.created') calls.push(`third:${next.payload.body}`); });
+        service.subscribe(second);
       }
     });
-    removeSecond = service.subscribe(event => { if (event.type === 'channel.message.created') calls.push(`second:${event.payload.body}`); });
+    removeSecond = service.subscribe(second);
     await service.postMessage(owner, channelId, { body: 'one' });
     await service.postMessage(owner, channelId, { body: 'two' });
-    assert.deepEqual(calls, ['first:one', 'second:one', 'first:two', 'third:two']);
+    assert.deepEqual(calls, ['first:one', 'first:two', 'second:two']);
   }));
 
   test(`${backend}: a reader starts from the newest page, reads back with before and on with after`, () => withService(async (service) => {

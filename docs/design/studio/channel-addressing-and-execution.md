@@ -8,10 +8,16 @@ can be changed or removed. Labels are presentation only; `participantId` carries
 the stable identity. Plain `@label`, code and quoted examples do not address a
 member; direct Markdown links and explicit `mentions` use the same parser.
 
-After a new message commits, Channel publishes a live `channel.message.created`
-event. Subscribers are independent of Channel and one another. Events are not a
-persistent queue: an offline or interrupted subscriber misses events, with no
-replay or catch-up. Stored history remains available through Channel queries.
+After a new message commits, `ChannelService.subscribe` broadcasts a live
+`channel.message.created` event. It invokes current listeners in registration
+order without awaiting their asynchronous work and isolates listener failures;
+asynchronous work can overlap, and concurrent writes do not guarantee publication
+order. Channel also forwards the event to the Studio event bus. That existing bus
+serializes delivery separately
+for each subscriber: an online slow handler can delay later events for itself,
+but not for other subscribers. Its in-memory pending work is not a durable queue;
+events missed while unsubscribed or offline are not replayed or caught up. Stored
+history remains available through Channel queries.
 The current implementation has no Pet Head: **messages and mentions only record
 conversation; they do not automatically start a Pet.**
 

@@ -99,6 +99,7 @@ export class InflightRequestController<TKey> {
       return null;
     }
 
+    run.stopRequested = true;
     this.sendControl(key, {
       type: 'interrupting',
       requestId: run.requestId,

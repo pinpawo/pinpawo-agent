@@ -10,6 +10,8 @@ import { ToolOperationTracker } from './toolOperationTracker';
 export type InflightOperationRun = {
   requestId: string;
   controller: AbortController;
+  /** Explicit run.interrupt, distinct from connection loss or replacement. */
+  stopRequested?: boolean;
   operationTracker: ToolOperationTracker;
 };
 

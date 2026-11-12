@@ -14,7 +14,7 @@ import {
   type PendingInterrupt,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
-import { Command, type GraphRunStream } from '@langchain/langgraph';
+import { Command, END, type GraphRunStream } from '@langchain/langgraph';
 import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
 import { HOST_INTERFACE_CONFIG_KEY } from '../chatInterface';
@@ -162,6 +162,7 @@ export class HostGraphService {
     setup: AgentChannelSetup,
     resume?: InterruptResume,
     onUsage?: (usage: TokenUsageSnapshot) => void,
+    onGraphStart?: () => void,
   ): Promise<HostGraphEventStream> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
@@ -177,6 +178,8 @@ export class HostGraphService {
       ? createSessionUsageTracker({ store, threadId, onUsage,
           baseline: store.readSessionUsage(threadId) ? undefined : await this.readLegacyUsageBaseline(setup),
         }) : null;
+    setup.input.signal?.throwIfAborted();
+    onGraphStart?.();
     return await graph.streamEvents(
       (resume === undefined
         ? buildOrchestratorRunInput(setup.input.messages, setup.input)
@@ -245,6 +248,21 @@ export class HostGraphService {
       values,
       asNode,
     );
+  }
+
+  /**
+   * Finish an explicitly stopped invocation after its output has settled.
+   * The caller retains thread ownership until this completes. Keep committed
+   * context for a future fresh continue; do not resume the old review to stop it.
+   */
+  async finishStoppedRun(setup: AgentChannelSetup): Promise<void> {
+    const graph = createOrchestratorGraph(setup.graphConfig);
+    const config = { configurable: buildAgentGraphConfigurable(setup) };
+    await graph.updateState(config, null, END);
+    const state = await graph.getState(config);
+    if (state.next.length || state.tasks.length) {
+      throw new Error('Stopped run still has scheduled work; stop could not be confirmed.');
+    }
   }
 
   /**

@@ -337,3 +337,77 @@ test('third-party checkpointers keep live accounting and rebuild a clearly incom
     if (turn === 3) assert.notEqual(usage?.usageEpoch, firstEpoch);
   }
 });
+
+test('explicit stop closes scheduling without running nodes or deleting saved plan', async () => {
+  let calls = 0;
+  class Model extends BaseChatModel {
+    _llmType() { return 'stop-no-execution'; }
+    bindTools() { return this; }
+    async _generate() {
+      calls++;
+      const message = new AIMessage('unexpected');
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
+  const service = new HostGraphService();
+  const input: AgentChannelSetup = {
+    registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
+    graphConfig: { models: { act: new Model({}) }, checkpoint: new MemorySaver() },
+    input: { threadId: randomUUID(), messages: [] },
+  };
+  await service.updateState(input, buildOrchestratorRunInput([new HumanMessage('saved work')]), 'captureUserRequest');
+  const before = await service.readThreadState(input);
+  assert.equal(before.acceptsResume, true);
+  await service.finishStoppedRun(input);
+  const after = await service.readThreadState(input);
+  assert.equal(after.acceptsResume, false);
+  assert.equal(after.pendingInterrupt, null);
+  assert.deepEqual(after.messages, before.messages);
+  assert.deepEqual(after.currentPlan, before.currentPlan);
+  assert.equal(calls, 0);
+  await service.finishStoppedRun(input);
+  assert.equal(calls, 0, 'repeated settlement does not execute graph');
+});
+
+test('stop during usage baseline read does not start graph or touch prior checkpoint', async () => {
+  let entered!: () => void;
+  const reading = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let blockReads = false;
+  class Checkpointer extends MemorySaver {
+    override async getTuple(...args: Parameters<MemorySaver['getTuple']>) {
+      if (blockReads) {
+        entered();
+        await blocked;
+      }
+      return super.getTuple(...args);
+    }
+  }
+  class Model extends BaseChatModel {
+    _llmType() { return 'must-not-start'; }
+    bindTools() { return this; }
+    async _generate(): Promise<never> { throw new Error('graph must not start'); }
+  }
+  const controller = new AbortController();
+  const service = new HostGraphService();
+  const input: AgentChannelSetup = {
+    registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
+    graphConfig: { models: { act: new Model({}) }, checkpoint: new Checkpointer() },
+    input: { threadId: randomUUID(), messages: [], signal: controller.signal },
+  };
+  await service.updateState(input, buildOrchestratorRunInput([new HumanMessage('prior work')]), 'captureUserRequest');
+  const before = await service.readThreadState(input);
+  blockReads = true;
+  let starts = 0;
+  const running = service.streamEvents(input, undefined, undefined, () => { starts++; });
+  await reading;
+  controller.abort();
+  release();
+  await assert.rejects(running, { name: 'AbortError' });
+  assert.equal(starts, 0);
+  blockReads = false;
+  const after = await service.readThreadState(input);
+  assert.equal(after.acceptsResume, before.acceptsResume);
+  assert.deepEqual(after.messages, before.messages);
+});

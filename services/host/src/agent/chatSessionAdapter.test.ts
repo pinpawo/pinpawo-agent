@@ -123,8 +123,10 @@ test('runAgentSessionTurn defers interrupted terminalization until graph output 
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
+  let current = true;
   const stream = Object.assign((async function* () {
     try {
+      current = false;
       yield protocolEvent('values', { messages: [new AIMessage('late')] });
     } finally {
       notifyIteratorClosed();
@@ -138,17 +140,13 @@ test('runAgentSessionTurn defers interrupted terminalization until graph output 
       return stream;
     },
   };
-  let currentChecks = 0;
   let settled = false;
 
   const run = runAgentSessionTurn({
     request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
     setup,
     graphService: graphService as unknown as HostGraphService,
-    isCurrent: () => {
-      currentChecks += 1;
-      return currentChecks === 1;
-    },
+    isCurrent: () => current,
     emitEvent: () => undefined,
     emitToolEvent: () => undefined,
   }).then((result) => {

@@ -377,17 +377,29 @@ export class ServerChatHandler {
     });
     const isCurrent = invocation.isCurrent;
     let runStarted = false;
+    let graphStarted = false;
+    let interruptionSettlement: Promise<ChatRunOutcome> | undefined;
     let interruptedFinalized = false;
     /**
-     * Cancellation creates no interrupt. Preserve only a native review
-     * that was already pending when the interruption arrived.
+     * Explicit stop closes scheduling; generic abort only projects native review.
+     * Share one settlement attempt even when its failure reaches the outer catch.
      */
-    const settleInterrupted = async (): Promise<ChatRunOutcome> => {
+    const settleInterrupted = (): Promise<ChatRunOutcome> => (
+      interruptionSettlement ??= settleInterruptionOnce()
+    );
+    const settleInterruptionOnce = async (): Promise<ChatRunOutcome> => {
+      if (inflight.stopRequested && !graphStarted) {
+        // A stopped queued/preflight request owns no checkpoint execution.
+        finalizeInterrupted();
+        return 'interrupted';
+      }
       // A settlement that fails leaves the thread in an unknown state, so it
       // takes the failure path rather than being reported as a clean
       // interruption. The caller decides how that failure is surfaced.
       const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
-      const settled = await this.graphService.settleAbortedRun(setup);
+      const settled = inflight.stopRequested
+        ? (await this.graphService.finishStoppedRun(setup), null)
+        : await this.graphService.settleAbortedRun(setup);
       const usage = this.graphService.readSessionTokenUsage?.(setup);
       if (usage && !invocation.isSuperseded()) {
         this.publishRuntimeEvent(peer, { type: 'usage.updated', requestId, usage });
@@ -501,6 +513,7 @@ export class ServerChatHandler {
         request,
         setup,
         graphService: this.graphService,
+        onGraphStart: () => { graphStarted = true; },
         isCurrent,
         emitEvent: (event) => {
           if (!isCurrent()) return;
@@ -525,6 +538,9 @@ export class ServerChatHandler {
             }
           : {}),
       });
+      // Stop may arrive after the adapter observed an interrupt, while its
+      // finally block is still joining graph output. It wins over waiting.
+      if (inflight.stopRequested) return await settleInterrupted();
       if (result.status === 'waiting') {
         // Every kind settles here. The run's own operations close, and the
         // interrupt.requested event already told the interface what it is

@@ -1350,3 +1350,145 @@ test('a review resolution that settles into a task pause finalizes as waiting, n
   assert.deepEqual(controls, []);
   assert.deepEqual(interruptedRuns(sent), []);
 });
+
+for (const failStop of [false, true]) {
+  test(`explicit stop ${failStop ? 'reports settlement failure' : 'finishes before confirming without reviving review'}`, async () => {
+    const sent: unknown[] = [];
+    const peer = createFakePeer(sent);
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const finishing = new Promise<void>(resolve => { release = resolve; });
+    let stopped = false;
+    let stopCalls = 0;
+    const inflightRequests = new InflightRequestController<ServerPeer>({
+      emitOperation: () => {}, sendControl: () => {},
+    });
+    const handler = new ServerChatHandler({
+      graphService: {
+        finishStoppedRun: async () => {
+          stopCalls++;
+          await finishing;
+          if (failStop) throw new Error('stop settlement failed');
+          stopped = true;
+        },
+        settleAbortedRun: async () => { throw new Error('must not re-project the old review'); },
+      } as never,
+      tuiSessions: {
+        getActiveSessionId: () => 'session', getChatThreadId: () => 'thread',
+        refreshActiveSessionSummary: async () => {},
+        buildChatSetup: () => ({ graphConfig: {}, input: { messages: [] } }),
+      } as never,
+      inflightRequests,
+      loadContext: async () => ({} as never),
+      runAgentTurn: async (options) => {
+        options.onGraphStart?.();
+        entered();
+        const signal = inflightRequests.get(peer)!.controller.signal;
+        await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+        return { status: 'interrupted' as const };
+      },
+    });
+    const running = handler.handleChatRequest(peer, {
+      type: 'chat_request', requestId: 'stop-request', message: 'work',
+    }, { petId: 'pet' } as never);
+    await started;
+    await handler.handleRunInterrupt(peer, { type: 'run.interrupt', requestId: 'stop-request' }, { petId: 'pet' } as never);
+    assert.deepEqual(interruptedRuns(sent), [], 'abort acknowledgement is not completion');
+    release();
+    await running;
+    assert.equal(stopped, !failStop);
+    assert.equal(stopCalls, 1, 'failed settlement is not silently retried');
+    assert.deepEqual(interruptedRuns(sent), failStop ? [] : ['stop-request']);
+    const eventTypes = sent.map(item => (item as { event?: { type?: string } }).event?.type);
+    assert.equal(eventTypes.includes('interrupt.requested'), false);
+    assert.equal(eventTypes.includes('error'), failStop);
+  });
+}
+
+for (const phase of ['preflight', 'waiting-settlement'] as const) {
+  test(`explicit stop during ${phase} never adopts a stale waiting result`, async () => {
+    const peer = createFakePeer();
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let stopCalls = 0;
+    const inflightRequests = new InflightRequestController<ServerPeer>({
+      emitOperation: () => {}, sendControl: () => {},
+    });
+    const handler = new ServerChatHandler({
+      graphService: {
+        finishStoppedRun: async () => { stopCalls++; },
+        settleAbortedRun: async () => { throw new Error('must not read old waiting'); },
+      } as never,
+      tuiSessions: {
+        getActiveSessionId: () => 'session', getChatThreadId: () => 'thread',
+        refreshActiveSessionSummary: async () => {},
+        buildChatSetup: () => ({ graphConfig: {}, input: { messages: [] } }),
+      } as never,
+      inflightRequests,
+      loadContext: async () => ({} as never),
+      runAgentTurn: async (options) => {
+        if (phase === 'waiting-settlement') options.onGraphStart?.();
+        entered();
+        await blocked;
+        return { status: phase === 'preflight' ? 'interrupted' as const : 'waiting' as const };
+      },
+    });
+    const running = handler.handleChatRequest(peer, {
+      type: 'chat_request', requestId: 'stop-request', message: 'work',
+    }, { petId: 'pet' } as never);
+    await started;
+    await handler.handleRunInterrupt(peer, { type: 'run.interrupt', requestId: 'stop-request' }, { petId: 'pet' } as never);
+    release();
+    await running;
+    assert.equal(stopCalls, phase === 'waiting-settlement' ? 1 : 0);
+  });
+}
+
+test('stopping a queued request does not terminate the preceding checkpoint', async () => {
+  const peer = createFakePeer();
+  let entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let graphCalls = 0;
+  let stopCalls = 0;
+  const inflightRequests = new InflightRequestController<ServerPeer>({
+    emitOperation: () => {}, sendControl: () => {},
+  });
+  const handler = new ServerChatHandler({
+    graphService: {
+      finishStoppedRun: async () => { stopCalls++; },
+      settleAbortedRun: async () => null,
+    } as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'session', getChatThreadId: () => 'thread',
+      refreshActiveSessionSummary: async () => {},
+      buildChatSetup: () => ({ graphConfig: {}, input: { messages: [] } }),
+    } as never,
+    inflightRequests,
+    loadContext: async () => ({} as never),
+    runAgentTurn: async options => {
+      graphCalls++;
+      options.onGraphStart?.();
+      entered();
+      await blocked;
+      return { status: 'interrupted' as const };
+    },
+  });
+  const deps = { petId: 'pet' } as never;
+  const first = handler.handleChatRequest(peer, {
+    type: 'chat_request', requestId: 'first', message: 'work',
+  }, deps);
+  await started;
+  const queued = handler.handleChatRequest(peer, {
+    type: 'chat_request', requestId: 'queued', message: 'next',
+  }, deps);
+  await handler.handleRunInterrupt(peer, { type: 'run.interrupt', requestId: 'queued' }, deps);
+  release();
+  await Promise.all([first, queued]);
+  assert.equal(graphCalls, 1);
+  assert.equal(stopCalls, 0, 'queued request owns no checkpoint to terminate');
+});

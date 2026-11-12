@@ -72,6 +72,8 @@ export type AgentSessionTurnOptions = {
   request: AgentSessionTurnRequest;
   setup: AgentChannelSetup;
   graphService: HostGraphService;
+  /** Called immediately before starting the native graph, after preflight. */
+  onGraphStart?: () => void;
   isCurrent: () => boolean;
   emitEvent: (event: AgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
@@ -368,11 +370,12 @@ export async function runAgentSessionTurn(
   let latestSessionUsage: TokenUsageSnapshot | undefined;
   let run: HostGraphEventStream | null = null;
   try {
+    if (!isCurrent()) return { status: 'interrupted' };
     run = await graphService.streamEvents(setup, resume, usage => {
       if (!isCurrent()) return;
       latestSessionUsage = usage;
       emitEvent({ type: 'usage.updated', requestId, usage: { ...usage, scope: 'session' } });
-    });
+    }, options.onGraphStart);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {

@@ -27,7 +27,14 @@ continue and let Supervisor reassess the plan in a fresh run.
 No task pause signal, paused result, pauseGate, interrupt input policy map, TUI
 pause mode, empty-input resume, or held Capability execution remains. Ordinary
 questions and iteration limits end normally. Aborting execution creates no
-synthetic interrupt; an already-pending human review remains pending.
+synthetic interrupt; generic connection/replacement aborts preserve pending review.
+An explicit `run.interrupt` on an active graph run waits for graph settlement,
+then closes root scheduling with native END and verifies no tasks remain before
+reporting `run.interrupted`. This prevents consumed review metadata from being
+re-announced or resumed after stopping. Saved values and child checkpoints remain;
+a later ordinary input enters a fresh run. A queued/preflight request has no graph
+execution to close. An idle pending review still uses its existing explicit review
+response/cancel flow. Settlement failure reports an error, not successful stop.
 
 The Channel queue waits only for genuine pending human review. Review decline
 settles as completed and releases the queue. Channel stores historical review

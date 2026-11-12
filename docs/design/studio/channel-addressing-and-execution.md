@@ -19,9 +19,12 @@ but not for other subscribers. Its in-memory pending work is not a durable queue
 events missed while unsubscribed or offline are not replayed or caught up. Stored
 history remains available through Channel queries.
 Each Pet Instance subscribes to its owner Channel Timeline when it becomes
-active, and cancels that subscription when it is deactivated. Its Head
-independently decides whether to ignore a message, reply directly, or request a
-Host dispatch. Events missed while inactive are not replayed. Mentions and replies provide context, not an automatic dispatch rule.
+active, and cancels that subscription when it is deactivated. Channel publishes
+new messages with its Channel id as the topic; each instance registers that exact
+source/topic before handler delivery, so other Channels do not wake its subscriber.
+Its Head independently decides whether to ignore a message, reply directly, or
+request a Host dispatch. Events missed while inactive are not replayed. Mentions
+and replies provide context, not an automatic dispatch rule.
 A Head filters its own output. To prevent lightweight confirmation loops, a
 Pet-triggered direct reply requires an explicit mention and cannot mention a
 Pet itself. Dispatch carries the triggering message, its reply target and their

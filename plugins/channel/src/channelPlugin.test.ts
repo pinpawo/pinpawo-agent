@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createStudioStorage, type StudioDispatchRequest, type StudioEvent, type StudioPluginContext } from '@pinpawo/studio-core';
+import { createStudioStorage, type StudioDispatchRequest, type StudioEvent, type StudioEventInput, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { createChannelPlugin, type ChannelWorking } from './channelPlugin';
 import { ChannelAccessError } from './channelService';
@@ -9,6 +9,7 @@ test('messages retain references and mentions without dispatching a Pet', async 
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const dispatched: StudioDispatchRequest[] = [];
+  const notified: StudioEventInput[] = [];
   const live: ReturnType<StudioPluginContext['listPets']> = [];
   const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
   const plugin = createChannelPlugin({ httpRoute: false });
@@ -19,7 +20,7 @@ test('messages retain references and mentions without dispatching a Pet', async 
     },
     allocateSessionId: () => 'writer-session',
     registerContextProvider: () => () => undefined,
-    notify: () => undefined,
+    notify: (event: StudioEventInput) => { notified.push(event); },
     subscribe: () => () => undefined,
     listPets: () => live,
     pets: { removeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
@@ -56,6 +57,12 @@ test('messages retain references and mentions without dispatching a Pet', async 
 
   const other = (await plugin.service.createChannel(owner, { title: 'Other', pets: [] })).channel.channelId;
   const otherMessage = (await plugin.sendMessage(other, { body: 'Elsewhere.', deliverables: current }, owner)).message;
+  const messageEvents = notified.filter(event => event.type === 'channel.message.created');
+  assert.deepEqual(messageEvents.map(event => event.topic), [channelId, channelId, other]);
+  assert.deepEqual(messageEvents.map(event => (event.payload as { messageId: string }).messageId), [
+    original.message.messageId, mentioned.message.messageId, otherMessage.messageId,
+  ]);
+  assert.ok(notified.filter(event => event.type !== 'channel.message.created').every(event => event.topic === undefined));
   await assert.rejects(plugin.sendMessage(channelId, { body: 'Wrong reply.', replyTo: otherMessage.messageId,
     mentions: [{ participantId: 'pet:writer' }],
   }, owner), /does not exist in this Channel/);

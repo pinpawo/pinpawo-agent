@@ -517,7 +517,11 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     await result.studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
     await result.studio.pets.create({ channelId: 'one', petId: 'writer', definitionId: 'writer', name: 'Writer' });
     assert.ok(channelContext);
-    channelContext.notify({ type: 'channel.message.created', payload: {
+    channelContext.notify({ type: 'channel.message.created', topic: 'other', payload: {
+      channelId: 'one', messageId: 'wrong-topic', sequence: 1, author: { kind: 'human', id: 'owner' },
+      occurredAt: '2026-01-01T00:00:00Z', body: 'Wrong topic', mentions: [],
+    } });
+    channelContext.notify({ type: 'channel.message.created', topic: 'one', payload: {
       channelId: 'one', messageId: 'message-1', sequence: 1, author: { kind: 'human', id: 'owner' },
       occurredAt: '2026-01-01T00:00:00Z', body: 'Hello', mentions: [],
     } });

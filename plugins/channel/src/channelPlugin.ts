@@ -289,7 +289,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (event.type === 'dispatch.message') await recordPetMessage(event.payload);
       });
       unexposeInputs = studio.hooks.expose(CHANNEL_INPUTS_HOOK_NAME, inputs);
-      unsubscribe = service.subscribe(event => studio.notify(event));
+      unsubscribe = service.subscribe(event => studio.notify(event.type === 'channel.message.created'
+        ? { ...event, topic: event.payload.channelId }
+        : event));
       if (options.httpRoute === false) return;
       removeHttp = studio.hooks.contribute<StudioHttpRoutesHook>(options.httpRoute?.pluginName ?? 'http', 'routes', (routes) => {
         // Any Studio client may call; membership decides what it can see. The caller is the human member `human:<clientId>`.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bindPetHeadChannel, createHeadDecision, createPetHead, type HeadMessage, type PetHeadChannel } from './petHead';
 import type { StudioPetRegistration } from '../types';
-import type { StudioEvent, StudioEventHandler } from '../studioContract';
+import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
 const pet = (petId: string, channelId = 'team'): StudioPetRegistration => ({
   petId, channelId, definitionId: 'assistant', name: petId, createdAt: '2026-01-01T00:00:00Z',
@@ -47,18 +47,22 @@ function deferred<T>() {
 
 test('the bound Channel exposes only its committed live messages and forwards operations with its owner id', async () => {
   let handler: StudioEventHandler | undefined;
+  let filter: StudioEventSubscriptionFilter | undefined;
   const calls: unknown[][] = [];
   const channel = bindPetHeadChannel('team', {
     readContext: async (...args) => { calls.push(['read', ...args]); return { messages: [] }; },
     reply: async (...args) => { calls.push(['reply', ...args]); },
     dispatch: async (...args) => { calls.push(['dispatch', ...args]); },
-  }, listener => { handler = listener; return () => { handler = undefined; }; });
+  }, (listener, scope) => { handler = listener; filter = scope; return () => { handler = undefined; }; });
   const seen: HeadMessage[] = [];
   const unsubscribe = channel.subscribe(async value => { seen.push(value); });
-  const wrap = (payload: unknown): StudioEvent => ({ eventId: '1', type: 'channel.message.created', source: 'channel', occurredAt: '2026-01-01T00:00:00Z', payload });
+  assert.deepEqual(filter, { source: 'channel', topic: 'team' });
+  const wrap = (payload: unknown): StudioEvent => ({ eventId: '1', type: 'channel.message.created', source: 'channel', topic: 'team', occurredAt: '2026-01-01T00:00:00Z', payload });
   const current = message('2');
   await handler?.({ ...wrap(current), source: 'other' });
   await handler?.({ ...wrap(current), type: 'channel.updated' });
+  await handler?.({ ...wrap(current), topic: 'other' });
+  await handler?.({ ...wrap(current), topic: undefined });
   await handler?.(wrap(message('3', { channelId: 'other' })));
   await handler?.(wrap({ bad: true }));
   await handler?.(wrap(current));

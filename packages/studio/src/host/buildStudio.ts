@@ -315,7 +315,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       // Resolve and create the model lazily, so a restored Pet subscribes before
       // Plugin activation without making model availability a startup requirement.
       let decide: ReturnType<typeof createHeadDecision> | undefined;
-      const channel = bindPetHeadChannel(registration.channelId, channelHead, handler => prepared.studio.subscribe(handler));
+      const channel = bindPetHeadChannel(registration.channelId, channelHead, prepared.studio.subscribe);
       const handleMessage = createPetHead({
         pet: registration,
         ...(description ? { description } : {}),

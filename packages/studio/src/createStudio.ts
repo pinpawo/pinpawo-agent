@@ -325,7 +325,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         source: plugin.name,
         occurredAt: new Date().toISOString(),
       }),
-      subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
+      subscribe: (handler, filter) => eventBus.subscribe(handler, filter, plugin.name),
       listPets,
       pets: registry,
       listDispatchQueues,
@@ -422,7 +422,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const studio: Studio = {
     dispatch,
     notify,
-    subscribe: (handler) => eventBus.subscribe(handler),
+    subscribe: (handler, filter) => eventBus.subscribe(handler, filter),
     listPets,
     pets: registry,
     shutdown,

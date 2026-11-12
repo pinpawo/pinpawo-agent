@@ -1,19 +1,26 @@
 import createMessageQueue from 'mqemitter';
 
-import type { StudioEvent, StudioEventHandler } from './studioContract';
+import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from './studioContract';
 
 const STUDIO_EVENT_TOPIC = 'studio/event';
+
+function eventTopic(source: string, topic?: string): string {
+  // Encode the tuple as one literal segment: producer values may contain the
+  // emitter's separator or wildcards. JSON also preserves lone surrogates.
+  return `${STUDIO_EVENT_TOPIC}/${Buffer.from(JSON.stringify([source, topic ?? null])).toString('base64url')}`;
+}
 
 type MessageQueue = ReturnType<typeof createMessageQueue>;
 type MessageQueueListener = Parameters<MessageQueue['on']>[1];
 type StudioEventMessage = Parameters<MessageQueue['emit']>[0] & {
-  topic: typeof STUDIO_EVENT_TOPIC;
+  topic: string;
   event: StudioEvent;
 };
 
 type StudioEventSubscription = {
   owner?: string;
   active: boolean;
+  topic: string;
   listener: MessageQueueListener;
   deliveryTail: Promise<void>;
 };
@@ -28,7 +35,7 @@ export class StudioEventBus {
   publish(event: StudioEvent): void {
     if (this.closed) throw new Error('Studio event bus is closed.');
     const delivery = new Promise<void>((resolve, reject) => {
-      this.queue.emit({ topic: STUDIO_EVENT_TOPIC, event }, (error) => {
+      this.queue.emit({ topic: eventTopic(event.source, event.topic), event }, (error) => {
         if (error) reject(error);
         else resolve();
       });
@@ -44,7 +51,7 @@ export class StudioEventBus {
       .finally(() => this.pendingDeliveries.delete(delivery));
   }
 
-  subscribe(handler: StudioEventHandler, owner?: string): () => void {
+  subscribe(handler: StudioEventHandler, filter?: StudioEventSubscriptionFilter, owner?: string): () => void {
     if (this.closed) throw new Error('Studio event bus is closed.');
     let subscription: StudioEventSubscription;
     const listener: MessageQueueListener = (message, done) => {
@@ -71,11 +78,12 @@ export class StudioEventBus {
     subscription = {
       ...(owner ? { owner } : {}),
       active: true,
+      topic: filter ? eventTopic(filter.source, filter.topic) : `${STUDIO_EVENT_TOPIC}/#`,
       listener,
       deliveryTail: Promise.resolve(),
     };
     this.subscriptions.add(subscription);
-    this.queue.on(STUDIO_EVENT_TOPIC, listener);
+    this.queue.on(subscription.topic, listener);
     return () => this.removeSubscription(subscription);
   }
 
@@ -89,7 +97,7 @@ export class StudioEventBus {
     if (!subscription.active) return;
     subscription.active = false;
     this.subscriptions.delete(subscription);
-    this.queue.removeListener(STUDIO_EVENT_TOPIC, subscription.listener);
+    this.queue.removeListener(subscription.topic, subscription.listener);
   }
 
   async close(): Promise<void> {

@@ -21,6 +21,7 @@ async function waitFor(predicate: () => boolean) {
 
 test('real Channel events follow Pet close, reopen and remove without replay or late dispatch', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
+  const subscriptionTopics: string[] = [];
   const observed: string[] = [];
   const dispatched: unknown[] = [];
   const pending = new Map<string, ReturnType<typeof deferred<HeadDecision>>>();
@@ -39,7 +40,12 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
       }, close: async () => {},
     }),
     subscribePetTimeline: ({ registration }, signal) => {
-      const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
+      const bound = bindPetHeadChannel(registration.channelId, channel.head, (handler, filter) => {
+        assert.ok(filter);
+        assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
+        subscriptionTopics.push(filter.topic);
+        return prepared.studio.subscribe(handler, filter);
+      });
       const handle = createPetHead({ pet: registration, channel: bound, decide });
       return bound.subscribe(message => handle(message, signal));
     },
@@ -58,6 +64,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     first.resolve({ action: 'dispatch', text: 'late task' });
     await post('while closed');
     await studio.pets.reopenInstance('worker');
+    assert.deepEqual(subscriptionTopics, [channelId, channelId], 'reopening creates a fresh owner-Channel subscription');
     await post('after reopen');
     await waitFor(() => observed.includes('after reopen'));
     assert.deepEqual(observed, ['held before close', 'after reopen']);

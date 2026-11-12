@@ -1,5 +1,5 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { StudioEventHandler, StudioModelEndpoint } from '../studioContract';
+import type { Studio, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 
 /** The committed Timeline message as seen by a Pet. */
@@ -37,15 +37,15 @@ type PetHeadChannelOperations = {
 export function bindPetHeadChannel(
   channelId: string,
   operations: PetHeadChannelOperations,
-  subscribe: (handler: StudioEventHandler) => () => void,
+  subscribe: Studio['subscribe'],
 ): PetHeadChannel {
   return {
     subscribe: handler => subscribe(async event => {
-      if (event.source !== 'channel' || event.type !== 'channel.message.created') return;
+      if (event.source !== 'channel' || event.topic !== channelId || event.type !== 'channel.message.created') return;
       const message = event.payload as HeadMessage | undefined;
       if (!message || message.channelId !== channelId || !message.author) return;
       await handler(message);
-    }),
+    }, { source: 'channel', topic: channelId }),
     readContext: (petId, before, replyTo) => operations.readContext(channelId, petId, before, replyTo),
     reply: (petId, messageId, body, signal, options) => operations.reply(channelId, petId, messageId, body, signal, options),
     dispatch: (petId, message, request, signal) => operations.dispatch(channelId, petId, message, request, signal),

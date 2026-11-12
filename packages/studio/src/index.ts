@@ -17,6 +17,7 @@ export type {
   StudioEvent,
   StudioEventHandler,
   StudioEventInput,
+  StudioEventSubscriptionFilter,
   StudioPetSessions,
   StudioPlugin,
   StudioPluginContext,

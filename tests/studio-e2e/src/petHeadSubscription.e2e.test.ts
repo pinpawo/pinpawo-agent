@@ -20,7 +20,7 @@ async function waitFor(predicate: () => boolean) {
 
 test('live Timeline subscriptions isolate slow instances and discard queued and offline events on reactivation', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
-  const seen: Record<string, string[]> = { slow: [], fast: [] };
+  const seen: Record<string, string[]> = { slow: [], fast: [], elsewhere: [] };
   const dispatches: string[] = [];
   const held = deferred<HeadDecision>();
   let inFlightSignal: AbortSignal | undefined;
@@ -42,7 +42,10 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
       }, close: async () => {},
     }),
     subscribePetTimeline: ({ registration }, signal) => {
-      const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
+      const bound = bindPetHeadChannel(registration.channelId, channel.head, (handler, filter) => {
+        assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
+        return prepared.studio.subscribe(handler, filter);
+      });
       const handle = createPetHead({ pet: registration, channel: bound, decide });
       return bound.subscribe(message => handle(message, signal));
     },
@@ -54,11 +57,14 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
     for (const petId of ['slow', 'fast']) {
       await studio.pets.create({ petId, definitionId: 'worker', name: petId, channelId });
     }
+    const otherId = (await channel.service.createChannel(human, { title: 'Elsewhere', pets: [] })).channel.channelId;
+    await studio.pets.create({ petId: 'elsewhere', definitionId: 'worker', name: 'Elsewhere', channelId: otherId });
     const post = async (body: string) => channel.service.postMessage(human, channelId, { body });
     await post('first');
     await waitFor(() => seen.slow!.includes('first') && seen.fast!.includes('first'));
     await post('queued');
-    await waitFor(() => seen.fast!.includes('queued'));
+    await channel.service.postMessage(human, otherId, { body: 'another Channel' });
+    await waitFor(() => seen.fast!.includes('queued') && seen.elsewhere!.includes('another Channel'));
     assert.deepEqual(seen.slow, ['first'], 'a slow subscriber handles its own events in order');
     assert.deepEqual(seen.fast, ['first', 'queued'], 'another instance is not blocked');
 
@@ -72,6 +78,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
     await waitFor(() => seen.slow!.includes('after reopen') && seen.fast!.includes('after reopen'));
     assert.deepEqual(seen.slow, ['first', 'after reopen'], 'queued and offline events are not replayed');
     assert.deepEqual(seen.fast, ['first', 'queued', 'offline', 'after reopen']);
+    assert.deepEqual(seen.elsewhere, ['another Channel'], 'each Channel has an independent live subscription');
     assert.deepEqual(dispatches, [], 'cancelled in-flight work cannot dispatch after Close');
   } finally {
     held.resolve({ action: 'ignore' });

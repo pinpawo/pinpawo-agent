@@ -97,7 +97,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   `channel_read_context`（Pet 视角）不带这一项。
 ## 事件
 
-新消息提交后，`ChannelService.subscribe` 按注册顺序向当前订阅者实时广播 `channel.message.created`，不等待异步处理，并隔离订阅者失败；异步处理可重叠，并发写入不保证发布顺序。Channel 同时将事件转发到 Studio 事件总线；该总线保留每个订阅者独立的进程内 FIFO：在线订阅者处理慢时，后续事件可能在其队列中等待，但不阻塞其他订阅者。这不是持久队列；退订或离线期间错过的事件不补发、不重放，历史仍可查询。Channel 不追踪消费者、ack 或消费游标，也不提供 outbox 或 exactly-once 保证。Channel 不替订阅者选择是否回应。
+新消息提交后，`ChannelService.subscribe` 按注册顺序向当前订阅者实时广播 `channel.message.created`，不等待异步处理，并隔离订阅者失败；异步处理可重叠，并发写入不保证发布顺序。Channel 同时将事件转发到 Studio 事件总线；该总线保留每个订阅者独立的进程内 FIFO：在线订阅者处理慢时，后续事件可能在其队列中等待，但不阻塞其他订阅者。这不是持久队列；退订或离线期间错过的事件不补发、不重放，历史仍可查询。Channel 不追踪消费者、ack 或消费游标，也不提供 outbox 或 exactly-once 保证。Channel 不替订阅者选择是否回应。新消息使用 Channel id 作为生产者自己的 topic；Pet Instance 精确订阅所属 Channel，其他 Channel 的消息不会进入该订阅者的待处理工作。topic 仅用于路由，不替代成员校验或授权。
 
 ## schedule / trigger
 

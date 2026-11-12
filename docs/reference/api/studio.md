@@ -70,7 +70,11 @@ no import from `pinpawo/host-runtime`.
 
 Every published `StudioEvent` carries an `eventId` that Studio assigns at `notify()`, along with
 `source` and `occurredAt`; subscribers can use it to tell two events apart even when they share a
-millisecond. The process-local event bus serializes handler work per subscriber,
+millisecond. Producers can attach an opaque `topic`;
+`subscribe(handler, { source, topic })` registers an exact subscription, so
+unrelated topics never enter that subscriber's pending work. Without a selector,
+subscription observes all events. Topics are routing labels, not authorization.
+The process-local event bus serializes handler work per subscriber,
 while different subscribers proceed independently. A slow online subscriber may
 therefore have pending events in memory. Unsubscribing drops its pending work that
 has not started; the bus does not persist or replay missed events.

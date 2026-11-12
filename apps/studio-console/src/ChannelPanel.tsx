@@ -425,7 +425,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 onSubmit={() => { if (body.trim() && connected && !pending) composerForm.current?.requestSubmit(); }} />
               <div className="channel-composer-controls">
                 <p className="channel-composer-hint"><kbd>@</kbd> mention · <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line
-                  · Messages and mentions do not automatically start a Pet.</p>
+                  · Each online Pet decides whether to respond or act.</p>
                 <button className="channel-send" disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
               </div>
             </div>

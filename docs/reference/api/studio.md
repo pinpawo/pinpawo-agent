@@ -134,7 +134,7 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins an active human client. An already-live Pet in its owner Channel returns its projected membership. Pet creation or reopen uses the lifecycle API; instances cannot join another Channel. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`, optional `confirmStop`; a human leaves, or a Pet instance is permanently removed. Resident Pet removal requires `confirmStop: true` and awaits business stop before final removal. Identity and history remain. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
-| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; message plus per-target deliveries. |
+| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; saved message. |
 
 The former `artifacts` message input and response field have been removed. The
 strict message schema rejects that input with `400`; clients must omit it.
@@ -153,8 +153,7 @@ Channel-scoped Pet run receives the Plugin's shared instructions and Channel met
 even without an announcement. The optional `channel_context` Capability is selected
 explicitly through Pet configuration and executed by the Agent as an ordinary subtask. The Host uses a
 snapshot of the system sections for that run; edits apply to later dispatches, not to the current run or its approval
-continuation. The routing model can also see it, but routing still applies only to
-unaddressed human messages. The prompt expresses collaboration intent, not authorization; it
+continuation. The prompt expresses collaboration intent, not authorization; it
 does not override Host or PET safety rules, grant tool access, change review policy,
 or change Channel membership. Supplying it does not guarantee model compliance. See the
 [design draft](../../design/studio/channel-collaboration-prompt.md).
@@ -167,12 +166,14 @@ combined. Schemas and
 limits are defined by [ChannelService](../../../plugins/channel/src/channelService.ts).
 `mentions: [{participantId}]` and direct Markdown `[@label](participant:pet:reviewer)`
 share one parser and address only current members; request-body author, source and
-scope claims are rejected. Deliveries are not stored: the response carries them and
-Channel publishes each as a global `channel.delivery` event. A Pet's final reply
-without tool calls in its Channel session is saved as its message and delivered the
-same way. The model is specified in [Channel model](../../design/studio/channel-model.md);
-addressing syntax and fixed sessions in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
-Delivery acceptance is not execution completion.
+scope claims are rejected. A Pet's public final reply in its Channel session is
+saved as a message with its verified author and an external reference for
+deduplication. A newly committed message publishes a live
+`channel.message.created` event; missed events are not replayed, though history
+remains queryable. Messages and mentions do not automatically start a Pet: the
+future Pet Head is not implemented. Explicit Host dispatch and scheduler/trigger
+entry points remain independent. See the [Channel model](../../design/studio/channel-model.md)
+and [addressing design](../../design/studio/channel-addressing-and-execution.md).
 
 ## Pet instances
 

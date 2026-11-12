@@ -10,7 +10,7 @@ import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, typ
 import { observeStudioEvents } from './studioEvents';
 import { ChannelPanel } from './ChannelPanel';
 import { KnowledgeDocument } from './KnowledgeDocument';
-import { appendChannelDeliveries, readChannelPages, type ChannelDelivery, type ChannelRoutingSkip, type ChannelRow } from './channelData';
+import { readChannelPages, type ChannelRow } from './channelData';
 import { Bell, BookOpen, CalendarClock, MessagesSquare, Plug, Zap, type LucideIcon } from 'lucide-react';
 import logoMark from '../../../assets/brand/pinpawo-primary-white.svg';
 
@@ -133,9 +133,7 @@ export function App() {
   const clientMode = identity?.scope === 'client';
   const [petsReady, setPetsReady] = useState(false);
   const [channelVersion, setChannelVersion] = useState(0);
-  const [channelDeliveries, setChannelDeliveries] = useState<ChannelDelivery[]>([]);
   const [channelFailures, setChannelFailures] = useState<{ channelId: string; petId?: string; error: string }[]>([]);
-  const [routingSkips, setRoutingSkips] = useState<ChannelRoutingSkip[]>([]);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
   const [notices, setNotices] = useState<Resource<Notice[]>>(empty);
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
@@ -265,14 +263,7 @@ export function App() {
         if (event.source === 'studio' && event.type.startsWith('pet.')) setChannelVersion(value => value + 1);
         if (event.source === 'channel') {
           setChannelVersion(value => value + 1);
-          const payload = event.payload as Partial<ChannelDelivery> & { petId?: string } | undefined;
-          if (event.type === 'channel.delivery' && payload?.channelId && payload.state) {
-            setChannelDeliveries(current => appendChannelDeliveries(current, [payload as ChannelDelivery]));
-          }
-          const skip = event.payload as Partial<ChannelRoutingSkip> | undefined;
-          if (event.type === 'channel.routing.skipped' && skip?.channelId && skip.messageId && skip.reason) {
-            setRoutingSkips(current => [...current.slice(-199), skip as ChannelRoutingSkip]);
-          }
+          const payload = event.payload as { channelId?: string; petId?: string; error?: string } | undefined;
           if (event.type === 'channel.message_failed' && payload?.channelId && payload.error) {
             const failure = { channelId: payload.channelId, petId: payload.petId, error: payload.error };
             setChannelFailures(current => [...current.slice(-19), failure]);
@@ -353,9 +344,7 @@ export function App() {
     }
     if (nextUrl !== normalizedUrl) {
       setPets([]);
-      setChannelDeliveries([]);
       setChannelFailures([]);
-      setRoutingSkips([]);
       setSchedules(empty());
       setNotices(empty());
       setTriggers(empty());
@@ -634,7 +623,7 @@ export function App() {
         <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
             active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady}
-            deliveries={channelDeliveries} dispatches={dispatches} routingSkips={routingSkips} failures={channelFailures} clientMode={clientMode}
+            dispatches={dispatches} failures={channelFailures} clientMode={clientMode}
             onPetsChanged={() => { void refreshRef.current().catch(reason => setNotice(connectionErrorMessage(reason))); }}
             onOpenKnowledge={identity?.scope === 'studio' ? () => setPage('knowledge') : undefined} />
         </div>

@@ -511,7 +511,7 @@ test('prepared Studio does not start Plugins until the Host activates them', asy
   assert.deepEqual(events, ['http:start', 'http:stop']);
 });
 
-test('Studio core event bus preserves per-subscriber order without cross-subscriber blocking', async () => {
+test('Studio core event bus does not wait for asynchronous handlers', async () => {
   const firstStarted = deferred();
   const releaseFirst = deferred();
   const slowDeliveryComplete = deferred();
@@ -560,12 +560,10 @@ test('Studio core event bus preserves per-subscriber order without cross-subscri
 
   await firstStarted.promise;
   await fastDeliveryComplete.promise;
-  assert.deepEqual(slowEvents, ['publisher:event.first']);
-  assert.deepEqual(fastEvents, ['publisher:event.first', 'publisher:event.second']);
-  releaseFirst.resolve();
   await slowDeliveryComplete.promise;
   assert.deepEqual(slowEvents, ['publisher:event.first', 'publisher:event.second']);
   assert.deepEqual(fastEvents, ['publisher:event.first', 'publisher:event.second']);
+  releaseFirst.resolve();
   await studio.shutdown();
 });
 

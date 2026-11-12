@@ -12,7 +12,7 @@ import { studioPetRoleCases, type StudioPetRoleCase } from './datasets/studio-pe
 import { buildStudioPetBoundaryInput, defaultStudioPetTemplateRoot, loadStudioPetRoleContext, runStudioPetRoleCase, StudioPetRoleInvocationError } from './studio-pet-role-evaluation.ts';
 import type { StudioPetModelObservation } from './studio-pet-model-observer.ts';
 import type { PromptEvalJudge } from './prompt-goal-evaluator.ts';
-import { channelDispatchInput } from '../../../plugins/channel/src/channelDispatchInput.ts';
+import { channelDispatchInput } from '../../support/channelDispatchInput.ts';
 import { studioPetEvalChannelId } from './studio-pet-invocation-fixture.ts';
 
 class ScriptedModel extends BaseChatModel {
@@ -87,20 +87,19 @@ test('template assembly honors explicit shared references and fails on missing r
 });
 
 test('the real Channel provider supplies the role fixture hint without putting it in system sections', async () => {
-  const focus = randomUUID();
   const request = channelDispatchInput({ channelId: studioPetEvalChannelId, messageId: randomUUID(), sequence: 1,
     author: { kind: 'human', id: 'owner' }, body: randomUUID(), occurredAt: '2026-01-01T00:00:00.000Z',
     mentions: [],
-  }, undefined, undefined, 'routing', focus);
-  const routed = await loadStudioPetRoleContext('reviewer', undefined, undefined, request);
-  const hint = routed.runtimeContext.hint;
+  });
+  const context = await loadStudioPetRoleContext('reviewer', undefined, undefined, request);
+  const hint = context.runtimeContext.hint;
   assert.ok(hint);
   assert.equal(hint.source, 'channel');
-  assert.equal(hint.focus, focus);
+  assert.equal(hint.focus, undefined);
   assert.ok(hint.instruction.trim());
   assert.ok(Object.isFrozen(hint));
-  assert.ok(routed.systemPromptSections.every(section => !section.content.includes(hint.instruction) && !section.content.includes(focus)));
-  assert.equal(routed.messages[0]?.text, request);
+  assert.ok(context.systemPromptSections.every(section => !section.content.includes(hint.instruction)));
+  assert.equal(context.messages[0]?.text, request);
   const fresh = await loadStudioPetRoleContext('reviewer');
   assert.equal(fresh.runtimeContext.hint?.focus, undefined);
   assert.equal(fresh.runtimeContext.hint?.instruction, hint.instruction);

@@ -1,4 +1,4 @@
-import { channelDispatchInput } from '../../../plugins/channel/src/channelDispatchInput.ts';
+import { channelDispatchInput } from '../../support/channelDispatchInput.ts';
 import { channelParticipantId } from '../../../plugins/channel/src/channelParticipants.ts';
 import type { ChannelMessageRow, MemberRef } from '../../../plugins/channel/src/store/channelStore.ts';
 import type { StudioPetRoleActor, StudioPetRoleCase } from './datasets/studio-pet-roles.ts';

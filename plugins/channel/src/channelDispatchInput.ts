@@ -1,29 +1,5 @@
-import type { Deliverable } from '@pinpawo/agent-contracts';
-import { channelParticipantId } from './channelParticipants';
-import type { ChannelMessageRow } from './store/channelStore';
-
 /** Who started a Pet's spontaneous run in a Channel. */
 export type ChannelRunOrigin = { kind: 'scheduler' | 'trigger'; id: string };
-
-// Routing provenance only. Preparation instructions travel in invocation context.
-const routingContextHint = {
-  source: 'channel-routing',
-  action: 'read-latest-channel',
-} as const;
-
-/** Explicit references from this message and its one addressed reply. */
-export function channelDispatchAttachments(message: ChannelMessageRow, original?: ChannelMessageRow): Deliverable[] {
-  const reply = original && message.replyTo === original.messageId && message.channelId === original.channelId
-    ? original : undefined;
-  const seen = new Set<string>();
-  return [...(message.deliverables ?? []), ...(reply?.deliverables ?? [])]
-    .filter(({ uri }) => {
-      if (seen.has(uri)) return false;
-      seen.add(uri);
-      return true;
-    })
-    .map(reference => ({ ...reference }));
-}
 
 function fenced(input: Record<string, unknown>): string {
   const text = JSON.stringify(input, null, 2);
@@ -33,37 +9,6 @@ function fenced(input: Record<string, unknown>): string {
   for (const match of text.matchAll(/`+/g)) length = Math.max(length, match[0].length + 1);
   const fence = '`'.repeat(length);
   return `${fence}json\n${text}\n${fence}`;
-}
-
-/**
- * Built only from stored messages whose authors were assigned by Channel / Host.
- * The participantId is the author's identity; the label, when the author is
- * still a member, is only how to call them.
- */
-export function channelDispatchInput(
-  message: ChannelMessageRow,
-  original?: ChannelMessageRow,
-  labelOf: (participantId: string) => string | undefined = () => undefined,
-  /** `routing`: nobody addressed this message; Channel routing chose this Pet. */
-  addressedBy?: 'routing',
-  /** Model-generated attention suggestion, separate from the fixed reading instruction. */
-  focus?: string,
-): string {
-  const author = (entry: ChannelMessageRow) => {
-    const participantId = channelParticipantId(entry.author.kind, entry.author.id);
-    const label = labelOf(participantId);
-    return { participantId, kind: entry.author.kind, ...(label === undefined ? {} : { label }) };
-  };
-  return fenced({
-    type: 'channel_message', version: 1,
-    channelId: message.channelId, messageId: message.messageId,
-    author: author(message), body: message.body,
-    ...(message.deliverables !== undefined ? { deliverables: message.deliverables } : {}),
-    ...(original ? { replyTo: { messageId: original.messageId, author: author(original), body: original.body,
-      ...(original.deliverables !== undefined ? { deliverables: original.deliverables } : {}),
-    } } : {}),
-    ...(addressedBy ? { addressedBy, contextHint: { ...routingContextHint, ...(focus?.trim() ? { focus: focus.trim() } : {}) } } : {}),
-  });
 }
 
 /** A scheduled or triggered instruction for a Pet in its Channel. It has no author and is not a Channel message. */

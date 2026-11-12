@@ -51,7 +51,9 @@ export type {
  * `plugins.activated`，依赖其他 Plugin hook 的工作可以等它再开始。`payload` 不被总线解释或校验。
  *
  * 这样互不认识的插件之间才能交换信息:发布方不需要知道谁在听,订阅方
- * 按自己认识的 type 过滤即可。
+ * 按自己认识的 type 过滤即可。广播只交给发布时在线的订阅者，不保存、不重放；
+ * 不等待 handler 完成，单个 handler 的同步异常或异步 rejection 不影响其他订阅者。
+ * 异步处理可重叠，不保证完成顺序；并发生产者的事件顺序也不保证。
  */
 export type StudioEvent = {
   /** Studio 在发布时为每个 event 分配的唯一 id;同一个 event 交给多个订阅者时不变。 */

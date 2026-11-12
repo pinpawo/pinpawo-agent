@@ -3,6 +3,8 @@ import { isJsonObject, isJsonValue, type Deliverable, type JsonObject } from '@p
 
 export type StudioDispatchRequest = {
   petId: string;
+  /** In-process cancellation before admission; never accepted from the wire. */
+  signal?: AbortSignal;
   /** In-process Plugin only: a reserved session target, never accepted from the wire. */
   session?: { id: string; create?: boolean };
   request: string;
@@ -21,7 +23,7 @@ export type StudioDispatchRequest = {
 };
 
 /** The public wire form: Host-trusted fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'delivery' | 'attachments'>;
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'delivery' | 'attachments' | 'signal'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {

@@ -85,7 +85,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 ## Pet 在 Channel 里
 
 - **Pet 的消息就是普通消息。** Channel 校验 resident 的 Channel scope、绑定 session 和成员身份后，将公开最终回复写入 `channel_messages`，作者为 `pet:<id>`，Agent Session 消息 id 作为 `external_ref` 去重。Human 与 Pet Instance 是对等生产者，保存后发布相同的实时消息事件；工具调用和私有过程不写入 Timeline。
-- **@ 只记录寻址。** 当前成员的 mentions 和同 Channel 的 `replyTo` 随消息保存；Channel 不决定回应或 dispatch。当前没有 Pet Head，消息和 @ 都不会自动启动 Pet。
+- **@ 只记录寻址。** 当前成员的 mentions 和同 Channel 的 `replyTo` 随消息保存；Channel 不决定回应或 dispatch。每个在线 Pet Instance 的 Head 独立判断是否忽略、直接回复或请求 Host dispatch；@ 本身不保证启动。
 - **过程不存，成员也不看过程。** Pet 的 operation（工具执行等）、subagent 消息和运行状态（排队、运行、等待审批、失败）
   不写进 Channel，Channel 成员只能看到主对话的公开消息（和下面的"正在输入"）。持本机 token 的人仍可通过 `channel_sessions` 找到 session，
   用已有的 Pet session 视图（`PetSessionView`，`/pet-sessions/snapshot|events|review`，#925）查看过程并处理审批；

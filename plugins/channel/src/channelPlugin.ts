@@ -1,9 +1,10 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
+import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
+import { channelMessageInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
 import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
@@ -56,6 +57,14 @@ export type ChannelPlugin = StudioPlugin & {
   /** Record a message as `author`; consumers independently observe the committed event. */
   sendMessage: (channelId: string, input: unknown, author: MemberRef) => Promise<{ message: ChannelMessage }>;
   run: ChannelInputsHook['run'];
+  /** Operations used by a Pet's own online Head. The Channel selects no consumers. */
+  head: ChannelHeadPort;
+};
+
+export type ChannelHeadPort = {
+  readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
+  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }) => Promise<void>;
+  dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal) => Promise<void>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -102,12 +111,23 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
+    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal },
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
+    const studio = host();
+    const check = () => {
+      headInput?.signal.throwIfAborted();
+      if (current !== service || context !== studio) throw new Error('Channel Plugin is not started.');
+    };
+    check();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
-    const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
-    const receipt = await host().dispatch({
+    check();
+    const binding = await service.reserveSession(channelId, petId, () => studio.allocateSessionId(petId));
+    check();
+    const receipt = await studio.dispatch({
       petId, request,
+      ...(headInput ? { signal: headInput.signal } : {}),
+      ...(headInput?.attachments?.length ? { attachments: headInput.attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
       scope: { namespace: 'channel', id: channelId },
@@ -204,6 +224,29 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     ],
   };
   const inputs: ChannelInputsHook = { run };
+  const head: ChannelHeadPort = {
+    readContext: async (channelId, petId, before, replyTo) => {
+      const service = channelService();
+      const context = await service.readContext({ kind: 'pet', id: petId }, channelId, { before, limit: 50 });
+      const referencedMessage = replyTo ? await service.getMessage(channelId, replyTo) : undefined;
+      return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
+    },
+    reply: async (channelId, petId, replyTo, body, signal, options) => {
+      signal.throwIfAborted();
+      await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options });
+    },
+    dispatch: async (channelId, petId, message, request, signal) => {
+      if (message.channelId !== channelId) throw new Error('Message does not belong to this Channel.');
+      signal.throwIfAborted();
+      const service = channelService();
+      await service.requireMember(channelId, { kind: 'pet', id: petId });
+      signal.throwIfAborted();
+      const referencedMessage = message.replyTo ? await service.getMessage(channelId, message.replyTo) : undefined;
+      signal.throwIfAborted();
+      const attachments = [...new Map([...(message.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
+      await dispatchPet(channelId, petId, channelMessageInput(message, request, referencedMessage), undefined, { attachments, signal });
+    },
+  };
 
   return {
     petChannels: {
@@ -211,7 +254,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (!await (await openStore(storage)).getChannel(channelId)) throw new StudioPetError(`No owner Channel "${channelId}".`, 'invalid');
       },
     },
-    name: 'channel', contextNamespaces: ['channel'], sendMessage, run, toolkits: [toolkit],
+    name: 'channel', contextNamespaces: ['channel'], sendMessage, run, head, toolkits: [toolkit],
     get service() { return channelService(); },
     start: async (studio) => {
       const store = await openStore(studio.storage);

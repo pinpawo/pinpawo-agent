@@ -18,8 +18,14 @@ for each subscriber: an online slow handler can delay later events for itself,
 but not for other subscribers. Its in-memory pending work is not a durable queue;
 events missed while unsubscribed or offline are not replayed or caught up. Stored
 history remains available through Channel queries.
-The current implementation has no Pet Head: **messages and mentions only record
-conversation; they do not automatically start a Pet.**
+Each online Pet Instance has its own Head subscribed to its Channel. The Head
+independently decides whether to ignore a message, reply directly, or request a
+Host dispatch. It stops with the instance; events missed while stopped are not
+replayed. Mentions and replies provide context, not an automatic dispatch rule.
+A Head filters its own output. To prevent lightweight confirmation loops, a
+Pet-triggered direct reply requires an explicit mention and cannot mention a
+Pet itself. Dispatch carries the triggering message, its reply target and their
+attachments through the existing Channel session admission path.
 
 Channel maps a resident Pet's public final message for an admitted Channel-scoped
 run to a Timeline message after checking the scope, session and member identity.

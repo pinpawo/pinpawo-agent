@@ -46,7 +46,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, delivery }) => {
+    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, delivery, signal }) => {
+      signal?.throwIfAborted();
       const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
       if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
       if (delivery === 'interrupt' && (!suppliedSession?.id || !suppliedScope)) {
@@ -59,6 +60,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       const resolved = scope && resolveInvocationContext
         ? await resolveInvocationContext(Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }), request }))
         : undefined;
+      signal?.throwIfAborted();
       if (context.isClosing()) throw new Error('Resident Pet is closing.');
       const invocationContext = snapshotInvocationContext(resolved);
       // Resolve and persist before admission; neither queue time nor a TUI switch
@@ -86,6 +88,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         });
       };
 
+      signal?.throwIfAborted();
       coordinator.submitDispatch(() => AsyncLocalStorageProviderSingleton.runWithConfig(
         { callbacks: [] },
         async () => {

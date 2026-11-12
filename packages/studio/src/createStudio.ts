@@ -26,6 +26,7 @@ import { StudioClients } from './clients/studioClients';
 import { KyselyClientStore, type ClientDatabase } from './clients/store/kysely';
 import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
 import { StudioPetError, StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
+import type { StudioPetHeadFactory } from './pets/petInstance';
 import { StudioPetCredentialVault } from './pets/petCredentials';
 import { studioCoreMigrations } from './storage/coreMigrations';
 
@@ -35,6 +36,8 @@ export type CreateStudioInput = {
   definitions: StudioPetDefinition[];
   /** Builds one Pet's runtime; Studio calls it for each active Pet and for each Pet it creates. */
   assemblePet: StudioPetAssembler;
+  /** Builds an independent live observer owned by each resident Pet instance. */
+  createPetHead?: StudioPetHeadFactory;
   plugins?: StudioPlugin[];
   /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
   storage?: StudioStorageConfig;
@@ -116,6 +119,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     credentials,
     definitions: input.definitions,
     assemble: input.assemblePet,
+    createHead: input.createPetHead,
     requireChannel: async (channelId) => {
       const channel = plugins.find(plugin => plugin.name === 'channel');
       if (!channel?.petChannels) throw new StudioPetError('The Channel Plugin is required to own Pet instances.', 'invalid');
@@ -208,6 +212,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     // Snapshot the complete Plugin request before asynchronous admission.
     const petId = request.petId;
+    const signal = request.signal;
+    signal?.throwIfAborted();
     const requestText = request.request;
     const attachments = request.attachments === undefined ? undefined : parseDeliverables(request.attachments);
     const suppliedIdempotencyKey = request.idempotencyKey;
@@ -220,6 +226,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       throw new Error('Interrupt delivery requires an explicit session and scope.');
     }
     await registry.restore();
+    signal?.throwIfAborted();
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     const pet = registry.getLive(petId);
     if (!pet) throw new StudioPetError(`studio "${input.studioId}": unknown petId "${petId}"`, 'not_found');
@@ -239,6 +246,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     // Reserve before awaiting the port: simultaneous deliveries share one
     // admission. Failed admissions release the reservation, in this domain.
     const admission = Promise.resolve().then(async () => {
+      signal?.throwIfAborted();
       const invocationId = randomUUID();
 
       if (scope) {
@@ -255,8 +263,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       console.log(
         `[studio] dispatch petId=${petId} source=${source ?? 'studio'} invocation=${invocationId}`,
       );
+      signal?.throwIfAborted();
       await pet.runtime.dispatch.dispatch({
         request: requestText,
+        ...(signal ? { signal } : {}),
         ...(attachments?.length ? { attachments } : {}),
         dispatchId: invocationId,
         ...(session ? { session } : {}),
@@ -386,6 +396,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         notify({ type: 'plugins.activated', source: 'studio', occurredAt: new Date().toISOString() });
       } catch (error) {
         stopped = true;
+        registry.stopHeads();
         await stopStartedPlugins();
         await closeCore();
         throw error;
@@ -398,6 +409,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   async function shutdown(): Promise<void> {
     if (shutdownPromise) return shutdownPromise;
     stopped = true;
+    registry.stopHeads();
     const pending = (async () => {
       await activationPromise?.catch(() => undefined);
       await stopStartedPlugins();

@@ -51,6 +51,8 @@ export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope }
  */
 export type PetDispatchRequest = {
   request: string;
+  /** In-process cancellation until the request enters the resident queue. */
+  signal?: AbortSignal;
   /** Explicit in-process input references; never inferred from request text. */
   attachments?: readonly Deliverable[];
   dispatchId?: string;

@@ -277,8 +277,8 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-Channel messages and mentions are recorded, but do not automatically start a Pet.
-The future Pet Head is not implemented. Explicit scheduler, trigger and Host
+Online Pet Heads independently decide whether to ignore, reply to, or dispatch work
+for Channel messages. A mention does not guarantee a response. Explicit scheduler, trigger and Host
 dispatch entry points remain available.
 
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source

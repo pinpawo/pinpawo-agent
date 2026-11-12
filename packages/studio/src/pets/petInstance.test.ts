@@ -51,6 +51,49 @@ test('one identity owns activation and runtime rename, using fresh names on Reop
 });
 
 for (const kind of ['close', 'remove'] as const) {
+  test(`a ${kind} stops its own Head before waiting for runtime teardown`, async () => {
+    const stoppedRuntime = deferred();
+    const stopped: string[] = [];
+    const create = (pet: StudioPet) => new PetInstance(pet, {
+      assemble: async () => ({ dispatch: {}, close: async () => stoppedRuntime.promise }) as StudioPetRuntime,
+      createHead: live => ({ stop: () => { stopped.push(live.registration.petId); } }),
+      onLive: () => {}, onClosed: () => {}, onChange: () => {},
+    });
+    const first = create(row);
+    const second = create({ ...row, petId: 'second' });
+    await first.restore(row);
+    await second.restore({ ...row, petId: 'second' });
+    const ending = first.end(row, kind, true, async () => {});
+    assert.deepEqual(stopped, ['pet'], 'Head is fenced synchronously and another Pet stays online');
+    const duplicate = first.end(row, kind, true, async () => {});
+    assert.equal(ending.promise, duplicate.promise);
+    assert.deepEqual(stopped, ['pet'], 'deduplicated teardown does not stop twice');
+    stoppedRuntime.resolve();
+    const ended = await ending.promise;
+    if (kind === 'close') {
+      await first.reopen(ended, async () => {}).promise;
+      await first.shutdown();
+      assert.deepEqual(stopped, ['pet', 'pet'], 'Reopen has a fresh Head that shutdown stops');
+    }
+    await second.shutdown();
+    assert.equal(stopped.at(-1), 'second');
+  });
+}
+
+test('failed activation stops the Head even when runtime cleanup fails', async () => {
+  let stopped = 0;
+  const instance = new PetInstance(row, {
+    assemble: async () => ({ dispatch: {}, close: async () => { throw new Error('close failed'); } }) as unknown as StudioPetRuntime,
+    createHead: () => ({ stop: () => { stopped++; } }),
+    onLive: () => { throw new Error('activation failed'); }, onClosed: () => {}, onChange: () => {},
+  });
+  await assert.rejects(instance.restore(row), /close failed/);
+  assert.equal(stopped, 1);
+  await assert.rejects(instance.shutdown(), /close failed/);
+  assert.equal(stopped, 1);
+});
+
+for (const kind of ['close', 'remove'] as const) {
   test(`${kind} owns consent, admission fencing, coalescing, busy rules and stop-before-commit`, async () => {
     const stop = deferred();
     const { instance, events, closes } = fixture(() => stop.promise);
@@ -161,6 +204,59 @@ test('registry keeps restoration, cross-instance scheduling, pending dedupe and 
     assert.equal(registry.listLive().length, 0);
     assert.equal(rows.get(row.petId)?.closedAt, undefined, 'shutdown does not write Close');
   } finally { stopping.resolve(); activating.resolve(); await registry.close(); }
+});
+
+test('shutdown immediately fences existing Heads and prevents late startup during Reopen', async () => {
+  const persisting = deferred();
+  const rows = new Map([
+    [row.petId, { ...row }],
+    ['closed', { ...row, petId: 'closed', closedAt: 'closed' }],
+  ]);
+  const started: string[] = [], stopped: string[] = [];
+  const store = {
+    listPets: async () => [...rows.values()].map(pet => ({ ...pet })),
+    getPet: async (id: string) => rows.get(id),
+    reopenPet: async () => { await persisting.promise; },
+  } as unknown as PetStore;
+  const registry = new StudioPetRegistry({
+    studioId: 'head-shutdown', store: async () => store, credentials: {} as StudioPetCredentials,
+    definitions: [{ definitionId: row.definitionId, name: 'Worker' }], requireChannel: async () => {},
+    assemble: async () => ({ dispatch: {}, close: async () => {} }) as StudioPetRuntime,
+    createHead: live => {
+      started.push(live.registration.petId);
+      return { stop: () => { stopped.push(live.registration.petId); } };
+    },
+    onLive: () => {}, onClosed: () => {}, onChange: () => {},
+  });
+  try {
+    await registry.restore();
+    const reopening = registry.reopenInstance('closed');
+    await tick();
+    assert.deepEqual(started, ['pet'], 'Reopen does not observe before its marker is committed');
+    const closing = registry.close();
+    assert.deepEqual(stopped, ['pet'], 'existing Head stops without waiting for Reopen persistence');
+    persisting.resolve();
+    await reopening;
+    await closing;
+    assert.deepEqual(started, ['pet'], 'pending Reopen cannot start a Head after shutdown');
+  } finally { persisting.resolve(); await registry.close(); }
+});
+
+test('successful Reopen starts its Head only after persistence settles', async () => {
+  const persisted = deferred();
+  const started: string[] = [];
+  const instance = new PetInstance(row, {
+    assemble: async () => ({ dispatch: {}, close: async () => {} }) as StudioPetRuntime,
+    createHead: () => { started.push('head'); return { stop: () => {} }; },
+    onLive: () => {}, onClosed: () => {}, onChange: () => {},
+  });
+  const reopening = instance.reopen({ ...row, closedAt: 'closed' }, () => persisted.promise).promise;
+  await tick();
+  assert.deepEqual(started, []);
+  persisted.resolve();
+  await reopening;
+  assert.deepEqual(started, ['head']);
+  await instance.shutdown();
 });
 
 test('failed activation cleanup retains the only runtime until a confirmed stop actually settles', async () => {

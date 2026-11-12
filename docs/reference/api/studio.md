@@ -175,9 +175,10 @@ deduplication. A newly committed message publishes a live
 `channel.message.created` event through `ChannelService.subscribe`, without
 awaiting asynchronous listeners; the Channel Plugin also forwards it to the
 Studio event bus described above. Missed events are not replayed, though history
-remains queryable. Messages and mentions do not automatically start a Pet: the
-future Pet Head is not implemented. Explicit Host dispatch and scheduler/trigger
-entry points remain independent. See the [Channel model](../../design/studio/channel-model.md)
+remains queryable. Each online Pet Instance has a Head that independently decides
+whether to ignore a message, reply, or request a Host dispatch. A mention does
+not guarantee a response. Explicit Host dispatch and scheduler/trigger entry
+points remain independent. See the [Channel model](../../design/studio/channel-model.md)
 and [addressing design](../../design/studio/channel-addressing-and-execution.md).
 
 ## Pet instances

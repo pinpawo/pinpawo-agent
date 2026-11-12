@@ -42,8 +42,7 @@ HostCapabilityCatalog 统一装配；未引用的共享能力不会进入该 Pet
 - 首次 init 一次性提供 Toolkit sources，随后新增 source 明确失败，不能静默复用半装配 inventory。
 - 并发 init 共用初始化；shutdown 与 init 串行，开始关闭后不允许重新 init。
 - init 只准备定义；实例由 Studio authority 在既有 Channel 中创建。每实例的 Channel 不可变，
-  runtime、运行槽与 Session 随实例固定归属，定义可以复用。Head 尚未在本次实现；
-  后续设计必须保持 Head 与实例归属一致。
+  runtime、运行槽与 Session 随实例固定归属，定义可以复用。Head 也随实例归属，不能跨 Channel 复用。
 - 所有未关闭且未移除实例在监听前 eager start，无 lazy/disabled 回退。任一 Pet/interaction 启动失败，
   关闭本轮已建资源；Pet 启停不定义次序，但等待所有 close settle。
 - Plugin 按配置顺序 start；失败时包含失败者的已启动前缀逆序 stop。

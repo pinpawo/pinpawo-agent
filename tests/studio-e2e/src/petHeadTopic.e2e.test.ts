@@ -8,7 +8,7 @@ import { buildHostRuntimeConfig, FileSaver } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../packages/studio/src/host/studioConfig';
 import type { HeadInput, HeadMessage } from '../../../packages/studio/src/host/petHead';
-import type { StudioModelEndpoint, StudioPlugin } from '../../../packages/studio/src/studioContract';
+import type { StudioEventSubscriptionFilter, StudioModelEndpoint, StudioPlugin } from '../../../packages/studio/src/studioContract';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
@@ -75,8 +75,10 @@ test('production Pet Head subscriptions receive only real messages from their ow
     const studio = result.studio;
     const subscribe = studio.subscribe;
     let subscribingPet = '';
+    const registrations: Array<{ petId: string; filter: StudioEventSubscriptionFilter | undefined }> = [];
     studio.subscribe = (handler, filter) => {
       const petId = subscribingPet;
+      registrations.push({ petId, filter });
       // Count before bindPetHeadChannel can inspect the payload or ignore it.
       // A broadcast subscription with a consumer-side Channel check fails here.
       return subscribe(event => {
@@ -98,6 +100,9 @@ test('production Pet Head subscriptions receive only real messages from their ow
       subscribingPet = petId;
       await studio.pets.create({ petId, definitionId: 'worker', name: petId, channelId });
     }
+    assert.deepEqual(registrations, ['alpha', 'beta'].map(petId => ({
+      petId, filter: { source: 'channel', topic: owners[petId] },
+    })), 'each Pet registers its exact owner topic rather than a global subscription');
     const { channel: { channelId: emptyChannelId } } = await channel.service.createChannel(human, { title: 'No Pets', pets: [] });
     await channel.service.postMessage(human, owners.alpha!, { body: 'alpha first' });
     await waitFor(() => decisions.alpha!.includes('alpha first'));

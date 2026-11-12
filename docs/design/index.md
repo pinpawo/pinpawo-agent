@@ -46,6 +46,9 @@ See [Reference](../reference/index.md) for the current public reading path.
 
 ## Studio applications and Plugins
 
+- [Channel Timeline 消费与 Pet Head](studio/channel-timeline-pet-head.md) — draft：
+  两个队列的边界、流程与时序；Channel 内轻量 Head、每 Pet 消费和待定恢复保证
+
 - [Channel 图片输入](studio/channel-image-input.md) — draft：结构化附件随消息派发，Host 复用图片输入准入
 - [Channel 协作提示词](studio/channel-collaboration-prompt.md) — draft for Channel-scoped collaboration context and Pet invocation isolation
 - [Channel 模型](studio/channel-model.md) — Channel、成员、消息与存储规则；

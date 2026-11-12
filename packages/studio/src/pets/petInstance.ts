@@ -26,12 +26,6 @@ export class PetInstance {
 
   constructor(pet: StudioPet, private readonly options: {
     assemble: StudioPetAssembler;
-    /** Prepare the Channel cursor/activation before attempting Host assembly. */
-    prepare?: (pet: StudioPetRegistration) => Promise<void>;
-    /** Cancel local admission synchronously, then return the short storage fence. */
-    deactivate?: (pet: StudioPetRegistration) => Promise<void>;
-    /** Called only after the successful lifecycle transition is no longer pending. */
-    onAvailable?: (pet: LiveStudioPet) => void;
     onLive: (pet: LiveStudioPet) => void;
     onClosed: (petId: string) => void;
     onChange: (type: 'pet.closed' | 'pet.removed' | 'pet.reopened', pet: StudioPet) => void;
@@ -88,7 +82,6 @@ export class PetInstance {
 
   private async activateRuntime(name: string): Promise<void> {
     const registration = { ...this.identity, name };
-    await this.options.prepare?.({ ...registration });
     const live = { registration, runtime: await this.options.assemble({ ...registration }) };
     this.resident = live;
     try { this.options.onLive(live); }
@@ -114,26 +107,17 @@ export class PetInstance {
     if (this.resident && !confirmStop) {
       throw new StudioPetError(`Confirm ${kind === 'remove' ? 'permanent removal' : 'temporary Close'}: stop current task and cancel unstarted queued tasks, retain history.`, 'confirmation_required');
     }
-    let revoking: Promise<void>;
-    const transition = this.begin(kind, async () => {
+    return this.begin(kind, async () => {
       this.unavailable = true;
-      // Host stop must not wait behind storage or an arbitrary consumer callback.
-      // Both the short Channel fence and the Host must settle before commit.
-      const settled = await Promise.allSettled([revoking, this.stop()]);
-      const failed = settled.find(result => result.status === 'rejected');
-      if (failed?.status === 'rejected') throw failed.reason;
+      // Fence admission first. Keep the handle if stop fails; commit only after
+      // the Host confirms business settlement, including its unstarted queue.
+      await this.stop();
       const ended = kind === 'remove' ? { ...row, removedAt: new Date().toISOString() }
         : { ...row, closedAt: new Date().toISOString() };
       await persist(ended);
       this.options.onChange(kind === 'remove' ? 'pet.removed' : 'pet.closed', { ...ended });
       return ended;
     });
-    // begin has already hidden this instance. Cancel Channel admission in the
-    // same turn, before either storage fencing or Host teardown can await.
-    try { revoking = Promise.resolve(this.options.deactivate?.({ ...this.identity, name: row.name })); }
-    catch (error) { revoking = Promise.reject(error); }
-    void revoking.catch(() => undefined);
-    return transition;
   }
 
   /** Whether this fresh record needs activation; all other outcomes are final or busy. */
@@ -209,17 +193,7 @@ export class PetInstance {
   }
 
   private begin(kind: LifecycleKind, work: () => Promise<StudioPet>): Transition {
-    const promise = Promise.resolve().then(work).then(result => {
-      this.transition = undefined;
-      if (kind === 'create' || kind === 'restore' || kind === 'reopen') {
-        const live = this.live;
-        if (live) {
-          try { this.options.onAvailable?.(live); }
-          catch (error) { console.error('[studio] Channel activation notification failed:', error); }
-        }
-      }
-      return result;
-    }, error => { this.transition = undefined; throw error; });
+    const promise = Promise.resolve().then(work).finally(() => { this.transition = undefined; });
     this.transition = { kind, promise };
     void promise.catch(() => undefined);
     return this.transition;

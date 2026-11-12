@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
-  ChannelConsumptionRow, ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
+  ChannelQueueCursor, ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
 } from './store/channelStore';
 
 const identifier = z.string().trim().min(1).max(256);
@@ -91,8 +91,6 @@ export class ChannelService {
   private readonly petOwner: ChannelServiceOptions['petOwner'];
   private readonly humans: ChannelServiceOptions['humans'];
   private readonly listeners = new Set<(event: ChannelEvent) => void>();
-  private readonly consumptionInvalidations = new Set<(channelId: string, petId: string) => void>();
-  private readonly consumptionActivations = new Set<(channelId: string, petId: string) => void>();
 
   constructor(options: ChannelServiceOptions) {
     this.store = options.store;
@@ -105,34 +103,6 @@ export class ChannelService {
   subscribe(listener: (event: ChannelEvent) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
-  }
-  /** Internal synchronous cancellation, before a lifecycle operation awaits storage/Host stop. */
-  invalidateConsumption(channelId: string, petId: string): void {
-    for (const listener of this.consumptionInvalidations) listener(channelId, petId);
-  }
-  subscribeConsumptionInvalidation(listener: (channelId: string, petId: string) => void): () => void {
-    this.consumptionInvalidations.add(listener);
-    return () => { this.consumptionInvalidations.delete(listener); };
-  }
-  /** Wake pending progress only after the Pet's lifecycle is fully live. */
-  activateConsumption(channelId: string, petId: string): void {
-    for (const listener of this.consumptionActivations) {
-      try { listener(channelId, petId); }
-      catch (error) { console.error('[channel] consumption activation notification failed:', error); }
-    }
-  }
-  subscribeConsumptionActivation(listener: (channelId: string, petId: string) => void): () => void {
-    this.consumptionActivations.add(listener);
-    return () => { this.consumptionActivations.delete(listener); };
-  }
-  isLiveOwner(channelId: string, petId: string): boolean {
-    return this.pets().some(pet => pet.petId === petId && pet.channelId === channelId);
-  }
-  /** Must be called after the last awaited read, immediately before effects or acknowledgement. */
-  isConsumptionCurrent(expected: ChannelConsumptionRow, current: ChannelConsumptionRow | undefined): boolean {
-    return current?.channelId === expected.channelId && current.petId === expected.petId
-      && current.activationId === expected.activationId && current.afterSequence === expected.afterSequence
-      && this.isLiveOwner(expected.channelId, expected.petId);
   }
   private publish(event: ChannelEvent): void {
     for (const listener of this.listeners) {
@@ -343,7 +313,7 @@ export class ChannelService {
     let mentionError: string | undefined;
     const result = await this.store.transaction(async (store) => {
       // Sequence allocation can precede another Postgres transaction's commit.
-      // Enrollment and appends take the same owner Channel lock.
+      // Appends to one Channel hold the same row lock until commit.
       await store.lockChannel(identifier.parse(channelId));
       const channel = retainedPetReply ? await this.requireChannel(store, channelId)
         : await this.requireMemberIn(store, channelId, trustedAuthor);
@@ -374,24 +344,44 @@ export class ChannelService {
     return this.store.getMessage(channelId, messageId);
   }
 
-  /** Public-message progress for a current Pet, never an execution completion marker. */
-  async consumption(channelId: string, petId: string): Promise<ChannelConsumptionRow> {
-    const channel = await this.requireMember(channelId, { kind: 'pet', id: petId });
-    const row = await this.store.getConsumption(channel.channelId, petId);
-    if (!row) throw new Error('Channel consumption baseline is missing.');
-    return row;
+  /** Trusted internal queue API. Notifications from subscribe are best-effort wakeups;
+   * read durable progress and catch up on startup as well as after a wakeup. */
+  async queueHead(channelId: string): Promise<number> {
+    const channel = await this.requireChannel(this.store, channelId);
+    const page = await this.store.readMessages(channel.channelId, { limit: 1 });
+    return page.items.at(-1)?.sequence ?? 0;
   }
 
-  /** An obsolete activation or unavailable instance cannot acknowledge any public messages. */
-  async advanceConsumption(expected: ChannelConsumptionRow, throughSequence: number): Promise<boolean> {
-    z.number().int().nonnegative().safe().parse(throughSequence);
-    if (throughSequence <= expected.afterSequence) throw new RangeError('Consumption must advance past the prior position.');
-    return this.store.transaction(async store => {
-      await store.lockChannel(expected.channelId);
-      // Raw Pet membership rows are historical data, never current authority.
-      if (!this.pets().some(pet => pet.petId === expected.petId && pet.channelId === expected.channelId)) return false;
-      return store.advanceConsumption(expected, throughSequence);
-    });
+  /** Read forward; pass a previously captured queueHead as through to freeze a batch. */
+  async queueRead(channelId: string, range: { after: number; through?: number; limit: number }) {
+    const position = z.number().int().nonnegative().safe();
+    const value = z.object({ after: position, through: position.optional(), limit: z.number().int().min(1).max(200) }).strict().parse(range);
+    if (value.through !== undefined && value.through < value.after) throw new RangeError('Batch end precedes its start.');
+    const channel = await this.requireChannel(this.store, channelId);
+    return this.store.readMessages(channel.channelId, value);
+  }
+
+  /** Create a cursor at the caller-selected starting position, or recover its durable position.
+   * The key is opaque and scoped to the Channel. This does not schedule or enumerate consumers. */
+  async queueCursor(channelId: string, consumerKey: string, initialAfterSequence: number): Promise<ChannelQueueCursor> {
+    const key = z.string().min(1).max(256).parse(consumerKey);
+    const initial = z.number().int().nonnegative().safe().parse(initialAfterSequence);
+    const channel = await this.requireChannel(this.store, channelId);
+    if (initial > await this.queueHead(channel.channelId)) throw new RangeError('Initial queue cursor exceeds the committed Channel head.');
+    await this.store.createQueueCursor({ channelId: channel.channelId, consumerKey: key, afterSequence: initial });
+    return (await this.store.getQueueCursor(channel.channelId, key))!;
+  }
+
+  /** Acknowledge processed messages only after the consumer succeeds. CAS rejects stale progress.
+   * It is the consumer's responsibility to acknowledge no further than the batch it read.
+   * This cursor is independent of any execution admission or completion. */
+  async advanceQueueCursor(expected: ChannelQueueCursor, throughSequence: number): Promise<boolean> {
+    const cursor = z.object({ channelId: identifier, consumerKey: z.string().min(1).max(256),
+      afterSequence: z.number().int().nonnegative().safe() }).strict().parse(expected);
+    const through = z.number().int().nonnegative().safe().parse(throughSequence);
+    if (through <= cursor.afterSequence) throw new RangeError('Queue cursor must advance past the prior position.');
+    if (through > await this.queueHead(cursor.channelId)) throw new RangeError('Queue cursor exceeds the committed Channel head.');
+    return this.store.advanceQueueCursor(cursor, through);
   }
 
   /** The (Channel, Pet) session, reserved on first use. */

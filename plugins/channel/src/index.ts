@@ -5,5 +5,3 @@ export * from './channelPlugin';
 export * from './channelParticipants';
 export * from './channelDispatchInput';
 export * from './channelRouting';
-
-export * from './channelTimelineConsumer';

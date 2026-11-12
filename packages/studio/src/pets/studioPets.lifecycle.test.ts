@@ -14,8 +14,7 @@ function deferred() {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-async function setup(t: import('node:test').TestContext, close: () => Promise<void> = async () => {},
-  hooks: Pick<ConstructorParameters<typeof StudioPetRegistry>[0], 'prepareInstance' | 'deactivateInstance'> = {}) {
+async function setup(t: import('node:test').TestContext, close: () => Promise<void> = async () => {}) {
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   const db = await storage.open<PetDatabase>('studio', studioCoreMigrations);
   const store = new KyselyPetStore(db);
@@ -24,7 +23,7 @@ async function setup(t: import('node:test').TestContext, close: () => Promise<vo
   const assembled: string[] = [];
   const events: string[] = [];
   const registry = new StudioPetRegistry({ studioId: 'lifecycle', store: async () => store, credentials,
-    definitions: [{ definitionId: 'worker', name: 'Worker' }], requireChannel: async id => { assert.equal(id, 'one'); }, ...hooks,
+    definitions: [{ definitionId: 'worker', name: 'Worker' }], requireChannel: async id => { assert.equal(id, 'one'); },
     assemble: async ({ petId }): Promise<StudioPetRuntime> => {
       assembled.push(petId);
       return { close: async () => { closes++; await close(); }, dispatch: {
@@ -129,69 +128,3 @@ test('an old closed marker cannot report Close success while a failed-Reopen run
   await assert.rejects(registry.closeInstance('pet', { confirmStop: true }), /stop unknown/);
   assert.equal(closes(), 3, 'confirmed Close retries the retained runtime teardown rather than trusting closedAt');
 });
-
-
-test('Channel preparation failure never assembles or exposes the new runtime and retains its closed identity', async t => {
-  let fail = false;
-  const { registry, assembled, store } = await setup(t, async () => {}, {
-    prepareInstance: async () => { if (fail) throw new Error('baseline unavailable'); },
-  });
-  fail = true;
-  await assert.rejects(registry.create({ petId: 'new', name: 'New', definitionId: 'worker', channelId: 'one' }), /baseline unavailable/);
-  assert.deepEqual(assembled, ['pet']);
-  assert.equal(registry.getLive('new'), undefined);
-  assert.ok((await store.getPet('new'))?.closedAt);
-  await assert.rejects(registry.create({ petId: 'new', name: 'New', definitionId: 'worker', channelId: 'one' }), /already exists/);
-});
-
-for (const action of ['close', 'remove'] as const) {
-  const marker = action === 'close' ? 'closedAt' : 'removedAt';
-  const ending = (registry: StudioPetRegistry) => action === 'close'
-    ? registry.closeInstance('pet', { confirmStop: true }) : registry.removeInstance('pet', { confirmStop: true });
-
-  test(`${action} starts Host stop without waiting for the Channel fence, and waits for both settlements`, async t => {
-    const fence = deferred(), host = deferred();
-    t.after(() => { fence.resolve(); host.resolve(); });
-    const order: string[] = [];
-    const { registry, store, events, closes } = await setup(t, async () => { order.push('host'); await host.promise; }, {
-      deactivateInstance: () => { order.push('cancel'); return fence.promise; },
-    });
-    let complete = false;
-    const pending = ending(registry).then(() => { complete = true; });
-    await tick();
-    assert.deepEqual(order, ['cancel', 'host']);
-    assert.equal(closes(), 1);
-    assert.equal(registry.getLive('pet'), undefined);
-    assert.equal((await store.getPet('pet'))?.[marker], undefined);
-    host.resolve();
-    await tick();
-    assert.equal(complete, false, 'Host stop alone cannot finalize while the Channel fence is pending');
-    assert.equal(events.includes(action === 'close' ? 'pet.closed' : 'pet.removed'), false);
-    fence.resolve();
-    await pending;
-    assert.ok((await store.getPet('pet'))?.[marker]);
-  });
-
-  test(`${action} fence failure still waits for Host stop and never claims a final marker`, async t => {
-    const host = deferred();
-    t.after(() => host.resolve());
-    const { registry, store, assembled, closes } = await setup(t, () => host.promise, {
-      // Exercise synchronous failure too: it must not prevent runtime.close.
-      deactivateInstance: () => { throw new Error('Channel fence failed'); },
-    });
-    let failure: unknown;
-    let returned = false;
-    const pending = ending(registry).catch(error => { failure = error; }).finally(() => { returned = true; });
-    await tick();
-    assert.equal(closes(), 1);
-    assert.equal(returned, false, 'an early fence rejection cannot abandon an unsettled Host stop');
-    await assert.rejects(registry.reopenInstance('pet'), (error: { code?: string }) => error.code === 'busy');
-    host.resolve();
-    await pending;
-    assert.match(String(failure), /Channel fence failed/);
-    assert.equal((await store.getPet('pet'))?.[marker], undefined);
-    assert.equal(registry.getLive('pet'), undefined);
-    await assert.rejects(registry.reopenInstance('pet'), (error: { code?: string }) => error.code === 'busy');
-    assert.equal(assembled.length, 1);
-  });
-}

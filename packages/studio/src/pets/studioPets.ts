@@ -2,7 +2,6 @@ import type {
   StudioPet,
   StudioPetAssembler,
   StudioPetDefinition,
-  StudioPetRegistration,
 } from '../types';
 import type { PetRow, PetStore } from './store/petStore';
 import type { StudioPetCredentials } from './petCredentials';
@@ -69,10 +68,6 @@ export class StudioPetRegistry implements StudioPets {
     definitions: readonly StudioPetDefinition[];
     assemble: StudioPetAssembler;
     requireChannel: (channelId: string) => Promise<void>;
-    /** Storage-only enrollment/fence before exposing any resident activation. */
-    prepareInstance?: (pet: StudioPetRegistration) => Promise<void>;
-    deactivateInstance?: (pet: StudioPetRegistration) => Promise<void>;
-    activateInstance?: (pet: StudioPetRegistration) => void;
     /** A Pet became live (restored or created). */
     onLive: (pet: LiveStudioPet) => void;
     /** A live Pet's runtime has closed. */
@@ -248,9 +243,6 @@ export class StudioPetRegistry implements StudioPets {
     if (!instance) {
       const created: PetInstance = new PetInstance(row, {
         assemble: this.options.assemble,
-        prepare: this.options.prepareInstance,
-        deactivate: this.options.deactivateInstance,
-        onAvailable: pet => this.options.activateInstance?.(pet.registration),
         onClosed: this.options.onClosed,
         onChange: this.options.onChange,
         onLive: pet => {

@@ -57,17 +57,14 @@ export function channelMigrations(dialect: StudioStorageDialect): StudioMigratio
         await db.schema.alterTable('channels').addColumn('prompt', 'text').execute();
       },
     },
-    '0003_channel_consumption': {
+    '0003_channel_queue_cursors': {
       async up(db: Kysely<unknown>) {
-        await db.schema.createTable('channel_consumptions')
+        await db.schema.createTable('channel_queue_cursors')
           .addColumn('channel_id', 'text', column => column.notNull().references('channels.channel_id'))
-          .addColumn('pet_id', 'text', column => column.notNull())
-          .addColumn('activation_id', 'text', column => column.notNull())
+          .addColumn('consumer_key', 'text', column => column.notNull())
           .addColumn('after_sequence', 'integer', column => column.notNull().check(sql`after_sequence >= 0`))
-          .addPrimaryKeyConstraint('channel_consumptions_pk', ['channel_id', 'pet_id'])
+          .addPrimaryKeyConstraint('channel_queue_cursors_pk', ['channel_id', 'consumer_key'])
           .execute();
-        // Raw Pet membership is not instance ownership. Registry preparation
-        // enrolls only authoritative owner instances before they become live.
       },
     },
   };

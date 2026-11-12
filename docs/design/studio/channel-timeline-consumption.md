@@ -1,83 +1,25 @@
-# Channel Timeline 消费基础
+# Channel Timeline 队列
 
-> 状态：消费存储与实例 activation 基础已实现，尚未接入运行中的 Channel Plugin；Pet Head 未实现。
-> 更新：2026-11-10
+> 状态：队列基础；Head 尚未接入。更新：2026-11-12
 
-本阶段落实 [#1078](https://github.com/pinpawo/pinpawo-agent/issues/1078) 的后端消费基础，
-并对齐 Channel-owned Pet instance，供后续 Pet Head 接入。
-当前 @ 与旧 Router 的行为不变。Channel Plugin 不创建或启动 `ChannelTimelineConsumer`，
-没有新增 Head 配置或生产 Reopen backlog 策略；Reopen 保留 cursor 并在真正 live 后唤醒。
-新路径接入时必须替换旧 Router，不能重复派发；策略未确定前不能将 Head 用于生产。
+Channel 保存一份共享的公开消息 Timeline。追加在事务提交之后通知本进程订阅者；通知是 best effort，既不跨进程可靠投递，也不代替启动时补读。相同 Channel 的追加在事务内持 Channel 行锁：PostgreSQL 序列分配的先后并不保证提交先后，锁防止消费者先看到较大序号并越过迟提交的较小序号。不同 Channel 可独立追加。直接使用底层 store 追加时也必须在同一事务中持有该 Channel 锁。
 
-## 实例进度与 activation
+## 消费契约
 
-- `channel_consumptions` 以 `(channel_id, pet_id)` 保存一个稳定实例的公开消息消费进度，与执行 session 分开。
-  一个实例只有一个不可变 owner Channel；definition 可复用，Pet id 不可回收。
-- 当前成员与消费权限来自 registry 的 live owner 投影，不来自 raw Pet membership rows。
-  迁移只建立消费表，不把旧 Pet membership 当作实例权威，不删除历史成员或改写消息。
-- registry 在 create、restore、Reopen 的 runtime assembly/live 可见之前调用 Channel 的窄准备接口。
-  Channel 持追加消息使用的同一行锁，只为缺失进度读取已提交 Timeline 末尾并建立基线；空 Channel 为 0。
-  已有 `after_sequence` 原样保留，普通进程重启不把它移到当前 tail。
-- `activation_id` 是一次开放期的独立 fence，不是实例 identity 或可重入 membership。
-  每次准备和 Close/Remove 开始均更换 token，不移动 cursor；旧 batch 的 CAS 不能确认新 activation。
-  重复添加当前 Pet 成员投影不创建、重置或激活进度。
-- 消息追加、enrollment/fence、ack 和人类成员管理复用 Channel 行锁。PostgreSQL sequence 分配
-  不代表事务提交顺序，因此同 Channel 追加必须串行，防止低序号消息稍后提交却被 cursor 越过。
-  Host 停止不在 Channel 数据库事务中执行；Channel 准备也不反向在事务内查询 registry 数据库。
+可信的内部消费者通过 `subscribe` 订阅变更提示，通过 `queueHead(channelId)` 捕获上界，再用 `queueRead(channelId, { after, through, limit })` 自行读取 Timeline。读取范围按序号升序分页；消费者应先确定本批上界，再在整个批次中沿用该上界，处理期间追加的消息属于后续批次。消费者不应仅依赖通知：启动时先订阅，再从持久游标补读，运行中也要有自己的漏通知恢复办法。
 
-保存旧 cursor 只是基础存储能力，**不表示已经决定生产 Reopen 消费策略**。
-Reopen 后补读全部未消费消息、跳至恢复时 cutoff，或区分关闭前积压与关闭期间消息，
-仍需在生产 Head 可触发前确定。当前没有永久 inactive/policy 状态，也没有新增产品恢复操作。
-准备发生在 live 之前，不发成员加入事件来假装完成 activation wake；成功装配和持久化且 transition
-结束后，内部通知补唤醒消费器。Reopen 目前同样保留 cursor 并补唤醒，这只是基础机制，不能当作已定义的
-生产 backlog 策略；在策略与历史消息来源保护确定前不能将 Head 用于生产。
+`queueCursor(channelId, consumerKey, initialAfterSequence)` 以 Channel 和不透明 consumer key 标识持久进度；不同 key 独立。首次创建必须显式指定起点，已有游标不会因重新初始化而改变。消费者处理成功后调用 `advanceQueueCursor(expected, throughSequence)`，以旧位置比较并交换（CAS）推进到已处理的批次末尾；读取、处理失败或取消时不推进。消费者自行决定首次起点、正常重启和关闭再打开的 backlog 策略，以及何时确认。不得用大于实际处理范围的位置确认，否则会跳过消息。游标持久化用于重启后恢复：只存在内存时，从头恢复会重放，从当前末尾恢复会遗漏。游标不是工作完成或 Host 接纳的证明。CAS 也不是 exactly-once：处理产生副作用后、确认前崩溃会重放，消费者须处理重复和并发协调。同一个 key 的活跃处理必须由消费者自行协调；CAS 不阻止两个处理者在确认前重复产生副作用，也不是取消或生命周期栅栏。
 
-## 单个 consumer 对象内的调度
+队列不枚举消费者，也不管理其生命周期、定时器或执行任务。通知本身不查询游标；消费者按自己的批次读取。旧实现是每次新消息唤醒并枚举成员，每批读取进度、消息、再次校验进度，再在处理成功后 CAS，并非每条通知直接查询游标。
 
-消费者需要显式创建并 `start()`。启动先订阅 Channel 事件和内部 activation 取消，再分页发现当前
-live 实例及进度；不依赖 Console 在线。固定窗口默认 300 ms，允许 0–60000 ms；每批默认 50 条，
-上限 200 条。这些是基础类参数，不是已发布的 Head 产品默认值。
+## 与 Head 和 Host 的边界
 
-调度保留在 Channel 内，不引入 MQ、持久任务或全局并发队列。每个 Channel/Pet 只有一份状态：
+后续 #1080 的实例侧 Head 可订阅并判断公开消息，只有需要执行时才使用既有 dispatch；之后仍由 Host 原有准入队列处理。Timeline 是公开消息日志，Host 队列是执行准入，两者前后衔接而不重复 dispatch。Head 需要自行设计实例生命周期的取消、恢复和防重复效果；取消不能撤销已经发生的副作用。#1079 不改变现有 @ 或 Router 路径。
 
-- 唤醒设置 `dirty`；同一固定窗口内重复唤醒不新增定时器，也不延长窗口。
-- 窗口到期清除这次 `dirty`，`processing` 持有真实处理 Promise 和取消信号。
-- 处理期间的新唤醒只重新标记 `dirty`，同一 activation 不并行处理，不同实例独立推进。
-- 成功后如果有新唤醒或下一页，真实 Promise 结束才启动一个后续固定窗口。
-- 失败清除本次处理期间累积的唤醒，保留 cursor；后续显式唤醒才能再试。
-  旧 activation 已取消时，不清除后续有效 activation 的显式唤醒。
+原 #1079 head `7920149a510a896c3cf1f8a28a787249f0d51453` 保留了移出的 `ChannelTimelineConsumer`、instance enrollment 和 lifecycle 测试，可作为 #1080 迁移参考，不能直接恢复其 Channel 内逐实例调度。#1080 应先合并本队列提交，再将消费逻辑放入 Pet Instance 所带 Head，处理 instance 说明、模型调用导出位置及关闭/重开策略；在替换旧 Router 前不得同时启用两条派发路径。
 
-callback 收到原始消息、作者、引用、附件及冻结的批次末尾，消息不被合并或改写。
-末次 awaited 读取之后，开始 callback 前再次同步核实 live owner 和 exact activation。
-成功后只以 CAS 推进到冻结末尾；处理期间的新消息或 callback 发出的公开回复属于后续批次。
-callback 不是执行入口：本层尚无相关性、@、自输出或可信来源过滤，不可直接 dispatch。
+真实 PostgreSQL 多连接测试需独立测试数据库和 `PINPAWO_TEST_POSTGRES_URL`；PGlite 单连接不能证明跨连接的提交顺序。
 
-## 取消、停止与失败
+## 旧版开发数据库
 
-Close/Remove 的 admission fence 开始后，Channel 内部同步清除等待窗口、abort 在途 signal，
-随后更换持久 activation token。它不等待最终 `pet.closed`/`pet.removed` 或 `channel.member.left` 事件，
-也不把临时 Close 冒充永久 Remove。Host stop 与短存储 fence 均须 settled 成功，才能写最终 marker；
-任一失败或结果未知不能报告关闭/移除成功。
-
-registry 不等待任意 consumer callback，仍由既有 Host runtime close 证明停止。
-callback 必须在每个外部 effect 前核实取消及 exact activation；abort 无法撤销已经产生的效果。
-即使 callback 忽略 abort，旧代际也不能阻塞或改写新 activation 的调度，更不能确认新 activation。
-独立的 `consumer.stop()` 会等待真实 callback Promise；callback 一直不结束时，这个 stop 也一直等待。
-已 stop 的 consumer 对象不能重新 start；Pet 临时 Close 可以 Reopen，永久 Remove 不可复用。
-
-callback、读取或 ack 失败均保留 cursor，不自动重试。一个实例失败不阻塞其他实例。
-通知是提交后的 best effort，遗漏通知可能需要后续显式唤醒或重启。本层不提供分布式 worker lease。
-
-## 保证与后续边界
-
-消费进度表示 callback 已处理公开消息，不表示 Host 已接纳或 Pet 已完成。
-单对象串行和持久 cursor 不保证跨进程或崩溃后的 exactly-once：effect 产生但 ack 尚未落库时崩溃，
-重启仍可能处理同一批。本层不新增 Host 上下文接口，不读取或创建 Pet session。
-
-当前生产路径可以保留 inactive 实例已接纳工作的最终输出为历史，但消费者没有持久的 history-only
-资格标记。后续 Head 必须先解决可信来源、防确认循环和每次 effect 的 exact activation admission，
-确保历史输出不会重新触发交接，再安装消费者。本轮不为未来策略扩展 message schema。
-
-测试覆盖 SQLite、PGlite PostgreSQL 方言、真实 SQLite 文件重启、before-live cutoff、raw owner 隔离、
-稳定 cursor、旧 activation CAS、取消、固定窗口、失败隔离、冻结批次、分页和并发唤醒。
-真实 PostgreSQL 多连接 commit-order 测试需 `PINPAWO_TEST_POSTGRES_URL`；PGlite 单连接不能替代它。
+曾运行原 #1079 的数据库已记录 `0003_channel_consumption`，新版本的迁移名称不同，不能直接原地启动。需要另行制定保留原始数据和消费者身份映射的迁移；不要重置数据库或删除旧表以绕过此问题。main 的既有数据库和新建数据库不含该旧迁移。

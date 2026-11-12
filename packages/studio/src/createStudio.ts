@@ -124,27 +124,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         open: migrations => storage.open('channel', migrations),
       });
     },
-    prepareInstance: async (pet) => {
-      const channel = plugins.find(plugin => plugin.name === 'channel');
-      await channel?.petChannels?.prepareInstance?.(pet, {
-        dialect: storage.dialect,
-        open: migrations => storage.open('channel', migrations),
-      });
-    },
-    deactivateInstance: (pet) => {
-      const channel = plugins.find(plugin => plugin.name === 'channel');
-      return channel?.petChannels?.deactivateInstance?.(pet, {
-        dialect: storage.dialect,
-        open: migrations => storage.open('channel', migrations),
-      }) ?? Promise.resolve();
-    },
-    activateInstance: (pet) => {
-      const channel = plugins.find(plugin => plugin.name === 'channel');
-      channel?.petChannels?.activateInstance?.(pet, {
-        dialect: storage.dialect,
-        open: migrations => storage.open('channel', migrations),
-      });
-    },
     onLive: (pet) => lifecycleObservers.set(pet.registration.petId, observeDispatchLifecycle(pet)),
     onClosed: (petId) => {
       lifecycleObservers.get(petId)?.();

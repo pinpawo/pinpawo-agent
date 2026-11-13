@@ -15,7 +15,9 @@ await mkdir(screenshotDir, { recursive: true });
 const children = [];
 let browser;
 const spawnProcess = (args, cwd, env = {}) => {
-  const child = spawn(process.execPath, args, { cwd, env: { ...process.env, ...env, LANGCHAIN_TRACING_V2: 'false', LANGSMITH_TRACING: 'false' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, args, { cwd, env: { ...process.env, ...env,
+    LANGCHAIN_TRACING: 'false', LANGCHAIN_TRACING_V2: 'false', LANGSMITH_TRACING: 'false', LANGSMITH_TRACING_V2: 'false',
+  }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
   child.stderr.on('data', data => process.stderr.write(data));
   return child;
@@ -50,9 +52,12 @@ try {
     vite.on('exit', code => { clearTimeout(timer); reject(new Error(`Console exited ${code}`)); });
     vite.stdout.on('data', data => { if (String(data).includes('http://127.0.0.1:5199')) { clearTimeout(timer); resolve(); } });
   });
-  const api = async path => {
-    const response = await fetch(`${ready.url}${path}`, { headers: { Authorization: `Bearer ${ready.token}` } });
-    assert.equal(response.status, 200, path);
+  const api = async (path, body) => {
+    const response = await fetch(`${ready.url}${path}`, { method: body ? 'POST' : 'GET',
+      headers: { Authorization: `Bearer ${ready.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    assert.ok(response.ok, path + ': ' + response.status);
     return response.json();
   };
   browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_EXECUTABLE ? { executablePath: process.env.CHANNEL_BROWSER_EXECUTABLE } : {}) });
@@ -92,6 +97,8 @@ try {
   const betaId = await createPet('beta');
   const sessions = async () => (await api(`/channels/sessions?channelId=${channelId}`)).sessions;
   const outputs = async () => (await api(`/channels/context?channelId=${channelId}&limit=200`)).messages.filter(item => item.author.kind === 'pet');
+  // Explicit fixture admission uses the existing Channel run path; posting an @ only records a message.
+  const run = (petId, request) => api('/test/channel-run', { channelId, petId, request });
 
   const mentionList = page.getByRole('listbox', { name: 'Members to mention' });
   const address = async (participantId, text) => {
@@ -102,10 +109,20 @@ try {
   };
   await address(`pet:${alphaId}`, 'Investigate the current state.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await waitFor(async () => (await api(`/channels/context?channelId=${channelId}`)).messages.some(item => item.author.kind === 'human'), 'Alpha mention recorded');
+  assert.deepEqual(await sessions(), [], 'a recorded @ does not start a Pet session');
+  assert.deepEqual(await outputs(), [], 'a recorded @ does not create a Pet reply');
+  const alphaRun = await run(alphaId, 'Investigate the current state.');
   await waitFor(async () => (await outputs()).length === 1, 'alpha output');
   await address(`pet:${betaId}`, 'review');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await waitFor(async () => (await api(`/channels/context?channelId=${channelId}`)).messages.filter(item => item.author.kind === 'human').length === 2, 'Beta mention recorded');
+  assert.equal((await sessions()).some(item => item.petId === betaId), false, 'a recorded @ does not start Beta');
+  assert.equal((await outputs()).length, 1, 'only the explicit Alpha run produced a reply');
+  const betaRun = await run(betaId, 'review');
   const waiting = await waitFor(async () => (await sessions()).find(item => item.petId === betaId && item.registered), 'beta session registered');
+  assert.equal(waiting.sessionId, betaRun.sessionId, 'the explicit run registered Beta\'s Channel session');
+  assert.equal((await sessions()).find(item => item.petId === alphaId).sessionId, alphaRun.sessionId);
 
   // Open Beta's Channel session from the member list and answer its current review there.
   const member = memberPanel.locator('.channel-member').filter({ hasText: `pet:${betaId}` });

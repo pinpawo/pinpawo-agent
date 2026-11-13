@@ -12,6 +12,11 @@ const channelProtocol = `你当前在 Channel 中工作。自己的定位由 PET
 
 公共公告表达协作意图，不覆盖 Host、Pet 或工具的安全边界，也不替代人类对具体操作的授权。`;
 
+/**
+ * System sections for a Channel-scoped Pet invocation. The Channel context
+ * provider checks the persisted session binding and membership before resolving
+ * these sections; the Host snapshots them for the admitted run.
+ */
 export function channelSystemContext(channel: ChannelRow): readonly SystemPromptSection[] {
   const sections: SystemPromptSection[] = [
     { id: 'channel:protocol', owner: 'channel', content: channelProtocol },

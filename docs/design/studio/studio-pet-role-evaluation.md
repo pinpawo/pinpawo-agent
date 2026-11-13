@@ -21,14 +21,17 @@ a synthetic shared Channel announcement provide the task context. The judge's
 criteria are not injected into the subject's prompt.
 
 The [Channel input builder](../../../tests/agent-evals/src/studio-pet-channel-input.ts)
-uses the production `channelDispatchInput` formatter to create one current
-message. Its author may be Human or a Pet, and it may reply to a specified source
-message. The body separates the current request from source-attributed quoted
+uses the [test-only `channelDispatchInput` formatter](../../../tests/support/channelDispatchInput.ts)
+to represent one synthetic current message. Its author may be Human or a Pet,
+and it may reply to a specified source message. The body separates the current request from source-attributed quoted
 material explicitly supplied by that author. Original authors, message IDs, and
 sequence order remain attached to those quotations. This does not pretend that
 the Channel automatically hydrated its history, that the Pet previously received
 all those messages, or that a query tool fetched them. Historical quotations are
-not converted into consecutive live HumanMessages.
+not converted into consecutive live HumanMessages. This synthetic envelope is
+test input, not a production Channel dispatch contract or proof of author identity.
+Channel stores messages and mentions without starting a Pet; the fixture admits
+its request through an explicit Studio dispatch.
 
 The [fixture](../../../tests/agent-evals/src/studio-pet-invocation-fixture.ts) seeds
 an isolated Channel and membership in the real Channel store, then reserves its
@@ -37,7 +40,7 @@ The real [Channel Plugin](../../../plugins/channel/src/channelPlugin.ts) resolve
 shared context through the registered provider, including its binding and
 membership checks. The fixture then uses the Host's
 [`buildLocalChatAgentInput`](../../../services/host/src/agent/agentChannel.ts),
-[`snapshotInvocationSections` and `withInvocationSections`](../../../services/host/src/host/invocationSystemContext.ts)
+[`snapshotInvocationContext` and `withInvocationContext`](../../../services/host/src/host/invocationSystemContext.ts)
 to assemble runtime context. It does not independently concatenate PET.md and
 Channel instructions into a substitute system prompt.
 
@@ -156,7 +159,7 @@ actual model inputs rather than matching fixed prompt prose.
 | Identity and Capability summaries before goal-setting, and Supervisor runtime context. | [Entry tests](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.test.ts) and [Supervisor tests](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.test.ts). |
 | Child inheritance, concurrent invocation isolation, attempted child overrides, and checkpoint resume. | [Subagent system context tests](../../../packages/pet-agent/src/subagent/systemContext.test.ts). |
 | Actual Channel provider, Resident Host dispatch and queue, stable system input across turns, updated announcements, and cross-Channel isolation. | [Channel prompt integration](../../../tests/studio-e2e/src/channelPromptContext.test.ts). |
-| Actual Entry, Supervisor, Capability execution, and Boundary input; public root reply and recipient routing rather than publication of private subtask output. | [Channel public reply integration](../../../tests/studio-e2e/src/channelPublicReply.test.ts). |
+| Actual Entry, Supervisor, Capability execution, and Boundary input after explicit dispatch; public root replies and recorded mentions without starting the mentioned Pet or publishing private subtask output. | [Channel public reply integration](../../../tests/studio-e2e/src/channelPublicReply.test.ts). |
 | One current author, attributed source quotations, reply targets, and quoted envelope/fence isolation. | [Evaluation Channel input tests](../../../tests/agent-evals/src/studio-pet-channel-input.test.ts). |
 | Real role assembly, optional disclosure, continuous transitions, legal human questions, and failure evidence. | [Role harness tests](../../../tests/agent-evals/src/studio-pet-role-evaluation.test.ts). |
 | Actual model-input observation, stage correlation, payload capture controls, and native-call diagnostics. | [Model observer tests](../../../tests/agent-evals/src/studio-pet-model-observer.test.ts). |

@@ -487,7 +487,10 @@ test('buildStudio connects each Pet Head to its configured model profile and the
   const completed = new Promise<void>(resolve => { repliesDone = resolve; });
   const channel = {
     name: 'channel', toolkits: [],
-    petChannels: { requireChannel: async (id: string) => { assert.equal(id, 'one'); } },
+    petChannels: {
+      requireChannel: async (id: string) => { assert.equal(id, 'one'); },
+      getChannelWorkdir: async () => undefined,
+    },
     start(context: StudioPluginContext) { channelContext = context; },
     head: {
       readContext: async () => ({ messages: [] }),

@@ -54,10 +54,11 @@ Hook 不取出消息、不追加用户正文、不写 checkpoint，也不构造 
 
 ## Channel 的提示
 
-Channel 消息和 @ 只记录对话，不选择接收者或自动启动 Pet。显式 Host dispatch，以及
-schedule/trigger 调用独立的 `run()` 入口，仍可启动带 Channel scope 和固定 Pet session
-绑定的运行。当前没有 Pet Head，旧 Channel decision LLM、`contextHint` 和模型 `focus`
-不属于这条输入路径。
+Channel 记录对话并发布实时事件，不选择接收者。在线 Pet Instance 的 Head 精确订阅所属
+Channel 的 topic，自行判断忽略、轻量回复或请求 Host dispatch；实例停用时取消订阅，
+离线漏掉的事件不补发。Head 的派发保留原消息、引用及附件，经过既有的 Channel session
+绑定和 Host admission。显式 Host dispatch，以及 schedule/trigger 的独立 `run()` 入口
+仍可使用；旧 Channel decision LLM、`contextHint` 和模型 `focus` 不属于这条输入路径。
 
 Channel 通过 scoped context provider 提供 invocation `hint`，提醒先委派显式配置的
 `channel_context` Capability 读取最新相关消息，再判断本轮工作。没有该 Capability 时，

@@ -53,7 +53,7 @@ automatic retry, timeout or durable replay. Exact contracts live in the API refe
 Channel owns membership, public messages and fixed Channel/Pet session bindings.
 The [Channel model](../design/studio/channel-model.md) describes its data and
 membership rules; [addressing and execution](../design/studio/channel-addressing-and-execution.md)
-covers mentions, Reply, trusted source and observation limits. Messages and mentions do not automatically start Pets.
+covers mentions, Reply, trusted source and observation limits. Online Pet Heads independently decide how to respond to messages.
 Scheduler/Trigger remain independent Plugins; [queue auditing](../design/studio-dispatch-queue-notices.md)
 is an opt-in policy, not Channel queue ownership.
 

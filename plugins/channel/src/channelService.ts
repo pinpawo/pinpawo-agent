@@ -317,7 +317,7 @@ export class ChannelService {
    * With an externalRef already saved for this author, the earlier message
    * is returned and `created` is false.
    */
-  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string } = {}): Promise<{
+  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
     message: ChannelMessage; created: boolean; mentionError?: string;
   }> {
     const value = channelMessageSchema.parse(input);
@@ -339,10 +339,16 @@ export class ChannelService {
       let mentions: ChannelMention[];
       try { mentions = parseChannelMentions(value.body, value.mentions, await this.membersIn(store, channel.channelId, labels)); }
       catch (error) {
-        if (trustedAuthor.kind !== 'pet') throw error;
+        if (trustedAuthor.kind !== 'pet' || options.preventPetMentions) throw error;
         mentionError = error instanceof Error ? error.message : String(error);
         mentions = [];
       }
+      if (options.preventPetMentions && mentions.some(mention => mention.participantId.startsWith('pet:'))) {
+        throw new Error('This reply cannot mention a Pet.');
+      }
+      // A Head may be stopped while membership or context lookups are pending.
+      // Do not begin its write after cancellation.
+      options.signal?.throwIfAborted();
       const messageId = randomUUID();
       const message = await store.appendMessage({
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),

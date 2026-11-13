@@ -80,9 +80,9 @@ Resolve `participantId` from `channels members`; labels are display names. Repea
 not a recipient. Plain `@label` does not address anyone; valid direct Markdown
 links such as `[@Reviewer](participant:pet:reviewer)` also address participants,
 so inspect the body even when no `--mention` is passed. Code and quoted examples
-do not address recipients. A message or mention records conversation and does
-not automatically start a Pet. A future Pet Head is not implemented. Use an
-explicit dispatch or configured schedule/trigger for work. Do not blindly retry an
+do not address recipients. Each online Pet Instance has a Head that can independently ignore a message,
+reply, or request a dispatch. A mention does not guarantee a response. Explicit
+dispatch and configured schedules/triggers remain available. Do not blindly retry an
 uncertain send: independent sends create independent messages.
 
 ## Studio clients

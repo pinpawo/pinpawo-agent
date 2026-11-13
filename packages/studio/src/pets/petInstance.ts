@@ -10,6 +10,8 @@ export class StudioPetError extends Error {
 
 /** The registration and runtime ports the Host lent Studio. */
 export type LiveStudioPet = { registration: StudioPetRegistration; runtime: StudioPetRuntime };
+/** Subscribe one active Pet to its owner Channel's live Timeline. */
+export type SubscribePetTimeline = (pet: LiveStudioPet, signal: AbortSignal) => () => void;
 type LifecycleKind = 'create' | 'restore' | 'close' | 'remove' | 'reopen';
 type Transition = { kind: LifecycleKind; promise: Promise<StudioPet> };
 
@@ -20,12 +22,15 @@ type Transition = { kind: LifecycleKind; promise: Promise<StudioPet> };
 export class PetInstance {
   private readonly identity: Readonly<Omit<StudioPetRegistration, 'name'>>;
   private resident: LiveStudioPet | undefined;
+  private timeline: { controller: AbortController; unsubscribe: () => void } | undefined;
   private transition: Transition | undefined;
   /** Failed/uncertain teardown is not permission to dispatch or reassemble. */
   private unavailable = false;
 
   constructor(pet: StudioPet, private readonly options: {
     assemble: StudioPetAssembler;
+    subscribePetTimeline?: SubscribePetTimeline;
+    canSubscribeTimeline?: () => boolean;
     onLive: (pet: LiveStudioPet) => void;
     onClosed: (petId: string) => void;
     onChange: (type: 'pet.closed' | 'pet.removed' | 'pet.reopened', pet: StudioPet) => void;
@@ -80,11 +85,14 @@ export class PetInstance {
     if (!this.needsRestore) throw new StudioPetError(`Pet "${this.petId}" already has a resident lifecycle.`, 'busy');
   }
 
-  private async activateRuntime(name: string): Promise<void> {
+  private async activateRuntime(name: string, subscribeTimeline = true): Promise<void> {
     const registration = { ...this.identity, name };
     const live = { registration, runtime: await this.options.assemble({ ...registration }) };
     this.resident = live;
-    try { this.options.onLive(live); }
+    try {
+      if (subscribeTimeline) this.subscribeTimeline(live);
+      this.options.onLive(live);
+    }
     catch (error) {
       // onLive may have partially exposed this runtime. Fence admission and
       // retain its handle/observation until cleanup proves it actually stopped.
@@ -107,6 +115,10 @@ export class PetInstance {
     if (this.resident && !confirmStop) {
       throw new StudioPetError(`Confirm ${kind === 'remove' ? 'permanent removal' : 'temporary Close'}: stop current task and cancel unstarted queued tasks, retain history.`, 'confirmation_required');
     }
+    // Stop observing before any asynchronous teardown, including while the
+    // Host waits for accepted work to settle. Abort any in-flight decision and
+    // unsubscribe before allowing the runtime to close.
+    this.unsubscribeTimeline();
     return this.begin(kind, async () => {
       this.unavailable = true;
       // Fence admission first. Keep the handle if stop fails; commit only after
@@ -140,8 +152,13 @@ export class PetInstance {
     if (!this.needsReopen(row)) return { promise: Promise.resolve({ ...row }) };
     const { closedAt: _closedAt, ...reopened } = row;
     return this.begin('reopen', async () => {
-      await this.activateRuntime(row.name);
-      try { await persist(); }
+      await this.activateRuntime(row.name, false);
+      try {
+        await persist();
+        // A closed Pet does not observe new messages until its Reopen is
+        // committed. Shutdown can meanwhile disable subscriptions entirely.
+        this.subscribeTimeline(this.resident!);
+      }
       catch (error) {
         this.unavailable = true;
         // A failed/unknown write must clean up its replacement before a retry.
@@ -166,6 +183,7 @@ export class PetInstance {
 
   /** Studio shutdown is not Close/Remove and never writes a lifecycle marker. */
   async shutdown(): Promise<void> {
+    this.unsubscribeTimeline();
     const live = this.resident;
     this.resident = undefined;
     // Let registry shutdown detach every resident before any close callback.
@@ -184,11 +202,33 @@ export class PetInstance {
   }
 
   private async stop(): Promise<void> {
+    this.unsubscribeTimeline();
     const live = this.resident;
     await live?.runtime.close();
     if (live) {
       this.resident = undefined;
       this.options.onClosed(this.petId);
+    }
+  }
+
+  /** Cancel in-flight work and unsubscribe synchronously when the Pet deactivates. */
+  unsubscribeTimeline(): void {
+    const timeline = this.timeline;
+    this.timeline = undefined;
+    if (!timeline) return;
+    timeline.controller.abort();
+    timeline.unsubscribe();
+  }
+
+  private subscribeTimeline(live: LiveStudioPet): void {
+    if (this.options.canSubscribeTimeline?.() === false || !this.options.subscribePetTimeline) return;
+    const controller = new AbortController();
+    try {
+      const unsubscribe = this.options.subscribePetTimeline(live, controller.signal);
+      this.timeline = { controller, unsubscribe };
+    } catch (error) {
+      controller.abort();
+      throw error;
     }
   }
 

@@ -85,7 +85,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
 ## Pet 在 Channel 里
 
 - **Pet 的消息就是普通消息。** Channel 校验 resident 的 Channel scope、绑定 session 和成员身份后，将公开最终回复写入 `channel_messages`，作者为 `pet:<id>`，Agent Session 消息 id 作为 `external_ref` 去重。Human 与 Pet Instance 是对等生产者，保存后发布相同的实时消息事件；工具调用和私有过程不写入 Timeline。
-- **@ 只记录寻址。** 当前成员的 mentions 和同 Channel 的 `replyTo` 随消息保存；Channel 不决定回应或 dispatch。当前没有 Pet Head，消息和 @ 都不会自动启动 Pet。
+- **@ 只记录寻址。** 当前成员的 mentions 和同 Channel 的 `replyTo` 随消息保存；Channel 不决定回应或 dispatch。每个在线 Pet Instance 的 Head 独立判断是否忽略、直接回复或请求 Host dispatch；@ 本身不保证启动。
 - **过程不存，成员也不看过程。** Pet 的 operation（工具执行等）、subagent 消息和运行状态（排队、运行、等待审批、失败）
   不写进 Channel，Channel 成员只能看到主对话的公开消息（和下面的"正在输入"）。持本机 token 的人仍可通过 `channel_sessions` 找到 session，
   用已有的 Pet session 视图（`PetSessionView`，`/pet-sessions/snapshot|events|review`，#925）查看过程并处理审批；
@@ -97,7 +97,7 @@ Channel 只有这四张表。`channel_outputs`、`channel_tool_call_messages`、
   `channel_read_context`（Pet 视角）不带这一项。
 ## 事件
 
-新消息提交后，`ChannelService.subscribe` 按注册顺序向当前订阅者实时广播 `channel.message.created`，不等待异步处理，并隔离订阅者失败；异步处理可重叠，并发写入不保证发布顺序。Channel 同时将事件转发到 Studio 事件总线；该总线保留每个订阅者独立的进程内 FIFO：在线订阅者处理慢时，后续事件可能在其队列中等待，但不阻塞其他订阅者。这不是持久队列；退订或离线期间错过的事件不补发、不重放，历史仍可查询。Channel 不追踪消费者、ack 或消费游标，也不提供 outbox 或 exactly-once 保证。Channel 不替订阅者选择是否回应。
+新消息提交后，`ChannelService.subscribe` 按注册顺序向当前订阅者实时广播 `channel.message.created`，不等待异步处理，并隔离订阅者失败；异步处理可重叠，并发写入不保证发布顺序。Channel 同时将事件转发到 Studio 事件总线；该总线保留每个订阅者独立的进程内 FIFO：在线订阅者处理慢时，后续事件可能在其队列中等待，但不阻塞其他订阅者。这不是持久队列；退订或离线期间错过的事件不补发、不重放，历史仍可查询。Channel 不追踪消费者、ack 或消费游标，也不提供 outbox 或 exactly-once 保证。Channel 不替订阅者选择是否回应。新消息使用 Channel id 作为生产者自己的 topic；Pet Instance 精确订阅所属 Channel，其他 Channel 的消息不会进入该订阅者的待处理工作。topic 仅用于路由，不替代成员校验或授权。
 
 ## schedule / trigger
 

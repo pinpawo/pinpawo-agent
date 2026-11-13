@@ -46,12 +46,12 @@ See [Reference](../reference/index.md) for the current public reading path.
 
 ## Studio applications and Plugins
 
-- [Channel 图片输入](studio/channel-image-input.md) — Timeline 保存结构化附件；消息不自动派发，Host 图片输入准入独立
+- [Channel 图片输入](studio/channel-image-input.md) — Timeline 保存结构化附件；Head 可将附件传入派发，Host 图片输入准入独立
 - [Channel 协作提示词](studio/channel-collaboration-prompt.md) — draft for Channel-scoped collaboration context and Pet invocation isolation
 - [Channel 模型](studio/channel-model.md) — Channel、成员、消息与存储规则；
   [寻址、执行与状态](studio/channel-addressing-and-execution.md) — 寻址、固定 session、
   可信来源、公开回复与 live 事件；[Channel 路由](studio/channel-routing.md) — 已退役；
-  消息与 @ 不自动启动 Pet，未来 Pet Head 尚未实现。
+  在线实例的 Head 独立订阅所属 Channel，判断忽略、回复或请求 Host dispatch。
   阶段原文见 [Channel 历史](../history/studio/channel-evolution.md)
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
   Channel, Scheduler, Notice, Trigger, and Knowledge APIs

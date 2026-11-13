@@ -5,7 +5,7 @@ import {
   type PetDocument,
 } from '@pinpawo/pet-agent';
 import { prepareStudio, type PreparedStudio } from '../createStudio';
-import type { Studio, StudioPlugin } from '../studioContract';
+import type { Studio, StudioPlugin, StudioModels } from '../studioContract';
 import type { StudioPetRegistration, StudioPetRuntime } from '../types';
 import {
   buildHostRuntimeConfig,
@@ -26,6 +26,7 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
+import { bindPetHeadChannel, createHeadDecision, createPetHead } from './petHead';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -274,6 +275,30 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     };
   };
 
+  const models: StudioModels = {
+    resolve: (profileId?: string) => {
+      const config = input.modelProfiles.resolve(profileId);
+      return {
+        profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
+        protocol: config.protocol ?? 'openai-compatible',
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        model: config.model,
+        createChatModel: (options) => buildModel({
+          ...config,
+          maxOutputTokens: options.maxOutputTokens,
+          maxRetries: options.maxRetries,
+        }, {
+          preferDeterministic: options.preferDeterministic,
+          ...(options.streaming !== undefined ? { streaming: options.streaming } : {}),
+          ...(options.forceChatCompletions !== undefined ? { forceChatCompletions: options.forceChatCompletions } : {}),
+        }),
+        structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
+      };
+    },
+  };
+  const channelHead = (plugins.find(plugin => plugin.name === 'channel') as (StudioPlugin & { head?: Parameters<typeof bindPetHeadChannel>[1] }) | undefined)?.head;
+
   prepared = prepareStudio({
     studioId: studioConfig.studioId,
     definitions: resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
@@ -283,28 +308,25 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     ...(studioConfig.credentials
       ? { credentialsKey: await readStudioCredentialsKey(studioConfig.credentials.keyFile) }
       : {}),
-    models: {
-      resolve: (profileId?: string) => {
-        const config = input.modelProfiles.resolve(profileId);
-        return {
-          profileId: config.modelProfileId ?? profileId ?? input.modelProfiles.defaultProfileId,
-          protocol: config.protocol ?? 'openai-compatible',
-          baseUrl: config.baseUrl,
-          apiKey: config.apiKey,
-          model: config.model,
-          createChatModel: (options) => buildModel({
-            ...config,
-            maxOutputTokens: options.maxOutputTokens,
-            maxRetries: options.maxRetries,
-          }, {
-            preferDeterministic: options.preferDeterministic,
-            ...(options.streaming !== undefined ? { streaming: options.streaming } : {}),
-            ...(options.forceChatCompletions !== undefined ? { forceChatCompletions: options.forceChatCompletions } : {}),
-          }),
-          structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
-        };
-      },
-    },
+    models,
+    ...(channelHead ? { subscribePetTimeline: ({ registration }: { registration: StudioPetRegistration }, signal: AbortSignal) => {
+      const definition = definitions.get(registration.definitionId);
+      const description = input.petDocuments?.get(registration.definitionId)?.content;
+      // Resolve and create the model lazily, so a restored Pet subscribes before
+      // Plugin activation without making model availability a startup requirement.
+      let decide: ReturnType<typeof createHeadDecision> | undefined;
+      const channel = bindPetHeadChannel(registration.channelId, channelHead, prepared.studio.subscribe);
+      const handleMessage = createPetHead({
+        pet: registration,
+        ...(description ? { description } : {}),
+        channel,
+        decide: (value, signal) => {
+          decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId));
+          return decide(value, signal);
+        },
+      });
+      return channel.subscribe(message => handleMessage(message, signal));
+    } } : {}),
   });
   try {
     // Before any transport listens: a TUI may connect to any active Pet.

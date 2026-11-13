@@ -51,7 +51,8 @@ export type {
  * `plugins.activated`，依赖其他 Plugin hook 的工作可以等它再开始。`payload` 不被总线解释或校验。
  *
  * 这样互不认识的插件之间才能交换信息:发布方不需要知道谁在听,订阅方
- * 按自己认识的 type 过滤即可。广播是进程内、非持久的，不重放离线事件；
+ * 可按 producer 的 source/topic 定向订阅，或订阅全部事件后按自己认识的 type 过滤。
+ * 交付是进程内、非持久的，不重放离线事件；
  * 每个订阅者按交付顺序串行处理，慢 handler 只会积压该订阅者的待处理事件，
  * 同步异常或异步 rejection 不影响其他订阅者。退订或关闭完成后尚未开始的处理会跳过；
  * 关闭进行时已发布事件仍可能开始处理。
@@ -63,6 +64,8 @@ export type StudioEvent = {
   type: string;
   /** 发布该 event 的插件名，或 `studio` 这一 core producer。 */
   source: string;
+  /** Producer-owned routing key; Studio matches it exactly without interpreting it. */
+  topic?: string;
   /** Producer-owned context; Studio does not assign meaning to its fields. */
   metadata?: JsonObject;
   payload?: unknown;
@@ -73,6 +76,9 @@ export type StudioEvent = {
 export type StudioEventInput = Omit<StudioEvent, 'eventId' | 'source' | 'occurredAt'>;
 
 export type StudioEventHandler = (event: StudioEvent) => void | Promise<void>;
+
+/** Match one producer's exact topic; omission subscribes to all live events. */
+export type StudioEventSubscriptionFilter = { source: string; topic: string };
 
 export type StudioPluginHookInstaller<T> = (hook: T) => void | (() => void);
 
@@ -125,7 +131,7 @@ export type StudioPluginContext = {
   allocateSessionId: (petId: string) => string;
   notify: (event: StudioEventInput) => void;
   /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
-  subscribe: (handler: StudioEventHandler) => () => void;
+  subscribe: (handler: StudioEventHandler, filter?: StudioEventSubscriptionFilter) => () => void;
   /** The live Pets. */
   listPets: () => StudioPetRegistration[];
   /** Create and rename Pets, and read their records. */
@@ -259,7 +265,7 @@ export type Studio = {
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
   /** eventId 省略时由 studio 分配。 */
   notify: (event: Omit<StudioEvent, 'eventId'> & { eventId?: string }) => void;
-  subscribe: (handler: StudioEventHandler) => () => void;
+  subscribe: (handler: StudioEventHandler, filter?: StudioEventSubscriptionFilter) => () => void;
   listPets: () => StudioPetRegistration[];
   pets: StudioPets;
   shutdown: () => Promise<void>;

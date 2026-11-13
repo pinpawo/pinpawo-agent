@@ -39,9 +39,9 @@ Plugin 拥有领域历史、调度与知识投影。精确接口以 API 为准�
 
 Channel 持有成员、公开消息和固定的 Channel/Pet session 绑定。[Channel 模型](../../design/studio/channel-model.md)
 说明数据与成员规则；[寻址与执行](../../design/studio/channel-addressing-and-execution.md)说明
-参与者寻址、默认 Reply、可信来源与观察边界。Channel 消息和 @ 只记录对话，
-不自动启动 Pet；未来的 Pet Head 尚未实现。显式 Host dispatch、schedule 和 trigger
-入口仍可使用。
+参与者寻址、默认 Reply、可信来源与观察边界。在线 Pet Instance 的 Head 独立订阅所属
+Channel，判断忽略、回复或请求 Host dispatch；@ 不保证回应。显式 Host dispatch、
+schedule 和 trigger 入口仍可使用。
 Scheduler/Trigger 仍为独立 Plugin；[队列巡检](../../design/studio-dispatch-queue-notices.md)
 是可选策略，不把队列所有权交给 Channel。
 HTTP Plugin 提供 control plane；同进程独立的 Host Pet listener 提供 Agent Session

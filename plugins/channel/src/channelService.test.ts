@@ -52,6 +52,18 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   }
 
+  test(`${backend}: guarded Pet replies cannot introduce Pet mentions`, () => withService(async service => {
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Reply guard' }, ['executor', 'other'])).channel;
+    const incoming = await service.postMessage({ kind: 'pet', id: 'other' }, channelId, { body: 'A contribution' });
+    const reply = await service.postMessage(executor, channelId, { body: 'Thank you', replyTo: incoming.message.messageId }, { preventPetMentions: true });
+    assert.equal(reply.message.replyTo, incoming.message.messageId);
+    await assert.rejects(service.postMessage(executor, channelId, {
+      body: '[@other](participant:pet:other), please confirm', replyTo: incoming.message.messageId,
+    }, { preventPetMentions: true }), /cannot mention a Pet/);
+    const history = await service.readContext(owner, channelId);
+    assert.deepEqual(history.messages.map(message => message.body), ['A contribution', 'Thank you']);
+  }));
+
   test(`${backend}: human and Pet deliverables persist unchanged and invalid declarations do not create a message`, () => withService(async (service) => {
     const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Deliverables' }, ['executor'])).channel;
     const deliverables = [{ uri: 'artifact://workspace/session/report/report.pdf', title: 'Report' },

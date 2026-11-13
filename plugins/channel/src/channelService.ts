@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
-  ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
+  ChannelQueueCursor, ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
 } from './store/channelStore';
 
 const identifier = z.string().trim().min(1).max(256);
@@ -331,6 +331,9 @@ export class ChannelService {
     const labels = await this.humanLabels(await this.store.listMembers(identifier.parse(channelId)));
     let mentionError: string | undefined;
     const result = await this.store.transaction(async (store) => {
+      // Sequence allocation can precede another Postgres transaction's commit.
+      // Appends to one Channel hold the same row lock until commit.
+      await store.lockChannel(identifier.parse(channelId));
       const channel = retainedPetReply ? await this.requireChannel(store, channelId)
         : await this.requireMemberIn(store, channelId, trustedAuthor);
       if (value.replyTo && !(await store.getMessage(channel.channelId, value.replyTo))) {
@@ -364,6 +367,46 @@ export class ChannelService {
 
   getMessage(channelId: string, messageId: string): Promise<ChannelMessage | undefined> {
     return this.store.getMessage(channelId, messageId);
+  }
+
+  /** Trusted internal queue API. Notifications from subscribe are best-effort wakeups;
+   * read durable progress and catch up on startup as well as after a wakeup. */
+  async queueHead(channelId: string): Promise<number> {
+    const channel = await this.requireChannel(this.store, channelId);
+    const page = await this.store.readMessages(channel.channelId, { limit: 1 });
+    return page.items.at(-1)?.sequence ?? 0;
+  }
+
+  /** Read forward; pass a previously captured queueHead as through to freeze a batch. */
+  async queueRead(channelId: string, range: { after: number; through?: number; limit: number }) {
+    const position = z.number().int().nonnegative().safe();
+    const value = z.object({ after: position, through: position.optional(), limit: z.number().int().min(1).max(200) }).strict().parse(range);
+    if (value.through !== undefined && value.through < value.after) throw new RangeError('Batch end precedes its start.');
+    const channel = await this.requireChannel(this.store, channelId);
+    return this.store.readMessages(channel.channelId, value);
+  }
+
+  /** Create a cursor at the caller-selected starting position, or recover its durable position.
+   * The key is opaque and scoped to the Channel. This does not schedule or enumerate consumers. */
+  async queueCursor(channelId: string, consumerKey: string, initialAfterSequence: number): Promise<ChannelQueueCursor> {
+    const key = z.string().min(1).max(256).parse(consumerKey);
+    const initial = z.number().int().nonnegative().safe().parse(initialAfterSequence);
+    const channel = await this.requireChannel(this.store, channelId);
+    if (initial > await this.queueHead(channel.channelId)) throw new RangeError('Initial queue cursor exceeds the committed Channel head.');
+    await this.store.createQueueCursor({ channelId: channel.channelId, consumerKey: key, afterSequence: initial });
+    return (await this.store.getQueueCursor(channel.channelId, key))!;
+  }
+
+  /** Acknowledge processed messages only after the consumer succeeds. CAS rejects stale progress.
+   * It is the consumer's responsibility to acknowledge no further than the batch it read.
+   * This cursor is independent of any execution admission or completion. */
+  async advanceQueueCursor(expected: ChannelQueueCursor, throughSequence: number): Promise<boolean> {
+    const cursor = z.object({ channelId: identifier, consumerKey: z.string().min(1).max(256),
+      afterSequence: z.number().int().nonnegative().safe() }).strict().parse(expected);
+    const through = z.number().int().nonnegative().safe().parse(throughSequence);
+    if (through <= cursor.afterSequence) throw new RangeError('Queue cursor must advance past the prior position.');
+    if (through > await this.queueHead(cursor.channelId)) throw new RangeError('Queue cursor exceeds the committed Channel head.');
+    return this.store.advanceQueueCursor(cursor, through);
   }
 
   /** The (Channel, Pet) session, reserved on first use. */

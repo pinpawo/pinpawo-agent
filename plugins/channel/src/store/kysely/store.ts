@@ -1,7 +1,7 @@
 import type { Kysely, Selectable } from 'kysely';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
 import type {
-  ChannelMemberRow, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef, MessagePage, MessageRange, Page, PageOf,
+  ChannelQueueCursor, ChannelMemberRow, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef, MessagePage, MessageRange, Page, PageOf,
 } from '../channelStore';
 import type { ChannelDatabase } from './schema';
 
@@ -135,7 +135,9 @@ export class KyselyChannelStore implements ChannelStore {
     const beyond = async (op: '<' | '>', sequence: number) => !!await this.db.selectFrom('channel_messages').select('sequence')
       .where('channel_id', '=', channelId).where('sequence', op, sequence).limit(1).executeTakeFirst();
     if ('after' in range) {
-      const records = await history.where('sequence', '>', range.after).orderBy('sequence').limit(range.limit + 1).execute();
+      const forward = history.where('sequence', '>', range.after);
+      const records = await (range.through === undefined ? forward : forward.where('sequence', '<=', range.through))
+        .orderBy('sequence').limit(range.limit + 1).execute();
       const items = records.slice(0, range.limit);
       const nextBefore = items[0]?.sequence ?? range.after + 1;
       return {
@@ -151,6 +153,26 @@ export class KyselyChannelStore implements ChannelStore {
       items: items.map(messageRow), nextAfter, hasMore: await beyond('>', nextAfter),
       nextBefore: items[0]?.sequence ?? range.before ?? 1, hasEarlier: records.length > range.limit,
     };
+  }
+
+  async getQueueCursor(channelId: string, consumerKey: string): Promise<ChannelQueueCursor | undefined> {
+    const row = await this.db.selectFrom('channel_queue_cursors').selectAll()
+      .where('channel_id', '=', channelId).where('consumer_key', '=', consumerKey).executeTakeFirst();
+    return row ? { channelId: row.channel_id, consumerKey: row.consumer_key, afterSequence: row.after_sequence } : undefined;
+  }
+
+  async createQueueCursor(cursor: ChannelQueueCursor): Promise<void> {
+    await this.db.insertInto('channel_queue_cursors').values({
+      channel_id: cursor.channelId, consumer_key: cursor.consumerKey, after_sequence: cursor.afterSequence,
+    }).onConflict(conflict => conflict.columns(['channel_id', 'consumer_key']).doNothing()).execute();
+  }
+
+  async advanceQueueCursor(expected: ChannelQueueCursor, throughSequence: number): Promise<boolean> {
+    const result = await this.db.updateTable('channel_queue_cursors').set({ after_sequence: throughSequence })
+      .where('channel_id', '=', expected.channelId).where('consumer_key', '=', expected.consumerKey)
+      .where('after_sequence', '=', expected.afterSequence)
+      .where('after_sequence', '<', throughSequence).executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
   }
 
   async getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined> {

@@ -40,6 +40,14 @@ export type ChannelMessageRow = {
   deliverables?: Deliverable[];
 };
 
+/** Durable position of an independent consumer in a Channel's public Timeline. */
+export type ChannelQueueCursor = {
+  channelId: string;
+  /** Opaque stable identity chosen by the consumer. */
+  consumerKey: string;
+  afterSequence: number;
+};
+
 export type ChannelSessionRow = {
   channelId: string;
   petId: string;
@@ -51,7 +59,7 @@ export type ChannelSessionRow = {
 export type Page = { after: number; limit: number };
 export type PageOf<T> = { items: T[]; nextAfter: number; hasMore: boolean };
 /** Forward from `after`, or back from `before` (absent: from the newest message). */
-export type MessageRange = { after: number; limit: number } | { before?: number; limit: number };
+export type MessageRange = { after: number; through?: number; limit: number } | { before?: number; limit: number };
 /**
  * Messages in sequence order, whichever way they were read. `nextAfter` reads
  * on toward newer messages while `hasMore`; `nextBefore` reads back toward
@@ -88,10 +96,16 @@ export interface ChannelStore {
   /** Current and former members. */
   listMembers(channelId: string): Promise<ChannelMemberRow[]>;
   upsertMember(row: ChannelMemberRow): Promise<void>;
-  /** With an externalRef the author already recorded, returns that earlier row unchanged. */
+  /** Append inside a transaction holding lockChannel for this Channel until commit.
+   * With an externalRef the author already recorded, returns that earlier row unchanged. */
   appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
   getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
   readMessages(channelId: string, range: MessageRange): Promise<MessagePage>;
+  getQueueCursor(channelId: string, consumerKey: string): Promise<ChannelQueueCursor | undefined>;
+  /** Insert only if missing; never overwrite existing progress. */
+  createQueueCursor(cursor: ChannelQueueCursor): Promise<void>;
+  /** Compare-and-set; returns false when another reader advanced this cursor. */
+  advanceQueueCursor(expected: ChannelQueueCursor, throughSequence: number): Promise<boolean>;
   getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined>;
   /** Returns the existing reservation for (channel, pet) if there is one. */
   reserveSession(row: ChannelSessionRow): Promise<ChannelSessionRow>;

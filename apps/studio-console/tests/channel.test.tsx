@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  appendChannelDeliveries, channelCanEditPrompt, channelInactivePets, channelMemberRemovalInput, channelInlineMentionIds, channelPetCreateInput, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
+  channelCanEditPrompt, channelInactivePets, channelMemberRemovalInput, channelInlineMentionIds, channelPetCreateInput, channelMentionLabel, channelMentionMarkdown, channelMentionMatches, channelMessageIdentity, channelMessageInput, channelMessagesGroup,
   channelMessageSummary, channelParticipantId, channelPetIdentity, channelPetSession, channelQuote, channelReplyRecipientId,
   channelWindowAfterEarlier, channelWindowAfterLater, channelWorkingLabel, mergeChannelMessages, readChannelContext, readChannelLater, readChannelPages, type ChannelMember, type ChannelMessage,
 } from '../src/channelData';
@@ -136,26 +136,6 @@ test('composer @ list matches name or id and serializes to the Channel link', ()
   assert.equal(channelMentionMarkdown({ participantId: 'pet:a' }), '[@pet:a](participant:pet:a)');
 });
 
-test('delivery outcomes observed by the Console show next to their message without being stored', () => {
-  const human = { ...message, author: { kind: 'human', id: 'studio-operator' } };
-  const deliveries = appendChannelDeliveries([
-    { channelId: 'a', messageId: 'm', participantId: 'pet:worker', state: 'accepted', invocationId: 'i-1' },
-  ], [
-    { channelId: 'a', messageId: 'm', participantId: 'pet:worker', state: 'failed', error: 'Admission denied.' },
-    { channelId: 'a', messageId: 'm', state: 'failed', error: 'Unknown Channel participant "pet:x".' },
-    { channelId: 'b', messageId: 'm', participantId: 'pet:worker', state: 'accepted' },
-  ]);
-  assert.equal(deliveries.length, 3, 'a later outcome replaces the earlier one for the same recipient');
-  const markup = renderToStaticMarkup(<ChannelTimeline messages={[human]} pending={false} onReply={() => undefined}
-    members={members} viewerParticipantId="human:studio-operator" deliveries={deliveries} />);
-  assert.ok(markup.includes('Analyst · failed')); assert.ok(markup.includes('Admission denied.'));
-  assert.ok(markup.includes('Mentions were not delivered: Unknown Channel participant'));
-  assert.ok(!markup.includes('dispatch accepted'), 'outcomes from another Channel stay there');
-  const accepted = renderToStaticMarkup(<ChannelTimeline messages={[human]} pending={false} onReply={() => undefined} members={members}
-    deliveries={[{ channelId: 'a', messageId: 'm', participantId: 'pet:worker', state: 'accepted' }]} />);
-  assert.ok(accepted.includes('Analyst · dispatch accepted'));
-});
-
 test('a Pet message opens its Channel session only once that session is registered', () => {
   const sessions = [{ channelId: 'a', petId: 'worker', sessionId: 'worker:0001', registered: true }];
   const opened: string[] = [];
@@ -244,17 +224,6 @@ test('message reader shares safe Markdown and member identity rendering with the
   assert.ok(!markup.includes('href="participant:'));
   assert.ok(!markup.includes('href="javascript:'));
   assert.ok(!markup.includes('<script>'));
-});
-
-test('routing outcomes show on the unaddressed message: who it went to, or why nobody', () => {
-  const asked = { ...message, messageId: 'asked', author: { kind: 'human' as const, id: 'studio-operator' }, body: 'Who is on #1003?' };
-  const thanks = { ...asked, messageId: 'thanks', body: 'thanks' };
-  const markup = renderToStaticMarkup(<ChannelTimeline messages={[asked, thanks]} pending={false} onReply={() => undefined} members={members}
-    deliveries={[{ channelId: 'a', messageId: 'asked', participantId: 'pet:worker', state: 'accepted', via: 'routing', confidence: 0.86, reason: 'It opened #1003.' }]}
-    routingSkips={[{ channelId: 'a', messageId: 'thanks', reason: 'none', confidence: 0.97 }]} />);
-  assert.ok(markup.includes('Analyst · routed 86%'));
-  assert.ok(markup.includes('title="It opened #1003."'));
-  assert.ok(markup.includes('Not routed: no Pet needed'));
 });
 
 test('the timeline ends with the Pets running a turn in the Channel, earliest first', () => {

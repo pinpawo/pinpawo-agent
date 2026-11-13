@@ -63,8 +63,7 @@ Function calling uses forced tool choice. Support for forced tool choice and
 native JSON schema output depends on the actual model and endpoint. Profiles
 are not rejected by model name, and configuration validation does not probe the
 endpoint. Unsupported capabilities produce an SDK or endpoint error when used;
-select the structured-output method supported by your endpoint. Channel routing
-turns such errors into a skipped decision with a safe error class or HTTP status.
+select the structured-output method supported by your endpoint.
 
 ### Streaming history limitation
 
@@ -74,33 +73,12 @@ bound tools: a returned `redacted_thinking` block may be dropped by the SDK.
 Do not use that legacy stream to build multi-turn history when such blocks may
 be returned; preserve the provider's complete message through a supported path.
 
-### Channel routing and evals
+### Model profiles and evals
 
-Pet runs, Channel routing, and profile-based decision/prompt evals use the
-Host model factory and the selected profile's protocol. Channel routing uses
-the Host default unless `routing.decider.modelProfileId` names another profile;
-the LLM decision uses a 300-token output limit, no retries, and its configured
-timeout. It prefers deterministic sampling for OpenAI-compatible profiles and
-leaves Anthropic sampling to the provider. Studio embedders supplying their
-own model resolver must provide `createChatModel` for LLM Channel routing. The
-optional `structuredOutputMethod` defaults to the legacy `jsonMode` behavior;
-custom native resolvers should set `functionCalling` or `jsonSchema` explicitly.
-Channel uses the public structured-output helper with a dynamic Zod candidate
-schema and local validation. LangChain applies the method's wire options, including
-OpenAI's strict non-streaming JSON schema output, without Channel imposing a
-provider-specific `strict` option. A malformed model decision or an unknown
-target fails schema validation and becomes a safe skipped routing error;
-custom deciders still pass through the router's independent candidate check.
-JSON schema decisions require `reason` to satisfy the strict schema contract;
-other methods retain the optional reason.
-
-The Host constructs five separate model roles for Agent work; context
-compaction reuses the observe role. Profile-based decision, prompt, and
-Channel routing evals use the same `buildModel` factory and resolved profile.
-Its generation options preserve caller behavior: evals can override temperature,
-and Channel requests deterministic OpenAI sampling, non-streaming output, and
-the legacy Chat Completions wire contract (`max_tokens` and the system role).
-Scripted tests and mock models do not make provider calls.
+The Host constructs five separate model roles for Agent work; context compaction
+reuses the observe role. Profile-based decision and prompt evals use the same
+`buildModel` factory and resolved profile. Scripted tests and mock models do not
+make provider calls.
 
 The legacy `orchestrator-route`, `orchestrator-flow.mock-subagent`, and
 `structured-output-compat` eval scripts read OpenAI-compatible `LLM_*`/legacy

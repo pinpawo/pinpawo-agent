@@ -26,8 +26,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, label: string) {
 
 /**
  * #943 acceptance: two people, each with their own Studio client key, share a
- * Channel with two Pets over HTTP and the CLI. Each Pet answers whoever wrote
- * to it, by name, and only members can read or speak.
+ * Channel with two Pets over HTTP and the CLI. Messages and mentions are recorded without starting a Pet; only members can read or speak.
  */
 test('two users with their own keys share a Channel with two Pets over HTTP and the CLI', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-two-users-'));
@@ -114,28 +113,18 @@ test('two users with their own keys share a Channel with two Pets over HTTP and 
     const fromBob = await cli(bobKeyFile, ['channels', 'send', channelId, '--file', '-', '--mention', 'pet:alpha'], 'Is the build green?');
     assert.deepEqual(fromBob.author, { kind: 'human', id: 'bob' });
 
-    // Alice asks Beta over HTTP while Bob's question is answered.
+    // Alice addresses Beta over HTTP; neither mention starts a Pet.
     const fromAlice = await ok(keys.alice!, '/channels/messages', { channelId, body: 'Draft the release note.', mentions: [{ participantId: 'pet:beta' }] });
     assert.deepEqual(fromAlice.author, { kind: 'human', id: 'alice' });
-    const petMessages = async () => (await ok(keys.alice!, `/channels/context?channelId=${channelId}&limit=200`)).messages
-      .filter((message: any) => message.author.kind === 'pet');
-    await waitFor(async () => (await petMessages()).length === 2, 'both Pets answer');
-
-    // Each Pet was told who wrote, by name, and answered that person.
-    assert.deepEqual(inputs.map(({ petId, input }) => [petId, input.author]).sort(), [
-      ['alpha', { participantId: 'human:bob', kind: 'human', label: 'Bob' }],
-      ['beta', { participantId: 'human:alice', kind: 'human', label: 'Alice' }],
-    ]);
-    const replies = Object.fromEntries((await petMessages()).map((message: any) => [message.author.id, message]));
-    assert.equal(replies.alpha.body, '[@Bob](participant:human:bob) Alpha heard Bob: Is the build green?');
-    assert.deepEqual(replies.alpha.mentions, [{ participantId: 'human:bob', label: 'Bob' }]);
-    assert.deepEqual(replies.beta.mentions, [{ participantId: 'human:alice', label: 'Alice' }]);
+    assert.deepEqual(fromBob.mentions, [{ participantId: 'pet:alpha', label: 'Alpha' }]);
+    assert.deepEqual(fromAlice.mentions, [{ participantId: 'pet:beta', label: 'Beta' }]);
+    assert.deepEqual(inputs, [], 'messages do not automatically start Pets');
 
     // Both people read the same conversation, Bob through the CLI.
     const seenByBob = (await cli(bobKeyFile, ['channels', 'read', channelId])).messages.map((message: any) => message.author.id);
     const seenByAlice = (await ok(keys.alice!, `/channels/context?channelId=${channelId}`)).messages.map((message: any) => message.author.id);
     assert.deepEqual(seenByBob, seenByAlice);
-    assert.deepEqual(new Set(seenByBob), new Set(['bob', 'alice', 'alpha', 'beta']));
+    assert.deepEqual(seenByBob, ['bob', 'alice']);
 
     // Carol is not a member: no reading, speaking or listing, and no local-token routes.
     for (const path of [`/channels/context?channelId=${channelId}`, `/channels/members?channelId=${channelId}`]) {

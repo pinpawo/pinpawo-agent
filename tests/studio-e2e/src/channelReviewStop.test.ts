@@ -1,3 +1,4 @@
+import { channelDispatchInput } from '../../support/channelDispatchInput';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -104,13 +105,21 @@ for (const decision of ['reject', 'cancel'] as const) {
     studio.subscribe(event => { events.push(event); });
     try {
       const id = (await createChannelWithPets(studio!, channel.service, me, { title: 'Goal', pets: ['one'] })).channel.channelId;
-      const ask = (body: string, replyTo?: string) => channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] }, me);
+      const ask = async (body: string, replyTo?: string) => {
+        const { message } = await channel.sendMessage(id, { body, ...(replyTo ? { replyTo } : {}), mentions: [{ participantId: 'pet:one' }] }, me);
+        const previous = await channel.service.getSession(id, 'one');
+        const binding = previous ?? await channel.service.reserveSession(id, 'one', () => 'one:11111111');
+        const original = replyTo ? await channel.service.getMessage(id, replyTo) : undefined;
+        const receipt = await studio.dispatch({ petId: 'one', request: channelDispatchInput(message, original),
+          session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) }, scope: { namespace: 'channel', id } });
+        if (!binding.registered) await channel.service.confirmSession(binding);
+        return receipt;
+      };
       await ask('Which destination?');
       await waitFor(async () => (await outputs(id)).length === 1);
       const question = (await outputs(id))[0]!;
-      const { deliveries: [waiting] } = await ask('Inspect and report.');
+      const waiting = await ask('Inspect and report.');
       const binding = (await channel.service.getSession(id, 'one'))!;
-      assert.equal(waiting!.sessionId, binding.sessionId);
       await waitFor(() => events.some(event => event.type === 'dispatch.waiting' && event.payload.invocationId === waiting!.invocationId));
       assert.equal((await outputs(id)).length, 1, 'a waiting review is not a Channel message');
       await ask('Continue with different constraints.');

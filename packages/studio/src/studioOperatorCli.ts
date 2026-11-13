@@ -42,8 +42,8 @@ Connection options (before or after the command):
 Output is JSON; events emits live SSE data as JSON lines for 1–60 seconds
 (default: 30). Pagination is one page, limit 1–200 (default: 50); use nextAfter
 while hasMore. channels read starts from the newest messages; --before nextBefore
-reads further back while hasEarlier, --after nextAfter reads newer ones. Channel sends return a saved message and per-target deliveries,
-not completion. No request is retried automatically. Read actual state before
+reads further back while hasEarlier, --after nextAfter reads newer ones. Channel
+sends return the saved message. No request is retried automatically. Read actual state before
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
 Create a Channel first, then create each Pet in that Channel with --channel.

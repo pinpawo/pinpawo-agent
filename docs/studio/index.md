@@ -37,9 +37,7 @@ Toolkits and state.
   and Plugin injection.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
   types and exact method semantics.
-- [Channel model](../design/studio/channel-model.md), [addressing and execution](../design/studio/channel-addressing-and-execution.md),
-  and [routing](../design/studio/channel-routing.md) — membership, messages, sessions,
-  and optional routing.
+- [Channel model](../design/studio/channel-model.md), [addressing and execution](../design/studio/channel-addressing-and-execution.md) — membership, messages and sessions.
 - [HTTP Plugin design](../design/studio/http-plugin.md) — the single HTTP/SSE
   control plane and contributed-route boundary.
 
@@ -55,8 +53,7 @@ automatic retry, timeout or durable replay. Exact contracts live in the API refe
 Channel owns membership, public messages and fixed Channel/Pet session bindings.
 The [Channel model](../design/studio/channel-model.md) describes its data and
 membership rules; [addressing and execution](../design/studio/channel-addressing-and-execution.md)
-covers mentions, Reply, trusted source and observation limits. Optional
-[Channel routing](../design/studio/channel-routing.md) handles eligible unaddressed messages.
+covers mentions, Reply, trusted source and observation limits. Messages and mentions do not automatically start Pets.
 Scheduler/Trigger remain independent Plugins; [queue auditing](../design/studio-dispatch-queue-notices.md)
 is an opt-in policy, not Channel queue ownership.
 

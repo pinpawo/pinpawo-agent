@@ -6,7 +6,7 @@ Enable `@pinpawo-plugin/channel`, allow the Console origin in the HTTP Plugin,
 and enter the Host URL and existing Studio Bearer token in the connection dialog.
 
 [Channel model](../../docs/design/studio/channel-model.md) owns members, messages,
-deliveries and Pet sessions; [Channel addressing](../../docs/design/studio/channel-addressing-and-execution.md)
+and Pet sessions; [Channel addressing](../../docs/design/studio/channel-addressing-and-execution.md)
 owns the @ syntax, default Reply and session binding rules.
 [Console design](../../docs/design/studio/console.md) owns layout, connection,
 observation and keyboard behavior. Configuration and migration steps live in
@@ -20,8 +20,7 @@ members, adds a Pet that is not yet a member or a human by id, and removes membe
 (the Console cannot remove its own member). Typing `@` in the message editor opens
 the list of current members at the caret; a picked member becomes an inline mention,
 sent as `[@label](participant:id)`. Enter sends and Shift+Enter starts a new line.
-Delivery outcomes are shown next to a message only as observed by this Console; the
-Host does not store them.
+Messages and mentions are recorded without automatically starting a Pet.
 
 A Pet's work in a Channel is not part of the Channel. **View session** on a Pet in the
 member list, or on a Pet's message, opens that Pet's Channel session read-only, where

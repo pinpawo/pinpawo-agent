@@ -32,18 +32,15 @@ const call = (name: string, args: Record<string, unknown>, id: string) =>
 
 test('a separate Channel hint reaches planning and Channel context is read before business work', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-hint-'));
-  const goal = randomUUID(), focus = randomUUID(), original = randomUUID(), evidence = randomUUID(), final = randomUUID();
+  const goal = randomUUID(), original = randomUUID(), evidence = randomUUID(), final = randomUUID();
   const bridge = createInvocationContextBridge();
-  const channel = createChannelPlugin({ httpRoute: false, routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:reviewer', confidence: 1, focus }),
-  });
+  const channel = createChannelPlugin({ httpRoute: false });
   let host: Awaited<ReturnType<typeof createResidentPetHost>> | undefined;
   let studio: Awaited<ReturnType<typeof createStudioWithPets>> | undefined;
   let observedHint: AgentInvocationHint | undefined;
   let read = false, business = false, settled = false;
   const entry = new Model(messages => {
     assert.ok(observedHint);
-    assert.equal(observedHint.focus, focus);
     assert.ok(messages.some(m => m.text.includes(observedHint!.instruction)));
     return call('plan_request', { goal }, 'request');
   });
@@ -108,6 +105,7 @@ test('a separate Channel hint reaches planning and Channel context is read befor
     const me = { kind: 'human' as const, id: 'local' };
     const cid = (await createChannelWithPets(studio!, channel.service, me, { title: 'Preparation', pets: ['reviewer'] })).channel.channelId;
     await channel.sendMessage(cid, { body: original }, me);
+    await channel.run(cid, 'reviewer', original, { kind: 'trigger', id: 'test' });
     for (let i = 0; i < 1000 && !settled; i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(settled, true);
     assert.equal(read, true); assert.equal(business, true);

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { StudioContextProvider, StudioInvocationContext } from '@pinpawo/studio-core';
 import type { AgentInvocationHint, SystemPromptSection } from '@pinpawo/pet-agent';
 import { createChannelWithPets, createStudioWithPets } from '../../../tests/support/livePets';
-import { readChannelTestInput, readChannelTestTask } from '../../../tests/support/channelDispatchInput';
+import { readChannelTestTask } from '../../../tests/support/channelDispatchInput';
 import { createChannelPlugin } from './channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -26,14 +26,8 @@ test('each Channel dispatch supplies only its own current prompt to its own Pet 
   const dispatched: Dispatched[] = [];
   const resolved: Sections[] = [];
   const hints: Array<AgentInvocationHint | undefined> = [];
-  const routingReason = randomUUID();
-  const routingFocus = randomUUID();
   let resolver!: StudioContextProvider;
-  const channel = createChannelPlugin({
-    httpRoute: false,
-    routing: { enabled: true },
-    routeDecider: async () => ({ target: 'pet:two', confidence: 1, reason: routingReason, focus: routingFocus }),
-  });
+  const channel = createChannelPlugin({ httpRoute: false });
   const studio = await createStudioWithPets({
     studioId: 'channel-prompt', plugins: [channel],
     onPreparedContextResolver: value => { resolver = value; },
@@ -53,13 +47,10 @@ test('each Channel dispatch supplies only its own current prompt to its own Pet 
       title: 'A', prompt: 'Alpha ]]> collaboration', pets: ['one'],
     }, { studio: true })).channel.channelId;
     const b = (await createChannelWithPets(studio!, channel.service, human, { title: 'B', pets: ['two'] })).channel.channelId;
-    const first = await channel.sendMessage(a, { body: 'hello', mentions: [{ participantId: 'pet:one' }] }, human);
-    assert.equal(first.deliveries[0]?.state, 'accepted');
-    await channel.sendMessage(b, { body: 'hello', mentions: [{ participantId: 'pet:two' }] }, human);
+    await channel.run(a, 'one', 'hello', { kind: 'scheduler', id: 'first' });
+    await channel.run(b, 'two', 'hello', { kind: 'trigger', id: 'second' });
     assert.equal(dispatched.length, 2);
     await assert.rejects(channel.run(b, 'one', 'wrong owner', { kind: 'scheduler', id: 'wrong' }));
-    assert.equal(Object.hasOwn(readChannelTestInput(dispatched[0]!.request), 'contextHint'), false);
-    assert.equal(Object.hasOwn(readChannelTestInput(dispatched[1]!.request), 'contextHint'), false);
     const aSection = resolved[0]?.find(section => section.id === 'channel:context');
     assert.deepEqual([aSection?.id, aSection?.owner], ['channel:context', 'channel']);
     assert.match(aSection!.content, /Alpha \]\]\]\]><!\[CDATA\[> collaboration/);
@@ -97,28 +88,6 @@ test('each Channel dispatch supplies only its own current prompt to its own Pet 
     await channel.run(a, 'one', 'cleared', { kind: 'scheduler', id: 's2' });
     assert.deepEqual(resolved[4]?.map(section => section.id), ['channel:protocol', 'channel:metadata'], 'clearing the announcement keeps the Plugin context');
 
-    // An unaddressed human message takes the router path, not the mention path.
-    await channel.sendMessage(b, { body: 'route this' }, human);
-    for (let i = 0; i < 200 && dispatched.length < 6; i++) await new Promise(resolve => setTimeout(resolve, 5));
-    assert.equal(dispatched.length, 6);
-    const routed = readChannelTestInput(dispatched[5]!.request);
-    assert.equal(routed.addressedBy, 'routing');
-    assert.equal(routed.contextHint?.source, 'channel-routing');
-    assert.equal(routed.contextHint?.action, 'read-latest-channel');
-    assert.equal(routed.contextHint?.focus, routingFocus);
-    assert.equal(hints[5]?.focus, routingFocus, 'the provider exposes model advice independently of the goal');
-    assert.equal(hints[4]?.focus, undefined);
-    assert.equal(routed.body, 'route this');
-    assert.equal(dispatched[5]!.request.includes(routingReason), false, 'the decision reason remains outside the Pet request');
-    assert.ok(resolved[5]?.every(section => !section.content.includes(routingFocus)), 'dynamic attention stays outside the system context');
-    assert.equal(dispatched[5]!.request.includes('Beta'), false, 'the announcement remains in the provider context');
-    assert.match(resolved[5]!.find(section => section.id === 'channel:context')!.content, /Beta/);
-    assert.deepEqual(resolved[5]?.map(section => section.id), ['channel:protocol', 'channel:metadata', 'channel:context']);
-    assert.equal(dispatched[5]!.session?.id, dispatched[1]!.session?.id);
-    await channel.run(b, 'two', 'after routing', { kind: 'trigger', id: 'after-routing' });
-    assert.equal(hints[6]?.source, 'channel');
-    assert.equal(hints[6]?.focus, undefined, 'a later non-routed task has no old focus');
-    assert.equal(hints[5]?.focus, routingFocus, 'the earlier invocation snapshot keeps its own focus');
   } finally { await studio.shutdown(); }
 });
 

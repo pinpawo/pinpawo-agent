@@ -25,17 +25,6 @@ export type ChannelWorking = { participantId: string; since: string };
 export const CHANNEL_PAGE_LIMIT = 100;
 /** The session a Pet uses in this Channel. */
 export type ChannelSession = { channelId: string; petId: string; sessionId: string; registered: boolean };
-/** What happened to one addressed member, from a send response or a `channel.delivery` event. Not stored by the Host. */
-export type ChannelDelivery = {
-  channelId: string; messageId?: string; participantId?: string;
-  state: 'delivered' | 'accepted' | 'failed'; invocationId?: string; sessionId?: string; error?: string;
-  /** Set when Channel routing, not a mention, chose the recipient. */
-  via?: 'routing'; confidence?: number; reason?: string;
-};
-/** Channel routing looked at an unaddressed message and chose nobody. */
-export type ChannelRoutingSkip = {
-  channelId: string; messageId: string; reason: 'none' | 'low_confidence' | 'invalid' | 'error'; confidence?: number; detail?: string;
-};
 export type DispatchQueueEntry = { dispatchId: string; enqueuedAt: string; sessionId?: string; scope?: { namespace: string; id: string } };
 export type DispatchQueue = {
   petId: string; state: 'open' | 'busy' | 'waiting' | 'blocked'; activeOperation: 'conversation' | 'dispatch' | null;
@@ -66,7 +55,7 @@ export function channelCanEditPrompt(clientMode: boolean): boolean {
   return !clientMode;
 }
 
-/** Reply preselects the author while it is a current member; former members never route. */
+/** Reply preselects the author while it is a current member; former members are not preselected. */
 export function channelReplyRecipientId(author: ChannelAuthor | undefined, members: ChannelMember[] = []): string {
   return members.find(item => item.kind === author?.kind && item.id === author?.id)?.participantId ?? '';
 }
@@ -114,7 +103,7 @@ export function channelMessageInput(channelId: string, participantId: string, bo
     ...(reply ? { replyTo: reply.messageId } : {}) };
 }
 
-/** Names are presentation only; stable Pet IDs remain the routing identity. */
+/** Names are presentation only; stable Pet IDs remain the member identity. */
 export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKnown = true) {
   const pet = pets.find(item => item.petId === petId);
   const name = pet?.name.trim() || petId;
@@ -170,29 +159,6 @@ export function channelMessagesGroup(previous: ChannelMessage | undefined, curre
 export function channelQuote(body: string): string {
   const text = body.replace(/\[@([^\]]*)\]\(participant:[^)\s]+\)/g, '@$1').replace(/\s+/g, ' ').trim();
   return text.length > 160 ? `${text.slice(0, 157)}…` : text;
-}
-
-/** The outcome of one delivery, as shown next to its message. */
-export function channelDeliveryLabel(delivery: ChannelDelivery): string {
-  if (delivery.via === 'routing') {
-    const score = delivery.confidence === undefined ? '' : ` ${Math.round(delivery.confidence * 100)}%`;
-    return delivery.state === 'accepted' ? `routed${score}` : `routing ${delivery.state}`;
-  }
-  if (delivery.state === 'accepted') return 'dispatch accepted';
-  return delivery.state;
-}
-
-export function channelRoutingSkipLabel(skip: ChannelRoutingSkip): string {
-  if (skip.reason === 'none') return 'Not routed: no Pet needed';
-  if (skip.reason === 'low_confidence') return 'Not routed: unsure who should answer';
-  return 'Not routed: routing failed';
-}
-
-/** Later observations of the same (message, recipient) replace earlier ones. */
-export function appendChannelDeliveries(current: ChannelDelivery[], next: ChannelDelivery[]): ChannelDelivery[] {
-  const key = (item: ChannelDelivery) => `${item.channelId}\n${item.messageId ?? ''}\n${item.participantId ?? ''}\n${item.participantId ? '' : item.error ?? ''}`;
-  const keys = new Set(next.map(key));
-  return [...current.filter(item => !keys.has(key(item))), ...next].slice(-200);
 }
 
 /** Load every ordered page after `from`; reject a broken cursor rather than hiding recent results. */

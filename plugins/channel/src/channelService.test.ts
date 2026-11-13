@@ -5,7 +5,7 @@ import {
   KyselyClientStore, StudioClients, clientMigrations, createStudioStorage, type ClientDatabase, type StudioStorageConfig,
 } from '@pinpawo/studio-core';
 import { createPglitePool } from '../../../tests/support/pglitePool';
-import { ChannelAccessError, ChannelLastHumanError, ChannelNotFoundError, ChannelService } from './channelService';
+import { ChannelAccessError, ChannelLastHumanError, ChannelNotFoundError, ChannelService, type ChannelEvent } from './channelService';
 import type { ChannelStore, MemberRef } from './store/channelStore';
 import { KyselyChannelStore, channelMigrations, type ChannelDatabase } from './store/kysely';
 
@@ -285,6 +285,79 @@ for (const [backend, config] of backends) {
     assert.deepEqual(lost.message.mentions, []);
     assert.match(lost.mentionError ?? '', /pet:reviewer/);
     assert.equal((await service.readContext(owner, channelId)).messages.length, 3);
+  }));
+
+  test(`${backend}: live message subscribers are independent, removable and do not replay`, { timeout: 10_000 }, () => withService(async (service) => {
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Live' }, ['executor'])).channel;
+    // Posting with no listeners is valid and does not queue a future event.
+    const earlier = await service.postMessage(owner, channelId, { body: 'Before subscription' });
+    const calls: string[] = [];
+    const observed: Array<{ author: MemberRef; body: string }> = [];
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const removeThrower = service.subscribe(event => {
+      if (event.type !== 'channel.message.created') return;
+      calls.push(`throw:${event.payload.body}`);
+      event.payload.body = 'modified by listener';
+      throw new Error('synchronous subscriber failure');
+    });
+    const removeRejecter = service.subscribe(async event => {
+      if (event.type !== 'channel.message.created') return;
+      calls.push(`reject:${event.payload.body}`);
+      throw new Error('asynchronous subscriber failure');
+    });
+    const removePending = service.subscribe(event => {
+      if (event.type === 'channel.message.created') calls.push(`pending:${event.payload.body}`);
+      return pending;
+    });
+    const removeObserver = service.subscribe(event => {
+      if (event.type !== 'channel.message.created') return;
+      calls.push(`observe:${event.payload.body}`);
+      observed.push({ author: event.payload.author, body: event.payload.body });
+    });
+
+    // The unresolved listener must not hold up either the write or other listeners.
+    const human = await service.postMessage(owner, channelId, { body: 'Human' });
+    removeThrower();
+    removeRejecter();
+    removePending();
+    const pet = await service.postMessage(executor, channelId, { body: 'Pet' }, { externalRef: 'pet-output' });
+    const duplicate = await service.postMessage(executor, channelId, { body: 'Duplicate' }, { externalRef: 'pet-output' });
+    removeObserver();
+    removeObserver(); // Unsubscription is idempotent.
+    const after = await service.postMessage(owner, channelId, { body: 'After unsubscribe' });
+    release();
+
+    assert.equal(duplicate.created, false);
+    assert.deepEqual(duplicate.message, pet.message);
+    assert.deepEqual(calls, ['throw:Human', 'reject:Human', 'pending:Human', 'observe:Human', 'observe:Pet']);
+    assert.deepEqual(observed, [{ author: owner, body: 'Human' }, { author: executor, body: 'Pet' }]);
+    assert.deepEqual((await service.readContext(owner, channelId)).messages.map(message => message.messageId),
+      [earlier.message.messageId, human.message.messageId, pet.message.messageId,
+        after.message.messageId]);
+  }));
+
+  test(`${backend}: unsubscribe stops a not-yet-started callback, even when it is resubscribed`, () => withService(async service => {
+    const { channelId } = (await service.createChannel(owner, { title: 'Snapshot' })).channel;
+    const calls: string[] = [];
+    let removeSecond = () => {};
+    let added = false;
+    const second = (event: ChannelEvent) => {
+      if (event.type === 'channel.message.created') calls.push(`second:${event.payload.body}`);
+    };
+    service.subscribe(event => {
+      if (event.type !== 'channel.message.created') return;
+      calls.push(`first:${event.payload.body}`);
+      removeSecond();
+      if (!added) {
+        added = true;
+        service.subscribe(second);
+      }
+    });
+    removeSecond = service.subscribe(second);
+    await service.postMessage(owner, channelId, { body: 'one' });
+    await service.postMessage(owner, channelId, { body: 'two' });
+    assert.deepEqual(calls, ['first:one', 'first:two', 'second:two']);
   }));
 
   test(`${backend}: a reader starts from the newest page, reads back with before and on with after`, () => withService(async (service) => {

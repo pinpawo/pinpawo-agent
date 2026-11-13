@@ -1,18 +1,12 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { channelDispatchAttachments, channelDispatchInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
+import { channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
 import { channelInvocationHint } from './channelInvocationHint';
 import { channelParticipantId } from './channelParticipants';
-import { collectChannelRoutingState, type RoutePetRuntime } from './channelRoutingState';
-import {
-  channelRoutingOptionsSchema, createChannelRouter, routeInput,
-  type ChannelRouter, type ChannelRoutingOptions, type RouteDecider,
-} from './channelRouting';
 import {
   ChannelAccessError, ChannelNotFoundError, ChannelService, type ChannelManageAccess, channelMessageSchema, channelMessagePageSchema,
   memberRefSchema, type ChannelMessage, type ChannelSessionBinding,
@@ -32,26 +26,6 @@ export type CreateChannelPluginOptions = {
   /** Defaults to the Channel tables in the Studio database. */
   store?: ChannelStore;
   httpRoute?: false | { pluginName?: string };
-  /** Who should attend to an unaddressed member message. Off by default. */
-  routing?: ChannelRoutingOptions;
-  /** Replaces the configured decider; for embedders and tests. */
-  routeDecider?: RouteDecider;
-};
-/** What happened to one addressed member. Not stored: returned to the poster and published as `channel.delivery`. */
-export type ChannelDelivery = {
-  participantId: string;
-  state: 'delivered' | 'accepted' | 'failed';
-  /** Set when Channel routing, not a mention, chose this member. */
-  via?: 'routing';
-  confidence?: number;
-  reason?: string;
-  /** The routing model's suggested focus, delivered as context rather than an instruction from the author. */
-  focus?: string;
-  /** Observation supplied to the routing model, not the target's later admission state. */
-  runtime?: RoutePetRuntime;
-  invocationId?: string;
-  sessionId?: string;
-  error?: string;
 };
 /**
  * A Pet member running a turn in this Channel now. Presence, not a message:
@@ -79,8 +53,8 @@ export type ChannelInputsHook = {
 export type ChannelPlugin = StudioPlugin & {
   /** Available once the Plugin has started. */
   service: ChannelService;
-  /** Post as `author` and deliver to the Pets the message addresses. */
-  sendMessage: (channelId: string, input: unknown, author: MemberRef) => Promise<{ message: ChannelMessage; deliveries: ChannelDelivery[] }>;
+  /** Record a message as `author`; consumers independently observe the committed event. */
+  sendMessage: (channelId: string, input: unknown, author: MemberRef) => Promise<{ message: ChannelMessage }>;
   run: ChannelInputsHook['run'];
 };
 
@@ -115,7 +89,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let removeHttp: (() => void) | undefined;
   let removeContextProvider: (() => void) | undefined;
   let unexposeInputs: (() => void) | undefined;
-  let router: ChannelRouter | undefined;
   /** Pet runs in a Channel that are executing now, by invocation. */
   const running = new Map<string, { channelId: string; participantId: string; since: string }>();
   function host(): StudioPluginContext {
@@ -129,21 +102,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
-    attachments: readonly Deliverable[] = [],
-    author?: MemberRef,
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     const binding = await service.reserveSession(channelId, petId, () => host().allocateSessionId(petId));
-    // This synchronous check is the source's handoff admission point. Reads
-    // and routing decisions may outlive its close; already admitted work is
-    // not canceled, but a historical author cannot start another handoff.
-    if (author?.kind === 'pet' && !host().listPets().some(pet => pet.petId === author.id && pet.channelId === channelId)) {
-      throw new ChannelAccessError('Channel message author is not a live Pet in this Channel.');
-    }
     const receipt = await host().dispatch({
       petId, request,
-      ...(attachments.length ? { attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
       scope: { namespace: 'channel', id: channelId },
@@ -151,104 +115,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     return { invocationId: receipt.invocationId, binding: await service.confirmSession(binding) };
   }
 
-  /** The one mention path, for a human's message and a Pet's alike. */
-  async function deliver(message: ChannelMessage): Promise<ChannelDelivery[]> {
-    const studio = host();
-    const service = channelService();
-    const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
-    const members = new Map((await service.members(message.channelId)).map(member => [member.participantId, member]));
-    const request = channelDispatchInput(message, original, participantId => members.get(participantId)?.label);
-    const attachments = channelDispatchAttachments(message, original);
-    const deliveries = await Promise.all(message.mentions
-      .map(async ({ participantId }): Promise<ChannelDelivery> => {
-        const target = members.get(participantId);
-        if (!target) return { participantId, state: 'failed', error: 'Not a current member of this Channel.' };
-        if (target.kind !== 'pet') return { participantId, state: 'delivered' };
-        try {
-          const { invocationId, binding } = await dispatchPet(message.channelId, target.id, request,
-            `channel:${message.channelId}:${message.messageId}:${participantId}`, attachments, message.author);
-          return { participantId, state: 'accepted', invocationId, sessionId: binding.sessionId };
-        } catch (error) {
-          return { participantId, state: 'failed', error: error instanceof Error ? error.message : String(error) };
-        }
-      }));
-    for (const delivery of deliveries) {
-      studio.notify({ type: 'channel.delivery', payload: { channelId: message.channelId, messageId: message.messageId, ...delivery } });
-    }
-    return deliveries;
-  }
-
-  /** Both member posts and new public Pet replies use the same delivery path. */
-  async function deliverAndRoute(message: ChannelMessage): Promise<ChannelDelivery[]> {
-    const deliveries = await deliver(message);
-    // Routing waits on a model; the poster does not. Its outcome arrives as an event.
-    if (router && message.mentions.length === 0) void route(router, message);
-    return deliveries;
-  }
-
   async function sendMessage(channelId: string, input: unknown, author: MemberRef) {
-    const { message, created, mentionError } = await channelService().postMessage(author, channelId, input);
-    const deliveries = created && !mentionError ? await deliverAndRoute(message) : [];
-    if (mentionError) {
-      host().notify({ type: 'channel.delivery', payload: { channelId, messageId: message.messageId, state: 'failed', error: mentionError } });
-    }
-    return { message, deliveries };
-  }
-
-  /** Let routing choose one other Pet to attend to an unaddressed public message. */
-  async function route(active: ChannelRouter, message: ChannelMessage): Promise<void> {
-    const studio = host();
-    let candidateStates: Array<{ participantId: string; runtime: RoutePetRuntime | undefined }> | undefined;
-    const skip = (payload: Record<string, unknown>) => studio.notify({
-      type: 'channel.routing.skipped', payload: {
-        channelId: message.channelId, messageId: message.messageId,
-        ...(candidateStates ? { candidateStates } : {}), ...payload,
-      },
-    });
-    try {
-      const service = channelService();
-      const members = await service.members(message.channelId);
-      if (!active.applies(message, members)) return;
-      const context = await service.readContext(message.author, message.channelId,
-        active.historyLimit > 0 ? { before: message.sequence, limit: active.historyLimit } : { limit: 1 });
-      const history = active.historyLimit > 0 ? context.messages : [];
-      const original = message.replyTo ? await service.getMessage(message.channelId, message.replyTo) : undefined;
-      const input = routeInput(context.channel, message, original, history, members);
-      const eligible = new Set(input.pets.map(pet => pet.participantId));
-      const candidateMembers = members.filter(member => member.kind === 'pet' && eligible.has(member.participantId));
-      const states = await collectChannelRoutingState(message.channelId, candidateMembers.map(member => member.id), { host: studio, channels: service });
-      const petIds = new Map(candidateMembers.map(member => [member.participantId, member.id]));
-      const pets = input.pets.map(pet => ({ ...pet, runtime: states[petIds.get(pet.participantId)!] }));
-      candidateStates = pets.map(({ participantId, runtime }) => ({ participantId, runtime }));
-      const outcome = await active.decide({ ...input, pets });
-      if (outcome.kind === 'skip') {
-        const { kind: _kind, ...rest } = outcome;
-        return skip(rest);
-      }
-      const target = members.find(member => member.participantId === outcome.participantId);
-      if (!target || target.kind !== 'pet' || target.participantId === channelParticipantId(message.author.kind, message.author.id)) {
-        return skip({ reason: 'invalid', detail: outcome.participantId });
-      }
-      const labels = new Map(members.map(member => [member.participantId, member.label]));
-      const decided = {
-        via: 'routing' as const, confidence: outcome.confidence,
-        ...(outcome.reason ? { reason: outcome.reason } : {}),
-        ...(outcome.focus ? { focus: outcome.focus } : {}),
-        runtime: pets.find(pet => pet.participantId === target.participantId)?.runtime,
-      };
-      let delivery: ChannelDelivery;
-      try {
-        const { invocationId, binding } = await dispatchPet(message.channelId, target.id,
-          channelDispatchInput(message, original, participantId => labels.get(participantId), 'routing', outcome.focus),
-          `channel:${message.channelId}:${message.messageId}:route`, channelDispatchAttachments(message, original), message.author);
-        delivery = { participantId: target.participantId, state: 'accepted', ...decided, invocationId, sessionId: binding.sessionId };
-      } catch (error) {
-        delivery = { participantId: target.participantId, state: 'failed', ...decided, error: error instanceof Error ? error.message : String(error) };
-      }
-      studio.notify({ type: 'channel.delivery', payload: { channelId: message.channelId, messageId: message.messageId, ...delivery } });
-    } catch (error) {
-      skip({ reason: 'error', detail: error instanceof Error ? error.message : String(error) });
-    }
+    const { message } = await channelService().postMessage(author, channelId, input);
+    return { message };
   }
 
   const run: ChannelInputsHook['run'] = async (channelId, petId, request, origin, runOptions = {}) => {
@@ -266,32 +135,26 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const { invocationId, petId, sessionId, scope: { id: channelId }, message } = parsed.data;
     if (!message.text.trim()) return;
     const studio = host();
+    // Capture authorization when the message event arrives. A terminal event
+    // may clear `running` while the asynchronous registry lookup is pending.
+    const active = running.get(invocationId);
+    const acceptedWork = active?.channelId === channelId && active.participantId === channelParticipantId('pet', petId);
     try {
       const service = channelService();
       const pet = await studio.pets.get(petId);
       if (pet?.closedAt || pet?.removedAt) {
-        const active = running.get(invocationId);
-        if (active?.channelId !== channelId || active.participantId !== channelParticipantId('pet', petId)) {
+        if (!acceptedWork) {
           throw new ChannelAccessError('Inactive Pet is not a member and has no active accepted Channel work.');
         }
       }
       if ((await service.getSession(channelId, petId))?.sessionId !== sessionId) {
         throw new Error('Pet message session does not match its Channel binding.');
       }
-      const { message: saved, created, mentionError } = await service.postMessage(
+      await service.postMessage(
         { kind: 'pet', id: petId }, channelId,
         { body: message.text, ...(message.deliverables !== undefined ? { deliverables: message.deliverables } : {}) },
         { externalRef: message.messageId },
       );
-      if (mentionError) {
-        studio.notify({ type: 'channel.delivery', payload: { channelId, messageId: saved.messageId, state: 'failed', error: mentionError } });
-      }
-      // Invalid mentions were retained for observation; they are not a new
-      // unaddressed conversation for the router to repair or reinterpret.
-      // An inactive instance may finish already accepted work. Retain that
-      // output, but its historical author cannot start fresh handoff/routing.
-      const currentPet = await studio.pets.get(petId);
-      if (created && !mentionError && !currentPet?.closedAt && !currentPet?.removedAt) await deliverAndRoute(saved);
     } catch (error) {
       // Nobody waits on this write; observers are the only ones who can see it failed.
       studio.notify({ type: 'channel.message_failed', payload: {
@@ -366,7 +229,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       context = studio;
       // A provider is scoped to a persisted (Pet, session) binding, not to the
       // Pet globally. The Studio resolves it when preparing a run.
-      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope, request }) => {
+      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope }) => {
         const binding = await service.getSession(scope.id, petId);
         if (!sessionId || !binding || binding.sessionId !== sessionId) {
           throw new ChannelAccessError('Channel scope does not match the Pet session binding.');
@@ -374,12 +237,8 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         const channel = await service.requireMember(binding.channelId, { kind: 'pet', id: petId });
         return {
           systemPromptSections: channelSystemContext(channel),
-          hint: channelInvocationHint(channel.channelId, request),
+          hint: channelInvocationHint(),
         };
-      });
-      router = createChannelRouter(options.routing, {
-        ...(options.routeDecider ? { decider: options.routeDecider } : {}),
-        resolveModel: studio.models.resolve,
       });
       unsubscribeHost = studio.subscribe(async (event) => {
         if (event.source !== 'resident-pet' || !event.type.startsWith('dispatch.')) return;
@@ -443,7 +302,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           register('POST', '/channels/messages', async ({ readJson }, actor) => {
             const { channelId, ...message } = channelMessageSchema.extend({ channelId: z.string().min(1) }).strict().parse(await readJson());
             const result = await sendMessage(channelId, message, actor);
-            return { kind: 'json', status: 201, body: { ...result.message, deliveries: result.deliveries } };
+            return { kind: 'json', status: 201, body: result.message };
           }),
         ];
         return () => { for (const release of remove.reverse()) release(); };
@@ -457,7 +316,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       unsubscribeHost?.(); unsubscribeHost = undefined;
       context = undefined;
       current = undefined;
-      router = undefined;
       running.clear();
     },
   };
@@ -466,7 +324,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
 export function createStudioPlugin(value: Record<string, unknown> | undefined): ChannelPlugin {
   const options = z.object({
     httpRoute: z.union([z.literal(false), z.object({ pluginName: z.string().min(1).optional() }).strict()]).optional(),
-    routing: channelRoutingOptionsSchema.optional(),
   }).strict().parse(value ?? {});
   return createChannelPlugin(options);
 }

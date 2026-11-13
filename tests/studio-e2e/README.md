@@ -5,6 +5,11 @@ Run commands below from the repository root with Node.js 24 or newer.
 
 ## Pet Head Timeline scenarios
 
+These scenarios run only when explicitly requested through the commands below.
+There is no scenario workflow. The ordinary workspace and root `npm test` commands
+exclude `src/scenarios/`; existing CI may typecheck these files but does not run
+the scenarios or upload their reports.
+
 The [scenario runner](src/scenarios/petHeadTimeline.ts) exercises the production
 `buildStudio`, Pet Head assembly, resident Host, and Channel message path. The
 offline profile replaces only the model transport with a scripted OpenAI-compatible
@@ -52,7 +57,8 @@ npm run test:scenarios -w @pinpawo-tests/studio-e2e
 The runner executes three trials. This offline entry point also runs
 [live gateway safety tests](src/scenarios/liveModelGateway.test.ts) with mocked
 `fetch`; those tests do not contact a remote model. The ordinary workspace test
-command also discovers the scenario and isolation tests:
+command runs the remaining Studio acceptance tests and excludes these scenarios,
+gateway safety tests, and isolation tests:
 
 ```sh
 npm test -w @pinpawo-tests/studio-e2e
@@ -91,7 +97,7 @@ arguments. Live evaluation uses the same case IDs and program assertions. Record
 all three trials, including failures, when comparing a model profile or commit.
 The live default is three trials, and `--output` defaults to
 `artifacts/pet-head-scenarios/live-report.json` relative to the workspace package.
-CI never runs the live entry point.
+The live entry point is also on demand and always requires `--live`.
 
 The live gateway virtualizes local paths before egress, restricts the tool surface,
 and rejects secrets and provider error payloads in both request and response paths.
@@ -99,7 +105,7 @@ Runtime logs are suppressed in live mode; only the safe summary and JSON report
 are retained. SIGINT or SIGTERM cancels the active trial and records the remaining
 requested trials as blocked.
 
-## Reports and CI
+## Local reports
 
 Both modes write JSON with this versioned envelope:
 
@@ -125,14 +131,7 @@ raw errors, trace payloads, and session/checkpoint contents. Generated reports a
 ignored by Git. The implementation defines the exact check and observation keys;
 this README does not assert a live result.
 
-The [Studio Head scenarios workflow](../../.github/workflows/studio-head-scenarios.yml)
-runs on pull requests, pushes to `main`, and manual dispatch. It uses Node.js 24,
-builds the prerequisites above, and runs only the offline scenario entry point,
-including the deterministic trials and mocked gateway safety tests.
-It sets `LANGCHAIN_TRACING`, `LANGCHAIN_TRACING_V2`, `LANGSMITH_TRACING`,
-`LANGSMITH_TRACING_V2`, and `LANGFUSE_TRACING_ENABLED` to `false`.
-
-The upload step runs with `always()` and retains only the sanitized
-`offline-report.json` artifact for three days. It does not upload raw logs,
-temporary workspaces, or traces. A failure before the scenario runner starts can
-leave no report to upload; the workflow log identifies that prerequisite failure.
+Reports remain local at the paths selected by the commands above. No workflow
+runs these commands or uploads reports. A failure before the scenario runner
+starts can leave no report; check the command's exit status and prerequisite
+build output.

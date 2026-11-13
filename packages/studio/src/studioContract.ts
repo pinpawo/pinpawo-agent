@@ -250,6 +250,8 @@ export type StudioPlugin = {
   /** Channel Plugin's storage-only ownership check, available before resident restoration. */
   petChannels?: {
     requireChannel: (channelId: string, storage: StudioPluginStorage) => Promise<void>;
+    /** Read the execution-directory binding before Plugin startup. */
+    getChannelWorkdir: (channelId: string, storage: StudioPluginStorage) => Promise<string | undefined>;
   };
   /** Scope namespaces for which this Plugin must register invocation context providers. */
   contextNamespaces?: readonly string[];

@@ -10,6 +10,7 @@ import { tool } from '@langchain/core/tools';
 
 import {
   buildStudio,
+  resolveChannelWorkdir,
   resolveStudioHostConfig,
   selectStudioPetCapabilities,
 } from './buildStudio';
@@ -92,6 +93,22 @@ function residentBuildResources(workdir: string) {
     autoAuthorizationSafetyLevel: 'strict' as const,
   };
 }
+
+test('Channel execution directory resolves on the Host without changing the Studio root', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-channel-workdir-'));
+  await mkdir(path.join(root, 'project'));
+  await writeFile(path.join(root, 'file'), 'not a directory');
+  assert.equal(await resolveChannelWorkdir('fallback', undefined, root), root);
+  assert.equal(await resolveChannelWorkdir('one', 'project', root), path.join(root, 'project'));
+  assert.equal(await resolveChannelWorkdir('one', path.join(root, 'project'), '/elsewhere'), path.join(root, 'project'));
+  for (const input of ['missing', 'file', '']) {
+    await assert.rejects(resolveChannelWorkdir('one', input, root), (error: Error) => {
+      assert.ok(error.message.includes('one'));
+      assert.ok(error.message.includes(path.resolve(root, input)));
+      return true;
+    });
+  }
+});
 
 /**
  * 插件 options 透传。schema 与文档都承诺「studio 原样透传,由插件自己解释」,
@@ -470,7 +487,10 @@ test('buildStudio connects each Pet Head to its configured model profile and the
   const completed = new Promise<void>(resolve => { repliesDone = resolve; });
   const channel = {
     name: 'channel', toolkits: [],
-    petChannels: { requireChannel: async (id: string) => { assert.equal(id, 'one'); } },
+    petChannels: {
+      requireChannel: async (id: string) => { assert.equal(id, 'one'); },
+      getChannelWorkdir: async () => undefined,
+    },
     start(context: StudioPluginContext) { channelContext = context; },
     head: {
       readContext: async () => ({ messages: [] }),

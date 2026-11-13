@@ -11,6 +11,8 @@ export type ChannelRow = {
   description?: string;
   /** Channel-authored collaboration instructions, separate from its public description. */
   prompt?: string;
+  /** Host-side execution directory, selected when the Channel is created. */
+  workdir?: string;
   createdBy: MemberRef;
   createdAt: string;
   updatedAt: string;

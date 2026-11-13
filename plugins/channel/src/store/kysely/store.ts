@@ -12,6 +12,7 @@ function channelRow(record: Record<'channels'>): ChannelRow {
     channelId: record.channel_id, title: record.title,
     ...(record.description === null ? {} : { description: record.description }),
     ...(record.prompt === null ? {} : { prompt: record.prompt }),
+    ...(record.workdir === null ? {} : { workdir: record.workdir }),
     createdBy: { kind: record.created_by_kind, id: record.created_by_id },
     createdAt: record.created_at, updatedAt: record.updated_at,
   };
@@ -52,6 +53,7 @@ export class KyselyChannelStore implements ChannelStore {
   async createChannel(row: ChannelRow): Promise<void> {
     await this.db.insertInto('channels').values({
       channel_id: row.channelId, title: row.title, description: row.description ?? null, prompt: row.prompt ?? null,
+      workdir: row.workdir ?? null,
       created_by_kind: row.createdBy.kind, created_by_id: row.createdBy.id, created_at: row.createdAt, updated_at: row.updatedAt,
     }).execute();
   }

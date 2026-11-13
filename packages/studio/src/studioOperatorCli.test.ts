@@ -27,6 +27,9 @@ test('operator parser accepts connection flags on either side and rejects incomp
     ['pets', 'list', '--agent-url', 'http://localhost/path'],
     ['pets', 'create', 'a', '--definition', 'd', '--name', 'A'],
     ['channels', 'create', '--title', 'C', '--pet', 'a'],
+    ['channels', 'create', '--title', 'C', '--workdir'],
+    ['channels', 'list', '--workdir', '/project'],
+    ['pets', 'create', 'a', '--definition', 'd', '--name', 'A', '--channel', 'c', '--workdir', '/project'],
     ['channels', 'add-member', 'c', '--member', 'pet:a'],
     ['pets'], ['pets', 'show'], ['pets', 'list', 'a'], ['pets', 'records', 'a'], ['pets', 'close'], ['pets', 'remove'], ['pets', 'reopen'],
     ['pets', 'close', 'a', '--confirm-stop', '--confirm-stop'], ['pets', 'close', 'a', '--confirm-stop', 'false'],
@@ -132,6 +135,8 @@ test('operator commands send the existing wire protocol without retries or start
   assert.equal(seen.at(-1)?.method, 'POST');
   await run(['channels', 'create', '--title', 'Release']);
   assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/channels', { title: 'Release', pets: [] }]);
+  await run(['channels', 'create', '--title', 'Project', '--workdir', 'project path']);
+  assert.deepEqual([seen.at(-1)?.method, seen.at(-1)?.url, seen.at(-1)?.body], ['POST', '/channels', { title: 'Project', workdir: 'project path', pets: [] }]);
   await run(['channels', 'add-member', 'c', '--member', 'human:a%20b']);
   assert.deepEqual([seen.at(-1)?.url, seen.at(-1)?.body], ['/channels/members', { channelId: 'c', kind: 'human', id: 'a b' }]);
   await run(['channels', 'remove-member', 'c', '--member', 'pet:reviewer']);

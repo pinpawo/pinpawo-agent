@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 export const STUDIO_OPERATOR_HELP = `Operate an already-running Studio (no Host is started):
   pinpawo-studio channels list [--after N] [--limit N]
-  pinpawo-studio channels create --title <text> [--description <text>]
+  pinpawo-studio channels create --title <text> [--description <text>] [--workdir <host-path>]
   pinpawo-studio channels read <channelId> [--before N | --after N] [--limit N]
   pinpawo-studio channels send <channelId> --file <markdown|-> [--mention <participantId>] [--reply-to <messageId>]
   pinpawo-studio channels members <channelId>
@@ -47,6 +47,8 @@ sends return the saved message. No request is retried automatically. Read actual
 resubmitting an uncertain mutation. --mention and --member take a participantId
 (human:<id> or pet:<id>), not a display name; --mention must be a current member.
 Create a Channel first, then create each Pet in that Channel with --channel.
+Only the local Host token can set --workdir; the Host resolves it and all Pets
+in the Channel use it. The directory cannot be changed after creation.
 A Pet has one immutable Channel and its own runtime and sessions. Definitions
 can be reused for new instances; existing instances cannot join other Channels.
 Close is temporary; reopen restores the same instance in its owner Channel.
@@ -85,6 +87,7 @@ export type StudioOperatorOptions = {
   replyTo?: string;
   title?: string;
   description?: string;
+  workdir?: string;
   label?: string;
   definition?: string;
   name?: string;
@@ -147,7 +150,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
       allowed.add('--file'); allowed.add('--mention'); allowed.add('--reply-to');
     }
     if (action === 'create') {
-      allowed.add('--title'); allowed.add('--description');
+      allowed.add('--title'); allowed.add('--description'); allowed.add('--workdir');
     }
     if (action === 'add-member' || action === 'remove-member') allowed.add('--member');
     if (action === 'remove-member') allowed.add('--confirm-stop');
@@ -215,7 +218,7 @@ export function parseStudioOperatorArgs(args: readonly string[]): StudioOperator
     ...(values.has('--confirm-stop') ? { confirmStop: true } : {}),
     file: values.get('--file'), mentions: [...new Set(mentions)],
     replyTo: values.get('--reply-to'), idempotencyKey: values.get('--idempotency-key'),
-    title: values.get('--title'), description: values.get('--description'), channelId: values.get('--channel'),
+    title: values.get('--title'), description: values.get('--description'), workdir: values.get('--workdir'), channelId: values.get('--channel'),
     label: values.get('--label'), definition: values.get('--definition'), name: values.get('--name'), env: values.get('--env'),
     ...(values.has('--member') ? { member: memberRef(values.get('--member')!) } : {}),
   };
@@ -288,7 +291,8 @@ export async function runStudioOperator(options: StudioOperatorOptions, dependen
   if (command === 'channels' && id && ['read', 'members', 'sessions'].includes(action!)) url.searchParams.set('channelId', id);
   if (command === 'pets' && action === 'credentials') url.searchParams.set('petId', id!);
   if (command === 'channels' && action === 'create') {
-    body = { title: options.title, ...(options.description ? { description: options.description } : {}), pets: [] };
+    body = { title: options.title, ...(options.description ? { description: options.description } : {}),
+      ...(options.workdir !== undefined ? { workdir: options.workdir } : {}), pets: [] };
   } else if (action === 'add-member' || action === 'remove-member') {
     body = { channelId: id, ...options.member, ...(action === 'remove-member' && options.member?.kind === 'pet' && options.confirmStop ? { confirmStop: true } : {}) };
   }

@@ -253,6 +253,11 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       requireChannel: async (channelId, storage) => {
         if (!await (await openStore(storage)).getChannel(channelId)) throw new StudioPetError(`No owner Channel "${channelId}".`, 'invalid');
       },
+      getChannelWorkdir: async (channelId, storage) => {
+        const channel = await (await openStore(storage)).getChannel(channelId);
+        if (!channel) throw new StudioPetError(`No owner Channel "${channelId}".`, 'invalid');
+        return channel.workdir;
+      },
     },
     name: 'channel', contextNamespaces: ['channel'], sendMessage, run, head, toolkits: [toolkit],
     get service() { return channelService(); },

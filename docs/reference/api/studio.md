@@ -134,7 +134,7 @@ A human joins only as an active Studio client, and its label is the client's lab
 | Route | Input / result |
 |---|---|
 | `GET /channels` | Paginated Channels the actor is a member of, plus `viewerParticipantId`. With `all=true`, the local Host token lists every Channel. |
-| `POST /channels` | `title`, optional `description` and `prompt`; `pets` may be omitted or `[]`, and non-empty arrays are rejected. Only Studio authority may supply a non-empty prompt. The human creator is the only initial member; no Pet instances are created. `201 { channel, members }`. |
+| `POST /channels` | `title`, optional `description`, `prompt` and `workdir`; `pets` may be omitted or `[]`, and non-empty arrays are rejected. Only Studio authority may supply a non-empty prompt or a workdir. The human creator is the only initial member; no Pet instances are created. `201 { channel, members }`. |
 | `POST /channels/update` | `channelId`, optional `title`, optional `description` and `prompt` (`null` clears the corresponding field). Members may edit title and description; only Studio authority may modify or clear prompt, even when the caller created the Channel. Non-member Studio authority may update prompt alone; mixed updates still require membership. |
 | `GET /channels/context?channelId=...` | Channel, current members, a page of messages (the newest by default; `before` reads older, `after` newer), `viewerParticipantId`. |
 | `GET /channels/members?channelId=...` | Current members. The local Host token may read any Channel's members. |
@@ -142,6 +142,16 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`, optional `confirmStop`; a human leaves, or a Pet instance is permanently removed. Resident Pet removal requires `confirmStop: true` and awaits business stop before final removal. Identity and history remain. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
 | `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; saved message. |
+
+`workdir` is an optional Host-side execution directory for every Pet owned by
+the Channel. It can be supplied only at Channel creation and is persisted with
+the Channel; there is no Pet override. The Host resolves a relative path against
+the Studio workdir and validates it when assembling a Pet. Omission uses the
+Studio workdir. An invalid or inaccessible directory fails assembly rather than
+falling back; the error identifies the Channel and directory. This directory is
+a path resolution base, not a filesystem sandbox. It does not move Studio
+configuration, storage, checkpoints or session records, or alter independently
+configured Plugin roots and authorization.
 
 The former `artifacts` message input and response field have been removed. The
 strict message schema rejects that input with `400`; clients must omit it.

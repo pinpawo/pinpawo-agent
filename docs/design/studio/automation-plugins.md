@@ -42,7 +42,7 @@ Channel 是对话和结果的汇集处。schedule / trigger 是 Pet 的自发行
 `run(channelId, petId, request, {kind:'trigger', id: triggerId}, {idempotencyKey})`。Channel 只校验目标 Pet
 是该 Channel 的成员，然后在 `(channel, pet)` 绑定的 session、带 `channel` scope 派发
 `{type:'channel_task', version:1, channelId, origin, body}`。指令不写入 Channel；Pet 随后的公开回复照常以
-Pet 身份成为 Channel 消息，其中的 @ 照常交接。指令不是消息，正文里的寻址链接不会投递给任何成员。
+Pet 身份成为 Channel 消息，其中的 @ 只记录寻址，不触发派发。指令不是消息，正文里的寻址链接不会投递给任何成员。
 `run()` 返回 Host 回执（invocationId、sessionId），Trigger 存在 delivery 记录的 `receipt` 里。
 Channel 是软依赖：没有安装或没有启动 Channel Plugin、或 Pet 不是成员时，这类 delivery 记为 failed，
 并不会退回到无 session 的 dispatch。没有 `channelId` 的规则在 Plugin 创建时就被拒绝：没有 Channel，

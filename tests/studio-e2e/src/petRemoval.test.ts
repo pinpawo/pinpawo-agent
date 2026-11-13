@@ -176,7 +176,7 @@ test('confirmed Close and Reopen rebuild a real Host on the same identity, owner
   const channelId = (await channel.service.createChannel(human, { title: 'Owner' })).channel.channelId;
   const original = await studio.pets.create({ petId: 'pet', definitionId: 'worker', name: 'Pet', channelId });
   await studio.pets.credentials.set({ petId: 'pet', envName: 'TOKEN', value: 'local-test-value' });
-  const send = (body: string) => channel.sendMessage(channelId, { body, mentions: [{ participantId: 'pet:pet' }] }, human);
+  const send = (body: string) => channel.run(channelId, 'pet', body, { kind: 'trigger', id: 'test' });
   await send('Before Close.');
   await waitFor(() => turns === 1 && hosts[0]!.resident.dispatch.getQueueSnapshot().activeOperation === null);
   const binding = (await channel.service.getSession(channelId, 'pet'))!;

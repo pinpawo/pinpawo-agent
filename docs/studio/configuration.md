@@ -256,8 +256,7 @@ and any configured announcement in its system prompt. This does not change
 the Pet's `PET.md`; a prompt
 edit applies to a subsequent dispatch, not to a run already in progress or its
 approval continuation. Use it to describe the current team's roles and how members
-collaborate. The routing model can also see it; routing still only considers human
-messages with no @. It does not grant permissions or override Host / PET safety
+collaborate. It does not grant permissions or override Host / PET safety
 rules, and does not guarantee model compliance. A Pet can still use `channel_read_context`
 to inspect messages; the prompt does not automatically include conversation history.
 Existing workdir templates are not rewritten by this setting. See the
@@ -285,7 +284,7 @@ The default template ships one shared `channel_context` Capability, explicitly
 referenced by its four Pet configurations. It performs a separate analysis subtask
 and returns a summary to the main Pet. PET.md defines only the Pet's own
 role and boundaries; the Channel announcement defines team roles and collaboration.
-The Host still saves and delivers public replies through its existing event path.
+The Host still saves public replies as Timeline messages.
 
 Existing workdirs are not rewritten. A Pet without `sharedCapabilities` continues
 to use its private directory. To migrate, preserve local customizations, place
@@ -295,21 +294,9 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-A human's message that addresses nobody is stored and wakes no Pet. Setting the Channel
-Plugin option `routing.enabled` to `true` lets one model call choose a single Pet, or
-nobody, for such a message:
-
-```json
-{ "id": "@pinpawo-plugin/channel", "options": { "routing": {
-  "enabled": true,
-  "decider": { "kind": "llm", "modelProfileId": "deepseek-v4-flash" },
-  "pets": { "executor": "Runs code, commands and delivery requests." }
-} } }
-```
-
-`modelProfileId` names a Host model profile (omit it for the Host default); `threshold`
-(default 0.5), `timeoutMs` (default 10000) and `historyLimit` (default 20) are optional.
-See [Channel routing](../design/studio/channel-routing.md).
+Online Pet Heads independently decide whether to ignore, reply to, or dispatch work
+for Channel messages. A mention does not guarantee a response. Explicit scheduler, trigger and Host
+dispatch entry points remain available.
 
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source

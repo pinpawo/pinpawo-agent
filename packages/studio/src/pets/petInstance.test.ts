@@ -51,6 +51,73 @@ test('one identity owns activation and runtime rename, using fresh names on Reop
 });
 
 for (const kind of ['close', 'remove'] as const) {
+  test(`a ${kind} cancels its own Timeline subscription before runtime teardown`, async () => {
+    const stoppedRuntime = deferred();
+    const stopped: string[] = [];
+    const signals: Array<{ petId: string; signal: AbortSignal }> = [];
+    const create = (pet: StudioPet) => new PetInstance(pet, {
+      assemble: async () => ({ dispatch: {}, close: async () => stoppedRuntime.promise }) as StudioPetRuntime,
+      subscribePetTimeline: (live, signal) => {
+        signals.push({ petId: live.registration.petId, signal });
+        return () => {
+          assert.equal(signal.aborted, true, 'in-flight work is canceled before unsubscribe');
+          stopped.push(live.registration.petId);
+        };
+      },
+      onLive: () => {}, onClosed: () => {}, onChange: () => {},
+    });
+    const first = create(row);
+    const second = create({ ...row, petId: 'second' });
+    await first.restore(row);
+    await second.restore({ ...row, petId: 'second' });
+    const ending = first.end(row, kind, true, async () => {});
+    assert.deepEqual(stopped, ['pet'], 'subscription is canceled synchronously and another Pet stays online');
+    assert.equal(signals[0].signal.aborted, true);
+    assert.equal(signals[1].signal.aborted, false, 'another Pet remains active');
+    const duplicate = first.end(row, kind, true, async () => {});
+    assert.equal(ending.promise, duplicate.promise);
+    assert.deepEqual(stopped, ['pet'], 'deduplicated teardown does not stop twice');
+    stoppedRuntime.resolve();
+    const ended = await ending.promise;
+    if (kind === 'close') {
+      await first.reopen(ended, async () => {}).promise;
+      assert.notEqual(signals[2].signal, signals[0].signal, 'Reopen uses a fresh activation signal');
+      assert.equal(signals[2].signal.aborted, false);
+      await first.shutdown();
+      assert.deepEqual(stopped, ['pet', 'pet'], 'Reopen subscribes again and shutdown unsubscribes');
+    }
+    await second.shutdown();
+    assert.equal(stopped.at(-1), 'second');
+  });
+}
+
+test('failed activation cancels the Timeline subscription even when runtime cleanup fails', async () => {
+  let stopped = 0;
+  const instance = new PetInstance(row, {
+    assemble: async () => ({ dispatch: {}, close: async () => { throw new Error('close failed'); } }) as unknown as StudioPetRuntime,
+    subscribePetTimeline: (_live, signal) => () => { assert.equal(signal.aborted, true); stopped++; },
+    onLive: () => { throw new Error('activation failed'); }, onClosed: () => {}, onChange: () => {},
+  });
+  await assert.rejects(instance.restore(row), /close failed/);
+  assert.equal(stopped, 1);
+  await assert.rejects(instance.shutdown(), /close failed/);
+  assert.equal(stopped, 1);
+});
+
+test('a failed Timeline subscription aborts its activation and closes the runtime', async () => {
+  let signal: AbortSignal | undefined, closed = 0;
+  const instance = new PetInstance(row, {
+    assemble: async () => ({ dispatch: {}, close: async () => { closed++; } }) as StudioPetRuntime,
+    subscribePetTimeline: (_live, activationSignal) => { signal = activationSignal; throw new Error('subscribe failed'); },
+    onLive: () => { assert.fail('failed subscription cannot expose the Pet'); }, onClosed: () => {}, onChange: () => {},
+  });
+  await assert.rejects(instance.restore(row), /subscribe failed/);
+  assert.equal(signal?.aborted, true);
+  assert.equal(closed, 1);
+  assert.equal(instance.live, undefined);
+});
+
+for (const kind of ['close', 'remove'] as const) {
   test(`${kind} owns consent, admission fencing, coalescing, busy rules and stop-before-commit`, async () => {
     const stop = deferred();
     const { instance, events, closes } = fixture(() => stop.promise);
@@ -161,6 +228,59 @@ test('registry keeps restoration, cross-instance scheduling, pending dedupe and 
     assert.equal(registry.listLive().length, 0);
     assert.equal(rows.get(row.petId)?.closedAt, undefined, 'shutdown does not write Close');
   } finally { stopping.resolve(); activating.resolve(); await registry.close(); }
+});
+
+test('shutdown immediately cancels existing subscriptions and prevents late subscription during Reopen', async () => {
+  const persisting = deferred();
+  const rows = new Map([
+    [row.petId, { ...row }],
+    ['closed', { ...row, petId: 'closed', closedAt: 'closed' }],
+  ]);
+  const started: string[] = [], stopped: string[] = [];
+  const store = {
+    listPets: async () => [...rows.values()].map(pet => ({ ...pet })),
+    getPet: async (id: string) => rows.get(id),
+    reopenPet: async () => { await persisting.promise; },
+  } as unknown as PetStore;
+  const registry = new StudioPetRegistry({
+    studioId: 'head-shutdown', store: async () => store, credentials: {} as StudioPetCredentials,
+    definitions: [{ definitionId: row.definitionId, name: 'Worker' }], requireChannel: async () => {},
+    assemble: async () => ({ dispatch: {}, close: async () => {} }) as StudioPetRuntime,
+    subscribePetTimeline: (live, signal) => {
+      started.push(live.registration.petId);
+      return () => { assert.equal(signal.aborted, true); stopped.push(live.registration.petId); };
+    },
+    onLive: () => {}, onClosed: () => {}, onChange: () => {},
+  });
+  try {
+    await registry.restore();
+    const reopening = registry.reopenInstance('closed');
+    await tick();
+    assert.deepEqual(started, ['pet'], 'Reopen does not observe before its marker is committed');
+    const closing = registry.close();
+    assert.deepEqual(stopped, ['pet'], 'existing subscription is canceled without waiting for Reopen persistence');
+    persisting.resolve();
+    await reopening;
+    await closing;
+    assert.deepEqual(started, ['pet'], 'pending Reopen cannot subscribe after shutdown');
+  } finally { persisting.resolve(); await registry.close(); }
+});
+
+test('successful Reopen subscribes to the Timeline only after persistence settles', async () => {
+  const persisted = deferred();
+  const started: string[] = [];
+  const instance = new PetInstance(row, {
+    assemble: async () => ({ dispatch: {}, close: async () => {} }) as StudioPetRuntime,
+    subscribePetTimeline: () => { started.push('timeline'); return () => {}; },
+    onLive: () => {}, onClosed: () => {}, onChange: () => {},
+  });
+  const reopening = instance.reopen({ ...row, closedAt: 'closed' }, () => persisted.promise).promise;
+  await tick();
+  assert.deepEqual(started, []);
+  persisted.resolve();
+  await reopening;
+  assert.deepEqual(started, ['timeline']);
+  await instance.shutdown();
 });
 
 test('failed activation cleanup retains the only runtime until a confirmed stop actually settles', async () => {

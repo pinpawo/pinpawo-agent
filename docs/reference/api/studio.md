@@ -70,7 +70,14 @@ no import from `pinpawo/host-runtime`.
 
 Every published `StudioEvent` carries an `eventId` that Studio assigns at `notify()`, along with
 `source` and `occurredAt`; subscribers can use it to tell two events apart even when they share a
-millisecond.
+millisecond. Producers can attach an opaque `topic`;
+`subscribe(handler, { source, topic })` registers an exact subscription, so
+unrelated topics never enter that subscriber's pending work. Without a selector,
+subscription observes all events. Topics are routing labels, not authorization.
+The process-local event bus serializes handler work per subscriber,
+while different subscribers proceed independently. A slow online subscriber may
+therefore have pending events in memory. Unsubscribing drops its pending work that
+has not started; the bus does not persist or replay missed events.
 
 ## Global dispatch observation
 
@@ -134,7 +141,7 @@ A human joins only as an active Studio client, and its label is the client's lab
 | `POST /channels/members` | `channelId`, `kind` (`human` \| `pet`), `id`; adds or rejoins an active human client. An already-live Pet in its owner Channel returns its projected membership. Pet creation or reopen uses the lifecycle API; instances cannot join another Channel. Any member, or the local Host token for any Channel. |
 | `POST /channels/members/remove` | `channelId`, `kind`, `id`, optional `confirmStop`; a human leaves, or a Pet instance is permanently removed. Resident Pet removal requires `confirmStop: true` and awaits business stop before final removal. Identity and history remain. `409` for the last human member. Any member, or the local Host token for any Channel. |
 | `GET /channels/sessions?channelId=...` | Each Pet's session in this Channel, for `/pet-sessions/*`. |
-| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; message plus per-target deliveries. |
+| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`; saved message. |
 
 `workdir` is an optional Host-side execution directory for every Pet owned by
 the Channel. It can be supplied only at Channel creation and is persisted with
@@ -163,8 +170,7 @@ Channel-scoped Pet run receives the Plugin's shared instructions and Channel met
 even without an announcement. The optional `channel_context` Capability is selected
 explicitly through Pet configuration and executed by the Agent as an ordinary subtask. The Host uses a
 snapshot of the system sections for that run; edits apply to later dispatches, not to the current run or its approval
-continuation. The routing model can also see it, but routing still applies only to
-unaddressed human messages. The prompt expresses collaboration intent, not authorization; it
+continuation. The prompt expresses collaboration intent, not authorization; it
 does not override Host or PET safety rules, grant tool access, change review policy,
 or change Channel membership. Supplying it does not guarantee model compliance. See the
 [design draft](../../design/studio/channel-collaboration-prompt.md).
@@ -177,12 +183,17 @@ combined. Schemas and
 limits are defined by [ChannelService](../../../plugins/channel/src/channelService.ts).
 `mentions: [{participantId}]` and direct Markdown `[@label](participant:pet:reviewer)`
 share one parser and address only current members; request-body author, source and
-scope claims are rejected. Deliveries are not stored: the response carries them and
-Channel publishes each as a global `channel.delivery` event. A Pet's final reply
-without tool calls in its Channel session is saved as its message and delivered the
-same way. The model is specified in [Channel model](../../design/studio/channel-model.md);
-addressing syntax and fixed sessions in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
-Delivery acceptance is not execution completion.
+scope claims are rejected. A Pet's public final reply in its Channel session is
+saved as a message with its verified author and an external reference for
+deduplication. A newly committed message publishes a live
+`channel.message.created` event through `ChannelService.subscribe`, without
+awaiting asynchronous listeners; the Channel Plugin also forwards it to the
+Studio event bus described above. Missed events are not replayed, though history
+remains queryable. Each online Pet Instance has a Head that independently decides
+whether to ignore a message, reply, or request a Host dispatch. A mention does
+not guarantee a response. Explicit Host dispatch and scheduler/trigger entry
+points remain independent. See the [Channel model](../../design/studio/channel-model.md)
+and [addressing design](../../design/studio/channel-addressing-and-execution.md).
 
 ## Pet instances
 

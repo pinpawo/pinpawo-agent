@@ -59,12 +59,13 @@ try {
   };
   const channel = (await api('/channels')).channels[0];
   const context = () => api('/channels/context?channelId=' + channel.channelId + '&limit=200');
-  const execute = body => api('/channels/messages', { channelId: channel.channelId, body, mentions: [{ participantId: 'pet:alpha' }] });
+  const run = request => api('/test/channel-run', { channelId: channel.channelId, petId: 'alpha', request });
   const note = body => api('/channels/messages', { channelId: channel.channelId, body });
   const longBody = '# Investigation notes\n\n' + Array.from({ length: 12 }, (_, i) => 'Evidence ' + (i + 1) + ': ' + 'A complete paragraph of public findings. '.repeat(5)).join('\n\n')
     + '\n\n~~~ts\nconst veryLongLine = "' + 'stored-evidence-'.repeat(90) + '";\nconsole.log(veryLongLine);\n~~~\n\n| Record | Observation |\n| --- | --- |\n| A | Verified against the stated scope |';
   await note(longBody);
-  await execute('Summarize public evidence.');
+  await note('Summarize public evidence.');
+  await run('Summarize public evidence.');
   await until(async () => (await context()).messages.some(item => item.author.kind === 'pet' && item.author.id === 'alpha'), 'public output');
   for (let i = 0; i < 18; i++) await note('Progress note ' + i + '. Evidence remains available for the next round.');
   browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_CHANNEL ? { channel: process.env.CHANNEL_BROWSER_CHANNEL } : {}),

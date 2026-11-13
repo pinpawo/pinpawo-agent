@@ -68,10 +68,10 @@ export async function assembleStudioPetInvocation(params: {
         title: '示例笔记项目', description: '合成的项目协作案例。', prompt: params.announcement,
         createdBy: { kind: 'human', id: 'owner' }, createdAt: occurredAt, updatedAt: occurredAt,
       });
-      for (const member of [{ kind: 'human' as const, id: 'owner' }, { kind: 'pet' as const, id: params.role }]) {
-        await transaction.upsertMember({ ...member, channelId: studioPetEvalChannelId, joinedAt: occurredAt });
-      }
+      await transaction.upsertMember({ kind: 'human', id: 'owner', channelId: studioPetEvalChannelId, joinedAt: occurredAt });
     });
+    // Pet membership comes from its registry owner, not the Channel member table.
+    await studio.pets.create({ petId: params.role, definitionId: params.role, name: params.role, channelId: studioPetEvalChannelId });
     const binding = await channel.service.reserveSession(studioPetEvalChannelId, params.role, () => `${params.role}:role-eval`);
     await studio.dispatch({ petId: params.role, request: params.request ?? 'Prepare the synthetic decision context.',
       session: { id: binding.sessionId, create: true }, scope: { namespace: 'channel', id: studioPetEvalChannelId },

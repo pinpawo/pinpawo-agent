@@ -7,10 +7,10 @@ import { ChannelMessageInput, type ChannelMessageInputHandle } from './ChannelMe
 import { PetSessionView } from './PetSessionView';
 import type { PetSessionTarget } from './petSession';
 import {
-  appendChannelDeliveries, channelCanEditPrompt, channelInactivePets, channelMemberRemovalInput, channelPetCreateInput, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
+  channelCanEditPrompt, channelInactivePets, channelMemberRemovalInput, channelPetCreateInput, channelMessageIdentity, channelMessageInput, channelMessageSummary, channelPetIdentity,
   channelPetSession, channelReplyRecipientId, channelWindowAfterEarlier, channelWindowAfterLater, mergeChannelMessages,
   readChannelContext, readChannelLater, readChannelPages, type ChannelWindow,
-  type ChannelPetDefinition, type ChannelPetRecord, type ChannelContext, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
+  type ChannelPetDefinition, type ChannelPetRecord, type ChannelContext, type ChannelMember, type ChannelMessage, type ChannelRow, type ChannelSession, type DispatchQueue,
 } from './channelData';
 
 type Props = {
@@ -23,12 +23,8 @@ type Props = {
   active?: boolean;
   pets: { petId: string; name: string }[];
   petsReady?: boolean;
-  /** Delivery outcomes observed on the Studio event stream. */
-  deliveries?: ChannelDelivery[];
   /** Live execution failures, distinct from admission and saving a reply. */
   dispatches?: DispatchRecord[];
-  /** Unaddressed messages Channel routing gave to nobody. */
-  routingSkips?: ChannelRoutingSkip[];
   /** Pet replies the Host could not save into a Channel. */
   failures?: { channelId: string; petId?: string; error: string }[];
 };
@@ -43,13 +39,12 @@ export function ChannelDispatchFailures({ channelId, dispatches, pets, petsReady
     </p>)}</>;
 }
 
-export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, deliveries = [], dispatches = [], routingSkips = [], failures = [], clientMode = false, onOpenKnowledge, onPetsChanged }: Props) {
+export function ChannelPanel({ url, token, connected, refreshVersion, active = true, pets, petsReady = true, dispatches = [], failures = [], clientMode = false, onOpenKnowledge, onPetsChanged }: Props) {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [selected, setSelected] = useState('');
   const [context, setContext] = useState<OpenChannel | null>(null);
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const [sessions, setSessions] = useState<ChannelSession[]>([]);
-  const [sent, setSent] = useState<ChannelDelivery[]>([]);
   const [unavailable, setUnavailable] = useState(false);
   const [error, setError] = useState('');
   const [memberError, setMemberError] = useState('');
@@ -266,13 +261,8 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     event.preventDefault();
     void submit(async () => {
       followLatest.current = true;
-      const result = await post('/channels/messages', channelMessageInput(selected, '', body, reply)) as ChannelMessage & {
-        deliveries?: Omit<ChannelDelivery, 'channelId' | 'messageId'>[];
-      };
+      await post('/channels/messages', channelMessageInput(selected, '', body, reply));
       setBody(''); setReply(undefined); composer.current?.reset();
-      if (result.deliveries?.length) {
-        setSent(current => appendChannelDeliveries(current, result.deliveries!.map(item => ({ ...item, channelId: result.channelId, messageId: result.messageId }))));
-      }
     });
   };
   const savePrompt = (event: FormEvent) => {
@@ -383,7 +373,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           Members <span>{members.length}</span>
         </button>
       </div>
-      {!connected && <div className="channel-connection-note" role="status">Connection interrupted. Stored history remains visible; new messages and deliveries are unknown until reconnected.</div>}
+      {!connected && <div className="channel-connection-note" role="status">Connection interrupted. Stored history remains visible; new messages are unknown until reconnected.</div>}
       {unavailable ? <div className="empty-state"><strong>Channel Plugin unavailable</strong><span>Enable the Channel Plugin on this Studio Host to use this page.</span></div>
         : context ? <>
           <div className="channel-timeline-region">
@@ -396,7 +386,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               {held?.hasEarlier && <button className="channel-earlier" type="button" disabled={loadingEarlier || !connected}
                 onClick={() => { void loadEarlier(); }}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
               <ChannelTimeline messages={messages} pets={identityPets} petsReady={petsReady} connected={connected} highlighted={highlightedMessage} artifactSource={{ url, token }}
-                members={members} viewerParticipantId={viewerParticipantId} deliveries={appendChannelDeliveries(sent, deliveries)} routingSkips={routingSkips} working={working}
+                members={members} viewerParticipantId={viewerParticipantId} working={working}
                 sessions={sessions} onViewSession={clientMode ? undefined : viewSession}
                 onViewerChange={open => {
                   if (open) {
@@ -415,7 +405,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                   composer.current?.reset(author);
                 }} />
               <ChannelDispatchFailures channelId={selected} dispatches={dispatches} pets={pets} petsReady={petsReady} />
-              {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}
+              {error && <p className="channel-record-error channel-send-error" role="alert">Message was not saved: {error}</p>}
               {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>
                 {item.petId ? `${channelPetIdentity(item.petId, pets, petsReady).name} reply was not saved` : 'Pet reply was not saved'}: {item.error}</p>)}
             </div>
@@ -437,7 +427,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 onSubmit={() => { if (body.trim() && connected && !pending) composerForm.current?.requestSubmit(); }} />
               <div className="channel-composer-controls">
                 <p className="channel-composer-hint"><kbd>@</kbd> mention · <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line
-                  · Without an @, no Pet is woken unless Channel routing picks one.</p>
+                  · Each online Pet decides whether to respond or act.</p>
                 <button className="channel-send" disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
               </div>
             </div>

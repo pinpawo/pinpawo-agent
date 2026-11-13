@@ -61,7 +61,7 @@ Registry 先通过数据库唯一约束保留新身份，再交给 `PetInstance.
 这个薄对象持有不可变身份与 owner Channel、当前 runtime handle、进行中的生命周期操作和失败不可用状态，执行 Close/Remove 的确认、
 停止与最终状态顺序，以及 Reopen 和改名的单实例约束。Registry 保留集合、身份唯一性、定义与 Channel
 校验、数据库协调、恢复和整体 shutdown；最终关闭/移除标记始终重新读库，不在对象中维护第二份真相。
-Host 仍由 `buildStudio.assemblePet` 调用 `createResidentPetHost` 装配；这里尚未接入 Head lifecycle。
+Host 仍由 `buildStudio.assemblePet` 调用 `createResidentPetHost` 装配；每个实例激活时订阅所属 Channel Timeline，停用开始时同步取消订阅并取消在途判断。
 
 
 ## 定义
@@ -106,7 +106,7 @@ Studio 进程关闭与这两种操作不同：正常重启只恢复未关闭且�
   `petId` 换成实例 id 后，Session 自然属于实例，不需要新的关联字段。
 - Channel 沿用现有形状：`channel_sessions(channel_id, pet_id) → session_id`，实例在唯一所属 Channel 中有专用 Session。
   runtime、运行槽和 Session 都随实例固定归属；不能拆开或跨 Channel 复用。
-- Head 属于后续独立设计，本次没有实现 Head。后续实现也必须保持 Head 与实例归属一致，不能拆开或跨 Channel 复用。
+- Head 属于实例并绑定其 owner Channel；关闭后错过的事件不重放。
 - RS 资源仍按 Agent Session 管理，不改成按实例。实例级共享资源以后单独设计。
 - Pet 可以有自己的凭据（命令的环境变量），存在 Studio core，见 [Pet 凭据](pet-credentials.md)。
 
@@ -181,7 +181,7 @@ Studio 关闭时，先停 Plugin，再关闭所有 Pet 的 runtime。
 - Console 和 CLI 遵守相同创建顺序；普通客户不获得定义创建权限。
 - Close 可恢复，Remove（包括移除 Pet 成员）永久生效；共用明确确认后的先停止、再持久化路径。
 - 保留身份与历史，关闭可原身份恢复，移除不可重开或复用 id；两者都不能搬迁至其他 Channel。
-- 不新增 Head、停止端口、队列或 dispatch/event-core 语义。
+- 实例激活和停用控制 Timeline 订阅；不新增独立 Head 服务、持久消费队列或改变 dispatch/event-core 语义。
 
 ## 验收
 

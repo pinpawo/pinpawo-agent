@@ -469,3 +469,96 @@ test('Plugin model factories use complete resolved profiles for native and gatew
     assert.equal(forcedRequests, 1);
   } finally { await result.studio.shutdown(); }
 });
+
+test('buildStudio connects each Pet Head to its configured model profile and the live Channel', { timeout: 5000 }, async () => {
+  const workdir = await writeStudioConfig([]);
+  const petDir = path.join(workdir, '.pinpawo', 'pets');
+  await writeFile(path.join(petDir, 'planner.json'), JSON.stringify({
+    definitionId: 'planner', name: 'Planner', modelProfileId: 'specialist',
+  }));
+  await writeFile(path.join(petDir, 'writer.json'), JSON.stringify({ definitionId: 'writer', name: 'Writer' }));
+  await writeFile(path.join(workdir, '.pinpawo', 'studio.json'), JSON.stringify({
+    studioId: 'head-composition', definitions: ['planner', 'writer'],
+  }));
+  const configuration = await resolveStudioHostConfig({ workdir });
+  let channelContext: StudioPluginContext | undefined;
+  const replies: Array<{ petId: string; messageId: string; body: string }> = [];
+  let repliesDone!: () => void;
+  const completed = new Promise<void>(resolve => { repliesDone = resolve; });
+  const channel = {
+    name: 'channel', toolkits: [],
+    petChannels: { requireChannel: async (id: string) => { assert.equal(id, 'one'); } },
+    start(context: StudioPluginContext) { channelContext = context; },
+    head: {
+      readContext: async () => ({ messages: [] }),
+      reply: async (_channelId: string, petId: string, messageId: string, body: string) => {
+        replies.push({ petId, messageId, body });
+        if (replies.length === 2) repliesDone();
+      },
+      dispatch: async () => { assert.fail('model requested a direct reply'); },
+    },
+  };
+  const calls: Array<{ url: string; model: string; petId: string }> = [];
+  const tracingKeys = ['LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2'];
+  const tracing = tracingKeys.map(key => process.env[key]);
+  for (const key of tracingKeys) process.env[key] = 'false';
+  const savedFetch = globalThis.fetch;
+  const savedSetTimeout = globalThis.setTimeout;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    const timer = savedSetTimeout(...args);
+    timers.add(timer);
+    return timer;
+  }) as typeof setTimeout;
+  globalThis.fetch = async (url, init) => {
+    const request = JSON.parse(String(init?.body));
+    const human = request.messages.find((message: { role: string }) => message.role === 'user');
+    const input = JSON.parse(human.content);
+    calls.push({ url: String(url), model: request.model, petId: input.pet.petId });
+    return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'reply', text: `hello from ${input.pet.petId}` }) }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+  };
+  const profiles = createTestModelProfileRegistry([
+    { modelProfileId: 'default', model: 'default-model', baseUrl: 'https://default.example.test/v1' },
+    { modelProfileId: 'specialist', model: 'specialist-model', baseUrl: 'https://specialist.example.test/v1' },
+  ]);
+  const modelProfiles = createLocalModelProfileRegistry({ snapshot: profiles.snapshot, llmDefaults: { timeoutMs: 1000 } });
+  let result: Awaited<ReturnType<typeof buildStudio>> | undefined;
+  try {
+    result = await buildStudio({
+      configuration: { ...configuration, plugins: [channel] },
+      modelProfiles,
+      hostCapabilities: [generalCapability()], petCapabilities: new Map(), ...residentBuildResources(workdir),
+    });
+    await result.studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
+    await result.studio.pets.create({ channelId: 'one', petId: 'writer', definitionId: 'writer', name: 'Writer' });
+    assert.ok(channelContext);
+    channelContext.notify({ type: 'channel.message.created', topic: 'other', payload: {
+      channelId: 'one', messageId: 'wrong-topic', sequence: 1, author: { kind: 'human', id: 'owner' },
+      occurredAt: '2026-01-01T00:00:00Z', body: 'Wrong topic', mentions: [],
+    } });
+    channelContext.notify({ type: 'channel.message.created', topic: 'one', payload: {
+      channelId: 'one', messageId: 'message-1', sequence: 1, author: { kind: 'human', id: 'owner' },
+      occurredAt: '2026-01-01T00:00:00Z', body: 'Hello', mentions: [],
+    } });
+    await completed;
+    assert.deepEqual(calls.sort((a, b) => a.petId.localeCompare(b.petId)), [
+      { petId: 'planner', model: 'specialist-model', url: 'https://specialist.example.test/v1/chat/completions' },
+      { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions' },
+    ]);
+    assert.deepEqual(replies.sort((a, b) => a.petId.localeCompare(b.petId)), [
+      { petId: 'planner', messageId: 'message-1', body: 'hello from planner' },
+      { petId: 'writer', messageId: 'message-1', body: 'hello from writer' },
+    ]);
+  } finally {
+    await result?.studio.shutdown();
+    globalThis.fetch = savedFetch;
+    globalThis.setTimeout = savedSetTimeout;
+    for (const timer of timers) clearTimeout(timer);
+    for (const [index, key] of tracingKeys.entries()) {
+      if (tracing[index] === undefined) delete process.env[key];
+      else process.env[key] = tracing[index];
+    }
+  }
+});

@@ -84,6 +84,7 @@ export type ChannelServiceOptions = {
  * the last human member cannot be removed; the Studio authority may manage
  * every Channel. Who may call at all is Studio's decision.
  * Notifications are best effort after commit, not a durable delivery guarantee.
+ * There is no replay for listeners that were absent when an event was published.
  */
 export class ChannelService {
   readonly store: ChannelStore;
@@ -91,7 +92,7 @@ export class ChannelService {
   private readonly removePet: ChannelServiceOptions['removePet'];
   private readonly petOwner: ChannelServiceOptions['petOwner'];
   private readonly humans: ChannelServiceOptions['humans'];
-  private readonly listeners = new Set<(event: ChannelEvent) => void>();
+  private readonly listeners = new Set<{ listener: (event: ChannelEvent) => unknown; active: boolean }>();
 
   constructor(options: ChannelServiceOptions) {
     this.store = options.store;
@@ -101,13 +102,31 @@ export class ChannelService {
     this.petOwner = options.petOwner;
   }
 
-  subscribe(listener: (event: ChannelEvent) => void): () => void {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+  /**
+   * Subscribe to live committed changes. A publication invokes a snapshot of
+   * listeners in registration order. A new subscription starts with the next
+   * publication; unsubscribing prevents any callback that has not started,
+   * including one in the current publication. Listeners get separate event copies. Their
+   * returned promises are not awaited, so completion order is not guaranteed
+   * and consecutive publications may overlap. Concurrent writes have no
+   * guaranteed publication order. Missed events are not replayed.
+   */
+  subscribe(listener: (event: ChannelEvent) => unknown): () => void {
+    const subscription = { listener, active: true };
+    this.listeners.add(subscription);
+    return () => {
+      subscription.active = false;
+      this.listeners.delete(subscription);
+    };
   }
   private publish(event: ChannelEvent): void {
-    for (const listener of this.listeners) {
-      try { listener(structuredClone(event)); }
+    for (const subscription of [...this.listeners]) {
+      if (!subscription.active) continue;
+      try {
+        Promise.resolve(subscription.listener(structuredClone(event))).catch(error => {
+          console.error('[channel] committed change notification failed:', error);
+        });
+      }
       catch (error) { console.error('[channel] committed change notification failed:', error); }
     }
   }
@@ -301,7 +320,7 @@ export class ChannelService {
    * With an externalRef already saved for this author, the earlier message
    * is returned and `created` is false.
    */
-  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string } = {}): Promise<{
+  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
     message: ChannelMessage; created: boolean; mentionError?: string;
   }> {
     const value = channelMessageSchema.parse(input);
@@ -323,10 +342,16 @@ export class ChannelService {
       let mentions: ChannelMention[];
       try { mentions = parseChannelMentions(value.body, value.mentions, await this.membersIn(store, channel.channelId, labels)); }
       catch (error) {
-        if (trustedAuthor.kind !== 'pet') throw error;
+        if (trustedAuthor.kind !== 'pet' || options.preventPetMentions) throw error;
         mentionError = error instanceof Error ? error.message : String(error);
         mentions = [];
       }
+      if (options.preventPetMentions && mentions.some(mention => mention.participantId.startsWith('pet:'))) {
+        throw new Error('This reply cannot mention a Pet.');
+      }
+      // A Head may be stopped while membership or context lookups are pending.
+      // Do not begin its write after cancellation.
+      options.signal?.throwIfAborted();
       const messageId = randomUUID();
       const message = await store.appendMessage({
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),

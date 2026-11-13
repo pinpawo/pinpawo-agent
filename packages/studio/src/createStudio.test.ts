@@ -572,6 +572,8 @@ test('Studio core event bus preserves per-subscriber order without cross-subscri
 test('Studio releases event subscriptions with their Plugin lifecycle owner', async () => {
   let subscriberStopped = false;
   let deliveryAfterStop = false;
+  const pluginEvents: string[] = [];
+  const studioEvents: string[] = [];
   let publisherContext: Parameters<StudioPlugin['start']>[0] | undefined;
   const publisher: StudioPlugin = {
     name: 'publisher',
@@ -580,7 +582,7 @@ test('Studio releases event subscriptions with their Plugin lifecycle owner', as
       publisherContext = context;
     },
     stop: () => {
-      publisherContext?.notify({ type: 'publisher.stopping' });
+      publisherContext?.notify({ type: 'publisher.stopping', topic: 'one' });
     },
   };
   const subscriber: StudioPlugin = {
@@ -591,6 +593,10 @@ test('Studio releases event subscriptions with their Plugin lifecycle owner', as
       context.subscribe(() => {
         if (subscriberStopped) deliveryAfterStop = true;
       });
+      context.subscribe(event => {
+        pluginEvents.push(event.type);
+        if (subscriberStopped) deliveryAfterStop = true;
+      }, { source: 'publisher', topic: 'one' });
     },
     stop: () => {
       subscriberStopped = true;
@@ -601,9 +607,16 @@ test('Studio releases event subscriptions with their Plugin lifecycle owner', as
     pets: [binding('worker')],
     plugins: [publisher, subscriber],
   });
-
+  studio.subscribe(event => { studioEvents.push(event.type); }, { source: 'publisher', topic: 'one' });
+  publisherContext!.notify({ type: 'publisher.other-topic', topic: 'two' });
+  publisherContext!.notify({ type: 'publisher.ready', topic: 'one' });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(pluginEvents, ['publisher.ready']);
+  assert.deepEqual(studioEvents, ['publisher.ready']);
   await studio.shutdown();
   assert.equal(deliveryAfterStop, false);
+  assert.deepEqual(pluginEvents, ['publisher.ready']);
+  assert.deepEqual(studioEvents, ['publisher.ready', 'publisher.stopping']);
 });
 
 test('Studio shutdown does not wait for a stalled event subscriber', async () => {

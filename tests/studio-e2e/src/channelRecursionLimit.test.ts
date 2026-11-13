@@ -55,10 +55,10 @@ test('a run ending on the recursion limit lands its notice as the Pet message, n
     const id = (await createChannelWithPets(studio!, channel.service, me, { title: 'Goal', pets: ['one'] })).channel.channelId;
     const completed: string[] = [];
     studio.subscribe(event => { if (event.type === 'dispatch.completed') completed.push((event.payload as { invocationId: string }).invocationId); });
-    const { deliveries } = await channel.sendMessage(id, { body: 'Inspect.', mentions: [{ participantId: 'pet:one' }] }, me);
+    const receipt = await channel.run(id, 'one', 'Inspect.', { kind: 'trigger', id: 'test' });
     const published = async () => (await channel.service.readContext(me, id)).messages.filter(message => message.author.kind === 'pet');
     await waitFor(async () => (await published()).length > 0 && completed.length > 0);
-    assert.deepEqual(completed, [deliveries[0]!.invocationId]);
+    assert.deepEqual(completed, [receipt.invocationId]);
     // Only the notice is public; the announced plan_request call stays in Agent Session.
     assert.equal((await published()).length, 1);
     assert.match((await published())[0]!.body, /步数已达上限/);

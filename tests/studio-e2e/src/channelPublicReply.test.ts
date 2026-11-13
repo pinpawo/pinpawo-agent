@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readChannelTestInput, type ChannelTestInput } from '../../support/channelDispatchInput';
+import { channelDispatchInput, readChannelTestInput, type ChannelTestInput } from '../../support/channelDispatchInput';
 import test from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -40,7 +40,7 @@ async function waitFor(done: () => boolean | Promise<boolean>) {
   throw new Error('Timed out waiting for final public reply.');
 }
 
-// This deterministic integration locks the publication boundary and routing semantics.
+// This deterministic integration locks the publication boundary without automatic handoff.
 // Compliance with the final-reply prompt itself requires the separate real-model acceptance.
 test('capability handoff reaches Channel only through the selected final root reply', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-public-reply-'));
@@ -188,7 +188,14 @@ test('capability handoff reaches Channel only through the selected final root re
     }, { studio: true })).channel.channelId;
     const outputs = async () => (await channel.service.readContext(me, id, { limit: 200 })).messages.filter(message => message.author.kind === 'pet');
     const alphaOutputs = async () => (await outputs()).filter(message => message.author.id === 'acceptance-a');
-    const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] }, me);
+    const send = async (body: string) => {
+      const { message } = await channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] }, me);
+      const previous = await channel.service.getSession(id, 'acceptance-a');
+      const binding = previous ?? await channel.service.reserveSession(id, 'acceptance-a', () => 'acceptance-a:11111111');
+      await studio!.dispatch({ petId: 'acceptance-a', request: channelDispatchInput(message, undefined, () => 'local'),
+        session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) }, scope: { namespace: 'channel', id } });
+      if (!binding.registered) await channel.service.confirmSession(binding);
+    };
     await send('Produce the plan and selected handoff.');
     await waitFor(() => arrivedAtCapability);
     await channel.service.updateChannel(me, id, { prompt: revisedAnnouncement }, { studio: true });
@@ -199,7 +206,8 @@ test('capability handoff reaches Channel only through the selected final root re
     assert.equal((await outputs()).length, 0, 'internal delivery, Supervisor work and tool calls are not published');
     assert.equal(betaCalls, 0, 'internal @ is not a dispatch');
     release();
-    await waitFor(async () => (await outputs()).length === 2 && betaCalls === 1);
+    await waitFor(async () => (await outputs()).length === 1);
+    assert.equal(betaCalls, 0);
     assert.equal((await alphaOutputs())[0]!.body, handoff);
     assert.deepEqual((await alphaOutputs())[0]!.mentions.map(mention => mention.participantId), ['pet:acceptance-b']);
     for (let index = 1; index < replies.length; index++) {
@@ -207,19 +215,20 @@ test('capability handoff reaches Channel only through the selected final root re
       await waitFor(async () => (await alphaOutputs()).length === index + 1);
       assert.equal((await alphaOutputs())[index]!.body, replies[index]);
       assert.deepEqual((await alphaOutputs())[index]!.mentions, [], 'code, quotes and unselected internal links remain inert');
-      assert.equal(betaCalls, 1, 'the system never adds a handoff from the internal delivery');
+      assert.equal(betaCalls, 0, 'a mention does not dispatch the other Pet');
     }
     await send('Now publish the chosen handoff directly.');
-    await waitFor(async () => (await outputs()).length === 7 && betaCalls === 2);
+    await waitFor(async () => (await outputs()).length === 5);
+    assert.equal(betaCalls, 0);
     assert.equal(boundaryDeliveries.length, 4, 'direct Entry reply does not repeat execution');
     assert.equal((await alphaOutputs()).at(-1)!.body, handoff);
     assert.ok((await alphaOutputs()).every(message => message.externalRef), 'each reply is keyed by its Agent Session message');
     assert.equal(new Set((await alphaOutputs()).map(message => message.externalRef)).size, (await alphaOutputs()).length);
     assert.deepEqual((await channel.service.listSessions(me, id)).map(binding => [binding.petId, binding.registered]),
-      [['acceptance-a', true], ['acceptance-b', true]]);
+      [['acceptance-a', true]]);
     assert.ok((await outputs()).every(message => !message.body.includes('Internal analysis only.')));
     assert.deepEqual(['entry', 'supervisor-entry', 'capability', 'supervisor-boundary'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 8, 4, 8]);
-    assert.equal(seenContexts.filter(context => context.petId === 'acceptance-b' && context.stage === 'entry').length, 2);
+    assert.equal(seenContexts.filter(context => context.petId === 'acceptance-b' && context.stage === 'entry').length, 0);
     for (const { petId, input } of entryInputs) {
       assert.equal(input.channelId, id);
       const stored = (await channel.service.getMessage(id, input.messageId))!;
@@ -228,7 +237,7 @@ test('capability handoff reaches Channel only through the selected final root re
         ? { participantId: 'human:local', kind: 'human', label: 'local' }
         : { participantId: 'pet:acceptance-a', kind: 'pet', label: 'A' });
     }
-    for (const readMessages of readCanonicalMessages) {
+    for (const readMessages of readCanonicalMessages.slice(0, 1)) {
       const messages = await readMessages();
       assert.ok(messages.length > 0, 'inspect the persisted canonical conversation');
       assert.ok(messages.every(message => message._getType() !== 'system'));

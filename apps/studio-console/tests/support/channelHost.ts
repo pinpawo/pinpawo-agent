@@ -1,4 +1,4 @@
-import { readChannelTestInput } from '../../../../tests/support/channelDispatchInput';
+import { readChannelTestTask } from '../../../../tests/support/channelDispatchInput';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,8 +6,8 @@ import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { Annotation, Command, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { buildReviewSpec, readPendingInterrupt } from '@pinpawo/pet-agent';
 
-import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
-import { prepareStudio, type StudioPetAssembler } from '@pinpawo/studio-core';
+import { createStudioHttpPlugin, type StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
+import { prepareStudio, type StudioPetAssembler, type StudioPlugin } from '@pinpawo/studio-core';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver, readPetInvocationContext } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../../services/host/src/testing/modelProfiles';
@@ -26,6 +26,24 @@ const root = process.env.CHANNEL_HOST_TEST_ROOT ?? await mkdtemp(join(tmpdir(), 
 const token = 'console-browser-test-only';
 const http = createStudioHttpPlugin({ port: Number(process.env.CHANNEL_HOST_TEST_PORT ?? 0), authToken: token, allowedOrigins: ['http://127.0.0.1:5199'] });
 const channel = createChannelPlugin();
+// Fixture-only entrance to the existing Channel run API. Sending a Timeline
+// message remains independent of execution, including in browser regressions.
+let removeRunRoute: (() => void) | undefined;
+const explicitRuns: StudioPlugin = {
+  name: 'browser-channel-runs',
+  toolkits: [],
+  start: context => {
+    removeRunRoute = context.hooks.contribute<StudioHttpRoutesHook>('http', 'routes', routes => routes.register({
+      method: 'POST', path: '/test/channel-run', authorization: 'studio',
+      handle: async ({ readJson }) => {
+        const input = await readJson() as { channelId: string; petId: string; request: string };
+        return { kind: 'json', status: 202, body: await channel.run(input.channelId, input.petId, input.request,
+          { kind: 'trigger', id: 'browser-fixture' }) };
+      },
+    }));
+  },
+  stop: () => { removeRunRoute?.(); removeRunRoute = undefined; },
+};
 const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
 const petNames = process.env.CHANNEL_HOST_TEST_DUPLICATE_NAMES ? ['Analyst', 'Analyst'] : ['Alpha', 'Beta'];
 // The real Console creates an owner Channel first, then assembles independent
@@ -37,7 +55,7 @@ const assemblePet: StudioPetAssembler = async ({ petId, name }) => {
   const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
   const graph = new StateGraph(State).addNode('reply', async state => {
     const raw = state.messages.at(-1)!.text;
-    const input = /^`{3,}json\n/.test(raw) ? readChannelTestInput(raw) : undefined;
+    const input = /^`{3,}json\n/.test(raw) ? readChannelTestTask(raw) : undefined;
     const last = input?.body ?? raw;
     // The Console composer puts a picked @ first; fixture commands follow it.
     const command = last.replace(/^\[@[^\]]*\]\(participant:[^)\s]+\)\s*/, '');
@@ -63,7 +81,7 @@ const assemblePet: StudioPetAssembler = async ({ petId, name }) => {
     }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string) as { messages: Array<{ author: { kind: string } }> };
     const prior = snapshot.messages.filter(entry => entry.author.kind === 'pet');
-    return { messages: [fixtureReply(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nInput source: ${input?.author.participantId}. Message: ${input?.messageId}. Referenced message: ${input?.replyTo?.messageId ?? 'none'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the Channel title, members and messages. Remaining work: user acceptance.`)] };
+    return { messages: [fixtureReply(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nTask origin: ${input ? `${input.origin.kind}:${input.origin.id}` : 'direct dispatch'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the Channel title, members and messages. Remaining work: user acceptance.`)] };
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
   const host = await createResidentPetHost({ petId, petName: name, runtimeConfig,
@@ -84,7 +102,7 @@ const assemblePet: StudioPetAssembler = async ({ petId, name }) => {
   });
   return { dispatch: host.resident.dispatch, sessions: host.sessions, close: () => host.close() };
 };
-const prepared = prepareStudio({ studioId: 'console-browser', plugins: [channel, http],
+const prepared = prepareStudio({ studioId: 'console-browser', plugins: [channel, http, explicitRuns],
   storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
   definitions, assemblePet,
 });
@@ -97,11 +115,11 @@ if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
     { title: 'Layout investigation', description: 'Review public evidence and choose the next round.', pets: [] });
   for (const definition of definitions) await studio.pets.create({ petId: definition.definitionId, definitionId: definition.definitionId,
     name: definition.name, channelId: seeded.channelId });
-  // A former member whose Pet is no longer registered; its message stays as written.
-  const joinedAt = new Date().toISOString();
-  await channel.service.store.upsertMember({ channelId: seeded.channelId, kind: 'pet', id: 'retired-pet', joinedAt, leftAt: joinedAt });
-  await channel.service.store.appendMessage({ messageId: 'retired-delivery', channelId: seeded.channelId, author: { kind: 'pet', id: 'retired-pet' },
-    occurredAt: joinedAt, body: 'Historical public delivery from a Pet that is no longer registered.', mentions: [] });
+  // A real removed instance retains its identity and public history.
+  await studio.pets.create({ petId: 'retired-pet', definitionId: 'alpha', name: 'retired-pet', channelId: seeded.channelId });
+  await channel.service.postMessage({ kind: 'pet', id: 'retired-pet' }, seeded.channelId,
+    { body: 'Historical public delivery from a Pet that is no longer registered.' });
+  await studio.pets.removeInstance('retired-pet', { confirmStop: true });
 }
 console.log(JSON.stringify({ ready: true, url: `http://127.0.0.1:${http.address()!.port}`, token }));
 let closing = false;

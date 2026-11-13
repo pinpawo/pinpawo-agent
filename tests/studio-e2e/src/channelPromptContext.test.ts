@@ -89,7 +89,7 @@ Pet identity marker: ${petMarker}
     const a = (await createChannelWithPets(studio!, channel.service, me, { title: titleA, description: descriptionA, prompt: alpha, pets: ['worker'] }, { studio: true })).channel.channelId;
     const b = (await createChannelWithPets(studio!, channel.service, me, { title: titleB, prompt: beta, pets: ['worker-b'] }, { studio: true })).channel.channelId;
     const sendAndWait = async (id: string, expectedCount: number) => {
-      await channel.sendMessage(id, { body: 'Please respond.', mentions: [{ participantId: id === a ? 'pet:worker' : 'pet:worker-b' }] }, me);
+      await channel.run(id, id === a ? 'worker' : 'worker-b', 'Please respond.', { kind: 'trigger', id: 'test' });
       await waitFor(async () => (await channel.service.readContext(me, id, { limit: 100 })).messages.filter(m => m.author.kind === 'pet').length === expectedCount);
     };
     await sendAndWait(a, 1);
@@ -116,9 +116,9 @@ Pet identity marker: ${petMarker}
     const queuedRevision = randomUUID();
     const holding = new Promise<void>(resolve => { modelStarted = resolve; });
     holdNext = true;
-    const held = channel.sendMessage(a, { body: 'Hold this run.', mentions: [{ participantId: 'pet:worker' }] }, me);
+    const held = channel.run(a, 'worker', 'Hold this run.', { kind: 'trigger', id: 'test' });
     await holding;
-    await channel.sendMessage(a, { body: 'Run after the held task.', mentions: [{ participantId: 'pet:worker' }] }, me);
+    await channel.run(a, 'worker', 'Run after the held task.', { kind: 'trigger', id: 'test' });
     await channel.service.updateChannel(me, a, { prompt: queuedRevision }, { studio: true });
     releaseModel!();
     await held;

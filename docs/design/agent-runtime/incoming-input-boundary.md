@@ -54,17 +54,19 @@ Hook 不取出消息、不追加用户正文、不写 checkpoint，也不构造 
 
 ## Channel 的提示
 
-Channel decision LLM 可为没有 @ 的人类消息或 Pet 公开回复选择一个其他 Pet，或选择
-`none`。选中接收者后，既有 dispatch JSON envelope 的 `contextHint` 保留来源与模型
-关注方向。Channel 通过 scoped context provider 另外提供 invocation `hint`，提醒先
-委派显式配置的 `channel_context` Capability 读取最新相关消息，再判断本轮工作。
-可选的 `focus` 由分配模型指出与接收者相关的关注方向，与固定 instruction 分开保留。
+Channel 记录对话并发布实时事件，不选择接收者。在线 Pet Instance 的 Head 精确订阅所属
+Channel 的 topic，自行判断忽略、轻量回复或请求 Host dispatch；实例停用时取消订阅，
+离线漏掉的事件不补发。Head 的派发保留原消息、引用及附件，经过既有的 Channel session
+绑定和 Host admission。显式 Host dispatch，以及 schedule/trigger 的独立 `run()` 入口
+仍可使用；旧 Channel decision LLM、`contextHint` 和模型 `focus` 不属于这条输入路径。
 
-固定读取提示来自 Channel 插件代码；`focus` 是模型基于公开对话的建议，不代表原作者
-指令、已确认事实、目标或新授权，不写入 system prompt 或强制生成计划。路由的审计
-`reason` 不进入 Pet 输入，原始消息作者和正文保持不变。公告仍使用原有 system context
-provider。provider 兼容原来的 section 数组，也可返回公告与 hint；它收到本次请求快照，
-由领域插件解释请求，pet-agent 不解析 Channel envelope。Studio dispatch 不增加 hint 参数。
+Channel 通过 scoped context provider 提供 invocation `hint`，提醒先委派显式配置的
+`channel_context` Capability 读取最新相关消息，再判断本轮工作。没有该 Capability 时，
+提示要求通过可用的 `channel_read_context` 工具补齐背景；缺少能力或读取失败时说明缺口。
+固定读取提示来自 [Channel 插件代码](../../../plugins/channel/src/channelInvocationHint.ts)，
+不代表消息作者的新授权，也不强制生成计划。公告仍使用原有 system context provider。
+provider 兼容原来的 section 数组，也可返回公告与 hint；pet-agent 不解析 Channel
+envelope。Studio dispatch 不增加 hint 参数。
 
 Host 在 admission 前冻结本次 hint，通过 invocation runtime context 传递。Entry 的 goal
 与外部 hint 分开，`plan_request`、`continue` 参数不变；Supervisor 在 request 旁读取准备
@@ -72,12 +74,14 @@ Host 在 admission 前冻结本次 hint，通过 invocation runtime context 传�
 Entry 不增加业务读取工具。没有 hint 时不新增提示段落，沿用原来行为。子任务继承原始
 runtime hint，但不重复渲染整轮准备提示，避免业务子任务再次启动准备工作。
 
-显式 @ 和 schedule/trigger 保持各自已有消息形式，也通过 provider 获得 Channel 准备提示。
-hint 不写入 canonical 对话历史；原生审批等待状态保存原 invocation hint，恢复时不查询
-新 provider 或采用新输入的提示。普通新输入用自己的 hint，缺省时不沿用旧值。
+schedule/trigger 使用 `channel_task` 请求，指令不另存为 Channel 消息；显式派发通过
+provider 获得 Channel 准备提示。hint 不写入 canonical 对话历史；原生审批等待状态
+保存原 invocation hint，恢复时不查询新 provider 或采用新输入的提示。普通新输入
+用自己的 hint，缺省时不沿用旧值。
 
-分配入口、作者候选排除、非法 @ 与重复公开回传的边界见
-[Channel 路由](../studio/channel-routing.md)。分配模型不读取 Pet 私有执行结果。
+消息寻址、live 事件、显式执行与公开回传的边界见
+[Channel 寻址、执行与状态](../studio/channel-addressing-and-execution.md)。Pet 私有执行结果
+不会作为 Channel 公开消息发布。
 
 ## 验证与限制
 
@@ -87,6 +91,8 @@ hint 不写入 canonical 对话历史；原生审批等待状态保存原 invoca
 实现证据见 [Root 边界测试](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.test.ts)、
 [Host 输入与审批竞态测试](../../../services/host/src/host/residentPetIncomingInput.test.ts)
 和 [Channel 跨包测试](../../../tests/studio-e2e/src/channelIncomingInput.test.ts)。
+Channel 跨包测试使用测试专属的合成消息 envelope 并显式调用 Studio dispatch；它验证
+输入接续与公开回复归属，不证明 Channel 消息或 @ 会触发派发。
 
 Host 队列仍是内存队列。本设计不承诺进程崩溃后恢复未执行的 dispatch，也不自动
 合并内容相似的多条消息。delegation 结束之后才到达的普通输入仍可能等待下一边界；

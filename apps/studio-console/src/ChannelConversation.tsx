@@ -4,8 +4,8 @@ import remarkGfm from 'remark-gfm';
 import { useChannelDialogFocus } from './channelFocus';
 import { MessageDeliverables, MessageLink, messageUrlTransform, type ArtifactSource } from './MessageDeliverables';
 import {
-  channelDateKey, channelDeliveryLabel, channelParticipantId, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
-  channelPetSession, channelRoutingSkipLabel, channelWorkingLabel, type ChannelDelivery, type ChannelRoutingSkip, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession, type ChannelWorking,
+  channelDateKey, channelParticipantId, channelInlineMentionIds, channelMessageIdentity, channelMentionLabel, channelMessagesGroup, channelMessageSummary,
+  channelPetSession, channelWorkingLabel, type ChannelMember, type ChannelMessage, type ChannelPet, type ChannelSession, type ChannelWorking,
 } from './channelData';
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
@@ -78,9 +78,6 @@ type TimelineProps = {
   pets?: ChannelPet[]; petsReady?: boolean; connected?: boolean; highlighted?: string;
   onLocateMessage?: (messageId: string) => void;
   members?: ChannelMember[]; viewerParticipantId?: string; onViewerChange?: (open: boolean) => void;
-  /** Deliveries observed by this Console; the Host does not store them. */
-  deliveries?: ChannelDelivery[];
-  routingSkips?: ChannelRoutingSkip[];
   sessions?: ChannelSession[]; onViewSession?: (session: ChannelSession) => void;
   /** Pet members running a turn in this Channel now. */
   working?: ChannelWorking[];
@@ -88,7 +85,7 @@ type TimelineProps = {
 };
 
 export function ChannelTimeline({ messages, pending, onReply, pets = [], petsReady = true, connected = true, highlighted, onLocateMessage,
-  members = [], viewerParticipantId, onViewerChange, deliveries = [], routingSkips = [], sessions = [], onViewSession, working = [], artifactSource }: TimelineProps) {
+  members = [], viewerParticipantId, onViewerChange, sessions = [], onViewSession, working = [], artifactSource }: TimelineProps) {
   const [viewer, setViewer] = useState<(MessageMarkdownProps & { author: string; occurredAt: string }) | null>(null);
   const closeViewer = () => { setViewer(null); onViewerChange?.(false); };
   const byId = new Map(messages.map(item => [item.messageId, item]));
@@ -101,15 +98,10 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
     const grouped = channelMessagesGroup(previous, item);
     const original = item.replyTo ? byId.get(item.replyTo) : undefined;
     const avatar = identity.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
-    const outcomes = deliveries.filter(delivery => delivery.channelId === item.channelId && delivery.messageId === item.messageId);
-    const skipped = routingSkips.filter(skip => skip.channelId === item.channelId && skip.messageId === item.messageId).at(-1);
     const session = item.author.kind === 'pet' ? channelPetSession(item.author.id, sessions) : undefined;
     // Inline @ links already show in the body; only list addressed members the body does not show.
     const inline = channelInlineMentionIds(item.body);
-    // An addressed member with a known delivery shows once, as that delivery's state.
-    const delivered = outcomes.filter(delivery => delivery.participantId);
-    const listedMentions = item.mentions.filter(mention => !inline.has(mention.participantId)
-      && !delivered.some(delivery => delivery.participantId === mention.participantId));
+    const listedMentions = item.mentions.filter(mention => !inline.has(mention.participantId));
     return <React.Fragment key={item.messageId}>{separator}<article id={'message-' + item.messageId} tabIndex={-1}
       className={'channel-message ' + (channelParticipantId(item.author) === viewerParticipantId ? 'mine' : item.author.kind) + (grouped ? ' grouped' : '') + (highlighted === item.messageId ? ' located' : '')}
       data-message-id={item.messageId} aria-label={identity.name + ' at ' + date.toLocaleTimeString()}>
@@ -119,10 +111,6 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
           <time dateTime={item.occurredAt} title={date.toLocaleString()}>{date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
           {listedMentions.length > 0 && <span className="channel-mentions" aria-label="Addressed participants">{listedMentions.map((mention, mentionIndex) =>
             <span className="channel-mention" key={mentionIndex}>@{channelMentionLabel(mention, members, viewerParticipantId)}</span>)}</span>}
-          {delivered.map(delivery => <span key={delivery.participantId} className={'channel-inline-state ' + delivery.state}
-            title={delivery.reason}>
-            {`@${channelMentionLabel({ participantId: delivery.participantId! }, members, viewerParticipantId)} · ${channelDeliveryLabel(delivery)}`}</span>)}
-          {skipped && <span className="channel-inline-state skipped" title={skipped.detail}>{channelRoutingSkipLabel(skipped)}</span>}
         </div>
         <div className="channel-bubble">
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
@@ -131,9 +119,6 @@ export function ChannelTimeline({ messages, pending, onReply, pets = [], petsRea
         <ChannelMessageMarkdown body={item.body} members={members} viewerParticipantId={viewerParticipantId} artifactSource={artifactSource} />
         <MessageDeliverables deliverables={item.deliverables} source={artifactSource} />
         </div>
-        {outcomes.filter(delivery => delivery.state === 'failed').map((delivery, failureIndex) =>
-          <p className="channel-record-error" role="alert" key={failureIndex}>
-            {delivery.participantId ? `${channelMentionLabel({ participantId: delivery.participantId }, members, viewerParticipantId)}: ` : 'Mentions were not delivered: '}{delivery.error ?? 'Delivery failed.'}</p>)}
         <div className="channel-message-actions" role="toolbar" aria-label={'Message from ' + identity.name}>
           <button type="button" disabled={pending} aria-label={'Reply to ' + identity.name} onClick={() => onReply(item)}>Reply</button>
           {session && onViewSession && <button type="button" disabled={!connected} aria-label={`View ${identity.name} session`} onClick={() => onViewSession(session)}>Session</button>}

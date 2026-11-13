@@ -4,4 +4,3 @@ export * from './channelService';
 export * from './channelPlugin';
 export * from './channelParticipants';
 export * from './channelDispatchInput';
-export * from './channelRouting';

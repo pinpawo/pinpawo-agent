@@ -34,6 +34,25 @@ const sessionId = 'worker:00000001';
 const scope = { namespace: 'channel', id: 'one' };
 const target = { session: { id: sessionId, create: true }, scope };
 
+test('cancellation during context resolution prevents admission', async () => {
+  const entered = deferred(), release = deferred();
+  let turns = 0;
+  const h = await fixture(async turn => { turns++; return reply(turn, 'unexpected'); }, {
+    resolveInvocationContext: async () => { entered.resolve(); await release.promise; return []; },
+  });
+  try {
+    const controller = new AbortController();
+    const admission = h.resident.dispatch.dispatch({ ...target, request: 'cancelled', signal: controller.signal });
+    await entered.promise;
+    controller.abort();
+    release.resolve();
+    await assert.rejects(admission, { name: 'AbortError' });
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.equal(turns, 0);
+    assert.deepEqual(h.events, []);
+  } finally { release.resolve(); await h.close(); }
+});
+
 async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>, hooks: {
   beforeContextLoad?: () => Promise<void>;
   beforeReadState?: () => Promise<void>;

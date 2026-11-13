@@ -116,9 +116,7 @@ PET.md 只定义自身职责和边界，团队分工由公告说明。公告只�
 既有工作区不自动迁移。保留定制后集中共享定义，移除迁移 Pet 的同名私有副本并添加引用；
 保留私有定义时则不添加同名共享引用。两者同时存在会报冲突。Pet 或 Capability 文件编辑后重启生效。
 
-人类发的、没有 @ 任何人的 Channel 消息只保存，不唤醒 Pet。把 Channel Plugin 的 `options.routing.enabled`
-设为 `true` 后，会用一次模型调用为这类消息选一个 Pet 或不选（`decider: {kind:'llm', modelProfileId}`，
-引用 Host 的模型配置）。见 [Channel 路由](../../design/studio/channel-routing.md)。
+Channel 消息和 @ 只记录对话，不自动启动 Pet。未来的 Pet Head 尚未实现；显式 Host dispatch、schedule 和 trigger 入口仍可使用。
 
 ## 旧 Kanban 工作区迁移
 

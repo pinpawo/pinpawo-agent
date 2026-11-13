@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import ../support/isolateSessions.mjs --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --import ../support/isolateSessions.mjs --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
+    "test:scenarios": "node --import ../support/isolateSessions.mjs --import tsx/esm --test src/scenarios/*.test.ts",
+    "scenario:live": "node --import ../support/isolateSessions.mjs --import tsx/esm scripts/petHeadTimelineLive.ts"
   },
   "devDependencies": {
     "@langchain/core": "^1.2.1",

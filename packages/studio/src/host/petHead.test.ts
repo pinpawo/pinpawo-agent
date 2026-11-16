@@ -221,61 +221,115 @@ test('cancellation while context is loading never starts a decision', async () =
   assert.equal(decisions, 0);
 });
 
-test('model decisions use the selected structured-output method and receive only the instance input and cancellation signal', async () => {
-  for (const method of [undefined, 'functionCalling', 'jsonSchema'] as const) {
-    let factoryOptions: unknown;
-    let schema: unknown;
-    let structuredOptions: unknown;
-    let received: unknown;
-    let receivedSignal: AbortSignal | undefined;
-    const endpoint = {
-      profileId: 'test', baseUrl: 'https://example.test', apiKey: 'secret', model: 'test', structuredOutputMethod: method,
-      createChatModel: (options: unknown) => {
-        factoryOptions = options;
-        return { withStructuredOutput: (value: unknown, options: unknown) => {
-          schema = value; structuredOptions = options;
-          return { invoke: async (messages: unknown, config: { signal: AbortSignal }) => {
-            received = messages; receivedSignal = config.signal;
-            return { action: 'dispatch', text: 'Investigate' };
-          } };
-        } };
-      },
-    };
-    const decide = createHeadDecision(endpoint as never);
+const decisionInput = { pet: pet('a'), message: message('1'), context: { messages: [] } };
+const raw = (value: unknown) => ({ content: JSON.stringify(value) });
+const tool = (args: unknown, name = 'pet_head_decision') => ({ content: '', tool_calls: [{ name, args }] });
+function mockEndpoint(outputs: unknown[], method?: string) {
+  const calls: Array<{ mode: string; messages: unknown; signal: unknown }> = [];
+  let binding: unknown;
+  let factory: unknown;
+  const invoke = (mode: string) => async (messages: unknown, config: { signal: AbortSignal }) => {
+    calls.push({ mode, messages, signal: config.signal });
+    const value = outputs.shift();
+    if (value instanceof Error) throw value;
+    if (typeof value === 'function') return value();
+    return value;
+  };
+  const endpoint = { profileId: 'test', baseUrl: 'https://example.test', apiKey: 'secret', model: 'test', structuredOutputMethod: method,
+    createChatModel: (options: unknown) => { factory = options; return {
+      bindTools: (...args: unknown[]) => { binding = args; return { invoke: invoke('tool') }; },
+      withStructuredOutput: (_schema: unknown, options: unknown) => { binding = options; return { invoke: invoke('structured') }; },
+      invoke: invoke('json'),
+    }; } };
+  return { endpoint: endpoint as never, calls, binding: () => binding, factory: () => factory };
+}
+test('single declared decision tool has no forced choice, no tool execution and no SDK retries', async () => {
+  for (const method of [undefined, 'functionCalling']) {
+    const mock = mockEndpoint([tool({ action: 'reply', text: 'Address source' })], method);
+    const events: unknown[] = [];
+    const decide = createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) });
+    const signal = new AbortController().signal;
+    assert.deepEqual(await decide(decisionInput, signal), { action: 'reply', text: 'Address source' });
+    assert.deepEqual(mock.factory(), { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false });
+    assert.equal((mock.binding() as unknown[]).length, 1);
+    assert.equal(mock.calls.length, 1);
+    assert.equal(mock.calls[0]!.signal, signal);
+    assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), decisionInput);
+    assert.deepEqual(events, [{ petId: 'a', channelId: 'team', messageId: '1', attempts: 1, outcome: 'selected', action: 'reply' }]);
+  }
+});
+test('explicit JSON schema capability inspects raw refusal and validates parsed output', async () => {
+  const mock = mockEndpoint([{ raw: raw({ action: 'ignore', text: '' }), parsed: { action: 'ignore', text: '' } }], 'jsonSchema');
+  assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore' });
+  assert.deepEqual(mock.binding(), { name: 'pet_head_decision', method: 'jsonSchema', includeRaw: true });
+});
+test('known malformed output or explicit unsupported capability gets only one clean JSON fallback', async () => {
+  const unsupported = Object.assign(new Error('private provider payload'), { status: 400, code: 'unsupported_parameter', param: 'tools' });
+  for (const first of [tool({ action: 'reply', text: ' ' }), raw({ action: 'ignore', text: 'not empty' }), raw({ action: 'dispatch', text: 'ok', extra: true }), unsupported]) {
+    const mock = mockEndpoint([first, raw({ action: 'ignore', text: '' })]);
+    assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore' });
+    assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'json']);
+    assert.deepEqual((mock.calls[0]!.messages as unknown[])[1], (mock.calls[1]!.messages as unknown[])[1], 'original input is preserved');
+    assert.equal(JSON.stringify(mock.calls[1]!.messages).includes('private provider payload'), false);
+    assert.notDeepEqual(mock.calls[0]!.messages, mock.calls[1]!.messages, 'fallback requests a fresh JSON-only decision');
+  }
+});
+test('unknown tools, multiple calls, refusal, truncation and provider failures never fall back', async () => {
+  for (const output of [tool({ action: 'ignore', text: '' }, 'unknown'),
+    { content: '', tool_calls: [...tool({}).tool_calls, ...tool({}).tool_calls] },
+    { content: '', invalid_tool_calls: [{}] },
+    { ...raw({ action: 'ignore', text: '' }), additional_kwargs: { refusal: 'private' } },
+    { ...raw({ action: 'ignore', text: '' }), response_metadata: { finish_reason: 'length' } },
+    { content: [{ type: 'refusal', refusal: 'private' }] },
+    Object.assign(new Error('private auth'), { status: 401 }), new Error('private network'),
+    Object.assign(new Error('private runtime'), { status: 400, code: 'invalid_request_error' })]) {
+    const mock = mockEndpoint([output]);
+    const events: unknown[] = [];
+    await assert.rejects(createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) })(decisionInput, new AbortController().signal), { message: 'Invalid Pet Head decision.' });
+    assert.equal(mock.calls.length, 1);
+    assert.equal(JSON.stringify(events).includes('private'), false);
+  }
+});
+test('strict validation never guesses an action and the two-call ceiling is absolute', async () => {
+  for (const value of [null, {}, { action: 'ignore' }, { action: 'reply', text: 42 }, { action: 'route', text: 'x' }, { action: 'ignore', text: '', other: true }]) {
+    const mock = mockEndpoint([raw(value), raw(value), raw({ action: 'ignore', text: '' })]);
+    await assert.rejects(createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal));
+    assert.equal(mock.calls.length, 2);
+  }
+});
+test('abort before or during provider work prevents fallback and selection', async () => {
+  for (const before of [true, false]) {
     const controller = new AbortController();
-    const input = { pet: pet('a'), description: 'Instance role', message: message('1'), context: { messages: [] } };
-    assert.deepEqual(await decide(input, controller.signal), { action: 'dispatch', text: 'Investigate' });
-    assert.deepEqual(factoryOptions, { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true });
-    assert.deepEqual(structuredOptions, { name: 'pet_head_decision', method: method ?? 'jsonMode' });
-    assert.deepEqual((schema as { properties: { action: { enum: string[] } } }).properties.action.enum, ['ignore', 'reply', 'dispatch']);
-    const messages = received as Array<[string, string]>;
-    assert.deepEqual(messages.map(item => item[0]), ['system', 'human']);
-    if (method === undefined) {
-      // jsonMode providers receive field constraints in the request itself.
-      for (const part of ['JSON', 'action', 'text', 'ignore', 'reply', 'dispatch']) {
-        assert.ok(messages[0]![1].includes(part));
-      }
-    }
-    assert.deepEqual(JSON.parse(messages[1]![1]), input);
-    assert.equal(receivedSignal, controller.signal);
+    const mock = mockEndpoint([() => { controller.abort(); return raw({ action: 'ignore', text: '' }); }]);
+    if (before) controller.abort();
+    const events: Array<{ outcome: string; code?: string }> = [];
+    await assert.rejects(createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) })(decisionInput, controller.signal));
+    assert.equal(mock.calls.length, before ? 0 : 1);
+    assert.equal(events[0]?.code, 'aborted');
   }
 });
 
-test('model decisions reject invalid outputs without exposing their contents', async () => {
-  let output: unknown;
-  const endpoint = { profileId: 'test', baseUrl: 'https://example.test', apiKey: 'secret', model: 'test',
-    createChatModel: () => ({ withStructuredOutput: () => ({ invoke: async () => output }) }) };
-  const decide = createHeadDecision(endpoint as never);
-  const input = { pet: pet('a'), message: message('1'), context: { messages: [] } };
-  const signal = new AbortController().signal;
-  for (const invalid of [null, undefined, 'invalid', { action: 'route', text: 'sensitive output' }, { action: 'reply', text: ' ' }, { action: 'dispatch', text: 42 }, {}]) {
-    output = invalid;
-    await assert.rejects(decide(input, signal), (error: Error) => {
-      assert.equal(error.message, 'Invalid Pet Head decision.');
-      assert.ok(!error.message.includes('sensitive output'));
-      return true;
-    });
-  }
-  output = { action: 'ignore', text: '' };
-  assert.deepEqual(await decide(input, signal), { action: 'ignore' });
+test('explicit JSON mode is preserved even when the adapter exposes tools', async () => {
+  const value = { action: 'dispatch', text: 'Inspect the source' };
+  const mock = mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonMode');
+  assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), value);
+  assert.deepEqual(mock.calls.map(call => call.mode), ['structured']);
+  assert.deepEqual(mock.binding(), { name: 'pet_head_decision', method: 'jsonMode', includeRaw: true });
+});
+
+test('without tool binding or declared structured transport the Head uses conservative plain JSON', async () => {
+  let calls = 0;
+  const endpoint = { createChatModel: () => ({ invoke: async () => { calls++; return raw({ action: 'ignore', text: '' }); } }) };
+  assert.deepEqual(await createHeadDecision(endpoint as never)(decisionInput, new AbortController().signal), { action: 'ignore' });
+  assert.equal(calls, 1);
+});
+
+test('structured parsing failure retries once but raw refusal never does', async () => {
+  const bad = { raw: { content: 'broken' }, parsed: null, parsing_error: new Error('private parsing detail') };
+  const mock = mockEndpoint([bad, raw({ action: 'ignore', text: '' })], 'jsonMode');
+  assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore' });
+  assert.deepEqual(mock.calls.map(call => call.mode), ['structured', 'json']);
+  const refused = mockEndpoint([{ raw: { content: '', response_metadata: { stop_reason: 'refusal' } }, parsed: { action: 'ignore', text: '' } }], 'jsonSchema');
+  await assert.rejects(createHeadDecision(refused.endpoint)(decisionInput, new AbortController().signal));
+  assert.equal(refused.calls.length, 1);
 });

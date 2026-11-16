@@ -302,6 +302,25 @@ guarantee a response, and an unmentioned message may still merit participation.
 The Head's `text` is routing intent, not a finished answer. Explicit scheduler,
 trigger and Host dispatch entry points remain available.
 
+Head decisions honor the model profile's explicit `structuredOutputMethod`.
+JSON mode/schema profiles keep their declared transport; function-calling (or
+unspecified profiles with a tool-capable adapter) use a single declared decision
+tool without forced choice or strict-provider flags. This is one model decision,
+not an Agent loop, and no returned tool is executed.
+
+Every transport uses the same exact action/text validation. A known malformed
+output or an explicit unsupported tools/response-format capability may receive
+one fresh text-only JSON attempt: at most two model calls total, SDK retries off.
+The second request never includes the malformed provider output. Auth, network,
+refusal, safety, truncation, ambiguous/unknown tool calls and other provider errors
+are not replayed as output retries; invalid output is never converted to `ignore`.
+
+Safe `pet.head.decision` diagnostics identify Pet, Channel, source message,
+outcome (`selected`, `ignore`, `error`), attempt count and a finite error code.
+Host logs include a timestamp; the same diagnostic is emitted on the Studio bus.
+They contain no prompt, response body, credentials or provider error payload.
+These diagnostics are not persisted decision history or a user-visible retry UI.
+
 The Channel reserves one Session on the first accepted execution for each
 (Channel, Pet instance) pair, then reuses that identity for response and work turns.
 Completion does not remove it; changing the tools used does not allocate another

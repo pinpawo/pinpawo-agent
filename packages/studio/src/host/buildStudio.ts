@@ -347,7 +347,16 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         ...(description ? { description } : {}),
         channel,
         decide: (value, signal) => {
-          decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId));
+          decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId), {
+            onDiagnostic: diagnostic => {
+              const occurredAt = new Date().toISOString();
+              // Correlation and finite outcomes only: never log prompts, raw model
+              // output, provider errors, credentials or endpoint URLs.
+              console.info('[studio] pet.head', JSON.stringify({ occurredAt, ...diagnostic }));
+              prepared.studio.notify({ type: 'pet.head.decision', source: 'studio',
+                topic: registration.channelId, occurredAt, payload: diagnostic });
+            },
+          });
           return decide(value, signal);
         },
       });

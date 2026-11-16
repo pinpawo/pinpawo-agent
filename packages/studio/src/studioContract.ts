@@ -174,7 +174,7 @@ export type StudioModelEndpoint = {
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** Routing defaults to legacy jsonMode; native custom resolvers should set their supported method. */
+  /** Explicit Head transport preference. Host profiles default to jsonMode; custom resolvers may declare their supported method. */
   structuredOutputMethod?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
   /** Creates a model from the complete Host-resolved profile. */
   createChatModel?: (options: {

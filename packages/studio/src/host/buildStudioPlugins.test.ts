@@ -534,6 +534,10 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       modelProfiles,
       hostCapabilities: [generalCapability()], petCapabilities: new Map(), ...residentBuildResources(workdir),
     });
+    const diagnostics: unknown[] = [];
+    result.studio.subscribe(event => {
+      if (event.type === 'pet.head.decision') diagnostics.push(event.payload);
+    });
     await result.studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
     await result.studio.pets.create({ channelId: 'one', petId: 'writer', definitionId: 'writer', name: 'Writer' });
     assert.ok(channelContext);
@@ -546,6 +550,18 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       occurredAt: '2026-01-01T00:00:00Z', body: 'Hello', mentions: [],
     } });
     await completed;
+    // The observable event is correlated, bounded and excludes model/source text.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(diagnostics.length, 2);
+    for (const entry of diagnostics as Array<Record<string, unknown>>) {
+      assert.equal(entry.channelId, 'one');
+      assert.equal(entry.messageId, 'message-1');
+      assert.equal(entry.outcome, 'selected');
+      assert.equal(entry.action, 'reply');
+      assert.equal(entry.attempts, 1);
+      assert.ok(['planner', 'writer'].includes(String(entry.petId)));
+      assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'action', 'attempts', 'code'].includes(key)));
+    }
     assert.deepEqual(calls.sort((a, b) => a.petId.localeCompare(b.petId)), [
       { petId: 'planner', model: 'specialist-model', url: 'https://specialist.example.test/v1/chat/completions' },
       { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions' },

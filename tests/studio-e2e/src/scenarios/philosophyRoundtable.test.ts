@@ -21,9 +21,10 @@ const philosophers = [
   { petId: 'roundtable-being', definitionId: 'being', name: '海德格尔', answer: '可计算的表象不能穷尽在世的显现。' },
 ] as const;
 const human = { kind: 'human' as const, id: 'local' };
-const question = '合成讨论：请把“集体感知共识”理解为感知实践、共享概念与纠错规则共同构成的认识条件，而非多数投票。当预测系统与这种共识吻合时，是否足以断言两者具有相同的理解？请从自己的角色给出一个区分。';
+const question = '合成讨论：请把“集体感知共识”理解为感知实践、共享概念与纠错规则共同构成的认识条件，而非多数投票。当预测系统与这种共识吻合时，是否足以断言两者具有相同的理解？请各位回复，从自己的角色给出一个区分。';
 type WireMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
-type WireRequest = { model: string; stream?: boolean; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
+type HeadWireMode = 'tool' | 'malformed-tool' | 'unsupported-tools';
+type WireRequest = { model: string; stream?: boolean; tool_choice?: unknown; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 function text(content: unknown): string {
   return typeof content === 'string' ? content : Array.isArray(content)
     ? content.map(block => block && typeof block === 'object' && 'text' in block ? String(block.text) : '').join('') : '';
@@ -37,7 +38,8 @@ async function until(predicate: () => boolean | Promise<boolean>) {
 }
 
 /** Script only model decisions/content. Runtime, queues, SQLite and session snapshots are production. */
-async function scriptedModel() {
+async function scriptedModel(mode: HeadWireMode) {
+  const attempts = new Map<string, number>();
   const decisions: Array<{ petId: string; channelId: string; messageId: string; action: string; mentioned: boolean }> = [];
   const modelErrors: unknown[] = [];
   let sequence = 0;
@@ -57,6 +59,21 @@ async function scriptedModel() {
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
         if (head) {
+          const key = `${head.pet.petId}:${head.message.messageId}`;
+          const attempt = (attempts.get(key) ?? 0) + 1;
+          attempts.set(key, attempt);
+          assert.ok(attempt <= 2, 'Head compatibility must never exceed two model requests per source');
+          assert.ok(input.tool_choice === undefined || input.tool_choice === 'auto', 'The Head must not require provider-specific forced tool selection');
+          if (attempt === 1) {
+            assert.ok(names.includes('pet_head_decision'), 'Initial Head call declares the decision tool');
+            if (mode === 'unsupported-tools') {
+              response.writeHead(400, { 'content-type': 'application/json' });
+              response.end(JSON.stringify({ error: { type: 'invalid_request_error', code: 'unsupported_parameter', param: 'tools', message: 'tools are not supported by this synthetic endpoint' } }));
+              return;
+            }
+          } else {
+            assert.equal(names.length, 0, 'Compatibility retry must be tool-free');
+          }
           const peerEligible = head.message.author.kind === 'pet'
             && head.message.author.id === 'roundtable-language'
             && head.message.body.includes('RESULT_2_roundtable-language')
@@ -64,9 +81,12 @@ async function scriptedModel() {
           const round = peerEligible ? 3 : head.message.body === question ? 1 : head.message.body.startsWith('合成同伴回应：') ? 2 : 0;
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
           const action = eligible ? (round === 2 && head.pet.petId === 'roundtable-conditions' ? 'dispatch' : 'reply') : 'ignore';
-          decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
+          if (mode === 'tool' || attempt === 2) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
-          content = JSON.stringify({ action, text: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' });
+          const decision = { action, text: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
+          if (attempt === 1) {
+            call = { name: 'pet_head_decision', args: mode === 'malformed-tool' ? { action: 'invalid', text: '' } : decision };
+          } else content = JSON.stringify(decision);
         } else {
           const all = input.messages.map(message => text(message.content)).join('\n');
           const marker = [...all.matchAll(/ROUND_([123])_(roundtable-(?:language|conditions|being))/g)].at(-1);
@@ -110,13 +130,14 @@ async function scriptedModel() {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'roundtable-fixture', decisions, modelErrors,
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'roundtable-fixture', decisions, attempts, modelErrors,
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
-test('manual three-Pet roundtable routes dialogue through retained execution sessions, including unmentioned decisions', { timeout: 120_000 }, async () => {
+for (const mode of ['tool', 'malformed-tool', 'unsupported-tools'] as const) {
+test(`manual three-Pet roundtable retains execution sessions and bounded ${mode} Head decisions`, { timeout: 120_000 }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'studio-roundtable-eval-'));
-  const model = await scriptedModel();
+  const model = await scriptedModel(mode);
   const channel = createChannelPlugin({ httpRoute: false });
   let built: Awaited<ReturnType<typeof buildStudio>> | undefined;
   let directHeadWrites = 0;
@@ -136,7 +157,7 @@ test('manual three-Pet roundtable routes dialogue through retained execution ses
       configuration: { workdir: root, studioConfigPath: path.join(root, '.pinpawo/studio.json'), petsDir: path.join(root, '.pinpawo/pets'),
         resolved: resolveStudio({ studioId: 'roundtable-eval', definitions: philosophers.map(role => role.definitionId), storage: { kind: 'sqlite', path: 'studio.sqlite' } },
           philosophers.map(role => ({ definitionId: role.definitionId, name: role.name }))), plugins: [channel] },
-      modelProfiles: createTestModelProfiles({ baseUrl: model.baseUrl, model: model.model, apiKey: 'synthetic-only', timeoutMs: 20_000, maxRetries: 0, structuredOutputMethod: 'jsonMode' }),
+      modelProfiles: createTestModelProfiles({ baseUrl: model.baseUrl, model: model.model, apiKey: 'synthetic-only', timeoutMs: 20_000, maxRetries: 0, structuredOutputMethod: 'functionCalling' }),
       hostCapabilities: [{ name: GENERAL_CAPABILITY_NAME, uses: ['channel'], description: 'Produce a concise synthetic philosophical response.',
         instructions: defineInstructionDocument({ content: 'Answer the current synthetic request as this Pet. No external resources or tools are required.' }) }],
       petCapabilities: new Map(), toolkitInventory: createTestHostToolkitInventory([]),
@@ -230,6 +251,8 @@ test('manual three-Pet roundtable routes dialogue through retained execution ses
     assert.equal(directHeadWrites, 0);
     assert.deepEqual(failed, []);
     assert.deepEqual(model.modelErrors, []);
+    assert.ok(model.attempts.size > 0);
+    for (const count of model.attempts.values()) assert.equal(count, mode === 'tool' ? 1 : 2);
   } finally {
     await built?.studio.shutdown();
     for (const resident of built?.residentPets.values() ?? []) await resident.close();
@@ -237,3 +260,4 @@ test('manual three-Pet roundtable routes dialogue through retained execution ses
     await rm(root, { recursive: true, force: true });
   }
 });
+}

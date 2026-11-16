@@ -118,7 +118,7 @@ test('duplicate Pet externalRef emits only one event to another live Head', asyn
   } finally { await studio.shutdown(); }
 });
 
-test('a live Head writes a reply to the Timeline and dispatches source attachments through Host admission', async () => {
+test('response and work both use Host admission without Head final text and preserve source attachments', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
   const observed: string[] = [];
   const dispatched: Array<{ request: string; attachments?: unknown; scope?: unknown; session?: unknown }> = [];
@@ -154,15 +154,12 @@ test('a live Head writes a reply to the Timeline and dispatches source attachmen
     await studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker', channelId });
     const question = await channel.service.postMessage(human, channelId, { body: 'short question' });
     await waitFor(() => observed.includes('short question'));
-    let messages = (await channel.service.readContext(human, channelId)).messages;
-    for (let attempt = 0; !messages.some(message => message.body === 'Short answer') && attempt < 1000; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 5));
-      messages = (await channel.service.readContext(human, channelId)).messages;
-    }
-    const reply = messages.find(message => message.body === 'Short answer');
-    assert.ok(reply);
-    assert.deepEqual(reply.author, { kind: 'pet', id: 'worker' });
-    assert.equal(reply.replyTo, question.message.messageId);
+    await waitFor(() => dispatched.length === 1);
+    const messages = (await channel.service.readContext(human, channelId)).messages;
+    assert.deepEqual(messages.map(message => message.messageId), [question.message.messageId], 'admission alone is not a final reply');
+    const firstSession = await channel.service.listSessions(human, channelId);
+    assert.equal(firstSession.length, 1);
+    assert.equal(firstSession[0]!.registered, true);
     await studio.pets.closeInstance('worker', { confirmStop: true });
     const referencedAttachments = [{ uri: 'https://example.com/older.png', title: 'Older' }];
     const referenced = await channel.service.postMessage(human, channelId, { body: 'older source', deliverables: referencedAttachments });
@@ -170,13 +167,14 @@ test('a live Head writes a reply to the Timeline and dispatches source attachmen
     await studio.pets.reopenInstance('worker');
     const attachments = [{ uri: 'https://example.com/source.png', title: 'Source' }];
     await channel.service.postMessage(human, channelId, { body: 'inspect attachment', replyTo: referenced.message.messageId, deliverables: attachments });
-    await waitFor(() => dispatched.length === 1);
-    assert.deepEqual(dispatched[0]!.attachments, [...attachments, ...referencedAttachments]);
+    await waitFor(() => dispatched.length === 2);
+    assert.deepEqual(dispatched[1]!.attachments, [...attachments, ...referencedAttachments]);
     assert.equal(triggerInput?.context.messages.some(message => message.messageId === referenced.message.messageId), false);
     assert.deepEqual(triggerInput?.context.referencedMessage, referenced.message, 'an explicit older reply remains available outside the context window');
-    assert.ok(dispatched[0]!.request.includes(referenced.message.messageId), 'dispatch preserves the referenced source');
-    assert.deepEqual(dispatched[0]!.scope, { namespace: 'channel', id: channelId });
-    assert.ok(dispatched[0]!.session, 'admission uses the Channel session');
+    assert.ok(dispatched[1]!.request.includes(referenced.message.messageId), 'dispatch preserves the referenced source');
+    assert.deepEqual(dispatched[1]!.scope, { namespace: 'channel', id: channelId });
+    assert.ok(dispatched[1]!.session, 'admission uses the Channel session');
+    assert.deepEqual(await channel.service.listSessions(human, channelId), firstSession, 'work after response reuses the same retained session');
     assert.deepEqual(observed, ['short question', 'inspect attachment'], 'own reply does not trigger the Head');
   } finally { await studio.shutdown(); }
 });

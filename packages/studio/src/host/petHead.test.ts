@@ -156,37 +156,38 @@ test('reply and dispatch decisions use their own instance, message and cancellat
   }, events);
   await events.publish(current);
   assert.deepEqual(inputs[0], { pet: pet('a'), description: 'Instance description', message: current, context });
-  assert.deepEqual(calls[1]?.slice(0, 4), ['reply', 'a', '1', 'Acknowledged']);
+  assert.deepEqual(calls[1]?.slice(0, 3), ['dispatch', 'a', current]);
+  assert.equal(calls.filter(call => call[0] === 'reply').length, 0);
   assert.ok(calls[1]?.[4] instanceof AbortSignal);
   action = 'dispatch';
   const taskMessage = message('2', { replyTo: '1', deliverables: [{ uri: 'https://example.test/file' }] });
   await events.publish(taskMessage);
-  const dispatch = calls.find(call => call[0] === 'dispatch')!;
+  const dispatch = calls.filter(call => call[0] === 'dispatch').at(-1)!;
   assert.deepEqual(dispatch.slice(0, 4), ['dispatch', 'a', taskMessage, 'Investigate']);
   assert.ok(dispatch[4] instanceof AbortSignal);
   unsubscribe();
 });
 
-test('Pet messages are independently judged while undirected acknowledgements and recursive mentions are suppressed', async () => {
+test('eligible peer responses execute even without mentions; ignored messages and self replies do not route', async () => {
   const events = bus();
   const petMessages = [message('1', { author: { kind: 'pet', id: 'b' } }),
     message('2', { author: { kind: 'pet', id: 'c' } })];
   const decisions: string[] = [];
   const replies: unknown[][] = [];
   const dispatches: unknown[][] = [];
-  let action: 'reply' | 'dispatch' = 'reply';
-  let text = 'Acknowledged';
+  let action: 'ignore' | 'reply' | 'dispatch' = 'ignore';
+  let text = 'Address the peer question';
   const unsubscribe = activate({ pet: pet('a'),
     channel: { readContext: async () => ({ messages: petMessages }),
       reply: async (...args) => { replies.push(args); }, dispatch: async (...args) => { dispatches.push(args); } },
-    decide: async input => { decisions.push(input.message.messageId); return { action, text }; },
+    decide: async input => { decisions.push(input.message.messageId); return action === 'ignore' ? { action } : { action, text }; },
   }, events);
   await events.publish(petMessages[1]!);
   assert.equal(replies.length, 0);
   action = 'dispatch';
   const task = message('3', { author: { kind: 'pet', id: 'b' }, mentions: [{ participantId: 'pet:a' }] });
   await events.publish(task);
-  assert.deepEqual(dispatches[0]?.slice(0, 3), ['a', task, 'Acknowledged']);
+  assert.deepEqual(dispatches[0]?.slice(0, 3), ['a', task, 'Address the peer question']);
   const unaddressedWork = message('4', { author: { kind: 'pet', id: 'c' } });
   await events.publish(unaddressedWork);
   assert.equal(dispatches.length, 2);
@@ -194,9 +195,12 @@ test('Pet messages are independently judged while undirected acknowledgements an
   text = 'Here is the answer.';
   const question = message('5', { author: { kind: 'pet', id: 'b' }, mentions: [{ participantId: 'pet:a' }] });
   await events.publish(question);
-  assert.deepEqual(replies[0]?.slice(0, 3), ['a', '5', 'Here is the answer.']);
-  assert.deepEqual(replies[0]?.[4], { preventPetMentions: true });
-  assert.deepEqual(decisions, ['2', '3', '4', '5']);
+  assert.equal(replies.length, 0);
+  assert.deepEqual(dispatches[2]?.slice(0, 2), ['a', question]);
+  const unmentionedQuestion = message('6', { author: { kind: 'pet', id: 'b' } });
+  await events.publish(unmentionedQuestion);
+  assert.deepEqual(dispatches[3]?.slice(0, 2), ['a', unmentionedQuestion]);
+  assert.deepEqual(decisions, ['2', '3', '4', '5', '6']);
   unsubscribe();
 });
 

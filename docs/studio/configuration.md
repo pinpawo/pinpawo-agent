@@ -294,9 +294,35 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-Online Pet Heads independently decide whether to ignore, reply to, or dispatch work
-for Channel messages. A mention does not guarantee a response. Explicit scheduler, trigger and Host
-dispatch entry points remain available.
+Online Pet Heads independently decide whether to ignore a Channel message, request
+a concise response (`reply`), or request substantive work (`dispatch`). Neither
+response mode publishes Head-generated text: both enter the resident execution
+pipeline and produce public replies from its Agent Session. A mention does not
+guarantee a response, and an unmentioned message may still merit participation.
+The Head's `text` is routing intent, not a finished answer. Explicit scheduler,
+trigger and Host dispatch entry points remain available.
+
+The Channel reserves one Session on the first accepted execution for each
+(Channel, Pet instance) pair, then reuses that identity for response and work turns.
+Completion does not remove it; changing the tools used does not allocate another
+Channel Session. Short responses therefore add a resident execution/model turn
+rather than taking the old direct-Head shortcut. The current trial requests a
+concise, non-delegated response where possible, but does not promise a fixed latency
+or a restricted tool surface. It introduces no separate lightweight-session
+store, automatic acknowledgement message, or deployment migration.
+Peer-authored messages can also be judged eligible; there is no longer a
+mention-only gate for those responses. Model instructions discourage recursive
+exchanges, but they are not a hard turn budget. Use bounded isolated evaluation
+before enabling autonomous multi-Pet discussion in a live Channel.
+Known trial compatibility gap: execution input preserves the triggering message
+and any explicit quoted context, but execution publication does not yet carry
+that source correlation back to Timeline `replyTo`. This trial is not accepted
+for deployment until that output-link behavior is restored and tested.
+Follow-up design: admit a trusted invocation-scoped origin (Channel and source
+message identity), persist it through await/retry/restart, carry it on execution
+output, and verify the source belongs to the output Channel before publication.
+Do not reconstruct it from labels or an in-memory receipt-to-source map. This
+correlation protocol is intentionally not implemented by this local trial.
 
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source

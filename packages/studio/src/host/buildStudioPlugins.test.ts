@@ -494,11 +494,11 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     start(context: StudioPluginContext) { channelContext = context; },
     head: {
       readContext: async () => ({ messages: [] }),
-      reply: async (_channelId: string, petId: string, messageId: string, body: string) => {
-        replies.push({ petId, messageId, body });
+      reply: async () => { assert.fail('Head routing must not write a final reply'); },
+      dispatch: async (_channelId: string, petId: string, message: { messageId: string }, body: string) => {
+        replies.push({ petId, messageId: message.messageId, body });
         if (replies.length === 2) repliesDone();
       },
-      dispatch: async () => { assert.fail('model requested a direct reply'); },
     },
   };
   const calls: Array<{ url: string; model: string; petId: string }> = [];
@@ -550,9 +550,9 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       { petId: 'planner', model: 'specialist-model', url: 'https://specialist.example.test/v1/chat/completions' },
       { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions' },
     ]);
-    assert.deepEqual(replies.sort((a, b) => a.petId.localeCompare(b.petId)), [
-      { petId: 'planner', messageId: 'message-1', body: 'hello from planner' },
-      { petId: 'writer', messageId: 'message-1', body: 'hello from writer' },
+    assert.deepEqual(replies.map(({ petId, messageId }) => ({ petId, messageId })).sort((a, b) => a.petId.localeCompare(b.petId)), [
+      { petId: 'planner', messageId: 'message-1' },
+      { petId: 'writer', messageId: 'message-1' },
     ]);
   } finally {
     await result?.studio.shutdown();

@@ -135,3 +135,35 @@ Reports remain local at the paths selected by the commands above. No workflow
 runs these commands or uploads reports. A failure before the scenario runner
 starts can leave no report; check the command's exit status and prerequisite
 build output.
+
+### Manual persistent-Session philosophy roundtable trial
+
+```sh
+npm run scenario:roundtable -w @pinpawo-tests/studio-e2e
+```
+
+This deterministic scenario uses three distinct philosopher-named Pet instances,
+a synthetic collective-experience question, the production Studio/Channel/resident
+runtime, and a loopback scripted model. It never reads real model credentials or
+contacts a live model/backend. It is excluded from the default test command and CI,
+like the other manually invoked scenario tests.
+
+It verifies one lazy, retained execution Session per `(Channel, Pet instance)`;
+seven attributed execution replies across two human-triggered rounds plus one
+actual Pet-publication-triggered peer turn, including a response-to-work
+routing change on the same Session; shared source and quoted-peer
+context; eligible unmentioned routing versus explicitly ignored messages; no
+substantive Head write;
+no duplicate replies under a scripted explicit ignore stop; and foreign
+Channel isolation. Controlled model decisions exercise routing semantics, not the
+claim that every unmentioned Pet should answer. No optional Head status is emitted
+in this trial. The fixture's final answers are distinct from routing instructions.
+
+Known acceptance gap: execution publications currently omit outgoing `replyTo`.
+The test explicitly records that gap; incoming quoted context and trigger IDs in
+Session history are verified, but output quote correlation is not preserved.
+
+This is integration evidence, not a philosophical-quality or latency benchmark.
+It does not establish real-model routing accuracy or autonomous loop safety, interrupted delivery/ACK retry
+behavior, or tool/Capability-switch continuity. Those require separate cases and
+an explicitly isolated live-model run when desired. No live deployment is implied.

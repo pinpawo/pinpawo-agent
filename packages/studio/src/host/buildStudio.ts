@@ -315,6 +315,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           maxOutputTokens: options.maxOutputTokens,
           maxRetries: options.maxRetries,
         }, {
+          ...(options.purpose ? { purpose: options.purpose } : {}),
           preferDeterministic: options.preferDeterministic,
           ...(options.streaming !== undefined ? { streaming: options.streaming } : {}),
           ...(options.forceChatCompletions !== undefined ? { forceChatCompletions: options.forceChatCompletions } : {}),

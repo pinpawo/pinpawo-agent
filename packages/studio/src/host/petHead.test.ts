@@ -206,6 +206,7 @@ const tool = (args: unknown, name = 'pet_head_decision') => ({ content: '', tool
 function mockEndpoint(outputs: unknown[], method?: string) {
   const calls: Array<{ mode: string; messages: unknown; signal: unknown }> = [];
   let binding: unknown;
+  let schema: unknown;
   let factory: unknown;
   const invoke = (mode: string) => async (messages: unknown, config: { signal: AbortSignal }) => {
     calls.push({ mode, messages, signal: config.signal });
@@ -217,10 +218,10 @@ function mockEndpoint(outputs: unknown[], method?: string) {
   const endpoint = { profileId: 'test', baseUrl: 'https://example.test', apiKey: 'secret', model: 'test', structuredOutputMethod: method,
     createChatModel: (options: unknown) => { factory = options; return {
       bindTools: (...args: unknown[]) => { binding = args; return { invoke: invoke('tool') }; },
-      withStructuredOutput: (_schema: unknown, options: unknown) => { binding = options; return { invoke: invoke('structured') }; },
+      withStructuredOutput: (value: unknown, options: unknown) => { schema = value; binding = options; return { invoke: invoke('structured') }; },
       invoke: invoke('json'),
     }; } };
-  return { endpoint: endpoint as never, calls, binding: () => binding, factory: () => factory };
+  return { endpoint: endpoint as never, calls, schema: () => schema, binding: () => binding, factory: () => factory };
 }
 test('single declared decision tool has no forced choice, no tool execution and no SDK retries', async () => {
   for (const method of [undefined, 'functionCalling']) {
@@ -229,7 +230,7 @@ test('single declared decision tool has no forced choice, no tool execution and 
     const decide = createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) });
     const signal = new AbortController().signal;
     assert.deepEqual(await decide(decisionInput, signal), { reply: '', action: 'dispatch', intent: 'Address source', timing: 'enqueue' });
-    assert.deepEqual(mock.factory(), { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false });
+    assert.deepEqual(mock.factory(), { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
     assert.equal((mock.binding() as unknown[]).length, 1);
     assert.equal(mock.calls.length, 1);
     assert.equal(mock.calls[0]!.signal, signal);
@@ -382,4 +383,78 @@ test('old schema, non-string reply and ignore carrying execution intent fail clo
     await assert.rejects(createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal));
     assert.equal(mock.calls.length, 2);
   }
+});
+
+test('tool and structured JSON expose the same independent reply and execution schema', async () => {
+  const value = { action: 'dispatch', reply: '收到，我会先核对口径，再整理差异。', intent: 'Compare both datasets using equivalent definitions.', timing: 'enqueue' };
+  const toolModel = mockEndpoint([tool(value)], 'functionCalling');
+  const jsonModel = mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonSchema');
+  for (const mock of [toolModel, jsonModel]) {
+    assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), value);
+  }
+  const declaration = (toolModel.binding() as Array<Array<{ function: { parameters: unknown } }>>)[0]![0]!.function.parameters;
+  assert.deepEqual(declaration, jsonModel.schema());
+  const schema = declaration as { required: string[]; additionalProperties: boolean; properties: { action: { enum: string[] }; reply: { type: string }; intent: { type: string } } };
+  assert.deepEqual(schema.required, ['action', 'reply', 'intent', 'timing']);
+  assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+  assert.equal(schema.properties.reply.type, 'string');
+  assert.equal(schema.properties.intent.type, 'string');
+  assert.equal(schema.additionalProperties, false);
+});
+
+test('an explicit acknowledgement is published before slow independent execution admission', async () => {
+  const entered = deferred<void>();
+  const admission = deferred<void>();
+  const effects: string[] = [];
+  const source = message('1', { body: '先回应一下，再核对这两份数据。' });
+  const signal = new AbortController().signal;
+  const handler = createPetHead({ pet: pet('a'),
+    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
+      reply: async (id, replyTo, body, actualSignal) => {
+        assert.equal(id, 'a'); assert.equal(replyTo, source.messageId); assert.equal(actualSignal, signal);
+        effects.push(body);
+      },
+      dispatch: async (_id, actualSource, request) => {
+        assert.equal(actualSource, source); assert.equal(request, '核对两份数据的口径，整理差异。');
+        entered.resolve(); await admission.promise; effects.push('admitted');
+      } },
+    decide: async () => ({ action: 'dispatch', reply: '收到，我会先核对口径，再整理差异。', intent: '核对两份数据的口径，整理差异。', timing: 'enqueue' }),
+  });
+  const pending = handler(source, signal);
+  await entered.promise;
+  assert.deepEqual(effects, ['收到，我会先核对口径，再整理差异。']);
+  admission.resolve(); await pending;
+  assert.deepEqual(effects, ['收到，我会先核对口径，再整理差异。', 'admitted']);
+});
+
+test('JSON-mode system carries the same parseable field-policy schema as the decision tool', async () => {
+  const value = { action: 'ignore', reply: '', intent: '', timing: 'enqueue' };
+  const models = [mockEndpoint([tool(value)], 'functionCalling'), mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonMode')];
+  for (const mock of models) await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal);
+  const declaration = (models[0]!.binding() as Array<Array<{ function: { parameters: unknown } }>>)[0]![0]!.function.parameters;
+  for (const mock of models) {
+    const system = (mock.calls[0]!.messages as Array<[string, string]>)[0]![1];
+    const block = system.split('<decision_schema>\n')[1]?.split('\n</decision_schema>')[0];
+    assert.ok(block);
+    assert.deepEqual(JSON.parse(block), declaration);
+  }
+});
+
+test('empty stop output is diagnosed separately from malformed, refusal, truncation and ignore', async () => {
+  for (const mode of ['functionCalling', 'jsonMode']) for (const [content, finish, code, attempts] of [
+    ['', 'stop', 'empty_output', 2], ['   ', 'stop', 'empty_output', 2], [[], 'stop', 'empty_output', 2],
+    ['broken', 'stop', 'malformed', 2], ['', 'length', 'truncated', 1], ['', 'content_filter', 'refusal', 1],
+  ] as const) {
+    const response = { content, response_metadata: { finish_reason: finish } };
+    const first = mode === 'jsonMode' ? { raw: response, parsed: null } : response;
+    const mock = mockEndpoint([first, response], mode);
+    const diagnostics: Array<{ outcome: string; code?: string }> = [];
+    await assert.rejects(createHeadDecision(mock.endpoint, { onDiagnostic: value => diagnostics.push(value) })(decisionInput, new AbortController().signal));
+    assert.equal(mock.calls.length, attempts);
+    assert.deepEqual(diagnostics.map(item => [item.outcome, item.code]), [['error', code]]);
+  }
+  const ignore = { action: 'ignore', reply: '', intent: '', timing: 'enqueue' };
+  const mock = mockEndpoint([{ content: '', response_metadata: { finish_reason: 'stop' } }, raw(ignore)]);
+  assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), ignore);
+  assert.equal(mock.calls.length, 2);
 });

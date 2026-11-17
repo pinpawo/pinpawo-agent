@@ -331,7 +331,9 @@ output or an explicit unsupported tools/response-format capability may receive
 one fresh text-only JSON attempt: at most two model calls total, SDK retries off.
 The second request never includes the malformed provider output. Auth, network,
 refusal, safety, truncation, ambiguous/unknown tool calls and other provider errors
-are not replayed as output retries; invalid output is never converted to `ignore`.
+are not replayed as output retries; invalid output is never converted to `ignore`. Blank output reports
+`empty_output` separately from `malformed`, `truncated`, or a valid ignore; it
+shares the same bounded fresh-JSON retry policy and never logs raw output.
 
 Safe `pet.head.decision` diagnostics identify Pet, Channel, source message,
 outcome (`selected`, `ignore`, `error`), attempt count and a finite error code.
@@ -498,3 +500,22 @@ remains scoped to that invocation and cannot close another pending subject.
 Deterministic tests exercise the declaration and safe queue behavior, not the
 quality of a live model's timing judgments. No new model configuration or tool
 permission is implied by this trial.
+
+### Official DeepSeek Head decision budget
+
+Only Studio Head calls are tagged with the invocation-local `pet-head` purpose.
+For the official HTTPS `api.deepseek.com` OpenAI-compatible route and the
+`deepseek-flash` / `deepseek-v4-pro` models, this purpose sends
+`thinking: { type: disabled }`. This keeps the Head's bounded 512-token decision
+budget available for its structured answer. It does not edit the saved profile,
+Agent models, gateway routes, other model names or Anthropic-compatible routes.
+The same shared Head decision policy and field descriptions apply to tool output
+and JSON mode; explicit requests to acknowledge before processing can select
+both reply and dispatch without claiming admission has already succeeded.
+Routine dispatch still need not produce an acknowledgement.
+
+A prior six-call isolated synthetic A/B reproduced truncated JSON when default
+thinking consumed 489/512 or 512/512 completion tokens. Disabling thinking removed
+those two sample truncations but did not itself make the model select a combined
+acknowledgement and execution. Transport validity and routing choices are separate
+acceptance questions; a valid ignore remains a legitimate model decision.

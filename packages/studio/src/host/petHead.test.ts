@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bindPetHeadChannel, createHeadDecision, createPetHead, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadSchedulingSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
@@ -245,11 +245,11 @@ function mockEndpoint(outputs: unknown[], method?: string) {
 }
 test('single declared decision tool has no forced choice, no tool execution and no SDK retries', async () => {
   for (const method of [undefined, 'functionCalling']) {
-    const mock = mockEndpoint([tool({ action: 'reply', text: 'Address source' })], method);
+    const mock = mockEndpoint([tool({ action: 'reply', text: 'Address source', timing: 'enqueue' })], method);
     const events: unknown[] = [];
     const decide = createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) });
     const signal = new AbortController().signal;
-    assert.deepEqual(await decide(decisionInput, signal), { action: 'reply', text: 'Address source' });
+    assert.deepEqual(await decide(decisionInput, signal), { action: 'reply', text: 'Address source', timing: 'enqueue' });
     assert.deepEqual(mock.factory(), { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false });
     assert.equal((mock.binding() as unknown[]).length, 1);
     assert.equal(mock.calls.length, 1);
@@ -259,14 +259,14 @@ test('single declared decision tool has no forced choice, no tool execution and 
   }
 });
 test('explicit JSON schema capability inspects raw refusal and validates parsed output', async () => {
-  const mock = mockEndpoint([{ raw: raw({ action: 'ignore', text: '' }), parsed: { action: 'ignore', text: '' } }], 'jsonSchema');
+  const mock = mockEndpoint([{ raw: raw({ action: 'ignore', text: '', timing: 'enqueue' }), parsed: { action: 'ignore', text: '', timing: 'enqueue' } }], 'jsonSchema');
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore' });
   assert.deepEqual(mock.binding(), { name: 'pet_head_decision', method: 'jsonSchema', includeRaw: true });
 });
 test('known malformed output or explicit unsupported capability gets only one clean JSON fallback', async () => {
   const unsupported = Object.assign(new Error('private provider payload'), { status: 400, code: 'unsupported_parameter', param: 'tools' });
-  for (const first of [tool({ action: 'reply', text: ' ' }), raw({ action: 'ignore', text: 'not empty' }), raw({ action: 'dispatch', text: 'ok', extra: true }), unsupported]) {
-    const mock = mockEndpoint([first, raw({ action: 'ignore', text: '' })]);
+  for (const first of [tool({ action: 'reply', text: ' ', timing: 'enqueue' }), raw({ action: 'ignore', text: 'not empty', timing: 'enqueue' }), raw({ action: 'dispatch', text: 'ok', extra: true, timing: 'enqueue' }), unsupported]) {
+    const mock = mockEndpoint([first, raw({ action: 'ignore', text: '', timing: 'enqueue' })]);
     assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore' });
     assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'json']);
     assert.deepEqual((mock.calls[0]!.messages as unknown[])[1], (mock.calls[1]!.messages as unknown[])[1], 'original input is preserved');
@@ -275,11 +275,11 @@ test('known malformed output or explicit unsupported capability gets only one cl
   }
 });
 test('unknown tools, multiple calls, refusal, truncation and provider failures never fall back', async () => {
-  for (const output of [tool({ action: 'ignore', text: '' }, 'unknown'),
+  for (const output of [tool({ action: 'ignore', text: '', timing: 'enqueue' }, 'unknown'),
     { content: '', tool_calls: [...tool({}).tool_calls, ...tool({}).tool_calls] },
     { content: '', invalid_tool_calls: [{}] },
-    { ...raw({ action: 'ignore', text: '' }), additional_kwargs: { refusal: 'private' } },
-    { ...raw({ action: 'ignore', text: '' }), response_metadata: { finish_reason: 'length' } },
+    { ...raw({ action: 'ignore', text: '', timing: 'enqueue' }), additional_kwargs: { refusal: 'private' } },
+    { ...raw({ action: 'ignore', text: '', timing: 'enqueue' }), response_metadata: { finish_reason: 'length' } },
     { content: [{ type: 'refusal', refusal: 'private' }] },
     Object.assign(new Error('private auth'), { status: 401 }), new Error('private network'),
     Object.assign(new Error('private runtime'), { status: 400, code: 'invalid_request_error' })]) {
@@ -291,8 +291,8 @@ test('unknown tools, multiple calls, refusal, truncation and provider failures n
   }
 });
 test('strict validation never guesses an action and the two-call ceiling is absolute', async () => {
-  for (const value of [null, {}, { action: 'ignore' }, { action: 'reply', text: 42 }, { action: 'route', text: 'x' }, { action: 'ignore', text: '', other: true }]) {
-    const mock = mockEndpoint([raw(value), raw(value), raw({ action: 'ignore', text: '' })]);
+  for (const value of [null, {}, { action: 'ignore' }, { action: 'reply', text: 42, timing: 'enqueue' }, { action: 'route', text: 'x', timing: 'enqueue' }, { action: 'ignore', text: '', other: true, timing: 'enqueue' }]) {
+    const mock = mockEndpoint([raw(value), raw(value), raw({ action: 'ignore', text: '', timing: 'enqueue' })]);
     await assert.rejects(createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal));
     assert.equal(mock.calls.length, 2);
   }
@@ -300,7 +300,7 @@ test('strict validation never guesses an action and the two-call ceiling is abso
 test('abort before or during provider work prevents fallback and selection', async () => {
   for (const before of [true, false]) {
     const controller = new AbortController();
-    const mock = mockEndpoint([() => { controller.abort(); return raw({ action: 'ignore', text: '' }); }]);
+    const mock = mockEndpoint([() => { controller.abort(); return raw({ action: 'ignore', text: '', timing: 'enqueue' }); }]);
     if (before) controller.abort();
     const events: Array<{ outcome: string; code?: string }> = [];
     await assert.rejects(createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) })(decisionInput, controller.signal));
@@ -310,7 +310,7 @@ test('abort before or during provider work prevents fallback and selection', asy
 });
 
 test('explicit JSON mode is preserved even when the adapter exposes tools', async () => {
-  const value = { action: 'dispatch', text: 'Inspect the source' };
+  const value = { action: 'dispatch', text: 'Inspect the source', timing: 'enqueue' };
   const mock = mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonMode');
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), value);
   assert.deepEqual(mock.calls.map(call => call.mode), ['structured']);
@@ -319,17 +319,63 @@ test('explicit JSON mode is preserved even when the adapter exposes tools', asyn
 
 test('without tool binding or declared structured transport the Head uses conservative plain JSON', async () => {
   let calls = 0;
-  const endpoint = { createChatModel: () => ({ invoke: async () => { calls++; return raw({ action: 'ignore', text: '' }); } }) };
+  const endpoint = { createChatModel: () => ({ invoke: async () => { calls++; return raw({ action: 'ignore', text: '', timing: 'enqueue' }); } }) };
   assert.deepEqual(await createHeadDecision(endpoint as never)(decisionInput, new AbortController().signal), { action: 'ignore' });
   assert.equal(calls, 1);
 });
 
 test('structured parsing failure retries once but raw refusal never does', async () => {
   const bad = { raw: { content: 'broken' }, parsed: null, parsing_error: new Error('private parsing detail') };
-  const mock = mockEndpoint([bad, raw({ action: 'ignore', text: '' })], 'jsonMode');
+  const mock = mockEndpoint([bad, raw({ action: 'ignore', text: '', timing: 'enqueue' })], 'jsonMode');
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore' });
   assert.deepEqual(mock.calls.map(call => call.mode), ['structured', 'json']);
-  const refused = mockEndpoint([{ raw: { content: '', response_metadata: { stop_reason: 'refusal' } }, parsed: { action: 'ignore', text: '' } }], 'jsonSchema');
+  const refused = mockEndpoint([{ raw: { content: '', response_metadata: { stop_reason: 'refusal' } }, parsed: { action: 'ignore', text: '', timing: 'enqueue' } }], 'jsonSchema');
   await assert.rejects(createHeadDecision(refused.endpoint)(decisionInput, new AbortController().signal));
   assert.equal(refused.calls.length, 1);
+});
+
+test('scheduling snapshot admits only exact owning Channel sources, never names or foreign scopes', () => {
+  const entry = { dispatchId: 'running', enqueuedAt: 'now', sessionId: 'session', scope: { namespace: 'channel', id: 'team' }, origin: { namespace: 'channel', id: 'original' } };
+  const result = readHeadSchedulingSnapshot('a', 'team', [{ petId: 'a', state: 'busy', activeOperation: 'dispatch', queuedConversations: 0, queuedDispatches: 3,
+    activeDispatch: entry, entries: [{ ...entry, dispatchId: 'next' }, { ...entry, scope: { namespace: 'channel', id: 'other' } }, { ...entry, origin: undefined }] }]);
+  assert.deepEqual(result, { active: { dispatchId: 'running', sessionId: 'session', messageId: 'original' }, pending: [{ dispatchId: 'next', sessionId: 'session', messageId: 'original' }] });
+});
+
+test('tool and JSON decisions separately validate participation and timing for either author', async () => {
+  for (const kind of ['human', 'pet'] as const) for (const timing of ['enqueue', 'interrupt'] as const) for (const mode of ['functionCalling', 'jsonMode']) {
+    const value = { action: 'reply', text: timing === 'interrupt' ? 'Correct the invalid units, then address the original calculation.' : 'Add the nonblocking illustration after the current explanation.', timing };
+    const mock = mockEndpoint([mode === 'jsonMode' ? { raw: raw(value), parsed: value } : tool(value)], mode);
+    const result = await createHeadDecision(mock.endpoint)({ ...decisionInput, message: message('2', { author: { kind, id: 'source' } }) }, new AbortController().signal);
+    assert.deepEqual(result, value);
+  }
+  for (const value of [{ action: 'ignore', text: '', timing: 'interrupt' }, { action: 'reply', text: 'work' }, { action: 'reply', text: 'work', timing: 'urgent' }]) {
+    const mock = mockEndpoint([raw(value), raw(value)]);
+    await assert.rejects(createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal));
+    assert.equal(mock.calls.length, 2);
+  }
+});
+
+test('modeled interrupt preserves exact source and safely queues; stale snapshots never cancel a different run', async () => {
+  for (const stale of [false, true]) for (const author of ['human', 'pet'] as const) {
+    let snapshot = { active: { dispatchId: 'old', sessionId: 'session', messageId: 'original' }, pending: [] };
+    const original = message('original', { body: 'Calculate using the measured units.' });
+    const source = message('2', { author: { kind: author, id: 'source' }, body: 'The original units were wrong.' });
+    const effects: unknown[][] = [];
+    const decisions: unknown[] = [];
+    const handler = createPetHead({ pet: pet('a'), readScheduling: () => structuredClone(snapshot), onScheduling: event => decisions.push(event),
+      channel: { subscribe: () => () => {}, reply: async () => { throw new Error('no direct reply'); },
+        readContext: async (_pet, _before, reference) => ({ messages: [], ...(reference === 'original' ? { referencedMessage: original } : {}) }),
+        dispatch: async (...args) => { effects.push(args); } },
+      decide: async input => {
+        assert.deepEqual(input.activeSource, original);
+        assert.equal(input.scheduling?.active?.dispatchId, 'old');
+        if (stale) snapshot = { ...snapshot, active: { ...snapshot.active, dispatchId: 'new' } };
+        return { action: 'dispatch', text: 'Correct units and finish the original calculation.', timing: 'interrupt' };
+      } });
+    await handler(source, new AbortController().signal);
+    assert.equal(effects.length, 1);
+    assert.equal(effects[0]!.length, 4, 'no trusted interrupt delivery is passed');
+    assert.equal(effects[0]![1], source);
+    assert.deepEqual(decisions, [{ petId: 'a', channelId: 'team', messageId: '2', requested: 'interrupt', effective: 'enqueue', reason: stale ? 'stale_snapshot' : 'continuation_unavailable', activeDispatchId: 'old' }]);
+  }
 });

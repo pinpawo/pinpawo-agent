@@ -34,7 +34,7 @@ test('production Pet Head subscriptions receive only real messages from their ow
       invoke: async (messages: Array<[string, string]>) => {
         const { pet, message } = JSON.parse(messages[1]![1]) as HeadInput;
         decisions[pet.petId]!.push(message.body);
-        return { raw: { content: '{"action":"ignore","text":""}' }, parsed: { action: 'ignore', text: '' } };
+        return { raw: { content: '{"action":"ignore","text":"","timing":"enqueue"}' }, parsed: { action: 'ignore', text: '', timing: 'enqueue' } };
       },
     }),
   } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;

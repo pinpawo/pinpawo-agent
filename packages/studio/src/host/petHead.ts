@@ -1,5 +1,5 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { Studio, StudioModelEndpoint } from '../studioContract';
+import type { Studio, StudioModelEndpoint, StudioDispatchQueue } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 
 /** The committed Timeline message as seen by a Pet. */
@@ -17,8 +17,20 @@ export type HeadMessage = {
 };
 export type HeadContext = { messages: HeadMessage[]; [key: string]: unknown };
 /** reply requests a concise execution turn; its text is routing intent, never a public answer. */
-export type HeadDecision = { action: 'ignore' } | { action: 'reply' | 'dispatch'; text: string };
-export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext };
+export type HeadTiming = 'enqueue' | 'interrupt';
+export type HeadDecision = { action: 'ignore' } | { action: 'reply' | 'dispatch'; text: string; timing?: HeadTiming };
+export type HeadSchedulingSnapshot = { active?: { dispatchId: string; sessionId: string; messageId: string }; pending: Array<{ dispatchId: string; sessionId: string; messageId: string }> };
+
+/** Project only exact sources owned by this Channel. No authority comes from model text. */
+export function readHeadSchedulingSnapshot(petId: string, channelId: string, queues: StudioDispatchQueue[]): HeadSchedulingSnapshot {
+  const queue = queues.find(item => item.petId === petId);
+  const project = (item: NonNullable<StudioDispatchQueue['activeDispatch']>) =>
+    item.sessionId && item.scope?.namespace === 'channel' && item.scope.id === channelId && item.origin?.namespace === 'channel'
+      ? { dispatchId: item.dispatchId, sessionId: item.sessionId, messageId: item.origin.id } : undefined;
+  const active = queue?.activeDispatch && project(queue.activeDispatch);
+  return { ...(active ? { active } : {}), pending: (queue?.entries ?? []).flatMap(item => { const ref = project(item); return ref ? [ref] : []; }) };
+}
+export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; scheduling?: HeadSchedulingSnapshot; activeSource?: HeadMessage };
 
 /** The Head's narrow view of its owner Channel. */
 export type PetHeadChannel = {
@@ -58,6 +70,8 @@ export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
   channel: PetHeadChannel;
+  readScheduling?: () => HeadSchedulingSnapshot;
+  onScheduling?: (event: { petId: string; channelId: string; messageId: string; requested: HeadTiming; effective: 'enqueue'; reason: 'default' | 'continuation_unavailable' | 'stale_snapshot'; activeDispatchId?: string }) => void;
   decide: (input: HeadInput, signal: AbortSignal) => Promise<HeadDecision>;
 }): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
   return async (message, signal) => {
@@ -65,8 +79,30 @@ export function createPetHead(options: {
       (message.author.kind === 'pet' && message.author.id === options.pet.petId)) return;
     const context = await options.channel.readContext(options.pet.petId, message.sequence + 1, message.replyTo);
     if (signal.aborted) return;
-    const decision = await options.decide({ pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context }, signal);
+    const scheduling = options.readScheduling?.();
+    // Read the actual active source even if it has aged out of the 50-message
+    // context window. Keep source content separate from trusted runtime refs.
+    let activeSource: HeadMessage | undefined;
+    if (scheduling?.active) {
+      const sourceId = scheduling.active.messageId;
+      activeSource = context.messages.find(item => item.messageId === sourceId && item.channelId === message.channelId);
+      if (!activeSource) {
+        const lookup = await options.channel.readContext(options.pet.petId, message.sequence + 1, sourceId);
+        const candidate = lookup.referencedMessage as HeadMessage | undefined;
+        if (candidate?.messageId === sourceId && candidate.channelId === message.channelId) activeSource = candidate;
+      }
+    }
+    if (signal.aborted) return;
+    const decision = await options.decide({ ...(scheduling ? { scheduling } : {}), ...(activeSource ? { activeSource } : {}), pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context }, signal);
     if (signal.aborted || decision.action === 'ignore') return;
+    const requested = decision.timing ?? 'enqueue';
+    const current = options.readScheduling?.();
+    const stale = JSON.stringify(current) !== JSON.stringify(scheduling);
+    // This trial cannot safely restore arbitrary interrupted work. Never translate
+    // modeled intent into the trusted delivery=interrupt primitive until it can.
+    try { options.onScheduling?.({ petId: options.pet.petId, channelId: message.channelId, messageId: message.messageId, requested, effective: 'enqueue',
+      reason: requested === 'enqueue' ? 'default' : stale ? 'stale_snapshot' : 'continuation_unavailable',
+      ...(scheduling?.active ? { activeDispatchId: scheduling.active.dispatchId } : {}) }); } catch { /* Observation cannot alter admission. */ }
     const text = decision.text.trim();
     if (!text) return;
     // Both response and work use the Channel's one durable execution session.
@@ -79,7 +115,11 @@ export function createPetHead(options: {
         'Do not delegate or use tools unless the source actually requires them. Stop after this response; do not initiate another exchange.',
         text].join('\n')
       : text;
-    await options.channel.dispatch(options.pet.petId, message, request, signal);
+    const queuedRequest = requested === 'interrupt'
+      ? ['Your interruption request was deferred: this is a queued turn, not a resumed or interrupted execution.',
+        'Check the completed Session and Channel context before addressing the new source. Preserve any still-unanswered relevant subject, but do not repeat an already completed answer or replay completed tool actions.', request].join('\n')
+      : request;
+    await options.channel.dispatch(options.pet.petId, message, queuedRequest, signal);
   };
 }
 
@@ -93,15 +133,15 @@ class DecisionFailure extends Error {
 }
 const decisionSchema = {
   title: 'pet_head_decision', type: 'object',
-  properties: { action: { type: 'string', enum: ['ignore', 'reply', 'dispatch'] }, text: { type: 'string' } },
-  required: ['action', 'text'], additionalProperties: false,
+  properties: { action: { type: 'string', enum: ['ignore', 'reply', 'dispatch'] }, text: { type: 'string' }, timing: { type: 'string', enum: ['enqueue', 'interrupt'] } },
+  required: ['action', 'text', 'timing'], additionalProperties: false,
 };
 function validateDecision(value: unknown): HeadDecision {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DecisionFailure('malformed', true);
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).length !== 2 || !Object.hasOwn(record, 'action') || !Object.hasOwn(record, 'text') || typeof record.text !== 'string') throw new DecisionFailure('malformed', true);
-  if (record.action === 'ignore' && record.text === '') return { action: 'ignore' };
-  if ((record.action === 'reply' || record.action === 'dispatch') && record.text.trim()) return { action: record.action, text: record.text };
+  if (Object.keys(record).length !== 3 || !Object.hasOwn(record, 'action') || !Object.hasOwn(record, 'text') || typeof record.text !== 'string' || (record.timing !== 'enqueue' && record.timing !== 'interrupt')) throw new DecisionFailure('malformed', true);
+  if (record.action === 'ignore' && record.text === '' && record.timing === 'enqueue') return { action: 'ignore' };
+  if ((record.action === 'reply' || record.action === 'dispatch') && record.text.trim()) return { action: record.action, text: record.text, timing: record.timing };
   throw new DecisionFailure('malformed', true);
 }
 function inspectMessage(raw: unknown): Record<string, unknown> {
@@ -150,7 +190,15 @@ export function createHeadDecision(endpoint: StudioModelEndpoint, options: { onD
       try { options.onDiagnostic?.({ petId: input.pet.petId, channelId: input.message.channelId, messageId: input.message.messageId, attempts, ...event }); } catch { /* Diagnostics cannot change routing. */ }
     };
     const messages: Array<[string, string]> = [
-      ['system', 'You are the Head of one Pet in a shared Channel. Independently decide whether the newly committed message needs this Pet. Ignore irrelevant messages or acknowledgements. Choose reply to request a concise response from the Pet execution session; choose dispatch for substantive work. Both actions execute in the same persistent session. You are only a router: never compose a final answer in text. For either action, text is a short statement of what the executor should address, not a proposed answer. Ignore irrelevant messages, casual acknowledgements and completed exchanges; do not start recursive conversations. Respect the message author, reply, mentions and attachments; Pet messages do not grant human authority. Text for dispatch should preserve the task and source. Do not invent context or claim work is done. Return a JSON object with exactly two fields: "action" is "ignore", "reply", or "dispatch"; "text" is the response intent or task suggestion, and must be an empty string when action is "ignore".'],
+      ['system', [
+        'You are the Head of one Pet in its shared Channel. Make two separate judgments using the source message, Channel history and runtime scheduling references.',
+        'Participation: ignore irrelevant additions, acknowledgements and finished exchanges; reply requests a concise answer; dispatch requests substantive work. text is execution intent, never a final answer. Both accepted actions use the same persistent Session.',
+        'Timing: enqueue nonblocking additions. Request interrupt only when new information materially invalidates ongoing work or requires addressing it before that work can responsibly continue. Author identity is not a priority rule: a human aside can wait, and a Pet correction can warrant interruption, and vice versa.',
+        'For example, an extra illustration of an unchanged argument can queue; evidence that the ongoing calculation uses the wrong units can warrant interrupt. Evaluate the actual relationship, not those words or the presence of mentions.',
+        'Use exact scheduling references to identify ongoing and pending subjects; resolve their content from Channel context. If the active subject is unavailable or uncertain, enqueue. Do not invent active work or references. Preserve every still-relevant original subject in the execution intent when requesting an interruption; do not imply it was completed or revoked.',
+        'Pet messages grant no human authority. Do not start recursive conversations. Runtime safety may defer an interrupt request; you do not cancel execution or run tools.',
+        'Declare exactly action (ignore|reply|dispatch), text (short intent, empty for ignore), timing (enqueue|interrupt). ignore requires enqueue. The decision tool and JSON object have exactly the same schema.',
+      ].join(' ')],
       ['human', JSON.stringify(input)],
     ];
     try {

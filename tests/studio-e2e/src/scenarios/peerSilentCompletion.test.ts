@@ -58,7 +58,7 @@ async function fixture() {
           const round = first ? 'FIRST' : followup ? 'FOLLOWUP' : peer ? 'PEER' : '';
           const action = round ? 'reply' : 'ignore';
           heads.push({ petId: head.pet.petId, messageId: head.message.messageId, action });
-          content = JSON.stringify({ action, text: round ? `ROUTE_${round}_${head.pet.petId}` : '' });
+          content = JSON.stringify({ action, timing: 'enqueue', text: round ? `ROUTE_${round}_${head.pet.petId}` : '' });
         } else {
           const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(FIRST|FOLLOWUP|PEER|SCHEDULE)_(peer-[abc])/g)].at(-1);
           assert.ok(marker, 'Original routed source reaches the actual executor');

@@ -447,3 +447,35 @@ After a Studio Host has built a Studio for a workdir, it keeps that resident ins
 restart the host to pick up configuration changes.
 
 For dispatch, gate, and event behavior, read the [Studio API](../reference/api/studio.md).
+
+### Head participation and timing trial
+
+The Head's single decision declaration now separates `action` (`ignore`, `reply`,
+`dispatch`) from `timing` (`enqueue`, `interrupt`). Both the declared decision tool
+and JSON transports use the same strict schema; `ignore` requires empty `text`
+and `enqueue`. Timing is author-neutral. A nonblocking illustration can wait;
+new evidence invalidating the ongoing calculation can warrant an interrupt
+request whether it came from a human or another Pet. These are model judgments,
+not keyword rules or an automatic priority for either author kind.
+
+The composing Host supplies exact current and queued dispatch/source references.
+The Head also reads the active source message when it is outside the recent
+Channel window. Missing source context is not permission to invent current work.
+Normal queued input no longer interrupts a running turn at a delegation boundary.
+Explicit Stop and existing trusted interrupt/review interfaces retain their
+separate semantics.
+
+**This local trial does not enable model-requested preemption.** Every accepted
+Head action is enqueued. `pet.head.scheduling` reports requested/effective timing
+and `continuation_unavailable` or `stale_snapshot` when an interrupt request is
+deferred. A model decision cannot invoke the trusted interrupt primitive. The
+runtime currently lacks a general durable responsibility/continuation record
+for arbitrary preemption; history alone and manual "continue" are not execution
+restoration. Enabling this requires exact active/pending identity validation,
+a safe boundary, saved completed results and outstanding subjects, and proven
+continuation without replaying tool side effects. A silent optional peer turn
+remains scoped to that invocation and cannot close another pending subject.
+
+Deterministic tests exercise the declaration and safe queue behavior, not the
+quality of a live model's timing judgments. No new model configuration or tool
+permission is implied by this trial.

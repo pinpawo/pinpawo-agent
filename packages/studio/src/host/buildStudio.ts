@@ -28,7 +28,7 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
-import { bindPetHeadChannel, createHeadDecision, createPetHead } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadSchedulingSnapshot } from './petHead';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -346,6 +346,11 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         pet: registration,
         ...(description ? { description } : {}),
         channel,
+        readScheduling: () => readHeadSchedulingSnapshot(registration.petId, registration.channelId, prepared.listDispatchQueues()),
+        onScheduling: diagnostic => {
+          const occurredAt = new Date().toISOString();
+          prepared.studio.notify({ type: 'pet.head.scheduling', source: 'studio', topic: registration.channelId, occurredAt, payload: diagnostic });
+        },
         decide: (value, signal) => {
           decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId), {
             onDiagnostic: diagnostic => {

@@ -49,6 +49,8 @@ export type CreateStudioInput = {
 
 export type PreparedStudio = {
   studio: Studio;
+  /** Read-only resident snapshots for the composing Head; never a scheduling authority. */
+  listDispatchQueues: StudioPluginContext['listDispatchQueues'];
   /** Decrypts a Pet's credentials; only for the composing Host, never for Plugins. */
   credentialSource: PetCredentialSource;
   /** Resolve a trusted invocation's Plugin context for the composing Host. */
@@ -439,7 +441,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     pets: registry,
     shutdown,
   };
-  return { studio, credentialSource: credentials.source, resolveInvocationContext, getChannelWorkdir, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, listDispatchQueues, credentialSource: credentials.source, resolveInvocationContext, getChannelWorkdir, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

@@ -519,7 +519,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     const input = JSON.parse(human.content);
     calls.push({ url: String(url), model: request.model, petId: input.pet.petId });
     return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
-      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'reply', text: `hello from ${input.pet.petId}` }) }, finish_reason: 'stop' }],
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'reply', text: `hello from ${input.pet.petId}`, timing: 'enqueue' }) }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   };
   const profiles = createTestModelProfileRegistry([

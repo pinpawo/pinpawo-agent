@@ -56,9 +56,9 @@ async function fixture() {
           const followup = head.message.author.kind === 'human' && head.message.body === followupQuestion;
           const peer = head.message.author.kind === 'pet' && head.message.author.id === 'peer-a' && head.message.body === 'RESULT_FIRST_peer-a';
           const round = first ? 'FIRST' : followup ? 'FOLLOWUP' : peer ? 'PEER' : '';
-          const action = round ? 'reply' : 'ignore';
+          const action = round ? 'dispatch' : 'ignore';
           heads.push({ petId: head.pet.petId, messageId: head.message.messageId, action });
-          content = JSON.stringify({ action, timing: 'enqueue', text: round ? `ROUTE_${round}_${head.pet.petId}` : '' });
+          content = JSON.stringify({ action, reply: '', timing: 'enqueue', intent: round ? `ROUTE_${round}_${head.pet.petId}` : '' });
         } else {
           const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(FIRST|FOLLOWUP|PEER|SCHEDULE)_(peer-[abc])/g)].at(-1);
           assert.ok(marker, 'Original routed source reaches the actual executor');
@@ -133,7 +133,7 @@ test('canonical peer execution may finish silently while valuable peers and quot
     assert.equal(count('peer-b', 'message'), 1, 'Silent completion emits no resident message event');
     const peerSource = initial.find(m => m.body === 'RESULT_FIRST_peer-a')!;
     const positive = initial.find(m => m.body === 'RESULT_PEER_peer-c')!;
-    assert.ok(model.heads.some(h => h.petId === 'peer-b' && h.messageId === peerSource.messageId && h.action === 'reply'), 'Silence occurs after Head admission, not Head ignore');
+    assert.ok(model.heads.some(h => h.petId === 'peer-b' && h.messageId === peerSource.messageId && h.action === 'dispatch'), 'Silence occurs after Head admission, not Head ignore');
     await until(() => ['peer-a', 'peer-b'].every(id => model.heads.some(h => h.petId === id && h.messageId === positive.messageId && h.action === 'ignore')));
     assert.equal(publicEvents.filter(e => e.author.kind === 'pet').length, 4);
     const bindings = new Map<string, string>();

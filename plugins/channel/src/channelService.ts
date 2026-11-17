@@ -320,11 +320,18 @@ export class ChannelService {
    * With an externalRef already saved for this author, the earlier message
    * is returned and `created` is false.
    */
-  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
+  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; headReplyTo?: string; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
     message: ChannelMessage; created: boolean; mentionError?: string;
   }> {
     const value = channelMessageSchema.parse(input);
     const trustedAuthor = memberRefSchema.parse(author);
+    // Head deduplication is not resident completion authority. A fresh Head
+    // write must still be an active member and reference its actual trigger.
+    if (options.headReplyTo !== undefined && (options.externalRef !== undefined || trustedAuthor.kind !== 'pet'
+      || !options.headReplyTo || value.replyTo !== options.headReplyTo)) {
+      throw new Error('Invalid Head reply reference.');
+    }
+    const dedupeRef = options.headReplyTo !== undefined ? `head-reply:${options.headReplyTo}` : options.externalRef;
     // Only the internal resident-reply path supplies an external reference.
     // Its final event may be handled after close settled; ownership and the
     // Plugin's exact persisted session binding remain valid history authority.
@@ -355,7 +362,7 @@ export class ChannelService {
       const messageId = randomUUID();
       const message = await store.appendMessage({
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),
-        ...(options.externalRef ? { externalRef: options.externalRef } : {}),
+        ...(dedupeRef ? { externalRef: dedupeRef } : {}),
         body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}), mentions,
         ...(value.deliverables !== undefined ? { deliverables: value.deliverables } : {}),
       });

@@ -58,7 +58,7 @@ async function fixture(activeAuthor: 'human' | 'peer', queuedOutcome: 'reply' | 
             : petId === 'target' && source === 'QUEUED_PEER' ? 'QUEUED' : '';
           const action = route ? 'dispatch' : 'ignore';
           heads.push({ petId, messageId: head.message.messageId, action });
-          content = JSON.stringify({ action, timing: 'enqueue', text: route ? `ROUTE_${route}` : '' });
+          content = JSON.stringify({ action, reply: '', timing: 'enqueue', intent: route ? `ROUTE_${route}` : '' });
         } else {
           const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(SEED_ACTIVE|SEED_QUEUED|ACTIVE|QUEUED)/g)].at(-1)?.[1];
           assert.ok(marker);

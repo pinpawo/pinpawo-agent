@@ -265,7 +265,7 @@ export async function createDeterministicScenarioModel(): Promise<ScenarioModel 
         let toolCall: { name: string; args: Record<string, unknown> } | undefined;
         if (names.length === 0) {
           const head = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
-          content = JSON.stringify({ action: 'dispatch', timing: 'enqueue', text: head.message.body });
+          content = JSON.stringify({ action: 'dispatch', reply: '', timing: 'enqueue', intent: head.message.body });
         } else if (names.includes('plan_request')) {
           toolCall = { name: 'plan_request', args: { goal: 'Read the synthetic cobalt record and report its units and exact verification receipt.' } };
         } else if (names.includes('synthetic_lookup')) {

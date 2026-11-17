@@ -80,10 +80,10 @@ async function scriptedModel(mode: HeadWireMode) {
             && head.pet.petId === 'roundtable-being';
           const round = peerEligible ? 3 : head.message.body === question ? 1 : head.message.body.startsWith('合成同伴回应：') ? 2 : 0;
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
-          const action = eligible ? (round === 2 && head.pet.petId === 'roundtable-conditions' ? 'dispatch' : 'reply') : 'ignore';
+          const action = eligible ? 'dispatch' : 'ignore';
           if (mode === 'tool' || attempt === 2) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
-          const decision = { action, timing: 'enqueue', text: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
+          const decision = { action, reply: '', timing: 'enqueue', intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
           if (attempt === 1) {
             call = { name: 'pet_head_decision', args: mode === 'malformed-tool' ? { action: 'invalid', text: '' } : decision };
           } else content = JSON.stringify(decision);
@@ -199,7 +199,7 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     }
     assert.equal(new Set(bindings.values()).size, 3);
     assert.equal(directHeadWrites, 0, 'Routing text must never be published as a final Head answer');
-    assert.equal(model.decisions.filter(item => item.messageId === first.messageId && !item.mentioned && item.action === 'reply').length, 2);
+    assert.equal(model.decisions.filter(item => item.messageId === first.messageId && !item.mentioned && item.action === 'dispatch').length, 2);
 
     const peer = firstReplies.find(message => message.author.id === philosophers[0].petId)!;
     const second = (await channel.service.postMessage(human, ownerId, {
@@ -207,7 +207,7 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     })).message;
     await until(async () => (await replies()).length >= 7 && philosophers.every(role => completed.get(role.petId)!.length >= (role.petId === 'roundtable-being' ? 3 : 2)));
     assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-conditions' && entry.action === 'dispatch'));
-    assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-language' && entry.action === 'reply'));
+    assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-language' && entry.action === 'dispatch'));
     const secondReplies = (await replies()).filter(message => message.body.includes('RESULT_2_'));
     assert.equal(secondReplies.length, 3);
     for (const role of philosophers) {
@@ -234,7 +234,7 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     assert.equal(peerResponse.author.id, 'roundtable-being');
     assert.equal(peerResponse.replyTo, undefined, 'Known gap: peer execution output omits triggering Pet message replyTo');
     assert.ok(model.decisions.some(entry => entry.messageId === peerTrigger.messageId
-      && entry.petId === 'roundtable-being' && !entry.mentioned && entry.action === 'reply'));
+      && entry.petId === 'roundtable-being' && !entry.mentioned && entry.action === 'dispatch'));
     const peerSession = await built.residentPets.get('roundtable-being')!.sessions.snapshot(bindings.get('roundtable-being')!);
     assert.ok(peerSession.session.timeline.some(entry => entry.type === 'message'
       && entry.role === 'user' && entry.text.includes(peerTrigger.messageId)));

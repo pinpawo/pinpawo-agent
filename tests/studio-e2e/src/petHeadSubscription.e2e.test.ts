@@ -30,7 +30,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
       inFlightSignal = signal;
       return held.promise;
     }
-    return { action: 'ignore' };
+    return { action: 'ignore', reply: '', intent: '', timing: 'enqueue' };
   };
   const prepared = prepareStudio({
     studioId: 'head-subscription-fifo', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
@@ -70,7 +70,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
 
     await studio.pets.closeInstance('slow', { confirmStop: true });
     assert.equal(inFlightSignal?.aborted, true);
-    held.resolve({ action: 'dispatch', text: 'late task' });
+    held.resolve({ action: 'dispatch', reply: '', timing: 'enqueue', intent: 'late task' });
     await post('offline');
     await waitFor(() => seen.fast!.includes('offline'));
     await studio.pets.reopenInstance('slow');
@@ -81,7 +81,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
     assert.deepEqual(seen.elsewhere, ['another Channel'], 'each Channel has an independent live subscription');
     assert.deepEqual(dispatches, [], 'cancelled in-flight work cannot dispatch after Close');
   } finally {
-    held.resolve({ action: 'ignore' });
+    held.resolve({ action: 'ignore', reply: '', intent: '', timing: 'enqueue' });
     await studio.shutdown();
   }
 });

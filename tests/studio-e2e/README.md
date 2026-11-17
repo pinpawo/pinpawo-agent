@@ -157,8 +157,8 @@ a production rule that forces every Pet to participate.
 
 It verifies one lazy, retained execution Session per `(Channel, Pet instance)`;
 seven attributed execution replies across two human-triggered rounds plus one
-actual Pet-publication-triggered peer turn, including a response-to-work
-routing change on the same Session; shared source and quoted-peer
+actual Pet-publication-triggered peer turn, including repeated response dispatches
+on the same Session; shared source and quoted-peer
 context; eligible unmentioned routing versus explicitly ignored messages; no
 substantive Head write;
 no duplicate replies under a scripted explicit ignore stop; and foreign

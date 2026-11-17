@@ -7,6 +7,7 @@ test('Head eval distinguishes routing presence, timing, invalidity and provider 
   const good = score(combined, { action: 'dispatch', reply: '收到', intent: '核对', timing: 'enqueue' });
   assert.equal(good.pass, true);
   const wrong = score(combined, { action: 'dispatch', reply: '', intent: '核对', timing: 'enqueue' });
+  assert.equal(wrong.actionPass, true); assert.equal(wrong.replyPresencePass, false);
   assert.deepEqual([wrong.valid, wrong.routePass, wrong.timingPass], [true, false, true]);
   const failed = score(combined, undefined, 'provider-error');
   const summary = summarize([{ kind: 'contrast', score: good }, { kind: 'contrast', score: wrong }, { kind: 'contrast', score: failed }]);
@@ -40,4 +41,10 @@ test('Peer acknowledgement cannot revive a previous combined human request', () 
     { action: 'ignore' as const, reply: '收到', intent: '', timing: 'enqueue' as const },
     { action: 'dispatch' as const, reply: '', intent: '重复核对', timing: 'enqueue' as const },
   ]) assert.equal(score(testCase, decision).pass, false);
+});
+
+test('Substantive direct peer question is not satisfied by ignoring every Pet', () => {
+  const testCase = cases.find(row => row.id === 'peer-direct-ask')!;
+  assert.equal(score(testCase, { action: 'ignore', reply: '同比比较去年同期，环比比较上一期。', intent: '', timing: 'enqueue' }).pass, true);
+  assert.equal(score(testCase, { action: 'ignore', reply: '  ', intent: '', timing: 'enqueue' }).pass, false);
 });

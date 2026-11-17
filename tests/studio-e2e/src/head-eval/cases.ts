@@ -31,5 +31,6 @@ export const cases: EvalCase[] = [
     context: { messages: [{ ...message('original-human-request', '请各位先简短确认收到，然后分别核对两份季度报表，找出差异并给出结果。'), sequence: 1 }] },
   }, routes: ['silent'], timing: ['enqueue'] },
   { id: 'peer-neutral-noop', kind: 'contrast', input: base('peer-neutral-noop', '我已收到，暂无新信息，不需要其他成员回复。', 'pet'), routes: ['silent'], timing: ['enqueue'] },
+  { id: 'peer-direct-ask', kind: 'contrast', input: base('peer-direct-ask', '数据分析员，请用一句话解释同比和环比有什么区别。我正在写说明，只需直接解释，不需启动新任务。', 'pet'), routes: ['reply-only'], timing: ['enqueue'] },
   { id: 'organic-peer', kind: 'organic', input: base('organic-peer', '我怀疑月份边界会影响收入统计，但还没看到证据。', 'pet'), routes: ['silent', 'reply-only', 'dispatch-only', 'combined'], timing: ['enqueue'] },
 ];

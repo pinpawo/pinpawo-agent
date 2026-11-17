@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { cases, fixtureVersion } from '../src/head-eval/cases';
 import { score, summarize } from '../src/head-eval/scorer';
@@ -26,14 +26,19 @@ async function main() {
   if (!Number.isInteger(repeats) || repeats < 1 || selected.length * repeats > 20) throw new Error('maximum-20-decisions');
   const output = options.get('--output');
   if (!output) throw new Error('output-required');
+  // Reserve a private new report before spending any provider calls.
+  const reservation = await open(output, 'wx', 0o600);
   const root = fileURLToPath(new URL('../../..', import.meta.url));
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const originalConsole = { ...console }, originalFetch = globalThis.fetch;
   for (const key of ['log', 'info', 'warn', 'error', 'debug'] as const) console[key] = () => {};
   let calls = 0;
+  type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
+  let wire: Wire[] = [];
+
   const report = { schemaVersion: 1, fixtureVersion, commit, profile, model: '',
     startedAt: new Date().toISOString(), providerCalls: 0, providerCallLimit: 20,
-    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; outcome?: string; code?: string; decision?: { action: string; hasReply: boolean; hasIntent: boolean; timing: string }; score: ReturnType<typeof score> }>,
+    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; decision?: { action: string; hasReply: boolean; hasIntent: boolean; timing: string }; score: ReturnType<typeof score> }>,
     summary: {} as ReturnType<typeof summarize> | object };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240_000);
@@ -50,9 +55,36 @@ async function main() {
     globalThis.fetch = async (url, init) => {
       if (controller.signal.aborted || calls >= 20) throw new Error('eval-budget');
       calls++;
-      return originalFetch(url, { ...init, signal: AbortSignal.any([controller.signal, ...(init?.signal ? [init.signal] : [])]) });
+      const started = Date.now();
+      let request: Record<string, any> = {};
+      try { request = JSON.parse(String(init?.body)); } catch { /* No raw request retained. */ }
+      let response: Response;
+      try { response = await originalFetch(url, { ...init, signal: AbortSignal.any([controller.signal, ...(init?.signal ? [init.signal] : [])]) }); }
+      catch { wire.push({ elapsedMs: Date.now() - started, status: 0, finishReasons: [] }); throw new Error('transport-error'); }
+      const metadata: Wire = { elapsedMs: Date.now() - started, status: response.status, finishReasons: [] };
+      const cap = request.max_completion_tokens ?? request.max_tokens;
+      if (Number.isFinite(cap)) metadata.maxOutputTokens = cap;
+      if (['enabled', 'disabled'].includes(request.thinking?.type)) metadata.thinking = request.thinking.type;
+      if (['json_object', 'json_schema'].includes(request.response_format?.type)) metadata.format = request.response_format.type;
+      try {
+        // Production Head is nonstreaming; retain only allowlisted counters/enums.
+        const body = await response.clone().json() as Record<string, any>;
+        const allowed = ['stop', 'length', 'tool_calls', 'content_filter', 'end_turn', 'max_tokens', 'tool_use', 'stop_sequence'];
+        const reasons = [...(Array.isArray(body.choices) ? body.choices.map((choice: any) => choice.finish_reason) : []), body.stop_reason];
+        metadata.finishReasons = reasons.filter(reason => allowed.includes(reason));
+        const input = body.usage?.prompt_tokens ?? body.usage?.input_tokens;
+        const output = body.usage?.completion_tokens ?? body.usage?.output_tokens;
+        if (Number.isFinite(input)) metadata.inputTokens = input;
+        if (Number.isFinite(output)) metadata.outputTokens = output;
+      } catch { /* Non-JSON responses remain operational status only. */ }
+      metadata.elapsedMs = Date.now() - started;
+      wire.push(metadata);
+      return response;
+
     };
     for (let repeat = 1; repeat <= repeats; repeat++) for (const test of selected) {
+      wire = [];
+      const started = Date.now();
       let diagnostic: HeadDecisionDiagnostic | undefined;
       const decide = createHeadDecision({
         profileId: profile, protocol: config.protocol ?? 'openai-compatible', model: config.model,
@@ -65,7 +97,7 @@ async function main() {
         decision = await decide(test.input, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
       } catch { /* No raw provider errors or model reasoning in reports. */ }
       const failure = controller.signal.aborted ? 'cancelled-or-deadline' : calls >= 20 && !decision ? 'call-budget' : diagnostic?.code ?? 'provider-or-transport-error';
-      report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: diagnostic?.attempts ?? 0,
+      report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: diagnostic?.attempts ?? 0, elapsedMs: Date.now() - started, wire: [...wire],
         ...(diagnostic ? { outcome: diagnostic.outcome, ...(diagnostic.code ? { code: diagnostic.code } : {}) } : {}),
         ...(decision ? { decision: { action: decision.action, hasReply: !!decision.reply.trim(), hasIntent: !!decision.intent.trim(), timing: decision.timing } } : {}),
         score: score(test, decision, failure) });
@@ -73,7 +105,7 @@ async function main() {
   } catch {
     // Configuration failures count in the full denominator too.
     for (let repeat = 1; repeat <= repeats; repeat++) for (const test of selected) {
-      if (!report.rows.some(row => row.case === test.id && row.repeat === repeat)) report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: 0, score: score(test, undefined, 'setup-error') });
+      if (!report.rows.some(row => row.case === test.id && row.repeat === repeat)) report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: 0, elapsedMs: 0, wire: [], score: score(test, undefined, 'setup-error') });
     }
   } finally {
     clearTimeout(timer); process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
@@ -82,7 +114,8 @@ async function main() {
   }
   report.providerCalls = calls;
   report.summary = summarize(report.rows);
-  await writeFile(output, JSON.stringify(report, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+  await reservation.writeFile(JSON.stringify(report, null, 2) + '\n');
+  await reservation.close();
   console.log(JSON.stringify({ fixtureVersion, providerCalls: calls, summary: report.summary }));
   if (report.rows.some(row => !row.score.pass)) process.exitCode = 1;
 }

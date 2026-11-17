@@ -33,7 +33,7 @@ async function main() {
   const originalConsole = { ...console }, originalFetch = globalThis.fetch;
   for (const key of ['log', 'info', 'warn', 'error', 'debug'] as const) console[key] = () => {};
   let calls = 0;
-  type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
+  type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
   let wire: Wire[] = [];
 
   const report = { schemaVersion: 1, fixtureVersion, commit, profile, model: '',
@@ -76,6 +76,9 @@ async function main() {
         const output = body.usage?.completion_tokens ?? body.usage?.output_tokens;
         if (Number.isFinite(input)) metadata.inputTokens = input;
         if (Number.isFinite(output)) metadata.outputTokens = output;
+        const reasoning = body.usage?.completion_tokens_details?.reasoning_tokens;
+        if (Number.isFinite(reasoning)) metadata.reasoningTokens = reasoning;
+        if (Number.isFinite(body.usage?.total_tokens)) metadata.totalTokens = body.usage.total_tokens;
       } catch { /* Non-JSON responses remain operational status only. */ }
       metadata.elapsedMs = Date.now() - started;
       wire.push(metadata);

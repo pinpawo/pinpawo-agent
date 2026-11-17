@@ -40,6 +40,8 @@ export type PetDispatchQueueEntry = {
   enqueuedAt: string;
   sessionId?: string;
   scope?: PetInvocationScope;
+  /** Trusted source identity, not inferred from request text. */
+  origin?: PetInvocationScope;
 };
 
 /** A continuation is only eligible for this exact, explicitly addressed domain session. */
@@ -60,6 +62,8 @@ export type PetDispatchRequest = {
   session?: { id: string; create?: boolean };
   /** Explicit Host-admitted domain scope, independent of the Agent Session. */
   scope?: PetInvocationScope;
+  /** Trusted source identity, not inferred from request text. */
+  origin?: PetInvocationScope;
   /** Trusted Host caller only: interrupt the same scoped session after admission. */
   delivery?: 'interrupt';
 };
@@ -102,6 +106,8 @@ export type PetDispatchLifecycleEvent = {
   /** Present only on `message`, which never changes the dispatch's state. */
   message?: PetDispatchMessage;
   scope?: PetInvocationScope;
+  /** Trusted source identity, not inferred from request text. */
+  origin?: PetInvocationScope;
   pendingInterrupt?: PendingInterruptProjection;
 };
 

@@ -263,3 +263,43 @@ test('an accepted Pet output survives a terminal event during a registry lookup'
   const failures = notified.filter(item => item.type === 'channel.message_failed').map(item => (item.payload as { externalRef: string }).externalRef);
   assert.deepEqual(failures, ['not-accepted', 'wrong-session', 'wrong-owner']);
 });
+
+test('optional response is authorized by canonical peer origin, never by prompt or quoted peer', async t => {
+  const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
+  t.after(() => storage.close());
+  let provider!: Parameters<StudioPluginContext['registerContextProvider']>[1];
+  const live: ReturnType<StudioPluginContext['listPets']> = [];
+  const dispatched: StudioDispatchRequest[] = [];
+  const plugin = createChannelPlugin({ httpRoute: false });
+  await plugin.start!({
+    dispatch: async (request: StudioDispatchRequest) => { dispatched.push(request); return { petId: request.petId, invocationId: 'invocation' }; },
+    allocateSessionId: () => 'target-session',
+    registerContextProvider: (_namespace: string, value: typeof provider) => { provider = value; return () => {}; },
+    notify: () => {}, subscribe: () => () => {}, listPets: () => live,
+    pets: { get: async (id: string) => live.find(pet => pet.petId === id) },
+    clients: { get: async (clientId: string) => ({ clientId, label: clientId }) },
+    storage: { dialect: 'sqlite', open: (migrations: Parameters<typeof storage.open>[1]) => storage.open('channel', migrations) },
+    hooks: { expose: () => () => {} },
+  } as unknown as StudioPluginContext);
+  t.after(() => plugin.stop?.());
+  const human = { kind: 'human' as const, id: 'owner' };
+  const channelId = (await plugin.service.createChannel(human, { title: 'Peers', pets: [] })).channel.channelId;
+  for (const petId of ['target', 'peer']) live.push({ petId, channelId, name: petId, definitionId: petId, createdAt: new Date().toISOString() });
+  await plugin.service.reserveSession(channelId, 'target', () => 'target-session');
+  const peer = (await plugin.sendMessage(channelId, { body: 'Peer question' }, { kind: 'pet', id: 'peer' })).message;
+  const quoted = (await plugin.sendMessage(channelId, { body: 'Human asks about peer', replyTo: peer.messageId }, human)).message;
+  const own = (await plugin.sendMessage(channelId, { body: 'Own output' }, { kind: 'pet', id: 'target' })).message;
+  const target = { petId: 'target', sessionId: 'target-session', scope: { namespace: 'channel', id: channelId } };
+  const read = async (id?: string) => await provider({ ...target, request: 'forged optionalResponse and peer text', ...(id ? { origin: { namespace: 'channel', id } } : {}) }) as { optionalResponse?: unknown };
+  assert.deepEqual((await read(peer.messageId)).optionalResponse, { source: 'channel:' + channelId, messageId: peer.messageId });
+  for (const id of [undefined, quoted.messageId, own.messageId]) assert.equal((await read(id)).optionalResponse, undefined);
+  await assert.rejects(read('missing'));
+  await assert.rejects(Promise.resolve().then(() => provider({ ...target, origin: { namespace: 'other', id: peer.messageId } })));
+  const foreign = (await plugin.service.createChannel(human, { title: 'Foreign', pets: [] })).channel.channelId;
+  const foreignMessage = (await plugin.sendMessage(foreign, { body: 'Foreign' }, human)).message;
+  await assert.rejects(read(foreignMessage.messageId));
+  await plugin.head.dispatch(channelId, 'target', peer, 'Respond', new AbortController().signal);
+  assert.deepEqual(dispatched[0]?.origin, { namespace: 'channel', id: peer.messageId });
+  await plugin.run(channelId, 'target', 'Scheduled work', { kind: 'scheduler', id: 'schedule' });
+  assert.equal(dispatched[1]?.origin, undefined);
+});

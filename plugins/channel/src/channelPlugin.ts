@@ -111,7 +111,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
-    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal },
+    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string },
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     const studio = host();
@@ -126,7 +126,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     check();
     const receipt = await studio.dispatch({
       petId, request,
-      ...(headInput ? { signal: headInput.signal } : {}),
+      ...(headInput ? { signal: headInput.signal, origin: { namespace: 'channel', id: headInput.messageId } } : {}),
       ...(headInput?.attachments?.length ? { attachments: headInput.attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
@@ -244,7 +244,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const referencedMessage = message.replyTo ? await service.getMessage(channelId, message.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(message.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(message, request, referencedMessage), undefined, { attachments, signal });
+      await dispatchPet(channelId, petId, channelMessageInput(message, request, referencedMessage), undefined, { attachments, signal, messageId: message.messageId });
     },
   };
 
@@ -277,13 +277,18 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       context = studio;
       // A provider is scoped to a persisted (Pet, session) binding, not to the
       // Pet globally. The Studio resolves it when preparing a run.
-      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope }) => {
+      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope, origin }) => {
         const binding = await service.getSession(scope.id, petId);
         if (!sessionId || !binding || binding.sessionId !== sessionId) {
           throw new ChannelAccessError('Channel scope does not match the Pet session binding.');
         }
         const channel = await service.requireMember(binding.channelId, { kind: 'pet', id: petId });
+        const source = origin ? await service.getMessage(channel.channelId, origin.id) : undefined;
+        if (origin && (origin.namespace !== 'channel' || !source)) throw new ChannelAccessError('Channel invocation source is not a canonical message in this Channel.');
+        const optionalResponse = source?.author.kind === 'pet' && source.author.id !== petId
+          ? { source: 'channel:' + channel.channelId, messageId: source.messageId } : undefined;
         return {
+          ...(optionalResponse ? { optionalResponse } : {}),
           systemPromptSections: channelSystemContext(channel),
           hint: channelInvocationHint(),
         };

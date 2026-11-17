@@ -4,6 +4,8 @@ import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import {
   createTokenUsageSnapshot,
+  getAgentRuntimeContext,
+  isSilentResponseReceipt,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
   isValidHumanReviewResume,
@@ -349,6 +351,8 @@ export async function runAgentSessionTurn(
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
+  let settledRunId = '';
+  const optionalResponse = getAgentRuntimeContext({ context: setup.input.context }).optionalResponse;
   // Identifies the assistant entry the streamed reply is building, so the
   // terminal `message.completed` finalizes that same entry instead of creating
   // a second one. Falls back to the requestId when the model stream carried no
@@ -383,7 +387,7 @@ export async function runAgentSessionTurn(
         case 'assistant.delta': {
           streamedReply += chatEvent.text;
           streamedReplyMessageId = chatEvent.messageId || streamedReplyMessageId;
-          emitEvent({
+          if (!optionalResponse) emitEvent({
             type: 'message.delta',
             requestId,
             messageId: chatEvent.messageId || requestId,
@@ -446,6 +450,8 @@ export async function runAgentSessionTurn(
           // Decision records are observability, not chat surface.
           break;
         case 'values': {
+          const currentRunId = (chatEvent.values as { runId?: unknown }).runId;
+          if (typeof currentRunId === 'string') settledRunId = currentRunId;
           const messages = (chatEvent.values as { messages?: BaseMessage[] }).messages;
           if (Array.isArray(messages)) {
             finalMessages = messages;
@@ -488,7 +494,7 @@ export async function runAgentSessionTurn(
     }
     const reply = streamedReply.trim() || RECURSION_LIMIT_NOTICE;
     const replyMessageId = streamedReplyMessageId || requestId;
-    if (!streamedReply.trim()) {
+    if (optionalResponse || !streamedReply.trim()) {
       emitEvent({
         type: 'message.delta',
         requestId,
@@ -542,6 +548,15 @@ export async function runAgentSessionTurn(
     return { status: 'waiting' };
   }
 
+  const last = finalThreadState.messages.at(-1);
+  const existedBefore = last && initialThreadState.messages.some(message =>
+    message === last || (!!last.id && message.id === last.id));
+  if (optionalResponse && !existedBefore && isSilentResponseReceipt(last, optionalResponse, settledRunId)) {
+    // A validated, checkpointed control receipt is successful execution, not a
+    // message. Never synthesize an empty reply or publish the private reason.
+    return { status: 'completed', reply: '' };
+  }
+
   // Only new public AI text can become a conversation reply. Tool results,
   // private lanes and an old checkpoint reply are not publishable fallbacks.
   const finalMessage = finalMessages.at(-1) ?? finalThreadState.messages.at(-1);
@@ -554,6 +569,10 @@ export async function runAgentSessionTurn(
   // inside the checkpoint collection before projecting its preceding deliveries.
   const checkpointReply = finalThreadState.messages.find(message =>
     message === finalMessage || (!!finalMessage?.id && message.id === finalMessage.id));
+  if (optionalResponse && finalReply) emitEvent({
+    type: 'message.delta', requestId, messageId: streamedReplyMessageId || requestId,
+    role: 'assistant', text: finalReply,
+  });
   emitEvent({
     type: 'message.completed',
     requestId,

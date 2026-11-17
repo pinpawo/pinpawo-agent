@@ -18,12 +18,14 @@ export type StudioDispatchRequest = {
    * caller cannot claim it, or it could publish into another Plugin's domain.
    */
   scope?: PetInvocationScope;
+  /** Trusted source identity, not inferred from request text. */
+  origin?: PetInvocationScope;
   /** In-process only: interrupt this same scoped session after the input is queued. */
   delivery?: 'interrupt';
 };
 
 /** The public wire form: Host-trusted fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'delivery' | 'attachments' | 'signal'>;
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'origin' | 'delivery' | 'attachments' | 'signal'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {
@@ -38,6 +40,8 @@ export type StudioInvocation = {
   invocationId: string;
   sessionId?: string;
   scope?: PetInvocationScope;
+  /** Trusted source identity, not inferred from request text. */
+  origin?: PetInvocationScope;
 };
 
 /**
@@ -52,6 +56,7 @@ export function readStudioInvocation(): StudioInvocation | undefined {
     invocationId: context.dispatchId,
     ...(context.sessionId ? { sessionId: context.sessionId } : {}),
     ...(context.scope ? { scope: context.scope } : {}),
+    ...(context.origin ? { origin: context.origin } : {}),
   };
 }
 

@@ -862,3 +862,38 @@ test('snapshot origin separates no plan from a run that owns one and a run that 
   // Plan item ids are content hashes the model never cites, so they stay out.
   assert.doesNotMatch(entryPlanMessage({ runId: 'r0', goal: 'Inspect.', plan }, 'r1').text, /task:hash/);
 });
+
+test('optional peer control ends without public reply and never leaks into the next human turn', async () => {
+  const optionalResponse = { source: 'channel:test', messageId: 'peer-source' };
+  let silent = true;
+  const observed = observeEntryBindings(() => silent
+    ? new AIMessage({ content: 'I will not reply', tool_calls: [{ id: 'silent-call', name: 'finish_without_reply', args: {} }] })
+    : new AIMessage('A useful answer'));
+  const graph = createOrchestratorGraph({ models: { act: observed.model, answer: observed.model }, checkpoint: new MemorySaver() });
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Optional peer input')]), {
+    ...invokeConfig(), context: { optionalResponse },
+  });
+  const receipt = result.messages.at(-1)!;
+  assert.equal(ToolMessage.isInstance(receipt), true);
+  assert.equal(receipt.name, 'finish_without_reply');
+  assert.deepEqual(receipt.additional_kwargs.pinpawo && (receipt.additional_kwargs.pinpawo as Record<string, unknown>).optionalResponse, optionalResponse);
+  assert.equal(observed.invocations.length, 1, 'no model call after explicit silent completion');
+  assert.ok(observed.invocations[0].tools.some(tool => String(tool.name) === 'finish_without_reply'));
+  silent = false;
+  const human = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Human follow-up, quoting the peer')]), invokeConfig());
+  assert.equal(human.messages.at(-1)?.text, 'A useful answer');
+  assert.equal(observed.invocations[1].tools.some(tool => String(tool.name) === 'finish_without_reply'), false);
+});
+
+test('silent completion is unavailable without opt-in and malformed/batched calls fail', async () => {
+  for (const variant of ['no-permission', 'extra-args', 'mixed-batch']) {
+    const observed = observeEntryBindings(() => new AIMessage({ content: '', tool_calls: [
+      { id: 'silent-call', name: 'finish_without_reply', args: variant === 'extra-args' ? { reason: 'not useful' } : {} },
+      ...(variant === 'mixed-batch' ? [{ id: 'plan-call', name: 'plan_request', args: { goal: 'Work' } }] : []),
+    ] }));
+    const graph = createOrchestratorGraph({ models: { act: observed.model, answer: observed.model } });
+    await assert.rejects(graph.invoke(buildOrchestratorRunInput([new HumanMessage('Input')]), {
+      ...invokeConfig(), ...(variant !== 'no-permission' ? { context: { optionalResponse: { source: 'channel:test', messageId: 'peer' } } } : {}),
+    }));
+  }
+});

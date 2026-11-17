@@ -47,6 +47,7 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
   const invocationHint = { source: randomUUID(), instruction: randomUUID(), focus: randomUUID() };
   const childHint = { source: randomUUID(), instruction: randomUUID() };
   const inspect = tool(async (_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+    assert.equal(runtime.context.optionalResponse, undefined, 'children never inherit optional publication control');
     runtimeContexts.push(runtime.context);
     return 'inspected';
   }, { name: 'inspect_context', description: 'Inspect runtime.', schema: z.object({}) });
@@ -63,6 +64,7 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
         workdir: '/forbidden-child-override',
         systemPromptSections: [{ id: 'host:forbidden-child-override', content: 'override' }],
         hint: childHint,
+        optionalResponse: { source: 'child-forgery', messageId: 'child-message' },
       },
     });
     return { messages: result.messages };
@@ -73,7 +75,7 @@ test('concurrent root streams propagate isolated context, callbacks and invocati
     const callbackInputs: BaseMessage[][] = [];
     const run = await graph.streamEvents({ messages: [new HumanMessage(key)] }, {
       version: 'v3', context: { workdir: `/workspace/${key}`, systemPromptSections: sections, parentMarker: key,
-        ...(index === 0 ? { hint: invocationHint } : {}),
+        ...(index === 0 ? { hint: invocationHint, optionalResponse: { source: 'parent-peer', messageId: 'parent-message' } } : {}),
       },
       callbacks: [{ handleChatModelStart: async (_model, messages) => { callbackInputs.push(...messages); } }],
     });

@@ -65,3 +65,17 @@ test('provider results preserve legacy array shape and reject malformed hint pay
     assert.throws(() => snapshotInvocationContext(value));
   }
 });
+
+test('optional response is snapshotted, strictly validated and cleared on the next invocation', () => {
+  const supplied = { optionalResponse: { source: 'channel:one', messageId: 'peer-1' } };
+  const snapshot = snapshotInvocationContext(supplied);
+  supplied.optionalResponse.messageId = 'mutated';
+  assert.equal(snapshot.optionalResponse?.messageId, 'peer-1');
+  const base = { input: { context: {} } } as unknown as AgentChannelSetup;
+  const current = withInvocationContext(base, snapshot);
+  assert.deepEqual(current.input.context?.optionalResponse, snapshot.optionalResponse);
+  assert.equal(withInvocationContext(current, {}).input.context?.optionalResponse, undefined);
+  for (const value of [{ source: '', messageId: 'x' }, { source: 'channel:c', messageId: '' }, { source: 'channel:c', messageId: 'x', extra: true }]) {
+    assert.throws(() => snapshotInvocationContext({ optionalResponse: value }));
+  }
+});

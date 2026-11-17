@@ -32,10 +32,10 @@ export function continueSuspendedDispatch(options: {
     const suspended = session?.pendingDispatch;
     if (!session || suspended?.interruptId !== turn.request.resume.interruptId) return run(turn);
 
-    const { dispatchId, request, scope } = suspended;
+    const { dispatchId, request, scope, origin } = suspended;
     const requestId = turn.request.requestId;
     const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'message'>) => publishLifecycle({
-      ...event, dispatchId, request, requestId, sessionId: session.id, ...(scope ? { scope } : {}),
+      ...event, dispatchId, request, requestId, sessionId: session.id, ...(scope ? { scope } : {}), ...(origin ? { origin } : {}),
     });
     const suspend = (pendingInterrupt: PendingInterruptProjection) => {
       sessions.setPendingDispatch(session.id, { ...suspended, interruptId: pendingInterrupt.interruptId });
@@ -57,7 +57,7 @@ export function continueSuspendedDispatch(options: {
     let result: AgentSessionTurnResult;
     try {
       result = await withPetInvocationContext(
-        { petId, dispatchId, sessionId: session.id, ...(scope ? { scope } : {}) },
+        { petId, dispatchId, sessionId: session.id, ...(scope ? { scope } : {}), ...(origin ? { origin } : {}) },
         () => run({
           ...turn,
           setup: withInvocationContext(turn.setup, suspended),

@@ -333,6 +333,25 @@ Peer-authored messages can also be judged eligible; there is no longer a
 mention-only gate for those responses. Model instructions discourage recursive
 exchanges, but they are not a hard turn budget. Use bounded isolated evaluation
 before enabling autonomous multi-Pet discussion in a live Channel.
+Optional peer-triggered responses have a second, execution-side exit: Entry Answer
+may explicitly call `finish_without_reply` when it has no useful contribution.
+The Channel validates the canonical source message and enables this control only
+for another Pet's publication. Human messages (including those quoting a Pet),
+scheduler and trigger runs retain normal response behavior. This is an option,
+not a blanket suppression of peer replies; worthwhile peer responses still use
+the same resident Session and are published normally.
+
+The silent control is a strict, exclusive tool call. Its runtime-created receipt
+is checkpointed with the run and source identity; completion remains successful,
+but no public message event is emitted. Silence is never inferred from words,
+empty text, cancellation, errors, or pending approvals. It is available at Entry,
+before planning/external execution, not as a way to discard work or deliverables.
+Optional-turn public text is buffered until the completion disposition is known.
+Invocation context and source are retained over native review suspension and
+cleared for unrelated calls. This does not make Head routing accurate or provide
+a hard autonomous-loop budget: a model can still choose to publish an unhelpful
+response. Use bounded verification and monitor those decisions separately.
+
 Known trial compatibility gap: execution input preserves the triggering message
 and any explicit quoted context, but execution publication does not yet carry
 that source correlation back to Timeline `replyTo`. This trial is not accepted

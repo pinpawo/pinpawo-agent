@@ -351,3 +351,6 @@ export { clipForPrompt } from './agent/orchestrator/utils';
 export { readContentText, readMessageText } from './utils/messages';
 export { createAutoReviewer } from './autoReview';
 export type { AutoReviewer, AutoReviewInput, AutoReviewAction, AutoReviewResult, ReviewAssessment } from './autoReview';
+
+export { optionalResponseSchema, isSilentResponseReceipt } from './runtime/optionalResponse';
+export type { OptionalResponse } from './runtime/optionalResponse';

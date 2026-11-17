@@ -1,9 +1,10 @@
-import { agentInvocationHintSchema, getAgentRuntimeContext, type AgentInvocationHint, type SystemPromptSection } from '@pinpawo/pet-agent';
+import { agentInvocationHintSchema, optionalResponseSchema, getAgentRuntimeContext, type AgentInvocationHint, type SystemPromptSection } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from '../agent/agentChannel';
 
 export type InvocationInputContext = Readonly<{
   systemPromptSections?: readonly SystemPromptSection[];
   hint?: AgentInvocationHint;
+  optionalResponse?: Readonly<{ source: string; messageId: string }>;
 }>;
 export type InvocationContextResult = readonly SystemPromptSection[] | InvocationInputContext | undefined;
 
@@ -30,7 +31,7 @@ export function snapshotInvocationContextResult(value: unknown): InvocationConte
   if (value === undefined) return undefined;
   if (Array.isArray(value)) return snapshotInvocationSections(value);
   if (!value || typeof value !== 'object'
-    || Object.keys(value).some(key => key !== 'systemPromptSections' && key !== 'hint')) {
+    || Object.keys(value).some(key => key !== 'systemPromptSections' && key !== 'hint' && key !== 'optionalResponse')) {
     throw new Error('Invalid invocation context.');
   }
   const record = value as Record<string, unknown>;
@@ -38,6 +39,7 @@ export function snapshotInvocationContextResult(value: unknown): InvocationConte
     ...(record.systemPromptSections !== undefined
       ? { systemPromptSections: snapshotInvocationSections(record.systemPromptSections) } : {}),
     ...(record.hint !== undefined ? { hint: agentInvocationHintSchema.parse(record.hint) } : {}),
+    ...(record.optionalResponse !== undefined ? { optionalResponse: optionalResponseSchema.parse(record.optionalResponse) } : {}),
   });
 }
 
@@ -53,15 +55,16 @@ export function snapshotInvocationContext(value: unknown): InvocationInputContex
 export function withInvocationContext(
   setup: AgentChannelSetup, invocation: InvocationInputContext,
 ): AgentChannelSetup {
-  const { systemPromptSections: sections, hint } = invocation;
+  const { systemPromptSections: sections, hint, optionalResponse } = invocation;
   const base = setup.input.context;
-  if (!sections?.length && !hint && !Object.hasOwn(base ?? {}, 'hint')) return setup;
+  if (!sections?.length && !hint && !optionalResponse && !Object.hasOwn(base ?? {}, 'hint') && !Object.hasOwn(base ?? {}, 'optionalResponse')) return setup;
   // A fresh invocation or native review continuation owns its hint. Never
   // inherit one from an unrelated setup or the resume message's caller.
-  const { hint: _previousHint, ...context } = base ?? {};
+  const { hint: _previousHint, optionalResponse: _previousOptionalResponse, ...context } = base ?? {};
   return { ...setup, input: { ...setup.input, context: {
     ...context,
     ...(sections?.length ? { systemPromptSections: [...(base?.systemPromptSections ?? []), ...sections] } : {}),
     ...(hint ? { hint } : {}),
+    ...(optionalResponse ? { optionalResponse } : {}),
   } } };
 }

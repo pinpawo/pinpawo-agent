@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
-import { allocatePetSessionId, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, copyPetInvocationScope, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -182,6 +182,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           ...(event.requestId ? { requestId: event.requestId } : {}),
           ...(event.sessionId ? { sessionId: event.sessionId } : {}),
           ...(event.scope ? { scope: { ...event.scope } } : {}),
+          ...(event.origin ? { origin: copyPetInvocationScope(event.origin) } : {}),
           ...(event.pendingInterrupt ? { pendingInterrupt: event.pendingInterrupt } : {}),
           ...(event.reply !== undefined ? { reply: event.reply } : {}),
           ...(event.message ? { message: structuredClone(event.message) } : {}),
@@ -205,6 +206,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       ...(target.request !== undefined ? { request: target.request } : {}),
       ...(target.sessionId ? { sessionId: target.sessionId } : {}),
       scope: Object.freeze({ ...target.scope }),
+      ...(target.origin ? { origin: copyPetInvocationScope(target.origin) } : {}),
     });
     const sections = await provider.provide(snapshot);
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
@@ -227,6 +229,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
     const session = request.session ? { ...request.session } : undefined;
     const scope = request.scope ? { ...request.scope } : undefined;
+    const origin = request.origin ? copyPetInvocationScope(request.origin) : undefined;
+    if (origin && (!scope || origin.namespace !== scope.namespace)) throw new Error('Dispatch origin requires a matching scope namespace.');
     const delivery = request.delivery;
     if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
     if (delivery === 'interrupt' && (!session?.id || !scope)) {
@@ -278,6 +282,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         dispatchId: invocationId,
         ...(session ? { session } : {}),
         ...(scope ? { scope } : {}),
+        ...(origin ? { origin } : {}),
         ...(delivery ? { delivery } : {}),
       });
 

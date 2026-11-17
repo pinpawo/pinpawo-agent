@@ -174,3 +174,13 @@ This is integration evidence, not a philosophical-quality or latency benchmark.
 It does not establish real-model routing accuracy or autonomous loop safety, interrupted delivery/ACK retry
 behavior, or tool/Capability-switch continuity. Those require separate cases and
 an explicitly isolated live-model run when desired. No live deployment is implied.
+
+### Manual Head routing evaluation
+
+`npm run eval:head -w @pinpawo-tests/studio-e2e -- --live --profile deepseek-v4-flash --repeats 1 --output /tmp/head-eval-new.json`
+
+This **manual, paid-provider opt-in** is not part of CI or `npm test`. It uses the existing local profile registry and production `createHeadDecision`/model factory, never constructs a Studio Host or writes a Channel. Do not run it without authorization for real model calls. No profile or credential overrides are accepted. Output must be a new file; no existing report is overwritten.
+
+`--cases combined,no-at-followup` filters stable fixture IDs; `--repeats` defaults to 1. At most 20 decisions and **20 actual fetch calls including retry/fallback attempts**, 30 seconds per decision and 240 seconds overall. Exhaustion counts remaining requested cases as failures, not skipped successes. Default 12 fixtures cover four independent reply/dispatch combinations, grounded no-mention follow-up, author-neutral queue/interrupt contrasts a hard negative peer acknowledgement that must not revive an older human request, a neutral peer no-op, and an organic peer utterance with multiple acceptable outcomes. Timing is the Head's *requested* policy; production can still downgrade interrupt to enqueue.
+
+The JSON includes source commit, fixture version, model/profile, each case and repeat, sanitized diagnostics and decision axes. It stores neither provider reasoning nor reply/intent text. Metrics measure schema validity, routing/reply **presence**, and timing, not reply semantic quality. Contrast pass/total includes errors; conditional pass/valid is reported separately. Organic acceptance is separate and must not be called accuracy. Provider/transport/setup failures are separate from valid behavioral mismatches. Any invalid or unaccepted result exits nonzero after writing the full report. This is a small diagnostic suite, not proof of general model quality, successful tool execution, message delivery or autonomous loop safety.

@@ -189,27 +189,3 @@ test('resuming a persisted dispatch after restart restores its original prompt a
   assert.ok(Object.isFrozen(session.pendingDispatch?.hint));
   assert.equal(restarted.sessions[session.id]?.pendingDispatch, undefined);
 });
-
-test('peer origin and optional response survive native review continuation without affecting other turns', async () => {
-  const h = harness();
-  const origin = { namespace: 'channel', id: 'peer-1' };
-  const optionalResponse = { source: 'channel:ch-1', messageId: 'peer-1' };
-  Object.assign(h.session.pendingDispatch!, { origin, optionalResponse });
-  const wrapper = continueSuspendedDispatch({
-    petId: 'pet',
-    sessions: {
-      findSessionByThread: () => h.session,
-      setPendingDispatch: (_id: string, value: TuiSessionPendingDispatch | null) => { h.session.pendingDispatch = value ?? undefined; },
-    } as never,
-    publishLifecycle: event => h.events.push(event),
-    run: async turn => {
-      assert.deepEqual(readPetInvocationContext()?.origin, origin);
-      assert.deepEqual(turn.setup.input.context?.optionalResponse, optionalResponse);
-      return { status: 'completed', reply: '' };
-    },
-  });
-  await wrapper(h.turn('review-1'));
-  assert.ok(h.events.every(event => event.origin?.id === 'peer-1'));
-  assert.equal(h.session.pendingDispatch, undefined);
-  assert.equal(readPetInvocationContext(), undefined);
-});

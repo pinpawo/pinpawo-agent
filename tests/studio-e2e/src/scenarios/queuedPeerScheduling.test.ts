@@ -28,7 +28,7 @@ async function until(predicate: () => boolean | Promise<boolean>) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 }
-async function fixture(activeAuthor: 'human' | 'peer', queuedOutcome: 'reply' | 'silent') {
+async function fixture() {
   const errors: unknown[] = [];
   const heads: Array<{ petId: string; messageId: string; action: string }> = [];
   let sequence = 0, held = false, aborted = false, released = false, queuedExecutions = 0, parentResumes = 0;
@@ -55,7 +55,7 @@ async function fixture(activeAuthor: 'human' | 'peer', queuedOutcome: 'reply' | 
           const route = petId === 'origin' && source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE'
             : petId === 'origin' && source === 'EMIT_QUEUED_PEER' ? 'SEED_QUEUED'
             : petId === 'target' && (source === 'ACTIVE_HUMAN' || source === 'ACTIVE_PEER') ? 'ACTIVE'
-            : petId === 'target' && source === 'QUEUED_PEER' ? 'QUEUED' : '';
+            : petId === 'target' && (source === 'QUEUED_HUMAN' || source === 'QUEUED_PEER') ? 'QUEUED' : '';
           const action = route ? 'dispatch' : 'ignore';
           heads.push({ petId, messageId: head.message.messageId, action });
           content = JSON.stringify({ action, reply: '', timing: 'enqueue', intent: route ? `ROUTE_${route}` : '' });
@@ -66,17 +66,14 @@ async function fixture(activeAuthor: 'human' | 'peer', queuedOutcome: 'reply' | 
           else if (marker === 'SEED_QUEUED') content = 'QUEUED_PEER';
           else if (marker === 'QUEUED') {
             queuedExecutions++;
-            assert.equal(released, true, 'Queued peer cannot replace or enter the still-active subject');
-            assert.ok(names.includes('finish_without_reply'));
-            if (queuedOutcome === 'silent') call = { name: 'finish_without_reply', args: {} };
-            else content = 'RESULT_QUEUED';
+            assert.equal(released, true, 'Queued input cannot replace or enter the still-active subject');
+            content = 'RESULT_QUEUED';
           } else {
             const resultOf = (name: string) => {
               const ids = new Set(input.messages.flatMap(m => m.tool_calls ?? []).filter(c => c.function.name === name).map(c => c.id));
               return [...input.messages].reverse().find(m => m.role === 'tool' && !!m.tool_call_id && ids.has(m.tool_call_id));
             };
             if (names.includes('plan_request')) {
-              assert.equal(names.includes('finish_without_reply'), activeAuthor === 'peer');
               call = { name: 'plan_request', args: { goal: 'ROUTE_ACTIVE' } };
             } else if (names.includes('submit_plan')) {
               if (!resultOf('submit_plan')) call = { name: 'submit_plan', args: { tasks: [{ capability: 'general', objective: 'ROUTE_ACTIVE' }] } };
@@ -123,10 +120,10 @@ async function fixture(activeAuthor: 'human' | 'peer', queuedOutcome: 'reply' | 
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
-for (const activeAuthor of ['human', 'peer'] as const) for (const queuedOutcome of ['reply', 'silent'] as const) {
-  test(`normal queued peer ${queuedOutcome} preserves active ${activeAuthor} subject across delegation boundary`, { timeout: 120_000 }, async () => {
+for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor of ['human', 'peer'] as const) {
+  test(`normal queued ${queuedAuthor} reply preserves active ${activeAuthor} subject across delegation boundary`, { timeout: 120_000 }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'studio-queued-peer-'));
-    const model = await fixture(activeAuthor, queuedOutcome);
+    const model = await fixture();
     const channel = createChannelPlugin({ httpRoute: false });
     let built: Awaited<ReturnType<typeof buildStudio>> | undefined;
     const lifecycle: Array<{ state: string; sessionId?: string }> = [];
@@ -152,25 +149,26 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedOutcome 
       const binding = await channel.service.getSession(channelId, 'target');
       assert.equal(binding?.registered, true);
       const original = (await messages()).find(m => m.body === (activeAuthor === 'human' ? 'ACTIVE_HUMAN' : 'ACTIVE_PEER'))!;
-      await channel.service.postMessage(human, channelId, { body: 'EMIT_QUEUED_PEER', mentions: [] });
+      await channel.service.postMessage(human, channelId, { body: queuedAuthor === 'human' ? 'QUEUED_HUMAN' : 'EMIT_QUEUED_PEER', mentions: [] });
       await until(() => lifecycle.filter(e => e.state === 'queued').length === 2);
-      const queued = (await messages()).find(m => m.body === 'QUEUED_PEER')!;
-      assert.ok(queued && queued.author.kind === 'pet');
+      const queued = (await messages()).find(m => m.body === (queuedAuthor === 'human' ? 'QUEUED_HUMAN' : 'QUEUED_PEER'))!;
+      assert.ok(queued);
+      assert.equal(queued.author.kind, queuedAuthor === 'human' ? 'human' : 'pet');
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().queuedExecutions, 0);
       assert.equal(lifecycle.filter(e => e.state === 'running').length, 1);
       model.release();
       await until(() => lifecycle.filter(e => e.state === 'completed').length === 2);
-      await until(async () => (await messages()).filter(m => m.author.id === 'target').length === (queuedOutcome === 'reply' ? 2 : 1));
+      await until(async () => (await messages()).filter(m => m.author.id === 'target').length === 2);
       const final = await messages();
       const targetReplies = final.filter(m => m.author.kind === 'pet' && m.author.id === 'target');
-      assert.deepEqual(targetReplies.map(m => m.body), queuedOutcome === 'reply' ? ['RESULT_ACTIVE', 'RESULT_QUEUED'] : ['RESULT_ACTIVE']);
+      assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE', 'RESULT_QUEUED']);
       await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'ignore')));
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().parentResumes, 1, 'Original parent receives its delegated result before queued work');
       assert.equal(model.state().queuedExecutions, 1);
       assert.equal(lifecycle.some(e => ['failed', 'interrupted', 'cancelled'].includes(e.state)), false);
-      assert.equal(lifecycle.filter(e => e.state === 'message').length, queuedOutcome === 'reply' ? 2 : 1);
+      assert.equal(lifecycle.filter(e => e.state === 'message').length, 2);
       assert.ok(lifecycle.filter(e => e.state === 'completed').every(e => e.sessionId === binding!.sessionId));
       assert.equal((await channel.service.getSession(channelId, 'target'))?.sessionId, binding!.sessionId);
       const snapshot = await built.residentPets.get('target')!.sessions.snapshot(binding!.sessionId);

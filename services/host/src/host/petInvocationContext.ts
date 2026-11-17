@@ -7,8 +7,6 @@ export type PetInvocationContext = Readonly<{
   dispatchId: string;
   sessionId?: string;
   scope?: PetInvocationScope;
-  /** Trusted source identity, not inferred from request text. */
-  origin?: PetInvocationScope;
 }>;
 
 const invocations = new AsyncLocalStorage<{ active: boolean; value: PetInvocationContext }>();
@@ -38,7 +36,6 @@ export async function withPetInvocationContext<T>(
     dispatchId: context.dispatchId,
     ...(context.sessionId ? { sessionId: context.sessionId } : {}),
     ...(context.scope ? { scope: copyPetInvocationScope(context.scope) } : {}),
-    ...(context.origin ? { origin: copyPetInvocationScope(context.origin) } : {}),
   }) };
   return invocations.run(entry, async () => {
     try { return await run(); } finally { entry.active = false; }

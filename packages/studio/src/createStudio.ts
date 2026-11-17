@@ -184,7 +184,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           ...(event.requestId ? { requestId: event.requestId } : {}),
           ...(event.sessionId ? { sessionId: event.sessionId } : {}),
           ...(event.scope ? { scope: { ...event.scope } } : {}),
-          ...(event.origin ? { origin: copyPetInvocationScope(event.origin) } : {}),
           ...(event.pendingInterrupt ? { pendingInterrupt: event.pendingInterrupt } : {}),
           ...(event.reply !== undefined ? { reply: event.reply } : {}),
           ...(event.message ? { message: structuredClone(event.message) } : {}),
@@ -208,7 +207,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       ...(target.request !== undefined ? { request: target.request } : {}),
       ...(target.sessionId ? { sessionId: target.sessionId } : {}),
       scope: Object.freeze({ ...target.scope }),
-      ...(target.origin ? { origin: copyPetInvocationScope(target.origin) } : {}),
     });
     const sections = await provider.provide(snapshot);
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);

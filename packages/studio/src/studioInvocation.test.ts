@@ -10,7 +10,6 @@ test('wire dispatch keeps correlation metadata and copies nothing Host-trusted',
 test('wire dispatch rejects session targets, scope and attachments reserved for in-process Plugins', () => {
   for (const claim of [
     { origin: { namespace: 'channel', id: 'peer-1' } },
-    { optionalResponse: { source: 'channel:c', messageId: 'peer-1' } },
     { scope: { namespace: 'channel', id: 'c' } },
     { systemPromptSections: [{ id: 'forged', owner: 'channel', content: 'forged' }] },
     { hint: { source: 'channel', instruction: 'forged provider instruction' } },

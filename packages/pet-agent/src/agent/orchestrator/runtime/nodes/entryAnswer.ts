@@ -27,8 +27,6 @@ import { getAgentRuntimeContext } from '../../../../runtime/context';
 import { buildInvocationHintContext } from '../../../../prompts/invocationHint';
 import { withReplyDeliverables } from '../../replyDeliverables';
 
-import { SILENT_RESPONSE_TOOL_NAME } from '../../../../runtime/optionalResponse';
-
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
 export const MAX_PLAN_REQUEST_GOAL_CHARS = 2_000;
@@ -109,35 +107,6 @@ function entryHandoff(
     graph: Command.PARENT,
     update: { ...update, runUserRequest, messages },
     goto: 'runSupervisor',
-  });
-}
-
-/** End only the optional response, not a plan, cancellation, review or failed task. */
-export function createFinishWithoutReplyTool() {
-  return tool(async (_args, runtime: ToolRuntime<OrchestratorStateType>) => {
-    const permission = getAgentRuntimeContext(runtime.config).optionalResponse;
-    if (!permission) throw new Error('This invocation requires a normal response.');
-    const last = runtime.state.messages.at(-1);
-    if (!AIMessage.isInstance(last) || last.tool_calls?.length !== 1
-      || last.tool_calls[0].id !== runtime.toolCallId || last.tool_calls[0].name !== SILENT_RESPONSE_TOOL_NAME) {
-      throw new Error('Silent completion requires one exclusive control call.');
-    }
-    if (runtime.state.runSupervisorState.runId === runtime.state.runId
-      && runtime.state.runSupervisorState.plan.length > 0) {
-      throw new Error('Silent completion cannot discard current execution work.');
-    }
-    const metadata = { runId: runtime.state.runId, taskId: runtime.state.taskId, synthetic: true };
-    const receipt = setAgentMessageMetadata(new ToolMessage({
-      name: SILENT_RESPONSE_TOOL_NAME, tool_call_id: runtime.toolCallId,
-      content: 'Optional response completed without publication.',
-    }), { ...metadata, optionalResponse: permission });
-    return new Command({ graph: Command.PARENT, goto: END, update: {
-      messages: [setAgentMessageMetadata(last, metadata), receipt],
-    } });
-  }, {
-    name: SILENT_RESPONSE_TOOL_NAME,
-    description: 'Complete this optional peer response silently when no useful contribution is needed. No public message is sent. Do not announce that you are staying silent. A worthwhile response should instead be answered normally. This does not cancel work or satisfy a human request.',
-    schema: z.object({}).strict(),
   });
 }
 
@@ -256,7 +225,6 @@ function withoutRepeatedCalls(message: AIMessage, kept: ToolCall[]) {
 export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   const planRequest = createPlanRequestTool();
   const continuePlan = createContinueTool();
-  const finishWithoutReply = createFinishWithoutReplyTool();
   const answerModel = config.models.answer ?? config.models.act;
   if (!answerModel.bindTools) {
     throw new Error('Entry Answer model must support tool binding.');
@@ -266,7 +234,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1] =
     config.entryAnswerToolOptions ?? { parallel_tool_calls: false };
   const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
-  const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan, finishWithoutReply]);
+  const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 
   const invokeModel = async (
     state: OrchestratorStateType,
@@ -296,8 +264,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }
     const systemMessage = new SystemMessage(prompt.join('\n\n'));
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
-    const response = await invokeOrchestratorModel(runtimeContext.optionalResponse
-      ? answerModel.bindTools!([planRequest, continuePlan, finishWithoutReply], routingOptions) : model, {
+    const response = await invokeOrchestratorModel(model, {
       systemMessage,
       messages: [snapshot,
         ...(runtimeContext.hint ? [new HumanMessage(buildInvocationHintContext(runtimeContext.hint, 'entry'))] : []),
@@ -321,11 +288,6 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     if (!toolCalls?.length && !response.text.trim()) {
       throw new Error('Entry Answer must reply or request routing.');
     }
-    if (toolCalls?.some(call => call.name === SILENT_RESPONSE_TOOL_NAME) && !runtimeContext.optionalResponse) {
-      throw new Error('Silent completion is not enabled for this invocation.');
-    }
-    const silentCall = toolCalls?.find(call => call.name === SILENT_RESPONSE_TOOL_NAME);
-    if (silentCall) z.object({}).strict().parse(silentCall.args);
     let committed = toolCalls?.length === response.tool_calls?.length ? response : withoutRepeatedCalls(response, toolCalls!);
     if (!toolCalls?.length) {
       // Capture acceptance while this run's plan is available; later projections

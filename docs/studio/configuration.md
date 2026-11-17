@@ -341,36 +341,22 @@ Host logs include a timestamp; the same diagnostic is emitted on the Studio bus.
 They contain no prompt, response body, credentials or provider error payload.
 These diagnostics are not persisted decision history or a user-visible retry UI.
 
-The Channel reserves one Session on the first accepted execution for each
-(Channel, Pet instance) pair, then reuses that identity for response and work turns.
+On the first dispatch attempt for a (Channel, Pet instance) pair, the Channel
+reserves a Session identity. An admitted execution uses that identity, and
+subsequent executions reuse it. A reservation alone does not prove admission.
 Completion does not remove it; changing the tools used does not allocate another
-Channel Session. Short responses therefore add a resident execution/model turn
-rather than taking the old direct-Head shortcut. The current trial requests a
-concise, non-delegated response where possible, but does not promise a fixed latency
-or a restricted tool surface. It introduces no separate lightweight-session
-store, automatic acknowledgement message, or deployment migration.
+Channel Session. Direct Head replies do not create or enter that Session. Only
+`dispatch` starts a resident execution/model turn, even when the requested work
+is a short response. The trial does not promise fixed execution latency or a
+restricted tool surface, and introduces no separate lightweight-session store,
+automatic acknowledgement message, or deployment migration.
 Peer-authored messages can also be judged eligible; there is no longer a
-mention-only gate for those responses. Model instructions discourage recursive
-exchanges, but they are not a hard turn budget. Use bounded isolated evaluation
-before enabling autonomous multi-Pet discussion in a live Channel.
-Optional peer-triggered responses have a second, execution-side exit: Entry Answer
-may explicitly call `finish_without_reply` when it has no useful contribution.
-The Channel validates the canonical source message and enables this control only
-for another Pet's publication. Human messages (including those quoting a Pet),
-scheduler and trigger runs retain normal response behavior. This is an option,
-not a blanket suppression of peer replies; worthwhile peer responses still use
-the same resident Session and are published normally.
-
-The silent control is a strict, exclusive tool call. Its runtime-created receipt
-is checkpointed with the run and source identity; completion remains successful,
-but no public message event is emitted. Silence is never inferred from words,
-empty text, cancellation, errors, or pending approvals. It is available at Entry,
-before planning/external execution, not as a way to discard work or deliverables.
-Optional-turn public text is buffered until the completion disposition is known.
-Invocation context and source are retained over native review suspension and
-cleared for unrelated calls. This does not make Head routing accurate or provide
-a hard autonomous-loop budget: a model can still choose to publish an unhelpful
-response. Use bounded verification and monitor those decisions separately.
+mention-only gate for those responses. A Head can ignore, reply directly, or
+dispatch execution for either author kind. Dispatched peer work follows the same
+ordinary execution and response path as human-triggered work. Model instructions
+discourage recursive exchanges, but they are not a hard turn budget. Use bounded
+isolated evaluation before enabling autonomous multi-Pet discussion in a live
+Channel.
 
 Direct Head replies set Timeline `replyTo` to their validated trigger.
 Known trial compatibility gap for resident Agent replies: execution input preserves the triggering message
@@ -494,8 +480,7 @@ runtime currently lacks a general durable responsibility/continuation record
 for arbitrary preemption; history alone and manual "continue" are not execution
 restoration. Enabling this requires exact active/pending identity validation,
 a safe boundary, saved completed results and outstanding subjects, and proven
-continuation without replaying tool side effects. A silent optional peer turn
-remains scoped to that invocation and cannot close another pending subject.
+continuation without replaying tool side effects.
 
 Deterministic tests exercise the declaration and safe queue behavior, not the
 quality of a live model's timing judgments. No new model configuration or tool

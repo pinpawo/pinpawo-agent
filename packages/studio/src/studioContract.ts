@@ -101,7 +101,6 @@ export type StudioPluginHooks = {
 export type StudioInvocationContext = Readonly<{
   systemPromptSections?: readonly SystemPromptSection[];
   hint?: AgentInvocationHint;
-  optionalResponse?: Readonly<{ source: string; messageId: string }>;
 }>;
 
 /** Resolve domain context for one admitted, scoped Pet invocation. */
@@ -109,7 +108,6 @@ export type StudioContextProvider = (target: Readonly<{
   petId: string;
   sessionId?: string;
   scope: PetInvocationScope;
-  origin?: PetInvocationScope;
   /** Present for Host dispatches; optional for older composition callers. */
   request?: string;
 }>) => readonly SystemPromptSection[] | StudioInvocationContext | undefined

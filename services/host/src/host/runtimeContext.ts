@@ -66,7 +66,6 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
     petId: string;
     sessionId?: string;
     scope: PetInvocationScope;
-    origin?: PetInvocationScope;
     /** The admitted request, before any queue wait or model processing. */
     request?: string;
   }>) => Promise<InvocationContextResult>;

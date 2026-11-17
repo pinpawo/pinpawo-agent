@@ -279,18 +279,13 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       context = studio;
       // A provider is scoped to a persisted (Pet, session) binding, not to the
       // Pet globally. The Studio resolves it when preparing a run.
-      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope, origin }) => {
+      removeContextProvider = studio.registerContextProvider('channel', async ({ petId, sessionId, scope }) => {
         const binding = await service.getSession(scope.id, petId);
         if (!sessionId || !binding || binding.sessionId !== sessionId) {
           throw new ChannelAccessError('Channel scope does not match the Pet session binding.');
         }
         const channel = await service.requireMember(binding.channelId, { kind: 'pet', id: petId });
-        const source = origin ? await service.getMessage(channel.channelId, origin.id) : undefined;
-        if (origin && (origin.namespace !== 'channel' || !source)) throw new ChannelAccessError('Channel invocation source is not a canonical message in this Channel.');
-        const optionalResponse = source?.author.kind === 'pet' && source.author.id !== petId
-          ? { source: 'channel:' + channel.channelId, messageId: source.messageId } : undefined;
         return {
-          ...(optionalResponse ? { optionalResponse } : {}),
           systemPromptSections: channelSystemContext(channel),
           hint: channelInvocationHint(),
         };

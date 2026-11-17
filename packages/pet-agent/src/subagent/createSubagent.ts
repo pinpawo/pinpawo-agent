@@ -120,15 +120,14 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     generationReserveTokens: input.generationReserveTokens,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
-  const { optionalResponse: _parentOptionalResponse, ...parentRuntimeContext } = input.runnableConfig?.context ?? {};
-  const { optionalResponse: _commonOptionalResponse, ...commonRuntimeContext } = getAgentRuntimeContext(input.runnableConfig);
+  const parentRuntimeContext = input.runnableConfig?.context;
   // Preparation hints belong to the parent invocation, never to a child override.
-  const { hint: _childHint, optionalResponse: _optionalResponse, ...childRuntimeContext } = input.runtimeContext ?? {};
+  const { hint: _childHint, ...childRuntimeContext } = input.runtimeContext ?? {};
   const runtimeContext: SubagentRuntimeContext = {
     ...parentRuntimeContext,
     ...childRuntimeContext,
     // Common context belongs to the root invocation, never to a child override.
-    ...commonRuntimeContext,
+    ...getAgentRuntimeContext(input.runnableConfig),
     modelInputModalities: childRuntimeContext.modelInputModalities ?? ['text'],
   };
   const frameworkSections = [

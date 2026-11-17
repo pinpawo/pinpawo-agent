@@ -51,7 +51,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('compactContext', compactContext, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('captureUserRequest', captureRunUserRequest, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('entryAnswer', entryAnswer, {
-      ends: [END, 'runSupervisor', 'throwRunFailure'],
+      ends: ['runSupervisor', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('runSupervisor', runSupervisor, {

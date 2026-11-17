@@ -18,7 +18,7 @@ export type StudioDispatchRequest = {
    * caller cannot claim it, or it could publish into another Plugin's domain.
    */
   scope?: PetInvocationScope;
-  /** Trusted source identity, not inferred from request text. */
+  /** Trusted source identity for queue observation only; not Agent execution context. */
   origin?: PetInvocationScope;
   /** In-process only: interrupt this same scoped session after the input is queued. */
   delivery?: 'interrupt';
@@ -40,8 +40,6 @@ export type StudioInvocation = {
   invocationId: string;
   sessionId?: string;
   scope?: PetInvocationScope;
-  /** Trusted source identity, not inferred from request text. */
-  origin?: PetInvocationScope;
 };
 
 /**
@@ -56,7 +54,6 @@ export function readStudioInvocation(): StudioInvocation | undefined {
     invocationId: context.dispatchId,
     ...(context.sessionId ? { sessionId: context.sessionId } : {}),
     ...(context.scope ? { scope: context.scope } : {}),
-    ...(context.origin ? { origin: context.origin } : {}),
   };
 }
 

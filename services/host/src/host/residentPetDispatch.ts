@@ -60,7 +60,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       const session = suppliedSession ? { ...suppliedSession } : undefined;
       const petId = runtime.petId;
       const resolved = scope && resolveInvocationContext
-        ? await resolveInvocationContext(Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }), ...(origin ? { origin } : {}), request }))
+        ? await resolveInvocationContext(Object.freeze({ petId, ...(session ? { sessionId: session.id } : {}), scope: Object.freeze({ ...scope }), request }))
         : undefined;
       signal?.throwIfAborted();
       if (context.isClosing()) throw new Error('Resident Pet is closing.');
@@ -72,7 +72,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         : undefined;
       let pendingInterrupt: PendingInterruptProjection | undefined;
       const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
-        ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}), ...(origin ? { origin } : {}),
+        ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
         ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
         ...(target ? { sessionId: target.id } : {}),
       });
@@ -85,7 +85,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         const session = target ?? sessions.findSessionByThread(petId, setup.input.threadId);
         if (!session) throw new Error('A waiting dispatch has no session to resume from.');
         sessions.setPendingDispatch(session.id, {
-          interruptId: pending.interruptId, dispatchId, request, ...(scope ? { scope } : {}), ...(origin ? { origin } : {}),
+          interruptId: pending.interruptId, dispatchId, request, ...(scope ? { scope } : {}),
           ...invocationContext,
         });
       };
@@ -110,7 +110,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               message: request,
               ...(artifactReferences.length ? { artifactReferences } : {}),
               runAgentTurn: (turn) => withPetInvocationContext(
-                { petId, dispatchId, scope, ...(origin ? { origin } : {}), sessionId: target?.id },
+                { petId, dispatchId, scope, sessionId: target?.id },
                 async () => {
                   turnSetup = turn.setup;
                   const result = await runAgentTurn({
@@ -174,8 +174,9 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
       } : undefined, {
         dispatchId, enqueuedAt: new Date().toISOString(),
+        ...(origin ? { origin } : {}),
         ...(target ? { sessionId: target.id } : {}),
-        ...(scope ? { scope: copyPetInvocationScope(scope) } : {}), ...(origin ? { origin } : {}),
+        ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
       });
       publishLifecycle({ dispatchId, request, state: 'queued' });
       if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });

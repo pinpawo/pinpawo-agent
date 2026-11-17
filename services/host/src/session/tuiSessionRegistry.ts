@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
 import { atomicWriteFile } from '../atomicFile';
 import { buildTuiChatThreadId } from '../chatInterface';
-import { copyPetInvocationScope, type PetInvocationScope } from '../host/petInvocationContext';
+import type { PetInvocationScope } from '../host/petInvocationContext';
 import type { AgentInvocationHint, SystemPromptSection } from '@pinpawo/pet-agent';
 import { snapshotInvocationContext } from '../host/invocationSystemContext';
 
@@ -32,11 +32,8 @@ export type TuiSessionPendingDispatch = {
   dispatchId: string;
   request: string;
   scope?: PetInvocationScope;
-  /** Trusted source identity, not inferred from request text. */
-  origin?: PetInvocationScope;
   systemPromptSections?: readonly SystemPromptSection[];
   hint?: AgentInvocationHint;
-  optionalResponse?: Readonly<{ source: string; messageId: string }>;
 };
 
 export type TuiSessionState = {
@@ -369,14 +366,10 @@ function readPendingDispatch(value: unknown): TuiSessionPendingDispatch | null {
     return null;
   }
   let invocationContext;
-  let origin: PetInvocationScope | undefined;
   try {
-    origin = record.origin === undefined ? undefined : copyPetInvocationScope(record.origin as PetInvocationScope);
-    if (origin && origin.namespace !== namespace) return null;
     invocationContext = snapshotInvocationContext({
       ...(record.systemPromptSections !== undefined ? { systemPromptSections: record.systemPromptSections } : {}),
       ...(record.hint !== undefined ? { hint: record.hint } : {}),
-      ...(record.optionalResponse !== undefined ? { optionalResponse: record.optionalResponse } : {}),
     });
   } catch { return null; }
   return {
@@ -385,7 +378,6 @@ function readPendingDispatch(value: unknown): TuiSessionPendingDispatch | null {
     request,
     ...(namespace && scopeId ? { scope: { namespace, id: scopeId } } : {}),
     ...invocationContext,
-    ...(origin ? { origin } : {}),
   };
 }
 

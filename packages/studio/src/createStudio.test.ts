@@ -28,7 +28,7 @@ async function createStudio(input: Omit<CreateStudioInput, 'definitions' | 'asse
       // the composition port. This fake exercises that same boundary.
       const dispatch: PetDispatchPort = { ...pet.dispatch, dispatch: async (request) => {
         if (request.scope) await prepared.resolveInvocationContext({
-          petId, request: request.request, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope, ...(request.origin ? { origin: request.origin } : {}),
+          petId, request: request.request, ...(request.session ? { sessionId: request.session.id } : {}), scope: request.scope,
         });
         return pet.dispatch.dispatch(request);
       } };
@@ -242,7 +242,7 @@ test('scoped context providers resolve from the snapshotted target and do not ch
     assert.deepEqual(receipt.metadata, { nested: { value: 'original correlation' } });
     assert.equal(seen[0]?.request, 'work');
     assert.equal(Object.hasOwn(seen[0]!, 'systemPromptSections'), false);
-    assert.deepEqual(targets, [{ petId: 'worker', request: 'work', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' }, origin: { namespace: 'channel', id: 'source-a' } }]);
+    assert.deepEqual(targets, [{ petId: 'worker', request: 'work', sessionId: 'worker:00000001', scope: { namespace: 'channel', id: 'a' } }]);
     assert.deepEqual(seen[0]?.scope, { namespace: 'channel', id: 'a' });
     assert.deepEqual(seen[0]?.origin, { namespace: 'channel', id: 'source-a' });
     assert.deepEqual(seen[0]?.session, { id: 'worker:00000001', create: true });

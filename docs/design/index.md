@@ -53,6 +53,7 @@ See [Reference](../reference/index.md) for the current public reading path.
   可信来源、公开回复与 live 事件；[Channel 路由](studio/channel-routing.md) — 已退役；
   在线实例的 Head 独立订阅所属 Channel，判断忽略、回复或请求 Host dispatch。
   阶段原文见 [Channel 历史](../history/studio/channel-evolution.md)
+- [Pet Head 进度查询](studio/pet-head-progress-query.md) — draft：在所属 Channel 内回答明确的进度问题，不发起新任务
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
   Channel, Scheduler, Notice, Trigger, and Knowledge APIs
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container

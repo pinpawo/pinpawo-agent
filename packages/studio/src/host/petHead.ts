@@ -22,7 +22,7 @@ export type HeadDecision = { action: 'ignore' | 'dispatch'; reply: string; inten
 export type HeadSchedulingSnapshot = { active?: { dispatchId: string; sessionId: string; messageId: string }; pending: Array<{ dispatchId: string; sessionId: string; messageId: string }> };
 
 /** Project only exact sources owned by this Channel. No authority comes from model text. */
-export function readHeadSchedulingSnapshot(petId: string, channelId: string, queues: StudioDispatchQueue[]): HeadSchedulingSnapshot {
+export function readHeadDispatchQueueSnapshot(petId: string, channelId: string, queues: StudioDispatchQueue[]): HeadSchedulingSnapshot {
   const queue = queues.find(item => item.petId === petId);
   const project = (item: NonNullable<StudioDispatchQueue['activeDispatch']>) =>
     item.sessionId && item.scope?.namespace === 'channel' && item.scope.id === channelId && item.origin?.namespace === 'channel'

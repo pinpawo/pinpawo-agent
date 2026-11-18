@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadSchedulingSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadDispatchQueueSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
@@ -316,7 +316,7 @@ test('structured parsing failure retries once but raw refusal never does', async
 
 test('scheduling snapshot admits only exact owning Channel sources, never names or foreign scopes', () => {
   const entry = { dispatchId: 'running', enqueuedAt: 'now', sessionId: 'session', scope: { namespace: 'channel', id: 'team' }, origin: { namespace: 'channel', id: 'original' } };
-  const result = readHeadSchedulingSnapshot('a', 'team', [{ petId: 'a', state: 'busy', activeOperation: 'dispatch', queuedConversations: 0, queuedDispatches: 3,
+  const result = readHeadDispatchQueueSnapshot('a', 'team', [{ petId: 'a', state: 'busy', activeOperation: 'dispatch', queuedConversations: 0, queuedDispatches: 3,
     activeDispatch: entry, entries: [{ ...entry, dispatchId: 'next' }, { ...entry, scope: { namespace: 'channel', id: 'other' } }, { ...entry, origin: undefined }] }]);
   assert.deepEqual(result, { active: { dispatchId: 'running', sessionId: 'session', messageId: 'original' }, pending: [{ dispatchId: 'next', sessionId: 'session', messageId: 'original' }] });
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
-import { allocatePetSessionId, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, copyPetInvocationScope, snapshotInvocationContextResult, type PetCredentialSource } from 'pinpawo/host-runtime';
 
 import {
   StudioPetUnavailableError,
@@ -49,6 +49,8 @@ export type CreateStudioInput = {
 
 export type PreparedStudio = {
   studio: Studio;
+  /** Read-only resident snapshots for the composing Head; never a scheduling authority. */
+  listDispatchQueues: StudioPluginContext['listDispatchQueues'];
   /** Decrypts a Pet's credentials; only for the composing Host, never for Plugins. */
   credentialSource: PetCredentialSource;
   /** Resolve a trusted invocation's Plugin context for the composing Host. */
@@ -227,6 +229,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     const metadata = request.metadata ? Object.freeze(structuredClone(request.metadata)) : undefined;
     const session = request.session ? { ...request.session } : undefined;
     const scope = request.scope ? { ...request.scope } : undefined;
+    const origin = request.origin ? copyPetInvocationScope(request.origin) : undefined;
+    if (origin && (!scope || origin.namespace !== scope.namespace)) throw new Error('Dispatch origin requires a matching scope namespace.');
     const delivery = request.delivery;
     if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
     if (delivery === 'interrupt' && (!session?.id || !scope)) {
@@ -278,6 +282,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         dispatchId: invocationId,
         ...(session ? { session } : {}),
         ...(scope ? { scope } : {}),
+        ...(origin ? { origin } : {}),
         ...(delivery ? { delivery } : {}),
       });
 
@@ -434,7 +439,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     pets: registry,
     shutdown,
   };
-  return { studio, credentialSource: credentials.source, resolveInvocationContext, getChannelWorkdir, restorePets: () => registry.restore(), activatePlugins };
+  return { studio, listDispatchQueues, credentialSource: credentials.source, resolveInvocationContext, getChannelWorkdir, restorePets: () => registry.restore(), activatePlugins };
 }
 
 /** Create a Studio, assemble its active Pets and activate its Plugins. */

@@ -52,6 +52,41 @@ for (const [backend, config] of backends) {
     } finally { await storage.close(); }
   }
 
+  test(`${backend}: Head replies deduplicate by exact source without resident membership bypass`, () => withService(async (service, store) => {
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Head replies' }, ['executor'])).channel;
+    const source = (await service.postMessage(owner, channelId, { body: 'Please inspect the question.' })).message;
+    const options = { headReplyTo: source.messageId };
+    const first = await service.postMessage(executor, channelId, { body: 'I can discuss this.', replyTo: source.messageId }, options);
+    const duplicate = await service.postMessage(executor, channelId, { body: 'Changed duplicate.', replyTo: source.messageId }, options);
+    assert.equal(first.created, true);
+    assert.equal(duplicate.created, false);
+    assert.equal(duplicate.message.messageId, first.message.messageId);
+    assert.equal(duplicate.message.replyTo, source.messageId);
+    assert.equal(await service.getSession(channelId, executor.id), undefined);
+    const concurrentSource = (await service.postMessage(owner, channelId, { body: 'Concurrent retry source.' })).message;
+    const events: ChannelEvent[] = [];
+    const unsubscribe = service.subscribe(event => events.push(event));
+    const concurrent = await Promise.all(Array.from({ length: 8 }, (_, index) => service.postMessage(executor, channelId,
+      { body: `Retry ${index}`, replyTo: concurrentSource.messageId }, { headReplyTo: concurrentSource.messageId })));
+    unsubscribe();
+    assert.equal(concurrent.filter(result => result.created).length, 1);
+    assert.equal(new Set(concurrent.map(result => result.message.messageId)).size, 1);
+    assert.equal(events.filter(event => event.type === 'channel.message.created').length, 1);
+    assert.ok(concurrent.every(result => result.message.replyTo === concurrentSource.messageId));
+    const other = (await service.createChannel(owner, { title: 'Other', pets: [] })).channel.channelId;
+    const foreign = (await service.postMessage(owner, other, { body: 'Elsewhere.' })).message;
+    await assert.rejects(service.postMessage(executor, channelId, { body: 'Wrong source', replyTo: foreign.messageId }, { headReplyTo: foreign.messageId }), /does not exist in this Channel/);
+    await assert.rejects(service.postMessage(executor, channelId, { body: 'Mismatched', replyTo: source.messageId }, { headReplyTo: 'different' }), /Invalid Head reply/);
+    await assert.rejects(service.postMessage(executor, channelId, { body: 'Mixed authority', replyTo: source.messageId }, { ...options, externalRef: 'resident' }), /Invalid Head reply/);
+    const stopped = new AbortController(); stopped.abort();
+    await assert.rejects(service.postMessage(executor, channelId, { body: 'Canceled', replyTo: source.messageId }, { ...options, signal: stopped.signal }));
+    const live = liveByService.get(service)!;
+    const retained = new ChannelService({ store, humans, pets: () => live, removePet: async () => {}, petOwner: async () => channelId });
+    live.splice(0);
+    await assert.rejects(retained.postMessage(executor, channelId, { body: 'Stale Head', replyTo: source.messageId }, options), ChannelAccessError);
+    assert.equal((await retained.postMessage(executor, channelId, { body: 'Already accepted resident final' }, { externalRef: 'resident-final' })).created, true);
+  }));
+
   test(`${backend}: guarded Pet replies cannot introduce Pet mentions`, () => withService(async service => {
     const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Reply guard' }, ['executor', 'other'])).channel;
     const incoming = await service.postMessage({ kind: 'pet', id: 'other' }, channelId, { body: 'A contribution' });

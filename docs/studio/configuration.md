@@ -294,9 +294,80 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-Online Pet Heads independently decide whether to ignore, reply to, or dispatch work
-for Channel messages. A mention does not guarantee a response. Explicit scheduler, trigger and Host
-dispatch entry points remain available.
+Online Pet Heads make one typed decision with two independent outputs:
+`action` (`ignore` or `dispatch`) controls execution admission; `reply` controls
+immediate public text. Empty/whitespace `reply` writes nothing. Nonempty `reply`
+is written as this active Pet's direct Timeline response to the actual same-Channel
+trigger, without creating an Agent Session. `intent` and `timing` apply only to
+`dispatch`; `ignore` requires empty `intent` and `timing: enqueue` and does not
+mean "say nothing". All four combinations are valid. A mention does not guarantee
+a response, and an unmentioned message may still merit participation.
+
+A combined decision publishes the reply, then independently attempts one dispatch.
+An acknowledgement does not prove admission or completion; the prompt prohibits
+claiming either before it is observed. Failure of publication does not suppress
+an independent dispatch, and failure of dispatch does not roll back a committed
+reply. Cancellation fences remaining actions. Failures are reported by axis with
+sanitized errors. The Head ends after this declaration; it does not run an Agent
+or tools. Explicit scheduler, trigger and Host dispatch remain available.
+
+Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
+internal Head-write option that always checks active membership and the actual
+same-Channel reference. It does not inherit the resident-final externalRef path's
+retained-membership exception. Dispatch reuses Studio's process-lifetime admission
+idempotency key scoped to Channel/Pet/trigger. Failed admissions can retry; there
+is no claim of exactly-once dispatch across Host restarts. Events are not replayed
+automatically. Peer replies cannot add Pet mentions, and the Head instruction
+ignores acknowledgement-only chatter while allowing useful peer contributions.
+
+Head decisions honor the model profile's explicit `structuredOutputMethod`.
+JSON mode/schema profiles keep their declared transport; function-calling (or
+unspecified profiles with a tool-capable adapter) use a single declared decision
+tool without forced choice or strict-provider flags. This is one model decision,
+not an Agent loop, and no returned tool is executed.
+
+Every transport uses the same exact action/reply/intent/timing validation. A known malformed
+output or an explicit unsupported tools/response-format capability may receive
+one fresh text-only JSON attempt: at most two model calls total, SDK retries off.
+The second request never includes the malformed provider output. Auth, network,
+refusal, safety, truncation, ambiguous/unknown tool calls and other provider errors
+are not replayed as output retries; invalid output is never converted to `ignore`. Blank output reports
+`empty_output` separately from `malformed`, `truncated`, or a valid ignore; it
+shares the same bounded fresh-JSON retry policy and never logs raw output.
+
+Safe `pet.head.decision` diagnostics identify Pet, Channel, source message,
+outcome (`selected`, `ignore`, `error`), attempt count and a finite error code.
+Host logs include a timestamp; the same diagnostic is emitted on the Studio bus.
+They contain no prompt, response body, credentials or provider error payload.
+These diagnostics are not persisted decision history or a user-visible retry UI.
+
+On the first dispatch attempt for a (Channel, Pet instance) pair, the Channel
+reserves a Session identity. An admitted execution uses that identity, and
+subsequent executions reuse it. A reservation alone does not prove admission.
+Completion does not remove it; changing the tools used does not allocate another
+Channel Session. Direct Head replies do not create or enter that Session. Only
+`dispatch` starts a resident execution/model turn, even when the requested work
+is a short response. The trial does not promise fixed execution latency or a
+restricted tool surface, and introduces no separate lightweight-session store,
+automatic acknowledgement message, or deployment migration.
+Peer-authored messages can also be judged eligible; there is no longer a
+mention-only gate for those responses. A Head can ignore, reply directly, or
+dispatch execution for either author kind. Dispatched peer work follows the same
+ordinary execution and response path as human-triggered work. Model instructions
+discourage recursive exchanges, but they are not a hard turn budget. Use bounded
+isolated evaluation before enabling autonomous multi-Pet discussion in a live
+Channel.
+
+Direct Head replies set Timeline `replyTo` to their validated trigger.
+Known trial compatibility gap for resident Agent replies: execution input preserves the triggering message
+and any explicit quoted context, but execution publication does not yet carry
+that source correlation back to Timeline `replyTo`. This trial is not accepted
+for deployment until that output-link behavior is restored and tested.
+Follow-up design: admit a trusted invocation-scoped origin (Channel and source
+message identity), persist it through await/retry/restart, carry it on execution
+output, and verify the source belongs to the output Channel before publication.
+Do not reconstruct it from labels or an in-memory receipt-to-source map. This
+correlation protocol is intentionally not implemented by this local trial.
 
 `@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
 to a Pet request. Static strings and logic-free templates remain supported; source
@@ -383,3 +454,53 @@ After a Studio Host has built a Studio for a workdir, it keeps that resident ins
 restart the host to pick up configuration changes.
 
 For dispatch, gate, and event behavior, read the [Studio API](../reference/api/studio.md).
+
+### Head participation and timing trial
+
+The Head's single decision declaration separates independent `reply` text from
+`action` (`ignore`, `dispatch`) and its execution `intent`/`timing`
+(`enqueue`, `interrupt`). Both the declared decision tool and JSON transports use
+the same strict four-field schema; `ignore` requires empty `intent` and `enqueue`. Timing is author-neutral. A nonblocking illustration can wait;
+new evidence invalidating the ongoing calculation can warrant an interrupt
+request whether it came from a human or another Pet. These are model judgments,
+not keyword rules or an automatic priority for either author kind.
+
+The composing Host supplies exact current and queued dispatch/source references.
+The Head also reads the active source message when it is outside the recent
+Channel window. Missing source context is not permission to invent current work.
+Normal queued input no longer interrupts a running turn at a delegation boundary.
+Explicit Stop and existing trusted interrupt/review interfaces retain their
+separate semantics.
+
+**This local trial does not enable model-requested preemption.** Every accepted
+Head dispatch is enqueued; direct replies do not enter the execution queue. `pet.head.scheduling` reports requested/effective timing
+and `continuation_unavailable` or `stale_snapshot` when an interrupt request is
+deferred. A model decision cannot invoke the trusted interrupt primitive. The
+runtime currently lacks a general durable responsibility/continuation record
+for arbitrary preemption; history alone and manual "continue" are not execution
+restoration. Enabling this requires exact active/pending identity validation,
+a safe boundary, saved completed results and outstanding subjects, and proven
+continuation without replaying tool side effects.
+
+Deterministic tests exercise the declaration and safe queue behavior, not the
+quality of a live model's timing judgments. No new model configuration or tool
+permission is implied by this trial.
+
+### Official DeepSeek Head decision budget
+
+Only Studio Head calls are tagged with the invocation-local `pet-head` purpose.
+For the official HTTPS `api.deepseek.com` OpenAI-compatible route and the
+`deepseek-flash` / `deepseek-v4-pro` models, this purpose sends
+`thinking: { type: disabled }`. This keeps the Head's bounded 512-token decision
+budget available for its structured answer. It does not edit the saved profile,
+Agent models, gateway routes, other model names or Anthropic-compatible routes.
+The same shared Head decision policy and field descriptions apply to tool output
+and JSON mode; explicit requests to acknowledge before processing can select
+both reply and dispatch without claiming admission has already succeeded.
+Routine dispatch still need not produce an acknowledgement.
+
+A prior six-call isolated synthetic A/B reproduced truncated JSON when default
+thinking consumed 489/512 or 512/512 completion tokens. Disabling thinking removed
+those two sample truncations but did not itself make the model select a combined
+acknowledgement and execution. Transport validity and routing choices are separate
+acceptance questions; a valid ignore remains a legitimate model decision.

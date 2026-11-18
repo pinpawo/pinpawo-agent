@@ -34,7 +34,7 @@ test('production Pet Head subscriptions receive only real messages from their ow
       invoke: async (messages: Array<[string, string]>) => {
         const { pet, message } = JSON.parse(messages[1]![1]) as HeadInput;
         decisions[pet.petId]!.push(message.body);
-        return { action: 'ignore', text: '' };
+        return { raw: { content: '{"action":"ignore","reply":"","intent":"","timing":"enqueue"}' }, parsed: { action: 'ignore', reply: '', intent: '', timing: 'enqueue' } };
       },
     }),
   } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
@@ -44,7 +44,7 @@ test('production Pet Head subscriptions receive only real messages from their ow
       // Replace only the model transport; buildStudio still owns Head assembly.
       context.models.resolve = () => ({
         profileId: 'test', baseUrl: 'https://models.example.test/v1', apiKey: 'test-key', model: 'scripted',
-        createChatModel: () => model,
+        structuredOutputMethod: 'jsonMode', createChatModel: () => model,
       });
     },
   };

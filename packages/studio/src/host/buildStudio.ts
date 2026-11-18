@@ -28,7 +28,7 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
-import { bindPetHeadChannel, createHeadDecision, createPetHead } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadDispatchQueueSnapshot } from './petHead';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -315,6 +315,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           maxOutputTokens: options.maxOutputTokens,
           maxRetries: options.maxRetries,
         }, {
+          ...(options.purpose ? { purpose: options.purpose } : {}),
           preferDeterministic: options.preferDeterministic,
           ...(options.streaming !== undefined ? { streaming: options.streaming } : {}),
           ...(options.forceChatCompletions !== undefined ? { forceChatCompletions: options.forceChatCompletions } : {}),
@@ -346,8 +347,22 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         pet: registration,
         ...(description ? { description } : {}),
         channel,
+        readScheduling: () => readHeadDispatchQueueSnapshot(registration.petId, registration.channelId, prepared.listDispatchQueues()),
+        onScheduling: diagnostic => {
+          const occurredAt = new Date().toISOString();
+          prepared.studio.notify({ type: 'pet.head.scheduling', source: 'studio', topic: registration.channelId, occurredAt, payload: diagnostic });
+        },
         decide: (value, signal) => {
-          decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId));
+          decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId), {
+            onDiagnostic: diagnostic => {
+              const occurredAt = new Date().toISOString();
+              // Correlation and finite outcomes only: never log prompts, raw model
+              // output, provider errors, credentials or endpoint URLs.
+              console.info('[studio] pet.head', JSON.stringify({ occurredAt, ...diagnostic }));
+              prepared.studio.notify({ type: 'pet.head.decision', source: 'studio',
+                topic: registration.channelId, occurredAt, payload: diagnostic });
+            },
+          });
           return decide(value, signal);
         },
       });

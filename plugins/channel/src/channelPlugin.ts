@@ -111,7 +111,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
-    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal },
+    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string },
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     const studio = host();
@@ -126,7 +126,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     check();
     const receipt = await studio.dispatch({
       petId, request,
-      ...(headInput ? { signal: headInput.signal } : {}),
+      ...(headInput ? { signal: headInput.signal, origin: { namespace: 'channel', id: headInput.messageId } } : {}),
       ...(headInput?.attachments?.length ? { attachments: headInput.attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
@@ -233,7 +233,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();
-      await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options });
+      await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options, headReplyTo: replyTo });
     },
     dispatch: async (channelId, petId, message, request, signal) => {
       if (message.channelId !== channelId) throw new Error('Message does not belong to this Channel.');
@@ -241,10 +241,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const service = channelService();
       await service.requireMember(channelId, { kind: 'pet', id: petId });
       signal.throwIfAborted();
-      const referencedMessage = message.replyTo ? await service.getMessage(channelId, message.replyTo) : undefined;
+      const canonical = await service.getMessage(channelId, message.messageId);
+      if (!canonical) throw new Error('Head source message does not exist in this Channel.');
+      const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
-      const attachments = [...new Map([...(message.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(message, request, referencedMessage), undefined, { attachments, signal });
+      const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
+      await dispatchPet(channelId, petId, channelMessageInput(canonical, request, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
     },
   };
 

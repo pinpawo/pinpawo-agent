@@ -43,9 +43,9 @@ async function waitFor(done: () => boolean | Promise<boolean>) {
 }
 
 for (const delivery of ['boundary', 'interrupt'] as const) {
-  test(`Channel input continues the saved plan after ${delivery} without duplicate public delivery`, async () => {
+  test(`Channel input ${delivery === 'boundary' ? 'queues behind the original subject' : 'continues the interrupted plan'} without duplicate public delivery`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'channel-incoming-'));
-    const announcement = randomUUID(), update = randomUUID(), final = randomUUID();
+    const announcement = randomUUID(), update = randomUUID(), final = randomUUID(), originalFinal = randomUUID();
     const me = { kind: 'human' as const, id: 'local' };
     const channel = createChannelPlugin({ httpRoute: false });
     const bridge = createInvocationContextBridge();
@@ -85,13 +85,13 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
         assert.equal(input.author.kind, 'pet', 'continuation preserves the actual source');
         assert.equal(input.author.participantId, 'pet:reviewer');
         assert.equal(input.body, update);
-        return call('continue', {}, 'continue-input');
+        return delivery === 'boundary' ? new AIMessage(final) : call('continue', {}, 'continue-input');
       });
       const supervisor = new ScriptedModel((messages, index) => {
         if (index === 0) return call('submit_plan', { tasks: [{ capability: 'inspect', objective: 'Perform controlled work.' }] }, 'plan');
         if (index === 1) return call('delegate_capability', { briefing: 'Perform controlled work.' }, 'delegate');
-        assert.ok(messages.some(message => message._getType() === 'human' && message.text.includes(update)),
-          'the next Supervisor sees the new Channel input');
+        assert.equal(messages.some(message => message._getType() === 'human' && message.text.includes(update)), delivery === 'interrupt',
+          'normal queued input must not replace the active Supervisor subject');
         const result = [...messages].reverse().find(message => ToolMessage.isInstance(message) && message.name === 'delegate_capability');
         if (delivery === 'boundary') {
           assert.ok(result, 'the completed delivery survives checkpoint and continuation');
@@ -101,7 +101,7 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
           assert.ok(!result, 'cancelled work is not represented as a returned delivery');
           assert.equal(index, 2);
         }
-        return new AIMessage(final);
+        return new AIMessage(delivery === 'boundary' ? originalFinal : final);
       });
       const child = new ScriptedModel((_messages, index) => index === 0
         ? call('probe', {}, 'probe-call') : new AIMessage('A factual completed delivery.'));
@@ -166,13 +166,13 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
       await waitFor(async () => (await channel.service.readContext(me, cid)).messages.some(message => message.body === final));
       await waitFor(() => host!.resident.dispatch.getQueueSnapshot().state === 'open');
       const messages = (await channel.service.readContext(me, cid)).messages;
-      assert.deepEqual(messages.filter(message => message.author.id === 'worker').map(message => message.body), [final]);
+      assert.deepEqual(messages.filter(message => message.author.id === 'worker').map(message => message.body), delivery === 'boundary' ? [originalFinal, final] : [final]);
       assert.equal(toolCalls, 1, 'continuing does not replay the earlier tool');
       assert.equal(aborted, delivery === 'interrupt');
       assert.equal(lifecycle.filter(event => event.state === 'running').length, 2);
-      assert.equal(lifecycle.filter(event => event.state === 'interrupted').length, 1);
-      assert.equal(lifecycle.filter(event => event.state === 'completed').length, 1);
-      assert.equal(lifecycle.filter(event => event.state === 'message').length, 1, 'one invocation owns the public reply');
+      assert.equal(lifecycle.filter(event => event.state === 'interrupted').length, delivery === 'interrupt' ? 1 : 0);
+      assert.equal(lifecycle.filter(event => event.state === 'completed').length, delivery === 'interrupt' ? 1 : 2);
+      assert.equal(lifecycle.filter(event => event.state === 'message').length, delivery === 'boundary' ? 2 : 1, 'each completed subject publishes once');
     } finally {
       release();
       await host?.close();

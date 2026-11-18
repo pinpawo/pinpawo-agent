@@ -36,6 +36,8 @@ export type PetDispatchQueueSnapshot = {
 };
 
 export type PetDispatchQueueEntry = {
+  /** Source identity for read-only scheduling observation; not execution context. */
+  origin?: PetInvocationScope;
   dispatchId: string;
   enqueuedAt: string;
   sessionId?: string;
@@ -50,6 +52,8 @@ export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope }
  * it only returns the same key in lifecycle observations.
  */
 export type PetDispatchRequest = {
+  /** Source identity for queue observation only; not execution or review context. */
+  origin?: PetInvocationScope;
   request: string;
   /** In-process cancellation until the request enters the resident queue. */
   signal?: AbortSignal;

@@ -8,6 +8,8 @@ import { createReasoningPassbackChatOpenAI, ReasoningPassbackCompletions } from 
 export { resolveLlmGenerationReserveTokens } from '../config/llmModelPresets';
 
 export type HostModelGenerationOptions = {
+  /** Only the narrow Studio Head decision, not ordinary Agent roles. */
+  purpose?: 'pet-head';
   /** Explicit experimental override; when omitted the provider chooses. */
   temperature?: number;
   /** Ask compatible OpenAI endpoints for deterministic output. */
@@ -17,6 +19,16 @@ export type HostModelGenerationOptions = {
   /** Preserve Channel's legacy Chat Completions, max_tokens and system-role wire contract. */
   forceChatCompletions?: boolean;
 };
+
+function isOfficialDeepSeekHead(config: AgentLlmConfig, options: HostModelGenerationOptions): boolean {
+  if (options.purpose !== 'pet-head' || (config.protocol && config.protocol !== 'openai-compatible')
+    || !['deepseek-flash', 'deepseek-v4-pro'].includes(config.model)) return false;
+  try {
+    const url = new URL(config.baseUrl);
+    return url.protocol === 'https:' && url.hostname === 'api.deepseek.com' && (!url.port || url.port === '443')
+      && !url.username && !url.password && !url.search && !url.hash && ['/', '/v1', '/v1/'].includes(url.pathname);
+  } catch { return false; }
+}
 
 /** Construct one model using the Host's protocol and generation settings. */
 export function buildModel(
@@ -44,7 +56,9 @@ export function buildModel(
   }
   const openaiFields: ChatOpenAIFields = {
     ...fields,
-    // Thinking and reasoning effort use provider defaults.
+    // Official DeepSeek Head decisions have a small bounded JSON budget. Leave
+    // every Agent role, gateway and other protocol on its unchanged defaults.
+    ...(isOfficialDeepSeekHead(llmConfig, generationOptions) ? { modelKwargs: { thinking: { type: 'disabled' } } } : {}),
     timeout: llmConfig.timeoutMs ?? 45000,
     streaming: generationOptions.streaming ?? requiresLlmStreaming(llmConfig.model),
     streamUsage: true,

@@ -46,7 +46,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession, delivery, signal }) => {
+    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, origin: suppliedOrigin, session: suppliedSession, delivery, signal }) => {
       signal?.throwIfAborted();
       const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
       if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
@@ -55,6 +55,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       }
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
+      const origin = suppliedOrigin ? copyPetInvocationScope(suppliedOrigin) : undefined;
+      if (origin && (!scope || origin.namespace !== scope.namespace)) throw new Error('Dispatch origin requires a matching scope namespace.');
       const session = suppliedSession ? { ...suppliedSession } : undefined;
       const petId = runtime.petId;
       const resolved = scope && resolveInvocationContext
@@ -172,6 +174,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
       } : undefined, {
         dispatchId, enqueuedAt: new Date().toISOString(),
+        ...(origin ? { origin } : {}),
         ...(target ? { sessionId: target.id } : {}),
         ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
       });

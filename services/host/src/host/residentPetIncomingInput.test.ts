@@ -98,7 +98,7 @@ function reply(turn: AgentSessionTurnOptions, text: string): AgentSessionTurnRes
   return { status: 'completed', reply: text };
 }
 
-test('queued input interrupts only after delivery and is consumed once with its own attribution', async () => {
+test('ordinary same-session queued input waits through delegation completion and retains attribution', async () => {
   const started = deferred(), delivered = deferred();
   const turns: Array<{ message: string; invocation: ReturnType<typeof readPetInvocationContext> }> = [];
   const incoming = JSON.stringify({ type: 'channel_message', author: { kind: 'pet', participantId: 'pet:reviewer' }, body: 'Delivery ready' });
@@ -113,7 +113,7 @@ test('queued input interrupts only after delivery and is consumed once with its 
       await delivered.promise;
       await turn.setup.input.onDelegationComplete?.();
       firstSignal.throwIfAborted();
-      assert.fail('The old run must not publish a stale reply.');
+      assert.equal(firstSignal.aborted, false, 'queued input cannot preempt accepted work at a boundary');
     }
     return reply(turn, message);
   });
@@ -121,14 +121,15 @@ test('queued input interrupts only after delivery and is consumed once with its 
     await h.resident.dispatch.dispatch({ ...target, dispatchId: 'first', request: 'first' });
     await started.promise;
     await h.resident.dispatch.dispatch({ ...target, dispatchId: 'next', request: incoming });
-    assert.equal(firstSignal.aborted, false, 'ordinary dispatch waits for the delegation boundary');
+    assert.equal(firstSignal.aborted, false, 'ordinary dispatch does not interrupt');
     assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 1);
     delivered.resolve();
     await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
     assert.deepEqual(turns.map(turn => turn.message), ['first', incoming]);
     assert.deepEqual(turns.map(turn => turn.invocation?.dispatchId), ['first', 'next']);
-    assert.ok(h.events.some(event => event.dispatchId === 'first' && event.state === 'interrupted'));
-    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => [event.dispatchId, event.message?.text]), [['next', incoming]]);
+    assert.ok(h.events.some(event => event.dispatchId === 'first' && event.state === 'completed'));
+    assert.ok(!h.events.some(event => event.state === 'interrupted'));
+    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => [event.dispatchId, event.message?.text]), [['first', 'first'], ['next', incoming]]);
     assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
   } finally { delivered.resolve(); await h.close(); }
 });
@@ -205,7 +206,7 @@ test('immediate input during review settlement cannot cancel a later human appro
   } finally { releaseSettlement.resolve(); await h.close(); }
 });
 
-test('a matching input is preferred without consuming another session or scope, and preserves target FIFO', async () => {
+test('ordinary queued input preserves admission FIFO across sessions and scopes', async () => {
   const started = deferred(), boundary = deferred();
   const turns: string[] = [];
   const h = await fixture(async turn => {
@@ -229,8 +230,8 @@ test('a matching input is preferred without consuming another session or scope, 
     await h.resident.dispatch.dispatch({ ...target, request: 'next-1' });
     await h.resident.dispatch.dispatch({ ...target, request: 'next-2' });
     boundary.resolve();
-    await waitFor(() => h.events.filter(event => event.state === 'completed').length === 7);
-    assert.deepEqual(turns, ['first', 'next-1', 'other-session', 'other-namespace', 'other-channel', 'unscoped', 'implicit-session', 'next-2']);
+    await waitFor(() => h.events.filter(event => event.state === 'completed').length === 8);
+    assert.deepEqual(turns, ['first', 'other-session', 'other-namespace', 'other-channel', 'unscoped', 'implicit-session', 'next-1', 'next-2']);
   } finally { boundary.resolve(); await h.close(); }
 });
 
@@ -287,7 +288,7 @@ test('an immediate interruption that races with native review preserves approval
       resumeStarted.resolve(); await resumeBoundary.promise;
       await turn.setup.input.onDelegationComplete?.();
       turn.setup.input.signal?.throwIfAborted();
-      assert.fail('Queued input must also be considered after a reviewed dispatch resumes.');
+      return reply(turn, 'approved work completed');
     }
     if (turn.request.message === 'first') {
       const signal = turn.setup.input.signal!;
@@ -317,7 +318,7 @@ test('an immediate interruption that races with native review preserves approval
     resumeBoundary.resolve();
     await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch, undefined);
-    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['next']);
+    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['first', 'next']);
   } finally { resumeBoundary.resolve(); await h.close(); }
 });
 
@@ -366,4 +367,34 @@ test('queued dispatches retain separate request and hint snapshots across scopes
     assert.ok(targets.every(target => Object.isFrozen(target)));
     assert.equal(targets.length, 2, 'plain input does not resolve scoped provider context');
   } finally { release.resolve(); await h.close(); }
+});
+
+test('explicit interruption is retained on either side of a delegation boundary', async () => {
+  for (const timing of ['before', 'after'] as const) {
+    const boundary = deferred(), release = deferred();
+    let signal!: AbortSignal;
+    const h = await fixture(async turn => {
+      const text = turn.request.kind === 'user_message' ? turn.request.message : '';
+      if (text === 'first') {
+        signal = turn.setup.input.signal!;
+        if (timing === 'after') await turn.setup.input.onDelegationComplete?.();
+        boundary.resolve();
+        await release.promise;
+        if (timing === 'before') await turn.setup.input.onDelegationComplete?.();
+        signal.throwIfAborted();
+        assert.fail('Explicit interruption must stop the accepted current turn.');
+      }
+      return reply(turn, text);
+    });
+    try {
+      await h.resident.dispatch.dispatch({ ...target, request: 'first', dispatchId: 'first' });
+      await boundary.promise;
+      await h.resident.dispatch.dispatch({ ...target, request: 'urgent', dispatchId: 'urgent', delivery: 'interrupt' });
+      assert.equal(signal.aborted, true);
+      release.resolve();
+      await waitFor(() => h.events.some(event => event.dispatchId === 'urgent' && event.state === 'completed'));
+      assert.equal(h.events.filter(event => event.dispatchId === 'first' && event.state === 'interrupted').length, 1);
+      assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['urgent']);
+    } finally { release.resolve(); await h.close(); }
+  }
 });

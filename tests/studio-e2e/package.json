@@ -7,7 +7,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import ../support/isolateSessions.mjs --import tsx/esm --test $(find src -name '*.test.ts' -not -path 'src/scenarios/*' | sort)",
     "test:scenarios": "node --import ../support/isolateSessions.mjs --import tsx/esm --test src/scenarios/*.test.ts",
-    "scenario:live": "node --import ../support/isolateSessions.mjs --import tsx/esm scripts/petHeadTimelineLive.ts"
+    "scenario:live": "node --import ../support/isolateSessions.mjs --import tsx/esm scripts/petHeadTimelineLive.ts",
+    "scenario:roundtable": "node --import ../support/isolateSessions.mjs --import tsx/esm --test src/scenarios/philosophyRoundtable.test.ts",
+    "eval:head": "node --import tsx/esm scripts/headDecisionEval.ts"
   },
   "devDependencies": {
     "@langchain/core": "^1.2.1",

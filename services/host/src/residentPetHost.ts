@@ -309,7 +309,8 @@ export async function createResidentPetRuntime(
           onDelegationComplete: async () => {
             await input.setup.input.onDelegationComplete?.();
             input.setup.input.signal?.throwIfAborted();
-            interrupt();
+            // Queue presence is not permission to preempt accepted work. Only
+            // explicit delivery=interrupt (or Stop) may interrupt this turn.
           },
         } },
       });

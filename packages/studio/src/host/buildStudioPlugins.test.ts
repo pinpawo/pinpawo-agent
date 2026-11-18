@@ -375,6 +375,8 @@ test('Plugin model factories use complete resolved profiles for native and gatew
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway', maxOutputTokens: 4096 },
     { modelProfileId: 'responses-preferred', model: 'gpt-5.5-pro',
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway', maxOutputTokens: 4096 },
+    { modelProfileId: 'official-deepseek', model: 'deepseek-flash',
+      baseUrl: 'https://api.deepseek.com/v1', apiKey: 'mock-deepseek' },
     { modelProfileId: 'unknown', model: 'example-model',
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway' },
   ], 'native');
@@ -443,6 +445,28 @@ test('Plugin model factories use complete resolved profiles for native and gatew
       assert.equal(gatewayRequests, 1);
     }
 
+    // The shared profile stays unchanged: only explicitly Head-scoped requests opt in.
+    const officialEndpoint = models.resolve('official-deepseek');
+    for (const purpose of [undefined, 'pet-head'] as const) {
+      const model = officialEndpoint.createChatModel!({
+        maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false,
+        forceChatCompletions: true, ...(purpose ? { purpose } : {}),
+      });
+      let requests = 0;
+      const transport = model as unknown as { clientConfig: { fetch: typeof fetch } };
+      transport.clientConfig.fetch = async (url, init) => {
+        requests++;
+        assert.equal(String(url), 'https://api.deepseek.com/v1/chat/completions');
+        const body = JSON.parse(String(init?.body));
+        assert.deepEqual(body.thinking, purpose === 'pet-head' ? { type: 'disabled' } : undefined);
+        return Response.json({ id: 'mock', object: 'chat.completion', created: 0, model: 'deepseek-flash',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+      };
+      assert.equal((await model.invoke('hi')).text, 'ok');
+      assert.equal(requests, 1);
+    }
+
     const preferredEndpoint = models.resolve('responses-preferred');
     assert.equal(preferredEndpoint.structuredOutputMethod, 'jsonSchema');
     assert.equal(models.resolve('unknown').structuredOutputMethod, 'jsonMode');
@@ -477,8 +501,9 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     definitionId: 'planner', name: 'Planner', modelProfileId: 'specialist',
   }));
   await writeFile(path.join(petDir, 'writer.json'), JSON.stringify({ definitionId: 'writer', name: 'Writer' }));
+  await writeFile(path.join(petDir, 'official.json'), JSON.stringify({ definitionId: 'official', name: 'Official', modelProfileId: 'official' }));
   await writeFile(path.join(workdir, '.pinpawo', 'studio.json'), JSON.stringify({
-    studioId: 'head-composition', definitions: ['planner', 'writer'],
+    studioId: 'head-composition', definitions: ['planner', 'writer', 'official'],
   }));
   const configuration = await resolveStudioHostConfig({ workdir });
   let channelContext: StudioPluginContext | undefined;
@@ -494,14 +519,14 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     start(context: StudioPluginContext) { channelContext = context; },
     head: {
       readContext: async () => ({ messages: [] }),
-      reply: async (_channelId: string, petId: string, messageId: string, body: string) => {
-        replies.push({ petId, messageId, body });
-        if (replies.length === 2) repliesDone();
+      reply: async () => { assert.fail('Head routing must not write a final reply'); },
+      dispatch: async (_channelId: string, petId: string, message: { messageId: string }, body: string) => {
+        replies.push({ petId, messageId: message.messageId, body });
+        if (replies.length === 3) repliesDone();
       },
-      dispatch: async () => { assert.fail('model requested a direct reply'); },
     },
   };
-  const calls: Array<{ url: string; model: string; petId: string }> = [];
+  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown }> = [];
   const tracingKeys = ['LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2'];
   const tracing = tracingKeys.map(key => process.env[key]);
   for (const key of tracingKeys) process.env[key] = 'false';
@@ -515,16 +540,25 @@ test('buildStudio connects each Pet Head to its configured model profile and the
   }) as typeof setTimeout;
   globalThis.fetch = async (url, init) => {
     const request = JSON.parse(String(init?.body));
+    const system = request.messages.find((message: { role: string }) => message.role === 'system');
+    const schemaBlock = system.content.split('<decision_schema>\n')[1]?.split('\n</decision_schema>')[0];
+    assert.ok(schemaBlock, 'actual JSON-mode wire request must carry the structured decision schema');
+    const schema = JSON.parse(schemaBlock);
+    assert.deepEqual(schema.required, ['action', 'reply', 'intent', 'timing']);
+    assert.equal(schema.additionalProperties, false);
+    assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+    assert.equal(request.response_format.type, 'json_object');
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
-    calls.push({ url: String(url), model: request.model, petId: input.pet.petId });
+    calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
     return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
-      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'reply', text: `hello from ${input.pet.petId}` }) }, finish_reason: 'stop' }],
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, timing: 'enqueue' }) }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   };
   const profiles = createTestModelProfileRegistry([
     { modelProfileId: 'default', model: 'default-model', baseUrl: 'https://default.example.test/v1' },
-    { modelProfileId: 'specialist', model: 'specialist-model', baseUrl: 'https://specialist.example.test/v1' },
+    { modelProfileId: 'specialist', model: 'deepseek-flash', baseUrl: 'https://specialist.example.test/v1' },
+    { modelProfileId: 'official', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com/v1' },
   ]);
   const modelProfiles = createLocalModelProfileRegistry({ snapshot: profiles.snapshot, llmDefaults: { timeoutMs: 1000 } });
   let result: Awaited<ReturnType<typeof buildStudio>> | undefined;
@@ -534,8 +568,13 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       modelProfiles,
       hostCapabilities: [generalCapability()], petCapabilities: new Map(), ...residentBuildResources(workdir),
     });
+    const diagnostics: unknown[] = [];
+    result.studio.subscribe(event => {
+      if (event.type === 'pet.head.decision') diagnostics.push(event.payload);
+    });
     await result.studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
     await result.studio.pets.create({ channelId: 'one', petId: 'writer', definitionId: 'writer', name: 'Writer' });
+    await result.studio.pets.create({ channelId: 'one', petId: 'official', definitionId: 'official', name: 'Official' });
     assert.ok(channelContext);
     channelContext.notify({ type: 'channel.message.created', topic: 'other', payload: {
       channelId: 'one', messageId: 'wrong-topic', sequence: 1, author: { kind: 'human', id: 'owner' },
@@ -546,13 +585,27 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       occurredAt: '2026-01-01T00:00:00Z', body: 'Hello', mentions: [],
     } });
     await completed;
+    // The observable event is correlated, bounded and excludes model/source text.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(diagnostics.length, 3);
+    for (const entry of diagnostics as Array<Record<string, unknown>>) {
+      assert.equal(entry.channelId, 'one');
+      assert.equal(entry.messageId, 'message-1');
+      assert.equal(entry.outcome, 'selected');
+      assert.equal(entry.action, 'dispatch');
+      assert.equal(entry.attempts, 1);
+      assert.ok(['planner', 'writer', 'official'].includes(String(entry.petId)));
+      assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'action', 'attempts', 'code'].includes(key)));
+    }
     assert.deepEqual(calls.sort((a, b) => a.petId.localeCompare(b.petId)), [
-      { petId: 'planner', model: 'specialist-model', url: 'https://specialist.example.test/v1/chat/completions' },
-      { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions' },
+      { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions', thinking: { type: 'disabled' } },
+      { petId: 'planner', model: 'deepseek-flash', url: 'https://specialist.example.test/v1/chat/completions', thinking: undefined },
+      { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions', thinking: undefined },
     ]);
-    assert.deepEqual(replies.sort((a, b) => a.petId.localeCompare(b.petId)), [
-      { petId: 'planner', messageId: 'message-1', body: 'hello from planner' },
-      { petId: 'writer', messageId: 'message-1', body: 'hello from writer' },
+    assert.deepEqual(replies.map(({ petId, messageId }) => ({ petId, messageId })).sort((a, b) => a.petId.localeCompare(b.petId)), [
+      { petId: 'official', messageId: 'message-1' },
+      { petId: 'planner', messageId: 'message-1' },
+      { petId: 'writer', messageId: 'message-1' },
     ]);
   } finally {
     await result?.studio.shutdown();

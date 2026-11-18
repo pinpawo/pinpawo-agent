@@ -176,6 +176,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       notify({
         type: `dispatch.${event.state}`,
         source: 'resident-pet',
+        topic: pet.registration.petId,
         occurredAt: new Date().toISOString(),
         payload: {
           invocationId: event.dispatchId,

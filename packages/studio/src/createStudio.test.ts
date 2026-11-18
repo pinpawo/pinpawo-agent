@@ -5,7 +5,7 @@ import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 
 import { prepareStudio, type CreateStudioInput, type PreparedStudio } from './createStudio';
 import { StudioPetError } from './pets/studioPets';
-import { StudioPetUnavailableError, type StudioPlugin, type StudioPluginContext } from './studioContract';
+import { StudioPetUnavailableError, type StudioEvent, type StudioPlugin, type StudioPluginContext } from './studioContract';
 import type { StudioPetRuntime } from './types';
 
 type StudioPetBinding = {
@@ -104,28 +104,28 @@ test('Studio dispatches request-only input and returns no thread or continuation
   await studio.shutdown();
 });
 
-test('Studio relays resident dispatch lifecycle observations without owning execution', async () => {
-  const events: unknown[] = [];
-  let lifecycleListener: Parameters<PetDispatchPort['onDispatchLifecycle']>[0] | undefined;
-  const port: PetDispatchPort = {
+test('Studio routes resident dispatch lifecycle by Pet instance while preserving broadcast delivery', async (t) => {
+  const lifecycleListeners = new Map<string, Parameters<PetDispatchPort['onDispatchLifecycle']>[0]>();
+  const portFor = (petId: string): PetDispatchPort => ({
     getQueueSnapshot: () => ({
       state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
     }),
     onQueueChange: () => () => undefined,
     onDispatchLifecycle: (listener) => {
-      lifecycleListener = listener;
+      lifecycleListeners.set(petId, listener);
       return () => {
-        if (lifecycleListener === listener) lifecycleListener = undefined;
+        if (lifecycleListeners.get(petId) === listener) lifecycleListeners.delete(petId);
       };
     },
     dispatch: async ({ request, dispatchId }) => {
       assert.ok(dispatchId);
-      lifecycleListener?.({ dispatchId, request, state: 'queued' });
-      lifecycleListener?.({ dispatchId, request, requestId: 'host-1', state: 'running' });
-      lifecycleListener?.({ dispatchId, request, requestId: 'host-1', state: 'message', message: {
+      const listener = lifecycleListeners.get(petId);
+      listener?.({ dispatchId, request, state: 'queued' });
+      listener?.({ dispatchId, request, requestId: 'host-1', state: 'running' });
+      listener?.({ dispatchId, request, requestId: 'host-1', state: 'message', message: {
         type: 'message.completed', messageId: 'm1', role: 'assistant', text: 'draft ready',
       } });
-      lifecycleListener?.({
+      listener?.({
         dispatchId,
         request,
         requestId: 'host-1',
@@ -133,41 +133,51 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
         error: 'Connection error',
       });
     },
-  };
-  const studio = await createStudio({
-    studioId: 's1',
-    pets: [{
-      registration: { petId: 'worker', name: 'WORKER' },
-      dispatch: port,
-    }],
   });
+  const { studio, activatePlugins } = prepareStudio({
+    studioId: 's1',
+    definitions: [{ definitionId: 'worker', name: 'Worker' }],
+    plugins: withTestPetChannel(),
+    assemblePet: async ({ petId }) => ({ dispatch: portFor(petId), close: async () => undefined }),
+  });
+  t.after(() => studio.shutdown());
+  const petIds = ['first-pet', 'second-pet'];
+  for (const petId of petIds) {
+    await studio.pets.create({ channelId: 'one', petId, definitionId: 'worker', name: petId.toUpperCase() });
+  }
+  await activatePlugins();
+
+  const events: StudioEvent[] = [];
   studio.subscribe((event) => { events.push(event); });
+  const scopedEvents = petIds.map(petId => {
+    const seen: StudioEvent[] = [];
+    studio.subscribe(event => { seen.push(event); }, { source: 'resident-pet', topic: petId });
+    return seen;
+  });
 
-  const receipt = await studio.dispatch({ petId: 'worker', request: 'draft' });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  const receipt = await studio.dispatch({ petId: 'first-pet', request: 'draft' });
+  await studio.dispatch({ petId: 'second-pet', request: 'review' });
+  await new Promise<void>(resolve => setImmediate(resolve));
 
-  assert.deepEqual(events.map((event) => ({
-    type: (event as { type: string }).type,
-    source: (event as { source: string }).source,
-  })), [
-    { type: 'dispatch.queued', source: 'resident-pet' },
-    { type: 'dispatch.running', source: 'resident-pet' },
-    { type: 'dispatch.message', source: 'resident-pet' },
-    { type: 'dispatch.failed', source: 'resident-pet' },
-    { type: 'dispatch.accepted', source: 'studio' },
-  ]);
-  assert.deepEqual((events[2] as { payload: { message?: unknown } }).payload.message, {
+  const lifecycleTypes = ['dispatch.queued', 'dispatch.running', 'dispatch.message', 'dispatch.failed'];
+  assert.deepEqual(scopedEvents.map(seen => seen.map(event => event.type)), petIds.map(() => lifecycleTypes));
+  assert.deepEqual(events.map(({ type, source, topic }) => ({ type, source, topic })), petIds.flatMap(petId => [
+    ...lifecycleTypes.map(type => ({ type, source: 'resident-pet', topic: petId })),
+    { type: 'dispatch.accepted', source: 'studio', topic: undefined },
+  ]));
+  assert.deepEqual(scopedEvents, petIds.map(petId => events.filter(event => event.topic === petId)));
+  assert.deepEqual((events[2]!.payload as { message?: unknown }).message, {
     type: 'message.completed', messageId: 'm1', role: 'assistant', text: 'draft ready',
   });
-  assert.deepEqual((events[3] as { payload: unknown }).payload, {
+  assert.deepEqual(events[3]!.payload, {
     invocationId: receipt.invocationId,
-    petId: 'worker',
+    petId: 'first-pet',
     request: 'draft',
     requestId: 'host-1',
     error: 'Connection error',
   });
   await studio.shutdown();
-  assert.equal(lifecycleListener, undefined);
+  assert.equal(lifecycleListeners.size, 0);
 });
 
 test('Studio delegates queue ownership to each live Pet dispatch port', async () => {

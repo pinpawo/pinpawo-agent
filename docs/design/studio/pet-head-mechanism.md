@@ -12,55 +12,44 @@
 
 当前实现：[Timeline 写入](../../../plugins/channel/src/channelService.ts)、[Channel port 与输出桥接](../../../plugins/channel/src/channelPlugin.ts)、[Head 与执行器](../../../packages/studio/src/host/petHead.ts)、[Studio 装配](../../../packages/studio/src/host/buildStudio.ts)、[EventBus](../../../packages/studio/src/studioEventBus.ts)、[Studio Dispatch 与 Session 入口](../../../packages/studio/src/createStudio.ts)、[Resident Pet Dispatch](../../../services/host/src/host/residentPetDispatch.ts)。
 
-## 2. 每条 Timeline 消息先判断该不该接
+## 2. Head 先判断是否该接，再看 Session 状态
 
-Head 的第一次判断只用原消息、Channel 上下文和 Pet 职责，不预读 Session。输出用互斥分支表达，避免再用 `ignore` 表示「不派发」：
+先用本条消息、Pet 职责、明确引用的消息和有限的 Channel Timeline 判断「归不归我」。**不接就是静默**：不回复、不读 Session、不派发。Head 能直接回答的，就直接决定是否回复；不为了回复而启动 Agent。
 
-| 第一次判断 | Head 下一步 |
+当 Head 需要让 Agent 做事，或需要知道此刻已有执行的情况时，宿主给出该 Session 的状态事实。**对需要 Agent 处理的请求，只按 Session 状态分两条路径：**
+
+| Session 状态 | 当前路径 |
 | --- | --- |
-| 不接 | 结束。不回复、不读 Session、不派发。 |
-| 接，只需答复 | 需要开口才写 Timeline。不调用 Dispatch。 |
-| 接，需要查证进度 | 定位本 Channel 的具体执行，按需只读查证，再决定如何答复。不为回答进度伪造派发意图。 |
-| 接，需要派发 | 产出一个可校验的原始意图，并区分「可独立执行」与「依赖当前执行的补充或更正」。再由宿主检查 Studio 接纳状态。可选回复不是派发回执。 |
+| 空闲（idle） | **`dispatch`**：把已确认需要执行的工作交给 Studio，不先读 Session 内容。 |
+| 已有任务在执行 | **`read_session`**：先查正在执行的那次，拿到事实后让 Head 做判断；不在这一步直接另起执行。 |
 
-「该我接」是必须经过的判断，不是额外的模型调用。不接与回复互斥；接了但暂时没有可靠结果，可以不回复。模型只表达意图，不能指定读取目标、选择 Session、修改队列或中断执行。
+这不是让模型先选「查进度」或「要派发」。例如，「上次那份表做到哪了？没做完就换新表」在已有执行时，先查那次执行，再判断怎么回复、以及是否有工作需要提交。只有询问、没有执行请求时，查到事实就据实回应；没有正在执行的任务也不会因此派发一个任务。
 
-## 3. 需要派发，且已有执行时怎么办
+## 3. 工具边界与读取后的判断
 
-1. **没有冲突**：独立任务通过原 Channel port 请求 Studio 接纳，Studio 决定开始或排队。依赖旧任务的补充或更正不因当前空闲就变成独立任务。
-2. **有冲突，且能定位本 Channel 的具体执行**：宿主读取一次受限 Session 快照，再把事实和原消息交给同一个 Head 做一次追加判断。队列说明「有没有接纳上的冲突」；Session 帮助判断「是新任务、已有结果，还是对当前任务的更正」。
-3. **Pet 忙，但无法定位本 Channel 内的执行**：不读别的 Session，也不把「看不到」当作空闲。独立任务仍由现有 Studio 接纳；依赖当前执行的更正不盲目排队，必要时明确说明尚未应用。
+- **`dispatch` 是执行，`read_session` 是查证。** 宿主按 Session 状态选择当前路径，不让模型同时拿两个能力猜状态。首版可以用结构化决定加宿主编排，不必引入通用 ReAct。最终决定只表达回复或工作意图；回复与派发可以独立发生，不要求每次派发都先回复。
+- **只读当前这次。** 宿主用已核实的 Pet、Channel、Session 与 `invocationId` 定位，必要时用生命周期与 `activeRun.requestId` 核对具体运行。模型不传任意身份或查询参数。定位或读取失败，就是这次查证拿不到可靠证据，不把它解释成空闲、没完成或已完成。
+- **读完再决定。** 可以据实回复；有已提交且可核实的结果明确满足新请求，就不重复派发；独立的后续工作仍走现有 Studio 接纳。针对当前执行的更正，只有能作为独立后续任务才提交；必须改正在跑的那次，第一版不自动打断，也不声称已改。正在跑、类似的计划或单个 `completed` 事件，都不能证明新请求已满足。
+- **Queue 仍由 Studio 管。** Session 状态决定 Head 此时走哪条路径；实际开始还是排队由现有 Studio 接纳规则决定。无需 Head 自己维护队列。
 
-追加判断之后：
+## 4. 上下文按步骤给，不把整个 Session 交给 Head
 
-| 情况 | 第一版行为 |
-| --- | --- |
-| 独立的新任务 | 使用原消息的现有去重键，经原 Channel port 入队。不新增 Head 队列。 |
-| 已被满足 | 有可核实的、已提交且可在本 Channel 使用的结果，明确覆盖这次要求，才不再派发。相同源消息的重送由原有去重处理，不和不同消息的语义相似混用。 |
-| 还在做，看起来会覆盖 | 不把预期当成已满足。独立请求仍走正常接纳；不跟随一个未完成的执行来静默吞掉新请求。 |
-| 补充或更正 | 能明确整理成独立后续任务才排队；必须修改正在执行的内容时，第一版不自动打断、不盲目重跑，并说明尚未应用。 |
+1. **初判只看 Channel。** 原消息、Pet 职责、用户明确引用的原文和有限 Timeline。不给整份实例配置、队列明细或原始附件内容。宿主用轻量运行事实判定路径，不为判断空闲去拉完整快照。
+2. **只有走读取路径，才补给执行证据。** 复用 Studio 的 `petSessions.snapshot`。给模型可核实的状态、观察时间、必要的原任务摘要，以及能确认属于本次执行、可在本 Channel 使用的消息或已公开结果。无法核实的字段省略，并明确查证限制。宿主保留运行关联 ID 供复核。即使活跃 `requestId` 匹配，也不把没有运行来源的旧计划当作本次进度。不给 TUI 私聊、原始工具输入输出、私下审批或未交接的子 Agent 内容。
+3. **限制读取和判断次数。** 每条消息最多两次 Head 模型适配器调用（含格式回退）、一次 Session 读取，共用判断截止时间。读取前后核验绑定及访问权限，迟到结果不生效；A 已变成 B 时，不拿 A 的快照描述或操作 B。初判无有效意图不派发；查证不成时，只有已确认可独立执行的工作才能走现有接纳，依赖当前执行的更正不盲目提交。
 
-**提交前重新校验。** 用已验证的 Pet 实例、Channel scope、Session 和 `invocationId`（Dispatch 侧的 `dispatchId`）关联本次观察；若证据只属于某一具体运行尝试，还需要能核实其运行身份。Session 相同不等于执行相同。若 A 已失败、停止、换成 B，或状态不可验证，不能拿 A 的快照来操作 B，也不能据此说新请求已覆盖。即便 A 在复核时仍在跑，也可能随后失败；单个 `completed` 事件不是结果覆盖证据。没有可核实的结果时，独立请求回到原接纳路径，依赖旧执行的更正则不自动应用。
-
-## 4. Session 查证和调用预算
-
-- **宿主按条件决定是否读，模型读完再判断。** 复用 Studio 的 `petSessions.snapshot`，不把通用 Session 查询绑定成始终可用的 LLM tool，不把读操作藏进最终决策的 handler。第一版不需要通用 ReAct loop；JSON-only 模型也可以做同样的两段结构化判断。
-- **范围由宿主决定。** 读取前后核验实例仍在线、Channel 绑定与权限没变。仅返回这次执行的精确关联、采样时间、有限的可公开消息或已交接内容，以及能证明属于本轮且可公开的计划。旧 checkpoint 的计划、未交接的子 Agent 内容、TUI 私聊、工具入参和内部结果不作进度证据。缺失、截断、权限变化或超时显式标记，不猜进度。
-- **每条消息最多两次 Head 模型适配器调用、一次 Session 读取。** 两次是实际的 Head 层调用上限，不是每阶段各自的重试额度。优先按已验证的模型能力选输出模式；若允许格式 fallback，它也占同一额度，不能另开重试循环。
-- **共用一个判断截止时间。** 初判、回退、读取和复判共享同一预算。在预算内为最终校验与安全降级留出时间。模型或读取超过剩余预算就结束等待，拒绝迟到结果，不能让同一 Head 的下一条消息一直卡着；不改变 EventBus 的订阅顺序。初判无有效意图则不派发；有已校验的独立意图而查证不成，可退回正常接纳。依赖当前执行的更正不能用这个降级。实例下线或绑定失效则不再提交。已交给 Studio 的操作按真实回执解释，不把 Head 超时当成撤回。
-
-现有入口：[队列与 Session 接口](../../../packages/studio/src/studioContract.ts)、[精确 Session 适配器](../../../services/host/src/host/residentPetSessions.ts)、[snapshot 投影](../../../services/host/src/conversation/agentSessionSnapshot.ts)、[Head 判断适配器](../../../packages/studio/src/host/petHead.ts)、[EventBus FIFO](../../../packages/studio/src/studioEventBus.ts)。图中的 `read_session` 表示这条宿主只读路径，不代表向模型开放的通用工具。
+现有入口：[队列与 Session 接口](../../../packages/studio/src/studioContract.ts)、[精确 Session 适配器](../../../services/host/src/host/residentPetSessions.ts)、[snapshot 投影](../../../services/host/src/conversation/agentSessionSnapshot.ts)、[Head 判断适配器](../../../packages/studio/src/host/petHead.ts)、[EventBus FIFO](../../../packages/studio/src/studioEventBus.ts)。图中的 `read_session` 表示这条受限只读路径，不代表通用 Session 工具。
 
 ## 5. 反馈分别走现有链路
 
 - **接纳与执行变化**：Studio 接纳回执回答是否接纳；已有 `dispatch.*` 经同一个 EventBus 到本实例的 Head。Head 只保存少量可关联的观察。事件可以帮助查证，不能覆写实时快照，不因为收到状态事件就直接回复。主动长时提醒和失败恢复另做，不在这版引入调度机制。
-- **用户追问进度**：它是新的 Timeline 消息，先过同一个职责判断。定位到执行后，Head 可按需读 Session，明确区分「还在跑」「等待输入」「已停止」「失败」和「目前查不到」。若用户同时追加或更正工作，仍按派发冲突的规则判断；同一消息复用读取结果，不再读第二次。
+- **用户追问进度**：它是新的 Timeline 消息，先过同一个职责判断。已有可定位的执行时，Head 沿 `read_session` 查证，明确区分「还在跑」「等待输入」「已停止」「失败」和「目前查不到」。若用户同时追加或更正工作，仍按派发冲突的规则判断；同一消息复用读取结果，不再读第二次。
 - **执行的公开回复**：继续走 resident `dispatch.message` → 已有 Channel 桥接 → Timeline。Head 不从完成事件再发同一结果，不转发未公开的中间内容。派发接纳、执行完成、结果发表是三件事。
 
 ## 6. 第一版验收
 
 - 忙时收到不归本 Pet 的消息：零 Session 读取、零回复、零派发；普通直接答复不读 Session。
-- 独立请求正常派发；跨 Channel 的忙碌不允许读外部 Session。明确的进度问题可走只读，不产生新运行。
+- 空闲且需要执行时派发，不读 Session 内容；已有执行时先读正在执行的那次，不直接另起执行。跨 Channel 不允许读外部 Session；仅问进度不产生新运行。
 - 命中当前执行才查证；确认覆盖与仅有相似计划分别验证；A 在复判前失败、复判后才失败、或同一 Session 已切到 B，都不会因旧证据静默吞掉独立的新请求，也不会操作 B。
 - 当前更正不能独立执行时不自动打断、不夸称已修改；晚到的事件不能覆盖实时观察，执行的公开回复不重复写入。
 - 格式 fallback 不突破两次调用；用脚本模型模拟慢调用、慢快照、实例下线及绑定变化。验证同一 Head 的下一条消息按时推进，且晚到结果不会提交回复或派发；其他订阅者不受阻。

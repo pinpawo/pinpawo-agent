@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createStudioStorage, type StudioDispatchRequest, type StudioEvent, type StudioEventInput, type StudioPluginContext } from '@pinpawo/studio-core';
+import { createStudioStorage, STUDIO_HEAD_PROGRESS_REPLY, type StudioDispatchRequest, type StudioEvent, type StudioEventInput, type StudioPluginContext } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { createChannelPlugin, type ChannelWorking } from './channelPlugin';
 import { ChannelAccessError } from './channelService';
@@ -9,6 +9,8 @@ test('messages retain references and mentions without dispatching a Pet', async 
   const storage = createStudioStorage({ kind: 'sqlite', path: ':memory:' });
   t.after(() => storage.close());
   const dispatched: StudioDispatchRequest[] = [];
+  const snapshotReads: unknown[][] = [];
+  const snapshot = { session: { sessionId: 'writer-session' } };
   const notified: StudioEventInput[] = [];
   const live: ReturnType<StudioPluginContext['listPets']> = [];
   const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
@@ -22,6 +24,9 @@ test('messages retain references and mentions without dispatching a Pet', async 
     registerContextProvider: () => () => undefined,
     notify: (event: StudioEventInput) => { notified.push(event); },
     subscribe: () => () => undefined,
+    petSessions: {
+      snapshot: async (...args: unknown[]) => { snapshotReads.push(args); return snapshot; },
+    },
     listPets: () => live,
     pets: { removeInstance, get: async (petId: string) => live.find(pet => pet.petId === petId) } as unknown as StudioPluginContext['pets'],
     clients: { get: async (clientId: string) => ({ clientId, label: clientId }) },
@@ -72,6 +77,31 @@ test('messages retain references and mentions without dispatching a Pet', async 
   await assert.rejects(plugin.sendMessage(channelId, { body: 'Unknown target.',
     mentions: [{ participantId: 'pet:missing' }], deliverables: current,
   }, owner));
+  const inquiry = (await plugin.sendMessage(channelId, { body: 'How far?' }, owner)).message;
+  const signal = new AbortController().signal;
+  await assert.rejects(plugin.sendMessage(channelId, { body: 'Fake marker', metadata: { headReplyKind: 'progress' } }, owner));
+  await assert.rejects(plugin.head.reply(channelId, 'writer', inquiry.messageId, '[@Writer](participant:pet:writer)', signal, { kind: 'progress' }), /cannot mention a Pet/);
+  await plugin.head.reply(channelId, 'writer', inquiry.messageId, 'Still running', signal, { kind: 'progress' });
+  await plugin.head.reply(channelId, 'writer', inquiry.messageId, 'Duplicate', signal, { kind: 'progress' });
+  const progress = notified.filter(event => event[STUDIO_HEAD_PROGRESS_REPLY]);
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0]?.topic, channelId);
+  assert.deepEqual(Object.getOwnPropertySymbols(JSON.parse(JSON.stringify(progress[0]))), []);
+  assert.equal(JSON.parse(JSON.stringify(progress[0])).metadata, undefined);
+  const publicRows = (await plugin.service.readContext(owner, channelId)).messages;
+  const storedReply = publicRows.find(message => message.replyTo === inquiry.messageId);
+  assert.equal(storedReply?.body, 'Still running');
+  assert.ok(!Object.hasOwn(storedReply!, 'metadata'));
+
+  const binding = await plugin.service.reserveSession(channelId, 'writer', () => 'writer-session');
+  await assert.rejects(plugin.head.readProgressSession(channelId, 'writer', binding.sessionId), ChannelAccessError);
+  await plugin.service.confirmSession(binding);
+  await assert.rejects(plugin.head.readProgressSession(channelId, 'writer', 'another-session'), ChannelAccessError);
+  await assert.rejects(plugin.head.readProgressSession(other, 'writer', binding.sessionId), ChannelAccessError);
+  assert.strictEqual(await plugin.head.readProgressSession(channelId, 'writer', binding.sessionId), snapshot);
+  await removeInstance('writer');
+  await assert.rejects(plugin.head.readProgressSession(channelId, 'writer', binding.sessionId), ChannelAccessError);
+  assert.deepEqual(snapshotReads, [['writer', 'writer-session', { timelineLimit: 8 }]]);
   assert.equal(dispatched.length, 0);
 });
 

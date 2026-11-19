@@ -74,7 +74,7 @@ test('the bound Channel exposes only its committed live messages and forwards op
   assert.deepEqual(calls, [
     ['read', 'team', 'a', 3, '1'],
     ['reply', 'team', 'a', '2', 'yes', signal, undefined],
-    ['dispatch', 'team', 'a', current, 'work', signal],
+    ['dispatch', 'team', 'a', current, 'work', signal, undefined],
   ]);
   unsubscribe();
   assert.equal(handler, undefined);
@@ -134,7 +134,7 @@ test('independent publication and execution axes support all four combinations w
     assert.equal(calls.filter(call => call[0] === 'reply').length, reply ? 1 : 0);
     assert.equal(calls.filter(call => call[0] === 'dispatch').length, action === 'dispatch' ? 1 : 0);
     if (reply) assert.deepEqual(calls[0], ['reply', 'a', '1', reply, signal, { preventPetMentions: true }]);
-    if (action === 'dispatch') assert.deepEqual(calls.at(-1), ['dispatch', 'a', source, 'Do the work', signal]);
+    if (action === 'dispatch') assert.deepEqual(calls.at(-1), ['dispatch', 'a', source, 'Do the work', signal, undefined]);
   }
 });
 
@@ -354,7 +354,7 @@ test('modeled interrupt preserves exact source and safely queues; stale snapshot
       } });
     await handler(source, new AbortController().signal);
     assert.equal(effects.length, 1);
-    assert.equal(effects[0]!.length, 4, 'no trusted interrupt delivery is passed');
+    assert.deepEqual(effects[0]!.slice(4), [undefined], 'no trusted interrupt delivery is passed');
     assert.equal(effects[0]![1], source);
     assert.deepEqual(decisions, [{ petId: 'a', channelId: 'team', messageId: '2', requested: 'interrupt', effective: 'enqueue', reason: stale ? 'stale_snapshot' : 'continuation_unavailable', activeDispatchId: 'old' }]);
   }
@@ -396,7 +396,7 @@ test('tool and structured JSON expose the same independent reply and execution s
   assert.deepEqual(declaration, jsonModel.schema());
   const schema = declaration as { required: string[]; additionalProperties: boolean; properties: { action: { enum: string[] }; reply: { type: string }; intent: { type: string } } };
   assert.deepEqual(schema.required, ['action', 'reply', 'intent', 'timing']);
-  assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+  assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch', 'progress-status', 'progress-details', 'progress-mixed', 'progress-reference']);
   assert.equal(schema.properties.reply.type, 'string');
   assert.equal(schema.properties.intent.type, 'string');
   assert.equal(schema.additionalProperties, false);
@@ -457,4 +457,18 @@ test('empty stop output is diagnosed separately from malformed, refusal, truncat
   const mock = mockEndpoint([{ content: '', response_metadata: { finish_reason: 'stop' } }, raw(ignore)]);
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), ignore);
   assert.equal(mock.calls.length, 2);
+});
+
+test('status model actions cannot carry freeform replies, execution intent, or interruption timing', async () => {
+  const status = { action: 'progress-status', reply: '', intent: '', timing: 'enqueue' };
+  for (const invalid of [
+    { ...status, reply: 'Guessing completion' },
+    { ...status, intent: 'Rerun original' },
+    { ...status, timing: 'interrupt' },
+    { ...status, sessionId: 'not-model-authority' },
+  ]) {
+    const mock = mockEndpoint([raw(invalid), raw(status)]);
+    assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), status);
+    assert.equal(mock.calls.length, 2);
+  }
 });

@@ -40,7 +40,7 @@ EventBus 仅保证同一订阅者的交付顺序，不回放离线事件，也�
 
 Head 继续使用 [Channel port](../../../plugins/channel/src/channelPlugin.ts) 派发。通过进程内观察接缝，在 resident 接纳前登记 Studio 刚分配的身份，关联 `(petId, channelId, sourceMessageId) → invocationId`。[Studio](../../../packages/studio/src/createStudio.ts) 以同一个值作为 resident `dispatchId`；只有相同 Pet、相同 ID 的成功 Studio receipt 确认归属。receipt 不是运行句柄。Studio 的接纳与 Channel 的 `confirmSession` 是两步；后者失败不抹去已接纳证据，也不重派。幂等回放不重新登记或接管旧 receipt。
 
-只暂存刚分配且尚待确认的 invocation 的提前事件；接纳失败即丢弃。每条事件先核对精确来源和 topic，再核对 `payload.petId`、`scope = { namespace: 'channel', id: channelId }` 和已登记的 `payload.invocationId`；已知 Session 与传入 `sessionId` 冲突时丢弃。其它生产者（含同 Pet、同 Channel、同 Session 的 Trigger、Scheduler 或人工派发）不会被认领。`requestId` 是一次执行轮次的身份，不是 invocation 的替代；人工审核后的现有[续跑路径](../../../services/host/src/host/dispatchContinuation.ts)可在同一 invocation 上开启新的轮次。
+只暂存刚分配且尚待确认的 invocation 的提前事件；接纳失败即丢弃。每条事件先核对精确来源和 topic，再核对 `payload.petId`、`scope = { namespace: 'channel', id: channelId }` 和已登记的 `payload.invocationId`；已知 Session 与传入 `sessionId` 冲突时丢弃。其它生产者（含同 Pet、同 Channel、同 Session 的 Trigger、Scheduler 或人工派发）不会被认领。`requestId` 是一次执行轮次的身份，不是 invocation 的替代；除了接纳后的排队事件，归并状态需要该轮次标识。人工审核后的现有[续跑路径](../../../services/host/src/host/dispatchContinuation.ts)可在同一 invocation 上开启新的轮次。
 
 | 可信事件 | Head 记录的事实 |
 |---|---|
@@ -53,13 +53,13 @@ Head 继续使用 [Channel port](../../../plugins/channel/src/channelPlugin.ts) 
 
 ## 3. 按需补证：队列或既有 Agent Session
 
-先有已接纳且归属匹配的记录，再读快照。对一次问句只选一次 Studio 快照读取，不巡检、不重试、不补发、不新增 Session 读取协议。快照读取期间若收到新可信事件，以新事件归并后的证据为准。
+先有已接纳且归属匹配的记录，再读快照。既有判断路由仍读取一份队列视图；进度分支只复用当次仍新鲜的队列快照，或补读一次 Agent Session。不巡检、不重试、不补发、不新增 Session 读取协议。快照读取期间若收到新可信事件，以新事件归并后的证据为准。
 
 - **队列**：非终态缺证据或上次可信证据超过 30 秒、尚无精确 Session/轮次，或只需补证排队时，可读取已有 [`listDispatchQueues()`](../../reference/api/studio.md#global-dispatch-observation)。只保留 Pet、Channel scope、原消息 origin、`dispatchId` 全匹配且 Session 不冲突的一项。精确 `activeOperation === 'dispatch'` 的 `activeDispatch` 可证实运行；精确 `entries` 可证实排队。全局 waiting/blocked 不能证实某一项在等人工；队列缺项不证明它已结束。
-- **Agent Session**：有精确 Session 与当前 `requestId`，且需要更细进展时，复用 [`petSessions.snapshot(petId, sessionId, { timelineLimit })`](../../../packages/studio/src/studioContract.ts)。先由 Channel 核对当前成员、实例归属和 Session 绑定，然后核对返回的 `sessionId` 与 `activeRun.requestId`。精确匹配的 `activeRun` 只补证运行。当前 `currentPlan` 没有自身的轮次归属，可能仍是上一轮 checkpoint 的计划；[初始 `plan.updated`](../../../services/host/src/agent/chatSessionAdapter.ts) 也可能把它标为新 `requestId`。首期不使用这些计划或初始 activity 推断阶段，不声称第几步、百分比或预计时间。读取请求限制近期 `timelineLimit`；Host 可能额外保留未结轮次的条目，Head 自己再限取近期条目、只接受显式匹配轮次且可公开的投影。无精确归属、轮次或来源证据就不使用条目。
+- **Agent Session**：有精确 Session 与当前 `requestId`，且需要更细进展时，复用 [`petSessions.snapshot(petId, sessionId, { timelineLimit })`](../../../packages/studio/src/studioContract.ts)。先由 Channel 核对当前成员、实例归属和 Session 绑定，然后核对返回的 `sessionId` 与 `activeRun.requestId`。精确匹配的 `activeRun` 只补证运行。当前 `currentPlan` 没有自身的轮次归属，可能仍是上一轮 checkpoint 的计划；[初始 `plan.updated`](../../../services/host/src/agent/chatSessionAdapter.ts) 也可能把它标为新 `requestId`。首期不使用这些计划或初始 activity 推断阶段，不声称第几步、百分比或预计时间。读取请求限制近期 `timelineLimit`；Host 可能额外保留未结轮次的条目，因此响应不转发整份快照。首期不读取这些条目的内容。后续只有有界、显式匹配轮次且可公开的既有投影才能提供阶段证据。
 - **Capability 边界**：子 Agent 的内部工作不可见；Root 工具历史出现 `delegate_capability`、甚至其调用状态为 completed，都不证明某个交接物可见、获批或已投递。[Transcript 投影](../../../services/host/src/conversation/transcriptProjection.ts)只可能把验证过的返回作为同轮最终回复的引用；[Host 快照的 checkpoint Timeline](../../../services/host/src/conversation/agentSessionSnapshot.ts)目前没有逐条填充 `requestId`。不能凭顺序、工具名或原始结果补这个缺口。没有同时满足公开与轮次归属的阶段摘要时，只用现有可信状态；不为隐藏内容另建抽取、投影或管道。不把工具参数/结果、审核内容、计划任务原文、整份 Session 或全局队列传给模型或发到 Channel。
 
-读不到、绑定不符或证据冲突时，答当前未知；有可信旧观察才注明上次所见，不冒充当前状态。不据此接管派发或变更工作。
+读取失败但仍有新鲜且未被否定的生命周期证据时，可以回答该状态，不冒充已知具体步骤。证据过时或精确绑定的快照与其冲突时答当前未知；有可信旧观察才注明上次所见。不据此接管派发或变更工作。
 
 ## 4. Timeline 分支：回答中途提问
 
@@ -68,9 +68,9 @@ Head 继续使用 [Channel port](../../../plugins/channel/src/channelPlugin.ts) 
 1. **确定唯一 Pet**：使用消息中单一解析出的 Pet mention，或同 Channel 精确 `replyTo` 指向的 Pet 作者；两者均无时，只有 Channel 恰有一只 Pet 才可答。多个目标或身份冲突时不抢答；名称和正文不替代身份。
 2. **确定归属任务**：有 `replyTo` 就查该条已提交消息是不是已跟踪的原始来源。同 Pet 的普通 Head 确认允许向上查一跳：核对作者与 `head-reply:<原来源 ID>`，要求上级是同 Channel 已跟踪的原来源；不向上递归或把上次进度答复认作原任务。显式引用无效不回落。无引用时仅在本次激活有唯一可证实的非终态且未辨清候选为零时选它；否则请引用原消息或答无法确认。
 3. **单独核对交付**：对可信完成运行，如有同轮 Agent 消息引用，由 Channel 验证当前成员、实例归属，再按 `channel_id + Pet 作者 + 准确 external_ref` 查已提交 Timeline 行；**仅**返回匹配的 Timeline 消息 ID。该内部读接缝位于 Channel，不新增数据表或公共端点。现有[投递路径](../../../plugins/channel/src/channelPlugin.ts)以 Agent 消息 ID 写 `externalRef`，现有[重复写入唯一键](../../../plugins/channel/src/store/kysely/store.ts)本身不含 Channel，不可直接用作查询。排除 `head-reply:` 保留前缀，写入延迟、写失败或不匹配只说明交付尚未确认；出现早先回复不把失败/中断变成成功。
-4. **正常提交答复，但不再交给 Head**：通过现有 Channel port 回复本次提问，沿用 `head-reply:<提问 ID>` 去重，不带 Pet mention。由 Channel 在首次提交的 live 事件上，用已有内部 `metadata` 标记这类答复和澄清；仅可信 Head reply 选项可设置该标记，公开请求与正文不能设置。Head 在判断前跳过标记事件，其余订阅者仍收到正常提交的消息；不改变持久 Timeline 格式。
+4. **正常提交答复，但不再交给 Head**：通过现有 Channel port 回复本次提问，沿用 `head-reply:<提问 ID>` 去重，不带 Pet mention。由 Channel 在首次提交的 live 事件上，用进程内 Symbol 标记这类答复和澄清，不进入 SSE JSON；仅可信 Head reply 选项可设置该标记，公开请求与正文不能设置。Head 在判断前跳过标记事件，其余订阅者仍收到正常提交的消息；不改变持久 Timeline 格式。
 
-例如，「执行已结束，尚未确认回复已发到本 Channel」与「执行已结束，已在本 Channel 留下回复」是不同结论。后一种可给出精确消息引用，也不宣称工作成功或全量交付。没有主动播报、计时巡检、自动重试、补偿派发或重启恢复。
+例如，「执行已结束，尚未确认回复已发到本 Channel」与「执行已结束，已在本 Channel 留下回复」是不同结论。后一种依据精确 Timeline 消息核对，但首期答复不回传内部引用，也不宣称工作成功或全量交付。没有主动播报、计时巡检、自动重试、补偿派发或重启恢复。
 
 ## 5. 验收
 

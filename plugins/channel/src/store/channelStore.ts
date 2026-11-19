@@ -93,6 +93,7 @@ export interface ChannelStore {
   /** With an externalRef the author already recorded, returns that earlier row unchanged. */
   appendMessage(row: Omit<ChannelMessageRow, 'sequence'>): Promise<ChannelMessageRow>;
   getMessage(channelId: string, messageId: string): Promise<ChannelMessageRow | undefined>;
+  findCommittedPetOutput(channelId: string, petId: string, externalRefs: readonly string[]): Promise<string | undefined>;
   readMessages(channelId: string, range: MessageRange): Promise<MessagePage>;
   getSession(channelId: string, petId: string): Promise<ChannelSessionRow | undefined>;
   /** Returns the existing reservation for (channel, pet) if there is one. */

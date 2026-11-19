@@ -104,6 +104,34 @@ test('Studio dispatches request-only input and returns no thread or continuation
   await studio.shutdown();
 });
 
+test('an in-process observer sees the canonical id before the resident port, without changing admission or replay', async (t) => {
+  const target = binding('worker');
+  let assigned: string | undefined;
+  let receiptPromise: Promise<unknown> | undefined;
+  let residentCalls = 0;
+  target.dispatch.dispatch = async request => {
+    residentCalls++;
+    assert.ok(assigned);
+    assert.equal(request.dispatchId, assigned);
+    assert.equal('observeInvocation' in request, false, 'the callback never crosses the resident port');
+  };
+  const studio = await createStudio({ studioId: 'admission-observer', pets: [target] });
+  t.after(() => studio.shutdown());
+
+  const request = { petId: 'worker', request: 'work', idempotencyKey: 'same' };
+  const receipt = await studio.dispatch({ ...request, observeInvocation: async observation => {
+    assigned = observation.invocationId;
+    receiptPromise = observation.receipt;
+    throw new Error('failed observer');
+  } });
+  assert.equal(receipt.invocationId, assigned);
+  assert.equal(await receiptPromise, receipt);
+  let replayed = false;
+  assert.equal(await studio.dispatch({ ...request, observeInvocation: () => { replayed = true; } }), receipt);
+  assert.equal(residentCalls, 1);
+  assert.equal(replayed, false);
+});
+
 test('Studio routes resident dispatch lifecycle by Pet instance while preserving broadcast delivery', async (t) => {
   const lifecycleListeners = new Map<string, Parameters<PetDispatchPort['onDispatchLifecycle']>[0]>();
   const portFor = (petId: string): PetDispatchPort => ({
@@ -940,4 +968,11 @@ test('Pet ownership rejects missing Channels and permanent removal retains ident
     assert.equal((await second.studio.pets.get('dev'))?.removedAt, closed.removedAt);
     await second.studio.shutdown();
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a Plugin cannot claim the resident lifecycle event source', () => {
+  assert.throws(() => prepareStudio({
+    studioId: 'resident-reserved', definitions: [], assemblePet: async () => { throw new Error('unexpected assembly'); },
+    plugins: [{ name: 'resident-pet', toolkits: [], start: () => {} }],
+  }), /plugin name "resident-pet" is reserved/u);
 });

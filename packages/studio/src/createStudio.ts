@@ -69,9 +69,11 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const pluginNames = new Set<string>();
   for (const plugin of plugins) {
     if (!plugin.name.trim()) throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
-    // `studio` is the core's own event source and storage owner.
+    // Studio and resident lifecycle events are not Plugin-owned.
     if (plugin.petChannels && plugin.name !== 'channel') throw new Error('Only the Channel Plugin may validate Pet ownership.');
-    if (plugin.name === 'studio') throw new Error(`studio "${input.studioId}": plugin name "studio" is reserved`);
+    if (plugin.name === 'studio' || plugin.name === 'resident-pet') {
+      throw new Error(`studio "${input.studioId}": plugin name "${plugin.name}" is reserved`);
+    }
     if (pluginNames.has(plugin.name)) {
       throw new Error(`studio "${input.studioId}": duplicate plugin "${plugin.name}"`);
     }
@@ -223,6 +225,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     // Snapshot the complete Plugin request before asynchronous admission.
     const petId = request.petId;
     const signal = request.signal;
+    const observeInvocation = request.observeInvocation;
     signal?.throwIfAborted();
     const requestText = request.request;
     const attachments = request.attachments === undefined ? undefined : parseDeliverables(request.attachments);
@@ -257,7 +260,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
 
     // Reserve before awaiting the port: simultaneous deliveries share one
     // admission. Failed admissions release the reservation, in this domain.
-    const admission = Promise.resolve().then(async () => {
+    const admission: Promise<StudioDispatchReceipt> = Promise.resolve().then(async () => {
       signal?.throwIfAborted();
       const invocationId = randomUUID();
 
@@ -275,6 +278,11 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       console.log(
         `[studio] dispatch petId=${petId} source=${source ?? 'studio'} invocation=${invocationId}`,
       );
+      if (observeInvocation) {
+        // Never wait for (or let a failure escape from) this identity observer.
+        try { void Promise.resolve(observeInvocation({ invocationId, receipt: admission })).catch(() => undefined); }
+        catch { /* Observation cannot prevent admission. */ }
+      }
       signal?.throwIfAborted();
       await pet.runtime.dispatch.dispatch({
         request: requestText,

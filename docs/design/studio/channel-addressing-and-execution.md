@@ -30,6 +30,16 @@ Pet-triggered direct reply requires an explicit mention and cannot mention a
 Pet itself. Dispatch carries the triggering message, its reply target and their
 attachments through the existing Channel session admission path.
 
+The online Head separately subscribes to resident dispatch events for its exact
+Pet instance. It correlates only newly allocated invocations from its own
+dispatches in this Channel, using the Studio receipt's invocation id, not the
+Agent Session request id. Early events for that id are held until Studio admits
+the dispatch. Other producers' work, idempotent replays, and work from a prior
+Head activation are not claimed. A receipt is not completion, and a resident
+message event is not proof of a committed Timeline message. The subscriptions
+are independent; the Head does not infer their relative delivery order or
+publish progress in response to dispatch events.
+
 Channel maps a resident Pet's public final message for an admitted Channel-scoped
 run to a Timeline message after checking the scope, session and member identity.
 The Agent Session message id supplies `externalRef` for deduplication. Tool calls,

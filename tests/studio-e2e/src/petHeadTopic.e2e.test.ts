@@ -23,11 +23,12 @@ async function waitFor(predicate: () => boolean) {
   throw new Error('Timed out waiting for the owner Head.');
 }
 
-test('production Pet Head subscriptions receive only real messages from their owner Channel', async () => {
+test('production Pet Head subscriptions use the owner Channel and exact Pet instance topics', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'head-topic-e2e-'));
   const channel = createChannelPlugin({ httpRoute: false });
   const decisions: Record<string, string[]> = { alpha: [], beta: [] };
   const deliveries: Record<string, string[]> = { alpha: [], beta: [] };
+  const residentDeliveries: Record<string, Array<string | undefined>> = { alpha: [], beta: [] };
   const published: Array<{ topic: string | undefined; message: HeadMessage }> = [];
   const model = {
     withStructuredOutput: () => ({
@@ -85,6 +86,7 @@ test('production Pet Head subscriptions receive only real messages from their ow
         if (event.source === 'channel' && event.type === 'channel.message.created') {
           deliveries[petId]!.push((event.payload as HeadMessage).body);
         }
+        if (event.source === 'resident-pet') residentDeliveries[petId]!.push(event.topic);
         return handler(event);
       }, filter);
     };
@@ -100,9 +102,13 @@ test('production Pet Head subscriptions receive only real messages from their ow
       subscribingPet = petId;
       await studio.pets.create({ petId, definitionId: 'worker', name: petId, channelId });
     }
-    assert.deepEqual(registrations, ['alpha', 'beta'].map(petId => ({
-      petId, filter: { source: 'channel', topic: owners[petId] },
-    })), 'each Pet registers its exact owner topic rather than a global subscription');
+    assert.deepEqual(registrations, ['alpha', 'beta'].flatMap(petId => [
+      { petId, filter: { source: 'resident-pet', topic: petId } },
+      { petId, filter: { source: 'channel', topic: owners[petId] } },
+    ]), 'each Pet registers its exact instance and owner Channel topics, never a global subscription');
+    for (const topic of ['alpha', 'beta', 'worker', undefined]) {
+      studio.notify({ topic, source: 'resident-pet', type: 'dispatch.queued', occurredAt: new Date().toISOString() });
+    }
     const { channel: { channelId: emptyChannelId } } = await channel.service.createChannel(human, { title: 'No Pets', pets: [] });
     await channel.service.postMessage(human, owners.alpha!, { body: 'alpha first' });
     await waitFor(() => decisions.alpha!.includes('alpha first'));
@@ -114,6 +120,7 @@ test('production Pet Head subscriptions receive only real messages from their ow
     assert.deepEqual(deliveries, { alpha: ['alpha first', 'alpha second'], beta: ['beta only'] },
       'another Channel never enters the Head subscriber wrapper, including Channels with no live Pet');
     assert.deepEqual(decisions, deliveries, 'owner messages continue through the production Head');
+    assert.deepEqual(residentDeliveries, { alpha: ['alpha'], beta: ['beta'] }, 'only the exact Pet instance topic is delivered');
     assert.deepEqual(published.map(({ topic, message }) => ({ topic, channelId: message.channelId, body: message.body })), [
       { topic: owners.alpha, channelId: owners.alpha, body: 'alpha first' },
       { topic: emptyChannelId, channelId: emptyChannelId, body: 'no owner here' },

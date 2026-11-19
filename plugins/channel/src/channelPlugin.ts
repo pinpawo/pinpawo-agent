@@ -2,7 +2,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
+import { readStudioInvocation, StudioPetError, type StudioDispatchRequest, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { channelMessageInput, channelTaskInput, type ChannelRunOrigin } from './channelDispatchInput';
 import { channelSystemContext } from './channelSystemContext';
@@ -63,8 +63,10 @@ export type ChannelPlugin = StudioPlugin & {
 
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
-  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }) => Promise<void>;
-  dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal) => Promise<void>;
+  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; kind?: 'progress' }) => Promise<void>;
+  findCommittedPetOutput: (channelId: string, petId: string, agentMessageIds: readonly string[]) => Promise<string | undefined>;
+  readProgressSession: (channelId: string, petId: string, sessionId: string) => ReturnType<StudioPluginContext['petSessions']['snapshot']>;
+  dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal, observeInvocation?: StudioDispatchRequest['observeInvocation']) => Promise<void>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -111,7 +113,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
-    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string },
+    headInput?: {
+      attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string;
+      observeInvocation?: StudioDispatchRequest['observeInvocation'];
+    },
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     const studio = host();
@@ -127,6 +132,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const receipt = await studio.dispatch({
       petId, request,
       ...(headInput ? { signal: headInput.signal, origin: { namespace: 'channel', id: headInput.messageId } } : {}),
+      ...(headInput?.observeInvocation ? { observeInvocation: headInput.observeInvocation } : {}),
       ...(headInput?.attachments?.length ? { attachments: headInput.attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
@@ -233,9 +239,17 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();
-      await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options, headReplyTo: replyTo });
+      await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, {
+        signal, preventPetMentions: options?.preventPetMentions, headReplyTo: replyTo, headReplyKind: options?.kind,
+      });
     },
-    dispatch: async (channelId, petId, message, request, signal) => {
+    findCommittedPetOutput: (channelId, petId, agentMessageIds) =>
+      channelService().findCommittedPetOutput(channelId, petId, agentMessageIds),
+    readProgressSession: async (channelId, petId, sessionId) => {
+      await channelService().requireProgressSession(channelId, petId, sessionId);
+      return host().petSessions.snapshot(petId, sessionId, { timelineLimit: 8 });
+    },
+    dispatch: async (channelId, petId, message, request, signal, observeInvocation) => {
       if (message.channelId !== channelId) throw new Error('Message does not belong to this Channel.');
       signal.throwIfAborted();
       const service = channelService();
@@ -246,7 +260,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(canonical, request, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
+      await dispatchPet(channelId, petId, channelMessageInput(canonical, request, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId, ...(observeInvocation ? { observeInvocation } : {}) });
     },
   };
 

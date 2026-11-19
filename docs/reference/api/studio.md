@@ -42,6 +42,12 @@ handle. Queueing and the dispatch gate belong to the resident runtime; execution
 is observed through Agent Session events, checkpoints, or Plugin-owned domain
 state rather than a Studio result.
 
+An in-process caller can optionally observe a newly allocated invocation id
+before the resident port runs. The observer gets the Studio admission promise;
+it must still await that receipt before attributing execution to the dispatch.
+Idempotent replays do not reannounce the invocation, and the HTTP wire form
+cannot set the observer.
+
 After admission, Studio publishes a live `dispatch.accepted` event with the
 `invocationId`, target `petId`, request text, and producer name. This is an
 observability fact on the same non-durable event bus, not a completion signal or

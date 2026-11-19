@@ -28,7 +28,7 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
-import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadDispatchQueueSnapshot } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, subscribePetHead } from './petHead';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -343,11 +343,11 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       // Plugin activation without making model availability a startup requirement.
       let decide: ReturnType<typeof createHeadDecision> | undefined;
       const channel = bindPetHeadChannel(registration.channelId, channelHead, prepared.studio.subscribe);
-      const handleMessage = createPetHead({
+      return subscribePetHead({
         pet: registration,
         ...(description ? { description } : {}),
         channel,
-        readScheduling: () => readHeadDispatchQueueSnapshot(registration.petId, registration.channelId, prepared.listDispatchQueues()),
+        readQueues: prepared.listDispatchQueues,
         onScheduling: diagnostic => {
           const occurredAt = new Date().toISOString();
           prepared.studio.notify({ type: 'pet.head.scheduling', source: 'studio', topic: registration.channelId, occurredAt, payload: diagnostic });
@@ -365,8 +365,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           });
           return decide(value, signal);
         },
-      });
-      return channel.subscribe(message => handleMessage(message, signal));
+      }, prepared.studio.subscribe, signal);
     } } : {}),
   });
   try {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
+import { STUDIO_HEAD_PROGRESS_REPLY } from '@pinpawo/studio-core';
 import { channelMentionSchema, channelParticipantId, parseChannelMentions, type ChannelParticipant } from './channelParticipants';
 import type {
   ChannelMemberRow, ChannelMention, ChannelMessageRow, ChannelRow, ChannelSessionRow, ChannelStore, MemberRef,
@@ -58,7 +59,7 @@ export type ChannelEvent =
   | { type: 'channel.created'; payload: { channel: ChannelRow; members: ChannelMember[] } }
   | { type: 'channel.updated'; payload: { channel: ChannelRow } }
   | { type: 'channel.member.joined' | 'channel.member.left'; payload: { channelId: string; member: MemberRef; actor: MemberRef } }
-  | { type: 'channel.message.created'; payload: ChannelMessage };
+  | { type: 'channel.message.created'; payload: ChannelMessage; [STUDIO_HEAD_PROGRESS_REPLY]?: true };
 
 /** The actor is not a current member of an existing Channel. */
 export class ChannelAccessError extends Error {}
@@ -123,7 +124,13 @@ export class ChannelService {
     for (const subscription of [...this.listeners]) {
       if (!subscription.active) continue;
       try {
-        Promise.resolve(subscription.listener(structuredClone(event))).catch(error => {
+        const copy = structuredClone(event);
+        // structuredClone intentionally drops symbol keys. Preserve the one
+        // in-process marker while still giving every listener its own payload.
+        if (copy.type === 'channel.message.created' && event.type === copy.type && event[STUDIO_HEAD_PROGRESS_REPLY]) {
+          copy[STUDIO_HEAD_PROGRESS_REPLY] = true;
+        }
+        Promise.resolve(subscription.listener(copy)).catch(error => {
           console.error('[channel] committed change notification failed:', error);
         });
       }
@@ -320,18 +327,21 @@ export class ChannelService {
    * With an externalRef already saved for this author, the earlier message
    * is returned and `created` is false.
    */
-  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; headReplyTo?: string; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
+  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; headReplyTo?: string; headReplyKind?: 'progress'; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
     message: ChannelMessage; created: boolean; mentionError?: string;
   }> {
     const value = channelMessageSchema.parse(input);
     const trustedAuthor = memberRefSchema.parse(author);
     // Head deduplication is not resident completion authority. A fresh Head
     // write must still be an active member and reference its actual trigger.
-    if (options.headReplyTo !== undefined && (options.externalRef !== undefined || trustedAuthor.kind !== 'pet'
-      || !options.headReplyTo || value.replyTo !== options.headReplyTo)) {
+    const { headReplyTo } = options;
+    const isProgress = options.headReplyKind === 'progress';
+    if ((isProgress && headReplyTo === undefined) || (headReplyTo !== undefined
+      && (options.externalRef !== undefined || trustedAuthor.kind !== 'pet' || !headReplyTo || value.replyTo !== headReplyTo))) {
       throw new Error('Invalid Head reply reference.');
     }
-    const dedupeRef = options.headReplyTo !== undefined ? `head-reply:${options.headReplyTo}` : options.externalRef;
+    const preventPetMentions = options.preventPetMentions || isProgress;
+    const dedupeRef = headReplyTo !== undefined ? `head-reply:${headReplyTo}` : options.externalRef;
     // Only the internal resident-reply path supplies an external reference.
     // Its final event may be handled after close settled; ownership and the
     // Plugin's exact persisted session binding remain valid history authority.
@@ -349,11 +359,11 @@ export class ChannelService {
       let mentions: ChannelMention[];
       try { mentions = parseChannelMentions(value.body, value.mentions, await this.membersIn(store, channel.channelId, labels)); }
       catch (error) {
-        if (trustedAuthor.kind !== 'pet' || options.preventPetMentions) throw error;
+        if (trustedAuthor.kind !== 'pet' || preventPetMentions) throw error;
         mentionError = error instanceof Error ? error.message : String(error);
         mentions = [];
       }
-      if (options.preventPetMentions && mentions.some(mention => mention.participantId.startsWith('pet:'))) {
+      if (preventPetMentions && mentions.some(mention => mention.participantId.startsWith('pet:'))) {
         throw new Error('This reply cannot mention a Pet.');
       }
       // A Head may be stopped while membership or context lookups are pending.
@@ -368,12 +378,31 @@ export class ChannelService {
       });
       return { message, created: message.messageId === messageId };
     });
-    if (result.created) this.publish({ type: 'channel.message.created', payload: result.message });
+    if (result.created) this.publish({
+      type: 'channel.message.created', payload: result.message,
+      ...(isProgress ? { [STUDIO_HEAD_PROGRESS_REPLY]: true as const } : {}),
+    });
     return { ...result, ...(result.created && mentionError ? { mentionError } : {}) };
   }
 
   getMessage(channelId: string, messageId: string): Promise<ChannelMessage | undefined> {
     return this.store.getMessage(channelId, messageId);
+  }
+
+  /** Exact committed output of the current Pet member; returns only the Timeline ID. */
+  async findCommittedPetOutput(channelId: string, petId: string, agentMessageIds: readonly string[]): Promise<string | undefined> {
+    const channel = await this.requireMember(channelId, { kind: 'pet', id: petId });
+    const refs = agentMessageIds.slice(-8).filter(id => id && !id.startsWith('head-reply:'));
+    return this.store.findCommittedPetOutput(channel.channelId, petId, refs);
+  }
+
+  /** Authorize a progress read against this live member's exact registered binding. */
+  async requireProgressSession(channelId: string, petId: string, sessionId: string): Promise<void> {
+    const channel = await this.requireMember(channelId, { kind: 'pet', id: petId });
+    const binding = await this.store.getSession(channel.channelId, petId);
+    if (!binding?.registered || binding.sessionId !== sessionId) {
+      throw new ChannelAccessError('Progress requires the registered Channel Session for the current Pet.');
+    }
   }
 
   /** The (Channel, Pet) session, reserved on first use. */

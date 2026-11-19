@@ -28,7 +28,7 @@ export type {
   StudioModelEndpoint,
   StudioModels,
 } from './studioContract';
-export { StudioPetUnavailableError } from './studioContract';
+export { STUDIO_HEAD_PROGRESS_REPLY, StudioPetUnavailableError } from './studioContract';
 export { createStudioStorage } from './storage/studioStorage';
 export { StudioClients, StudioClientError } from './clients/studioClients';
 export type { StudioClient } from './clients/studioClients';

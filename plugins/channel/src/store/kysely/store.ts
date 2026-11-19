@@ -131,6 +131,14 @@ export class KyselyChannelStore implements ChannelStore {
     return record ? messageRow(record) : undefined;
   }
 
+  async findCommittedPetOutput(channelId: string, petId: string, externalRefs: readonly string[]): Promise<string | undefined> {
+    if (!externalRefs.length) return undefined;
+    const row = await this.db.selectFrom('channel_messages').select('message_id')
+      .where('channel_id', '=', channelId).where('author_kind', '=', 'pet').where('author_id', '=', petId)
+      .where('external_ref', 'in', externalRefs).orderBy('sequence', 'desc').limit(1).executeTakeFirst();
+    return row?.message_id;
+  }
+
   async readMessages(channelId: string, range: MessageRange): Promise<MessagePage> {
     const history = this.db.selectFrom('channel_messages').selectAll().where('channel_id', '=', channelId);
     // Read one past the limit in the direction asked; ask once about the other side.

@@ -87,6 +87,25 @@ for (const [backend, config] of backends) {
     assert.equal((await retained.postMessage(executor, channelId, { body: 'Already accepted resident final' }, { externalRef: 'resident-final' })).created, true);
   }));
 
+  test(`${backend}: progress delivery proof is bounded by the exact committed author, Channel, and output ref`, () => withService(async (service, store) => {
+    const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Progress' }, ['executor', 'other'])).channel;
+    const foreign = (await service.createChannel(owner, { title: 'Foreign', pets: [] })).channel.channelId;
+    const write = (messageId: string, rowChannel: string, author: MemberRef, externalRef: string) => store.appendMessage({
+      messageId, channelId: rowChannel, author, externalRef, occurredAt: new Date().toISOString(), body: 'Same text', mentions: [],
+    });
+    await write('other-channel', foreign, executor, 'agent-other-channel');
+    await write('other-author', channelId, { kind: 'pet', id: 'other' }, 'agent-other-pet');
+    await write('human-same-id', channelId, { kind: 'human', id: 'executor' }, 'agent-human');
+    await write('head-ack', channelId, executor, 'head-reply:some-source');
+    await write('exact', channelId, executor, 'agent-exact');
+    assert.equal(await service.findCommittedPetOutput(channelId, executor.id, ['agent-other-channel', 'agent-other-pet', 'agent-human', 'head-reply:some-source']), undefined);
+    assert.equal(await service.findCommittedPetOutput(channelId, executor.id, ['agent-exact', ...Array.from({ length: 8 }, (_, i) => `unknown-${i}`)]), undefined);
+    assert.equal(await service.findCommittedPetOutput(channelId, executor.id, ['agent-exact', 'nonmatching']), 'exact');
+    await assert.rejects(service.findCommittedPetOutput(foreign, executor.id, ['agent-other-channel']), ChannelAccessError);
+    liveByService.get(service)!.splice(0);
+    await assert.rejects(service.findCommittedPetOutput(channelId, executor.id, ['agent-exact']), ChannelAccessError);
+  }));
+
   test(`${backend}: guarded Pet replies cannot introduce Pet mentions`, () => withService(async service => {
     const { channelId } = (await createChannelWithInstances(service, owner, { title: 'Reply guard' }, ['executor', 'other'])).channel;
     const incoming = await service.postMessage({ kind: 'pet', id: 'other' }, channelId, { body: 'A contribution' });

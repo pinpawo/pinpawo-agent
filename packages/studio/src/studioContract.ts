@@ -42,6 +42,9 @@ export type {
 
 /* ─────────────── 入:event ─────────────── */
 
+/** @internal Producer-only live marker; a Symbol keeps it off persisted or JSON surfaces. */
+export const STUDIO_HEAD_PROGRESS_REPLY = Symbol.for('pinpawo.studio.head-progress-reply');
+
 /**
  * 插件发给 studio 的通知。
  *
@@ -62,12 +65,13 @@ export type StudioEvent = {
   /** Studio 在发布时为每个 event 分配的唯一 id;同一个 event 交给多个订阅者时不变。 */
   eventId: string;
   type: string;
-  /** 发布该 event 的插件名，或 `studio` 这一 core producer。 */
+  /** 发布该 event 的插件名，或 `studio` / `resident-pet` core producer。 */
   source: string;
   /** Producer-owned routing key; Studio matches it exactly without interpreting it. */
   topic?: string;
   /** Producer-owned context; Studio does not assign meaning to its fields. */
   metadata?: JsonObject;
+  [STUDIO_HEAD_PROGRESS_REPLY]?: true;
   payload?: unknown;
   occurredAt: string;
 };

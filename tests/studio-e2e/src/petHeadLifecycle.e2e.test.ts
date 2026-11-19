@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prepareStudio } from '../../../packages/studio/src/createStudio';
-import { bindPetHeadChannel, createPetHead, type HeadDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
+import { bindPetHeadChannel, createPetHead, subscribePetHead, type HeadDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -21,7 +21,8 @@ async function waitFor(predicate: () => boolean) {
 
 test('real Channel events follow Pet close, reopen and remove without replay or late dispatch', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
-  const subscriptionTopics: string[] = [];
+  const subscriptions: string[] = [];
+  const unsubscribed: string[] = [];
   const observed: string[] = [];
   const dispatched: unknown[] = [];
   const pending = new Map<string, ReturnType<typeof deferred<HeadDecision>>>();
@@ -40,14 +41,15 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
       }, close: async () => {},
     }),
     subscribePetTimeline: ({ registration }, signal) => {
-      const bound = bindPetHeadChannel(registration.channelId, channel.head, (handler, filter) => {
+      const subscribe: typeof prepared.studio.subscribe = (handler, filter) => {
         assert.ok(filter);
-        assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
-        subscriptionTopics.push(filter.topic);
-        return prepared.studio.subscribe(handler, filter);
-      });
-      const handle = createPetHead({ pet: registration, channel: bound, decide });
-      return bound.subscribe(message => handle(message, signal));
+        const key = JSON.stringify(filter);
+        subscriptions.push(key);
+        const remove = prepared.studio.subscribe(handler, filter);
+        return () => { unsubscribed.push(key); remove(); };
+      };
+      const bound = bindPetHeadChannel(registration.channelId, channel.head, subscribe);
+      return subscribePetHead({ pet: registration, channel: bound, decide }, subscribe, signal);
     },
   });
   const studio = prepared.studio;
@@ -64,7 +66,12 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     first.resolve({ action: 'dispatch', reply: '', timing: 'enqueue', intent: 'late task' });
     await post('while closed');
     await studio.pets.reopenInstance('worker');
-    assert.deepEqual(subscriptionTopics, [channelId, channelId], 'reopening creates a fresh owner-Channel subscription');
+    const filters = [
+      JSON.stringify({ source: 'resident-pet', topic: 'worker' }),
+      JSON.stringify({ source: 'channel', topic: channelId }),
+    ];
+    assert.deepEqual(subscriptions, [...filters, ...filters], 'reopening subscribes afresh to the exact Pet and Channel');
+    assert.deepEqual(unsubscribed, filters, 'closing removes both subscriptions');
     await post('after reopen');
     await waitFor(() => observed.includes('after reopen'));
     assert.deepEqual(observed, ['held before close', 'after reopen']);
@@ -74,6 +81,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     await post('held before remove');
     await waitFor(() => observed.includes('held before remove'));
     await studio.pets.removeInstance('worker', { confirmStop: true });
+    assert.deepEqual(unsubscribed, [...filters, ...filters]);
     second.resolve({ action: 'dispatch', reply: '', timing: 'enqueue', intent: 'late task after remove' });
     await post('after remove');
     await tick();

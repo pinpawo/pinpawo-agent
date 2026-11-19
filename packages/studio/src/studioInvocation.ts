@@ -3,6 +3,12 @@ import { isJsonObject, isJsonValue, type Deliverable, type JsonObject } from '@p
 
 export type StudioDispatchRequest = {
   petId: string;
+  /**
+   * In-process only: observe a newly allocated invocation identity before
+   * resident admission. A reused idempotent admission does not call this.
+   * Allocation alone is not admission; await the given Studio receipt.
+   */
+  observeInvocation?: (invocation: { invocationId: string; receipt: Promise<StudioDispatchReceipt> }) => void;
   /** In-process cancellation before admission; never accepted from the wire. */
   signal?: AbortSignal;
   /** In-process Plugin only: a reserved session target, never accepted from the wire. */
@@ -25,7 +31,7 @@ export type StudioDispatchRequest = {
 };
 
 /** The public wire form: Host-trusted fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'origin' | 'delivery' | 'attachments' | 'signal'>;
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'origin' | 'delivery' | 'attachments' | 'signal' | 'observeInvocation'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {

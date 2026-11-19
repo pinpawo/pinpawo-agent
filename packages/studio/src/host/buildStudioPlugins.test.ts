@@ -546,7 +546,8 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     const schema = JSON.parse(schemaBlock);
     assert.deepEqual(schema.required, ['action', 'reply', 'intent', 'timing']);
     assert.equal(schema.additionalProperties, false);
-    assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+    assert.deepEqual(schema.properties.action.enum,
+      ['ignore', 'dispatch', 'progress-status', 'progress-details', 'progress-mixed', 'progress-reference']);
     assert.equal(request.response_format.type, 'json_object');
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);

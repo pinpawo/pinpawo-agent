@@ -1,6 +1,6 @@
-# Pet Head：Judgment / Execution / Feedback
+# Pet Head：判断、派发与反馈
 
-状态：设计草案。当前 PR 只讨论接口和边界，不改变运行时。
+状态：设计草案。只调整 Head 的判断流程，不改变 Channel、Studio Dispatch 或 resident Pet Agent 的职责。
 
 ## 1. 总体结构
 
@@ -12,55 +12,57 @@
 
 当前实现：[Timeline 写入](../../../plugins/channel/src/channelService.ts)、[Channel port 与输出桥接](../../../plugins/channel/src/channelPlugin.ts)、[Head 与执行器](../../../packages/studio/src/host/petHead.ts)、[Studio 装配](../../../packages/studio/src/host/buildStudio.ts)、[EventBus](../../../packages/studio/src/studioEventBus.ts)、[Studio Dispatch 与 Session 入口](../../../packages/studio/src/createStudio.ts)、[Resident Pet Dispatch](../../../services/host/src/host/residentPetDispatch.ts)。
 
-## 2. Judgment：一个 Head，两种 LLM tool 语义
+## 2. 每条 Timeline 消息先判断该不该接
 
-现在的 Head 先做一次结构化判断。`jsonSchema` / `jsonMode` 路径拒绝 tool call；`bindTools` 路径只绑定 `pet_head_decision`，它是输出声明，不执行读取。仅在 TypeScript 层预读 Session 再套一条进度回复，不能让 Head 自己决定何时找证据。
+Head 的第一次判断只用原消息、Channel 上下文和 Pet 职责，不预读 Session。输出用互斥分支表达，避免再用 `ignore` 表示「不派发」：
 
-| LLM tool | 宿主行为 | 后续 |
-| --- | --- | --- |
-| `read_session({})` | 执行一次只读查询。参数严格为空；模型不能传 Pet、Channel、Session、文件或动态查询参数。 | 以匹配调用 ID 的 tool result 返回投影，Head 继续判断。 |
-| `pet_head_decision({ action, reply, intent, timing })` | 校验并接收最终声明。不执行工具，不产生派发回执，不回填 tool result。 | 结束判断；把已校验的声明交给现有确定性执行器。 |
+| 第一次判断 | Head 下一步 |
+| --- | --- |
+| 不接 | 结束。不回复、不读 Session、不派发。 |
+| 接，只需答复 | 需要开口才写 Timeline。不调用 Dispatch。 |
+| 接，需要查证进度 | 定位本 Channel 的具体执行，按需只读查证，再决定如何答复。不为回答进度伪造派发意图。 |
+| 接，需要派发 | 产出一个可校验的原始意图，并区分「可独立执行」与「依赖当前执行的补充或更正」。再由宿主检查 Studio 接纳状态。可选回复不是派发回执。 |
 
-1. 每条合规 Timeline 消息既可以直接得出决定，也可以先读 Session。初始输入仍用 Channel 上下文、同 Channel 的受信队列引用，以及匹配的有限生命周期观察。不预读 Session，不增加“问进度”关键词或强制读取分支。
-2. 工具模式下，每次模型响应只允许一个已知 tool call。若第 1 次调用 `read_session`，执行后保留原 assistant tool call 和同 ID 的 tool result，再做第 2 次模型调用；第 2 次只接受 `pet_head_decision`。首版每条消息最多 2 次模型调用、1 次读取，不并行，不递归；只在预算和生命周期信号允许时继续。缺失调用 ID、重复读取、混合调用、拒绝、截断或无效声明，不执行副作用。
-3. **兼容按模型能力，不按用户措辞。** 对验证过支持调用和回填的 endpoint，Head 走 `bindTools` 及原生 tool-result 消息，不和 JSON response format 混用。先支持已验证的 `functionCalling` 配置；`bindTools` 方法存在、或者模型支持 `jsonMode` / `jsonSchema`，都不单独证明两个 tool 可用。对尚未验证、仅支持 JSON，或读取前明确拒绝 tool 参数的 endpoint，保留现有严格 JSON 决策路径；标记本轮无 Session 证据，不偷读且不假装已读。已进入工具往返后遇到协议错误，安全结束，不用丢掉结果的盲重试代替判断。
+「该我接」是必须经过的判断，不是额外的模型调用。不接与回复互斥；接了但暂时没有可靠结果，可以不回复。模型只表达意图，不能指定读取目标、选择 Session、修改队列或中断执行。
 
-### 只读 Session 的范围和结果
+## 3. 需要派发，且已有执行时怎么办
 
-- 在 Host 装配时给 Head 注入受限读取函数。由既有 Channel 绑定逻辑验证在线实例与成员权限，查当前已确认的 `(channelId, petId) → sessionId`，通过现有 Studio [`petSessions.snapshot`](../../../packages/studio/src/studioContract.ts) 读取该精确 Session。读取不创建、切换或缓存 Session；不回退到活跃 TUI Session、其他实例或其他 Channel。Head 不获得 `observe` / `review`、checkpoint 或 Capability 访问权。
-- 绑定只证明读的是正确 Session，不证明其中每一项都可对该 Channel 公开。首版允许近期 `user` / `assistant` 消息中有可信 Channel 来源或公开记录的内容（角色、可公开文本、可用的 ID / 时间），例如与已回写 Timeline 的 `externalRef` 匹配的 Session 回复；同一 Session 的 TUI 私聊、合成派发提示均不自动纳入。只有 Session 接口给出 `currentPlan` 且宿主能证明其 Channel 可见性时，才另附任务和状态；缺少来源或可见性就省略相应内容。先筛选再截窗。原始 snapshot 只留在宿主：不传 tool 参数/结果、私有审批数据、子 Agent 内部记录、运行配置或路径，不从 checkpoint 补齐。
-- 可公开的阶段性交接只在已提交为 Session 消息后读取，以稳定消息 ID 只保留一次。已经在本轮 Channel 上下文出现的同一条消息，用可信引用做去重；没有可靠身份或可见性就不补入。不重播流式片段或从内部 briefing 拼一条公开消息。
-- 区分 `ok`、`empty`（没有符合范围的消息或计划）、`unbound`、`stale`（读取期间绑定或权限变化）与 `unavailable`（超时或读取失败）。无效结果不带 snapshot 内容或底层错误。宿主固定读取窗口、输出体积和截止时间；标明采样时间与是否截断。开始读取前核验绑定，返回前复核绑定和实例生命周期；即使底层 snapshot 无法取消，也丢弃迟到结果。
-- `currentPlan` 是 Session 保存的计划事实，不是某条 dispatch 的进度。若队列、生命周期与 Session 没有可验证的关联，或者观察已过期，Head 可以说“Session 里记录了什么”，不能据此说“这次执行已做到哪一步”、已完成或估算百分比。
+1. **没有冲突**：独立任务通过原 Channel port 请求 Studio 接纳，Studio 决定开始或排队。依赖旧任务的补充或更正不因当前空闲就变成独立任务。
+2. **有冲突，且能定位本 Channel 的具体执行**：宿主读取一次受限 Session 快照，再把事实和原消息交给同一个 Head 做一次追加判断。队列说明「有没有接纳上的冲突」；Session 帮助判断「是新任务、已有结果，还是对当前任务的更正」。
+3. **Pet 忙，但无法定位本 Channel 内的执行**：不读别的 Session，也不把「看不到」当作空闲。独立任务仍由现有 Studio 接纳；依赖当前执行的更正不盲目排队，必要时明确说明尚未应用。
 
-Session 侧的基线是 [Host 精确会话适配器](../../../services/host/src/host/residentPetSessions.ts)、[snapshot 投影](../../../services/host/src/conversation/agentSessionSnapshot.ts)、[会话消息投影](../../../services/host/src/conversation/transcriptProjection.ts)和[计划投影](../../../services/host/src/conversation/currentPlanProjection.ts)。本草案不将通用 snapshot 直接暴露给 Head。
+追加判断之后：
 
-## 3. Execution：声明不是执行权限
+| 情况 | 第一版行为 |
+| --- | --- |
+| 独立的新任务 | 使用原消息的现有去重键，经原 Channel port 入队。不新增 Head 队列。 |
+| 已被满足 | 有可核实的、已提交且可在本 Channel 使用的结果，明确覆盖这次要求，才不再派发。相同源消息的重送由原有去重处理，不和不同消息的语义相似混用。 |
+| 还在做，看起来会覆盖 | 不把预期当成已满足。独立请求仍走正常接纳；不跟随一个未完成的执行来静默吞掉新请求。 |
+| 补充或更正 | 能明确整理成独立后续任务才排队；必须修改正在执行的内容时，第一版不自动打断、不盲目重跑，并说明尚未应用。 |
 
-沿用现有 `HeadDecision`：`action` 是 `ignore | dispatch`；`reply` 是独立轴。空回复 + ignore 是不动作；非空回复 + ignore 是只回复；dispatch 必须有真实非空 `intent`，可同时回复。校验通过并检查未取消后，现有执行器经 Channel port 写回复和请求派发。两者独立记成功或失败：先写的回复只能是回应或下一步，不能宣称已经接纳或完成。Channel 继续用原消息去重和现有 peer 回复限制。
+**提交前重新校验。** 用已验证的 Pet 实例、Channel scope、Session 和 `invocationId`（Dispatch 侧的 `dispatchId`）关联本次观察；若证据只属于某一具体运行尝试，还需要能核实其运行身份。Session 相同不等于执行相同。若 A 已失败、停止、换成 B，或状态不可验证，不能拿 A 的快照来操作 B，也不能据此说新请求已覆盖。即便 A 在复核时仍在跑，也可能随后失败；单个 `completed` 事件不是结果覆盖证据。没有可核实的结果时，独立请求回到原接纳路径，依赖旧执行的更正则不自动应用。
 
-`timing=interrupt` 只是建议。沿用当前的安全降级（排队），不赋予 Head 取消、继续、审批或切 Session 的权限；生命周期里的 waiting 也不是授权。
+## 4. Session 查证和调用预算
 
-## 4. Feedback：不要把三条反馈混为一条
+- **宿主按条件决定是否读，模型读完再判断。** 复用 Studio 的 `petSessions.snapshot`，不把通用 Session 查询绑定成始终可用的 LLM tool，不把读操作藏进最终决策的 handler。第一版不需要通用 ReAct loop；JSON-only 模型也可以做同样的两段结构化判断。
+- **范围由宿主决定。** 读取前后核验实例仍在线、Channel 绑定与权限没变。仅返回这次执行的精确关联、采样时间、有限的可公开消息或已交接内容，以及能证明属于本轮且可公开的计划。旧 checkpoint 的计划、未交接的子 Agent 内容、TUI 私聊、工具入参和内部结果不作进度证据。缺失、截断、权限变化或超时显式标记，不猜进度。
+- **每条消息最多两次 Head 模型适配器调用、一次 Session 读取。** 两次是实际的 Head 层调用上限，不是每阶段各自的重试额度。优先按已验证的模型能力选输出模式；若允许格式 fallback，它也占同一额度，不能另开重试循环。
+- **共用一个判断截止时间。** 初判、回退、读取和复判共享同一预算。在预算内为最终校验与安全降级留出时间。模型或读取超过剩余预算就结束等待，拒绝迟到结果，不能让同一 Head 的下一条消息一直卡着；不改变 EventBus 的订阅顺序。初判无有效意图则不派发；有已校验的独立意图而查证不成，可退回正常接纳。依赖当前执行的更正不能用这个降级。实例下线或绑定失效则不再提交。已交给 Studio 的操作按真实回执解释，不把 Head 超时当成撤回。
 
-| 反馈 | 经过哪里 | 说明 |
-| --- | --- | --- |
-| **LLM tool result** | 只读适配器 → 本轮 Head 判断 | 唯一直接回到同一轮模型上下文的结果；含授权投影或显式不可用。 |
-| **接纳与生命周期** | Studio 接纳回执；resident `dispatch.*` → 同一个 Studio EventBus → Head | 回执只证明接纳。Head 只消费匹配 Pet 实例、Channel scope、已绑定 Session 的生命周期事实，以 invocation ID 关联；保存有限的临时观察，不把原始事件负载给模型。生命周期事件不启动一次新的 Head 判断，不产生自动回复，不当作 tool result。 |
-| **执行的公开答复** | resident `dispatch.message` → 已有 Channel 回写桥接 → 提交 Timeline | 保留现有来源校验与去重。`completed` 不是新的公开回复；不得从完成事件复制一份文本，也不得通过 Head 提前发布内部结果。 |
+现有入口：[队列与 Session 接口](../../../packages/studio/src/studioContract.ts)、[精确 Session 适配器](../../../services/host/src/host/residentPetSessions.ts)、[snapshot 投影](../../../services/host/src/conversation/agentSessionSnapshot.ts)、[Head 判断适配器](../../../packages/studio/src/host/petHead.ts)、[EventBus FIFO](../../../packages/studio/src/studioEventBus.ts)。图中的 `read_session` 表示这条宿主只读路径，不代表向模型开放的通用工具。
 
-新订阅与 Timeline 订阅共用 Pet 实例激活边界；关闭时取消并清理。两个 topic 不保证跨订阅的处理顺序；不会用事件缓存覆盖实时队列或授权查询，也不会补投或持久化缓存。缺失或不一致就保留未知状态。
+## 5. 反馈分别走现有链路
 
-## 5. 两个例子
+- **接纳与执行变化**：Studio 接纳回执回答是否接纳；已有 `dispatch.*` 经同一个 EventBus 到本实例的 Head。Head 只保存少量可关联的观察。事件可以帮助查证，不能覆写实时快照，不因为收到状态事件就直接回复。主动长时提醒和失败恢复另做，不在这版引入调度机制。
+- **用户追问进度**：它是新的 Timeline 消息，先过同一个职责判断。定位到执行后，Head 可按需读 Session，明确区分「还在跑」「等待输入」「已停止」「失败」和「目前查不到」。若用户同时追加或更正工作，仍按派发冲突的规则判断；同一消息复用读取结果，不再读第二次。
+- **执行的公开回复**：继续走 resident `dispatch.message` → 已有 Channel 桥接 → Timeline。Head 不从完成事件再发同一结果，不转发未公开的中间内容。派发接纳、执行完成、结果发表是三件事。
 
-- **普通请求**：“先回我一声，再把这两份表的口径核一遍。” Head 可以直接声明简短回复 + dispatch，不读 Session。Channel 提交回复并向 Studio 请求接纳；resident 后续产生公开结果时，走原来的 Channel 回写路线。
-- **执行中追加**：“旧表先别用，最新那份你已经核到哪儿了？” Head 可先调用 `read_session({})`，再结合原消息、关联的生命周期事实与 Session 投影决定：能证实的工作状态可以回复；仅有旧计划就说目前能确认的边界。是否同时派发更正取决于消息本身，不靠关键词；若建议中断，仍按既有规则排队。
+## 6. 第一版验收
 
-## 6. 实现时的最小验收
+- 忙时收到不归本 Pet 的消息：零 Session 读取、零回复、零派发；普通直接答复不读 Session。
+- 独立请求正常派发；跨 Channel 的忙碌不允许读外部 Session。明确的进度问题可走只读，不产生新运行。
+- 命中当前执行才查证；确认覆盖与仅有相似计划分别验证；A 在复判前失败、复判后才失败、或同一 Session 已切到 B，都不会因旧证据静默吞掉独立的新请求，也不会操作 B。
+- 当前更正不能独立执行时不自动打断、不夸称已修改；晚到的事件不能覆盖实时观察，执行的公开回复不重复写入。
+- 格式 fallback 不突破两次调用；用脚本模型模拟慢调用、慢快照、实例下线及绑定变化。验证同一 Head 的下一条消息按时推进，且晚到结果不会提交回复或派发；其他订阅者不受阻。
 
-- 脚本模型验证两次调用确实往返：第 1 次发 `read_session`，第 2 次收到匹配调用 ID 的结果后才声明决定。验证普通请求能一次决定且不读取，最终声明不是可执行 handler。
-- 用选定的原生/兼容模型 adapter 验证两个声明与 tool-result 往返；JSON-only、明确的不支持以及超时、非法/重复/混合调用不绕过验证。诊断只记录有限结果码和关联 ID。
-- 验证精确 Session、权限变化、无绑定、旧计划及阶段性交接去重。对错 Pet、错 Channel、错 Session、原始 tool 字段和子 Agent 内容做反例验证，确认都不会进入 Model 输入或公开回复。
-- 验证正常的 reply-only / dispatch-only / both / neither，回复与接纳失败相互独立；在运行中观察到生命周期不必另起判断，不重复公开答复。Pet 关闭后，迟到的读取不能导致回复或 dispatch。
-
-非目标：新增进度专题路由、调度器、第二套事件总线、复刻 Session 状态、替换 Studio Dispatch、改 resident Agent 执行循环或扩充 Head 权限。
+非目标：新增调度器、Head 队列或第二套总线；替换 Studio Dispatch；让 Pet Agent 反向依赖 Head；修改 resident Agent 的执行、审批和中断接口。

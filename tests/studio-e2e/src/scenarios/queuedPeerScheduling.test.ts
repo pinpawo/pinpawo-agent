@@ -17,7 +17,7 @@ import { createTestHostToolkitInventory } from '../../../../services/host/src/te
 
 const human = { kind: 'human' as const, id: 'local' };
 type WireMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
-type WireRequest = { model: string; stream?: boolean; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
+type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 function text(value: unknown): string {
   return typeof value === 'string' ? value : Array.isArray(value) ? value.map(v => String(v?.text ?? '')).join('') : '';
 }
@@ -50,6 +50,8 @@ async function fixture() {
         let call: { name: string; args: Record<string, unknown> } | undefined;
         let hold = false;
         if (head) {
+          assert.deepEqual(names, [], 'JSON-mode Head never exposes execution tools');
+          assert.deepEqual(input.response_format, { type: 'json_object' });
           const { petId } = head.pet;
           const source = head.message.body;
           const route = petId === 'origin' && source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE'
@@ -58,7 +60,7 @@ async function fixture() {
             : petId === 'target' && (source === 'QUEUED_HUMAN' || source === 'QUEUED_PEER') ? 'QUEUED' : '';
           const action = route ? 'dispatch' : 'ignore';
           heads.push({ petId, messageId: head.message.messageId, action });
-          content = JSON.stringify({ action, reply: '', timing: 'enqueue', intent: route ? `ROUTE_${route}` : '' });
+          content = JSON.stringify({ action, reply: '', readProgress: false, ...(!head.addressed ? { engage: action === 'dispatch' } : {}), intent: route ? `ROUTE_${route}` : '' });
         } else {
           const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(SEED_ACTIVE|SEED_QUEUED|ACTIVE|QUEUED)/g)].at(-1)?.[1];
           assert.ok(marker);

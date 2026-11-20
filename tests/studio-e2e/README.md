@@ -148,12 +148,11 @@ runtime, and a loopback scripted model. It never reads real model credentials or
 contacts a live model/backend. It is excluded from the default test command and CI,
 like the other manually invoked scenario tests.
 
-The synthetic group question explicitly asks “请各位回复”. Three transport cases
-exercise a declared decision tool, malformed decision arguments followed by a
-tool-free JSON retry, and an explicit unsupported-tools response followed by that
-retry. Each source/Pet pair makes exactly one or two Head model requests, without
-forced tool selection. Eligibility still comes from scripted model decisions, not
-a production rule that forces every Pet to participate.
+The synthetic group question explicitly asks “请各位回复”. Two transport cases
+exercise the configured decision protocol: a named decision tool or tool-free
+JSON mode. Each source/Pet pair makes exactly one Head model request. Eligibility
+still comes from scripted model decisions, not a production rule that forces
+every Pet to participate.
 
 It verifies one lazy, retained execution Session per `(Channel, Pet instance)`;
 seven attributed execution replies across two human-triggered rounds plus one
@@ -179,8 +178,8 @@ an explicitly isolated live-model run when desired. No live deployment is implie
 
 `npm run eval:head -w @pinpawo-tests/studio-e2e -- --live --profile deepseek-v4-flash --repeats 1 --output /tmp/head-eval-new.json`
 
-This **manual, paid-provider opt-in** is not part of CI or `npm test`. It uses the existing local profile registry and production `createHeadDecision`/model factory, never constructs a Studio Host or writes a Channel. Do not run it without authorization for real model calls. No profile or credential overrides are accepted. Output must be a new file; a private file is reserved before any model call, and no existing report is overwritten.
+This **manual, paid-provider opt-in** is not part of CI or `npm test`. It uses the existing local profile registry and production `createHeadModel().decide`/model factory, never constructs a Studio Host or writes a Channel. Do not run it without authorization for real model calls. No profile or credential overrides are accepted. Output must be a new file; a private file is reserved before any model call, and no existing report is overwritten.
 
-`--cases combined,no-at-followup` filters stable fixture IDs; `--repeats` defaults to 1. At most 20 decisions and **20 actual fetch calls including retry/fallback attempts**, 30 seconds per decision and 240 seconds overall. Exhaustion counts remaining requested cases as failures, not skipped successes. Default 13 fixtures cover four independent reply/dispatch combinations, grounded no-mention follow-up, author-neutral queue/interrupt contrasts a hard negative peer acknowledgement that must not revive an older human request, a neutral peer no-op, an explicit substantive peer direct-question positive, and an organic peer utterance with multiple acceptable outcomes. Timing is the Head's *requested* policy; production can still downgrade interrupt to enqueue.
+`--cases combined,no-at-followup` filters stable fixture IDs; `--repeats` defaults to 1. At most 20 decisions and **20 actual fetch calls including retry/fallback attempts**, 30 seconds per decision and 240 seconds overall. Exhaustion counts remaining requested cases as failures, not skipped successes. Fixtures cover independent reply/dispatch combinations, grounded no-mention follow-up, author-neutral independent additions and unsupported edits, progress-only and mixed progress/additions, peer acknowledgements that must not revive an older request, and direct peer questions. The evaluation records the first decision, not the Session read, publication, or actual dispatch.
 
-The JSON includes source commit, fixture version, model/profile, each case and repeat, sanitized diagnostics and decision axes, elapsed milliseconds, HTTP status, allowlisted finish reasons, token usage when supplied, requested token cap/thinking mode/JSON format. It stores neither provider reasoning nor reply/intent text. Metrics measure schema validity, routing/reply **presence**, and timing, not reply semantic quality. Contrast pass/total includes errors; conditional pass/valid is reported separately. Organic acceptance is separate and must not be called accuracy. Provider/transport/setup failures are separate from valid behavioral mismatches. Any invalid or unaccepted result exits nonzero after writing the full report. This is a small diagnostic suite, not proof of general model quality, successful tool execution, message delivery or autonomous loop safety.
+The JSON includes source commit, fixture version, model/profile, each case and repeat, sanitized diagnostics and decision axes, elapsed milliseconds, HTTP status, allowlisted finish reasons, token usage when supplied, requested token cap/thinking mode/JSON format. It stores neither provider reasoning nor reply/intent text. Metrics measure schema validity, routing/reply **presence**, and whether the Head requests a progress read, not reply semantic quality. Contrast pass/total includes errors; conditional pass/valid is reported separately. Organic acceptance is separate and must not be called accuracy. Provider/transport/setup failures are separate from valid behavioral mismatches. Any invalid or unaccepted result exits nonzero after writing the full report. This is a small diagnostic suite, not proof of general model quality, successful tool execution, message delivery or autonomous loop safety.

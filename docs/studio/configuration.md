@@ -294,22 +294,26 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-Online Pet Heads make one typed decision with two independent outputs:
-`action` (`ignore` or `dispatch`) controls execution admission; `reply` controls
-immediate public text. Empty/whitespace `reply` writes nothing. Nonempty `reply`
-is written as this active Pet's direct Timeline response to the actual same-Channel
-trigger, without creating an Agent Session. `intent` and `timing` apply only to
-`dispatch`; `ignore` requires empty `intent` and `timing: enqueue` and does not
-mean "say nothing". All four combinations are valid. A mention does not guarantee
-a response, and an unmentioned message may still merit participation.
+An online Pet Head makes one typed decision: `action` controls execution
+admission (`ignore` or `dispatch`), `intent` contains only independent new
+work, and `reply` controls immediate public text. A canonical mention skips
+only the participation decision. An unmentioned message may still merit a
+reply. A direct reply neither reads nor creates an Agent Session.
 
-A combined decision publishes the reply, then independently attempts one dispatch.
-An acknowledgement does not prove admission or completion; the prompt prohibits
-claiming either before it is observed. Failure of publication does not suppress
+When asked about an active ordinary dispatch, the Head uses the owning Pet's
+live queue slot and run event to identify it. After the Channel verifies
+membership and the exact Session binding, it reads one existing snapshot.
+Only the sampled status (running or unavailable) reaches the unbound reply
+model. No Session body or historical result is used. Reviewed work resuming
+outside the ordinary dispatch slot is not sampled. Asking for progress alone
+never dispatches; independent work still goes through the usual queue without
+interrupting or changing the active execution.
+
+Reply and execution are independent: failure of publication does not suppress
 an independent dispatch, and failure of dispatch does not roll back a committed
-reply. Cancellation fences remaining actions. Failures are reported by axis with
-sanitized errors. The Head ends after this declaration; it does not run an Agent
-or tools. Explicit scheduler, trigger and Host dispatch remain available.
+reply. Cancellation fences remaining actions. An acknowledgement does not
+prove admission or completion. The Head never executes a model tool;
+explicit scheduler, trigger and Host dispatch remain available.
 
 Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
 internal Head-write option that always checks active membership and the actual
@@ -320,20 +324,10 @@ is no claim of exactly-once dispatch across Host restarts. Events are not replay
 automatically. Peer replies cannot add Pet mentions, and the Head instruction
 ignores acknowledgement-only chatter while allowing useful peer contributions.
 
-Head decisions honor the model profile's explicit `structuredOutputMethod`.
-JSON mode/schema profiles keep their declared transport; function-calling (or
-unspecified profiles with a tool-capable adapter) use a single declared decision
-tool without forced choice or strict-provider flags. This is one model decision,
-not an Agent loop, and no returned tool is executed.
-
-Every transport uses the same exact action/reply/intent/timing validation. A known malformed
-output or an explicit unsupported tools/response-format capability may receive
-one fresh text-only JSON attempt: at most two model calls total, SDK retries off.
-The second request never includes the malformed provider output. Auth, network,
-refusal, safety, truncation, ambiguous/unknown tool calls and other provider errors
-are not replayed as output retries; invalid output is never converted to `ignore`. Blank output reports
-`empty_output` separately from `malformed`, `truncated`, or a valid ignore; it
-shares the same bounded fresh-JSON retry policy and never logs raw output.
+Head decisions use the resolved model profile's `structuredOutputMethod` in
+one LangChain structured-output call. Function-calling profiles must return
+one valid named declaration. Invalid or failed decisions do not produce a reply
+or dispatch. The Head does not repair output, retry, or switch formats.
 
 Safe `pet.head.decision` diagnostics identify Pet, Channel, source message,
 outcome (`selected`, `ignore`, `error`), attempt count and a finite error code.

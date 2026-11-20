@@ -6,7 +6,7 @@ import {
   type AgentCapability,
   type PetDocument,
 } from '@pinpawo/pet-agent';
-import { prepareStudio, type PreparedStudio } from '../createStudio';
+import { prepareStudioWithHead, type PreparedStudio } from '../createStudio';
 import type { Studio, StudioPlugin, StudioModels } from '../studioContract';
 import type { StudioPetRegistration, StudioPetRuntime } from '../types';
 import {
@@ -28,7 +28,7 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
-import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadDispatchQueueSnapshot } from './petHead';
+import { attachPetHead, type PetHeadChannelOperations } from './petHead';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -324,9 +324,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       };
     },
   };
-  const channelHead = (plugins.find(plugin => plugin.name === 'channel') as (StudioPlugin & { head?: Parameters<typeof bindPetHeadChannel>[1] }) | undefined)?.head;
+  const channelHead = (plugins.find(plugin => plugin.name === 'channel') as (StudioPlugin & { head?: PetHeadChannelOperations }) | undefined)?.head;
 
-  prepared = prepareStudio({
+  prepared = prepareStudioWithHead({
     studioId: studioConfig.studioId,
     definitions: resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
     assemblePet,
@@ -336,39 +336,22 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ? { credentialsKey: await readStudioCredentialsKey(studioConfig.credentials.keyFile) }
       : {}),
     models,
-    ...(channelHead ? { subscribePetTimeline: ({ registration }: { registration: StudioPetRegistration }, signal: AbortSignal) => {
-      const definition = definitions.get(registration.definitionId);
-      const description = input.petDocuments?.get(registration.definitionId)?.content;
-      // Resolve and create the model lazily, so a restored Pet subscribes before
-      // Plugin activation without making model availability a startup requirement.
-      let decide: ReturnType<typeof createHeadDecision> | undefined;
-      const channel = bindPetHeadChannel(registration.channelId, channelHead, prepared.studio.subscribe);
-      const handleMessage = createPetHead({
-        pet: registration,
-        ...(description ? { description } : {}),
-        channel,
-        readScheduling: () => readHeadDispatchQueueSnapshot(registration.petId, registration.channelId, prepared.listDispatchQueues()),
-        onScheduling: diagnostic => {
-          const occurredAt = new Date().toISOString();
-          prepared.studio.notify({ type: 'pet.head.scheduling', source: 'studio', topic: registration.channelId, occurredAt, payload: diagnostic });
-        },
-        decide: (value, signal) => {
-          decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId), {
-            onDiagnostic: diagnostic => {
-              const occurredAt = new Date().toISOString();
-              // Correlation and finite outcomes only: never log prompts, raw model
-              // output, provider errors, credentials or endpoint URLs.
-              console.info('[studio] pet.head', JSON.stringify({ occurredAt, ...diagnostic }));
-              prepared.studio.notify({ type: 'pet.head.decision', source: 'studio',
-                topic: registration.channelId, occurredAt, payload: diagnostic });
-            },
-          });
-          return decide(value, signal);
-        },
-      });
-      return channel.subscribe(message => handleMessage(message, signal));
-    } } : {}),
-  });
+  }, channelHead ? ({ registration, runtime }, signal) => attachPetHead({
+    pet: registration,
+    description: input.petDocuments?.get(registration.definitionId)?.content,
+    channel: channelHead,
+    subscribe: prepared.studio.subscribe,
+    getQueueSnapshot: () => runtime.dispatch.getQueueSnapshot(),
+    resolveModel: () => models.resolve(definitions.get(registration.definitionId)?.config.modelProfileId),
+    onDiagnostic: diagnostic => {
+      const occurredAt = new Date().toISOString();
+      // Correlation and finite outcomes only: never log prompts, raw model
+      // output, provider errors, credentials or endpoint URLs.
+      console.info('[studio] pet.head', JSON.stringify({ occurredAt, ...diagnostic }));
+      prepared.studio.notify({ type: 'pet.head.decision', source: 'studio',
+        topic: registration.channelId, occurredAt, payload: diagnostic });
+    },
+  }, signal) : undefined);
   try {
     // Before any transport listens: a TUI may connect to any active Pet.
     await prepared.restorePets();

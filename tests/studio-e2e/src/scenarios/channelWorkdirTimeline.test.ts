@@ -22,7 +22,7 @@ type WireMessage = {
   role: string; content?: unknown; tool_call_id?: string;
   tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
 };
-type WireRequest = { model: string; stream?: boolean; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
+type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 const human = { kind: 'human' as const, id: 'local' };
 
 function wireText(content: unknown): string {
@@ -50,11 +50,11 @@ async function createWorkdirModel() {
         };
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
-        if (names.length === 0) {
-          const { pet, message } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
+        if (input.response_format?.type === 'json_object' && names.length === 0) {
+          const { pet, message, addressed } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
           decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
-          content = JSON.stringify({ action: 'dispatch', reply: '', timing: 'enqueue', intent: message.body });
+          content = JSON.stringify({ action: 'dispatch', reply: '', readProgress: false, ...(!addressed ? { engage: true } : {}), intent: message.body });
         } else if (names.includes('plan_request')) {
           call = { name: 'plan_request', args: { goal: 'Read marker.txt and report the exact result.' } };
         } else if (names.includes('view_file_chunk')) {

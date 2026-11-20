@@ -51,13 +51,13 @@ test('one identity owns activation and runtime rename, using fresh names on Reop
 });
 
 for (const kind of ['close', 'remove'] as const) {
-  test(`a ${kind} cancels its own Timeline subscription before runtime teardown`, async () => {
+  test(`a ${kind} detaches its own Head before runtime teardown`, async () => {
     const stoppedRuntime = deferred();
     const stopped: string[] = [];
     const signals: Array<{ petId: string; signal: AbortSignal }> = [];
     const create = (pet: StudioPet) => new PetInstance(pet, {
       assemble: async () => ({ dispatch: {}, close: async () => stoppedRuntime.promise }) as StudioPetRuntime,
-      subscribePetTimeline: (live, signal) => {
+      attachHead: (live, signal) => {
         signals.push({ petId: live.registration.petId, signal });
         return () => {
           assert.equal(signal.aborted, true, 'in-flight work is canceled before unsubscribe');
@@ -91,11 +91,11 @@ for (const kind of ['close', 'remove'] as const) {
   });
 }
 
-test('failed activation cancels the Timeline subscription even when runtime cleanup fails', async () => {
+test('failed activation detaches the Head even when runtime cleanup fails', async () => {
   let stopped = 0;
   const instance = new PetInstance(row, {
     assemble: async () => ({ dispatch: {}, close: async () => { throw new Error('close failed'); } }) as unknown as StudioPetRuntime,
-    subscribePetTimeline: (_live, signal) => () => { assert.equal(signal.aborted, true); stopped++; },
+    attachHead: (_live, signal) => () => { assert.equal(signal.aborted, true); stopped++; },
     onLive: () => { throw new Error('activation failed'); }, onClosed: () => {}, onChange: () => {},
   });
   await assert.rejects(instance.restore(row), /close failed/);
@@ -104,11 +104,11 @@ test('failed activation cancels the Timeline subscription even when runtime clea
   assert.equal(stopped, 1);
 });
 
-test('a failed Timeline subscription aborts its activation and closes the runtime', async () => {
+test('a failed Head attachment aborts its activation and closes the runtime', async () => {
   let signal: AbortSignal | undefined, closed = 0;
   const instance = new PetInstance(row, {
     assemble: async () => ({ dispatch: {}, close: async () => { closed++; } }) as StudioPetRuntime,
-    subscribePetTimeline: (_live, activationSignal) => { signal = activationSignal; throw new Error('subscribe failed'); },
+    attachHead: (_live, activationSignal) => { signal = activationSignal; throw new Error('subscribe failed'); },
     onLive: () => { assert.fail('failed subscription cannot expose the Pet'); }, onClosed: () => {}, onChange: () => {},
   });
   await assert.rejects(instance.restore(row), /subscribe failed/);
@@ -246,7 +246,7 @@ test('shutdown immediately cancels existing subscriptions and prevents late subs
     studioId: 'head-shutdown', store: async () => store, credentials: {} as StudioPetCredentials,
     definitions: [{ definitionId: row.definitionId, name: 'Worker' }], requireChannel: async () => {},
     assemble: async () => ({ dispatch: {}, close: async () => {} }) as StudioPetRuntime,
-    subscribePetTimeline: (live, signal) => {
+    attachHead: (live, signal) => {
       started.push(live.registration.petId);
       return () => { assert.equal(signal.aborted, true); stopped.push(live.registration.petId); };
     },
@@ -266,12 +266,12 @@ test('shutdown immediately cancels existing subscriptions and prevents late subs
   } finally { persisting.resolve(); await registry.close(); }
 });
 
-test('successful Reopen subscribes to the Timeline only after persistence settles', async () => {
+test('successful Reopen attaches the Head only after persistence settles', async () => {
   const persisted = deferred();
   const started: string[] = [];
   const instance = new PetInstance(row, {
     assemble: async () => ({ dispatch: {}, close: async () => {} }) as StudioPetRuntime,
-    subscribePetTimeline: () => { started.push('timeline'); return () => {}; },
+    attachHead: () => { started.push('timeline'); return () => {}; },
     onLive: () => {}, onClosed: () => {}, onChange: () => {},
   });
   const reopening = instance.reopen({ ...row, closedAt: 'closed' }, () => persisted.promise).promise;

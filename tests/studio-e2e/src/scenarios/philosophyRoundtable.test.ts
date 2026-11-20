@@ -23,8 +23,8 @@ const philosophers = [
 const human = { kind: 'human' as const, id: 'local' };
 const question = '合成讨论：请把“集体感知共识”理解为感知实践、共享概念与纠错规则共同构成的认识条件，而非多数投票。当预测系统与这种共识吻合时，是否足以断言两者具有相同的理解？请各位回复，从自己的角色给出一个区分。';
 type WireMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
-type HeadWireMode = 'tool' | 'malformed-tool' | 'unsupported-tools';
-type WireRequest = { model: string; stream?: boolean; tool_choice?: unknown; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
+type HeadWireMode = 'tool' | 'json';
+type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; tool_choice?: unknown; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 function text(content: unknown): string {
   return typeof content === 'string' ? content : Array.isArray(content)
     ? content.map(block => block && typeof block === 'object' && 'text' in block ? String(block.text) : '').join('') : '';
@@ -62,17 +62,13 @@ async function scriptedModel(mode: HeadWireMode) {
           const key = `${head.pet.petId}:${head.message.messageId}`;
           const attempt = (attempts.get(key) ?? 0) + 1;
           attempts.set(key, attempt);
-          assert.ok(attempt <= 2, 'Head compatibility must never exceed two model requests per source');
-          assert.ok(input.tool_choice === undefined || input.tool_choice === 'auto', 'The Head must not require provider-specific forced tool selection');
-          if (attempt === 1) {
-            assert.ok(names.includes('pet_head_decision'), 'Initial Head call declares the decision tool');
-            if (mode === 'unsupported-tools') {
-              response.writeHead(400, { 'content-type': 'application/json' });
-              response.end(JSON.stringify({ error: { type: 'invalid_request_error', code: 'unsupported_parameter', param: 'tools', message: 'tools are not supported by this synthetic endpoint' } }));
-              return;
-            }
+          assert.equal(attempt, 1, 'One model request per Head decision');
+          if (mode === 'tool') {
+            assert.deepEqual(names, ['pet_head_decision'], 'Only the decision schema tool is bound');
+            assert.deepEqual(input.tool_choice, { type: 'function', function: { name: 'pet_head_decision' } });
           } else {
-            assert.equal(names.length, 0, 'Compatibility retry must be tool-free');
+            assert.deepEqual(names, []);
+            assert.deepEqual(input.response_format, { type: 'json_object' });
           }
           const peerEligible = head.message.author.kind === 'pet'
             && head.message.author.id === 'roundtable-language'
@@ -81,12 +77,11 @@ async function scriptedModel(mode: HeadWireMode) {
           const round = peerEligible ? 3 : head.message.body === question ? 1 : head.message.body.startsWith('合成同伴回应：') ? 2 : 0;
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
           const action = eligible ? 'dispatch' : 'ignore';
-          if (mode === 'tool' || attempt === 2) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
+          decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
-          const decision = { action, reply: '', timing: 'enqueue', intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
-          if (attempt === 1) {
-            call = { name: 'pet_head_decision', args: mode === 'malformed-tool' ? { action: 'invalid', text: '' } : decision };
-          } else content = JSON.stringify(decision);
+          const decision = { action, reply: '', readProgress: false, ...(!head.addressed ? { engage: eligible } : {}), intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
+          if (mode === 'tool') call = { name: 'pet_head_decision', args: decision };
+          else content = JSON.stringify(decision);
         } else {
           const all = input.messages.map(message => text(message.content)).join('\n');
           const marker = [...all.matchAll(/ROUND_([123])_(roundtable-(?:language|conditions|being))/g)].at(-1);
@@ -134,7 +129,7 @@ async function scriptedModel(mode: HeadWireMode) {
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
-for (const mode of ['tool', 'malformed-tool', 'unsupported-tools'] as const) {
+for (const mode of ['tool', 'json'] as const) {
 test(`manual three-Pet roundtable retains execution sessions and bounded ${mode} Head decisions`, { timeout: 120_000 }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'studio-roundtable-eval-'));
   const model = await scriptedModel(mode);
@@ -157,7 +152,7 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
       configuration: { workdir: root, studioConfigPath: path.join(root, '.pinpawo/studio.json'), petsDir: path.join(root, '.pinpawo/pets'),
         resolved: resolveStudio({ studioId: 'roundtable-eval', definitions: philosophers.map(role => role.definitionId), storage: { kind: 'sqlite', path: 'studio.sqlite' } },
           philosophers.map(role => ({ definitionId: role.definitionId, name: role.name }))), plugins: [channel] },
-      modelProfiles: createTestModelProfiles({ baseUrl: model.baseUrl, model: model.model, apiKey: 'synthetic-only', timeoutMs: 20_000, maxRetries: 0, structuredOutputMethod: 'functionCalling' }),
+      modelProfiles: createTestModelProfiles({ baseUrl: model.baseUrl, model: model.model, apiKey: 'synthetic-only', timeoutMs: 20_000, maxRetries: 0, structuredOutputMethod: mode === 'tool' ? 'functionCalling' : 'jsonMode' }),
       hostCapabilities: [{ name: GENERAL_CAPABILITY_NAME, uses: ['channel'], description: 'Produce a concise synthetic philosophical response.',
         instructions: defineInstructionDocument({ content: 'Answer the current synthetic request as this Pet. No external resources or tools are required.' }) }],
       petCapabilities: new Map(), toolkitInventory: createTestHostToolkitInventory([]),
@@ -252,7 +247,7 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     assert.deepEqual(failed, []);
     assert.deepEqual(model.modelErrors, []);
     assert.ok(model.attempts.size > 0);
-    for (const count of model.attempts.values()) assert.equal(count, mode === 'tool' ? 1 : 2);
+    for (const count of model.attempts.values()) assert.equal(count, 1);
   } finally {
     await built?.studio.shutdown();
     for (const resident of built?.residentPets.values() ?? []) await resident.close();

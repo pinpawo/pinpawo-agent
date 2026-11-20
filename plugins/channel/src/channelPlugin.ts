@@ -63,8 +63,10 @@ export type ChannelPlugin = StudioPlugin & {
 
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
-  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }) => Promise<void>;
+  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
   dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal) => Promise<void>;
+  readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
+    => Promise<string | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -230,6 +232,22 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const context = await service.readContext({ kind: 'pet', id: petId }, channelId, { before, limit: 50 });
       const referencedMessage = replyTo ? await service.getMessage(channelId, replyTo) : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
+    },
+    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {
+      const service = channelService();
+      const studio = host();
+      const authorized = async () => {
+        if (signal.aborted || current !== service || context !== studio || !isCurrent()) return false;
+        await service.requireMember(channelId, { kind: 'pet', id: petId });
+        const binding = await service.getSession(channelId, petId);
+        return !signal.aborted && current === service && context === studio && isCurrent() &&
+          binding?.registered === true && binding.sessionId === sessionId;
+      };
+      if (!await authorized()) return;
+      const { session } = await studio.petSessions.snapshot(petId, sessionId, { timelineLimit: 1 });
+      if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
+        return session.activeRun.requestId;
+      }
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();

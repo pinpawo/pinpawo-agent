@@ -46,6 +46,7 @@ See [Reference](../reference/index.md) for the current public reading path.
 
 ## Studio applications and Plugins
 
+- [Pet Head：Judgment / Execution / Feedback](studio/pet-head-mechanism.md) — draft：Head 工具往返、派发与反馈边界
 - [Channel 图片输入](studio/channel-image-input.md) — Timeline 保存结构化附件；Head 可将附件传入派发，Host 图片输入准入独立
 - [Channel 协作提示词](studio/channel-collaboration-prompt.md) — draft for Channel-scoped collaboration context and Pet invocation isolation
 - [Channel 模型](studio/channel-model.md) — Channel、成员、消息与存储规则；

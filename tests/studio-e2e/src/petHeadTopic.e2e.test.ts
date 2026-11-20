@@ -3,8 +3,9 @@ import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { AIMessage } from '@langchain/core/messages';
 import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet-agent';
-import { buildHostRuntimeConfig, FileSaver } from 'pinpawo/host-runtime';
+import { buildHostRuntimeConfig, FileSaver, type PetDispatchQueueSnapshot, type PetDispatchRequest } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../packages/studio/src/host/studioConfig';
 import type { HeadInput, HeadMessage } from '../../../packages/studio/src/host/petHead';
@@ -23,29 +24,77 @@ async function waitFor(predicate: () => boolean) {
   throw new Error('Timed out waiting for the owner Head.');
 }
 
-test('production Pet Head subscriptions receive only real messages from their owner Channel', async () => {
+test('production Head stays scoped to its Channel, samples only live runs, and does not republish results', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'head-topic-e2e-'));
   const channel = createChannelPlugin({ httpRoute: false });
   const decisions: Record<string, string[]> = { alpha: [], beta: [] };
   const deliveries: Record<string, string[]> = { alpha: [], beta: [] };
   const published: Array<{ topic: string | undefined; message: HeadMessage }> = [];
-  const model = {
-    withStructuredOutput: () => ({
-      invoke: async (messages: Array<[string, string]>) => {
-        const { pet, message } = JSON.parse(messages[1]![1]) as HeadInput;
-        decisions[pet.petId]!.push(message.body);
-        return { raw: { content: '{"action":"ignore","reply":"","intent":"","timing":"enqueue"}' }, parsed: { action: 'ignore', reply: '', intent: '', timing: 'enqueue' } };
+  const composeInputs: unknown[] = [];
+  const startA = 'Start work A.';
+  const direct = '[@alpha](participant:pet:alpha) Are you the analyst?';
+  const progress = '[@alpha](participant:pet:alpha) How is A going?';
+  const mixed = '[@alpha](participant:pet:alpha) How is A going? Also do work B.';
+  const finalA = 'This is A’s official result.';
+  const canonicalDecisions: HeadInput[] = [];
+  const held = '[@alpha](participant:pet:alpha) Hold Head judgment through close.';
+  const factoryCalls: number[] = [];
+  const decisionClients: Array<{ body: string; client: number }> = [];
+  const replyClients: number[] = [];
+  let resolutionCount = 0;
+  let heldSignal: AbortSignal | undefined;
+  let releaseHeld!: () => void;
+  const holdJudgment = new Promise<void>(resolve => { releaseHeld = resolve; });
+  type Messages = Array<[string, string]>;
+  type DecisionSchema = { safeParse(input: unknown): { success: boolean } };
+  const createModel = () => {
+    const client = factoryCalls.length;
+    factoryCalls.push(client);
+    return {
+      withStructuredOutput: (schema: DecisionSchema, options: unknown) => {
+        assert.deepEqual(options, { name: 'pet_head_decision', method: 'jsonMode', includeRaw: true });
+        return {
+          invoke: async (messages: Messages, { signal }: { signal: AbortSignal }) => {
+            const input = JSON.parse(messages[1]![1]) as HeadInput;
+            const { pet, message, addressed } = input;
+            decisions[pet.petId]!.push(message.body);
+            decisionClients.push({ body: message.body, client });
+            if (addressed) canonicalDecisions.push(input);
+            if (message.body === held) { heldSignal = signal; await holdJudgment; }
+            const intent = message.body === startA ? 'Do work A.' : message.body === mixed ? 'Do work B.' : message.body === held ? 'Do late work.' : '';
+            const parsed = {
+              ...(!addressed ? { engage: !!intent } : {}),
+              action: intent ? 'dispatch' : 'ignore',
+              intent,
+              reply: message.body === direct ? 'Yes, I am.' : message.body === held ? 'This reply is too late.' : '',
+              readProgress: message.body === progress || message.body === mixed,
+            };
+            assert.equal(schema.safeParse(parsed).success, true);
+            const { engage: _engage, ...withoutEngage } = parsed;
+            assert.equal(schema.safeParse(withoutEngage).success, addressed);
+            return { raw: new AIMessage(JSON.stringify(parsed)), parsed };
+          },
+        };
       },
-    }),
-  } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
+      invoke: async (messages: Messages) => {
+        const input = JSON.parse(messages[1]![1]);
+        composeInputs.push(input);
+        replyClients.push(client);
+        return new AIMessage(input.evidence.status === 'running' ? 'A is still running.' : 'I cannot verify the current status.');
+      },
+    } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
+  };
   const scriptedModels: StudioPlugin = {
     name: 'scripted-head-models', toolkits: [],
     start: context => {
       // Replace only the model transport; buildStudio still owns Head assembly.
-      context.models.resolve = () => ({
-        profileId: 'test', baseUrl: 'https://models.example.test/v1', apiKey: 'test-key', model: 'scripted',
-        structuredOutputMethod: 'jsonMode', createChatModel: () => model,
-      });
+      context.models.resolve = () => {
+        resolutionCount++;
+        return {
+          profileId: 'test', baseUrl: 'https://models.example.test/v1', apiKey: 'test-key', model: 'scripted',
+          structuredOutputMethod: 'jsonMode', createChatModel: createModel,
+        };
+      };
     },
   };
   let result: Awaited<ReturnType<typeof buildStudio>> | undefined;
@@ -76,17 +125,26 @@ test('production Pet Head subscriptions receive only real messages from their ow
     const subscribe = studio.subscribe;
     let subscribingPet = '';
     const registrations: Array<{ petId: string; filter: StudioEventSubscriptionFilter | undefined }> = [];
+    const detachments: Array<typeof registrations[number]> = [];
+    const handled: string[] = [];
     studio.subscribe = (handler, filter) => {
       const petId = subscribingPet;
-      registrations.push({ petId, filter });
+      const registration = { petId, filter };
+      registrations.push(registration);
       // Count before bindPetHeadChannel can inspect the payload or ignore it.
       // A broadcast subscription with a consumer-side Channel check fails here.
-      return subscribe(event => {
-        if (event.source === 'channel' && event.type === 'channel.message.created') {
-          deliveries[petId]!.push((event.payload as HeadMessage).body);
-        }
-        return handler(event);
+      const detach = subscribe(async event => {
+        const message = event.source === 'channel' && event.type === 'channel.message.created'
+          ? event.payload as HeadMessage : undefined;
+        if (message) deliveries[petId]!.push(message.body);
+        try { await handler(event); }
+        finally { if (message) handled.push(message.messageId); }
       }, filter);
+      return () => {
+        if (petId === 'alpha' && heldSignal) assert.equal(heldSignal.aborted, true, 'Pet aborts before either Head unsubscribe');
+        detachments.push(registration);
+        detach();
+      };
     };
     subscribe(event => {
       if (event.source === 'channel' && event.type === 'channel.message.created') {
@@ -100,9 +158,16 @@ test('production Pet Head subscriptions receive only real messages from their ow
       subscribingPet = petId;
       await studio.pets.create({ petId, definitionId: 'worker', name: petId, channelId });
     }
-    assert.deepEqual(registrations, ['alpha', 'beta'].map(petId => ({
-      petId, filter: { source: 'channel', topic: owners[petId] },
-    })), 'each Pet registers its exact owner topic rather than a global subscription');
+    assert.equal(registrations.length, 4);
+    assert.equal(resolutionCount, 0, 'subscription must not resolve or instantiate an LLM');
+    assert.deepEqual(factoryCalls, []);
+    for (const petId of ['alpha', 'beta']) {
+      assert.deepEqual(registrations.filter(r => r.petId === petId).map(r => r.filter)
+        .sort((a, b) => a!.source.localeCompare(b!.source)), [
+        { source: 'channel', topic: owners[petId] },
+        { source: 'resident-pet', topic: petId },
+      ]);
+    }
     const { channel: { channelId: emptyChannelId } } = await channel.service.createChannel(human, { title: 'No Pets', pets: [] });
     await channel.service.postMessage(human, owners.alpha!, { body: 'alpha first' });
     await waitFor(() => decisions.alpha!.includes('alpha first'));
@@ -120,7 +185,202 @@ test('production Pet Head subscriptions receive only real messages from their ow
       { topic: owners.beta, channelId: owners.beta, body: 'beta only' },
       { topic: owners.alpha, channelId: owners.alpha, body: 'alpha second' },
     ], 'the real Channel producer labels committed messages and global observers receive each once');
+
+    const ownerChannelId = owners.alpha!;
+    const resident = result.residentPets.get('alpha')!;
+    const otherDispatch = result.residentPets.get('beta')!.resident.dispatch;
+    const otherQueue = otherDispatch.getQueueSnapshot.bind(otherDispatch);
+    let otherQueueReads = 0;
+    otherDispatch.getQueueSnapshot = () => { otherQueueReads++; return otherQueue(); };
+    const admissions: PetDispatchRequest[] = [];
+    const sessionReads: string[] = [];
+    let activeDispatch: PetDispatchQueueSnapshot['activeDispatch'];
+    let switchDuringRead: PetDispatchQueueSnapshot['activeDispatch'];
+    let continuingAfterReview = false;
+    resident.resident.dispatch.getQueueSnapshot = () => ({
+      state: activeDispatch || continuingAfterReview ? 'busy' : 'open',
+      activeOperation: activeDispatch ? 'dispatch' : null,
+      queuedConversations: continuingAfterReview ? 1 : 0, queuedDispatches: Math.max(0, admissions.length - 1),
+      ...(activeDispatch ? { activeDispatch } : {}),
+    });
+    resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
+    resident.sessions.snapshot = async (sessionId, options) => {
+      assert.deepEqual(options, { timelineLimit: 1 });
+      sessionReads.push(sessionId);
+      if (switchDuringRead) activeDispatch = switchDuringRead;
+      return {
+        version: 5,
+        session: {
+          sessionId, kind: 'chat',
+          activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
+          pendingInterrupt: null,
+          currentPlan: { items: [{ id: 'old', capability: 'internal', task: 'private stale plan', status: 'active' }] },
+          timeline: [
+            { type: 'message', id: 'old-text', role: 'assistant', text: 'private checkpoint text', status: 'completed' },
+            {
+              type: 'operation', id: 'private-tool', requestId: 'opaque-live-request', operationKey: 'private-call',
+              kind: 'tool', title: 'Private tool', phase: 'completed', raw: { output: 'private tool output' },
+            },
+          ],
+        },
+      };
+    };
+    const post = async (body: string, replyTo?: string) => (await channel.service.postMessage(human, ownerChannelId, { body, ...(replyTo ? { replyTo } : {}) })).message;
+    const replyFor = (id: string) => published.find(item => item.message.replyTo === id)?.message;
+
+    const directQuestion = await post(direct);
+    await waitFor(() => !!replyFor(directQuestion.messageId));
+    assert.equal(replyFor(directQuestion.messageId)?.body, 'Yes, I am.');
+    assert.equal(admissions.length, 0);
+    assert.equal(sessionReads.length, 0);
+    const sourceA = await post(startA);
+    const hasBoundSession = async () => !!(await channel.service.getSession(ownerChannelId, 'alpha'))?.registered;
+    await waitFor(() => admissions.length === 1);
+    for (let attempts = 0; !(await hasBoundSession()); attempts++) {
+      assert.ok(attempts < 100);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(sessionReads.length, 0, 'idle dispatch does not read Session content');
+    const a = admissions[0]!;
+    assert.equal(a.origin?.id, sourceA.messageId);
+    assert.ok(a.dispatchId && a.session && a.scope && a.origin);
+    activeDispatch = { dispatchId: a.dispatchId, sessionId: a.session.id, scope: a.scope, origin: a.origin, enqueuedAt: new Date().toISOString() };
+    const lifecycle = (type: string, extra: object = {}) => studio.notify({
+      source: 'resident-pet', topic: 'alpha', type: `dispatch.${type}`, occurredAt: new Date().toISOString(),
+      payload: { invocationId: a.dispatchId, petId: 'alpha', sessionId: a.session!.id, scope: a.scope,
+        requestId: 'opaque-live-request', ...extra },
+    });
+    lifecycle('running');
+    const check = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(check.messageId));
+    assert.equal(replyFor(check.messageId)?.body, 'A is still running.');
+    assert.deepEqual(sessionReads, [a.session.id], 'the progress-only turn reads exact busy A only once');
+    assert.equal(admissions.length, 1, 'progress-only turns never dispatch');
+    const both = await post(mixed, sourceA.messageId);
+    await waitFor(() => admissions.length === 2 && !!replyFor(both.messageId));
+    assert.equal(replyFor(both.messageId)?.body, 'A is still running.');
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id], 'mixed asks still sample only A once each');
+    assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion.messageId, check.messageId, both.messageId]);
+    assert.equal(composeInputs.length, 2);
+    assert.equal(resolutionCount, 2, 'each active Head resolves only one client');
+    assert.equal(factoryCalls.length, 2);
+    const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
+    assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
+    assert.deepEqual(composeInputs, [
+      { message: check, evidence: { status: 'running' } },
+      { message: both, evidence: { status: 'running' } },
+    ]);
+    for (const input of canonicalDecisions.slice(1)) {
+      assert.deepEqual(input.activeWork, { source: { messageId: sourceA.messageId, body: sourceA.body } });
+      assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
+    }
+    assert.equal(otherQueueReads, 0, 'alpha Head samples only its own dispatch port');
+    assert.equal(admissions[1]!.origin?.id, both.messageId);
+    assert.equal(admissions[1]!.session?.id, a.session.id);
+    assert.equal(admissions[1]!.delivery, undefined, 'B uses ordinary admission, not interruption');
+    assert.match(admissions[1]!.request, /"request": "Do work B\."/);
+    assert.equal(activeDispatch.dispatchId, a.dispatchId);
+
+    const b = admissions[1]!;
+    assert.ok(b.dispatchId && b.session && b.scope && b.origin);
+    const activeA = activeDispatch;
+    const activeB = { dispatchId: b.dispatchId, sessionId: b.session.id, scope: b.scope, origin: b.origin, enqueuedAt: new Date().toISOString() };
+    const realReply = channel.head.reply;
+    let staleAtWrite = false;
+    channel.head.reply = async (...args) => {
+      staleAtWrite = true;
+      activeDispatch = activeB;
+      await realReply(...args);
+    };
+    try {
+      const raceAtWrite = await post(progress, sourceA.messageId);
+      const fence = (await post('alpha write fence')).body;
+      await waitFor(() => decisions.alpha!.includes(fence));
+      assert.equal(staleAtWrite, true);
+      assert.equal(replyFor(raceAtWrite.messageId), undefined, 'a stale result cannot be committed after the run changes');
+      assert.equal(admissions.length, 2);
+    } finally {
+      channel.head.reply = realReply;
+      activeDispatch = activeA;
+    }
+    switchDuringRead = activeB;
+    const race = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(race.messageId));
+    assert.equal(replyFor(race.messageId)?.body, 'I cannot verify the current status.');
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'each race reads once and never retries on B');
+    assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'unavailable' });
+    assert.equal(admissions.length, 2);
+
+    // A resumed review emits dispatch.running, but executes as a conversation
+    // hold and does not occupy the ordinary dispatch queue slot.
+    switchDuringRead = undefined;
+    lifecycle('waiting');
+    activeDispatch = undefined;
+    continuingAfterReview = true;
+    lifecycle('running', { requestId: 'resumed-request' });
+    const approvalFollowup = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(approvalFollowup.messageId));
+    assert.equal(replyFor(approvalFollowup.messageId)?.body, 'I cannot verify the current status.');
+    assert.equal(canonicalDecisions.at(-1)?.activeWork, undefined);
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'continuation is outside the ordinary dispatch slot');
+    assert.equal(admissions.length, 2);
+
+    const beforeOfficial = decisions.alpha!.length;
+    lifecycle('message', { requestId: 'resumed-request', message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
+    lifecycle('completed', { requestId: 'resumed-request', reply: finalA });
+    continuingAfterReview = false;
+    await waitFor(() => published.some(({ message }) => message.externalRef === 'public-a'));
+    const fence = (await post('alpha fence')).body;
+    await waitFor(() => decisions.alpha!.includes(fence));
+    assert.equal(decisions.alpha!.length, beforeOfficial + 1, 'resident events or own output must not start another judgment');
+    assert.equal(published.filter(({ message }) => message.body === finalA).length, 1, 'official result uses only the existing Channel bridge');
+    assert.equal(admissions.length, 2);
+
+    const oldRegistrations = registrations.filter(entry => entry.petId === 'alpha');
+    const realClose = resident.close.bind(resident);
+    let closed = false;
+    resident.close = async () => {
+      assert.equal(detachments.length, 2, 'each owned topic detaches exactly once');
+      assert.deepEqual(new Set(detachments), new Set(oldRegistrations), 'both alpha topics detach before its runtime stops; beta stays active');
+      assert.equal(heldSignal?.aborted, true);
+      await realClose();
+      closed = true;
+    };
+    const late = await post(held);
+    await waitFor(() => heldSignal !== undefined);
+    await post('queued before alpha closes');
+    await studio.pets.closeInstance('alpha', { confirmStop: true });
+    assert.equal(closed, true);
+    await post('sent while alpha is closed');
+    const betaAlive = (await channel.service.postMessage(human, owners.beta!, { body: 'beta remains online' })).message;
+    await waitFor(() => handled.includes(betaAlive.messageId));
+    subscribingPet = 'alpha';
+    await studio.pets.reopenInstance('alpha');
+    assert.equal(factoryCalls.length, 2, 'reopening still defers client construction');
+    // If the old Head incorrectly dispatches into the new activation, capture
+    // it locally rather than allowing the resident to call a real endpoint.
+    result.residentPets.get('alpha')!.resident.dispatch.dispatch = async request => { admissions.push(request); };
+    const newRegistrations = registrations.filter(entry => entry.petId === 'alpha').slice(2);
+    assert.equal(newRegistrations.length, 2, 'reopening establishes just one fresh subscription pair');
+    assert.deepEqual(newRegistrations.map(entry => entry.filter).sort((a, b) => a!.source.localeCompare(b!.source)), [
+      { source: 'channel', topic: ownerChannelId },
+      { source: 'resident-pet', topic: 'alpha' },
+    ]);
+    const testReopened = await post('alpha receives live traffic after reopen');
+    await waitFor(() => handled.includes(testReopened.messageId));
+    assert.equal(factoryCalls.length, 3);
+    assert.equal(resolutionCount, 3);
+    assert.notEqual(decisionClients.at(-1)?.client, alphaClient, 'a new activation builds its own client');
+    releaseHeld();
+    await waitFor(() => handled.includes(late.messageId));
+    assert.equal(admissions.length, 2, 'the canceled decision never dispatches');
+    assert.equal(replyFor(late.messageId), undefined, 'the canceled decision never publishes');
+    for (const offline of ['queued before alpha closes', 'sent while alpha is closed']) {
+      assert.ok(!decisions.alpha!.includes(offline), 'no replay into the reopened Head');
+      assert.ok(!deliveries.alpha!.includes(offline), 'closed subscription does not receive offline input');
+    }
   } finally {
+    releaseHeld();
     await result?.studio.shutdown();
     await rm(workdir, { recursive: true, force: true });
   }

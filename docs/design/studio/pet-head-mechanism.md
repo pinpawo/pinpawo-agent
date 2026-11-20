@@ -1,6 +1,8 @@
 # Pet Head：判断、派发与反馈
 
-状态：首版实现，待评审。只调整 Head 的判断流程，不改变 Channel、Studio Dispatch 或 resident Pet Agent 的职责。
+状态：首版行为已实现，以下是组装对齐后的目标设计，不改变 Channel、Studio Dispatch 或 resident Pet Agent 的职责。
+
+首版（`a9b59036`）仍由 Studio Host 装配两个订阅，并分别懒建判断和写回复的模型客户端。目标是每个在线 Pet 的 Head 自己串起这条流程，共用一个模型客户端。Host 只提供依赖，Pet 实例继续决定何时启动和停用 Head；不新增 Head 开关。
 
 ## 1. 总体结构
 
@@ -9,6 +11,23 @@
 - **Channel Timeline → Studio EventBus → Head。** Human 和 Pet 写入同一条 Timeline；Channel 只在消息提交后发布 `channel.message.created`。在线 Pet 实例由自己的 Head 订阅 `source=channel, topic=channelId`，过滤自己发的消息。Channel 不替 Head 选消费者；live bus 不向离线 Head 补投。
 - **Head → Channel port → Studio Dispatch → resident Pet Agent。** Head 做判断；现有 Channel port 校验成员和原消息、绑定 Session、传递附件和去重键；Studio 和 resident Pet 负责接纳、排队、执行与审核。
 - **resident Pet Agent → Studio EventBus → 本实例的 Head。** Studio 已发布以 Pet 实例为 topic 的 `dispatch.*` 生命周期；Head 只观察本实例的执行状态，不因事件发消息。另有独立的只读 Session 访问，不用事件负载代替 Session。
+
+**Head 的职责边界。** Head 随 Pet 实例启动，自己订阅归属 Channel 的 Timeline 和本实例的派发生命周期；停用时取消进行中的判断或回复并释放两个订阅。Host 不为每条消息逐步转交。Channel 仍负责原消息的校验、回复和派发入口；Studio 仍负责接纳；Session 仍提供现有只读入口。
+
+```mermaid
+flowchart LR
+    T["Channel Timeline<br/>已提交消息"] --> H
+    E["本 Pet 的 dispatch.*<br/>只观察"] --> H
+    subgraph HEAD["每个在线 Pet 的 Head"]
+        H["处理消息并绑定本次执行"] --> M["一个模型客户端"]
+        M --- D["decide：绑定决策工具"]
+        M --- W["composeReply：直接调用，不绑工具"]
+    end
+    H -->|关联原消息回复| C["Channel 接口"]
+    H -->|提交独立工作| C
+    C --> Q["Studio Dispatch 原队列"]
+    H -->|按需只读一次| S["当前执行对应的既有 Session"]
+```
 
 ## 2. 谁接，怎么处理
 
@@ -25,9 +44,11 @@
 
 ## 3. 忙时只查证、写回复
 
-宿主只读本 Pet、当前 Channel、对应执行能公开的事实。`read_session` 是只读查证，不是新一轮任务决策。需要组织语言时，Head 拿原消息和已核实的事实，**只返回 `reply` 正文或空值**，不再选择工具、排队或派发。宿主用原 Channel 回复接口发回原消息。
+模型层只有一个客户端：`decide` 使用绑定决策工具的调用视图，给出本条消息的处理决定；`composeReply` 直接调用同一个未绑定工具的客户端，不再判断或选择工具。读取由 Head 按第一次决定调用现有 Session 入口，不是模型的新任务，也不改其他模型调用的协议。
 
-例如「@Pet，A 做到哪了？另外帮我做 B」：第一次判断认出 B 是独立工作；宿主读 A 一次，回复步骤只说明 A 的实际进度，B 仍由原有 Studio 队列接纳。查不到 A 的可靠状态就如实说，不能把旧进度套到当前执行上。A 的计划和内部工具记录不是已完成的事实。
+需要查证时，Head 只读一次本 Pet 在当前 Channel 的那次执行，只把原消息和能公开的事实交给 `composeReply`。模型**只给出回复正文或空值**；有正文才用原 Channel 回复接口发回原消息。执行换了就不用迟到的证据。
+
+例如「@Pet，A 做到哪了？另外帮我做 B」：第一次判断认出 B 是独立工作；Head 读 A 一次，回复步骤只说明 A 的实际进度，B 仍由原有 Studio 队列接纳。查不到 A 的可靠状态就如实说，不能把旧进度套到当前执行上。A 的计划和内部工具记录不是已完成的事实。
 
 ## 4. 分场景时序
 
@@ -71,17 +92,18 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant H as Head 宿主
+    participant H as Pet Head
+    participant M as 同一个 Head 模型客户端
     participant S as Agent Session
-    participant M as Head 模型
     participant C as Channel 接口
     participant D as Studio Dispatch
-    Note over H: 首次判断已识别追问和独立的新工作
+    H->>M: decide（绑定决策工具）
+    M-->>H: 识别追问 A 和独立的新工作 B
     opt 需要回答当前执行的情况
         H->>S: 只读正在执行的那次
         S-->>H: 可用事实，或本次查不到
-        H->>M: 原消息和查证结果，仅组织回复
-        M-->>H: reply 正文或空
+        H->>M: composeReply（不绑工具），传原消息和查证结果
+        M-->>H: 回复正文或空
         H->>C: 有正文才回复原消息
     end
     opt 首次判断已识别独立新工作
@@ -107,6 +129,8 @@ sequenceDiagram
 ```
 
 ## 5. 首版验收边界
+
+以下用例验证当前实现的行为，不等同于验证目标中的单客户端和 Head 组装提取。
 
 - 被明确点名和主动接下消息，后续使用同一条 Head 路径。静默、直接答复和空闲派发都不读 Session 正文。
 - 忙时同一条追问只查一次；只问进度不派发，独立追加只提交一次；写回复的步骤没有调度权。

@@ -1,7 +1,8 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { Studio, StudioDispatchQueue } from '../studioContract';
+import type { Studio, StudioDispatchQueue, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
-import { readHeadProgress, type HeadRunReader, type HeadProgressEvidence, type HeadProgressSnapshotReader } from './petHeadProgress';
+import { readHeadProgress, type HeadRun, type HeadRunReader, type HeadProgressEvidence, type HeadProgressSnapshotReader } from './petHeadProgress';
+import { createHeadModel, type HeadDecisionDiagnostic } from './petHeadModel';
 
 /** The committed Timeline message as seen by a Pet. */
 export type HeadMessage = {
@@ -81,6 +82,83 @@ export function bindPetHeadChannel(
     reply: (petId, messageId, body, signal, options) => operations.reply(channelId, petId, messageId, body, signal, options),
     dispatch: (petId, message, request, signal) => operations.dispatch(channelId, petId, message, request, signal),
     ...(snapshot ? { readProgressSession: (...args: Parameters<NonNullable<PetHeadChannel['readProgressSession']>>) => snapshot(channelId, ...args) } : {}),
+  };
+}
+
+/** Attach the Head to one live Pet; PetInstance owns the signal and calls the disposer. */
+export function attachPetHead(input: {
+  pet: StudioPetRegistration;
+  description?: string;
+  channel: PetHeadChannelOperations;
+  subscribe: Studio['subscribe'];
+  listDispatchQueues: () => StudioDispatchQueue[];
+  resolveModel: () => StudioModelEndpoint;
+  onDiagnostic?: (event: HeadDecisionDiagnostic) => void;
+}, signal: AbortSignal): () => void {
+  signal.throwIfAborted();
+  const { pet, description, subscribe } = input;
+  const channel = bindPetHeadChannel(pet.channelId, input.channel, subscribe);
+  const readProgressSession = channel.readProgressSession;
+  const model = createHeadModel(input.resolveModel, { onDiagnostic: input.onDiagnostic });
+  const observation = observeHeadRun(subscribe, pet.petId, pet.channelId, signal);
+  let unsubscribe: () => void;
+  try {
+    const handleMessage = createPetHead({
+      pet,
+      ...(description ? { description } : {}),
+      channel,
+      readScheduling: () => readHeadDispatchQueueSnapshot(pet.petId, pet.channelId, input.listDispatchQueues()),
+      ...(readProgressSession ? { progress: {
+        readRun: observation.read,
+        snapshot: (sessionId, signal, isCurrent) => readProgressSession(pet.petId, sessionId, signal, isCurrent),
+        compose: model.composeReply,
+      } } : {}),
+      decide: model.decide,
+    });
+    unsubscribe = channel.subscribe(message => handleMessage(message, signal));
+  } catch (error) {
+    // PetInstance will abort on activation failure, but never received a
+    // disposer. Release the subscription already registered by the Head.
+    observation.close();
+    throw error;
+  }
+  return () => {
+    try { unsubscribe(); }
+    finally { observation.close(); }
+  };
+}
+
+/** Only correlate the live run on this Pet's own topic. Never publish from an event. */
+export function observeHeadRun(subscribe: Studio['subscribe'], petId: string, channelId: string, signal: AbortSignal) {
+  let current: HeadRun | undefined;
+  const unsubscribe = subscribe(event => {
+    if (signal.aborted || event.source !== 'resident-pet' || event.topic !== petId) return;
+    const payload = event.payload as Partial<{
+      petId: string; invocationId: string; sessionId: string; requestId: string;
+      scope: { namespace: string; id: string }; message: { type: string; messageId: string };
+    }> | undefined;
+    if (!payload || payload.petId !== petId || payload.scope?.namespace !== 'channel' || payload.scope.id !== channelId ||
+      typeof payload.invocationId !== 'string' || !payload.invocationId || typeof payload.sessionId !== 'string' || !payload.sessionId ||
+      typeof payload.requestId !== 'string' || !payload.requestId) return;
+    const { invocationId, sessionId, requestId } = payload;
+    const matches = current && current.invocationId === invocationId && current.sessionId === sessionId && current.requestId === requestId;
+    if (event.type === 'dispatch.running') {
+      if (!matches) current = { invocationId, sessionId, requestId, publishedIds: [] };
+    } else if (matches && current) {
+      if (event.type === 'dispatch.waiting' || event.type === 'dispatch.completed' || event.type === 'dispatch.failed' || event.type === 'dispatch.interrupted') {
+        current = undefined;
+      } else if (event.type === 'dispatch.message' && payload.message?.type === 'message.completed') {
+        const id = payload.message.messageId;
+        if (typeof id === 'string' && id && !current.publishedIds.includes(id)) {
+          current = { ...current, publishedIds: [...current.publishedIds.slice(-4), id] };
+        }
+      }
+    }
+  }, { source: 'resident-pet', topic: petId });
+  return {
+    close: () => { current = undefined; unsubscribe(); },
+    read: (active: NonNullable<HeadSchedulingSnapshot['active']>) => !signal.aborted && current?.invocationId === active.dispatchId && current.sessionId === active.sessionId
+      ? current : undefined,
   };
 }
 

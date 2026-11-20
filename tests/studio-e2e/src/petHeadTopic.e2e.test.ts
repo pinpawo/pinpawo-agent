@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { AIMessage } from '@langchain/core/messages';
 import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet-agent';
 import { buildHostRuntimeConfig, FileSaver, type PetDispatchQueueSnapshot, type PetDispatchRequest } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../packages/studio/src/host/buildStudio';
@@ -65,13 +66,13 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
             if (addressed) canonicalDecisions.push(input);
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
             const intent = message.body === startA ? 'Do work A.' : message.body === mixed ? 'Do work B.' : message.body === held ? 'Do late work.' : '';
-            return { content: '', tool_calls: [{ id: message.messageId, name: 'pet_head_decision', args: {
+            return new AIMessage({ content: '', tool_calls: [{ id: message.messageId, name: 'pet_head_decision', args: {
               ...(!addressed ? { engage: !!intent } : {}),
               action: intent ? 'dispatch' : 'ignore',
               intent,
               reply: message.body === direct ? 'Yes, I am.' : message.body === held ? 'This reply is too late.' : '',
               readProgress: message.body === progress || message.body === mixed,
-            } }] };
+            } }] });
           },
         };
       },
@@ -80,7 +81,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
         const input = JSON.parse(messages[1]![1]);
         composeInputs.push(input);
         replyClients.push(client);
-        return { content: input.evidence.status === 'running' ? 'A is still running.' : 'I cannot verify the current status.' };
+        return new AIMessage(input.evidence.status === 'running' ? 'A is still running.' : 'I cannot verify the current status.');
       },
     } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
   };

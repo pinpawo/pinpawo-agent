@@ -26,7 +26,7 @@ import { StudioClients } from './clients/studioClients';
 import { KyselyClientStore, type ClientDatabase } from './clients/store/kysely';
 import { KyselyPetStore, type PetDatabase } from './pets/store/kysely';
 import { StudioPetError, StudioPetRegistry, type LiveStudioPet } from './pets/studioPets';
-import type { SubscribePetTimeline } from './pets/petInstance';
+import type { AttachPetHead } from './pets/petInstance';
 import { StudioPetCredentialVault } from './pets/petCredentials';
 import { studioCoreMigrations } from './storage/coreMigrations';
 
@@ -36,8 +36,8 @@ export type CreateStudioInput = {
   definitions: StudioPetDefinition[];
   /** Builds one Pet's runtime; Studio calls it for each active Pet and for each Pet it creates. */
   assemblePet: StudioPetAssembler;
-  /** Subscribe each active Pet to its owner Channel's live Timeline. */
-  subscribePetTimeline?: SubscribePetTimeline;
+  /** Optional custom Timeline subscription for each active Pet. */
+  subscribePetTimeline?: AttachPetHead;
   plugins?: StudioPlugin[];
   /** Where Plugins keep their data. Defaults to an in-memory SQLite database. */
   storage?: StudioStorageConfig;
@@ -65,6 +65,13 @@ export type PreparedStudio = {
 
 /** Prepare the Studio registry without running executable Plugin lifecycles. */
 export function prepareStudio(input: CreateStudioInput): PreparedStudio {
+  // Keep the exported Timeline callback at the compatibility boundary; each
+  // PetInstance owns its lifetime just like the composing Host's Head.
+  return prepareStudioWithHead(input, input.subscribePetTimeline);
+}
+
+/** Host composition entry; not part of the published Studio contract. */
+export function prepareStudioWithHead(input: CreateStudioInput, attachHead?: AttachPetHead): PreparedStudio {
   const plugins = input.plugins ?? [];
   const pluginNames = new Set<string>();
   for (const plugin of plugins) {
@@ -133,7 +140,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     credentials,
     definitions: input.definitions,
     assemble: input.assemblePet,
-    subscribePetTimeline: input.subscribePetTimeline,
+    attachHead,
     requireChannel: async (channelId) => {
       await channelPort().requireChannel(channelId, channelStorage);
     },
@@ -409,7 +416,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
         notify({ type: 'plugins.activated', source: 'studio', occurredAt: new Date().toISOString() });
       } catch (error) {
         stopped = true;
-        registry.unsubscribeTimelines();
+        registry.detachHeads();
         await stopStartedPlugins();
         await closeCore();
         throw error;
@@ -422,7 +429,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   async function shutdown(): Promise<void> {
     if (shutdownPromise) return shutdownPromise;
     stopped = true;
-    registry.unsubscribeTimelines();
+    registry.detachHeads();
     const pending = (async () => {
       await activationPromise?.catch(() => undefined);
       await stopStartedPlugins();

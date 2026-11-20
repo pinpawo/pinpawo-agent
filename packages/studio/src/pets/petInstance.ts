@@ -10,8 +10,8 @@ export class StudioPetError extends Error {
 
 /** The registration and runtime ports the Host lent Studio. */
 export type LiveStudioPet = { registration: StudioPetRegistration; runtime: StudioPetRuntime };
-/** Subscribe one active Pet to its owner Channel's live Timeline. */
-export type SubscribePetTimeline = (pet: LiveStudioPet, signal: AbortSignal) => () => void;
+/** Attach the Head resource to one live Pet for its existing lifetime. */
+export type AttachPetHead = (pet: LiveStudioPet, signal: AbortSignal) => () => void;
 type LifecycleKind = 'create' | 'restore' | 'close' | 'remove' | 'reopen';
 type Transition = { kind: LifecycleKind; promise: Promise<StudioPet> };
 
@@ -22,15 +22,15 @@ type Transition = { kind: LifecycleKind; promise: Promise<StudioPet> };
 export class PetInstance {
   private readonly identity: Readonly<Omit<StudioPetRegistration, 'name'>>;
   private resident: LiveStudioPet | undefined;
-  private timeline: { controller: AbortController; unsubscribe: () => void } | undefined;
+  private head: { controller: AbortController; dispose: () => void } | undefined;
   private transition: Transition | undefined;
   /** Failed/uncertain teardown is not permission to dispatch or reassemble. */
   private unavailable = false;
 
   constructor(pet: StudioPet, private readonly options: {
     assemble: StudioPetAssembler;
-    subscribePetTimeline?: SubscribePetTimeline;
-    canSubscribeTimeline?: () => boolean;
+    attachHead?: AttachPetHead;
+    canAttachHead?: () => boolean;
     onLive: (pet: LiveStudioPet) => void;
     onClosed: (petId: string) => void;
     onChange: (type: 'pet.closed' | 'pet.removed' | 'pet.reopened', pet: StudioPet) => void;
@@ -85,12 +85,12 @@ export class PetInstance {
     if (!this.needsRestore) throw new StudioPetError(`Pet "${this.petId}" already has a resident lifecycle.`, 'busy');
   }
 
-  private async activateRuntime(name: string, subscribeTimeline = true): Promise<void> {
+  private async activateRuntime(name: string, withHead = true): Promise<void> {
     const registration = { ...this.identity, name };
     const live = { registration, runtime: await this.options.assemble({ ...registration }) };
     this.resident = live;
     try {
-      if (subscribeTimeline) this.subscribeTimeline(live);
+      if (withHead) this.attachHead(live);
       this.options.onLive(live);
     }
     catch (error) {
@@ -117,8 +117,8 @@ export class PetInstance {
     }
     // Stop observing before any asynchronous teardown, including while the
     // Host waits for accepted work to settle. Abort any in-flight decision and
-    // unsubscribe before allowing the runtime to close.
-    this.unsubscribeTimeline();
+    // dispose its Head before allowing the runtime to close.
+    this.detachHead();
     return this.begin(kind, async () => {
       this.unavailable = true;
       // Fence admission first. Keep the handle if stop fails; commit only after
@@ -157,7 +157,7 @@ export class PetInstance {
         await persist();
         // A closed Pet does not observe new messages until its Reopen is
         // committed. Shutdown can meanwhile disable subscriptions entirely.
-        this.subscribeTimeline(this.resident!);
+        this.attachHead(this.resident!);
       }
       catch (error) {
         this.unavailable = true;
@@ -183,7 +183,7 @@ export class PetInstance {
 
   /** Studio shutdown is not Close/Remove and never writes a lifecycle marker. */
   async shutdown(): Promise<void> {
-    this.unsubscribeTimeline();
+    this.detachHead();
     const live = this.resident;
     this.resident = undefined;
     // Let registry shutdown detach every resident before any close callback.
@@ -202,7 +202,7 @@ export class PetInstance {
   }
 
   private async stop(): Promise<void> {
-    this.unsubscribeTimeline();
+    this.detachHead();
     const live = this.resident;
     await live?.runtime.close();
     if (live) {
@@ -211,21 +211,21 @@ export class PetInstance {
     }
   }
 
-  /** Cancel in-flight work and unsubscribe synchronously when the Pet deactivates. */
-  unsubscribeTimeline(): void {
-    const timeline = this.timeline;
-    this.timeline = undefined;
-    if (!timeline) return;
-    timeline.controller.abort();
-    timeline.unsubscribe();
+  /** Abort in-flight Head work, then dispose its attachment synchronously. */
+  detachHead(): void {
+    const head = this.head;
+    this.head = undefined;
+    if (!head) return;
+    head.controller.abort();
+    head.dispose();
   }
 
-  private subscribeTimeline(live: LiveStudioPet): void {
-    if (this.options.canSubscribeTimeline?.() === false || !this.options.subscribePetTimeline) return;
+  private attachHead(live: LiveStudioPet): void {
+    if (this.options.canAttachHead?.() === false || !this.options.attachHead) return;
     const controller = new AbortController();
     try {
-      const unsubscribe = this.options.subscribePetTimeline(live, controller.signal);
-      this.timeline = { controller, unsubscribe };
+      const dispose = this.options.attachHead(live, controller.signal);
+      this.head = { controller, dispose };
     } catch (error) {
       controller.abort();
       throw error;

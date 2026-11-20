@@ -1,5 +1,6 @@
+import { AIMessage } from '@langchain/core/messages';
 import type { StudioModelEndpoint } from '../studioContract';
-import { isHeadAddressed, type HeadDecision, type HeadInput, type HeadMessage } from './petHead';
+import type { HeadDecision, HeadInput, HeadMessage } from './petHead';
 import type { HeadProgressEvidence } from './petHeadProgress';
 import { headDecisionMessages, headReplyMessages } from './petHeadPrompts';
 
@@ -41,50 +42,77 @@ function fields(value: unknown, keys: string[]): Record<string, unknown> {
     !keys.every(key => Object.hasOwn(value, key))) throw new DecisionFailure('malformed', true);
   return value as Record<string, unknown>;
 }
-function inspectMessage(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== 'object') throw new DecisionFailure('malformed', true);
-  const message = raw as Record<string, any>;
-  const finish = message.response_metadata?.finish_reason ?? message.response_metadata?.stop_reason;
-  if (message.additional_kwargs?.refusal || message.refusal || (Array.isArray(message.content) && message.content.some((block: any) => block?.type === 'refusal'))) throw new DecisionFailure('refusal');
+function inspectMessage(raw: unknown): AIMessage {
+  if (!AIMessage.isInstance(raw)) throw new DecisionFailure('malformed', true);
+  const { finish_reason, stop_reason } = raw.response_metadata ?? {};
+  const finish = finish_reason ?? stop_reason;
+  const isRefusal = (block: { type?: unknown } | undefined) => block?.type === 'refusal';
+  if (raw.additional_kwargs.refusal || ('refusal' in raw && raw.refusal) ||
+    (Array.isArray(raw.content) && raw.content.some(isRefusal)) || raw.contentBlocks.some(isRefusal) ||
+    finish === 'content_filter' || finish === 'safety' || finish === 'refusal') throw new DecisionFailure('refusal');
   if (finish === 'length' || finish === 'max_tokens') throw new DecisionFailure('truncated');
-  if (finish === 'content_filter' || finish === 'safety' || finish === 'refusal') throw new DecisionFailure('refusal');
-  return message;
+  return raw;
 }
-function rejectEmptyContent(content: unknown): void {
-  if ((typeof content === 'string' && !content.trim()) || (Array.isArray(content)
-    && content.every(block => block?.type === 'text' && typeof block.text === 'string' && !block.text.trim()))) {
-    throw new DecisionFailure('empty_output', true);
+
+function responseText(message: AIMessage, allowReasoning: boolean, retryable: boolean): string {
+  // Translators may drop a provider block or coerce its text before
+  // LangChain projects .text. Neither view may hide unsupported output.
+  const unsupported = (block: { type?: string; text?: unknown; value?: unknown } | undefined) => {
+    if (block?.type === 'text') return typeof block.text !== 'string';
+    if (!allowReasoning || !block?.type) return true;
+    if (['reasoning', 'thinking', 'redacted_thinking'].includes(block.type)) return false;
+    // The Anthropic translator wraps opaque redacted thinking in non_standard.
+    const value = block.value;
+    return block.type !== 'non_standard' || !value || typeof value !== 'object' ||
+      !('type' in value) || value.type !== 'redacted_thinking';
+  };
+  if ((Array.isArray(message.content) && message.content.some(unsupported)) || message.contentBlocks.some(unsupported)) {
+    throw new DecisionFailure('malformed', retryable);
+  }
+  return message.text;
+}
+
+function decisionText(message: AIMessage, profileFormat = false): string {
+  const text = responseText(message, profileFormat, true);
+  if (!text.trim()) throw new DecisionFailure('empty_output', true);
+  if (!profileFormat && (message.contentBlocks.length !== 1 || (Array.isArray(message.content) && message.content.length !== 1))) {
+    throw new DecisionFailure('malformed', true);
+  }
+  return text;
+}
+
+const toolBlocks = new Set(['tool_call', 'tool_call_chunk', 'tool_use', 'server_tool_call', 'server_tool_use',
+  'server_tool_call_chunk', 'server_tool_call_result', 'tool_result', 'invalid_tool_call']);
+function rejectToolCalls(message: AIMessage, code = 'unexpected_tool'): void {
+  const isTool = (block: { type?: string } | undefined) => !!block?.type && toolBlocks.has(block.type);
+  if (message.tool_calls?.length || message.invalid_tool_calls?.length || message.additional_kwargs.tool_calls?.length ||
+    message.additional_kwargs.function_call || (Array.isArray(message.content) && message.content.some(isTool)) || message.contentBlocks.some(isTool)) {
+    throw new DecisionFailure(code);
   }
 }
-function parseMessage<T>(raw: unknown, validate: (value: unknown) => T, declaration?: string): T {
+
+function parseDecision(raw: unknown, validate: (value: unknown) => HeadDecision, declaration?: string): HeadDecision {
   const message = inspectMessage(raw);
-  const calls = message.tool_calls as Array<{ name?: string; args?: unknown }> | undefined;
-  const invalid = message.invalid_tool_calls as unknown[] | undefined;
-  if (invalid?.length) throw new DecisionFailure('invalid_tool');
+  const calls = message.tool_calls;
+  if (message.invalid_tool_calls?.length || message.additional_kwargs.function_call ||
+    (message.additional_kwargs.tool_calls?.length ?? 0) > (calls?.length ?? 0)) {
+    throw new DecisionFailure('invalid_tool');
+  }
   if (calls?.length) {
     if (!declaration || calls.length !== 1 || calls[0]!.name !== declaration) throw new DecisionFailure('unexpected_tool');
     try { return validate(calls[0]!.args); }
     catch (error) {
-      // A tool declaration that arrived but failed local validation is not
-      // missing/old JSON text. Never ask another route to reinterpret it.
+      // A schema-invalid declaration is not an old JSON reply. Never retry it.
       if (error instanceof DecisionFailure) throw new DecisionFailure('invalid_tool');
       throw error;
     }
   }
-  // Never execute provider tools or salvage prose/fences into a decision.
-  if ((message.additional_kwargs as any)?.tool_calls?.length) throw new DecisionFailure('invalid_tool');
-  rejectEmptyContent(message.content);
-  let content = message.content;
-  if (Array.isArray(content) && content.length === 1 && content[0]?.type === 'text') content = content[0].text;
-  if (typeof content !== 'string') throw new DecisionFailure('malformed', true);
+  rejectToolCalls(message, 'invalid_tool');
+  const text = decisionText(message);
+  // Deliberately don't use a permissive JSON parser that repairs or accepts fenced text.
   let parsed: unknown;
-  try { parsed = JSON.parse(content); } catch { throw new DecisionFailure('malformed', true); }
+  try { parsed = JSON.parse(text); } catch { throw new DecisionFailure('malformed', true); }
   return validate(parsed);
-}
-function rejectToolCalls(raw: Record<string, unknown>): void {
-  if ((raw.tool_calls as unknown[])?.length || (raw.invalid_tool_calls as unknown[])?.length || (raw.additional_kwargs as any)?.tool_calls?.length) {
-    throw new DecisionFailure('unexpected_tool');
-  }
 }
 function unsupported(error: unknown, params = ['tools', 'response_format', 'response_format.type']): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -113,7 +141,8 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     const report = (event: Pick<HeadDecisionDiagnostic, 'outcome' | 'action' | 'code'>) => {
       try { options.onDiagnostic?.({ petId: input.pet.petId, channelId: input.message.channelId, messageId: input.message.messageId, attempts, ...event }); } catch { /* Diagnostics cannot change routing. */ }
     };
-    const addressed = isHeadAddressed(input);
+    // The owning Head has already resolved the canonical participant mention.
+    const addressed = input.addressed === true;
     const schema = decisionSchema(addressed);
     const validate = (value: unknown) => validateDecision(value, addressed);
     const messages = headDecisionMessages(input, addressed, schema);
@@ -134,13 +163,13 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
           signal.throwIfAborted();
           const raw = inspectMessage(result.raw);
           rejectToolCalls(raw);
-          rejectEmptyContent(raw.content);
+          decisionText(raw, true);
           return validate(result.parsed);
         }
         attempts++;
         const result = await model.invoke(jsonMessages, { signal });
         signal.throwIfAborted();
-        return parseMessage(result, validate);
+        return parseDecision(result, validate);
       };
       try {
         if (model.bindTools) {
@@ -149,7 +178,7 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
           attempts++;
           const result = await bound.invoke(messages, { signal });
           signal.throwIfAborted();
-          decision = parseMessage(result, validate, 'pet_head_decision');
+          decision = parseDecision(result, validate, 'pet_head_decision');
         } else {
           decision = await invokeJson(true);
         }
@@ -178,16 +207,7 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
       signal.throwIfAborted();
       const raw = inspectMessage(result);
       rejectToolCalls(raw);
-      const content = raw.content;
-      let reply = '';
-      if (typeof content === 'string') reply = content;
-      else if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block?.type === 'text' && typeof block.text === 'string') reply += block.text;
-          else if (!['reasoning', 'thinking', 'redacted_thinking'].includes(block?.type)) throw new DecisionFailure('malformed');
-        }
-      } else throw new DecisionFailure('malformed');
-      const text = reply.trim();
+      const text = responseText(raw, true, false).trim();
       if (text.startsWith('{') || text.startsWith('```') || /^\[\s*(?:\{|\[)/.test(text)) throw new DecisionFailure('malformed');
       return text;
     } catch {

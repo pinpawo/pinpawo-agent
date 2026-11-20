@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import test from 'node:test';
-import { bindPetHeadChannel, createPetHead, readHeadDispatchQueueSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadDispatchQueueSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
 import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
@@ -206,8 +207,8 @@ const createHeadDecision = (endpoint: StudioModelEndpoint, options?: Parameters<
   createHeadModel(() => endpoint, options).decide;
 const toolsUnsupported = () => Object.assign(new Error('private provider payload'), { status: 400, code: 'unsupported_parameter', param: 'tools' });
 const decisionInput = { pet: pet('a'), message: message('1'), context: { messages: [] } };
-const raw = (value: unknown) => ({ content: JSON.stringify(value) });
-const tool = (args: unknown, name = 'pet_head_decision') => ({ content: '', tool_calls: [{ name, args }] });
+const raw = (value: unknown) => new AIMessage(JSON.stringify(value));
+const tool = (args: Record<string, unknown>, name = 'pet_head_decision') => new AIMessage({ content: '', tool_calls: [{ name, args }] });
 function mockEndpoint(outputs: unknown[], method?: string, hasTools = true) {
   const calls: Array<{ mode: string; messages: unknown; signal: unknown }> = [];
   let binding: unknown;
@@ -279,11 +280,11 @@ test('a returned declaration with invalid arguments cannot retry as JSON or prod
 
 test('unknown tools, multiple calls, refusal, truncation and provider failures never fall back', async () => {
   for (const output of [tool({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false }, 'unknown'),
-    { content: '', tool_calls: [...tool({}).tool_calls, ...tool({}).tool_calls] },
-    { content: '', invalid_tool_calls: [{}] },
-    { ...raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false }), additional_kwargs: { refusal: 'private' } },
-    { ...raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false }), response_metadata: { finish_reason: 'length' } },
-    { content: [{ type: 'refusal', refusal: 'private' }] },
+    new AIMessage({ content: '', tool_calls: [...tool({}).tool_calls!, ...tool({}).tool_calls!] }),
+    new AIMessage({ content: '', invalid_tool_calls: [{ name: 'pet_head_decision', args: '{' }] }),
+    new AIMessage({ content: 'valid-looking text', additional_kwargs: { refusal: 'private' } }),
+    new AIMessage({ content: 'valid-looking text', response_metadata: { finish_reason: 'length' } }),
+    new AIMessage({ content: [{ type: 'refusal', refusal: 'private' }] }),
     Object.assign(new Error('private auth'), { status: 401 }), new Error('private network'),
     Object.assign(new Error('private runtime'), { status: 400, code: 'invalid_request_error' })]) {
     const mock = mockEndpoint([output]);
@@ -328,11 +329,11 @@ test('without tool binding or declared structured transport the Head uses conser
 });
 
 test('structured parsing failure retries once but raw refusal never does', async () => {
-  const bad = { raw: { content: 'broken' }, parsed: null, parsing_error: new Error('private parsing detail') };
+  const bad = { raw: new AIMessage('broken'), parsed: null, parsing_error: new Error('private parsing detail') };
   const mock = mockEndpoint([bad, raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false })], 'jsonMode', false);
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false });
   assert.deepEqual(mock.calls.map(call => call.mode), ['structured', 'json']);
-  const refused = mockEndpoint([{ raw: { content: '', response_metadata: { stop_reason: 'refusal' } }, parsed: { reply: '', action: 'ignore', intent: '', engage: true, readProgress: false } }], 'jsonSchema', false);
+  const refused = mockEndpoint([{ raw: new AIMessage({ content: '', response_metadata: { stop_reason: 'refusal' } }), parsed: { reply: '', action: 'ignore', intent: '', engage: true, readProgress: false } }], 'jsonSchema', false);
   await assert.rejects(createHeadDecision(refused.endpoint)(decisionInput, new AbortController().signal));
   assert.equal(refused.calls.length, 1);
 });
@@ -451,7 +452,7 @@ test('empty stop output is diagnosed separately from malformed, refusal, truncat
     ['', 'stop', 'empty_output', 2], ['   ', 'stop', 'empty_output', 2], [[], 'stop', 'empty_output', 2],
     ['broken', 'stop', 'malformed', 2], ['', 'length', 'truncated', 1], ['', 'content_filter', 'refusal', 1],
   ] as const) {
-    const response = { content, response_metadata: { finish_reason: finish } };
+    const response = new AIMessage({ content: typeof content === 'string' ? content : [], response_metadata: { finish_reason: finish } });
     const first = mode === 'jsonMode' ? { raw: response, parsed: null } : response;
     const mock = mockEndpoint([first, response], mode, mode !== 'jsonMode');
     const diagnostics: Array<{ outcome: string; code?: string }> = [];
@@ -460,7 +461,7 @@ test('empty stop output is diagnosed separately from malformed, refusal, truncat
     assert.deepEqual(diagnostics.map(item => [item.outcome, item.code]), [['error', code]]);
   }
   const ignore = { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false };
-  const mock = mockEndpoint([{ content: '', response_metadata: { finish_reason: 'stop' } }, raw(ignore)]);
+  const mock = mockEndpoint([new AIMessage({ content: '', response_metadata: { finish_reason: 'stop' } }), raw(ignore)]);
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), ignore);
   assert.equal(mock.calls.length, 2);
 });
@@ -469,10 +470,11 @@ test('a server-resolved canonical mention skips the engagement field but still n
   const participantId = 'pet:a%28b%29';
   const base = { pet: pet('a(b)'), context: { messages: [], members: [{ kind: 'pet' as const, id: 'a(b)', participantId }] } };
   const named = message('2', { mentions: [{ participantId, label: 'not the current label' }] });
+  const addressedInput = { ...base, message: named };
   const addressedOutput = { action: 'ignore', reply: 'I am here.', intent: '', readProgress: false };
   for (const method of ['jsonSchema', 'functionCalling'] as const) {
     const mock = mockEndpoint([method === 'functionCalling' ? tool(addressedOutput) : { raw: raw(addressedOutput), parsed: addressedOutput }], method, method === 'functionCalling');
-    assert.deepEqual(await createHeadDecision(mock.endpoint)({ ...base, message: named }, new AbortController().signal), addressedOutput);
+    assert.deepEqual(await createHeadDecision(mock.endpoint)({ ...addressedInput, addressed: isHeadAddressed(addressedInput) }, new AbortController().signal), addressedOutput);
     assert.equal(mock.calls.length, 1);
     const schema = method === 'jsonSchema' ? mock.schema() : (mock.binding() as Array<Array<{ function: { parameters: unknown } }>>)[0]![0]!.function.parameters;
     assert.deepEqual((schema as { required: string[] }).required, ['action', 'reply', 'intent', 'readProgress']);
@@ -480,13 +482,14 @@ test('a server-resolved canonical mention skips the engagement field but still n
   const matchingLabelOnly = message('3', { body: '@a(b)', mentions: [{ participantId: 'pet:other', label: 'a(b)' }] });
   const decline = { action: 'ignore', reply: '', intent: '', readProgress: false, engage: false };
   const mock = mockEndpoint([tool(decline)]);
-  assert.deepEqual(await createHeadDecision(mock.endpoint)({ ...base, context: { ...base.context, messages: [named] }, message: matchingLabelOnly }, new AbortController().signal), decline);
+  const lookalike = { ...base, context: { ...base.context, messages: [named] }, message: matchingLabelOnly };
+  assert.deepEqual(await createHeadDecision(mock.endpoint)({ ...lookalike, addressed: isHeadAddressed(lookalike) }, new AbortController().signal), decline);
 });
 
 test('progress composition accepts only a reply and never binds tools or retries', async () => {
   const input = { message: message('4'), evidence: { status: 'unavailable' as const } };
   for (const reply of ['I cannot confirm that yet.', '']) {
-    const mock = mockEndpoint([{ content: reply }], 'functionCalling');
+    const mock = mockEndpoint([new AIMessage(reply)], 'functionCalling');
     assert.equal(await createHeadModel(() => mock.endpoint).composeReply(input, new AbortController().signal), reply);
     assert.deepEqual(mock.calls.map(call => call.mode), ['json']);
     assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), input);
@@ -496,8 +499,8 @@ test('progress composition accepts only a reply and never binds tools or retries
     tool({ reply: 'Done' }),
     raw({ reply: 'Okay', action: 'dispatch', intent: 'Unrelated' }),
     raw([{ action: 'dispatch', intent: 'Unrelated' }]),
-    { content: [{ type: 'tool_use', name: 'dispatch' }] },
-    { content: 'Maybe', response_metadata: { finish_reason: 'length' } },
+    new AIMessage({ content: [{ type: 'tool_use', name: 'dispatch' }] }),
+    new AIMessage({ content: 'Maybe', response_metadata: { finish_reason: 'length' } }),
   ]) {
     const mock = mockEndpoint([output], 'functionCalling');
     await assert.rejects(createHeadModel(() => mock.endpoint).composeReply(input, new AbortController().signal), /Invalid Pet Head progress reply/);
@@ -507,9 +510,9 @@ test('progress composition accepts only a reply and never binds tools or retries
 
 test('decision binding and unbound plain reply share one lazily resolved model client', async () => {
   const result = { action: 'ignore', reply: '', intent: '', engage: true, readProgress: true };
-  const mock = mockEndpoint([tool(result), {
-    content: [{ type: 'reasoning', text: 'private analysis' }, { type: 'text', text: ' [Known update](https://example.test) ' }],
-  }, tool(result)], 'jsonMode');
+  const mock = mockEndpoint([tool(result), new AIMessage({
+    content: [{ type: 'reasoning', reasoning: 'private analysis' }, { type: 'text', text: ' [Known update](https://example.test) ' }],
+  }), tool(result)], 'jsonMode');
   let resolved = 0;
   const model = createHeadModel(() => { resolved++; return mock.endpoint; });
   assert.equal(resolved, 0);
@@ -522,6 +525,60 @@ test('decision binding and unbound plain reply share one lazily resolved model c
   assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'json', 'tool']);
   assert.equal(resolved, 1);
   assert.equal(mock.factoryCalls(), 1);
+});
+
+test('normalizing AIMessage text cannot hide a refusal or disguised tool payload', async () => {
+  const safe = { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false };
+  const shown = JSON.stringify(safe);
+  const refusal = new AIMessage({ content: [{ type: 'text', text: shown }, { type: 'refusal', refusal: 'private' }],
+    response_metadata: { model_provider: 'openai' } });
+  const legacyTool = new AIMessage({ content: shown, tool_calls: [], additional_kwargs: { function_call: { name: 'pet_head_decision', arguments: '{}' } } });
+  const undecoded = new AIMessage({ content: shown, tool_calls: [], additional_kwargs: { tool_calls: [
+    { id: 'unparsed', type: 'function', function: { name: 'pet_head_decision', arguments: '{}' } },
+  ] } });
+  const rawTool = new AIMessage({ content: [{ type: 'tool_use', id: 'native', name: 'pet_head_decision', input: {} }, { type: 'text', text: shown }], response_metadata: { model_provider: 'openai' } });
+  for (const unsafe of [refusal, legacyTool, undecoded, rawTool]) {
+    assert.equal(unsafe.text, shown, 'LangChain text projection by itself is insufficient');
+    const mock = mockEndpoint([unsafe, raw(safe)]);
+    await assert.rejects(createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal));
+    assert.deepEqual(mock.calls.map(call => call.mode), ['tool']);
+  }
+});
+
+test('JSON compatibility is exact, while unbound reply accepts valid LangChain chunks', async () => {
+  const valid = { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false };
+  const serialized = JSON.stringify(valid);
+  for (const invalid of [
+    new AIMessage({ content: [{ type: 'text', text: serialized.slice(0,6) }, { type: 'text', text: serialized.slice(6) }] }),
+    new AIMessage('Here is the decision: ' + serialized),
+    new AIMessage('```json\n' + serialized + '\n```'),
+  ]) {
+    const mock = mockEndpoint([invalid, invalid]);
+    await assert.rejects(createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal));
+    assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'json']);
+  }
+  const input = { message: message('4'), evidence: { status: 'unavailable' as const } };
+  const unknown = new AIMessage({ content: [{ type: 'text', text: 'Looks safe' }, { type: 'unsupported', value: 'hidden' }] });
+  const refusal = new AIMessage({ content: [{ type: 'text', text: 'Looks safe' }, { type: 'refusal', refusal: 'hidden' }],
+    response_metadata: { model_provider: 'openai' } });
+  const image = new AIMessage({ content: [{ type: 'image_url', image_url: { url: 'https://example.test/fixture.png' } },
+    { type: 'text', text: 'Looks safe' }], response_metadata: { model_provider: 'openai' } });
+  const coercedText = new AIMessage({ content: [{ type: 'text', text: 42 } as never], response_metadata: { model_provider: 'openai' } });
+  const signal = new AbortController().signal;
+  for (const unsafe of [unknown, refusal, image, coercedText]) {
+    const mock = mockEndpoint([unsafe]);
+    await assert.rejects(createHeadModel(() => mock.endpoint).composeReply(input, signal), /Invalid Pet Head progress reply/);
+    assert.deepEqual(mock.calls.map(call => call.mode), ['json']);
+  }
+  for (const message of [
+    new AIMessageChunk('No current result.'),
+    new AIMessage({ content: [{ type: 'redacted_thinking', data: 'do not publish' }, { type: 'text', text: 'No current result.' }],
+      response_metadata: { model_provider: 'anthropic' } }),
+    new AIMessage({ contentBlocks: [{ type: 'non_standard', value: { type: 'redacted_thinking', data: 'do not publish' } },
+      { type: 'text', text: 'No current result.' }] }),
+  ]) {
+    assert.equal(await createHeadModel(() => mockEndpoint([message]).endpoint).composeReply(input, signal), 'No current result.');
+  }
 });
 
 test('a run switch during progress composition cannot publish A as B, and B admission survives', async () => {

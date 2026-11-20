@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter, StudioPetSessions } from '../studioContract';
-import type { HeadMessage } from './petHead';
-import { observeHeadRun, readHeadProgress } from './petHeadProgress';
+import { observeHeadRun, type HeadMessage } from './petHead';
+import { readHeadProgress } from './petHeadProgress';
 
 const active = { dispatchId: 'dispatch-a', sessionId: 'shared-session', messageId: 'question-a' };
 const run = { invocationId: active.dispatchId, sessionId: active.sessionId, requestId: 'run-a', publishedIds: ['public', 'not-on-channel', 'fake-role'] };

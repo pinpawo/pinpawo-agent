@@ -35,7 +35,6 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
   const direct = '[@alpha](participant:pet:alpha) Are you the analyst?';
   const progress = '[@alpha](participant:pet:alpha) How is A going?';
   const mixed = '[@alpha](participant:pet:alpha) How is A going? Also do work B.';
-  const stageA = 'A’s public checkpoint: sources reviewed.';
   const finalA = 'This is A’s official result.';
   const canonicalDecisions: HeadInput[] = [];
   const held = '[@alpha](participant:pet:alpha) Hold Head judgment through close.';
@@ -189,17 +188,24 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
 
     const ownerChannelId = owners.alpha!;
     const resident = result.residentPets.get('alpha')!;
+    const otherDispatch = result.residentPets.get('beta')!.resident.dispatch;
+    const otherQueue = otherDispatch.getQueueSnapshot.bind(otherDispatch);
+    let otherQueueReads = 0;
+    otherDispatch.getQueueSnapshot = () => { otherQueueReads++; return otherQueue(); };
     const admissions: PetDispatchRequest[] = [];
     const sessionReads: string[] = [];
     let activeDispatch: PetDispatchQueueSnapshot['activeDispatch'];
     let switchDuringRead: PetDispatchQueueSnapshot['activeDispatch'];
+    let continuingAfterReview = false;
     resident.resident.dispatch.getQueueSnapshot = () => ({
-      state: activeDispatch ? 'busy' : 'open', activeOperation: activeDispatch ? 'dispatch' : null,
-      queuedConversations: 0, queuedDispatches: Math.max(0, admissions.length - 1),
+      state: activeDispatch || continuingAfterReview ? 'busy' : 'open',
+      activeOperation: activeDispatch ? 'dispatch' : null,
+      queuedConversations: continuingAfterReview ? 1 : 0, queuedDispatches: Math.max(0, admissions.length - 1),
       ...(activeDispatch ? { activeDispatch } : {}),
     });
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
-    resident.sessions.snapshot = async sessionId => {
+    resident.sessions.snapshot = async (sessionId, options) => {
+      assert.deepEqual(options, { timelineLimit: 1 });
       sessionReads.push(sessionId);
       if (switchDuringRead) activeDispatch = switchDuringRead;
       return {
@@ -211,7 +217,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
           currentPlan: { items: [{ id: 'old', capability: 'internal', task: 'private stale plan', status: 'active' }] },
           timeline: [
             { type: 'message', id: 'old-text', role: 'assistant', text: 'private checkpoint text', status: 'completed' },
-            { type: 'message', id: 'stage-a', role: 'assistant', text: 'unverified snapshot copy', status: 'completed' },
+            {
+              type: 'operation', id: 'private-tool', requestId: 'opaque-live-request', operationKey: 'private-call',
+              kind: 'tool', title: 'Private tool', phase: 'completed', raw: { output: 'private tool output' },
+            },
           ],
         },
       };
@@ -242,9 +251,6 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
         requestId: 'opaque-live-request', ...extra },
     });
     lifecycle('running');
-    lifecycle('message', { message: { type: 'message.completed', messageId: 'stage-a', role: 'assistant', text: stageA } });
-    await waitFor(() => published.some(({ message }) => message.externalRef === 'stage-a'));
-    const stage = published.find(({ message }) => message.externalRef === 'stage-a')!.message;
     const check = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(check.messageId));
     assert.equal(replyFor(check.messageId)?.body, 'A is still running.');
@@ -260,11 +266,15 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.equal(factoryCalls.length, 2);
     const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
     assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
-    assert.deepEqual((composeInputs[0] as { evidence: unknown }).evidence, {
-      status: 'running',
-      publishedUpdates: [{ messageId: stage.messageId, text: stageA }],
-    });
-    assert.doesNotMatch(JSON.stringify(composeInputs), /private stale plan|private checkpoint text|unverified snapshot copy|opaque-live-request/);
+    assert.deepEqual(composeInputs, [
+      { message: check, evidence: { status: 'running' } },
+      { message: both, evidence: { status: 'running' } },
+    ]);
+    for (const input of canonicalDecisions.slice(1)) {
+      assert.deepEqual(input.activeWork, { source: { messageId: sourceA.messageId, body: sourceA.body } });
+      assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
+    }
+    assert.equal(otherQueueReads, 0, 'alpha Head samples only its own dispatch port');
     assert.equal(admissions[1]!.origin?.id, both.messageId);
     assert.equal(admissions[1]!.session?.id, a.session.id);
     assert.equal(admissions[1]!.delivery, undefined, 'B uses ordinary admission, not interruption');
@@ -301,10 +311,24 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'unavailable' });
     assert.equal(admissions.length, 2);
 
-    const beforeOfficial = decisions.alpha!.length;
-    lifecycle('message', { message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
-    lifecycle('completed', { reply: finalA });
+    // A resumed review emits dispatch.running, but executes as a conversation
+    // hold and does not occupy the ordinary dispatch queue slot.
+    switchDuringRead = undefined;
+    lifecycle('waiting');
     activeDispatch = undefined;
+    continuingAfterReview = true;
+    lifecycle('running', { requestId: 'resumed-request' });
+    const approvalFollowup = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(approvalFollowup.messageId));
+    assert.equal(replyFor(approvalFollowup.messageId)?.body, 'I cannot verify the current status.');
+    assert.equal(canonicalDecisions.at(-1)?.activeWork, undefined);
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'continuation is outside the ordinary dispatch slot');
+    assert.equal(admissions.length, 2);
+
+    const beforeOfficial = decisions.alpha!.length;
+    lifecycle('message', { requestId: 'resumed-request', message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
+    lifecycle('completed', { requestId: 'resumed-request', reply: finalA });
+    continuingAfterReview = false;
     await waitFor(() => published.some(({ message }) => message.externalRef === 'public-a'));
     const fence = (await post('alpha fence')).body;
     await waitFor(() => decisions.alpha!.includes(fence));

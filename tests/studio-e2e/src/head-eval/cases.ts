@@ -8,12 +8,11 @@ const message = (id: string, body: string, kind: 'human' | 'pet' = 'human'): Hea
 });
 const base = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadInput => ({
   pet: { petId: 'analyst', definitionId: 'analyst', name: '数据分析员', channelId: 'synthetic-eval', createdAt: '2026-01-01T00:00:00Z' },
-  description: '负责数据核对和解释；不替其他成员表态。', message: message(id, body, kind), context: { messages: [] }, scheduling: { pending: [] },
+  description: '负责数据核对和解释；不替其他成员表态。', message: message(id, body, kind), context: { messages: [] },
 });
 const active = message('active-source', '核对季度报告中的收入口径，完成后给出差异表。');
 function queued(id: string, body: string, author: 'human' | 'pet'): HeadInput {
-  return { ...base(id, body, author), activeSource: active, context: { messages: [active] },
-    scheduling: { active: { dispatchId: 'active-dispatch', sessionId: 'persistent-session', messageId: active.messageId }, pending: [] } };
+  return { ...base(id, body, author), activeWork: { source: { messageId: active.messageId, body: active.body } }, context: { messages: [active] } };
 }
 export const cases: EvalCase[] = [
   { id: 'ignore-unrelated', kind: 'contrast', input: base('ignore-unrelated', '给设计师：封面颜色由你定，数据分析员不用回复。'), routes: ['silent'] },

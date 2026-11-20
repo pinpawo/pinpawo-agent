@@ -66,7 +66,7 @@ export type ChannelHeadPort = {
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
   dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal) => Promise<void>;
   readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
-    => Promise<Awaited<ReturnType<StudioPluginContext['petSessions']['snapshot']>> | undefined>;
+    => Promise<string | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -244,8 +244,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           binding?.registered === true && binding.sessionId === sessionId;
       };
       if (!await authorized()) return;
-      const snapshot = await studio.petSessions.snapshot(petId, sessionId, { timelineLimit: 12 });
-      return await authorized() ? snapshot : undefined;
+      const { session } = await studio.petSessions.snapshot(petId, sessionId, { timelineLimit: 1 });
+      if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
+        return session.activeRun.requestId;
+      }
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();

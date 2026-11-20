@@ -336,12 +336,12 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ? { credentialsKey: await readStudioCredentialsKey(studioConfig.credentials.keyFile) }
       : {}),
     models,
-  }, channelHead ? ({ registration }, signal) => attachPetHead({
+  }, channelHead ? ({ registration, runtime }, signal) => attachPetHead({
     pet: registration,
     description: input.petDocuments?.get(registration.definitionId)?.content,
     channel: channelHead,
     subscribe: prepared.studio.subscribe,
-    listDispatchQueues: prepared.listDispatchQueues,
+    getQueueSnapshot: () => runtime.dispatch.getQueueSnapshot(),
     resolveModel: () => models.resolve(definitions.get(registration.definitionId)?.config.modelProfileId),
     onDiagnostic: diagnostic => {
       const occurredAt = new Date().toISOString();

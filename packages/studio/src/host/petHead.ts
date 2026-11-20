@@ -1,7 +1,8 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { Studio, StudioDispatchQueue, StudioModelEndpoint } from '../studioContract';
+import type { PetDispatchQueueSnapshot } from 'pinpawo/host-runtime';
+import type { Studio, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
-import { readHeadProgress, type HeadRun, type HeadRunReader, type HeadProgressEvidence, type HeadProgressSnapshotReader } from './petHeadProgress';
+import { readHeadProgress, type HeadRun, type HeadProgressEvidence, type HeadSessionRunReader } from './petHeadProgress';
 import { createHeadModel, type HeadDecisionDiagnostic } from './petHeadModel';
 
 /** The committed Timeline message as seen by a Pet. */
@@ -26,18 +27,14 @@ export type HeadContext = {
 /** Reply publication and execution admission are independent decision axes. */
 export type HeadDecision = { action: 'ignore' | 'dispatch'; reply: string; intent: string; engage?: boolean; readProgress?: boolean };
 type HeadDispatchRef = { dispatchId: string; sessionId: string; messageId?: string };
-export type HeadSchedulingSnapshot = { active?: HeadDispatchRef; pending: HeadDispatchRef[] };
-
-/** Project only exact sources owned by this Channel. No authority comes from model text. */
-export function readHeadDispatchQueueSnapshot(petId: string, channelId: string, queues: StudioDispatchQueue[]): HeadSchedulingSnapshot {
-  const queue = queues.find(item => item.petId === petId);
-  const project = (item: NonNullable<StudioDispatchQueue['activeDispatch']>): HeadDispatchRef | undefined =>
-    item.sessionId && item.scope?.namespace === 'channel' && item.scope.id === channelId
-      ? { dispatchId: item.dispatchId, sessionId: item.sessionId, ...(item.origin?.namespace === 'channel' ? { messageId: item.origin.id } : {}) } : undefined;
-  const active = queue?.activeOperation === 'dispatch' && queue.activeDispatch && project(queue.activeDispatch);
-  return { ...(active ? { active } : {}), pending: (queue?.entries ?? []).flatMap(item => { const ref = project(item); return ref?.messageId ? [ref] : []; }) };
+/** Read only the owning Pet's ordinary dispatch slot, never its pending queue. */
+export function readHeadActiveDispatch(channelId: string, queue: PetDispatchQueueSnapshot): HeadDispatchRef | undefined {
+  const entry = queue.activeDispatch;
+  if (queue.activeOperation !== 'dispatch' || !entry?.sessionId || entry.scope?.namespace !== 'channel' || entry.scope.id !== channelId) return;
+  return { dispatchId: entry.dispatchId, sessionId: entry.sessionId, messageId: entry.origin?.namespace === 'channel' ? entry.origin.id : undefined };
 }
-export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; addressed?: boolean; scheduling?: HeadSchedulingSnapshot; activeSource?: HeadMessage };
+export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; addressed?: boolean;
+  activeWork?: { source?: Pick<HeadMessage, 'messageId' | 'body'> } };
 
 /** Mentions are server-resolved participant IDs on this committed message, not labels or quoted/history text. */
 export function isHeadAddressed(input: Pick<HeadInput, 'pet' | 'context' | 'message'>): boolean {
@@ -54,14 +51,14 @@ export type PetHeadChannel = {
   readContext(petId: string, before: number, replyTo?: string): Promise<HeadContext>;
   reply(petId: string, messageId: string, body: string, signal: AbortSignal, options?: HeadReplyOptions): Promise<unknown>;
   dispatch(petId: string, message: HeadMessage, request: string, signal: AbortSignal): Promise<unknown>;
-  readProgressSession?: (petId: string, ...args: Parameters<HeadProgressSnapshotReader>) => ReturnType<HeadProgressSnapshotReader>;
+  readProgressSession?: (petId: string, ...args: Parameters<HeadSessionRunReader>) => ReturnType<HeadSessionRunReader>;
 };
 
 export type PetHeadChannelOperations = {
   readContext(channelId: string, petId: string, before: number, replyTo?: string): Promise<HeadContext>;
   reply(channelId: string, petId: string, messageId: string, body: string, signal: AbortSignal, options?: HeadReplyOptions): Promise<unknown>;
   dispatch(channelId: string, petId: string, message: HeadMessage, request: string, signal: AbortSignal): Promise<unknown>;
-  readProgressSession?: (channelId: string, ...args: Parameters<NonNullable<PetHeadChannel['readProgressSession']>>) => ReturnType<HeadProgressSnapshotReader>;
+  readProgressSession?: (channelId: string, ...args: Parameters<NonNullable<PetHeadChannel['readProgressSession']>>) => ReturnType<HeadSessionRunReader>;
 };
 
 /** Bind Channel operations and the Studio live bus to this instance's owner Channel. */
@@ -91,7 +88,7 @@ export function attachPetHead(input: {
   description?: string;
   channel: PetHeadChannelOperations;
   subscribe: Studio['subscribe'];
-  listDispatchQueues: () => StudioDispatchQueue[];
+  getQueueSnapshot: () => PetDispatchQueueSnapshot;
   resolveModel: () => StudioModelEndpoint;
   onDiagnostic?: (event: HeadDecisionDiagnostic) => void;
 }, signal: AbortSignal): () => void {
@@ -107,10 +104,10 @@ export function attachPetHead(input: {
       pet,
       ...(description ? { description } : {}),
       channel,
-      readScheduling: () => readHeadDispatchQueueSnapshot(pet.petId, pet.channelId, input.listDispatchQueues()),
+      readActiveDispatch: () => readHeadActiveDispatch(pet.channelId, input.getQueueSnapshot()),
       ...(readProgressSession ? { progress: {
         readRun: observation.read,
-        snapshot: (sessionId, signal, isCurrent) => readProgressSession(pet.petId, sessionId, signal, isCurrent),
+        readSessionRunId: (sessionId, signal, isCurrent) => readProgressSession(pet.petId, sessionId, signal, isCurrent),
         compose: model.composeReply,
       } } : {}),
       decide: model.decide,
@@ -135,7 +132,7 @@ export function observeHeadRun(subscribe: Studio['subscribe'], petId: string, ch
     if (signal.aborted || event.source !== 'resident-pet' || event.topic !== petId) return;
     const payload = event.payload as Partial<{
       petId: string; invocationId: string; sessionId: string; requestId: string;
-      scope: { namespace: string; id: string }; message: { type: string; messageId: string };
+      scope: { namespace: string; id: string };
     }> | undefined;
     if (!payload || payload.petId !== petId || payload.scope?.namespace !== 'channel' || payload.scope.id !== channelId ||
       typeof payload.invocationId !== 'string' || !payload.invocationId || typeof payload.sessionId !== 'string' || !payload.sessionId ||
@@ -143,21 +140,14 @@ export function observeHeadRun(subscribe: Studio['subscribe'], petId: string, ch
     const { invocationId, sessionId, requestId } = payload;
     const matches = current && current.invocationId === invocationId && current.sessionId === sessionId && current.requestId === requestId;
     if (event.type === 'dispatch.running') {
-      if (!matches) current = { invocationId, sessionId, requestId, publishedIds: [] };
-    } else if (matches && current) {
-      if (event.type === 'dispatch.waiting' || event.type === 'dispatch.completed' || event.type === 'dispatch.failed' || event.type === 'dispatch.interrupted') {
-        current = undefined;
-      } else if (event.type === 'dispatch.message' && payload.message?.type === 'message.completed') {
-        const id = payload.message.messageId;
-        if (typeof id === 'string' && id && !current.publishedIds.includes(id)) {
-          current = { ...current, publishedIds: [...current.publishedIds.slice(-4), id] };
-        }
-      }
+      current = { invocationId, sessionId, requestId };
+    } else if (matches && ['dispatch.waiting', 'dispatch.completed', 'dispatch.failed', 'dispatch.interrupted'].includes(event.type)) {
+      current = undefined;
     }
   }, { source: 'resident-pet', topic: petId });
   return {
     close: () => { current = undefined; unsubscribe(); },
-    read: (active: NonNullable<HeadSchedulingSnapshot['active']>) => !signal.aborted && current?.invocationId === active.dispatchId && current.sessionId === active.sessionId
+    read: (active: HeadDispatchRef) => !signal.aborted && current?.invocationId === active.dispatchId && current.sessionId === active.sessionId
       ? current : undefined,
   };
 }
@@ -167,10 +157,10 @@ export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
   channel: PetHeadChannel;
-  readScheduling?: () => HeadSchedulingSnapshot;
+  readActiveDispatch?: () => HeadDispatchRef | undefined;
   progress?: {
-    readRun: HeadRunReader;
-    snapshot: HeadProgressSnapshotReader;
+    readRun: (active: HeadDispatchRef) => HeadRun | undefined;
+    readSessionRunId: HeadSessionRunReader;
     compose: (input: { message: HeadMessage; evidence: HeadProgressEvidence }, signal: AbortSignal) => Promise<string>;
   };
   decide: (input: HeadInput, signal: AbortSignal) => Promise<HeadDecision>;
@@ -180,27 +170,28 @@ export function createPetHead(options: {
       (message.author.kind === 'pet' && message.author.id === options.pet.petId)) return;
     const context = await options.channel.readContext(options.pet.petId, message.sequence + 1, message.replyTo);
     if (signal.aborted) return;
-    const scheduling = options.readScheduling?.();
     // Pin the exact invocation AND its current Host run before asking the model.
     // A later observation cannot silently retarget this turn.
     const progress = options.progress;
-    const active = scheduling?.active;
+    const active = options.readActiveDispatch?.();
     const run = active && progress?.readRun(active);
-    // Read the actual active source even if it has aged out of the 50-message
-    // context window. Keep source content separate from trusted runtime refs.
-    let activeSource: HeadMessage | undefined;
-    if (scheduling?.active?.messageId) {
-      const sourceId = scheduling.active.messageId;
-      activeSource = context.messages.find(item => item.messageId === sourceId && item.channelId === message.channelId);
-      if (!activeSource) {
-        const lookup = await options.channel.readContext(options.pet.petId, message.sequence + 1, sourceId);
-        const candidate = lookup.referencedMessage;
-        if (candidate?.messageId === sourceId && candidate.channelId === message.channelId) activeSource = candidate;
+    let source: HeadMessage | undefined;
+    const sourceId = active?.messageId;
+    if (sourceId) {
+      const matchesSource = (candidate: HeadMessage | undefined) =>
+        candidate?.messageId === sourceId && candidate.channelId === message.channelId;
+      source = context.messages.find(matchesSource);
+      if (!source && matchesSource(context.referencedMessage)) source = context.referencedMessage;
+      if (!source) {
+        const { referencedMessage } = await options.channel.readContext(options.pet.petId, message.sequence + 1, sourceId);
+        if (matchesSource(referencedMessage)) source = referencedMessage;
       }
     }
     if (signal.aborted) return;
-    const input = { ...(scheduling ? { scheduling } : {}), ...(activeSource ? { activeSource } : {}),
-      pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context };
+    const input = {
+      pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context,
+      ...(active ? { activeWork: source ? { source: { messageId: source.messageId, body: source.body } } : {} } : {}),
+    };
     const addressed = isHeadAddressed(input);
     const decision = await options.decide({ ...input, addressed }, signal);
     if (signal.aborted || (!addressed && decision.engage === false)) return;
@@ -211,7 +202,7 @@ export function createPetHead(options: {
       reply = '';
       if (progress) {
         const isCurrent = () => {
-          const now = options.readScheduling?.().active;
+          const now = options.readActiveDispatch?.();
           return !!active && !!run && now?.dispatchId === active.dispatchId && now.sessionId === active.sessionId &&
             now.messageId === active.messageId && progress.readRun(active)?.requestId === run.requestId;
         };
@@ -224,7 +215,7 @@ export function createPetHead(options: {
             reference.replyTo === active?.messageId && reference.externalRef === `head-reply:${active?.messageId}`);
         try {
           const evidence = targetsActive && active && run && isCurrent()
-            ? await readHeadProgress({ active, run, context, signal, isCurrent, snapshot: progress.snapshot, petId: options.pet.petId, channelId: message.channelId })
+            ? await readHeadProgress({ run, signal, isCurrent, readSessionRunId: progress.readSessionRunId })
             : { status: 'unavailable' as const };
           if (signal.aborted) return;
           reply = await progress.compose({ message, evidence }, signal);
@@ -232,7 +223,7 @@ export function createPetHead(options: {
           // Never publish text based on a run that is no longer current.
           if (evidence.status === 'running') {
             stillCurrent = isCurrent;
-            if (!isCurrent() || evidence.publishedUpdates?.some(update => update.text.trim() === reply.trim())) reply = '';
+            if (!isCurrent()) reply = '';
           }
         } catch {
           if (!signal.aborted) failures.push('progress reply');

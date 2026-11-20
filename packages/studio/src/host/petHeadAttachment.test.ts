@@ -14,7 +14,7 @@ const dependencies = {
     reply: async () => { throw new Error('unexpected reply'); },
     dispatch: async () => { throw new Error('unexpected dispatch'); },
   },
-  listDispatchQueues: () => [],
+  getQueueSnapshot: () => { throw new Error('activation must not read the runtime queue'); },
   resolveModel: () => { throw new Error('activation must not build the model'); },
 };
 

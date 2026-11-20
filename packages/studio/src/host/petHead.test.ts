@@ -3,7 +3,7 @@ import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { buildModel } from 'pinpawo/host-runtime';
 import test from 'node:test';
-import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadDispatchQueueSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadActiveDispatch, type HeadMessage, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
 import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
@@ -372,29 +372,40 @@ test('native Anthropic declaration accepts exactly one named tool and never repa
   }
 });
 
-test('scheduling snapshot admits only exact owning Channel sources, never names or foreign scopes', () => {
+test('readActiveDispatch uses only the current ordinary dispatch slot in its owner Channel', () => {
   const entry = { dispatchId: 'running', enqueuedAt: 'now', sessionId: 'session', scope: { namespace: 'channel', id: 'team' }, origin: { namespace: 'channel', id: 'original' } };
-  const result = readHeadDispatchQueueSnapshot('a', 'team', [{ petId: 'a', state: 'busy', activeOperation: 'dispatch', queuedConversations: 0, queuedDispatches: 3,
-    activeDispatch: entry, entries: [{ ...entry, dispatchId: 'next' }, { ...entry, scope: { namespace: 'channel', id: 'other' } }, { ...entry, origin: undefined }] }]);
-  assert.deepEqual(result, { active: { dispatchId: 'running', sessionId: 'session', messageId: 'original' }, pending: [{ dispatchId: 'next', sessionId: 'session', messageId: 'original' }] });
+  const queue = { state: 'busy' as const, activeOperation: 'dispatch' as const, queuedConversations: 0, queuedDispatches: 1,
+    activeDispatch: entry, entries: [{ ...entry, dispatchId: 'queued' }] };
+  assert.deepEqual(readHeadActiveDispatch('team', queue), { dispatchId: 'running', sessionId: 'session', messageId: 'original' });
+  assert.equal(readHeadActiveDispatch('elsewhere', queue), undefined);
+  assert.equal(readHeadActiveDispatch('team', { ...queue, activeOperation: 'conversation' }), undefined);
+  assert.equal(readHeadActiveDispatch('team', { ...queue, activeDispatch: undefined }), undefined);
 });
 
-test('the active source can be loaded from the Channel if it aged out of the current context', async () => {
-  const scheduling = { active: { dispatchId: 'old', sessionId: 'session', messageId: 'original' }, pending: [] };
+test('the active source can be loaded outside the current context, reusing an existing reference if possible', async () => {
+  const active = { dispatchId: 'old', sessionId: 'session', messageId: 'original' };
   const original = message('original', { body: 'Calculate using the measured units.' });
-  let calls = 0;
-  const handler = createPetHead({ pet: pet('a'), readScheduling: () => scheduling,
-    channel: { subscribe: () => () => {}, reply: async () => { throw new Error('no direct reply'); },
-      readContext: async (_pet, _before, reference) => ({ messages: [], ...(reference === 'original' ? { referencedMessage: original } : {}) }),
-      dispatch: async () => { throw new Error('no execution'); } },
-    decide: async input => {
-      calls++;
-      assert.deepEqual(input.activeSource, original);
-      assert.equal(input.scheduling?.active?.dispatchId, 'old');
-      return { engage: false, reply: '', action: 'ignore', intent: '', readProgress: false };
-    } });
-  await handler(message('2'), new AbortController().signal);
-  assert.equal(calls, 1);
+  for (const replyTo of [undefined, original.messageId]) {
+    let contextReads = 0;
+    let decisions = 0;
+    const handler = createPetHead({ pet: pet('a'), readActiveDispatch: () => active,
+      channel: { subscribe: () => () => {}, reply: async () => { throw new Error('no direct reply'); },
+        readContext: async (_pet, _before, reference) => {
+          contextReads++;
+          return { messages: [], ...(reference === original.messageId ? { referencedMessage: original } : {}) };
+        },
+        dispatch: async () => { throw new Error('no execution'); } },
+      decide: async input => {
+        decisions++;
+        assert.deepEqual(input.activeWork, { source: { messageId: original.messageId, body: original.body } });
+        assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|pending/);
+        return { engage: false, reply: '', action: 'ignore', intent: '', readProgress: false };
+      },
+    });
+    await handler(message('2', { replyTo }), new AbortController().signal);
+    assert.equal(decisions, 1);
+    assert.equal(contextReads, replyTo ? 1 : 2);
+  }
 });
 
 test('tool and JSON transports accept every independent reply/execution combination', async () => {
@@ -549,14 +560,11 @@ test('a run switch during progress composition cannot publish A as B, and B admi
   const handler = createPetHead({ pet: pet('a'),
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [original], referencedMessage: original }),
       reply: async () => { replies++; }, dispatch: async (_pet, source, request) => { assert.equal(source, inquiry); intents.push(request); } },
-    readScheduling: () => ({ active: { dispatchId, messageId: original.messageId, sessionId: 'same-session' }, pending: [] }),
+    readActiveDispatch: () => ({ dispatchId, messageId: original.messageId, sessionId: 'same-session' }),
     decide: async () => ({ action: 'dispatch', reply: '', intent: 'Summarize the calendar.', readProgress: true }),
     progress: {
-      readRun: () => ({ invocationId: dispatchId, requestId, sessionId: 'same-session', publishedIds: [] }),
-      snapshot: async id => {
-        reads++;
-        return { session: { sessionId: id, activeRun: { requestId, state: 'running' }, timeline: [] } } as unknown as Awaited<ReturnType<import('../studioContract').StudioPetSessions['snapshot']>>;
-      },
+      readRun: () => ({ invocationId: dispatchId, requestId, sessionId: 'same-session' }),
+      readSessionRunId: async id => { assert.equal(id, 'same-session'); reads++; return requestId; },
       compose: async input => {
         assert.deepEqual(input.evidence, { status: 'running' });
         // Even a different Host run in the same session/dispatch isn't A.
@@ -581,11 +589,11 @@ test('unrelated explicit reply targets are not replaced by the latest run', asyn
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [source, old], referencedMessage: old }),
       reply: async (_pet, id, text) => { assert.equal(id, inquiry.messageId); replies.push(text); },
       dispatch: async () => { throw new Error('progress-only never dispatches'); } },
-    readScheduling: () => ({ active: { dispatchId: 'd', messageId: source.messageId, sessionId: 's' }, pending: [] }),
+    readActiveDispatch: () => ({ dispatchId: 'd', messageId: source.messageId, sessionId: 's' }),
     decide: async () => ({ action: 'ignore', reply: '', intent: '', readProgress: true }),
     progress: {
-      readRun: () => ({ invocationId: 'd', sessionId: 's', requestId: 'r', publishedIds: [] }),
-      snapshot: async () => { reads++; return undefined; },
+      readRun: () => ({ invocationId: 'd', sessionId: 's', requestId: 'r' }),
+      readSessionRunId: async () => { reads++; return undefined; },
       compose: async input => {
         assert.deepEqual(input.evidence, { status: 'unavailable' });
         return 'I cannot confirm that work’s progress.';

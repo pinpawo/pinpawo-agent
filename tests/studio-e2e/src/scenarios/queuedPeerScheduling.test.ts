@@ -17,7 +17,7 @@ import { createTestHostToolkitInventory } from '../../../../services/host/src/te
 
 const human = { kind: 'human' as const, id: 'local' };
 type WireMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
-type WireRequest = { model: string; stream?: boolean; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
+type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 function text(value: unknown): string {
   return typeof value === 'string' ? value : Array.isArray(value) ? value.map(v => String(v?.text ?? '')).join('') : '';
 }
@@ -50,7 +50,8 @@ async function fixture() {
         let call: { name: string; args: Record<string, unknown> } | undefined;
         let hold = false;
         if (head) {
-          assert.deepEqual(names, ['pet_head_decision'], 'one decision schema tool, never execution tools');
+          assert.deepEqual(names, [], 'JSON-mode Head never exposes execution tools');
+          assert.deepEqual(input.response_format, { type: 'json_object' });
           const { petId } = head.pet;
           const source = head.message.body;
           const route = petId === 'origin' && source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE'

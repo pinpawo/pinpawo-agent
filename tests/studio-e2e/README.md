@@ -148,12 +148,11 @@ runtime, and a loopback scripted model. It never reads real model credentials or
 contacts a live model/backend. It is excluded from the default test command and CI,
 like the other manually invoked scenario tests.
 
-The synthetic group question explicitly asks “请各位回复”. Three transport cases
-exercise a declared decision tool, malformed decision arguments followed by a
-tool-free JSON retry, and an explicit unsupported-tools response followed by that
-retry. Each source/Pet pair makes exactly one or two Head model requests, without
-forced tool selection. Eligibility still comes from scripted model decisions, not
-a production rule that forces every Pet to participate.
+The synthetic group question explicitly asks “请各位回复”. Two transport cases
+exercise the configured decision protocol: a named decision tool or tool-free
+JSON mode. Each source/Pet pair makes exactly one Head model request. Eligibility
+still comes from scripted model decisions, not a production rule that forces
+every Pet to participate.
 
 It verifies one lazy, retained execution Session per `(Channel, Pet instance)`;
 seven attributed execution replies across two human-triggered rounds plus one

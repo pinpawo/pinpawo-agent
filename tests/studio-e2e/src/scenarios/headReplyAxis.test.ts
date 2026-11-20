@@ -16,7 +16,7 @@ import { createTestHostToolkitInventory } from '../../../../services/host/src/te
 
 
 const human = { kind: 'human' as const, id: 'local' };
-type WireRequest = { model: string; stream?: boolean; messages: Array<{ role: string; content?: unknown }> };
+type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; tools?: unknown[]; messages: Array<{ role: string; content?: unknown }> };
 function text(value: unknown): string { return typeof value === 'string' ? value : Array.isArray(value) ? value.map(v => String(v?.text ?? '')).join('') : ''; }
 async function until(predicate: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 20_000;
@@ -40,6 +40,8 @@ async function fixture() {
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
         if (head) {
+          assert.deepEqual(input.response_format, { type: 'json_object' });
+          assert.equal(input.tools?.length ?? 0, 0);
           decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId });
           const source = head.pet.petId === 'target' && head.message.author.kind === 'human' ? head.message.body : '';
           const dispatch = source === 'DISPATCH' || source === 'COMBINED';

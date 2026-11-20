@@ -20,7 +20,7 @@ flowchart LR
     E["本 Pet 的 dispatch.*<br/>只观察"] --> H
     subgraph HEAD["每个在线 Pet 的 Head"]
         H["处理消息并绑定本次执行"] --> M["一个模型客户端"]
-        M --- D["decide：绑定决策工具"]
+        M --- D["decide：按模型配置做一次结构化判断"]
         M --- W["composeReply：直接调用，不绑工具"]
     end
     H -->|关联原消息回复| C["Channel 接口"]
@@ -44,7 +44,7 @@ flowchart LR
 
 ## 3. 忙时只查证、写回复
 
-模型层只有一个客户端：`decide` 使用绑定决策工具的调用视图，给出本条消息的处理决定；`composeReply` 直接调用同一个未绑定工具的客户端，不再判断或选择工具。判断优先使用决策工具的返回值；受限的 JSON 兼容路径仍由 Head 统一校验。读取由 Head 按第一次决定调用现有 Session 入口，不是模型的新任务，也不改其他模型调用的协议。
+模型层只有一个客户端：`decide` 按已解析的模型配置做一次结构化调用（例如 DeepSeek 官方 Flash / Pro 用 JSON mode，Anthropic 默认用工具调用），无效输出不补救、不重试、不切换格式。`composeReply` 直接调用同一个未绑定工具的客户端，只写回复。读取由 Head 按第一次决定调用现有 Session 入口，不是模型的新任务，也不改其他模型调用的协议。
 
 需要查证时，Head 只读一次本 Pet 在当前 Channel 的那次执行，只把原消息和能公开的事实交给 `composeReply`。模型**只给出回复正文或空值**；有正文才用原 Channel 回复接口发回原消息。执行换了就不用迟到的证据。
 
@@ -97,7 +97,7 @@ sequenceDiagram
     participant S as Agent Session
     participant C as Channel 接口
     participant D as Studio Dispatch
-    H->>M: decide（绑定决策工具）
+    H->>M: decide（按模型配置一次结构化调用）
     M-->>H: 识别追问 A 和独立的新工作 B
     opt 需要回答当前执行的情况
         H->>S: 只读正在执行的那次

@@ -22,7 +22,7 @@ type WireMessage = {
   role: string; content?: unknown; tool_call_id?: string;
   tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
 };
-type WireRequest = { model: string; stream?: boolean; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
+type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 const human = { kind: 'human' as const, id: 'local' };
 
 function wireText(content: unknown): string {
@@ -50,8 +50,7 @@ async function createWorkdirModel() {
         };
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
-        if (names.includes('pet_head_decision')) {
-          assert.deepEqual(names, ['pet_head_decision']);
+        if (input.response_format?.type === 'json_object' && names.length === 0) {
           const { pet, message, addressed } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
           decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });

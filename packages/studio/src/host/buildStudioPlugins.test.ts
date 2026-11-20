@@ -541,28 +541,37 @@ test('buildStudio connects each Pet Head to its configured model profile and the
   globalThis.fetch = async (url, init) => {
     const request = JSON.parse(String(init?.body));
     const system = request.messages.find((message: { role: string }) => message.role === 'system');
-    const schemaBlock = system.content.split('<decision_schema>\n')[1]?.split('\n</decision_schema>')[0];
-    assert.ok(schemaBlock);
-    const schema = JSON.parse(schemaBlock);
+    const usesTool = request.model === 'default-model';
+    let schema;
+    if (usesTool) {
+      assert.equal(request.response_format, undefined);
+      assert.equal(request.tools.length, 1);
+      assert.equal(request.tools[0].function.name, 'pet_head_decision');
+      assert.deepEqual(request.tool_choice, { type: 'function', function: { name: 'pet_head_decision' } });
+      schema = request.tools[0].function.parameters;
+    } else {
+      assert.deepEqual(request.response_format, { type: 'json_object' });
+      assert.equal(request.tools, undefined);
+      assert.equal(request.tool_choice, undefined);
+      schema = JSON.parse(system.content.split('\n').at(-1));
+    }
     assert.deepEqual(schema.required, ['engage', 'action', 'reply', 'intent', 'readProgress']);
     assert.equal(schema.additionalProperties, false);
     assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
-    assert.deepEqual(request.tools.map(({ type, function: declared }: { type: string; function: { name: string; parameters: unknown } }) =>
-      ({ type, name: declared.name, parameters: declared.parameters })), [{ type: 'function', name: 'pet_head_decision', parameters: schema }]);
-    assert.equal(request.response_format, undefined);
-    assert.equal(request.tool_choice, undefined);
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
     calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
+    const args = JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false });
+    const output = usesTool
+      ? { content: null, tool_calls: [{ id: `head-decision-${input.pet.petId}`, type: 'function',
+        function: { name: 'pet_head_decision', arguments: args } }] }
+      : { content: args };
     return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
-      choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [
-        { id: `head-decision-${input.pet.petId}`, type: 'function', function: { name: 'pet_head_decision',
-          arguments: JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false }) } },
-      ] }, finish_reason: 'tool_calls' }],
+      choices: [{ index: 0, message: { role: 'assistant', ...output }, finish_reason: usesTool ? 'tool_calls' : 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   };
   const profiles = createTestModelProfileRegistry([
-    { modelProfileId: 'default', model: 'default-model', baseUrl: 'https://default.example.test/v1' },
+    { modelProfileId: 'default', model: 'default-model', baseUrl: 'https://default.example.test/v1', structuredOutputMethod: 'functionCalling' },
     { modelProfileId: 'specialist', model: 'deepseek-flash', baseUrl: 'https://specialist.example.test/v1' },
     { modelProfileId: 'official', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com/v1' },
   ]);

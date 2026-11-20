@@ -47,36 +47,36 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
   let releaseHeld!: () => void;
   const holdJudgment = new Promise<void>(resolve => { releaseHeld = resolve; });
   type Messages = Array<[string, string]>;
-  type DecisionBindings = Array<{ type: string; function: { name: string; parameters: { required: string[] } } }>;
+  type DecisionSchema = { safeParse(input: unknown): { success: boolean } };
   const createModel = () => {
     const client = factoryCalls.length;
     factoryCalls.push(client);
     return {
-      bindTools: (tools: DecisionBindings) => {
-        assert.equal(tools.length, 1);
-        assert.equal(tools[0]!.type, 'function');
-        assert.equal(tools[0]!.function.name, 'pet_head_decision');
+      withStructuredOutput: (schema: DecisionSchema, options: unknown) => {
+        assert.deepEqual(options, { name: 'pet_head_decision', method: 'jsonMode', includeRaw: true });
         return {
           invoke: async (messages: Messages, { signal }: { signal: AbortSignal }) => {
             const input = JSON.parse(messages[1]![1]) as HeadInput;
             const { pet, message, addressed } = input;
             decisions[pet.petId]!.push(message.body);
             decisionClients.push({ body: message.body, client });
-            assert.equal(tools[0]!.function.parameters.required.includes('engage'), !addressed);
             if (addressed) canonicalDecisions.push(input);
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
             const intent = message.body === startA ? 'Do work A.' : message.body === mixed ? 'Do work B.' : message.body === held ? 'Do late work.' : '';
-            return new AIMessage({ content: '', tool_calls: [{ id: message.messageId, name: 'pet_head_decision', args: {
+            const parsed = {
               ...(!addressed ? { engage: !!intent } : {}),
               action: intent ? 'dispatch' : 'ignore',
               intent,
               reply: message.body === direct ? 'Yes, I am.' : message.body === held ? 'This reply is too late.' : '',
               readProgress: message.body === progress || message.body === mixed,
-            } }] });
+            };
+            assert.equal(schema.safeParse(parsed).success, true);
+            const { engage: _engage, ...withoutEngage } = parsed;
+            assert.equal(schema.safeParse(withoutEngage).success, addressed);
+            return { raw: new AIMessage(JSON.stringify(parsed)), parsed };
           },
         };
       },
-      withStructuredOutput: () => { throw new Error('A tool-capable Head should use its decision tool'); },
       invoke: async (messages: Messages) => {
         const input = JSON.parse(messages[1]![1]);
         composeInputs.push(input);

@@ -83,7 +83,7 @@ async function scriptedModel(mode: HeadWireMode) {
           const action = eligible ? 'dispatch' : 'ignore';
           if (mode === 'tool' || attempt === 2) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
-          const decision = { action, reply: '', timing: 'enqueue', intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
+          const decision = { action, reply: '', readProgress: false, ...(!head.addressed ? { engage: eligible } : {}), intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
           if (attempt === 1) {
             call = { name: 'pet_head_decision', args: mode === 'malformed-tool' ? { action: 'invalid', text: '' } : decision };
           } else content = JSON.stringify(decision);

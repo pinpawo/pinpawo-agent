@@ -28,7 +28,8 @@ import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './stu
 import type { StudioStorageSettings } from '../configSchema';
 import type { StudioStorageConfig } from '../storage/studioStorage';
 import { readStudioCredentialsKey } from './credentialsKey';
-import { bindPetHeadChannel, createHeadDecision, createPetHead, readHeadDispatchQueueSnapshot } from './petHead';
+import { bindPetHeadChannel, createHeadDecision, createHeadProgressReply, createPetHead, readHeadDispatchQueueSnapshot } from './petHead';
+import { observeHeadRun } from './petHeadProgress';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -342,16 +343,23 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       // Resolve and create the model lazily, so a restored Pet subscribes before
       // Plugin activation without making model availability a startup requirement.
       let decide: ReturnType<typeof createHeadDecision> | undefined;
+      let compose: ReturnType<typeof createHeadProgressReply> | undefined;
       const channel = bindPetHeadChannel(registration.channelId, channelHead, prepared.studio.subscribe);
+      const readProgressSession = channel.readProgressSession;
+      const observation = observeHeadRun(prepared.studio.subscribe, registration.petId, registration.channelId, signal);
       const handleMessage = createPetHead({
         pet: registration,
         ...(description ? { description } : {}),
         channel,
         readScheduling: () => readHeadDispatchQueueSnapshot(registration.petId, registration.channelId, prepared.listDispatchQueues()),
-        onScheduling: diagnostic => {
-          const occurredAt = new Date().toISOString();
-          prepared.studio.notify({ type: 'pet.head.scheduling', source: 'studio', topic: registration.channelId, occurredAt, payload: diagnostic });
-        },
+        ...(readProgressSession ? { progress: {
+          readRun: observation.read,
+          snapshot: (sessionId, signal, isCurrent) => readProgressSession(registration.petId, sessionId, signal, isCurrent),
+          compose: (value, signal) => {
+            compose ??= createHeadProgressReply(models.resolve(definition?.config.modelProfileId));
+            return compose(value, signal);
+          },
+        } } : {}),
         decide: (value, signal) => {
           decide ??= createHeadDecision(models.resolve(definition?.config.modelProfileId), {
             onDiagnostic: diagnostic => {
@@ -366,7 +374,8 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           return decide(value, signal);
         },
       });
-      return channel.subscribe(message => handleMessage(message, signal));
+      const unsubscribe = channel.subscribe(message => handleMessage(message, signal));
+      return () => { unsubscribe(); observation.close(); };
     } } : {}),
   });
   try {

@@ -51,10 +51,10 @@ async function createWorkdirModel() {
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
         if (names.length === 0) {
-          const { pet, message } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
+          const { pet, message, addressed } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
           decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
-          content = JSON.stringify({ action: 'dispatch', reply: '', timing: 'enqueue', intent: message.body });
+          content = JSON.stringify({ action: 'dispatch', reply: '', readProgress: false, ...(!addressed ? { engage: true } : {}), intent: message.body });
         } else if (names.includes('plan_request')) {
           call = { name: 'plan_request', args: { goal: 'Read marker.txt and report the exact result.' } };
         } else if (names.includes('view_file_chunk')) {

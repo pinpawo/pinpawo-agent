@@ -211,7 +211,9 @@ export async function runPetHeadTimelineTrial(input: {
     cases.push(caseResult(currentCase, {
       foreignEventCommittedAndPublished: published.some(message => message.messageId === foreign.messageId),
       foreignEventNeverEnteredHeadHandler: foreignEntries === 0,
-      ownerSubscriptionIsExact: filters.length === 1 && filters[0]?.source === 'channel' && filters[0]?.topic === ownerId,
+      ownerSubscriptionIsExact: filters.length === 2 &&
+        filters.some(filter => filter?.source === 'channel' && filter.topic === ownerId) &&
+        filters.some(filter => filter?.source === 'resident-pet' && filter.topic === petId),
       ownerHandlerStillActive: entries.some(message => message.messageId === barrier.messageId),
     }, { foreignHandlerEntries: foreignEntries, foreignPublishedEvents: published.filter(message => message.channelId === foreignId).length }));
   } catch (error) {
@@ -265,7 +267,7 @@ export async function createDeterministicScenarioModel(): Promise<ScenarioModel 
         let toolCall: { name: string; args: Record<string, unknown> } | undefined;
         if (names.length === 0) {
           const head = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
-          content = JSON.stringify({ action: 'dispatch', reply: '', timing: 'enqueue', intent: head.message.body });
+          content = JSON.stringify({ action: 'dispatch', reply: '', readProgress: false, ...(!head.addressed ? { engage: true } : {}), intent: head.message.body });
         } else if (names.includes('plan_request')) {
           toolCall = { name: 'plan_request', args: { goal: 'Read the synthetic cobalt record and report its units and exact verification receipt.' } };
         } else if (names.includes('synthetic_lookup')) {

@@ -544,7 +544,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     const schemaBlock = system.content.split('<decision_schema>\n')[1]?.split('\n</decision_schema>')[0];
     assert.ok(schemaBlock, 'actual JSON-mode wire request must carry the structured decision schema');
     const schema = JSON.parse(schemaBlock);
-    assert.deepEqual(schema.required, ['action', 'reply', 'intent', 'timing']);
+    assert.deepEqual(schema.required, ['engage', 'action', 'reply', 'intent', 'readProgress']);
     assert.equal(schema.additionalProperties, false);
     assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
     assert.equal(request.response_format.type, 'json_object');
@@ -552,7 +552,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     const input = JSON.parse(human.content);
     calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
     return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
-      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, timing: 'enqueue' }) }, finish_reason: 'stop' }],
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false }) }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   };
   const profiles = createTestModelProfileRegistry([

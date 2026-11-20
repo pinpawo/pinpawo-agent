@@ -44,7 +44,7 @@ async function fixture() {
           const source = head.pet.petId === 'target' && head.message.author.kind === 'human' ? head.message.body : '';
           const dispatch = source === 'DISPATCH' || source === 'COMBINED';
           const reply = source === 'DIRECT' || source === 'COMBINED' ? `HEAD_${source}` : '';
-          content = JSON.stringify({ action: dispatch ? 'dispatch' : 'ignore', reply, intent: dispatch ? `ROUTE_${source}` : '', timing: 'enqueue' });
+          content = JSON.stringify({ action: dispatch ? 'dispatch' : 'ignore', reply, intent: dispatch ? `ROUTE_${source}` : '', readProgress: false, ...(!head.addressed ? { engage: !!(dispatch || reply) } : {}) });
         } else {
           executions++;
           const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(DISPATCH|COMBINED)/g)].at(-1)?.[1];

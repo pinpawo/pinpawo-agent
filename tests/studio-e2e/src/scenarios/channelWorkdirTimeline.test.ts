@@ -50,7 +50,8 @@ async function createWorkdirModel() {
         };
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
-        if (names.length === 0) {
+        if (names.includes('pet_head_decision')) {
+          assert.deepEqual(names, ['pet_head_decision']);
           const { pet, message, addressed } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
           decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });

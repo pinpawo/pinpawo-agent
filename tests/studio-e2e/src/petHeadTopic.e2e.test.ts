@@ -37,38 +37,64 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
   const stageA = 'A’s public checkpoint: sources reviewed.';
   const finalA = 'This is A’s official result.';
   const canonicalDecisions: HeadInput[] = [];
-  const model = {
-    withStructuredOutput: () => ({
-      invoke: async (messages: Array<[string, string]>) => {
-        const input = JSON.parse(messages[1]![1]) as HeadInput;
-        const { pet, message, addressed } = input;
-        decisions[pet.petId]!.push(message.body);
-        if (addressed) canonicalDecisions.push(input);
-        const intent = message.body === startA ? 'Do work A.' : message.body === mixed ? 'Do work B.' : '';
-        const parsed = {
-          ...(!addressed ? { engage: !!intent } : {}),
-          action: intent ? 'dispatch' : 'ignore',
-          intent,
-          reply: message.body === direct ? 'Yes, I am.' : '',
-          readProgress: message.body === progress || message.body === mixed,
+  const held = '[@alpha](participant:pet:alpha) Hold Head judgment through close.';
+  const factoryCalls: number[] = [];
+  const decisionClients: Array<{ body: string; client: number }> = [];
+  const replyClients: number[] = [];
+  let resolutionCount = 0;
+  let heldSignal: AbortSignal | undefined;
+  let releaseHeld!: () => void;
+  const holdJudgment = new Promise<void>(resolve => { releaseHeld = resolve; });
+  type Messages = Array<[string, string]>;
+  type DecisionBindings = Array<{ type: string; function: { name: string; parameters: { required: string[] } } }>;
+  const createModel = () => {
+    const client = factoryCalls.length;
+    factoryCalls.push(client);
+    return {
+      bindTools: (tools: DecisionBindings) => {
+        assert.equal(tools.length, 1);
+        assert.equal(tools[0]!.type, 'function');
+        assert.equal(tools[0]!.function.name, 'pet_head_decision');
+        return {
+          invoke: async (messages: Messages, { signal }: { signal: AbortSignal }) => {
+            const input = JSON.parse(messages[1]![1]) as HeadInput;
+            const { pet, message, addressed } = input;
+            decisions[pet.petId]!.push(message.body);
+            decisionClients.push({ body: message.body, client });
+            assert.equal(tools[0]!.function.parameters.required.includes('engage'), !addressed);
+            if (addressed) canonicalDecisions.push(input);
+            if (message.body === held) { heldSignal = signal; await holdJudgment; }
+            const intent = message.body === startA ? 'Do work A.' : message.body === mixed ? 'Do work B.' : message.body === held ? 'Do late work.' : '';
+            return { content: '', tool_calls: [{ id: message.messageId, name: 'pet_head_decision', args: {
+              ...(!addressed ? { engage: !!intent } : {}),
+              action: intent ? 'dispatch' : 'ignore',
+              intent,
+              reply: message.body === direct ? 'Yes, I am.' : message.body === held ? 'This reply is too late.' : '',
+              readProgress: message.body === progress || message.body === mixed,
+            } }] };
+          },
         };
-        return { raw: { content: JSON.stringify(parsed) }, parsed };
       },
-    }),
-    invoke: async (messages: Array<[string, string]>) => {
-      const input = JSON.parse(messages[1]![1]);
-      composeInputs.push(input);
-      return { content: JSON.stringify({ reply: input.evidence.status === 'running' ? 'A is still running.' : 'I cannot verify the current status.' }) };
-    },
-  } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
+      withStructuredOutput: () => { throw new Error('A tool-capable Head should use its decision tool'); },
+      invoke: async (messages: Messages) => {
+        const input = JSON.parse(messages[1]![1]);
+        composeInputs.push(input);
+        replyClients.push(client);
+        return { content: input.evidence.status === 'running' ? 'A is still running.' : 'I cannot verify the current status.' };
+      },
+    } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
+  };
   const scriptedModels: StudioPlugin = {
     name: 'scripted-head-models', toolkits: [],
     start: context => {
       // Replace only the model transport; buildStudio still owns Head assembly.
-      context.models.resolve = () => ({
-        profileId: 'test', baseUrl: 'https://models.example.test/v1', apiKey: 'test-key', model: 'scripted',
-        structuredOutputMethod: 'jsonMode', createChatModel: () => model,
-      });
+      context.models.resolve = () => {
+        resolutionCount++;
+        return {
+          profileId: 'test', baseUrl: 'https://models.example.test/v1', apiKey: 'test-key', model: 'scripted',
+          structuredOutputMethod: 'jsonMode', createChatModel: createModel,
+        };
+      };
     },
   };
   let result: Awaited<ReturnType<typeof buildStudio>> | undefined;
@@ -99,17 +125,26 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const subscribe = studio.subscribe;
     let subscribingPet = '';
     const registrations: Array<{ petId: string; filter: StudioEventSubscriptionFilter | undefined }> = [];
+    const detachments: Array<typeof registrations[number]> = [];
+    const handled: string[] = [];
     studio.subscribe = (handler, filter) => {
       const petId = subscribingPet;
-      registrations.push({ petId, filter });
+      const registration = { petId, filter };
+      registrations.push(registration);
       // Count before bindPetHeadChannel can inspect the payload or ignore it.
       // A broadcast subscription with a consumer-side Channel check fails here.
-      return subscribe(event => {
-        if (event.source === 'channel' && event.type === 'channel.message.created') {
-          deliveries[petId]!.push((event.payload as HeadMessage).body);
-        }
-        return handler(event);
+      const detach = subscribe(async event => {
+        const message = event.source === 'channel' && event.type === 'channel.message.created'
+          ? event.payload as HeadMessage : undefined;
+        if (message) deliveries[petId]!.push(message.body);
+        try { await handler(event); }
+        finally { if (message) handled.push(message.messageId); }
       }, filter);
+      return () => {
+        if (petId === 'alpha' && heldSignal) assert.equal(heldSignal.aborted, true, 'Pet aborts before either Head unsubscribe');
+        detachments.push(registration);
+        detach();
+      };
     };
     subscribe(event => {
       if (event.source === 'channel' && event.type === 'channel.message.created') {
@@ -124,6 +159,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
       await studio.pets.create({ petId, definitionId: 'worker', name: petId, channelId });
     }
     assert.equal(registrations.length, 4);
+    assert.equal(resolutionCount, 0, 'subscription must not resolve or instantiate an LLM');
+    assert.deepEqual(factoryCalls, []);
     for (const petId of ['alpha', 'beta']) {
       assert.deepEqual(registrations.filter(r => r.petId === petId).map(r => r.filter)
         .sort((a, b) => a!.source.localeCompare(b!.source)), [
@@ -218,6 +255,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual(sessionReads, [a.session.id, a.session.id], 'mixed asks still sample only A once each');
     assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion.messageId, check.messageId, both.messageId]);
     assert.equal(composeInputs.length, 2);
+    assert.equal(resolutionCount, 2, 'each active Head resolves only one client');
+    assert.equal(factoryCalls.length, 2);
+    const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
+    assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
     assert.deepEqual((composeInputs[0] as { evidence: unknown }).evidence, {
       status: 'running',
       publishedUpdates: [{ messageId: stage.messageId, text: stageA }],
@@ -270,7 +311,51 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.equal(published.filter(({ message }) => message.body === finalA).length, 1, 'official result uses only the existing Channel bridge');
     assert.equal(admissions.length, 2);
 
+    const oldRegistrations = registrations.filter(entry => entry.petId === 'alpha');
+    const realClose = resident.close.bind(resident);
+    let closed = false;
+    resident.close = async () => {
+      assert.equal(detachments.length, 2, 'each owned topic detaches exactly once');
+      assert.deepEqual(new Set(detachments), new Set(oldRegistrations), 'both alpha topics detach before its runtime stops; beta stays active');
+      assert.equal(heldSignal?.aborted, true);
+      await realClose();
+      closed = true;
+    };
+    const late = await post(held);
+    await waitFor(() => heldSignal !== undefined);
+    await post('queued before alpha closes');
+    await studio.pets.closeInstance('alpha', { confirmStop: true });
+    assert.equal(closed, true);
+    await post('sent while alpha is closed');
+    const betaAlive = (await channel.service.postMessage(human, owners.beta!, { body: 'beta remains online' })).message;
+    await waitFor(() => handled.includes(betaAlive.messageId));
+    subscribingPet = 'alpha';
+    await studio.pets.reopenInstance('alpha');
+    assert.equal(factoryCalls.length, 2, 'reopening still defers client construction');
+    // If the old Head incorrectly dispatches into the new activation, capture
+    // it locally rather than allowing the resident to call a real endpoint.
+    result.residentPets.get('alpha')!.resident.dispatch.dispatch = async request => { admissions.push(request); };
+    const newRegistrations = registrations.filter(entry => entry.petId === 'alpha').slice(2);
+    assert.equal(newRegistrations.length, 2, 'reopening establishes just one fresh subscription pair');
+    assert.deepEqual(newRegistrations.map(entry => entry.filter).sort((a, b) => a!.source.localeCompare(b!.source)), [
+      { source: 'channel', topic: ownerChannelId },
+      { source: 'resident-pet', topic: 'alpha' },
+    ]);
+    const testReopened = await post('alpha receives live traffic after reopen');
+    await waitFor(() => handled.includes(testReopened.messageId));
+    assert.equal(factoryCalls.length, 3);
+    assert.equal(resolutionCount, 3);
+    assert.notEqual(decisionClients.at(-1)?.client, alphaClient, 'a new activation builds its own client');
+    releaseHeld();
+    await waitFor(() => handled.includes(late.messageId));
+    assert.equal(admissions.length, 2, 'the canceled decision never dispatches');
+    assert.equal(replyFor(late.messageId), undefined, 'the canceled decision never publishes');
+    for (const offline of ['queued before alpha closes', 'sent while alpha is closed']) {
+      assert.ok(!decisions.alpha!.includes(offline), 'no replay into the reopened Head');
+      assert.ok(!deliveries.alpha!.includes(offline), 'closed subscription does not receive offline input');
+    }
   } finally {
+    releaseHeld();
     await result?.studio.shutdown();
     await rm(workdir, { recursive: true, force: true });
   }

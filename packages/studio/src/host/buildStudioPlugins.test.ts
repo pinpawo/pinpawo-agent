@@ -542,17 +542,23 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     const request = JSON.parse(String(init?.body));
     const system = request.messages.find((message: { role: string }) => message.role === 'system');
     const schemaBlock = system.content.split('<decision_schema>\n')[1]?.split('\n</decision_schema>')[0];
-    assert.ok(schemaBlock, 'actual JSON-mode wire request must carry the structured decision schema');
+    assert.ok(schemaBlock);
     const schema = JSON.parse(schemaBlock);
     assert.deepEqual(schema.required, ['engage', 'action', 'reply', 'intent', 'readProgress']);
     assert.equal(schema.additionalProperties, false);
     assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
-    assert.equal(request.response_format.type, 'json_object');
+    assert.deepEqual(request.tools.map(({ type, function: declared }: { type: string; function: { name: string; parameters: unknown } }) =>
+      ({ type, name: declared.name, parameters: declared.parameters })), [{ type: 'function', name: 'pet_head_decision', parameters: schema }]);
+    assert.equal(request.response_format, undefined);
+    assert.equal(request.tool_choice, undefined);
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
     calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
     return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
-      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false }) }, finish_reason: 'stop' }],
+      choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [
+        { id: `head-decision-${input.pet.petId}`, type: 'function', function: { name: 'pet_head_decision',
+          arguments: JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false }) } },
+      ] }, finish_reason: 'tool_calls' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   };
   const profiles = createTestModelProfileRegistry([

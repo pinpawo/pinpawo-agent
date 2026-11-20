@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bindPetHeadChannel, createHeadDecision, createHeadProgressReply, createPetHead, readHeadDispatchQueueSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createPetHead, readHeadDispatchQueueSnapshot, type HeadMessage, type PetHeadChannel } from './petHead';
+import { createHeadModel } from './petHeadModel';
+import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
@@ -200,14 +202,18 @@ test('cancellation while context is loading never starts a decision', async () =
   assert.equal(decisions, 0);
 });
 
+const createHeadDecision = (endpoint: StudioModelEndpoint, options?: Parameters<typeof createHeadModel>[1]) =>
+  createHeadModel(() => endpoint, options).decide;
+const toolsUnsupported = () => Object.assign(new Error('private provider payload'), { status: 400, code: 'unsupported_parameter', param: 'tools' });
 const decisionInput = { pet: pet('a'), message: message('1'), context: { messages: [] } };
 const raw = (value: unknown) => ({ content: JSON.stringify(value) });
 const tool = (args: unknown, name = 'pet_head_decision') => ({ content: '', tool_calls: [{ name, args }] });
-function mockEndpoint(outputs: unknown[], method?: string) {
+function mockEndpoint(outputs: unknown[], method?: string, hasTools = true) {
   const calls: Array<{ mode: string; messages: unknown; signal: unknown }> = [];
   let binding: unknown;
   let schema: unknown;
   let factory: unknown;
+  let factoryCalls = 0;
   const invoke = (mode: string) => async (messages: unknown, config: { signal: AbortSignal }) => {
     calls.push({ mode, messages, signal: config.signal });
     const value = outputs.shift();
@@ -216,15 +222,15 @@ function mockEndpoint(outputs: unknown[], method?: string) {
     return value;
   };
   const endpoint = { profileId: 'test', baseUrl: 'https://example.test', apiKey: 'secret', model: 'test', structuredOutputMethod: method,
-    createChatModel: (options: unknown) => { factory = options; return {
-      bindTools: (...args: unknown[]) => { binding = args; return { invoke: invoke('tool') }; },
+    createChatModel: (options: unknown) => { factory = options; factoryCalls++; return {
+      ...(hasTools ? { bindTools: (...args: unknown[]) => { binding = args; return { invoke: invoke('tool') }; } } : {}),
       withStructuredOutput: (value: unknown, options: unknown) => { schema = value; binding = options; return { invoke: invoke('structured') }; },
       invoke: invoke('json'),
     }; } };
-  return { endpoint: endpoint as never, calls, schema: () => schema, binding: () => binding, factory: () => factory };
+  return { endpoint: endpoint as never, calls, schema: () => schema, binding: () => binding, factory: () => factory, factoryCalls: () => factoryCalls };
 }
 test('single declared decision tool has no forced choice, no tool execution and no SDK retries', async () => {
-  for (const method of [undefined, 'functionCalling']) {
+  for (const method of [undefined, 'functionCalling', 'jsonMode', 'jsonSchema']) {
     const mock = mockEndpoint([tool({ reply: '', action: 'dispatch', intent: 'Address source', engage: true, readProgress: false })], method);
     const events: unknown[] = [];
     const decide = createHeadDecision(mock.endpoint, { onDiagnostic: event => events.push(event) });
@@ -239,13 +245,13 @@ test('single declared decision tool has no forced choice, no tool execution and 
   }
 });
 test('explicit JSON schema capability inspects raw refusal and validates parsed output', async () => {
-  const mock = mockEndpoint([{ raw: raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false }), parsed: { reply: '', action: 'ignore', intent: '', engage: true, readProgress: false } }], 'jsonSchema');
+  const mock = mockEndpoint([{ raw: raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false }), parsed: { reply: '', action: 'ignore', intent: '', engage: true, readProgress: false } }], 'jsonSchema', false);
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false });
   assert.deepEqual(mock.binding(), { name: 'pet_head_decision', method: 'jsonSchema', includeRaw: true });
 });
 test('known malformed output or explicit unsupported capability gets only one clean JSON fallback', async () => {
   const unsupported = Object.assign(new Error('private provider payload'), { status: 400, code: 'unsupported_parameter', param: 'tools' });
-  for (const first of [tool({ reply: '', action: 'dispatch', intent: ' ', engage: true, readProgress: false }), raw({ reply: '', action: 'ignore', intent: 'not empty', engage: true, readProgress: false }), raw({ reply: '', action: 'dispatch', intent: 'ok', extra: true, engage: true, readProgress: false }), unsupported]) {
+  for (const first of [raw({ reply: '', action: 'ignore', intent: 'not empty', engage: true, readProgress: false }), raw({ reply: '', action: 'dispatch', intent: 'ok', extra: true, engage: true, readProgress: false }), unsupported]) {
     const mock = mockEndpoint([first, raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false })]);
     assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false });
     assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'json']);
@@ -254,6 +260,23 @@ test('known malformed output or explicit unsupported capability gets only one cl
     assert.notDeepEqual(mock.calls[0]!.messages, mock.calls[1]!.messages, 'fallback requests a fresh JSON-only decision');
   }
 });
+test('a returned declaration with invalid arguments cannot retry as JSON or produce effects', async () => {
+  const otherwiseValid = { action: 'dispatch', reply: 'I can look into that.', intent: 'Inspect the report.', engage: true, readProgress: false };
+  const mock = mockEndpoint([tool({ ...otherwiseValid, intent: ' ' }), raw(otherwiseValid)]);
+  const effects: string[] = [];
+  const diagnostics: Array<{ outcome: string; code?: string }> = [];
+  const handle = createPetHead({
+    pet: pet('a'),
+    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
+      reply: async () => { effects.push('reply'); }, dispatch: async () => { effects.push('dispatch'); } },
+    decide: createHeadDecision(mock.endpoint, { onDiagnostic: value => diagnostics.push(value) }),
+  });
+  await assert.rejects(handle(message('1'), new AbortController().signal), /Invalid Pet Head decision/);
+  assert.deepEqual(mock.calls.map(call => call.mode), ['tool']);
+  assert.deepEqual(diagnostics.map(({ outcome, code }) => [outcome, code]), [['error', 'invalid_tool']]);
+  assert.deepEqual(effects, []);
+});
+
 test('unknown tools, multiple calls, refusal, truncation and provider failures never fall back', async () => {
   for (const output of [tool({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false }, 'unknown'),
     { content: '', tool_calls: [...tool({}).tool_calls, ...tool({}).tool_calls] },
@@ -289,11 +312,11 @@ test('abort before or during provider work prevents fallback and selection', asy
   }
 });
 
-test('explicit JSON mode is preserved even when the adapter exposes tools', async () => {
+test('configured JSON mode is used once when the provider specifically rejects tools', async () => {
   const value = { reply: '', action: 'dispatch', intent: 'Inspect the source', engage: true, readProgress: false };
-  const mock = mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonMode');
+  const mock = mockEndpoint([toolsUnsupported(), { raw: raw(value), parsed: value }], 'jsonMode');
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), value);
-  assert.deepEqual(mock.calls.map(call => call.mode), ['structured']);
+  assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'structured']);
   assert.deepEqual(mock.binding(), { name: 'pet_head_decision', method: 'jsonMode', includeRaw: true });
 });
 
@@ -306,10 +329,10 @@ test('without tool binding or declared structured transport the Head uses conser
 
 test('structured parsing failure retries once but raw refusal never does', async () => {
   const bad = { raw: { content: 'broken' }, parsed: null, parsing_error: new Error('private parsing detail') };
-  const mock = mockEndpoint([bad, raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false })], 'jsonMode');
+  const mock = mockEndpoint([bad, raw({ reply: '', action: 'ignore', intent: '', engage: true, readProgress: false })], 'jsonMode', false);
   assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false });
   assert.deepEqual(mock.calls.map(call => call.mode), ['structured', 'json']);
-  const refused = mockEndpoint([{ raw: { content: '', response_metadata: { stop_reason: 'refusal' } }, parsed: { reply: '', action: 'ignore', intent: '', engage: true, readProgress: false } }], 'jsonSchema');
+  const refused = mockEndpoint([{ raw: { content: '', response_metadata: { stop_reason: 'refusal' } }, parsed: { reply: '', action: 'ignore', intent: '', engage: true, readProgress: false } }], 'jsonSchema', false);
   await assert.rejects(createHeadDecision(refused.endpoint)(decisionInput, new AbortController().signal));
   assert.equal(refused.calls.length, 1);
 });
@@ -342,7 +365,7 @@ test('the active source can be loaded from the Channel if it aged out of the cur
 test('tool and JSON transports accept every independent reply/execution combination', async () => {
   for (const method of ['functionCalling', 'jsonMode']) for (const action of ['ignore', 'dispatch'] as const) for (const reply of ['', 'I can look into this.']) {
     const decision = { action, reply, intent: action === 'dispatch' ? 'Investigate the source' : '', engage: true, readProgress: false };
-    const mock = mockEndpoint([method === 'jsonMode' ? { raw: raw(decision), parsed: decision } : tool(decision)], method);
+    const mock = mockEndpoint([method === 'jsonMode' ? { raw: raw(decision), parsed: decision } : tool(decision)], method, method !== 'jsonMode');
     const diagnostics: Array<{ outcome: string; action?: string }> = [];
     assert.deepEqual(await createHeadDecision(mock.endpoint, { onDiagnostic: value => diagnostics.push(value) })(decisionInput, new AbortController().signal), decision);
     assert.equal(mock.calls.length, 1);
@@ -371,7 +394,7 @@ test('malformed decisions, stale timing and mixed engagement effects fail closed
 test('tool and structured JSON expose the same independent reply and execution schema', async () => {
   const value = { action: 'dispatch', reply: '收到，我会先核对口径，再整理差异。', intent: 'Compare both datasets using equivalent definitions.', engage: true, readProgress: false };
   const toolModel = mockEndpoint([tool(value)], 'functionCalling');
-  const jsonModel = mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonSchema');
+  const jsonModel = mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonSchema', false);
   for (const mock of [toolModel, jsonModel]) {
     assert.deepEqual(await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal), value);
   }
@@ -412,7 +435,7 @@ test('an explicit acknowledgement is published before slow independent execution
 
 test('JSON-mode system carries the same parseable field-policy schema as the decision tool', async () => {
   const value = { action: 'ignore', reply: '', intent: '', engage: true, readProgress: false };
-  const models = [mockEndpoint([tool(value)], 'functionCalling'), mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonMode')];
+  const models = [mockEndpoint([tool(value)], 'functionCalling'), mockEndpoint([{ raw: raw(value), parsed: value }], 'jsonMode', false)];
   for (const mock of models) await createHeadDecision(mock.endpoint)(decisionInput, new AbortController().signal);
   const declaration = (models[0]!.binding() as Array<Array<{ function: { parameters: unknown } }>>)[0]![0]!.function.parameters;
   for (const mock of models) {
@@ -430,7 +453,7 @@ test('empty stop output is diagnosed separately from malformed, refusal, truncat
   ] as const) {
     const response = { content, response_metadata: { finish_reason: finish } };
     const first = mode === 'jsonMode' ? { raw: response, parsed: null } : response;
-    const mock = mockEndpoint([first, response], mode);
+    const mock = mockEndpoint([first, response], mode, mode !== 'jsonMode');
     const diagnostics: Array<{ outcome: string; code?: string }> = [];
     await assert.rejects(createHeadDecision(mock.endpoint, { onDiagnostic: value => diagnostics.push(value) })(decisionInput, new AbortController().signal));
     assert.equal(mock.calls.length, attempts);
@@ -448,7 +471,7 @@ test('a server-resolved canonical mention skips the engagement field but still n
   const named = message('2', { mentions: [{ participantId, label: 'not the current label' }] });
   const addressedOutput = { action: 'ignore', reply: 'I am here.', intent: '', readProgress: false };
   for (const method of ['jsonSchema', 'functionCalling'] as const) {
-    const mock = mockEndpoint([method === 'functionCalling' ? tool(addressedOutput) : { raw: raw(addressedOutput), parsed: addressedOutput }], method);
+    const mock = mockEndpoint([method === 'functionCalling' ? tool(addressedOutput) : { raw: raw(addressedOutput), parsed: addressedOutput }], method, method === 'functionCalling');
     assert.deepEqual(await createHeadDecision(mock.endpoint)({ ...base, message: named }, new AbortController().signal), addressedOutput);
     assert.equal(mock.calls.length, 1);
     const schema = method === 'jsonSchema' ? mock.schema() : (mock.binding() as Array<Array<{ function: { parameters: unknown } }>>)[0]![0]!.function.parameters;
@@ -463,8 +486,8 @@ test('a server-resolved canonical mention skips the engagement field but still n
 test('progress composition accepts only a reply and never binds tools or retries', async () => {
   const input = { message: message('4'), evidence: { status: 'unavailable' as const } };
   for (const reply of ['I cannot confirm that yet.', '']) {
-    const mock = mockEndpoint([raw({ reply })], 'functionCalling');
-    assert.equal(await createHeadProgressReply(mock.endpoint)(input, new AbortController().signal), reply);
+    const mock = mockEndpoint([{ content: reply }], 'functionCalling');
+    assert.equal(await createHeadModel(() => mock.endpoint).composeReply(input, new AbortController().signal), reply);
     assert.deepEqual(mock.calls.map(call => call.mode), ['json']);
     assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), input);
     assert.equal(mock.binding(), undefined);
@@ -472,13 +495,33 @@ test('progress composition accepts only a reply and never binds tools or retries
   for (const output of [
     tool({ reply: 'Done' }),
     raw({ reply: 'Okay', action: 'dispatch', intent: 'Unrelated' }),
-    raw({ reply: false }),
-    { ...raw({ reply: 'Maybe' }), response_metadata: { finish_reason: 'length' } },
+    raw([{ action: 'dispatch', intent: 'Unrelated' }]),
+    { content: [{ type: 'tool_use', name: 'dispatch' }] },
+    { content: 'Maybe', response_metadata: { finish_reason: 'length' } },
   ]) {
     const mock = mockEndpoint([output], 'functionCalling');
-    await assert.rejects(createHeadProgressReply(mock.endpoint)(input, new AbortController().signal), /Invalid Pet Head progress reply/);
+    await assert.rejects(createHeadModel(() => mock.endpoint).composeReply(input, new AbortController().signal), /Invalid Pet Head progress reply/);
     assert.deepEqual(mock.calls.map(call => call.mode), ['json']);
   }
+});
+
+test('decision binding and unbound plain reply share one lazily resolved model client', async () => {
+  const result = { action: 'ignore', reply: '', intent: '', engage: true, readProgress: true };
+  const mock = mockEndpoint([tool(result), {
+    content: [{ type: 'reasoning', text: 'private analysis' }, { type: 'text', text: ' [Known update](https://example.test) ' }],
+  }, tool(result)], 'jsonMode');
+  let resolved = 0;
+  const model = createHeadModel(() => { resolved++; return mock.endpoint; });
+  assert.equal(resolved, 0);
+  assert.equal(mock.factoryCalls(), 0);
+  const signal = new AbortController().signal;
+  assert.deepEqual(await model.decide(decisionInput, signal), result);
+  assert.equal(await model.composeReply({ message: decisionInput.message, evidence: { status: 'unavailable' } }, signal),
+    '[Known update](https://example.test)');
+  assert.deepEqual(await model.decide(decisionInput, signal), result);
+  assert.deepEqual(mock.calls.map(call => call.mode), ['tool', 'json', 'tool']);
+  assert.equal(resolved, 1);
+  assert.equal(mock.factoryCalls(), 1);
 });
 
 test('a run switch during progress composition cannot publish A as B, and B admission survives', async () => {

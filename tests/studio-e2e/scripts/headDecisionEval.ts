@@ -3,7 +3,7 @@ import { open } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { cases, fixtureVersion } from '../src/head-eval/cases';
 import { score, summarize } from '../src/head-eval/scorer';
-import type { HeadDecisionDiagnostic } from '../../../packages/studio/src/host/petHead';
+import type { HeadDecisionDiagnostic } from '../../../packages/studio/src/host/petHeadModel';
 
 for (const key of ['LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2', 'LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGFUSE_TRACING_ENABLED']) process.env[key] = 'false';
 
@@ -48,7 +48,7 @@ async function main() {
     // Read the existing configured profile only; no credentials or model configuration written.
     const { buildLocalModelProfileRegistry } = await import('../../../services/host/src/config/llmConfig');
     const { buildModel } = await import('../../../services/host/src/agent/agentModels');
-    const { createHeadDecision } = await import('../../../packages/studio/src/host/petHead');
+    const { createHeadModel } = await import('../../../packages/studio/src/host/petHeadModel');
     const config = buildLocalModelProfileRegistry().resolve(profile);
     if (config.apiKey && (profile.includes(config.apiKey) || config.model.includes(config.apiKey))) throw new Error('unsafe-label');
     report.model = config.model;
@@ -89,11 +89,11 @@ async function main() {
       wire = [];
       const started = Date.now();
       let diagnostic: HeadDecisionDiagnostic | undefined;
-      const decide = createHeadDecision({
+      const { decide } = createHeadModel(() => ({
         profileId: profile, protocol: config.protocol ?? 'openai-compatible', model: config.model,
         baseUrl: config.baseUrl, apiKey: config.apiKey, structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
         createChatModel: options => buildModel({ ...config, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries }, options),
-      }, { onDiagnostic: value => { diagnostic = value; } });
+      }), { onDiagnostic: value => { diagnostic = value; } });
       let decision;
       try {
         if (controller.signal.aborted || calls >= 20) throw new Error('budget');

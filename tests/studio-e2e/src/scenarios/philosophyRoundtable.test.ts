@@ -23,7 +23,7 @@ const philosophers = [
 const human = { kind: 'human' as const, id: 'local' };
 const question = '合成讨论：请把“集体感知共识”理解为感知实践、共享概念与纠错规则共同构成的认识条件，而非多数投票。当预测系统与这种共识吻合时，是否足以断言两者具有相同的理解？请各位回复，从自己的角色给出一个区分。';
 type WireMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
-type HeadWireMode = 'tool' | 'malformed-tool' | 'unsupported-tools';
+type HeadWireMode = 'tool' | 'malformed-text' | 'unsupported-tools';
 type WireRequest = { model: string; stream?: boolean; tool_choice?: unknown; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 function text(content: unknown): string {
   return typeof content === 'string' ? content : Array.isArray(content)
@@ -85,7 +85,8 @@ async function scriptedModel(mode: HeadWireMode) {
             mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
           const decision = { action, reply: '', readProgress: false, ...(!head.addressed ? { engage: eligible } : {}), intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
           if (attempt === 1) {
-            call = { name: 'pet_head_decision', args: mode === 'malformed-tool' ? { action: 'invalid', text: '' } : decision };
+            if (mode === 'malformed-text') content = 'not a JSON decision';
+            else call = { name: 'pet_head_decision', args: decision };
           } else content = JSON.stringify(decision);
         } else {
           const all = input.messages.map(message => text(message.content)).join('\n');
@@ -134,7 +135,7 @@ async function scriptedModel(mode: HeadWireMode) {
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
-for (const mode of ['tool', 'malformed-tool', 'unsupported-tools'] as const) {
+for (const mode of ['tool', 'malformed-text', 'unsupported-tools'] as const) {
 test(`manual three-Pet roundtable retains execution sessions and bounded ${mode} Head decisions`, { timeout: 120_000 }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'studio-roundtable-eval-'));
   const model = await scriptedModel(mode);

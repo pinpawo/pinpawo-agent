@@ -15,6 +15,13 @@ const toolFields: Record<string, readonly string[]> = {
   runtime_budget_status: [],
   synthetic_lookup: ['recordId'],
 };
+// Routing is a declaration returned to the Head, never an executable scenario
+// tool or an assistant/tool exchange admitted into execution history.
+const headDecisionName = 'pet_head_decision';
+const headDecisionFields = ['engage', 'action', 'reply', 'intent', 'readProgress'];
+function isHeadDecisionTool(tool: unknown): boolean {
+  return record(tool) && record(tool.function) && tool.function.name === headDecisionName;
+}
 const requestFields = new Set([
   'model', 'messages', 'tools', 'tool_choice', 'stream', 'stream_options', 'temperature', 'top_p',
   'max_tokens', 'max_completion_tokens', 'frequency_penalty', 'presence_penalty', 'seed', 'n',
@@ -136,12 +143,15 @@ function validateRequest(value: unknown, model: string): asserts value is Record
   if (value.tools !== undefined) {
     if (!Array.isArray(value.tools)) blocked();
     for (const tool of value.tools) {
-      if (!record(tool) || tool.type !== 'function' || !record(tool.function) || !safeTool(tool.function.name)) blocked();
+      if (!record(tool) || tool.type !== 'function' || !record(tool.function)) blocked();
+      const name = tool.function.name;
+      const isDecision = isHeadDecisionTool(tool);
+      if (isDecision ? value.tools.length !== 1 || value.stream === true : !safeTool(name)) blocked();
       onlyKeys(tool, ['type', 'function']);
       onlyKeys(tool.function, ['name', 'description', 'parameters', 'strict']);
       if (tool.function.description !== undefined && typeof tool.function.description !== 'string') blocked();
       if (tool.function.strict !== undefined && typeof tool.function.strict !== 'boolean') blocked();
-      validateSchema(tool.function.parameters, toolFields[tool.function.name]);
+      validateSchema(tool.function.parameters, isDecision ? headDecisionFields : toolFields[name as string]);
     }
   }
   if (record(value.tool_choice)) {
@@ -253,7 +263,7 @@ function fixedError(res: ServerResponse, error: GatewayError) {
     res.end(body);
   }
 }
-function validCompletion(value: unknown): boolean {
+function validCompletion(value: unknown, allowedTools: readonly string[]): boolean {
   const hasOnly = (item: Record<string, unknown>, keys: string[]) => Object.keys(item).every(key => keys.includes(key));
   const message = (item: unknown) => {
     if (!record(item) || !hasOnly(item, ['role', 'content', 'refusal', 'reasoning_content', 'tool_calls'])) return false;
@@ -265,7 +275,7 @@ function validCompletion(value: unknown): boolean {
         if (!record(call.function) || !hasOnly(call.function, ['name', 'arguments'])) return false;
         const name = call.function.name;
         // Providers may split the function name across stream frames.
-        if (name !== undefined && (typeof name !== 'string' || !Object.keys(toolFields).some(known => known.includes(name)))) return false;
+        if (name !== undefined && (typeof name !== 'string' || !allowedTools.some(known => known.includes(name)))) return false;
         if (call.function.arguments !== undefined && typeof call.function.arguments !== 'string') return false;
       }
     }
@@ -276,7 +286,7 @@ function validCompletion(value: unknown): boolean {
       && hasOnly(choice, ['index', 'finish_reason', 'logprobs', 'message', 'delta'])
       && (choice.message === undefined || message(choice.message)) && (choice.delta === undefined || message(choice.delta)));
 }
-async function forwardResponse(upstream: Response, res: ServerResponse, stream: boolean, apiKey: string, signal: AbortSignal) {
+async function forwardResponse(upstream: Response, res: ServerResponse, stream: boolean, apiKey: string, signal: AbortSignal, allowedTools: readonly string[]) {
   if (!upstream.ok || upstream.status !== 200 || upstream.redirected || !upstream.body) {
     await upstream.body?.cancel();
     throw new GatewayError(502, 'scenario_gateway_upstream');
@@ -290,7 +300,7 @@ async function forwardResponse(upstream: Response, res: ServerResponse, stream: 
   const frames: string[] = [];
   const fragments = new Map<string, string>();
   const inspect = (parsed: unknown) => {
-    if (!validCompletion(parsed)) throw new GatewayError(502, 'scenario_gateway_upstream');
+    if (!validCompletion(parsed, allowedTools)) throw new GatewayError(502, 'scenario_gateway_upstream');
     try {
       const clean = sanitize(parsed, apiKey, [], () => {});
       // Accumulate the fields the SDK concatenates. A credential split across
@@ -310,7 +320,7 @@ async function forwardResponse(upstream: Response, res: ServerResponse, stream: 
           if (!record(call) || !record(call.function)) continue;
           for (const key of ['name', 'arguments']) append(`tool:${String(call.index ?? callIndex)}:${key}`, call.function[key]);
           const name = fragments.get(`${String(choice.index ?? 0)}:tool:${String(call.index ?? callIndex)}:name`);
-          if (name && !Object.keys(toolFields).some(known => known.startsWith(name))) blocked();
+          if (name && !allowedTools.some(known => known.startsWith(name))) blocked();
         }
       }
       return clean;
@@ -405,7 +415,9 @@ export async function createLiveScenarioGateway(options: LiveScenarioGatewayOpti
           headers: { 'content-type': 'application/json', 'authorization': `Bearer ${options.apiKey}` },
           body: JSON.stringify(clean),
         });
-        await forwardResponse(upstream, res, request.stream === true, options.apiKey, controller.signal);
+        const allowedTools = Array.isArray(request.tools) && request.tools.length === 1 && isHeadDecisionTool(request.tools[0])
+          ? [headDecisionName] : Object.keys(toolFields);
+        await forwardResponse(upstream, res, request.stream === true, options.apiKey, controller.signal, allowedTools);
       } catch (error) {
         const safe = controller.signal.aborted ? new GatewayError(504, 'scenario_gateway_timeout')
           : error instanceof GatewayError ? error : new GatewayError(502, 'scenario_gateway_upstream');

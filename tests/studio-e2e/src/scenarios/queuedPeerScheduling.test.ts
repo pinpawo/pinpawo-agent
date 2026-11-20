@@ -50,6 +50,7 @@ async function fixture() {
         let call: { name: string; args: Record<string, unknown> } | undefined;
         let hold = false;
         if (head) {
+          assert.deepEqual(names, ['pet_head_decision'], 'one decision schema tool, never execution tools');
           const { petId } = head.pet;
           const source = head.message.body;
           const route = petId === 'origin' && source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE'

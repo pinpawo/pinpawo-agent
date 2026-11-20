@@ -46,7 +46,104 @@
 - **用户追问进度**：它是新的 Timeline 消息，先过同一个职责判断。已有可定位的执行时，Head 沿 `read_session` 查证，明确区分「还在跑」「等待输入」「已停止」「失败」和「目前查不到」。若用户同时追加或更正工作，仍按派发冲突的规则判断；同一消息复用读取结果，不再读第二次。
 - **执行的公开回复**：继续走 resident `dispatch.message` → 已有 Channel 桥接 → Timeline。Head 不从完成事件再发同一结果，不转发未公开的中间内容。派发接纳、执行完成、结果发表是三件事。
 
-## 6. 第一版验收
+## 6. 分场景时序
+
+总体结构图说明各组件之间的关系；下面按消息到来后的实际顺序，区分 Head 的判断、Studio 的派发，以及谁向 Channel 写消息。`Head 宿主` 是现有 Head 的运行代码，不是新增服务。`redecision` 指同一条消息的第二次模型判断，不是独立工具，也不是重跑 Agent。
+
+### 6.1 不接，或 Head 可以直接回答
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant C as Channel Timeline
+    participant B as Studio EventBus
+    participant H as Head 宿主
+    participant M as Head 模型
+    U->>C: 发消息
+    C->>B: 提交后发布 channel.message.created
+    B->>H: 送达本 Channel 的 Head
+    H->>M: 原消息、职责和有限 Timeline
+    alt 不归本 Pet
+        M-->>H: 不接
+        Note over H: 静默，不查 Session，不派发
+    else 归本 Pet，且可以直接回答
+        M-->>H: 返回 reply 正文
+        H->>C: 以本 Pet 身份回复并关联原消息
+    end
+```
+
+### 6.2 需要 Agent 执行，Session 空闲
+
+```mermaid
+sequenceDiagram
+    participant B as Studio EventBus
+    participant H as Head 宿主
+    participant M as Head 模型
+    participant C as Channel 接口
+    participant D as Studio Dispatch
+    participant A as Pet Agent
+    B->>H: 新的 Channel 消息
+    H->>M: 初判是否该接、是否需要 Agent
+    M-->>H: 需要执行，返回工作意图
+    Note over H: 确认 Session 空闲，不读取 Session 正文
+    opt 有必要先回应
+        H->>C: 发送 reply，不声称已接纳或已开始
+    end
+    H->>C: 提交工作意图，关联原消息
+    C->>D: 校验绑定，走现有 dispatch
+    D-->>C: 接纳回执
+    C-->>H: 返回接纳结果
+    D->>A: 按现有规则启动执行
+```
+
+### 6.3 已有执行，先查证，再由 Head 回复
+
+```mermaid
+sequenceDiagram
+    participant B as Studio EventBus
+    participant H as Head 宿主
+    participant M as Head 模型
+    participant S as Agent Session
+    participant C as Channel Timeline
+    B->>H: 新消息，例如用户问「做到哪了？」
+    H->>M: 初判是否该接、是否需要 Agent 的执行事实
+    M-->>H: 应接，需要执行事实
+    Note over H: 确认已有执行，定位本 Pet 在该 Channel 的那次执行
+    H->>S: read_session，只读一次
+    alt 证据有效且仍指向同一次执行
+        S-->>H: 返回已核实状态与可用证据
+        H->>M: redecision，原消息加上这次执行的证据
+    else 读取失败或执行已切换
+        S-->>H: 没有可用于当前执行的证据
+        H->>M: redecision，说明查证限制，不传旧执行的进度
+    end
+    M-->>H: 返回 reply 正文，或不回复
+    opt 有回复，且判断仍有效
+        H->>C: 走原有 Channel 回复接口，以 Pet 身份关联原消息
+    end
+    Note over H,C: 只问进度到此结束，不派发
+```
+
+**`reply` 是判断结果中的正文，不是第三条 Session 路径，也不是模型再调用一次的工具。** 复判有话要说，就给出 `reply` 正文；没有就留空。Head 宿主校验这次判断仍可提交后，复用现有 Channel `reply`，以本 Pet 的身份写入 Timeline，`replyTo` 指向本次用户消息。Agent 不代写这条回复。若用户同时新增工作，独立的后续请求才可在复判后走现有 Studio 接纳；这不等于在读取时直接另起执行。要修改正在跑的那次，首版不自动打断。
+
+### 6.4 执行事件与正式结果返回
+
+```mermaid
+sequenceDiagram
+    participant A as Pet Agent 执行链路
+    participant B as Studio EventBus
+    participant H as Head 宿主
+    participant C as Channel Timeline
+    A->>B: 发布 dispatch.*，标记本 Pet 实例
+    B-->>H: Head 关联观察，不因状态事件自动回复
+    opt 执行产出了可公开的消息
+        A->>B: dispatch.message
+        B->>C: 现有 Channel 桥接提交公开消息
+    end
+    Note over H,C: dispatch.completed 不等于结果已发布，Head 不重复发
+```
+
+## 7. 第一版验收
 
 - 忙时收到不归本 Pet 的消息：零 Session 读取、零回复、零派发；普通直接答复不读 Session。
 - 空闲且需要执行时派发，不读 Session 内容；已有执行时先读正在执行的那次，不直接另起执行。跨 Channel 不允许读外部 Session；仅问进度不产生新运行。

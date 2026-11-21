@@ -229,8 +229,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   const head: ChannelHeadPort = {
     readContext: async (channelId, petId, before, replyTo) => {
       const service = channelService();
-      const context = await service.readContext({ kind: 'pet', id: petId }, channelId, { before, limit: 50 });
-      const referencedMessage = replyTo ? await service.getMessage(channelId, replyTo) : undefined;
+      const context = await service.readContext({ kind: 'pet', id: petId }, channelId, { before, limit: 10 });
+      const referencedMessage = replyTo
+        ? context.messages.find(message => message.messageId === replyTo) ?? await service.getMessage(channelId, replyTo)
+        : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
     readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {

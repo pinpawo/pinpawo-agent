@@ -169,6 +169,7 @@ test('response and work both use Host admission without Head final text and pres
     await channel.service.postMessage(human, channelId, { body: 'inspect attachment', replyTo: referenced.message.messageId, deliverables: attachments });
     await waitFor(() => dispatched.length === 2);
     assert.deepEqual(dispatched[1]!.attachments, [...attachments, ...referencedAttachments]);
+    assert.equal(triggerInput?.context.messages.length, 10);
     assert.equal(triggerInput?.context.messages.some(message => message.messageId === referenced.message.messageId), false);
     assert.deepEqual(triggerInput?.context.referencedMessage, referenced.message, 'an explicit older reply remains available outside the context window');
     assert.ok(dispatched[1]!.request.includes(referenced.message.messageId), 'dispatch preserves the referenced source');

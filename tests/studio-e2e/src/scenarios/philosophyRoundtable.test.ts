@@ -102,7 +102,7 @@ async function scriptedModel(mode: HeadWireMode) {
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
           const action = eligible ? 'dispatch' : 'ignore';
           decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
-            mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
+            mentioned: head.addressed === true });
           const decision = { action };
           if (mode === 'tool') call = { name: 'pet_head_decision', args: decision };
           else content = JSON.stringify(decision);

@@ -20,7 +20,8 @@ export type HeadMessage = {
 };
 export type HeadContext = {
   messages: HeadMessage[];
-  members?: Array<{ kind: 'human' | 'pet'; id: string; participantId: string }>;
+  channel?: { title: string; description?: string; prompt?: string };
+  members?: Array<{ kind: 'human' | 'pet'; id: string; participantId: string; label?: string }>;
   referencedMessage?: HeadMessage;
   [key: string]: unknown;
 };

@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { cases, fixtureVersion } from '../src/head-eval/cases';
+import { fixtureVersion } from '../src/head-eval/cases';
+import { selectCases } from '../src/head-eval/selection';
+import { readCacheUsage } from '../src/head-eval/cacheUsage';
 import { score, summarize } from '../src/head-eval/scorer';
 import type { HeadDecisionDiagnostic } from '../../../packages/studio/src/host/petHeadModel';
 
@@ -21,9 +23,7 @@ async function main() {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(profile)) throw new Error('profile-required');
   const repeats = Number(options.get('--repeats') ?? '1');
   const ids = options.get('--cases')?.split(',');
-  if (ids?.some(id => !cases.some(test => test.id === id))) throw new Error('unknown-case');
-  const selected = cases.filter(test => !ids || ids.includes(test.id));
-  if (!Number.isInteger(repeats) || repeats < 1 || selected.length * repeats > 20) throw new Error('maximum-20-decisions');
+  const selected = selectCases(ids, repeats);
   const output = options.get('--output');
   if (!output) throw new Error('output-required');
   // Reserve a private new report before spending any provider calls.
@@ -33,7 +33,7 @@ async function main() {
   const originalConsole = { ...console }, originalFetch = globalThis.fetch;
   for (const key of ['log', 'info', 'warn', 'error', 'debug'] as const) console[key] = () => {};
   let calls = 0;
-  type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
+  type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; cacheHitTokens?: number; cacheMissTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
   let wire: Wire[] = [];
 
   const report = { schemaVersion: 2, fixtureVersion, commit, profile, model: '',
@@ -79,6 +79,7 @@ async function main() {
         const reasoning = body.usage?.completion_tokens_details?.reasoning_tokens;
         if (Number.isFinite(reasoning)) metadata.reasoningTokens = reasoning;
         if (Number.isFinite(body.usage?.total_tokens)) metadata.totalTokens = body.usage.total_tokens;
+        Object.assign(metadata, readCacheUsage(body.usage));
       } catch { /* Non-JSON responses remain operational status only. */ }
       metadata.elapsedMs = Date.now() - started;
       wire.push(metadata);

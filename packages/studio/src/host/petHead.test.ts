@@ -5,6 +5,7 @@ import { buildModel } from 'pinpawo/host-runtime';
 import test from 'node:test';
 import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadWorkState, type HeadMessage, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
+import { headDecisionMessages } from './petHeadPrompts';
 import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
@@ -208,6 +209,46 @@ test('cancellation while context is loading never starts a decision', async () =
 const createHeadDecision = (endpoint: StudioModelEndpoint, options?: Parameters<typeof createHeadModel>[1]) =>
   createHeadModel(() => endpoint, options).decide;
 const decisionInput = { pet: pet('a'), message: message('1'), context: { messages: [] } };
+test('Head prompt keeps its prefix stable and sends ten prior public messages plus any older target once', () => {
+  const current = message('20', { replyTo: '2', body: 'Inspect the note.', mentions: [{ participantId: 'pet:a' }, { participantId: 'pet:b' }] });
+  const history = Array.from({ length: 15 }, (_, i) => message(String(i + 1), {
+    mentions: [{ participantId: 'pet:b' }], externalRef: 'private-reference',
+  }));
+  const context = {
+    channel: { title: 'Review', description: 'Evidence only', prompt: 'Check the sources', workdir: '/private/location' },
+    messages: [current, message('21'), message('19', { channelId: 'foreign' }), ...history, history[14]!],
+    members: [
+      { kind: 'pet' as const, id: 'a', participantId: 'pet:a', label: 'A' },
+      { kind: 'pet' as const, id: 'b', participantId: 'pet:b', label: 'B' },
+      { kind: 'pet' as const, id: 'c', participantId: 'pet:c', label: 'C' },
+    ],
+    referencedMessage: history[1],
+    queuedDispatches: 99,
+  };
+  const make = (incoming: HeadMessage, nextContext = context, addressed = true) =>
+    headDecisionMessages({ pet: pet('a'), description: 'Reviewer', message: incoming, context: nextContext, addressed }, 'Schema');
+  const [system, [, wire]] = make(current);
+  const inWindow = make({ ...current, replyTo: '15' }, { ...context, referencedMessage: history[14] }, false);
+  assert.deepEqual(system, inWindow[0], 'a mention and different reference cannot change the system/cache prefix');
+  const projection = JSON.parse(wire);
+  assert.deepEqual(Object.keys(projection), ['pet', 'context', 'message', 'addressed']);
+  assert.deepEqual(projection.context.channel, { title: 'Review', description: 'Evidence only', prompt: 'Check the sources' });
+  assert.deepEqual(projection.context.messages.map((item: { messageId: string }) => item.messageId), ['6','7','8','9','10','11','12','13','14','15']);
+  assert.deepEqual(projection.context.referencedMessage, { messageId: '2', sequence: 2, author: current.author, body: 'message 2' });
+  assert.ok(projection.context.messages.every((item: object) => !['mentions', 'externalRef', 'channelId'].some(key => Object.hasOwn(item, key))));
+  assert.equal(Object.hasOwn(projection.context, 'members'), false);
+  assert.equal(Object.hasOwn(projection.context, 'queuedDispatches'), false);
+  assert.deepEqual(projection.message, {
+    channelId: 'team', messageId: '20', sequence: 20, author: current.author, body: current.body, replyTo: '2',
+    mentions: [
+      { participantId: 'pet:a', kind: 'pet', id: 'a', label: 'A' },
+      { participantId: 'pet:b', kind: 'pet', id: 'b', label: 'B' },
+    ],
+  });
+  assert.equal(projection.addressed, true);
+  assert.equal(JSON.parse(inWindow[1]![1]).context.referencedMessage, undefined);
+  assert.equal(JSON.parse(inWindow[1]![1]).addressed, false);
+});
 const raw = (value: unknown) => new AIMessage(JSON.stringify(value));
 const decisionName = 'pet_head_decision';
 const tool = (args: Record<string, unknown>, name = decisionName) => new AIMessage({ content: '', tool_calls: [{ name, args }] });
@@ -250,7 +291,11 @@ test('a single structured call uses the configured method, shared schema, and no
     assert.deepEqual(mock.binding(), { name: decisionName, method: method ?? 'jsonMode', includeRaw: true });
     assert.deepEqual(mock.calls.map(call => call.mode), ['structured']);
     assert.equal(mock.calls[0]!.signal, signal);
-    assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), decisionInput);
+    assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
+      pet: { petId: 'a' }, context: { messages: [] },
+      message: { channelId: 'team', messageId: '1', sequence: 1, author: { kind: 'human', id: 'owner' }, body: 'message 1' },
+      addressed: false,
+    });
     assert.deepEqual(events, [{ petId: 'a', channelId: 'team', messageId: '1', attempts: 1, outcome: 'selected', action: 'dispatch' }]);
   }
 });
@@ -375,9 +420,9 @@ test('official Flash sends a committed review handoff to work and a matching sta
     const input = JSON.parse(body.messages.find((entry: { role: string }) => entry.role === 'user').content);
     const fixture = sources.find(item => item.incoming.messageId === input.message.messageId);
     assert.ok(fixture);
-    assert.deepEqual(input.message, fixture.incoming);
     let content: string;
     if (input.evidence) {
+      assert.deepEqual(input.message, fixture.incoming);
       assert.equal(fixture.route, 'status');
       assert.equal(body.response_format, undefined);
       assert.deepEqual(input.evidence, { status: 'unavailable' });
@@ -388,7 +433,10 @@ test('official Flash sends a committed review handoff to work and a matching sta
       assert.deepEqual(body.response_format, { type: 'json_object' });
       assert.equal(input.addressed, true);
       assert.deepEqual(Object.keys(input).sort(), ['addressed', 'context', 'message', 'pet']);
-      assert.deepEqual(input.context.messages, [artifact]);
+      const { messageId, sequence, channelId, author, body: sourceBody } = fixture.incoming;
+      assert.deepEqual(input.message, { messageId, sequence, channelId, author, body: sourceBody,
+        mentions: [{ participantId, kind: 'pet', id: 'a' }] });
+      assert.deepEqual(input.context.messages, [{ messageId: artifact.messageId, sequence: artifact.sequence, author: artifact.author, body: artifact.body }]);
       modelCalls.push({ messageId: fixture.incoming.messageId, stage: 'decide' });
       content = JSON.stringify(fixture.route === 'work' ? { action: 'dispatch' } :
         fixture.route === 'status' ? { action: 'status' } :

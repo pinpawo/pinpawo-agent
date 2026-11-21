@@ -20,8 +20,9 @@ Host. Operator commands do not start, update, or configure it.
   `services/studio/dist/cli.js` with Node.js 24+; do not silently use another
   checkout, download a package, or substitute the `pinpawo` CLI. Help for this
   contract lists `channels create --workdir` and separate `pets create --channel`.
-- Set `STUDIO_CLI` to that executable and set `STUDIO_URL` and
-  `STUDIO_TOKEN_FILE` for the verified Host. A local Host typically uses
+- Set `STUDIO_CLI` to an executable path and set `STUDIO_URL` and
+  `STUDIO_TOKEN_FILE` for the verified Host. If the built entry point cannot be
+  executed directly, use an executable wrapper that calls `node` with that file. A local Host typically uses
   `~/.pinpawo/local-server-token`; reuse the authorized file without reading
   its value into the conversation, echoing it, or putting it into a command
   argument. Supply the connection flags on either side of an operator command.
@@ -37,7 +38,8 @@ Before a mutation, check `viewerParticipantId` and the known Channel ID or
 workspace evidence. If a list is empty or looks wrong, verify the Host and
 identity instead of assuming the Channel should be recreated. An ordinary
 client key lists its member Channels and live Pets; it cannot read global
-queues, inspect Agent Sessions, set a Channel workdir, or manage Pet instances.
+queues, inspect Agent Sessions, set a Channel workdir, or use the direct `pets`
+lifecycle commands. Channel membership actions retain their own permissions.
 The local Host token has Studio authority and is normally `human:local` in
 Channels. It does not replace Channel membership for reading the Timeline or
 sending messages. The [Studio API](../../docs/reference/api/studio.md#studio-clients)
@@ -99,7 +101,8 @@ Live Pet membership is projected from the instance. To retire a Pet, use
 `pets close` (temporary, `pets reopen` restores the same identity, owner,
 sessions and credentials) or `pets remove` (permanent; identity and history
 remain and the ID cannot be reused). Removing a `pet:<petId>` with
-`channels remove-member` is the same permanent action, not a simple detach.
+`channels remove-member` is the same permanent action, not a simple detach;
+it is available to a current Channel member or the local Host operator.
 For a live instance, only pass `--confirm-stop` after explicit consent to stop
 its current work and cancel unstarted queued work. One call waits for business
 stop and applies the final state. It does not answer a review. Inspect
@@ -126,8 +129,9 @@ Inspect the file even when you omit `--mention`. `--reply-to MESSAGE_ID`
 links a message in the same Channel; it does not name a recipient.
 
 - Online Pets independently decide whether to participate. A valid `@Pet`
-  bypasses only the named Pet's participation check. It does not guarantee a
-  reply or start work, bypass a review, interrupt a run, or change its input.
+  bypasses only the named Pet's participation check. It guarantees neither a
+  reply nor execution, and does not bypass a review, interrupt a run, or change
+  its input.
   Without `@`, a Pet may still answer or request execution. An offline Pet
   does not receive missed events on reopen; history remains readable. A Pet
   ignores its own messages; committed peer messages can still be considered.
@@ -146,14 +150,16 @@ links a message in the same Channel; it does not name a recipient.
 
 A send receipt is the saved message; it is not evidence of execution. After an
 uncertain create, send, membership change or dispatch, read the authoritative
-directory, Channel or execution state and match the exact ID before deciding
-whether to retry. No command automatically retries a mutation. A new send
+directory, Channel or execution state before deciding whether to retry. Match
+an ID if you have one; if a create receipt was lost, reconcile against the exact
+Host, known prior state and intended Channel details rather than title alone.
+The operator CLI does not automatically retry a mutation. A new send
 creates a new message; do not blindly resend if a reply is delayed or absent.
 
 ## Observe execution and review
 
 - `studio channels sessions "$CHANNEL_ID"` identifies the exact Session for an
-  owned Pet. `studio queues` is Studio-authority, global and read-only. It helps
+  owned Pet when a binding exists. `studio queues` is Studio-authority, global and read-only. It helps
   distinguish current and queued work, but waiting alone does not prove a
   particular approval is pending. If a read fails, treat status as unknown.
   Do not relay other Channels' IDs or private execution details.

@@ -64,7 +64,7 @@ export type ChannelPlugin = StudioPlugin & {
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
-  dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal) => Promise<void>;
+  dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal) => Promise<void>;
   readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
     => Promise<string | undefined>;
 };
@@ -253,18 +253,17 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       signal.throwIfAborted();
       await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options, headReplyTo: replyTo });
     },
-    dispatch: async (channelId, petId, message, request, signal) => {
-      if (message.channelId !== channelId) throw new Error('Message does not belong to this Channel.');
+    dispatch: async (channelId, petId, messageId, signal) => {
       signal.throwIfAborted();
       const service = channelService();
       await service.requireMember(channelId, { kind: 'pet', id: petId });
       signal.throwIfAborted();
-      const canonical = await service.getMessage(channelId, message.messageId);
+      const canonical = await service.getMessage(channelId, messageId);
       if (!canonical) throw new Error('Head source message does not exist in this Channel.');
       const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(canonical, request, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
+      await dispatchPet(channelId, petId, channelMessageInput(canonical, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
     },
   };
 

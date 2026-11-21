@@ -10,7 +10,7 @@ import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet
 import { buildHostRuntimeConfig, FileSaver } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../../packages/studio/src/host/studioConfig';
-import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
+import type { HeadMessage } from '../../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../../services/host/src/testing/modelProfiles';
 import { createTestHostToolkitInventory } from '../../../../services/host/src/testing/toolkitInventory';
@@ -266,8 +266,7 @@ export async function createDeterministicScenarioModel(): Promise<ScenarioModel 
         let content = '';
         let toolCall: { name: string; args: Record<string, unknown> } | undefined;
         if (input.response_format?.type === 'json_object' && names.length === 0) {
-          const head = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
-          content = JSON.stringify({ action: 'dispatch', reply: '', readProgress: false, ...(!head.addressed ? { engage: true } : {}), intent: head.message.body });
+          content = JSON.stringify({ action: 'dispatch' });
         } else if (names.includes('plan_request')) {
           toolCall = { name: 'plan_request', args: { goal: 'Read the synthetic cobalt record and report its units and exact verification receipt.' } };
         } else if (names.includes('synthetic_lookup')) {

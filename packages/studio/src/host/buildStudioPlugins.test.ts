@@ -507,7 +507,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
   }));
   const configuration = await resolveStudioHostConfig({ workdir });
   let channelContext: StudioPluginContext | undefined;
-  const replies: Array<{ petId: string; messageId: string; body: string }> = [];
+  const replies: Array<{ petId: string; messageId: string }> = [];
   let repliesDone!: () => void;
   const completed = new Promise<void>(resolve => { repliesDone = resolve; });
   const channel = {
@@ -520,8 +520,8 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     head: {
       readContext: async () => ({ messages: [] }),
       reply: async () => { assert.fail('Head routing must not write a final reply'); },
-      dispatch: async (_channelId: string, petId: string, message: { messageId: string }, body: string) => {
-        replies.push({ petId, messageId: message.messageId, body });
+      dispatch: async (_channelId: string, petId: string, messageId: string) => {
+        replies.push({ petId, messageId });
         if (replies.length === 3) repliesDone();
       },
     },
@@ -555,13 +555,13 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.equal(request.tool_choice, undefined);
       schema = JSON.parse(system.content.split('\n').at(-1));
     }
-    assert.deepEqual(schema.required, ['engage', 'action', 'reply', 'intent', 'readProgress']);
+    assert.deepEqual(schema.required, ['action']);
     assert.equal(schema.additionalProperties, false);
-    assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+    assert.deepEqual(schema.properties.action.enum, ['ignore', 'direct', 'dispatch', 'status']);
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
     calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
-    const args = JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false });
+    const args = JSON.stringify({ action: 'dispatch' });
     const output = usesTool
       ? { content: null, tool_calls: [{ id: `head-decision-${input.pet.petId}`, type: 'function',
         function: { name: 'pet_head_decision', arguments: args } }] }

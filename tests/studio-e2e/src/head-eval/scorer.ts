@@ -1,30 +1,34 @@
 import type { HeadDecision } from '../../../../packages/studio/src/host/petHead';
 import type { EvalCase, Route } from './cases';
-export type Score = { valid: boolean; route?: Route; actionPass: boolean; replyPresencePass: boolean; routePass: boolean; progressReadPass: boolean; pass: boolean; error?: string };
-export function score(test: EvalCase, value?: HeadDecision, error?: string): Score {
-  const valid = !!value && Object.keys(value).every(key => ['engage', 'readProgress', 'action', 'reply', 'intent'].includes(key)) && typeof value.reply === 'string' && typeof value.intent === 'string'
-    && (value.engage === undefined || typeof value.engage === 'boolean')
-    && (value.readProgress === undefined || typeof value.readProgress === 'boolean')
-    && (test.input.addressed !== true || value.engage === undefined)
-    && (!value.readProgress || value.reply === '')
-    && (value.engage !== false || (value.action === 'ignore' && value.reply === '' && !value.readProgress))
-    && ((value.action === 'ignore' && value.intent === '') || (value.action === 'dispatch' && !!value.intent.trim()));
-  if (!valid) return { valid: false, actionPass: false, replyPresencePass: false, routePass: false, progressReadPass: false, pass: false, error: error ?? 'invalid-decision' };
-  const decision = value!;
-  const route: Route = decision.action === 'dispatch' ? (decision.reply.trim() ? 'combined' : 'dispatch-only') : (decision.reply.trim() ? 'reply-only' : 'silent');
-  const actionPass = test.routes.some(allowed => ['dispatch-only', 'combined'].includes(allowed) === (decision.action === 'dispatch'));
-  const replyPresencePass = test.routes.some(allowed => ['reply-only', 'combined'].includes(allowed) === !!decision.reply.trim());
-  const routePass = test.routes.includes(route), progressReadPass = !!decision.readProgress === (test.readProgress ?? false);
-  return { valid: true, route, actionPass, replyPresencePass, routePass, progressReadPass, pass: routePass && progressReadPass };
+export type Score = { valid: boolean; route?: Route; dispatchPass: boolean; replyPresencePass: boolean; routePass: boolean; statusPass: boolean; pass: boolean; error?: string };
+
+export function score(test: EvalCase, decision?: HeadDecision, error?: string): Score {
+  const valid = !!decision && Object.keys(decision).every(key => ['action', 'reply'].includes(key))
+    && (decision.reply == null || typeof decision.reply === 'string')
+    && (decision.action === 'dispatch' || decision.action === 'direct'
+      || ((decision.action === 'ignore' || decision.action === 'status') && !decision.reply?.trim()));
+  if (!valid || !decision) return { valid: false, dispatchPass: false, replyPresencePass: false, routePass: false, statusPass: false,
+    pass: false, error: error ?? 'invalid-decision' };
+  const hasWork = decision.action === 'dispatch';
+  const hasReply = !!decision.reply?.trim();
+  // The eval scores the first decision's work disposition and immediate reply, not
+  // Session reads or admissions. The Head runtime decides those from live facts.
+  const route: Route = hasWork ? (hasReply ? 'combined' : 'dispatch-only') : (hasReply ? 'reply-only' : 'silent');
+  const dispatchPass = test.routes.some(allowed => ['dispatch-only', 'combined'].includes(allowed) === hasWork);
+  const replyPresencePass = test.routes.some(allowed => ['reply-only', 'combined'].includes(allowed) === hasReply);
+  const routePass = test.routes.includes(route);
+  const statusPass = (decision.action === 'status') === !!test.needsExecutionFacts;
+  return { valid: true, route, dispatchPass, replyPresencePass, routePass, statusPass, pass: routePass && statusPass };
 }
+
 export function summarize(rows: Array<{ kind: EvalCase['kind']; score: Score }>) {
   const contrast = rows.filter(row => row.kind === 'contrast');
   const valid = contrast.filter(row => row.score.valid);
   return { total: rows.length, valid: rows.filter(row => row.score.valid).length,
     errors: rows.filter(row => !row.score.valid).length,
     contrast: { pass: contrast.filter(row => row.score.pass).length, total: contrast.length,
-      conditionalRoutingProgress: { pass: valid.filter(row => row.score.pass).length, total: valid.length },
-      actionPass: contrast.filter(row => row.score.actionPass).length, replyPresencePass: contrast.filter(row => row.score.replyPresencePass).length,
-      routePass: contrast.filter(row => row.score.routePass).length, progressReadPass: contrast.filter(row => row.score.progressReadPass).length },
+      conditionalDecisionPass: { pass: valid.filter(row => row.score.pass).length, total: valid.length },
+      dispatchPass: contrast.filter(row => row.score.dispatchPass).length, replyPresencePass: contrast.filter(row => row.score.replyPresencePass).length,
+      routePass: contrast.filter(row => row.score.routePass).length, statusPass: contrast.filter(row => row.score.statusPass).length },
     organic: { total: rows.length - contrast.length, accepted: rows.filter(row => row.kind === 'organic' && row.score.pass).length } };
 }

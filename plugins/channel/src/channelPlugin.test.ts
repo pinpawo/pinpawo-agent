@@ -73,6 +73,25 @@ test('messages retain references and mentions without dispatching a Pet', async 
     mentions: [{ participantId: 'pet:missing' }], deliverables: current,
   }, owner));
   assert.equal(dispatched.length, 0);
+
+  // The Head can identify a committed source; it cannot rewrite it or fetch another Channel.
+  const signal = new AbortController().signal;
+  await assert.rejects(plugin.head.dispatch(channelId, 'writer', otherMessage.messageId, signal), /does not exist in this Channel/);
+  await assert.rejects(plugin.head.dispatch(other, 'writer', otherMessage.messageId, signal), ChannelAccessError);
+  assert.equal(dispatched.length, 0);
+  await plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal);
+  assert.equal(dispatched.length, 1);
+  const request = dispatched[0]!;
+  assert.equal(request.petId, 'writer');
+  assert.equal(request.signal, signal);
+  assert.deepEqual(request.origin, { namespace: 'channel', id: mentioned.message.messageId });
+  assert.deepEqual(request.scope, { namespace: 'channel', id: channelId });
+  assert.equal(request.idempotencyKey, JSON.stringify(['head-dispatch', channelId, 'writer', mentioned.message.messageId]));
+  assert.equal(request.session?.id, 'writer-session');
+  assert.deepEqual(JSON.parse(request.request.split('\n').slice(1, -1).join('\n')), {
+    type: 'channel_message', version: 1, message: mentioned.message, referencedMessage: original.message,
+  });
+  assert.deepEqual(request.attachments, [current[0], ...original.message.deliverables!]);
 });
 
 test('a Pet works in a Channel only while its run there is running, and context reads say so', async (t) => {

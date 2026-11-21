@@ -18,6 +18,6 @@ export function channelTaskInput(channelId: string, origin: ChannelRunOrigin, bo
 }
 
 /** The event's author and references are carried as server-assigned data, not model-generated instructions. */
-export function channelMessageInput(message: ChannelMessage, request: string, referencedMessage?: ChannelMessage): string {
-  return fenced({ type: 'channel_message', version: 1, message, ...(referencedMessage ? { referencedMessage } : {}), request });
+export function channelMessageInput(message: ChannelMessage, referencedMessage?: ChannelMessage): string {
+  return fenced({ type: 'channel_message', version: 1, message, ...(referencedMessage ? { referencedMessage } : {}) });
 }

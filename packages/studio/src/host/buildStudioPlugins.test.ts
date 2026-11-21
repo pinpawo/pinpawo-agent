@@ -555,13 +555,13 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.equal(request.tool_choice, undefined);
       schema = JSON.parse(system.content.split('\n').at(-1));
     }
-    assert.deepEqual(schema.required, ['engage', 'action', 'reply', 'intent', 'readProgress']);
+    assert.deepEqual(schema.required, ['action']);
     assert.equal(schema.additionalProperties, false);
-    assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+    assert.deepEqual(schema.properties.action.enum, ['pass', 'direct', 'handle']);
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
     calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
-    const args = JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false });
+    const args = JSON.stringify({ action: 'handle', intent: `hello from ${input.pet.petId}` });
     const output = usesTool
       ? { content: null, tool_calls: [{ id: `head-decision-${input.pet.petId}`, type: 'function',
         function: { name: 'pet_head_decision', arguments: args } }] }
@@ -607,7 +607,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.equal(entry.channelId, 'one');
       assert.equal(entry.messageId, 'message-1');
       assert.equal(entry.outcome, 'selected');
-      assert.equal(entry.action, 'dispatch');
+      assert.equal(entry.action, 'handle');
       assert.equal(entry.attempts, 1);
       assert.ok(['planner', 'writer', 'official'].includes(String(entry.petId)));
       assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'action', 'attempts', 'code'].includes(key)));

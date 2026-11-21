@@ -9,13 +9,14 @@ import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet
 import { buildHostRuntimeConfig, FileSaver } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../../packages/studio/src/host/studioConfig';
-import type { HeadInput } from '../../../../packages/studio/src/host/petHead';
+import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../../services/host/src/testing/modelProfiles';
 import { createTestHostToolkitInventory } from '../../../../services/host/src/testing/toolkitInventory';
 
 
 const human = { kind: 'human' as const, id: 'local' };
+const queuedRequest = '[@target](participant:pet:target) Run the independent synthetic follow-up.';
 type WireMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
 type WireRequest = { model: string; stream?: boolean; response_format?: { type: string }; messages: WireMessage[]; tools?: Array<{ function: { name: string } }> };
 function text(value: unknown): string {
@@ -30,7 +31,8 @@ async function until(predicate: () => boolean | Promise<boolean>) {
 }
 async function fixture() {
   const errors: unknown[] = [];
-  const heads: Array<{ petId: string; messageId: string; action: string }> = [];
+  const heads: Array<{ petId: string; messageId: string; action: string; addressed?: boolean }> = [];
+  const composed: string[] = [];
   let sequence = 0, held = false, aborted = false, released = false, queuedExecutions = 0, parentResumes = 0;
   let release = () => {};
   const server = createServer((request, response) => {
@@ -42,9 +44,14 @@ async function fixture() {
         const input = JSON.parse(raw) as WireRequest;
         const names = input.tools?.map(t => t.function.name) ?? [];
         let head: HeadInput | undefined;
+        let composition: { message: HeadMessage; evidence: { status: string } } | undefined;
         for (const message of input.messages) {
           if (message.role !== 'user') continue;
-          try { const value = JSON.parse(text(message.content)); if (value.pet?.petId && value.message?.messageId && value.context) head = value; } catch { /* Executor. */ }
+          try {
+            const value = JSON.parse(text(message.content));
+            if (value.pet?.petId && value.message?.messageId && value.context) head = value;
+            else if (value.message?.messageId && value.evidence?.status) composition = value;
+          } catch { /* Executor. */ }
         }
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
@@ -57,15 +64,22 @@ async function fixture() {
           const route = petId === 'origin' && source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE'
             : petId === 'origin' && source === 'EMIT_QUEUED_PEER' ? 'SEED_QUEUED'
             : petId === 'target' && (source === 'ACTIVE_HUMAN' || source === 'ACTIVE_PEER') ? 'ACTIVE'
-            : petId === 'target' && (source === 'QUEUED_HUMAN' || source === 'QUEUED_PEER') ? 'QUEUED' : '';
-          const action = route ? 'dispatch' : 'ignore';
-          heads.push({ petId, messageId: head.message.messageId, action });
-          content = JSON.stringify({ action, reply: '', readProgress: false, ...(!head.addressed ? { engage: action === 'dispatch' } : {}), intent: route ? `ROUTE_${route}` : '' });
+            : petId === 'target' && source === queuedRequest ? 'QUEUED' : '';
+          const action = route ? 'handle' : head.addressed ? 'direct' : 'pass';
+          heads.push({ petId, messageId: head.message.messageId, action, addressed: head.addressed });
+          content = JSON.stringify({ action, ...(route ? { intent: `ROUTE_${route}` } : {}) });
+        } else if (composition) {
+          assert.deepEqual(names, [], 'reply composition cannot expose scheduling or execution tools');
+          assert.equal(input.response_format, undefined);
+          assert.equal(composition.message.body, queuedRequest);
+          assert.equal(composition.evidence.status, 'running');
+          composed.push(composition.message.messageId);
+          // Independent B does not ask about A; leave the public reply empty.
         } else {
           const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(SEED_ACTIVE|SEED_QUEUED|ACTIVE|QUEUED)/g)].at(-1)?.[1];
           assert.ok(marker);
           if (marker === 'SEED_ACTIVE') content = 'ACTIVE_PEER';
-          else if (marker === 'SEED_QUEUED') content = 'QUEUED_PEER';
+          else if (marker === 'SEED_QUEUED') content = queuedRequest;
           else if (marker === 'QUEUED') {
             queuedExecutions++;
             assert.equal(released, true, 'Queued input cannot replace or enter the still-active subject');
@@ -117,7 +131,7 @@ async function fixture() {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, heads, errors,
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, heads, composed, errors,
     state: () => ({ held, aborted, queuedExecutions, parentResumes }), release: () => release(),
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
@@ -144,18 +158,32 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       const studio = built.studio;
       const channelId = (await channel.service.createChannel(human, { title: 'Synthetic scheduling', pets: [] })).channel.channelId;
       for (const petId of ['origin', 'target']) await studio.pets.create({ petId, definitionId: petId, name: petId, channelId });
-      built.residentPets.get('target')!.resident.dispatch.onDispatchLifecycle(e => lifecycle.push({ state: e.state, sessionId: e.sessionId }));
+      const target = built.residentPets.get('target')!;
+      const readSnapshot = target.sessions.snapshot.bind(target.sessions);
+      const sampled: string[] = [];
+      target.sessions.snapshot = (sessionId, options) => {
+        sampled.push(sessionId);
+        return readSnapshot(sessionId, options);
+      };
+      target.resident.dispatch.onDispatchLifecycle(e => lifecycle.push({ state: e.state, sessionId: e.sessionId }));
       const messages = async () => (await channel.service.readContext(human, channelId, { limit: 100 })).messages;
       await channel.service.postMessage(human, channelId, { body: activeAuthor === 'human' ? 'ACTIVE_HUMAN' : 'EMIT_ACTIVE_PEER', mentions: [] });
       await until(() => model.state().held);
       const binding = await channel.service.getSession(channelId, 'target');
       assert.equal(binding?.registered, true);
       const original = (await messages()).find(m => m.body === (activeAuthor === 'human' ? 'ACTIVE_HUMAN' : 'ACTIVE_PEER'))!;
-      await channel.service.postMessage(human, channelId, { body: queuedAuthor === 'human' ? 'QUEUED_HUMAN' : 'EMIT_QUEUED_PEER', mentions: [] });
+      assert.deepEqual(sampled, [], 'idle admission does not read Session contents');
+      await channel.service.postMessage(human, channelId, { body: queuedAuthor === 'human' ? queuedRequest : 'EMIT_QUEUED_PEER', mentions: [] });
       await until(() => lifecycle.filter(e => e.state === 'queued').length === 2);
-      const queued = (await messages()).find(m => m.body === (queuedAuthor === 'human' ? 'QUEUED_HUMAN' : 'QUEUED_PEER'))!;
+      const queued = (await messages()).find(m => m.body === queuedRequest)!;
       assert.ok(queued);
       assert.equal(queued.author.kind, queuedAuthor === 'human' ? 'human' : 'pet');
+      assert.deepEqual(queued.mentions.map(mention => mention.participantId), ['pet:target']);
+      assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId), [
+        { petId: 'target', messageId: queued.messageId, action: 'handle', addressed: true },
+      ]);
+      assert.deepEqual(sampled, [binding!.sessionId], 'busy work samples only the target’s exact Session once');
+      assert.deepEqual(model.composed, [queued.messageId], 'text-only follow-up has the same path for human and peer mentions');
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().queuedExecutions, 0);
       assert.equal(lifecycle.filter(e => e.state === 'running').length, 1);
@@ -165,7 +193,7 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       const final = await messages();
       const targetReplies = final.filter(m => m.author.kind === 'pet' && m.author.id === 'target');
       assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE', 'RESULT_QUEUED']);
-      await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'ignore')));
+      await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'pass')));
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().parentResumes, 1, 'Original parent receives its delegated result before queued work');
       assert.equal(model.state().queuedExecutions, 1);

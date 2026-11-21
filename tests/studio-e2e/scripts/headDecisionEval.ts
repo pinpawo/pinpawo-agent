@@ -38,7 +38,7 @@ async function main() {
 
   const report = { schemaVersion: 2, fixtureVersion, commit, profile, model: '',
     startedAt: new Date().toISOString(), providerCalls: 0, providerCallLimit: 20,
-    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; decision?: { action: string; hasReply: boolean; hasIntent: boolean; readProgress: boolean }; score: ReturnType<typeof score> }>,
+    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; decision?: { action: string; hasReply: boolean; hasIntent: boolean }; score: ReturnType<typeof score> }>,
     summary: {} as ReturnType<typeof summarize> | object };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240_000);
@@ -102,7 +102,7 @@ async function main() {
       const failure = controller.signal.aborted ? 'cancelled-or-deadline' : calls >= 20 && !decision ? 'call-budget' : diagnostic?.code ?? 'provider-or-transport-error';
       report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: diagnostic?.attempts ?? 0, elapsedMs: Date.now() - started, wire: [...wire],
         ...(diagnostic ? { outcome: diagnostic.outcome, ...(diagnostic.code ? { code: diagnostic.code } : {}) } : {}),
-        ...(decision ? { decision: { action: decision.action, hasReply: !!decision.reply.trim(), hasIntent: !!decision.intent.trim(), readProgress: !!decision.readProgress } } : {}),
+        ...(decision ? { decision: { action: decision.action, hasReply: !!decision.reply?.trim(), hasIntent: !!decision.intent?.trim() } } : {}),
         score: score(test, decision, failure) });
     }
   } catch {

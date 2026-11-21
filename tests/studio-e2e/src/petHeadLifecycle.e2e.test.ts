@@ -28,7 +28,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
   const decide = async ({ message }: HeadInput): Promise<HeadDecision> => {
     observed.push(message.body);
     const wait = pending.get(message.body);
-    return wait ? wait.promise : { action: 'ignore', reply: '', intent: '' };
+    return wait ? wait.promise : { action: 'pass' };
   };
   const prepared = prepareStudio({
     studioId: 'head-lifecycle', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
@@ -61,7 +61,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     await post('held before close');
     await waitFor(() => observed.includes('held before close'));
     await studio.pets.closeInstance('worker', { confirmStop: true });
-    first.resolve({ action: 'dispatch', reply: '', intent: 'late task' });
+    first.resolve({ action: 'handle', intent: 'late task' });
     await post('while closed');
     await studio.pets.reopenInstance('worker');
     assert.deepEqual(subscriptionTopics, [channelId, channelId], 'reopening creates a fresh owner-Channel subscription');
@@ -74,7 +74,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     await post('held before remove');
     await waitFor(() => observed.includes('held before remove'));
     await studio.pets.removeInstance('worker', { confirmStop: true });
-    second.resolve({ action: 'dispatch', reply: '', intent: 'late task after remove' });
+    second.resolve({ action: 'handle', intent: 'late task after remove' });
     await post('after remove');
     await tick();
     assert.deepEqual(observed, ['held before close', 'after reopen', 'held before remove']);
@@ -96,7 +96,7 @@ test('duplicate Pet externalRef emits only one event to another live Head', asyn
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
       const handle = createPetHead({ pet: registration, channel: bound,
-        decide: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { action: 'ignore', reply: '', intent: '' }; },
+        decide: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { action: 'pass' }; },
       });
       return bound.subscribe(message => handle(message, signal));
     },
@@ -139,9 +139,9 @@ test('response and work both use Host admission without Head final text and pres
           const { message } = input;
           observed.push(message.body);
           if (message.body === 'inspect attachment') triggerInput = input;
-          if (message.body === 'short question') return { action: 'dispatch', reply: '', intent: 'Short answer' };
-          if (message.body === 'inspect attachment') return { action: 'dispatch', reply: '', intent: 'Inspect the attachment' };
-          return { action: 'ignore', reply: '', intent: '' };
+          if (message.body === 'short question') return { action: 'handle', intent: 'Short answer' };
+          if (message.body === 'inspect attachment') return { action: 'handle', intent: 'Inspect the attachment' };
+          return { action: 'pass' };
         },
       });
       return bound.subscribe(message => handle(message, signal));

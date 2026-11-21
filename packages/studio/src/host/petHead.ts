@@ -24,17 +24,28 @@ export type HeadContext = {
   referencedMessage?: HeadMessage;
   [key: string]: unknown;
 };
-/** Reply publication and execution admission are independent decision axes. */
-export type HeadDecision = { action: 'ignore' | 'dispatch'; reply: string; intent: string; engage?: boolean; readProgress?: boolean };
+/** The model judges responsibility and independent work, not Session state or routing. */
+export type HeadDecision = { action: 'pass' | 'direct' | 'handle'; reply?: string | null; intent?: string | null };
 type HeadDispatchRef = { dispatchId: string; sessionId: string; messageId?: string };
-/** Read only the owning Pet's ordinary dispatch slot, never its pending queue. */
-export function readHeadActiveDispatch(channelId: string, queue: PetDispatchQueueSnapshot): HeadDispatchRef | undefined {
+type HeadWorkState = { kind: 'idle' } | { kind: 'unknown' } | { kind: 'active'; dispatch: HeadDispatchRef };
+
+/** Idle means the ordinary resident dispatch slot is clear, not that a historical Session finished. */
+export function readHeadWorkState(channelId: string, queue: PetDispatchQueueSnapshot): HeadWorkState {
   const entry = queue.activeDispatch;
-  if (queue.activeOperation !== 'dispatch' || !entry?.sessionId || entry.scope?.namespace !== 'channel' || entry.scope.id !== channelId) return;
-  return { dispatchId: entry.dispatchId, sessionId: entry.sessionId, messageId: entry.origin?.namespace === 'channel' ? entry.origin.id : undefined };
+  if (queue.state === 'busy' && queue.activeOperation === 'dispatch' && entry?.dispatchId && entry.sessionId &&
+    entry.scope?.namespace === 'channel' && entry.scope.id === channelId) {
+    return { kind: 'active', dispatch: { dispatchId: entry.dispatchId, sessionId: entry.sessionId,
+      messageId: entry.origin?.namespace === 'channel' ? entry.origin.id : undefined } };
+  }
+  if (queue.state === 'open' && queue.activeOperation === null && !entry && queue.queuedConversations === 0 && queue.queuedDispatches === 0) {
+    return { kind: 'idle' };
+  }
+  return { kind: 'unknown' };
 }
 export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; addressed?: boolean;
-  activeWork?: { source?: Pick<HeadMessage, 'messageId' | 'body'> } };
+  activeWork?: { source: Pick<HeadMessage, 'messageId' | 'body'> } };
+
+export type HeadReplyInput = { message: HeadMessage; evidence: HeadProgressEvidence; source?: Pick<HeadMessage, 'messageId' | 'body'> };
 
 /** Mentions are server-resolved participant IDs on this committed message, not labels or quoted/history text. */
 export function isHeadAddressed(input: Pick<HeadInput, 'pet' | 'context' | 'message'>): boolean {
@@ -104,12 +115,13 @@ export function attachPetHead(input: {
       pet,
       ...(description ? { description } : {}),
       channel,
-      readActiveDispatch: () => readHeadActiveDispatch(pet.channelId, input.getQueueSnapshot()),
-      ...(readProgressSession ? { progress: {
+      readWorkState: () => readHeadWorkState(pet.channelId, input.getQueueSnapshot()),
+      progress: {
         readRun: observation.read,
-        readSessionRunId: (sessionId, signal, isCurrent) => readProgressSession(pet.petId, sessionId, signal, isCurrent),
+        ...(readProgressSession ? { readSessionRunId: (sessionId, signal, isCurrent) =>
+          readProgressSession(pet.petId, sessionId, signal, isCurrent) } : {}),
         compose: model.composeReply,
-      } } : {}),
+      },
       decide: model.decide,
     });
     unsubscribe = channel.subscribe(message => handleMessage(message, signal));
@@ -157,24 +169,24 @@ export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
   channel: PetHeadChannel;
-  readActiveDispatch?: () => HeadDispatchRef | undefined;
+  readWorkState?: () => HeadWorkState;
   progress?: {
     readRun: (active: HeadDispatchRef) => HeadRun | undefined;
-    readSessionRunId: HeadSessionRunReader;
-    compose: (input: { message: HeadMessage; evidence: HeadProgressEvidence }, signal: AbortSignal) => Promise<string>;
+    readSessionRunId?: HeadSessionRunReader;
+    compose: (input: HeadReplyInput, signal: AbortSignal) => Promise<string>;
   };
   decide: (input: HeadInput, signal: AbortSignal) => Promise<HeadDecision>;
 }): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
   return async (message, signal) => {
     if (signal.aborted || message.channelId !== options.pet.channelId || !message.author ||
       (message.author.kind === 'pet' && message.author.id === options.pet.petId)) return;
+    // Pin the ordinary slot and attempt before any await. This is not a Session read.
+    const state = options.readWorkState?.();
+    const active = state?.kind === 'active' ? state.dispatch : undefined;
+    const progress = options.progress;
+    const run = active && progress?.readRun(active);
     const context = await options.channel.readContext(options.pet.petId, message.sequence + 1, message.replyTo);
     if (signal.aborted) return;
-    // Pin the exact invocation AND its current Host run before asking the model.
-    // A later observation cannot silently retarget this turn.
-    const progress = options.progress;
-    const active = options.readActiveDispatch?.();
-    const run = active && progress?.readRun(active);
     let source: HeadMessage | undefined;
     const sourceId = active?.messageId;
     if (sourceId) {
@@ -190,40 +202,42 @@ export function createPetHead(options: {
     if (signal.aborted) return;
     const input = {
       pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context,
-      ...(active ? { activeWork: source ? { source: { messageId: source.messageId, body: source.body } } : {} } : {}),
+      ...(source ? { activeWork: { source: { messageId: source.messageId, body: source.body } } } : {}),
     };
     const addressed = isHeadAddressed(input);
     const decision = await options.decide({ ...input, addressed }, signal);
-    if (signal.aborted || (!addressed && decision.engage === false)) return;
+    if (signal.aborted || decision.action === 'pass') return;
+
     const failures: string[] = [];
-    let reply = decision.reply;
+    let reply = decision.reply ?? '';
     let stillCurrent: (() => boolean) | undefined;
-    if (decision.readProgress) {
-      reply = '';
-      if (progress) {
+    const intent = decision.action === 'handle' ? decision.intent : undefined;
+    if (decision.action === 'handle' && progress) {
+      const idle = state?.kind === 'idle' && options.readWorkState?.().kind === 'idle';
+      if (!idle || !intent) {
         const isCurrent = () => {
-          const now = options.readActiveDispatch?.();
-          return !!active && !!run && now?.dispatchId === active.dispatchId && now.sessionId === active.sessionId &&
-            now.messageId === active.messageId && progress.readRun(active)?.requestId === run.requestId;
+          const now = options.readWorkState?.();
+          return !!active && !!run && now?.kind === 'active' && now.dispatch.dispatchId === active.dispatchId &&
+            now.dispatch.sessionId === active.sessionId && now.dispatch.messageId === active.messageId &&
+            progress.readRun(active)?.requestId === run.requestId;
         };
-        // If the user explicitly links another message, don't substitute the
-        // current run. A real Head reply to the active source is a valid one-hop anchor.
+        // An explicit reference to other work never grants access to the current run.
         const reference = context.referencedMessage;
         const targetsActive = !message.replyTo || message.replyTo === active?.messageId ||
           (!!reference && !!active?.messageId && reference.messageId === message.replyTo && reference.channelId === message.channelId &&
             reference.author.kind === 'pet' && reference.author.id === options.pet.petId &&
-            reference.replyTo === active?.messageId && reference.externalRef === `head-reply:${active?.messageId}`);
+            reference.replyTo === active.messageId && reference.externalRef === `head-reply:${active.messageId}`);
         try {
-          const evidence = targetsActive && active && run && isCurrent()
+          const evidence = targetsActive && run && progress.readSessionRunId && isCurrent()
             ? await readHeadProgress({ run, signal, isCurrent, readSessionRunId: progress.readSessionRunId })
             : { status: 'unavailable' as const };
           if (signal.aborted) return;
-          reply = await progress.compose({ message, evidence }, signal);
-          // The model may have been composing while the next run started.
-          // Never publish text based on a run that is no longer current.
-          if (evidence.status === 'running') {
-            stillCurrent = isCurrent;
-            if (!isCurrent()) reply = '';
+          const statusReply = await progress.compose({ message, evidence,
+            ...(evidence.status === 'running' && input.activeWork ? { source: input.activeWork.source } : {}) }, signal);
+          // Work-only messages need no status announcement. Preserve an independent acknowledgement.
+          if (statusReply.trim() && (evidence.status !== 'running' || isCurrent())) {
+            reply = statusReply;
+            if (evidence.status === 'running') stillCurrent = isCurrent;
           }
         } catch {
           if (!signal.aborted) failures.push('progress reply');
@@ -244,8 +258,8 @@ export function createPetHead(options: {
       } catch (error) { if (!(error instanceof StaleProgressReply)) failures.push('reply'); }
     }
     // The only admission is the independent work chosen by the first decision.
-    if (decision.action === 'dispatch' && !signal.aborted) {
-      try { await options.channel.dispatch(options.pet.petId, message, decision.intent, signal); }
+    if (intent && !signal.aborted) {
+      try { await options.channel.dispatch(options.pet.petId, message, intent, signal); }
       catch { failures.push('dispatch'); }
     }
     if (signal.aborted) throw new Error('Pet Head action aborted.');

@@ -2,24 +2,23 @@ import { AIMessage } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
 import type { StudioModelEndpoint } from '../studioContract';
-import type { HeadDecision, HeadInput, HeadMessage } from './petHead';
-import type { HeadProgressEvidence } from './petHeadProgress';
+import type { HeadDecision, HeadInput, HeadReplyInput } from './petHead';
 import { headDecisionMessages, headReplyMessages } from './petHeadPrompts';
 
 export type HeadDecisionDiagnostic = {
   petId: string; channelId: string; messageId: string;
-  outcome: 'selected' | 'ignore' | 'error'; action?: 'ignore' | 'dispatch'; attempts: number; code?: string;
+  outcome: 'selected' | 'ignore' | 'error'; action?: HeadDecision['action']; attempts: number; code?: string;
 };
 
 const decisionName = 'pet_head_decision';
+// JSON mode may omit unused text; strict native JSON Schema can represent it as null.
+const optionalText = z.union([z.string(), z.null()]).optional();
 const decisionSchema = z.object({
-  engage: z.boolean(),
-  action: z.enum(['ignore', 'dispatch']),
-  reply: z.string(),
-  intent: z.string(),
-  readProgress: z.boolean(),
+  action: z.enum(['pass', 'direct', 'handle']),
+  reply: optionalText,
+  intent: optionalText,
 }).strict();
-const addressedSchema = decisionSchema.omit({ engage: true });
+const addressedSchema = decisionSchema.extend({ action: z.enum(['direct', 'handle']) });
 
 class DecisionFailure extends Error {
   constructor(readonly code: string) { super('Invalid Pet Head decision.'); }
@@ -76,12 +75,10 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
       const validated = schema.safeParse(parsed);
       if (!validated.success) throw new DecisionFailure('malformed');
       const decision = validated.data;
-      if ((decision.action === 'dispatch' ? !decision.intent.trim() : decision.intent !== '') ||
-        (decision.readProgress && decision.reply !== '') ||
-        ('engage' in decision && !decision.engage && (decision.action !== 'ignore' || decision.reply !== '' || decision.readProgress))) {
-        throw new DecisionFailure('malformed');
-      }
-      report(decision.action === 'ignore' && !decision.reply.trim() && !decision.readProgress ? { outcome: 'ignore' } : { outcome: 'selected', action: decision.action });
+      if ((decision.intent && (!decision.intent.trim() || decision.action !== 'handle')) ||
+        (decision.action === 'pass' && decision.reply)) throw new DecisionFailure('malformed');
+      report(decision.action === 'pass' || (decision.action === 'direct' && !decision.reply?.trim())
+        ? { outcome: 'ignore' } : { outcome: 'selected', action: decision.action });
       return decision;
     } catch (error) {
       report({ outcome: 'error', code: signal.aborted ? 'aborted' : error instanceof DecisionFailure ? error.code : 'provider_error' });
@@ -91,9 +88,9 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
   }
 
   /** Write only public reply text. Never bind tools, request a decision, or retry. */
-  async function composeReply({ message, evidence }: { message: HeadMessage; evidence: HeadProgressEvidence }, signal: AbortSignal): Promise<string> {
+  async function composeReply(input: HeadReplyInput, signal: AbortSignal): Promise<string> {
     signal.throwIfAborted();
-    const reply = await client().model.invoke(headReplyMessages(message, evidence), { signal });
+    const reply = await client().model.invoke(headReplyMessages(input), { signal });
     signal.throwIfAborted();
     if (failedFinish(reply)) throw new Error('Pet Head progress reply did not finish.');
     return reply.text.trim();

@@ -9,7 +9,7 @@ import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet
 import { buildHostRuntimeConfig, FileSaver } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../../packages/studio/src/host/studioConfig';
-import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
+import type { HeadInput, HeadReplyInput } from '../../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../../services/host/src/testing/modelProfiles';
 import { createTestHostToolkitInventory } from '../../../../services/host/src/testing/toolkitInventory';
@@ -41,6 +41,7 @@ async function until(predicate: () => boolean | Promise<boolean>) {
 async function scriptedModel(mode: HeadWireMode) {
   const attempts = new Map<string, number>();
   const decisions: Array<{ petId: string; channelId: string; messageId: string; action: string; mentioned: boolean }> = [];
+  const compositions = new Map<string, number>();
   const modelErrors: unknown[] = [];
   let sequence = 0;
   const server = createServer((request, response) => {
@@ -52,9 +53,14 @@ async function scriptedModel(mode: HeadWireMode) {
         const input = JSON.parse(raw) as WireRequest;
         const names = input.tools?.map(item => item.function.name) ?? [];
         let head: HeadInput | undefined;
+        let compose: HeadReplyInput | undefined;
         for (const message of input.messages) {
           if (message.role !== 'user') continue;
-          try { const value = JSON.parse(text(message.content)); if (value.pet?.petId && value.message?.messageId && value.context) head = value; } catch { /* Execution is not a Head request. */ }
+          try {
+            const value = JSON.parse(text(message.content));
+            if (value.pet?.petId && value.message?.messageId && value.context) head = value;
+            else if (value.message?.messageId && value.evidence) compose = value;
+          } catch { /* Execution is not a Head request. */ }
         }
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
@@ -76,12 +82,30 @@ async function scriptedModel(mode: HeadWireMode) {
             && head.pet.petId === 'roundtable-being';
           const round = peerEligible ? 3 : head.message.body === question ? 1 : head.message.body.startsWith('合成同伴回应：') ? 2 : 0;
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
-          const action = eligible ? 'dispatch' : 'ignore';
+          const action = eligible ? 'handle' : head.addressed ? 'direct' : 'pass';
           decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.message.mentions.some(item => item.participantId === `pet:${head!.pet.petId}`) });
-          const decision = { action, reply: '', readProgress: false, ...(!head.addressed ? { engage: eligible } : {}), intent: eligible ? `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` : '' };
+          const decision = { action, ...(eligible ? { intent: `Execute a concise philosophical response. ROUND_${round}_${head.pet.petId}. Preserve the source and quoted peer context; do not output routing instructions.` } : {}) };
           if (mode === 'tool') call = { name: 'pet_head_decision', args: decision };
           else content = JSON.stringify(decision);
+        } else if (compose) {
+          assert.deepEqual(names, []);
+          assert.equal(input.tool_choice, undefined);
+          assert.equal(input.response_format, undefined);
+          assert.ok(!input.stream);
+          assert.deepEqual(Object.keys(compose).sort(), compose.source ? ['evidence', 'message', 'source'] : ['evidence', 'message']);
+          assert.ok(['running', 'unavailable'].includes(compose.evidence.status));
+          assert.deepEqual(Object.keys(compose.evidence), ['status']);
+          if (compose.source) {
+            assert.equal(compose.evidence.status, 'running');
+            assert.deepEqual(Object.keys(compose.source).sort(), ['body', 'messageId']);
+          }
+          const { messageId } = compose.message;
+          const count = (compositions.get(messageId) ?? 0) + 1;
+          compositions.set(messageId, count);
+          assert.ok(count <= decisions.filter(entry => entry.messageId === messageId && entry.action === 'handle').length,
+            'At most one unbound composition per handling decision');
+          // The roundtable requests new work, not a status update.
         } else {
           const all = input.messages.map(message => text(message.content)).join('\n');
           const marker = [...all.matchAll(/ROUND_([123])_(roundtable-(?:language|conditions|being))/g)].at(-1);
@@ -125,7 +149,7 @@ async function scriptedModel(mode: HeadWireMode) {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'roundtable-fixture', decisions, attempts, modelErrors,
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'roundtable-fixture', decisions, attempts, compositions, modelErrors,
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
@@ -194,15 +218,15 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     }
     assert.equal(new Set(bindings.values()).size, 3);
     assert.equal(directHeadWrites, 0, 'Routing text must never be published as a final Head answer');
-    assert.equal(model.decisions.filter(item => item.messageId === first.messageId && !item.mentioned && item.action === 'dispatch').length, 2);
+    assert.equal(model.decisions.filter(item => item.messageId === first.messageId && !item.mentioned && item.action === 'handle').length, 2);
 
     const peer = firstReplies.find(message => message.author.id === philosophers[0].petId)!;
     const second = (await channel.service.postMessage(human, ownerId, {
       body: '合成同伴回应：请针对所引用的维特根斯坦观点，各自给出一个具体限定；答完等待人类。', replyTo: peer.messageId, mentions: [],
     })).message;
     await until(async () => (await replies()).length >= 7 && philosophers.every(role => completed.get(role.petId)!.length >= (role.petId === 'roundtable-being' ? 3 : 2)));
-    assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-conditions' && entry.action === 'dispatch'));
-    assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-language' && entry.action === 'dispatch'));
+    assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-conditions' && entry.action === 'handle'));
+    assert.ok(model.decisions.some(entry => entry.messageId === second.messageId && entry.petId === 'roundtable-language' && entry.action === 'handle'));
     const secondReplies = (await replies()).filter(message => message.body.includes('RESULT_2_'));
     assert.equal(secondReplies.length, 3);
     for (const role of philosophers) {
@@ -229,23 +253,27 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     assert.equal(peerResponse.author.id, 'roundtable-being');
     assert.equal(peerResponse.replyTo, undefined, 'Known gap: peer execution output omits triggering Pet message replyTo');
     assert.ok(model.decisions.some(entry => entry.messageId === peerTrigger.messageId
-      && entry.petId === 'roundtable-being' && !entry.mentioned && entry.action === 'dispatch'));
+      && entry.petId === 'roundtable-being' && !entry.mentioned && entry.action === 'handle'));
     const peerSession = await built.residentPets.get('roundtable-being')!.sessions.snapshot(bindings.get('roundtable-being')!);
     assert.ok(peerSession.session.timeline.some(entry => entry.type === 'message'
       && entry.role === 'user' && entry.text.includes(peerTrigger.messageId)));
     // Script an explicit stop on the new Pet output. This is not evidence of live-model loop safety.
     await until(() => philosophers.filter(role => role.petId !== peerResponse.author.id).every(role => model.decisions.some(entry => entry.petId === role.petId
-      && entry.messageId === peerResponse.messageId && entry.action === 'ignore')));
+      && entry.messageId === peerResponse.messageId && entry.action === 'pass')));
     assert.equal(model.decisions.some(entry => entry.petId === peerResponse.author.id
       && entry.messageId === peerResponse.messageId), false, 'Production self-author guard suppresses own-output routing');
     const foreign = (await channel.service.postMessage(human, foreignId, { body: 'Synthetic unrelated message.' })).message;
     const ignored = (await channel.service.postMessage(human, ownerId, { body: 'Synthetic housekeeping, no discussion requested.', mentions: [] })).message;
-    await until(() => philosophers.every(role => model.decisions.some(entry => entry.petId === role.petId && entry.messageId === ignored.messageId && entry.action === 'ignore')));
+    await until(() => philosophers.every(role => model.decisions.some(entry => entry.petId === role.petId && entry.messageId === ignored.messageId && entry.action === 'pass')));
     assert.equal(model.decisions.some(entry => entry.messageId === foreign.messageId), false);
     assert.equal((await replies()).length, 7, 'The scripted peer turn and explicit ignore stop must not create extra replies');
     assert.equal(directHeadWrites, 0);
     assert.deepEqual(failed, []);
     assert.deepEqual(model.modelErrors, []);
+    for (const [messageId, count] of model.compositions) {
+      assert.ok([second.messageId, peerTrigger.messageId].includes(messageId), 'Idle work and declined turns do not require composition');
+      assert.ok(count <= (messageId === second.messageId ? philosophers.length : 1));
+    }
     assert.ok(model.attempts.size > 0);
     for (const count of model.attempts.values()) assert.equal(count, 1);
   } finally {

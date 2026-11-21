@@ -1,7 +1,7 @@
 import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
-export const fixtureVersion = 'head-routing-v2';
+export const fixtureVersion = 'head-routing-v3';
 export type Route = 'silent' | 'reply-only' | 'dispatch-only' | 'combined';
-export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[]; readProgress?: boolean };
+export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[]; needsExecutionFacts?: boolean };
 const message = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadMessage => ({
   messageId: id, channelId: 'synthetic-eval', sequence: 2, author: { kind, id: kind === 'human' ? 'owner' : 'peer' },
   occurredAt: '2026-01-01T00:00:00Z', body, mentions: [],
@@ -19,9 +19,20 @@ export const cases: EvalCase[] = [
   { id: 'reply-only', kind: 'contrast', input: base('reply-only', '数据分析员，只确认你是否负责数据核对，用一句话回复，不启动任何工作。'), routes: ['reply-only'] },
   { id: 'dispatch-only', kind: 'contrast', input: base('dispatch-only', '数据分析员，开始核对本季度两份报表的差异。不要先确认或发进度消息，完成后再汇报。'), routes: ['dispatch-only'] },
   { id: 'combined', kind: 'contrast', input: base('combined', '数据分析员，请先简短确认收到，然后核对两份季度报表，找出差异并给出结果。'), routes: ['combined'] },
+  ...(['human', 'pet'] as const).map(author => {
+    const id = `addressed-review-${author}`;
+    const input = base(id, '[@数据分析员](participant:pet:analyst) 请独立核对合成季度报告的收入口径，直接提交差异表，不用先回复。', author);
+    const participantId = 'pet:analyst';
+    return {
+      id, kind: 'contrast' as const, input: {
+        ...input, addressed: true, message: { ...input.message, mentions: [{ participantId }] },
+        context: { ...input.context, members: [{ kind: 'pet' as const, id: input.pet.petId, participantId }] },
+      }, routes: ['dispatch-only'] as Route[],
+    };
+  }),
   { id: 'no-at-followup', kind: 'contrast', input: { ...base('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), message: { ...message('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), replyTo: 'prior-answer' }, context: { messages: [{ ...message('prior-answer', '我已核对总额，下一步可以逐月归类。', 'pet'), author: { kind: 'pet', id: 'analyst' }, sequence: 1 }] } }, routes: ['dispatch-only', 'combined'] },
-  { id: 'progress-only', kind: 'contrast', input: queued('progress-only', '当前收入核对进行到哪了？', 'human'), routes: ['silent'], readProgress: true },
-  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？另外帮我整理下周的指标清单。', 'human'), routes: ['dispatch-only'], readProgress: true },
+  { id: 'progress-only', kind: 'contrast', input: queued('progress-only', '当前收入核对进行到哪了？', 'human'), routes: ['silent'], needsExecutionFacts: true },
+  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？另外帮我整理下周的指标清单。', 'human'), routes: ['dispatch-only'], needsExecutionFacts: true },
   ...(['human', 'pet'] as const).flatMap(author => [
     { id: `queue-${author}`, kind: 'contrast' as const, input: queued(`queue-${author}`, '当前核对完成后，再整理下周的指标清单，不要打断当前工作。', author), routes: ['dispatch-only', 'combined'] as Route[] },
     { id: `unsupported-edit-${author}`, kind: 'contrast' as const, input: queued(`unsupported-edit-${author}`, '刚确认当前报告所用源表版本错误，请立即停止基于旧表的核对，先确认正确版本再继续，旧结论不能发布。', author), routes: ['silent', 'reply-only'] as Route[] },

@@ -1,26 +1,24 @@
 import type { HeadDecision } from '../../../../packages/studio/src/host/petHead';
 import type { EvalCase, Route } from './cases';
-export type Score = { valid: boolean; route?: Route; workIntentPass: boolean; replyPresencePass: boolean; routePass: boolean; handlingPass: boolean; pass: boolean; error?: string };
+export type Score = { valid: boolean; route?: Route; dispatchPass: boolean; replyPresencePass: boolean; routePass: boolean; statusPass: boolean; pass: boolean; error?: string };
 
 export function score(test: EvalCase, decision?: HeadDecision, error?: string): Score {
-  const valid = !!decision && Object.keys(decision).every(key => ['action', 'reply', 'intent'].includes(key))
+  const valid = !!decision && Object.keys(decision).every(key => ['action', 'reply'].includes(key))
     && (decision.reply == null || typeof decision.reply === 'string')
-    && (decision.intent == null || typeof decision.intent === 'string')
-    && (!decision.intent || (decision.action === 'handle' && !!decision.intent.trim()))
-    && (decision.action === 'handle' || decision.action === 'direct'
-      || (decision.action === 'pass' && !test.input.addressed && !decision.reply));
-  if (!valid || !decision) return { valid: false, workIntentPass: false, replyPresencePass: false, routePass: false, handlingPass: false,
+    && (decision.action === 'dispatch' || decision.action === 'direct'
+      || ((decision.action === 'ignore' || decision.action === 'status') && !decision.reply?.trim()));
+  if (!valid || !decision) return { valid: false, dispatchPass: false, replyPresencePass: false, routePass: false, statusPass: false,
     pass: false, error: error ?? 'invalid-decision' };
-  const hasWork = !!decision.intent?.trim();
+  const hasWork = decision.action === 'dispatch';
   const hasReply = !!decision.reply?.trim();
-  // The eval scores the first decision's work intent and immediate reply, not
+  // The eval scores the first decision's work disposition and immediate reply, not
   // Session reads or admissions. The Head runtime decides those from live facts.
   const route: Route = hasWork ? (hasReply ? 'combined' : 'dispatch-only') : (hasReply ? 'reply-only' : 'silent');
-  const workIntentPass = test.routes.some(allowed => ['dispatch-only', 'combined'].includes(allowed) === hasWork);
+  const dispatchPass = test.routes.some(allowed => ['dispatch-only', 'combined'].includes(allowed) === hasWork);
   const replyPresencePass = test.routes.some(allowed => ['reply-only', 'combined'].includes(allowed) === hasReply);
   const routePass = test.routes.includes(route);
-  const handlingPass = (decision.action === 'handle') === (hasWork || !!test.needsExecutionFacts);
-  return { valid: true, route, workIntentPass, replyPresencePass, routePass, handlingPass, pass: routePass && handlingPass };
+  const statusPass = (decision.action === 'status') === !!test.needsExecutionFacts;
+  return { valid: true, route, dispatchPass, replyPresencePass, routePass, statusPass, pass: routePass && statusPass };
 }
 
 export function summarize(rows: Array<{ kind: EvalCase['kind']; score: Score }>) {
@@ -30,7 +28,7 @@ export function summarize(rows: Array<{ kind: EvalCase['kind']; score: Score }>)
     errors: rows.filter(row => !row.score.valid).length,
     contrast: { pass: contrast.filter(row => row.score.pass).length, total: contrast.length,
       conditionalDecisionPass: { pass: valid.filter(row => row.score.pass).length, total: valid.length },
-      workIntentPass: contrast.filter(row => row.score.workIntentPass).length, replyPresencePass: contrast.filter(row => row.score.replyPresencePass).length,
-      routePass: contrast.filter(row => row.score.routePass).length, handlingPass: contrast.filter(row => row.score.handlingPass).length },
+      dispatchPass: contrast.filter(row => row.score.dispatchPass).length, replyPresencePass: contrast.filter(row => row.score.replyPresencePass).length,
+      routePass: contrast.filter(row => row.score.routePass).length, statusPass: contrast.filter(row => row.score.statusPass).length },
     organic: { total: rows.length - contrast.length, accepted: rows.filter(row => row.kind === 'organic' && row.score.pass).length } };
 }

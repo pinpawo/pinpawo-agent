@@ -27,10 +27,10 @@ test('message handoff preserves trusted source, reply and attachment metadata in
   const reference: ChannelMessage = {
     ...message, sequence: 1, messageId: 'm1', author: { kind: 'pet', id: 'two' }, body: 'Earlier', replyTo: undefined,
   };
-  const input = channelMessageInput(message, 'Please investigate', reference);
+  const input = channelMessageInput(message, reference);
   const lines = input.split('\n');
   assert.equal(lines[0], '`````json');
   assert.deepEqual(JSON.parse(lines.slice(1, -1).join('\n')), {
-    type: 'channel_message', version: 1, message, referencedMessage: JSON.parse(JSON.stringify(reference)), request: 'Please investigate',
+    type: 'channel_message', version: 1, message, referencedMessage: JSON.parse(JSON.stringify(reference)),
   });
 });

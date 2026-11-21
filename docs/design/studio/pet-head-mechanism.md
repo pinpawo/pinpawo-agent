@@ -34,7 +34,7 @@ flowchart LR
 
 先确定这条消息是否归本 Pet。**当前消息里的有效 `@Pet` 已经明确指定了响应者**，只跳过「要不要接」的模型判断，不绕过 Head，也不意味着要派发或打断。没有明确点名本 Pet 时，Head 用职责和 Channel 上下文判断；不接就静默。能直接答的就直接答，不读 Session、不启动 Agent。
 
-**先判断该不该接，再由 Head 运行代码按实际状态选路。** 沿用[原时序图](https://github.com/pinpawo/pinpawo-agent/blob/fec24f028d54ecb6b214881269b220739a2eab11/docs/design/studio/pet-head-mechanism.md#L51-L127)：模型只判断是否接下、能否直接回答、是否有独立工作；不决定读 Session 还是派发。运行代码负责查证。读完只写回复，不恢复第二次调度判断。
+**先判断该不该接，再由 Head 运行代码按实际状态选路。** 沿用[原时序图](https://github.com/pinpawo/pinpawo-agent/blob/fec24f028d54ecb6b214881269b220739a2eab11/docs/design/studio/pet-head-mechanism.md#L51-L127)：模型只回答动作和可选的回复正文：`ignore` 静默、`direct` 直接答、`dispatch` 接下独立新工作、`status` 只问已有执行的状态。`status` 不是读 Session 的指令；运行代码知道有没有可核对的执行。读完只写回复，不做第二次调度判断。
 
 | 场景 | 行为 |
 | --- | --- |
@@ -45,11 +45,13 @@ flowchart LR
 | 已有执行，用户明确加一件独立工作 | 先尝试查证同一次执行，再将独立工作提交现有队列；不因查证失败取消它。不打断当前执行，也不主动播报无关进度。 |
 | 用户要求停止或修改正在跑的任务 | 首版不新增聊天打断，也不注入新材料。已有停止入口不变；Head 不声称已停止或已修改。 |
 
+派发不让 Head 摘写任务。Channel 按源消息 ID 取同一 Channel 的已提交记录，复用现有 `channel_message` 放入 Agent 的原生输入。保留正文、作者、点名、附件和一层明确引用，不附带 Head 判定或整段 Timeline。Agent 按自己的职责处理原消息明确请求的独立新工作；引用和历史只是背景，不构成额外授权。
+
 ## 3. 忙时只查证、写回复
 
-模型层只有一个客户端：`decide` 按已解析的模型配置做一次结构化调用（例如 DeepSeek 官方 Flash / Pro 用 JSON mode，Anthropic 默认用工具调用），无效输出不补救、不重试、不切换格式。`composeReply` 直接调用同一个未绑定工具的客户端，只写回复。初判没有 `readProgress`；没有独立工作或回复时，不要求模型编造意图或正文。是否读取由 Head 核对本 Pet 的普通派发槽、归属 Channel、Session 和到达消息时的运行身份后决定。
+模型层只有一个客户端：`decide` 按已解析的模型配置做一次结构化调用（例如 DeepSeek 官方 Flash / Pro 用 JSON mode，Anthropic 默认用工具调用），无效输出不补救、不重试、不切换格式。`composeReply` 直接调用同一个未绑定工具的客户端，只写回复。初判只返回 `action` 和可选的 `reply`，没有 `readProgress` 或 `intent`。静默和单纯追问不在初判中生成正文。是否读取由 Head 核对本 Pet 的普通派发槽、归属 Channel、Session 和到达消息时的运行身份后决定。
 
-需要查证时，Head 对齐本 Pet 当前的普通派发与运行事件。Channel 验证当前成员及精确 Session 绑定后，只读一次 Session，只返回运行身份供核对。传给 `composeReply` 的只有原消息、「正在运行／无法确认」和能对应到此次运行的公开来源；不看计划、工具或 Session 正文，也不查历史结果或待排任务。Head 使用 LangChain 的回复文本；写入前复核当前执行是否已换。回复描述的是查证时的状态，不与 Channel 写入做跨系统原子提交。
+需要查证时，Head 对齐本 Pet 当前的普通派发与运行事件。Channel 验证当前成员及精确 Session 绑定后，只读一次 Session，只返回运行身份供核对。传给 `composeReply` 的只有原消息、「正在运行／无法确认」和能对应到此次运行的公开来源；初判只看本条消息和它之前的 Channel 上下文，不重复传本条消息，也不额外预取正在运行的任务来源。查证不看计划、工具或 Session 正文，也不查历史结果或待排任务。Head 使用 LangChain 的回复文本；写入前复核当前执行是否已换。回复描述的是查证时的状态，不与 Channel 写入做跨系统原子提交。
 
 例如「@Pet，A 做到哪了？另外帮我做 B」：第一次判断认出 B 是独立工作；Head 只核对 A 的运行状态，再尝试回复；B 仍由原有 Studio 队列接纳。查不到 A 就如实说，不把 A 的状态套到 B 上。「如果 A 没做完就换 B」并非独立授权：即使查不到 A，也不把 B 另行提交。
 

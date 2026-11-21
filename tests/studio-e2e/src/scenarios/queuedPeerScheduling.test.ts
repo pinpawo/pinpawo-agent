@@ -1,3 +1,4 @@
+import { readChannelEnvelope } from './channelWire';
 import './isolateScenarioConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -65,9 +66,9 @@ async function fixture() {
             : petId === 'origin' && source === 'EMIT_QUEUED_PEER' ? 'SEED_QUEUED'
             : petId === 'target' && (source === 'ACTIVE_HUMAN' || source === 'ACTIVE_PEER') ? 'ACTIVE'
             : petId === 'target' && source === queuedRequest ? 'QUEUED' : '';
-          const action = route ? 'handle' : head.addressed ? 'direct' : 'pass';
+          const action = route ? 'dispatch' : 'ignore';
           heads.push({ petId, messageId: head.message.messageId, action, addressed: head.addressed });
-          content = JSON.stringify({ action, ...(route ? { intent: `ROUTE_${route}` } : {}) });
+          content = JSON.stringify({ action });
         } else if (composition) {
           assert.deepEqual(names, [], 'reply composition cannot expose scheduling or execution tools');
           assert.equal(input.response_format, undefined);
@@ -76,7 +77,10 @@ async function fixture() {
           composed.push(composition.message.messageId);
           // Independent B does not ask about A; leave the public reply empty.
         } else {
-          const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(SEED_ACTIVE|SEED_QUEUED|ACTIVE|QUEUED)/g)].at(-1)?.[1];
+          const source = readChannelEnvelope(input.messages, text)?.message.body;
+          const marker = source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE' : source === 'EMIT_QUEUED_PEER' ? 'SEED_QUEUED'
+            : source === queuedRequest ? 'QUEUED' : source === 'ACTIVE_HUMAN' || source === 'ACTIVE_PEER' ? 'ACTIVE'
+            : input.messages.some(m => text(m.content).includes('ROUTE_ACTIVE')) ? 'ACTIVE' : undefined;
           assert.ok(marker);
           if (marker === 'SEED_ACTIVE') content = 'ACTIVE_PEER';
           else if (marker === 'SEED_QUEUED') content = queuedRequest;
@@ -180,7 +184,7 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       assert.equal(queued.author.kind, queuedAuthor === 'human' ? 'human' : 'pet');
       assert.deepEqual(queued.mentions.map(mention => mention.participantId), ['pet:target']);
       assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId), [
-        { petId: 'target', messageId: queued.messageId, action: 'handle', addressed: true },
+        { petId: 'target', messageId: queued.messageId, action: 'dispatch', addressed: true },
       ]);
       assert.deepEqual(sampled, [binding!.sessionId], 'busy work samples only the target’s exact Session once');
       assert.deepEqual(model.composed, [queued.messageId], 'text-only follow-up has the same path for human and peer mentions');
@@ -193,7 +197,7 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       const final = await messages();
       const targetReplies = final.filter(m => m.author.kind === 'pet' && m.author.id === 'target');
       assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE', 'RESULT_QUEUED']);
-      await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'pass')));
+      await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'ignore')));
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().parentResumes, 1, 'Original parent receives its delegated result before queued work');
       assert.equal(model.state().queuedExecutions, 1);

@@ -18,7 +18,7 @@ const toolFields: Record<string, readonly string[]> = {
 // Routing is a declaration returned to the Head, never an executable scenario
 // tool or an assistant/tool exchange admitted into execution history.
 const headDecisionName = 'pet_head_decision';
-const headDecisionFields = ['action', 'reply', 'intent'];
+const headDecisionFields = ['action', 'reply'];
 function isHeadDecisionTool(tool: unknown): boolean {
   return record(tool) && record(tool.function) && tool.function.name === headDecisionName;
 }

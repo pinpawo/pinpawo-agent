@@ -1,3 +1,4 @@
+import { readChannelEnvelope } from './channelWire';
 import './isolateScenarioConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -46,12 +47,17 @@ async function fixture() {
           const source = head.pet.petId === 'target' && head.message.author.kind === 'human' ? head.message.body : '';
           const dispatch = source === 'DISPATCH' || source === 'COMBINED';
           const reply = source === 'DIRECT' || source === 'COMBINED' ? `HEAD_${source}` : '';
-          content = JSON.stringify({ action: dispatch ? 'handle' : reply || head.addressed ? 'direct' : 'pass', ...(reply ? { reply } : {}), ...(dispatch ? { intent: `ROUTE_${source}` } : {}) });
+          content = JSON.stringify({ action: dispatch ? 'dispatch' : reply ? 'direct' : 'ignore', ...(reply ? { reply } : {}) });
+        } else if (input.messages.some(m => m.role === 'user' && /^\{"message":.*"evidence":/.test(text(m.content)))) {
+          assert.equal(input.tools?.length ?? 0, 0);
+          assert.equal(input.response_format, undefined);
         } else {
           executions++;
-          const marker = [...input.messages.map(m => text(m.content)).join('\n').matchAll(/ROUTE_(DISPATCH|COMBINED)/g)].at(-1)?.[1];
-          assert.ok(marker);
-          content = `FINAL_${marker}`;
+          const envelope = readChannelEnvelope(input.messages, text);
+          assert.ok(envelope);
+          const { body } = envelope.message;
+          assert.ok(body === 'DISPATCH' || body === 'COMBINED');
+          content = `FINAL_${body}`;
         }
         const id = `reply-axis-model-${++sequence}`;
         const message = { role: 'assistant', content, ...(call ? { tool_calls: [{ id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] } : {}) };

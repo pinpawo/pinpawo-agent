@@ -12,13 +12,10 @@ export type HeadDecisionDiagnostic = {
 
 const decisionName = 'pet_head_decision';
 // JSON mode may omit unused text; strict native JSON Schema can represent it as null.
-const optionalText = z.union([z.string(), z.null()]).optional();
 const decisionSchema = z.object({
-  action: z.enum(['pass', 'direct', 'handle']),
-  reply: optionalText,
-  intent: optionalText,
+  action: z.enum(['ignore', 'direct', 'dispatch', 'status']),
+  reply: z.union([z.string(), z.null()]).optional(),
 }).strict();
-const addressedSchema = decisionSchema.extend({ action: z.enum(['direct', 'handle']) });
 
 class DecisionFailure extends Error {
   constructor(readonly code: string) { super('Invalid Pet Head decision.'); }
@@ -50,15 +47,13 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     const report = (event: Pick<HeadDecisionDiagnostic, 'outcome' | 'action' | 'code'>) => {
       try { options.onDiagnostic?.({ petId: input.pet.petId, channelId: input.message.channelId, messageId: input.message.messageId, attempts, ...event }); } catch { /* Diagnostics cannot change routing. */ }
     };
-    // The owning Head has already resolved the canonical participant mention.
-    const schema = input.addressed ? addressedSchema : decisionSchema;
     try {
       signal.throwIfAborted();
       const { method, model } = client();
-      const structured = model.withStructuredOutput(schema, { name: decisionName, method, includeRaw: true });
+      const structured = model.withStructuredOutput(decisionSchema, { name: decisionName, method, includeRaw: true });
       // JSON mode carries no schema on the wire; only this mode needs a prompt copy.
       const format = method === 'jsonMode'
-        ? 'Return only a JSON object matching this schema:\n' + JSON.stringify(toJsonSchema(schema), (key, value) => key === '$schema' ? undefined : value)
+        ? 'Return only a JSON object matching this schema:\n' + JSON.stringify(toJsonSchema(decisionSchema), (key, value) => key === '$schema' ? undefined : value)
         : method === 'functionCalling' ? 'Declare the decision using the provided tool.' : '';
       const messages = headDecisionMessages(input, format);
       attempts = 1;
@@ -72,12 +67,13 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
         (method === 'functionCalling' ? tools.length !== 1 || tools[0]!.name !== decisionName : tools.length !== 0)) {
         throw new DecisionFailure('invalid_tool');
       }
-      const validated = schema.safeParse(parsed);
+      const validated = decisionSchema.safeParse(parsed);
       if (!validated.success) throw new DecisionFailure('malformed');
       const decision = validated.data;
-      if ((decision.intent && (!decision.intent.trim() || decision.action !== 'handle')) ||
-        (decision.action === 'pass' && decision.reply)) throw new DecisionFailure('malformed');
-      report(decision.action === 'pass' || (decision.action === 'direct' && !decision.reply?.trim())
+      if ((decision.action === 'ignore' || decision.action === 'status') && decision.reply?.trim()) {
+        throw new DecisionFailure('malformed');
+      }
+      report(decision.action === 'ignore' || (decision.action === 'direct' && !decision.reply?.trim())
         ? { outcome: 'ignore' } : { outcome: 'selected', action: decision.action });
       return decision;
     } catch (error) {

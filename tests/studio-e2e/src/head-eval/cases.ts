@@ -1,5 +1,5 @@
 import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
-export const fixtureVersion = 'head-routing-v4';
+export const fixtureVersion = 'head-routing-v5';
 export type Route = 'silent' | 'reply-only' | 'dispatch-only' | 'combined';
 export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[]; needsExecutionFacts?: boolean };
 const message = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadMessage => ({
@@ -12,7 +12,7 @@ const base = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadIn
 });
 const active = message('active-source', '核对季度报告中的收入口径，完成后给出差异表。');
 function queued(id: string, body: string, author: 'human' | 'pet'): HeadInput {
-  return { ...base(id, body, author), activeWork: { source: { messageId: active.messageId, body: active.body } }, context: { messages: [active] } };
+  return { ...base(id, body, author), context: { messages: [active] } };
 }
 export const cases: EvalCase[] = [
   { id: 'ignore-unrelated', kind: 'contrast', input: base('ignore-unrelated', '给设计师：封面颜色由你定，数据分析员不用回复。'), routes: ['silent'] },
@@ -41,14 +41,16 @@ export const cases: EvalCase[] = [
         id, kind: 'contrast' as const, input: {
           ...input, description: '负责独立复核方案及其依据，列明证据缺口；不负责改写或实施方案。',
           addressed: true, message: source,
-          context: { messages: [evidence, source], members: [{ kind: 'pet' as const, id: input.pet.petId, participantId }] },
+          context: { messages: [evidence], members: [{ kind: 'pet' as const, id: input.pet.petId, participantId }] },
         }, routes, ...expectations,
       };
     });
   }),
   { id: 'no-at-followup', kind: 'contrast', input: { ...base('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), message: { ...message('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), replyTo: 'prior-answer' }, context: { messages: [{ ...message('prior-answer', '我已核对总额，下一步可以逐月归类。', 'pet'), author: { kind: 'pet', id: 'analyst' }, sequence: 1 }] } }, routes: ['dispatch-only', 'combined'] },
   { id: 'progress-only', kind: 'contrast', input: queued('progress-only', '当前收入核对进行到哪了？', 'human'), routes: ['silent'], needsExecutionFacts: true },
-  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？另外帮我整理下周的指标清单。', 'human'), routes: ['dispatch-only'], needsExecutionFacts: true },
+  { id: 'conditional-work', kind: 'contrast', input: queued('conditional-work', '只有当前收入核对还没完成，你才去整理下周指标清单；不需要回复。', 'human'), routes: ['silent'] },
+  { id: 'conditional-and-independent-work', kind: 'contrast', input: queued('conditional-and-independent-work', '只有当前收入核对还没完成，才去整理下周指标清单。另外，不论核对结果如何，请独立对比四月的两张报表。', 'human'), routes: ['dispatch-only', 'combined'] },
+  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？另外帮我整理下周的指标清单。', 'human'), routes: ['dispatch-only', 'combined'] },
   ...(['human', 'pet'] as const).flatMap(author => [
     { id: `queue-${author}`, kind: 'contrast' as const, input: queued(`queue-${author}`, '当前核对完成后，再整理下周的指标清单，不要打断当前工作。', author), routes: ['dispatch-only', 'combined'] as Route[] },
     { id: `unsupported-edit-${author}`, kind: 'contrast' as const, input: queued(`unsupported-edit-${author}`, '刚确认当前报告所用源表版本错误，请立即停止基于旧表的核对，先确认正确版本再继续，旧结论不能发布。', author), routes: ['silent', 'reply-only'] as Route[] },

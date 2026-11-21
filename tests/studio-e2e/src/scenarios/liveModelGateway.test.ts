@@ -112,10 +112,10 @@ test('the complete synthetic runtime tool surface and text-only history remain u
 });
 
 test('the Head declaration is standalone, non-streaming, and never treated as executable history', async t => {
-  const decision = { id: 'call', type: 'function', function: { name: 'pet_head_decision', arguments: '{"action":"pass"}' } };
+  const decision = { id: 'call', type: 'function', function: { name: 'pet_head_decision', arguments: '{"action":"ignore"}' } };
   const tool = { type: 'function', function: { name: decision.function.name, parameters: {
-    type: 'object', properties: { action: { type: 'string', enum: ['pass', 'direct', 'handle'] },
-      reply: { type: 'string' }, intent: { type: 'string' } }, additionalProperties: false,
+    type: 'object', properties: { action: { type: 'string', enum: ['ignore', 'direct', 'dispatch', 'status'] },
+      reply: { type: 'string' } }, additionalProperties: false,
   } } };
   const answer = { ...completion, choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [decision] }, finish_reason: 'tool_calls' }] };
   const value = await gateway(t, asFetch(async () => Response.json(answer)));

@@ -1,5 +1,5 @@
 import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
-export const fixtureVersion = 'head-routing-v3';
+export const fixtureVersion = 'head-routing-v4';
 export type Route = 'silent' | 'reply-only' | 'dispatch-only' | 'combined';
 export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[]; needsExecutionFacts?: boolean };
 const message = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadMessage => ({
@@ -19,16 +19,32 @@ export const cases: EvalCase[] = [
   { id: 'reply-only', kind: 'contrast', input: base('reply-only', '数据分析员，只确认你是否负责数据核对，用一句话回复，不启动任何工作。'), routes: ['reply-only'] },
   { id: 'dispatch-only', kind: 'contrast', input: base('dispatch-only', '数据分析员，开始核对本季度两份报表的差异。不要先确认或发进度消息，完成后再汇报。'), routes: ['dispatch-only'] },
   { id: 'combined', kind: 'contrast', input: base('combined', '数据分析员，请先简短确认收到，然后核对两份季度报表，找出差异并给出结果。'), routes: ['combined'] },
-  ...(['human', 'pet'] as const).map(author => {
-    const id = `addressed-review-${author}`;
-    const input = base(id, '[@数据分析员](participant:pet:analyst) 请独立核对合成季度报告的收入口径，直接提交差异表，不用先回复。', author);
+  ...(['human', 'pet'] as const).flatMap(author => {
     const participantId = 'pet:analyst';
-    return {
-      id, kind: 'contrast' as const, input: {
-        ...input, addressed: true, message: { ...input.message, mentions: [{ participantId }] },
-        context: { ...input.context, members: [{ kind: 'pet' as const, id: input.pet.petId, participantId }] },
-      }, routes: ['dispatch-only'] as Route[],
-    };
+    const mention = '[@数据分析员](participant:pet:analyst)';
+    const evidence = { ...message('published-evidence', '合成证据：仓单 A 和仓单 B 使用同一盘点日；A 的调拨在途项未计入期末库存。', 'pet'), sequence: 1 };
+    const packet = '盘点核对方案已经整理完：先核对盘点日期，再核对期末库存。计划按“记录齐全、可排期”交付。';
+    return [
+      { name: 'review', body: `${packet}\n\n${mention} 请独立核查上面的方案和频道里的证据，把遗漏项或证据不支持的结论列出来。`,
+        routes: ['dispatch-only', 'combined'] as Route[] },
+      { name: 'review-status', body: `${packet}\n\n${mention} 你对上面这个方案的核查现在做到哪一步了？只告诉我当前状态，不要重新核查。`,
+        routes: ['silent'] as Route[], needsExecutionFacts: true },
+      { name: 'thanks', body: `${mention} 辛苦了，谢谢。`, routes: ['silent'] as Route[] },
+    ].map(({ name, body, routes, ...expectations }) => {
+      const id = `addressed-${name}-${author}`;
+      const input = base(id, body, author);
+      const source = {
+        ...input.message, mentions: [{ participantId }], author: { kind: author, id: author === 'pet' ? 'executor' : 'owner' },
+        ...(author === 'pet' ? { externalRef: `synthetic-final:${id}` } : {}),
+      };
+      return {
+        id, kind: 'contrast' as const, input: {
+          ...input, description: '负责独立复核方案及其依据，列明证据缺口；不负责改写或实施方案。',
+          addressed: true, message: source,
+          context: { messages: [evidence, source], members: [{ kind: 'pet' as const, id: input.pet.petId, participantId }] },
+        }, routes, ...expectations,
+      };
+    });
   }),
   { id: 'no-at-followup', kind: 'contrast', input: { ...base('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), message: { ...message('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), replyTo: 'prior-answer' }, context: { messages: [{ ...message('prior-answer', '我已核对总额，下一步可以逐月归类。', 'pet'), author: { kind: 'pet', id: 'analyst' }, sequence: 1 }] } }, routes: ['dispatch-only', 'combined'] },
   { id: 'progress-only', kind: 'contrast', input: queued('progress-only', '当前收入核对进行到哪了？', 'human'), routes: ['silent'], needsExecutionFacts: true },

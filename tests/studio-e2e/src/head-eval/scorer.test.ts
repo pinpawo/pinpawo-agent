@@ -60,12 +60,24 @@ test('Execution facts and independently executable work are distinct', () => {
 });
 
 for (const author of ['human', 'pet'] as const) {
-  test(`Explicit ${author} addressing fixes ownership, not the need to handle work`, () => {
-    const fixture = cases.find(row => row.id === `addressed-review-${author}`)!;
-    assert.equal(fixture.input.message.author.kind, author);
-    assert.equal(score(fixture, { action: 'handle', intent: 'Audit revenue.' }).pass, true);
-    assert.equal(score(fixture, { action: 'direct' }).valid, true);
-    assert.equal(score(fixture, { action: 'direct' }).pass, false);
-    assert.equal(score(fixture, { action: 'pass' }).valid, false);
+  test(`Finished artifact review is new work; a status question or thanks from a ${author} is not`, () => {
+    const review = cases.find(row => row.id === `addressed-review-${author}`)!;
+    const status = cases.find(row => row.id === `addressed-review-status-${author}`)!;
+    const thanks = cases.find(row => row.id === `addressed-thanks-${author}`)!;
+    assert.equal(review.input.message.author.kind, author);
+    assert.equal(review.input.activeWork, undefined, 'a closed upstream task is not an active Reviewer run');
+    assert.equal(!!review.input.message.externalRef, author === 'pet');
+    assert.deepEqual(review.input.message.mentions, status.input.message.mentions);
+    assert.equal(review.input.context.messages[0]?.messageId, status.input.context.messages[0]?.messageId);
+    assert.equal(score(review, { action: 'handle', intent: 'Independently audit the inventory plan against the evidence; report gaps.' }).pass, true);
+    const observedFailure = score(review, { action: 'handle', intent: null });
+    assert.equal(observedFailure.valid, true);
+    assert.equal(observedFailure.pass, false, 'valid structured output alone must not pass the delegation eval');
+    assert.equal(score(review, { action: 'direct' }).pass, false);
+    assert.equal(score(review, { action: 'pass' }).valid, false);
+    assert.equal(score(status, { action: 'handle', intent: null }).pass, true);
+    assert.equal(score(status, { action: 'handle', intent: 'redo review' }).pass, false);
+    assert.equal(score(thanks, { action: 'direct' }).pass, true);
+    assert.equal(score(thanks, { action: 'handle', intent: 'review something' }).pass, false);
   });
 }

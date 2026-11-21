@@ -340,24 +340,56 @@ test('official DeepSeek Flash / Pro profiles send JSON mode through the real Hos
   }
 });
 
-test('official Flash handles a committed canonical peer or human handoff without a state field', async t => {
+test('official Flash sends a committed review handoff to work and a matching status question only to reply', async t => {
   const participantId = 'pet:a';
-  const intent = 'Review the latest synthetic inventory for duplicate entries.';
   const mentions = [{ participantId, label: 'Reviewer' }];
-  const modelCalls: HeadMessage[] = [];
+  const artifact = message('10', { body: 'Synthetic observation: indicator A has no verified source.' });
+  const packet = '盘点核对方案已完成：先核对盘点日期，再核对期末库存。当前交付结论为“证据齐全”。';
+  const address = '[@Reviewer](participant:pet:a)';
+  const intent = '独立复核已完成的盘点核对方案及其依据，并列出不受证据支持的结论。';
+  const statusText = '我无法确认这项核查的执行状态。';
+  const sources = (['pet', 'human'] as const).flatMap((kind, index) => {
+    const author = { kind, id: kind === 'pet' ? 'executor' : 'owner' };
+    const final = kind === 'pet' ? { externalRef: 'synthetic-executor-final' } : {};
+    return [
+      { route: 'work', incoming: message(String(11 + index * 3), { mentions, author, ...final,
+        body: `${packet}\n\n${address} 请独立核查上述方案和频道中的依据，把证据不支持的结论列出来。` }) },
+      { route: 'status', incoming: message(String(12 + index * 3), { mentions, author,
+        body: `${packet}\n\n${address} 你的独立核查现在做到哪一步了？只报状态，不要重新核查。` }) },
+      { route: 'thanks', incoming: message(String(13 + index * 3), { mentions, author, body: `${address} 辛苦了，谢谢。` }) },
+    ] as const;
+  });
+  const modelCalls: Array<{ messageId: string; stage: 'decide' | 'compose' }> = [];
   const admitted: HeadMessage[] = [];
+  const replies: Array<[string, string]> = [];
   t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
     assert.equal(String(url), 'https://api.deepseek.com/v1/chat/completions');
     const body = JSON.parse(String(init?.body));
-    assert.deepEqual(body.response_format, { type: 'json_object' });
     assert.deepEqual(body.thinking, { type: 'disabled' });
     assert.equal(body.tools, undefined);
     const input = JSON.parse(body.messages.find((entry: { role: string }) => entry.role === 'user').content);
-    assert.equal(input.addressed, true);
-    assert.deepEqual(input.message.mentions, mentions);
-    modelCalls.push(input.message);
+    const fixture = sources.find(item => item.incoming.messageId === input.message.messageId);
+    assert.ok(fixture);
+    assert.deepEqual(input.message, fixture.incoming);
+    let content: string;
+    if (input.evidence) {
+      assert.equal(fixture.route, 'status');
+      assert.equal(body.response_format, undefined);
+      assert.deepEqual(input.evidence, { status: 'unavailable' });
+      assert.equal(input.source, undefined);
+      modelCalls.push({ messageId: fixture.incoming.messageId, stage: 'compose' });
+      content = statusText;
+    } else {
+      assert.deepEqual(body.response_format, { type: 'json_object' });
+      assert.equal(input.addressed, true);
+      assert.equal(input.activeWork, undefined, 'upstream completed evidence is not an active Reviewer run');
+      assert.deepEqual(input.context.messages, [artifact, fixture.incoming]);
+      modelCalls.push({ messageId: fixture.incoming.messageId, stage: 'decide' });
+      content = JSON.stringify(fixture.route === 'work' ? { action: 'handle', intent } :
+        fixture.route === 'status' ? { action: 'handle', intent: null } : { action: 'direct' });
+    }
     return Response.json({ id: 'fixture', object: 'chat.completion', created: 0, model: body.model,
-      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ action: 'handle', intent }) } }],
+      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content } }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   });
   const signal = new AbortController().signal;
@@ -366,8 +398,9 @@ test('official Flash handles a committed canonical peer or human handoff without
     readWorkState: () => ({ kind: 'idle' }),
     channel: {
       subscribe: () => () => {},
-      readContext: async () => ({ messages: [], members: [{ kind: 'pet', id: 'a', participantId }] }),
-      reply: async () => assert.fail('a work-only handoff needs no Head reply'),
+      readContext: async (_pet, before) => ({ messages: [artifact, sources.find(item => item.incoming.sequence === before - 1)!.incoming],
+        members: [{ kind: 'pet', id: 'a', participantId }] }),
+      reply: async (_pet, source, text) => { replies.push([source, text]); },
       dispatch: async (petId, source, request, actualSignal) => {
         assert.equal(petId, 'a');
         assert.equal(request, intent);
@@ -379,19 +412,16 @@ test('official Flash handles a committed canonical peer or human handoff without
     progress: {
       readRun: () => assert.fail('idle has no active run'),
       readSessionRunId: async () => assert.fail('idle must not read Session'),
-      compose: async () => assert.fail('idle work must not invoke a second model call'),
+      compose: model.composeReply,
     },
   });
-  const sources = [
-    message('11', { mentions, body: intent, author: { kind: 'pet', id: 'executor' }, replyTo: 'artifact-a' }),
-    message('12', { mentions, body: intent }),
-  ];
-  for (const source of sources) {
-    await handle(source, signal);
-    assert.equal(admitted.at(-1), source);
-  }
-  assert.deepEqual(modelCalls, sources);
-  assert.deepEqual(admitted, sources);
+  for (const { incoming } of sources) await handle(incoming, signal);
+  assert.deepEqual(modelCalls, sources.flatMap(({ route, incoming }) => [
+    { messageId: incoming.messageId, stage: 'decide' },
+    ...(route === 'status' ? [{ messageId: incoming.messageId, stage: 'compose' }] : []),
+  ]));
+  assert.deepEqual(admitted, sources.filter(item => item.route === 'work').map(item => item.incoming));
+  assert.deepEqual(replies, sources.filter(item => item.route === 'status').map(item => [item.incoming.messageId, statusText]));
 });
 
 test('the native OpenAI strict schema represents irrelevant work and reply slots as null', async t => {

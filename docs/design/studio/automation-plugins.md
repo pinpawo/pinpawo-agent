@@ -124,8 +124,9 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 
 - `{ kind: 'pet', petId }`：固定目标。旧的顶层 `petId` 是它的简写，仍然接受，解析时折叠成这个形式；
 - `{ kind: 'event_payload', path, allowedPetIds? }`：从 Trigger envelope 的点路径（如 `payload.assigneeId`）
-  读出 petId。路径必须解析为非空字符串，且必须是已注册的 Pet；配置了 `allowedPetIds` 时还必须在名单里，
-  否则这次 delivery 记为 `failed`。名单在启动时校验，名单里的未知 Pet 会让启动失败。
+  读出 `petId`。路径必须解析为非空字符串；配置了 `allowedPetIds` 时还必须在名单里，否则不接收
+  这次投递。启动时不要求目标 Pet 已存在；若投递时目标不是归属 Channel 的在线 Pet，已接收的 delivery
+  会记为 `failed`。
 
 事件生产方只提供事实，选择目标的始终是规则本身。
 
@@ -151,9 +152,8 @@ Trigger source 负责“何时触发”，request template 负责“发送什么
 
 ## Pet 与事件
 
-Trigger 在 `start()` 时通过 `listPets()` 验证其配置中的固定目标或允许名单。实际派发使用归属
-Channel 的 `inputs.run()`，由 Channel 建立对应 Session 和执行 scope。Plugin 发布的领域事件不是
-Channel 消息或 Agent 执行输入。
+实际派发由归属 Channel 的 `inputs.run()` 检查目标、绑定对应 Session 和执行 scope。
+Plugin 发布的领域事件不是 Channel 消息或 Agent 执行输入。
 
 ## Kanban 退役后的默认装配
 

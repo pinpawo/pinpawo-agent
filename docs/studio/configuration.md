@@ -294,25 +294,29 @@ a conflict rather than replacing either one. Compare PET.md and dedicated
 Capabilities for duplicated Channel rules. Restart the Host after changing these
 files; editing a Channel announcement uses the next-run behavior described above.
 
-An online Pet Head makes one typed decision: `action` controls execution
-admission (`ignore` or `dispatch`), `intent` contains only independent new
-work, and `reply` controls immediate public text. A canonical mention skips
-only the participation decision. An unmentioned message may still merit a
-reply. A direct reply neither reads nor creates an Agent Session.
+An online Pet Head first establishes relevance. A server-resolved mention of
+this Pet establishes relevance without a model call; otherwise `assessRelevance`
+returns only `{ relevant: boolean }`. Relevance never grants execution admission.
+Only a verified idle slot permits `handleIdle`, whose strict output is
+`{ shouldDispatch: boolean, reply: string | null }`. It interprets the canonical
+source's actual meaning: a direct answer, independent work, acknowledgement plus
+work, or neither. A bare mention does not by itself require work or a reply.
+Busy or unknown state uses factual composition or silence, never idle admission.
 
-When asked about an active ordinary dispatch, the Head uses the owning Pet's
-live queue slot and run event to identify it. After the Channel verifies
-membership and the exact Session binding, it reads one existing snapshot.
-The reply model receives the sampled status (running or unavailable). For a
-known Channel source, the same snapshot can also supply the exact bound
-Session’s existing plan items: completed, active, and pending, with brief
+After relevance, the Head uses the owning Pet's live queue slot and run event
+to identify an active ordinary dispatch. To check progress, it needs its
+same-Channel public source to predate the inquiry and match any explicit
+reference. After verifying membership and the exact Session binding, the
+Channel reads one snapshot. The reply model receives the sampled status
+(running or unavailable). That same snapshot can supply the bound Session’s
+recorded plan items: completed, active, and pending, with brief
 descriptions. An active item may be awaiting review; a completed item does not
 mean the whole task is complete. The recorded plan may predate this execution.
 Without a plan, the reply reports only the checked status. Delivery text,
 timeline text, and raw tool output are not used. Reviewed work resuming
 outside the ordinary dispatch slot is not sampled. Asking for progress alone
-never dispatches; independent work still goes through the usual queue without
-interrupting or changing the active execution.
+never dispatches. Busy or unknown state never admits an addition, even when it
+is independent work; it does not interrupt or change the active execution.
 
 Reply and execution are independent: failure of publication does not suppress
 an independent dispatch, and failure of dispatch does not roll back a committed
@@ -329,13 +333,13 @@ is no claim of exactly-once dispatch across Host restarts. Events are not replay
 automatically. Peer replies cannot add Pet mentions, and the Head instruction
 ignores acknowledgement-only chatter while allowing useful peer contributions.
 
-Head decisions use the resolved model profile's `structuredOutputMethod` in
-one LangChain structured-output call. Function-calling profiles must return
-one valid named declaration. Invalid or failed decisions do not produce a reply
+Each structured stage uses the resolved profile's `structuredOutputMethod`.
+Function-calling profiles must return one valid named declaration:
+`pet_head_relevance` or `pet_head_idle`, each with its own strict schema. Invalid or failed decisions do not produce a reply
 or dispatch. The Head does not repair output, retry, or switch formats.
 
-Safe `pet.head.decision` diagnostics identify Pet, Channel, source message,
-outcome (`selected`, `ignore`, `error`), attempt count and a finite error code.
+Safe `pet.head.relevance` diagnostics identify Pet, Channel, source message,
+outcome (`related`, `unrelated`, `error`), attempt count and a finite error code.
 Host logs include a timestamp; the same diagnostic is emitted on the Studio bus.
 They contain no prompt, response body, credentials or provider error payload.
 These diagnostics are not persisted decision history or a user-visible retry UI.
@@ -454,36 +458,15 @@ restart the host to pick up configuration changes.
 
 For dispatch, gate, and event behavior, read the [Studio API](../reference/api/studio.md).
 
-### Head participation and timing trial
+### Historical timing trial and current routing
 
-The Head's single decision declaration separates independent `reply` text from
-`action` (`ignore`, `dispatch`) and its execution `intent`/`timing`
-(`enqueue`, `interrupt`). Both the declared decision tool and JSON transports use
-the same strict four-field schema; `ignore` requires empty `intent` and `enqueue`. Timing is author-neutral. A nonblocking illustration can wait;
-new evidence invalidating the ongoing calculation can warrant an interrupt
-request whether it came from a human or another Pet. These are model judgments,
-not keyword rules or an automatic priority for either author kind.
-
-The composing Host supplies exact current and queued dispatch/source references.
-The Head also reads the active source message when it is outside the recent
-Channel window. Missing source context is not permission to invent current work.
-Normal queued input no longer interrupts a running turn at a delegation boundary.
-Explicit Stop and existing trusted interrupt/review interfaces retain their
-separate semantics.
-
-**This local trial does not enable model-requested preemption.** Every accepted
-Head dispatch is enqueued; direct replies do not enter the execution queue. `pet.head.scheduling` reports requested/effective timing
-and `continuation_unavailable` or `stale_snapshot` when an interrupt request is
-deferred. A model decision cannot invoke the trusted interrupt primitive. The
-runtime currently lacks a general durable responsibility/continuation record
-for arbitrary preemption; history alone and manual "continue" are not execution
-restoration. Enabling this requires exact active/pending identity validation,
-a safe boundary, saved completed results and outstanding subjects, and proven
-continuation without replaying tool side effects.
-
-Deterministic tests exercise the declaration and safe queue behavior, not the
-quality of a live model's timing judgments. No new model configuration or tool
-permission is implied by this trial.
+The earlier reply/action/intent/timing experiment is historical, not the current
+contract. The current contract separates relevance from semantic idle handling.
+Only a freshly verified idle slot permits admission. A busy/unknown slot permits
+factual composition or silence, not queued additions or model-requested preemption.
+Explicit Stop and review retain their own existing interfaces. This does not add
+durable responsibility tracking, restart recovery or autonomous-loop guarantees.
+See [the operative mechanism and historical diagram link](../design/studio/pet-head-mechanism.md).
 
 ### Official DeepSeek Head decision budget
 
@@ -493,13 +476,14 @@ For the official HTTPS `api.deepseek.com` OpenAI-compatible route and the
 `thinking: { type: disabled }`. This keeps the Head's bounded 512-token decision
 budget available for its structured answer. It does not edit the saved profile,
 Agent models, gateway routes, other model names or Anthropic-compatible routes.
-The same shared Head decision policy and field descriptions apply to tool output
-and JSON mode; explicit requests to acknowledge before processing can select
-both reply and dispatch without claiming admission has already succeeded.
+Each structured stage uses the same schema across tool output and JSON mode.
+When idle, explicit requests to acknowledge before processing can select both
+reply and dispatch without claiming admission has already succeeded.
 Routine dispatch still need not produce an acknowledgement.
 
 A prior six-call isolated synthetic A/B reproduced truncated JSON when default
 thinking consumed 489/512 or 512/512 completion tokens. Disabling thinking removed
 those two sample truncations but did not itself make the model select a combined
 acknowledgement and execution. Transport validity and routing choices are separate
-acceptance questions; a valid ignore remains a legitimate model decision.
+acceptance questions. That historical trial predates the relevance/idle split
+and is not evidence of current two-stage semantic accuracy.

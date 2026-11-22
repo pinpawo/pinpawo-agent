@@ -4,8 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { fixtureVersion } from '../src/head-eval/cases';
 import { selectCases } from '../src/head-eval/selection';
 import { readCacheUsage } from '../src/head-eval/cacheUsage';
+import { exercise } from '../src/head-eval/exercise';
 import { score, summarize } from '../src/head-eval/scorer';
-import type { HeadDecisionDiagnostic } from '../../../packages/studio/src/host/petHeadModel';
+import type { HeadRelevanceDiagnostic } from '../../../packages/studio/src/host/petHeadModel';
 
 for (const key of ['LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2', 'LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGFUSE_TRACING_ENABLED']) process.env[key] = 'false';
 
@@ -36,9 +37,9 @@ async function main() {
   type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; cacheHitTokens?: number; cacheMissTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
   let wire: Wire[] = [];
 
-  const report = { schemaVersion: 2, fixtureVersion, commit, profile, model: '',
+  const report = { schemaVersion: 3, fixtureVersion, commit, profile, model: '',
     startedAt: new Date().toISOString(), providerCalls: 0, providerCallLimit: 20,
-    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; decision?: { action: string; hasReply: boolean }; score: ReturnType<typeof score> }>,
+    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; observation?: { relevant: boolean; dispatched: boolean; hasReply: boolean }; score: ReturnType<typeof score> }>,
     summary: {} as ReturnType<typeof summarize> | object };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240_000);
@@ -89,22 +90,22 @@ async function main() {
     for (let repeat = 1; repeat <= repeats; repeat++) for (const test of selected) {
       wire = [];
       const started = Date.now();
-      let diagnostic: HeadDecisionDiagnostic | undefined;
-      const { decide } = createHeadModel(() => ({
+      let diagnostic: HeadRelevanceDiagnostic | undefined;
+      const model = createHeadModel(() => ({
         profileId: profile, protocol: config.protocol ?? 'openai-compatible', model: config.model,
         baseUrl: config.baseUrl, apiKey: config.apiKey, structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
         createChatModel: options => buildModel({ ...config, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries }, options),
       }), { onDiagnostic: value => { diagnostic = value; } });
-      let decision;
+      let observation;
       try {
         if (controller.signal.aborted || calls >= 20) throw new Error('budget');
-        decision = await decide(test.input, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
+        observation = await exercise(test, model, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
       } catch { /* No raw provider errors or model reasoning in reports. */ }
-      const failure = controller.signal.aborted ? 'cancelled-or-deadline' : calls >= 20 && !decision ? 'call-budget' : diagnostic?.code ?? 'provider-or-transport-error';
-      report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: diagnostic?.attempts ?? 0, elapsedMs: Date.now() - started, wire: [...wire],
+      const failure = controller.signal.aborted ? 'cancelled-or-deadline' : calls >= 20 && !observation ? 'call-budget' : diagnostic?.code ?? 'provider-or-transport-error';
+      report.rows.push({ case: test.id, kind: test.kind, repeat, attempts: wire.length, elapsedMs: Date.now() - started, wire: [...wire],
         ...(diagnostic ? { outcome: diagnostic.outcome, ...(diagnostic.code ? { code: diagnostic.code } : {}) } : {}),
-        ...(decision ? { decision: { action: decision.action, hasReply: !!decision.reply?.trim() } } : {}),
-        score: score(test, decision, failure) });
+        ...(observation ? { observation } : {}),
+        score: score(test, observation, observation ? undefined : failure) });
     }
   } catch {
     // Configuration failures count in the full denominator too.

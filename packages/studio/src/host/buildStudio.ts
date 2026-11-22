@@ -348,7 +348,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       // Correlation and finite outcomes only: never log prompts, raw model
       // output, provider errors, credentials or endpoint URLs.
       console.info('[studio] pet.head', JSON.stringify({ occurredAt, ...diagnostic }));
-      prepared.studio.notify({ type: 'pet.head.decision', source: 'studio',
+      prepared.studio.notify({ type: 'pet.head.relevance', source: 'studio',
         topic: registration.channelId, occurredAt, payload: diagnostic });
     },
   }, signal) : undefined);

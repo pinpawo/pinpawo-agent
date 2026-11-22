@@ -1,4 +1,4 @@
-/** Offline design contrasts, NOT scored by the existing Head action evaluator.
+/** Offline design contrasts, NOT scored by the current runtime-effect evaluator.
  * Relation is semantic evidence, not permission to stop or dispatch execution.
  * Keep expected relations and descriptive case IDs outside model-visible input.
  */

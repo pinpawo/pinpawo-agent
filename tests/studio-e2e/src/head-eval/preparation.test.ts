@@ -16,7 +16,7 @@ test('Explicit subsets and repeats obey the offline decision cap', () => {
   assert.throws(() => selectCases(['unknown'], 1), /unknown-case/);
 });
 
-test('Relevance contrasts stay separate from action scoring and have distinct expectations', () => {
+test('Relevance contrasts stay separate from runtime-effect scoring and have distinct expectations', () => {
   assert.equal(relevanceCases.length, 3);
   assert.deepEqual(relevanceCases.map(row => row.expected), [
     { relevant: true, relation: 'replacement', preserveA: false, bAfterA: false },

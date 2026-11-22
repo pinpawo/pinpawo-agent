@@ -1,3 +1,4 @@
+import { headFixtureStage } from './headFixtureStage';
 import './isolateScenarioConfig';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -266,7 +267,7 @@ export async function createDeterministicScenarioModel(): Promise<ScenarioModel 
         let content = '';
         let toolCall: { name: string; args: Record<string, unknown> } | undefined;
         if (input.response_format?.type === 'json_object' && names.length === 0) {
-          content = JSON.stringify({ action: 'dispatch' });
+          content = JSON.stringify(headFixtureStage(input) === 'relevance' ? { relevant: true } : { shouldDispatch: true, reply: null });
         } else if (names.includes('plan_request')) {
           toolCall = { name: 'plan_request', args: { goal: 'Read the synthetic cobalt record and report its units and exact verification receipt.' } };
         } else if (names.includes('synthetic_lookup')) {

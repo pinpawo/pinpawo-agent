@@ -1,3 +1,4 @@
+import { headFixtureStage } from './headFixtureStage';
 import './isolateScenarioConfig';
 import { readChannelEnvelope, type ChannelEnvelope } from './channelWire';
 import assert from 'node:assert/strict';
@@ -77,14 +78,16 @@ async function scriptedModel(mode: HeadWireMode) {
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
         if (head) {
-          const key = `${head.pet.petId}:${head.message.messageId}`;
+          const stage = headFixtureStage(input);
+          const name = stage === 'relevance' ? 'pet_head_relevance' : 'pet_head_idle';
+          const key = `${head.pet.petId}:${head.message.messageId}:${stage}`;
           const attempt = (attempts.get(key) ?? 0) + 1;
           attempts.set(key, attempt);
           assert.equal(attempt, 1, 'One model request per Head decision');
           assert.ok(head.context.messages.every(entry => entry.sequence < head!.message.sequence), 'Current message is not duplicated in Head history');
           if (mode === 'tool') {
-            assert.deepEqual(names, ['pet_head_decision'], 'Only the decision schema tool is bound');
-            assert.deepEqual(input.tool_choice, { type: 'function', function: { name: 'pet_head_decision' } });
+            assert.deepEqual(names, [name], 'Only the decision schema tool is bound');
+            assert.deepEqual(input.tool_choice, { type: 'function', function: { name } });
           } else {
             assert.deepEqual(names, []);
             assert.deepEqual(input.response_format, { type: 'json_object' });
@@ -101,10 +104,10 @@ async function scriptedModel(mode: HeadWireMode) {
           const round = peerEligible ? 3 : head.message.body === question ? 1 : head.message.body === followup ? 2 : 0;
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
           const action = eligible ? 'dispatch' : 'ignore';
-          decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
+          if (stage === 'idle' || !eligible) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.addressed === true });
-          const decision = { action };
-          if (mode === 'tool') call = { name: 'pet_head_decision', args: decision };
+          const decision = stage === 'relevance' ? { relevant: eligible } : { shouldDispatch: eligible, reply: null };
+          if (mode === 'tool') call = { name, args: decision };
           else content = JSON.stringify(decision);
         } else if (compose) {
           assert.deepEqual(names, []);

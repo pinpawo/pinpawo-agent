@@ -17,10 +17,13 @@ const toolFields: Record<string, readonly string[]> = {
 };
 // Routing is a declaration returned to the Head, never an executable scenario
 // tool or an assistant/tool exchange admitted into execution history.
-const headDecisionName = 'pet_head_decision';
-const headDecisionFields = ['action', 'reply'];
-function isHeadDecisionTool(tool: unknown): boolean {
-  return record(tool) && record(tool.function) && tool.function.name === headDecisionName;
+const headDeclarations: Record<string, readonly string[]> = {
+  pet_head_relevance: ['relevant'],
+  pet_head_idle: ['shouldDispatch', 'reply'],
+};
+function headToolName(tool: unknown): string | undefined {
+  return record(tool) && record(tool.function) && typeof tool.function.name === 'string'
+    && Object.hasOwn(headDeclarations, tool.function.name) ? tool.function.name : undefined;
 }
 const requestFields = new Set([
   'model', 'messages', 'tools', 'tool_choice', 'stream', 'stream_options', 'temperature', 'top_p',
@@ -145,24 +148,39 @@ function validateRequest(value: unknown, model: string): asserts value is Record
     for (const tool of value.tools) {
       if (!record(tool) || tool.type !== 'function' || !record(tool.function)) blocked();
       const name = tool.function.name;
-      const isDecision = isHeadDecisionTool(tool);
+      const declaration = headToolName(tool);
+      const isDecision = !!declaration;
       if (isDecision ? value.tools.length !== 1 || value.stream === true : !safeTool(name)) blocked();
       onlyKeys(tool, ['type', 'function']);
       onlyKeys(tool.function, ['name', 'description', 'parameters', 'strict']);
       if (tool.function.description !== undefined && typeof tool.function.description !== 'string') blocked();
       if (tool.function.strict !== undefined && typeof tool.function.strict !== 'boolean') blocked();
-      validateSchema(tool.function.parameters, isDecision ? headDecisionFields : toolFields[name as string]);
+      validateSchema(tool.function.parameters, declaration ? headDeclarations[declaration] : toolFields[name as string]);
     }
   }
   if (record(value.tool_choice)) {
     onlyKeys(value.tool_choice, ['type', 'function']);
     if (value.tool_choice.type !== 'function' || !record(value.tool_choice.function)) blocked();
     onlyKeys(value.tool_choice.function, ['name']);
-    if (!safeTool(value.tool_choice.function.name)) blocked();
+    if (!safeTool(value.tool_choice.function.name)
+      && !(Array.isArray(value.tools) && value.tools.length === 1
+        && headToolName(value.tools[0]) === value.tool_choice.function.name)) blocked();
   } else if (value.tool_choice !== undefined && !['auto', 'none', 'required'].includes(String(value.tool_choice))) blocked();
   if (value.response_format !== undefined) {
-    if (!record(value.response_format) || !['text', 'json_object'].includes(String(value.response_format.type))) blocked();
-    onlyKeys(value.response_format, ['type']);
+    if (!record(value.response_format)) blocked();
+    if (value.response_format.type === 'json_schema') {
+      onlyKeys(value.response_format, ['type', 'json_schema']);
+      const format = value.response_format.json_schema;
+      if (!record(format) || typeof format.name !== 'string' || !Object.hasOwn(headDeclarations, format.name)
+        || value.stream === true || value.tools !== undefined) blocked();
+      onlyKeys(format, ['name', 'description', 'schema', 'strict']);
+      if (format.description !== undefined && typeof format.description !== 'string') blocked();
+      if (format.strict !== undefined && typeof format.strict !== 'boolean') blocked();
+      validateSchema(format.schema, headDeclarations[format.name]);
+    } else {
+      if (!['text', 'json_object'].includes(String(value.response_format.type))) blocked();
+      onlyKeys(value.response_format, ['type']);
+    }
   }
   if (value.stream !== undefined && typeof value.stream !== 'boolean') blocked();
   if (value.stream_options !== undefined) {
@@ -415,8 +433,8 @@ export async function createLiveScenarioGateway(options: LiveScenarioGatewayOpti
           headers: { 'content-type': 'application/json', 'authorization': `Bearer ${options.apiKey}` },
           body: JSON.stringify(clean),
         });
-        const allowedTools = Array.isArray(request.tools) && request.tools.length === 1 && isHeadDecisionTool(request.tools[0])
-          ? [headDecisionName] : Object.keys(toolFields);
+        const allowedTools = Array.isArray(request.tools) && request.tools.length === 1 && headToolName(request.tools[0])
+          ? [headToolName(request.tools[0])!] : Object.keys(toolFields);
         await forwardResponse(upstream, res, request.stream === true, options.apiKey, controller.signal, allowedTools);
       } catch (error) {
         const safe = controller.signal.aborted ? new GatewayError(504, 'scenario_gateway_timeout')

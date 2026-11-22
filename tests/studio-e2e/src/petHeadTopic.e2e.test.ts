@@ -51,24 +51,24 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const client = factoryCalls.length;
     factoryCalls.push(client);
     return {
-      withStructuredOutput: (schema: DecisionSchema, options: unknown) => {
-        assert.deepEqual(options, { name: 'pet_head_decision', method: 'jsonMode', includeRaw: true });
+      withStructuredOutput: (schema: DecisionSchema, options: { name: string; method: string; includeRaw: boolean }) => {
+        assert.ok(['pet_head_relevance', 'pet_head_idle'].includes(options.name));
+        assert.equal(options.method, 'jsonMode');
+        assert.equal(options.includeRaw, true);
         return {
           invoke: async (messages: Messages, { signal }: { signal: AbortSignal }) => {
             const input = JSON.parse(messages[1]![1]) as HeadInput;
             const { pet, message, addressed } = input;
-            decisions[pet.petId]!.push(message.body);
+            if (options.name === 'pet_head_relevance' || addressed) decisions[pet.petId]!.push(message.body);
             decisionClients.push({ body: message.body, client });
             if (addressed) canonicalDecisions.push(input);
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
             const dispatch = [startA, mixed, held].includes(message.body);
             const reply = message.body === direct ? 'Yes, I am.' : message.body === held ? 'This reply is too late.' : '';
-            const parsed = {
-              action: dispatch ? 'dispatch' : message.body === progress ? 'status' : reply ? 'direct' : 'ignore',
-              ...(reply ? { reply } : {}),
-            };
+            const parsed = options.name === 'pet_head_relevance'
+              ? { relevant: [startA, mixed, held, progress, direct].includes(message.body) }
+              : { shouldDispatch: dispatch, reply: reply || null };
             assert.equal(schema.safeParse(parsed).success, true);
-            assert.equal(schema.safeParse({ action: 'ignore' }).success, true);
             return { raw: new AIMessage(JSON.stringify(parsed)), parsed };
           },
         };
@@ -264,26 +264,26 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const directWhileBusy = await post(direct);
     await waitFor(() => handled.includes(elsewhere.messageId) && !!replyFor(directWhileBusy.messageId));
     assert.equal(replyFor(elsewhere.messageId), undefined, 'declining a message is silent even while A is active');
-    assert.equal(replyFor(directWhileBusy.messageId)?.body, 'Yes, I am.');
-    assert.equal(sessionReads.length, 0, 'neither a decline nor a direct answer inspects busy A');
+    assert.equal(replyFor(directWhileBusy.messageId)?.body, 'A is still running.');
+    assert.equal(sessionReads.length, 1, 'the relevant busy question samples A; irrelevant text does not');
     assert.equal(admissions.length, 1);
     const check = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(check.messageId));
     assert.equal(replyFor(check.messageId)?.body, 'A is still running.');
-    assert.deepEqual(sessionReads, [a.session.id], 'the progress-only turn reads exact busy A only once');
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id], 'the progress-only turn reads exact busy A only once');
     assert.equal(admissions.length, 1, 'progress-only turns never dispatch');
     const both = await post(mixed, sourceA.messageId);
-    await waitFor(() => admissions.length === 2 && !!replyFor(both.messageId));
+    await waitFor(() => admissions.length === 1 && !!replyFor(both.messageId));
     assert.equal(replyFor(both.messageId)?.body, 'A is still running.');
-    assert.deepEqual(sessionReads, [a.session.id, a.session.id], 'mixed asks still sample only A once each');
-    assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion.messageId, directWhileBusy.messageId, check.messageId, both.messageId]);
-    assert.equal(composeInputs.length, 2);
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id], 'mixed asks still sample only A once each');
+    assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion.messageId]);
+    assert.equal(composeInputs.length, 3);
     assert.equal(resolutionCount, 2, 'each active Head resolves only one client');
     assert.equal(factoryCalls.length, 2);
     const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
-    assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
-    assert.deepEqual(composeInputs, [check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
-      message: { messageId, channelId, sequence, author, body, replyTo, mentions },
+    assert.deepEqual(replyClients, [alphaClient, alphaClient, alphaClient], 'unbound composition reuses the deciding client');
+    assert.deepEqual(composeInputs, [directWhileBusy, check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
+      message: { messageId, channelId, sequence, author, body, ...(replyTo ? { replyTo } : {}), mentions },
       evidence: { status: 'running', plan: [
         { status: 'completed', description: 'Gather inputs.' },
         { status: 'active', description: 'Check the report.' },
@@ -295,17 +295,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
       assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
     }
     assert.equal(otherQueueReads, 0, 'alpha Head samples only its own dispatch port');
-    assert.equal(admissions[1]!.origin?.id, both.messageId);
-    assert.equal(admissions[1]!.session?.id, a.session.id);
-    assert.equal(admissions[1]!.delivery, undefined, 'B uses ordinary admission, not interruption');
-    const envelope = JSON.parse(admissions[1]!.request.split('\n').slice(1, -1).join('\n'));
-    assert.deepEqual(envelope, { type: 'channel_message', version: 1, message: both, referencedMessage: sourceA });
+    assert.equal(admissions.length, 1, 'busy mixed question cannot admit new work');
     assert.equal(activeDispatch.dispatchId, a.dispatchId);
-
-    const b = admissions[1]!;
-    assert.ok(b.dispatchId && b.session && b.scope && b.origin);
     const activeA = activeDispatch;
-    const activeB = { dispatchId: b.dispatchId, sessionId: b.session.id, scope: b.scope, origin: b.origin, enqueuedAt: new Date().toISOString() };
+    const activeB = { ...activeA, dispatchId: 'synthetic-other-dispatch', origin: { namespace: 'channel', id: both.messageId } };
     const realReply = channel.head.reply;
     let staleAtWrite = false;
     channel.head.reply = async (...args) => {
@@ -319,7 +312,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
       await waitFor(() => decisions.alpha!.includes(fence));
       assert.equal(staleAtWrite, true);
       assert.equal(replyFor(raceAtWrite.messageId), undefined, 'a stale result cannot be committed after the run changes');
-      assert.equal(admissions.length, 2);
+      assert.equal(admissions.length, 1);
     } finally {
       channel.head.reply = realReply;
       activeDispatch = activeA;
@@ -328,9 +321,9 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const race = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(race.messageId));
     assert.equal(replyFor(race.messageId)?.body, 'I cannot verify the current status.');
-    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'each race reads once and never retries on B');
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id, a.session.id], 'each race reads once and never retries on B');
     assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'unavailable' });
-    assert.equal(admissions.length, 2);
+    assert.equal(admissions.length, 1);
 
     switchDuringRead = undefined;
     reviewPending = true;
@@ -339,7 +332,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     await waitFor(() => !!replyFor(duringReview.messageId));
     assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'running' },
       'pending review may not expose the recorded plan');
-    assert.equal(admissions.length, 2);
+    assert.equal(admissions.length, 1);
 
     // A resumed review emits dispatch.running, but executes as a conversation
     // hold and does not occupy the ordinary dispatch queue slot.
@@ -353,7 +346,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     await waitFor(() => !!replyFor(approvalFollowup.messageId));
     assert.equal(replyFor(approvalFollowup.messageId)?.body, 'I cannot verify the current status.');
     assert.equal(sessionReads.length, readsBeforeApproval, 'continuation is outside the ordinary dispatch slot');
-    assert.equal(admissions.length, 2);
+    assert.equal(admissions.length, 1);
 
     const beforeOfficial = decisions.alpha!.length;
     lifecycle('message', { requestId: 'resumed-request', message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
@@ -364,7 +357,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     await waitFor(() => decisions.alpha!.includes(fence));
     assert.equal(decisions.alpha!.length, beforeOfficial + 1, 'resident events or own output must not start another judgment');
     assert.equal(published.filter(({ message }) => message.body === finalA).length, 1, 'official result uses only the existing Channel bridge');
-    assert.equal(admissions.length, 2);
+    assert.equal(admissions.length, 1);
 
     const oldRegistrations = registrations.filter(entry => entry.petId === 'alpha');
     const realClose = resident.close.bind(resident);
@@ -376,6 +369,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
       await realClose();
       closed = true;
     };
+    activeDispatch = undefined;
     const late = await post(held);
     await waitFor(() => heldSignal !== undefined);
     await post('queued before alpha closes');
@@ -403,7 +397,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.notEqual(decisionClients.at(-1)?.client, alphaClient, 'a new activation builds its own client');
     releaseHeld();
     await waitFor(() => handled.includes(late.messageId));
-    assert.equal(admissions.length, 2, 'the canceled decision never dispatches');
+    assert.equal(admissions.length, 1, 'the canceled decision never dispatches');
     assert.equal(replyFor(late.messageId), undefined, 'the canceled decision never publishes');
     for (const offline of ['queued before alpha closes', 'sent while alpha is closed']) {
       assert.ok(!decisions.alpha!.includes(offline), 'no replay into the reopened Head');

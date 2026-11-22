@@ -1,3 +1,4 @@
+import { headFixtureStage } from './headFixtureStage';
 import './isolateScenarioConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -53,8 +54,8 @@ async function createWorkdirModel() {
         if (input.response_format?.type === 'json_object' && names.length === 0) {
           const { pet, message } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
-          decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
-          content = JSON.stringify({ action: 'dispatch' });
+          if (headFixtureStage(input) === 'idle') decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
+          content = JSON.stringify(headFixtureStage(input) === 'relevance' ? { relevant: true } : { shouldDispatch: true, reply: null });
         } else if (names.includes('plan_request')) {
           call = { name: 'plan_request', args: { goal: 'Read marker.txt and report the exact result.' } };
         } else if (names.includes('view_file_chunk')) {

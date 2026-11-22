@@ -1,3 +1,4 @@
+import { headFixtureStage } from './headFixtureStage';
 import { readChannelEnvelope } from './channelWire';
 import './isolateScenarioConfig';
 import assert from 'node:assert/strict';
@@ -43,11 +44,12 @@ async function fixture() {
         if (head) {
           assert.deepEqual(input.response_format, { type: 'json_object' });
           assert.equal(input.tools?.length ?? 0, 0);
-          decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId });
+          const stage = headFixtureStage(input);
+          if (stage === 'relevance') decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId });
           const source = head.pet.petId === 'target' && head.message.author.kind === 'human' ? head.message.body : '';
           const dispatch = source === 'DISPATCH' || source === 'COMBINED';
           const reply = source === 'DIRECT' || source === 'COMBINED' ? `HEAD_${source}` : '';
-          content = JSON.stringify({ action: dispatch ? 'dispatch' : reply ? 'direct' : 'ignore', ...(reply ? { reply } : {}) });
+          content = JSON.stringify(stage === 'relevance' ? { relevant: !!source && source !== 'EMPTY' } : { shouldDispatch: dispatch, reply: reply || null });
         } else if (input.messages.some(m => m.role === 'user' && /^\{"message":.*"evidence":/.test(text(m.content)))) {
           assert.equal(input.tools?.length ?? 0, 0);
           assert.equal(input.response_format, undefined);

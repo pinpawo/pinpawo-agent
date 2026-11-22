@@ -3,7 +3,7 @@ import type { PetDispatchQueueSnapshot } from 'pinpawo/host-runtime';
 import type { Studio, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import { readHeadProgress, type HeadRun, type HeadProgressEvidence, type HeadSessionRunReader } from './petHeadProgress';
-import { createHeadModel, type HeadDecisionDiagnostic } from './petHeadModel';
+import { createHeadModel, type HeadRelevanceDiagnostic } from './petHeadModel';
 
 /** The committed Timeline message as seen by a Pet. */
 export type HeadMessage = {
@@ -25,8 +25,9 @@ export type HeadContext = {
   referencedMessage?: HeadMessage;
   [key: string]: unknown;
 };
-/** The model judges responsibility and independent work, not Session state or routing. */
-export type HeadDecision = { action: 'ignore' | 'direct' | 'dispatch' | 'status'; reply?: string | null };
+export type HeadRelevance = { relevant: boolean };
+/** This contract belongs only to the handler of a verified idle slot. */
+export type HeadIdleResult = { shouldDispatch: boolean; reply: string | null };
 type HeadDispatchRef = { dispatchId: string; sessionId: string; messageId?: string };
 type HeadWorkState = { kind: 'idle' } | { kind: 'unknown' } | { kind: 'active'; dispatch: HeadDispatchRef };
 
@@ -101,7 +102,7 @@ export function attachPetHead(input: {
   subscribe: Studio['subscribe'];
   getQueueSnapshot: () => PetDispatchQueueSnapshot;
   resolveModel: () => StudioModelEndpoint;
-  onDiagnostic?: (event: HeadDecisionDiagnostic) => void;
+  onDiagnostic?: (event: HeadRelevanceDiagnostic) => void;
 }, signal: AbortSignal): () => void {
   signal.throwIfAborted();
   const { pet, description, subscribe } = input;
@@ -122,7 +123,8 @@ export function attachPetHead(input: {
           readProgressSession(pet.petId, ...args) } : {}),
         compose: model.composeReply,
       },
-      decide: model.decide,
+      assessRelevance: model.assessRelevance,
+      handleIdle: model.handleIdle,
     });
     unsubscribe = channel.subscribe(message => handleMessage(message, signal));
   } catch (error) {
@@ -169,83 +171,79 @@ export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
   channel: PetHeadChannel;
-  readWorkState?: () => HeadWorkState;
+  readWorkState: () => HeadWorkState;
   progress?: {
     readRun: (active: HeadDispatchRef) => HeadRun | undefined;
     readSessionRun?: HeadSessionRunReader;
     compose: (input: HeadReplyInput, signal: AbortSignal) => Promise<string>;
   };
-  decide: (input: HeadInput, signal: AbortSignal) => Promise<HeadDecision>;
+  assessRelevance: (input: HeadInput, signal: AbortSignal) => Promise<HeadRelevance>;
+  handleIdle: (input: HeadInput, signal: AbortSignal) => Promise<HeadIdleResult>;
 }): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
   return async (message, signal) => {
     if (signal.aborted || message.channelId !== options.pet.channelId || !message.author ||
       (message.author.kind === 'pet' && message.author.id === options.pet.petId)) return;
-    // Pin the ordinary slot and attempt before any await. This is not a Session read.
-    const state = options.readWorkState?.();
-    const active = state?.kind === 'active' ? state.dispatch : undefined;
-    const progress = options.progress;
-    const run = active && progress?.readRun(active);
     // The exclusive bound keeps the current message out of its own history.
     const context = await options.channel.readContext(options.pet.petId, message.sequence, message.replyTo);
     if (signal.aborted) return;
-    const input = {
-      pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context,
-    };
-    const addressed = isHeadAddressed(input);
-    const decision = await options.decide({ ...input, addressed }, signal);
-    if (signal.aborted || decision.action === 'ignore') return;
+    const base = { pet: options.pet, ...(options.description ? { description: options.description } : {}), message, context };
+    const input = { ...base, addressed: isHeadAddressed(base) };
+    if (!input.addressed && !(await options.assessRelevance(input, signal)).relevant) return;
+    if (signal.aborted) return;
 
     const failures: string[] = [];
-    let reply = decision.action === 'status' ? '' : decision.reply ?? '';
+    let reply = '';
+    let shouldDispatch = false;
     let stillCurrent: (() => boolean) | undefined;
-    const dispatch = decision.action === 'dispatch';
-    if ((dispatch || decision.action === 'status') && progress) {
-      const idle = state?.kind === 'idle' && options.readWorkState?.().kind === 'idle';
-      if (!idle || !dispatch) {
-        const isCurrent = () => {
-          const now = options.readWorkState?.();
-          return !!active && !!run && now?.kind === 'active' && now.dispatch.dispatchId === active.dispatchId &&
-            now.dispatch.sessionId === active.sessionId && now.dispatch.messageId === active.messageId &&
-            progress.readRun(active)?.requestId === run.requestId;
-        };
-        // An explicit reference to other work never grants access to the current run.
-        const reference = context.referencedMessage;
-        const targetsActive = !message.replyTo || message.replyTo === active?.messageId ||
-          (!!reference && !!active?.messageId && reference.messageId === message.replyTo && reference.channelId === message.channelId &&
-            reference.author.kind === 'pet' && reference.author.id === options.pet.petId &&
-            reference.replyTo === active.messageId && reference.externalRef === `head-reply:${active.messageId}`);
-        try {
-          let evidence = targetsActive && run && progress.readSessionRun && isCurrent()
-            ? await readHeadProgress({ run, signal, isCurrent, readSessionRun: progress.readSessionRun })
-            : { status: 'unavailable' as const };
-          if (signal.aborted) return;
-          let source: HeadMessage | undefined;
-          const sourceId = active?.messageId;
-          if (evidence.status === 'running' && !sourceId) evidence = { status: 'running' };
-          if (evidence.status === 'running' && sourceId) {
-            const isSource = (candidate: HeadMessage | undefined) =>
-              candidate?.messageId === sourceId && candidate.channelId === message.channelId;
-            source = isSource(reference) ? reference : context.messages.find(isSource);
-            if (!source) {
-              // Avoid loading old public work for the first decision. Only a
-              // confirmed run needs the exact source to write its status.
-              const { referencedMessage } = await options.channel.readContext(options.pet.petId, message.sequence, sourceId);
-              if (isSource(referencedMessage)) source = referencedMessage;
-            }
-            if (signal.aborted) return;
-            if (!isCurrent()) evidence = { status: 'unavailable' };
-            else if (!source) evidence = { status: 'running' };
+    // Relevance is settled without consulting the runtime. Pin this branch once.
+    const state = options.readWorkState();
+    const progress = options.progress;
+    if (state.kind === 'idle') {
+      const result = await options.handleIdle(input, signal);
+      reply = result.reply ?? '';
+      shouldDispatch = result.shouldDispatch;
+    } else if (progress) {
+      const active = state.kind === 'active' ? state.dispatch : undefined;
+      const run = active && progress.readRun(active);
+      const isCurrent = () => {
+        const now = options.readWorkState();
+        return !!active && !!run && now.kind === 'active' && now.dispatch.dispatchId === active.dispatchId &&
+          now.dispatch.sessionId === active.sessionId && now.dispatch.messageId === active.messageId &&
+          progress.readRun(active)?.requestId === run.requestId;
+      };
+      // An explicit reference to other work never grants access to the current run.
+      const reference = context.referencedMessage;
+      const targetsActive = !message.replyTo || message.replyTo === active?.messageId ||
+        (!!reference && !!active?.messageId && reference.messageId === message.replyTo && reference.channelId === message.channelId &&
+          reference.author.kind === 'pet' && reference.author.id === options.pet.petId &&
+          reference.replyTo === active.messageId && reference.externalRef === `head-reply:${active.messageId}`);
+      try {
+        let source: HeadMessage | undefined;
+        const sourceId = active?.messageId;
+        if (targetsActive && run && progress.readSessionRun && sourceId && isCurrent()) {
+          // A different dispatch can start while relevance is pending. Its source
+          // must predate this question before any Session evidence can be read.
+          const isSource = (candidate: HeadMessage | undefined): candidate is HeadMessage =>
+            candidate?.messageId === sourceId && candidate.channelId === message.channelId && candidate.sequence < message.sequence;
+          source = isSource(reference) ? reference : context.messages.find(isSource);
+          if (!source) {
+            const { referencedMessage } = await options.channel.readContext(options.pet.petId, message.sequence, sourceId);
+            if (isSource(referencedMessage)) source = referencedMessage;
           }
-          const statusReply = await progress.compose({ message, evidence,
-            ...(evidence.status === 'running' && source ? { source: { messageId: source.messageId, body: source.body } } : {}) }, signal);
-          // Work-only messages need no status announcement. Preserve an independent acknowledgement.
-          if (statusReply.trim() && (evidence.status !== 'running' || isCurrent())) {
-            reply = statusReply;
-            if (evidence.status === 'running') stillCurrent = isCurrent;
-          }
-        } catch {
-          if (!signal.aborted) failures.push('progress reply');
         }
+        if (signal.aborted) return;
+        const evidence = source && run && progress.readSessionRun && isCurrent()
+          ? await readHeadProgress({ run, signal, isCurrent, readSessionRun: progress.readSessionRun })
+          : { status: 'unavailable' as const };
+        if (signal.aborted) return;
+        const composed = await progress.compose({ message, evidence,
+          ...(evidence.status === 'running' && source ? { source: { messageId: source.messageId, body: source.body } } : {}) }, signal);
+        if (evidence.status !== 'running' || isCurrent()) {
+          reply = composed;
+          if (evidence.status === 'running') stillCurrent = isCurrent;
+        }
+      } catch {
+        if (!signal.aborted) failures.push('progress reply');
       }
     }
     if (signal.aborted) return;
@@ -262,13 +260,13 @@ export function createPetHead(options: {
       } catch (error) { if (!(error instanceof StaleProgressReply)) failures.push('reply'); }
     }
     // Admit the canonical source; Head does not rewrite the work passed to Agent.
-    if (dispatch && !signal.aborted) {
+    if (shouldDispatch && !signal.aborted && options.readWorkState().kind === 'idle') {
       try { await options.channel.dispatch(options.pet.petId, message.messageId, signal); }
       catch { failures.push('dispatch'); }
     }
-    if (signal.aborted) throw new Error('Pet Head action aborted.');
+    if (signal.aborted) throw new Error('Pet Head processing aborted.');
     // Do not let a failed publication suppress independent authorized execution,
     // or imply that a successful acknowledgement proves admission succeeded.
-    if (failures.length) throw new Error('Pet Head action failed: ' + failures.join(', ') + '.');
+    if (failures.length) throw new Error('Pet Head processing failed: ' + failures.join(', ') + '.');
   };
 }

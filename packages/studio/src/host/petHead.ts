@@ -118,8 +118,8 @@ export function attachPetHead(input: {
       readWorkState: () => readHeadWorkState(pet.channelId, input.getQueueSnapshot()),
       progress: {
         readRun: observation.read,
-        ...(readProgressSession ? { readSessionRunId: (sessionId, signal, isCurrent) =>
-          readProgressSession(pet.petId, sessionId, signal, isCurrent) } : {}),
+        ...(readProgressSession ? { readSessionRun: (...args: Parameters<HeadSessionRunReader>) =>
+          readProgressSession(pet.petId, ...args) } : {}),
         compose: model.composeReply,
       },
       decide: model.decide,
@@ -172,7 +172,7 @@ export function createPetHead(options: {
   readWorkState?: () => HeadWorkState;
   progress?: {
     readRun: (active: HeadDispatchRef) => HeadRun | undefined;
-    readSessionRunId?: HeadSessionRunReader;
+    readSessionRun?: HeadSessionRunReader;
     compose: (input: HeadReplyInput, signal: AbortSignal) => Promise<string>;
   };
   decide: (input: HeadInput, signal: AbortSignal) => Promise<HeadDecision>;
@@ -215,8 +215,9 @@ export function createPetHead(options: {
             reference.author.kind === 'pet' && reference.author.id === options.pet.petId &&
             reference.replyTo === active.messageId && reference.externalRef === `head-reply:${active.messageId}`);
         try {
-          let evidence = targetsActive && run && progress.readSessionRunId && isCurrent()
-            ? await readHeadProgress({ run, signal, isCurrent, readSessionRunId: progress.readSessionRunId })
+          let evidence = targetsActive && run && progress.readSessionRun && isCurrent()
+            ? await readHeadProgress({ run, signal, isCurrent, readSessionRun: progress.readSessionRun,
+              ...(active?.messageId ? { includeRunProgress: true } : {}) })
             : { status: 'unavailable' as const };
           if (signal.aborted) return;
           let source: HeadMessage | undefined;
@@ -233,6 +234,7 @@ export function createPetHead(options: {
             }
             if (signal.aborted) return;
             if (!isCurrent()) evidence = { status: 'unavailable' };
+            else if (!source) evidence = { status: 'running' };
           }
           const statusReply = await progress.compose({ message, evidence,
             ...(evidence.status === 'running' && source ? { source: { messageId: source.messageId, body: source.body } } : {}) }, signal);

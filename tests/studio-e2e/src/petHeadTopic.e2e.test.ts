@@ -202,11 +202,12 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     });
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
     resident.sessions.snapshot = async (sessionId, options) => {
-      assert.deepEqual(options, { timelineLimit: 1 });
+      assert.deepEqual(options, { timelineLimit: 1, includeRunProgress: true });
       sessionReads.push(sessionId);
       if (switchDuringRead) activeDispatch = switchDuringRead;
       return {
         version: 5,
+        runProgress: { latestDelivery: 'Inventory source verified.', pendingObjectives: ['Cross-check the remaining items.'] },
         session: {
           sessionId, kind: 'chat',
           activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
@@ -272,7 +273,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
     assert.deepEqual(composeInputs, [check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
       message: { messageId, channelId, sequence, author, body, replyTo, mentions },
-      evidence: { status: 'running' }, source: { messageId: sourceA.messageId, body: sourceA.body },
+      evidence: { status: 'running', latestDelivery: 'Inventory source verified.', pendingObjectives: ['Cross-check the remaining items.'] },
+      source: { messageId: sourceA.messageId, body: sourceA.body },
     })));
     for (const input of canonicalDecisions.slice(1)) {
       assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);

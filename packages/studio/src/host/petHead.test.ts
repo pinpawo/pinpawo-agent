@@ -467,7 +467,7 @@ test('official Flash sends a committed review handoff to work and a matching sta
     decide: model.decide,
     progress: {
       readRun: () => assert.fail('idle has no active run'),
-      readSessionRunId: async () => assert.fail('idle must not read Session'),
+      readSessionRun: async () => assert.fail('idle must not read Session'),
       compose: model.composeReply,
     },
   });
@@ -589,7 +589,7 @@ test('only a verified status lookup fetches a missing active source; reuse a pub
         },
         progress: {
           readRun: () => ({ invocationId: active.dispatchId, sessionId: active.sessionId, requestId: 'run' }),
-          readSessionRunId: async key => { assert.equal(key, active.sessionId); calls.push('sample'); return 'run'; },
+          readSessionRun: async key => { assert.equal(key, active.sessionId); calls.push('sample'); return { requestId: 'run' }; },
           compose: async input => {
             calls.push('compose');
             assert.deepEqual(input.evidence, { status: 'running' });
@@ -782,7 +782,7 @@ test('a run switch during progress composition cannot publish A as B, and B admi
     decide: async () => ({ action: 'dispatch', reply: 'I received the calendar request.' }),
     progress: {
       readRun: () => ({ invocationId: dispatchId, requestId, sessionId: 'same-session' }),
-      readSessionRunId: async id => { assert.equal(id, 'same-session'); reads++; return requestId; },
+      readSessionRun: async id => { assert.equal(id, 'same-session'); reads++; return { requestId }; },
       compose: async input => {
         assert.deepEqual(input.evidence, { status: 'running' });
         // Even a different Host run in the same session/dispatch isn't A.
@@ -811,7 +811,7 @@ test('unrelated explicit reply targets are not replaced by the latest run', asyn
     decide: async () => ({ action: 'status' }),
     progress: {
       readRun: () => ({ invocationId: 'd', sessionId: 's', requestId: 'r' }),
-      readSessionRunId: async () => { reads++; return undefined; },
+      readSessionRun: async () => { reads++; return undefined; },
       compose: async input => {
         assert.deepEqual(input.evidence, { status: 'unavailable' });
         return 'I cannot confirm that work’s progress.';
@@ -851,11 +851,11 @@ test('an exact busy run is sampled once, while only a work request enters admiss
       decide: async () => { calls.push('decide'); return { action }; },
       progress: {
         readRun: entry => { assert.deepEqual(entry, active); return run; },
-        readSessionRunId: async (sessionId, _signal, isCurrent) => {
+        readSessionRun: async (sessionId, _signal, isCurrent) => {
           assert.equal(sessionId, active.sessionId);
           assert.equal(isCurrent(), true);
           calls.push('read');
-          return run.requestId;
+          return { requestId: run.requestId };
         },
         compose: async input => {
           assert.equal(input.message, incoming);
@@ -881,7 +881,7 @@ test('first-gate ignore and direct replies have no Session read even if the Pet 
       decide: async () => ({ action, ...(action === 'direct' ? { reply: 'I know.' } : {}) }),
       progress: {
         readRun: () => ({ invocationId: 'a', requestId: 'r', sessionId: 's' }),
-        readSessionRunId: async () => assert.fail('first-gate ignore/direct never read Session'),
+        readSessionRun: async () => assert.fail('first-gate ignore/direct never read Session'),
         compose: async () => assert.fail('first-gate ignore/direct never compose status'),
       },
     });
@@ -903,7 +903,7 @@ test('switching attempts before the first decision returns never reads the new a
     decide: async () => { requestId = 'attempt-b'; return { action: 'status' }; },
     progress: {
       readRun: () => ({ invocationId: active.dispatchId, sessionId: active.sessionId, requestId }),
-      readSessionRunId: async () => assert.fail('do not read B or use B as evidence for A'),
+      readSessionRun: async () => assert.fail('do not read B or use B as evidence for A'),
       compose: async input => {
         assert.deepEqual(input.evidence, { status: 'unavailable' });
         composed++;
@@ -937,7 +937,7 @@ test('unknown is not idle: no arbitrary read, while separately identified work c
       decide: async () => ({ action }),
       progress: {
         readRun: () => assert.fail('no exact ordinary slot is known'),
-        readSessionRunId: async () => assert.fail('do not open a Session without a verified run'),
+        readSessionRun: async () => assert.fail('do not open a Session without a verified run'),
         compose: async input => {
           assert.deepEqual(input.evidence, { status: 'unavailable' });
           calls.push('compose');
@@ -975,7 +975,7 @@ test('if the run changes inside the reply operation, its write guard blocks stal
     decide: async () => ({ action: 'dispatch' }),
     progress: {
       readRun: () => ({ invocationId: active.dispatchId, sessionId: active.sessionId, requestId }),
-      readSessionRunId: async () => requestId,
+      readSessionRun: async () => ({ requestId }),
       compose: async ({ evidence, source }) => {
         assert.deepEqual(evidence, { status: 'running' });
         assert.deepEqual(source, { messageId: original.messageId, body: original.body });
@@ -1006,7 +1006,7 @@ test('idle mixed request can acknowledge unconfirmed earlier work and dispatch B
     decide: async () => ({ action: 'dispatch', reply: 'I cannot confirm the earlier report’s progress.' }),
     progress: {
       readRun: () => assert.fail('there is no currently bound attempt'),
-      readSessionRunId: async () => assert.fail('idle work never reads Session'),
+      readSessionRun: async () => assert.fail('idle work never reads Session'),
       compose: async () => assert.fail('idle work never needs a second model call'),
     },
   });

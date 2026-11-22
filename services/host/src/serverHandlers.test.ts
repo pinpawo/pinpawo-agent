@@ -696,6 +696,66 @@ test('a run claims the register for the whole admitted turn', async () => {
   }
 });
 
+test('opt-in progress follows the admitted graph input and is dropped when the run settles during a read', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-bound-progress-'));
+  const sent: HostServerMessage[] = [];
+  const peer = createPeer(sent);
+  const start = deferred<void>();
+  const bind = deferred<void>();
+  const bound = deferred<void>();
+  const finish = deferred<void>();
+  const enteredRead = deferred<void>();
+  const releaseRead = deferred<void>();
+  const graphA = { runId: 'graph-a', taskId: 'task-a' };
+  const graphB = { runId: 'graph-b', taskId: 'task-b' };
+  let checkpoint = graphA;
+  let holdRead = false;
+  const graphService = {
+    readThreadState: async (_setup: unknown, requested?: typeof graphA) => {
+      if (holdRead) { holdRead = false; enteredRead.resolve(); await releaseRead.promise; }
+      return { messages: [], pendingInterrupt: null, currentPlan: null,
+        ...(requested?.runId === checkpoint.runId && requested.taskId === checkpoint.taskId
+          ? { runProgress: { latestDelivery: 'Verified B result.' } } : {}) };
+    },
+  } as unknown as HostGraphService;
+  const handlers = createChatHostHandlers({ petId: 'pet-a', runtimeConfig: buildHostRuntimeConfig(workdir),
+    ...createTestModelServerDeps() }, {
+    chatGraphService: graphService, loadContext: loadTestContext,
+    runAgentTurn: async ({ onRunInput }) => {
+      start.resolve(); await bind.promise;
+      onRunInput?.(graphB); bound.resolve(); await finish.promise;
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  try {
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, { type: 'session.snapshot.get', requestId: 'session-id' });
+    const initial = sent.find(x => x.type === 'session.snapshot.result' && x.requestId === 'session-id');
+    assert.ok(initial?.type === 'session.snapshot.result');
+    const sessionId = initial.snapshot.session.sessionId;
+    const run = handlers.runHostTurn(peer, { requestId: 'host-b', message: 'B' }, sessionId);
+    await start.promise;
+    const unbound = await handlers.readSessionSnapshot(sessionId, 1, true);
+    assert.equal(unbound.session.activeRun?.requestId, 'host-b');
+    assert.equal(unbound.runProgress, undefined);
+    bind.resolve(); await bound.promise;
+    assert.equal((await handlers.readSessionSnapshot(sessionId, 1, true)).runProgress, undefined, 'B may not read A checkpoint');
+    checkpoint = graphB;
+    const full = await handlers.readSessionSnapshot(sessionId, 1, true);
+    const ordinary = await handlers.readSessionSnapshot(sessionId, 1);
+    assert.deepEqual(full.runProgress, { latestDelivery: 'Verified B result.' });
+    assert.equal(ordinary.runProgress, undefined);
+    assert.deepEqual(full.session.timeline, ordinary.session.timeline);
+    holdRead = true;
+    const late = handlers.readSessionSnapshot(sessionId, 1, true);
+    await enteredRead.promise;
+    finish.resolve(); await run; releaseRead.resolve();
+    assert.equal((await late).runProgress, undefined);
+  } finally {
+    bind.resolve(); finish.resolve(); releaseRead.resolve();
+    handlers.close(); rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test('completion snapshot does not reintroduce a settled active run', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-snapshot-settled-'));
   const sent: HostServerMessage[] = [];

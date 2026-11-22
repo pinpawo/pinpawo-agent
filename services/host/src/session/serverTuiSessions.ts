@@ -22,6 +22,7 @@ import {
   buildChatSetup,
 } from '../agent/buildChatSetup';
 import { HostGraphService } from '../agent/agentGraphService';
+import type { OrchestratorRunIdentity } from '../agent/activeRunRegister';
 import { loadAgentContext } from '../contextLoader';
 import { FileSaver } from '../fileSaver';
 import type { ServerDeps } from '../serverTypes';
@@ -32,6 +33,7 @@ import {
 } from '../agent/chatMessageInput';
 import { ImageAttachmentAdmission } from '../agent/attachmentAdmission';
 import type { HostRuntimeConfig } from '../config/runtimeConfig';
+import type { PetSessionRunProgress } from '../host/contracts';
 import {
   createTuiSession,
   ensureDispatchSession,
@@ -80,6 +82,7 @@ export type TuiCheckpointPoint = {
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingInterrupt: ActivePendingInterrupt | null;
   currentPlan: AgentPlan | null;
+  runProgress?: PetSessionRunProgress;
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
@@ -296,6 +299,7 @@ export class ServerTuiSessionService {
   async readSessionCheckpointPoint(
     deps: ServerDeps,
     session: TuiSessionRecord,
+    progressRun?: OrchestratorRunIdentity,
   ): Promise<TuiCheckpointPoint> {
     const ctx = await this.loadContext(deps.petId);
     let checkpointReaderProfileId = session.modelProfileId;
@@ -313,7 +317,7 @@ export class ServerTuiSessionService {
       session.threadId,
       checkpointReaderProfileId,
     );
-    const state = await this.graphService.readThreadState(setup);
+    const state = await this.graphService.readThreadState(setup, progressRun);
     const pendingInterrupt = state.pendingInterrupt
       ? { sessionId: session.id, ...state.pendingInterrupt }
       : null;
@@ -325,6 +329,7 @@ export class ServerTuiSessionService {
       sessionTokenUsage: state.sessionTokenUsage ?? readTuiCheckpointTokenUsage(state.messages),
       pendingInterrupt,
       currentPlan: state.currentPlan,
+      ...(state.runProgress ? { runProgress: state.runProgress } : {}),
     };
   }
 

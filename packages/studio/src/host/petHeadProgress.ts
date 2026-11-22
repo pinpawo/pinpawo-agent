@@ -1,12 +1,14 @@
 import { addAbortListener } from 'node:events';
+import type { PetSessionRunProgress } from 'pinpawo/host-runtime';
 
 export type HeadRun = { invocationId: string; sessionId: string; requestId: string };
-export type HeadSessionRunReader = (sessionId: string, signal: AbortSignal, isCurrent: () => boolean) => Promise<string | undefined>;
-export type HeadProgressEvidence = { status: 'unavailable' | 'running' };
+export type HeadSessionRunReader = (sessionId: string, signal: AbortSignal, isCurrent: () => boolean, includeRunProgress?: true)
+  => Promise<{ requestId: string; runProgress?: PetSessionRunProgress } | undefined>;
+export type HeadProgressEvidence = { status: 'unavailable' } | ({ status: 'running' } & PetSessionRunProgress);
 
 /** Bound one status sample to its deadline, the caller's signal and the exact run. */
 export async function readHeadProgress(input: {
-  run: HeadRun; signal: AbortSignal; isCurrent: () => boolean; readSessionRunId: HeadSessionRunReader;
+  run: HeadRun; signal: AbortSignal; isCurrent: () => boolean; readSessionRun: HeadSessionRunReader; includeRunProgress?: true;
 }): Promise<HeadProgressEvidence> {
   const { run, isCurrent } = input;
   const unavailable = { status: 'unavailable' } as const;
@@ -17,8 +19,11 @@ export async function readHeadProgress(input: {
     const cancelled = new Promise<undefined>(resolve => {
       listener = addAbortListener(signal, () => resolve(undefined));
     });
-    const requestId = await Promise.race([input.readSessionRunId(run.sessionId, signal, isCurrent), cancelled]);
-    return !signal.aborted && isCurrent() && requestId === run.requestId ? { status: 'running' } : unavailable;
+    const sample = await Promise.race([input.readSessionRun(run.sessionId, signal, isCurrent, input.includeRunProgress), cancelled]);
+    if (signal.aborted || !isCurrent() || sample?.requestId !== run.requestId) return unavailable;
+    const progress = input.includeRunProgress ? sample.runProgress : undefined;
+    return { status: 'running', ...(progress?.latestDelivery ? { latestDelivery: progress.latestDelivery } : {}),
+      ...(progress?.pendingObjectives?.length ? { pendingObjectives: progress.pendingObjectives } : {}) };
   } catch {
     return unavailable;
   } finally {

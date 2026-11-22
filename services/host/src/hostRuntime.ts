@@ -33,6 +33,7 @@ export type {
   PetDispatchState,
   PetSessionPort,
   PetSessionReviewRequest,
+  PetSessionRunProgress,
   ResidentPet,
   ResidentPetCoordinatorOptions,
   ResidentPetHost,

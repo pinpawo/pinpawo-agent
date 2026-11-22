@@ -303,8 +303,11 @@ reply. A direct reply neither reads nor creates an Agent Session.
 When asked about an active ordinary dispatch, the Head uses the owning Pet's
 live queue slot and run event to identify it. After the Channel verifies
 membership and the exact Session binding, it reads one existing snapshot.
-Only the sampled status (running or unavailable) reaches the unbound reply
-model. No Session body or historical result is used. Reviewed work resuming
+The reply model receives the sampled status (running or unavailable). For a
+known Channel source, a snapshot that matches the same live request and graph
+run can also supply bounded prose from the latest formally returned Capability
+and the pending plan for that run. A Capability return is not task completion.
+No timeline text, raw tool output, or result from a prior run is used. Reviewed work resuming
 outside the ordinary dispatch slot is not sampled. Asking for progress alone
 never dispatches; independent work still goes through the usual queue without
 interrupting or changing the active execution.

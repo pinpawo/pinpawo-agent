@@ -9,10 +9,10 @@ import {
   agentNoticeToText,
   type AgentModelProfileSummary,
   type AgentRuntimeEvent,
-  type AgentSessionSnapshot,
   type AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import { ActiveRunRegister } from './agent/activeRunRegister';
+import type { PetSessionSnapshot } from './host/contracts';
 import type {
   HostSessionServerMessage,
   InterruptResumeMessage,
@@ -47,7 +47,7 @@ export type ServerHandlers = {
    * for a session this Pet does not own; it never falls back to the active
    * session and never creates one.
    */
-  readSessionSnapshot: (sessionId: string, timelineLimit?: number) => Promise<AgentSessionSnapshot>;
+  readSessionSnapshot: (sessionId: string, timelineLimit?: number, includeRunProgress?: true) => Promise<PetSessionSnapshot>;
   /**
    * Answer the current human review of one exact session, in that session's
    * own thread. Admission, validation and dispatch continuation are the same
@@ -219,16 +219,19 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number) => {
+  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number, includeRunProgress?: true) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
       throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
     }
+    const captured = includeRunProgress ? activeRuns.read(sessionId) : null;
+    const progressRun = captured ? activeRuns.readOrchestratorRun(captured) : undefined;
     const checkpoint = await readCheckpointAtRun(
-      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session),
+      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session, progressRun),
     );
-    return buildHostSessionSnapshot({
+    const activeRun = activeRuns.read(checkpoint.sessionId);
+    const snapshot = buildHostSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',
       messages: checkpoint.messages,
@@ -237,10 +240,13 @@ export function createChatHostHandlers(
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
-      activeRun: activeRuns.read(checkpoint.sessionId),
+      activeRun,
       currentPlan: checkpoint.currentPlan,
       timelineLimit,
     });
+    return captured && captured === activeRun && progressRun && activeRuns.readOrchestratorRun(captured) === progressRun
+      && !checkpoint.pendingInterrupt && checkpoint.runProgress
+      ? { ...snapshot, runProgress: checkpoint.runProgress } : snapshot;
   };
 
   const loadSnapshot = async (peer?: ServerPeer, timelineLimit?: number) => {
@@ -865,7 +871,9 @@ export function createChatHostHandlers(
         session?.id ?? tuiSessions.getActiveSessionId(requestDeps.petId),
       );
       try {
-        return await chatHandler.runHostTurn(peer, turn, requestDeps, session);
+        return await chatHandler.runHostTurn(peer, { ...turn,
+          onRunInput: identity => activeRuns.bindOrchestratorRun(activeRun, identity),
+        }, requestDeps, session);
       } finally {
         activeRuns.finish(activeRun);
       }

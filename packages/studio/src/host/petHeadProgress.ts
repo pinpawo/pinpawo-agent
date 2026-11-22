@@ -3,10 +3,9 @@ import type { PetSessionPort } from 'pinpawo/host-runtime';
 
 export type HeadRun = { invocationId: string; sessionId: string; requestId: string };
 type RecordedPlan = NonNullable<Awaited<ReturnType<PetSessionPort['snapshot']>>['session']['currentPlan']>;
-type SessionHistory = { latestDelivery?: string; recordedPlan?: RecordedPlan };
 export type HeadSessionRunReader = (sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
-  => Promise<({ requestId: string } & SessionHistory) | undefined>;
-export type HeadProgressEvidence = { status: 'unavailable' } | ({ status: 'running' } & SessionHistory);
+  => Promise<{ requestId: string; recordedPlan?: RecordedPlan } | undefined>;
+export type HeadProgressEvidence = { status: 'unavailable' } | { status: 'running'; recordedPlan?: RecordedPlan };
 
 /** Bound one status sample to its deadline, the caller's signal and the exact run. */
 export async function readHeadProgress(input: {
@@ -23,8 +22,7 @@ export async function readHeadProgress(input: {
     });
     const sample = await Promise.race([input.readSessionRun(run.sessionId, signal, isCurrent), cancelled]);
     if (signal.aborted || !isCurrent() || sample?.requestId !== run.requestId) return unavailable;
-    const { latestDelivery, recordedPlan } = sample;
-    return { status: 'running', ...(latestDelivery ? { latestDelivery } : {}), ...(recordedPlan ? { recordedPlan } : {}) };
+    return { status: 'running', ...(sample.recordedPlan ? { recordedPlan: sample.recordedPlan } : {}) };
   } catch {
     return unavailable;
   } finally {

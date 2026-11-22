@@ -203,18 +203,19 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     });
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
     resident.sessions.snapshot = async (sessionId, options) => {
-      assert.deepEqual(options, { timelineLimit: 1, includeLatestDelivery: true });
+      assert.deepEqual(options, { timelineLimit: 1 });
       sessionReads.push(sessionId);
       if (switchDuringRead) activeDispatch = switchDuringRead;
       return {
         version: 5,
-        latestDelivery: 'Previous request: inventory source verified.',
         session: {
           sessionId, kind: 'chat',
           activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
           pendingInterrupt: reviewPending ? { interruptId: 'review-pending', payload: { kind: 'human_review', interactions: [] } } : null,
           currentPlan: { items: [
-            { id: 'old', capability: 'internal', task: 'Earlier recorded cross-check.', status: 'active' },
+            { id: 'one', capability: 'internal', task: 'Gather inputs.', status: 'completed' },
+            { id: 'two', capability: 'internal', task: 'Check the report.', status: 'active' },
+            { id: 'three', capability: 'internal', task: 'Verify the figures.', status: 'pending' },
             { id: 'secret', capability: 'internal', task: 'password: synthetic-private-plan', status: 'pending' },
           ] },
           timeline: [
@@ -283,8 +284,11 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
     assert.deepEqual(composeInputs, [check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
       message: { messageId, channelId, sequence, author, body, replyTo, mentions },
-      evidence: { status: 'running', latestDelivery: 'Previous request: inventory source verified.',
-        recordedPendingObjectives: ['Earlier recorded cross-check.'] },
+      evidence: { status: 'running', plan: [
+        { status: 'completed', description: 'Gather inputs.' },
+        { status: 'active', description: 'Check the report.' },
+        { status: 'pending', description: 'Verify the figures.' },
+      ] },
       source: { messageId: sourceA.messageId, body: sourceA.body },
     })));
     for (const input of canonicalDecisions.slice(1)) {
@@ -334,7 +338,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const duringReview = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(duringReview.messageId));
     assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'running' },
-      'pending review may not expose recorded Session history');
+      'pending review may not expose the recorded plan');
     assert.equal(admissions.length, 2);
 
     // A resumed review emits dispatch.running, but executes as a conversation

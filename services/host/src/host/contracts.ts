@@ -160,9 +160,8 @@ export type PetSessionReadOptions = {
 };
 
 export interface PetSessionPort {
-  /** The authoritative snapshot. A formal delivery is opt-in for trusted in-process readers, not active-run proof. */
-  snapshot(sessionId: string, options?: PetSessionReadOptions & { includeLatestDelivery?: true })
-    : Promise<AgentSessionSnapshot & { latestDelivery?: string }>;
+  /** The session's authoritative snapshot. */
+  snapshot(sessionId: string, options?: PetSessionReadOptions): Promise<AgentSessionSnapshot>;
   /**
    * Follow one session. The first message is a `session.snapshot.result`;
    * every later one is a message of that session only, in order. Messages

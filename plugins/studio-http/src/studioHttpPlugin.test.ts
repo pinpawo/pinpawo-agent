@@ -763,7 +763,7 @@ function sessionHarness() {
     snapshot: async (_petId, sessionId, options) => {
       reads.push(['snapshot', options]);
       if (sessionId !== 'pet:0000000b') throw notFound(sessionId);
-      return (options?.includeLatestDelivery ? { ...snapshot, latestDelivery: 'internal test delivery' } : snapshot) as never;
+      return snapshot as never;
     },
     observe: async (_petId, sessionId, listener, options) => {
       reads.push(['observe', options]);
@@ -821,7 +821,7 @@ test('HTTP Plugin reads and follows one exact Pet session', async (t) => {
   assert.equal(listeners.size, 0);
 });
 
-test('HTTP Plugin passes timeline limit to the Host but not the internal delivery opt-in', async (t) => {
+test('HTTP Plugin passes a session read\'s timeline limit to the Host', async (t) => {
   const { harness, reads } = sessionHarness();
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
   await plugin.start(harness.context);
@@ -832,15 +832,13 @@ test('HTTP Plugin passes timeline limit to the Host but not the internal deliver
   const base = '?petId=pet&sessionId=pet%3A0000000b';
 
   assert.equal((await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}`), { headers })).status, 200);
-  const snapshot = await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}&timelineLimit=100&includeLatestDelivery=true`), { headers });
-  assert.equal(snapshot.status, 200);
-  assert.equal((await snapshot.json()).snapshot.latestDelivery, undefined);
+  assert.equal((await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}&timelineLimit=100`), { headers })).status, 200);
   for (const bad of ['0', '-1', '1.5', 'ten', '']) {
     const refused: Response = await fetch(pluginUrl(address.port, `/pet-sessions/snapshot${base}&timelineLimit=${bad}`), { headers });
     assert.equal(refused.status, 400, bad);
   }
   const abort = new AbortController();
-  const stream = await fetch(pluginUrl(address.port, `/pet-sessions/events${base}&timelineLimit=50&includeLatestDelivery=true`), { headers, signal: abort.signal });
+  const stream = await fetch(pluginUrl(address.port, `/pet-sessions/events${base}&timelineLimit=50`), { headers, signal: abort.signal });
   assert.equal(stream.status, 200);
   abort.abort();
   await stream.body?.cancel().catch(() => undefined);

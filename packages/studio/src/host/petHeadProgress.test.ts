@@ -48,15 +48,13 @@ test('one exact Session status sample yields only running', async () => {
   assert.deepEqual(result, { status: 'running' });
 });
 
-test('previous Session delivery and recorded plan remain separate from verified live request status', async () => {
-  const history = { latestDelivery: 'A previously delivered.', recordedPlan: {
-    items: [{ id: 'old', capability: 'check', task: 'Earlier plan objective', status: 'pending' as const }],
-  } };
-  const readSessionRun = async () => ({ requestId: run.requestId, ...history });
+test('the recorded Session plan remains separate from verified live request status', async () => {
+  const recordedPlan = { items: [{ id: 'old', capability: 'check', task: 'Earlier plan objective', status: 'pending' as const }] };
+  const readSessionRun = async () => ({ requestId: run.requestId, recordedPlan });
   assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, readSessionRun }),
-    { status: 'running', ...history });
+    { status: 'running', recordedPlan });
   assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true,
-    readSessionRun: async () => ({ requestId: 'older-attempt', ...history }) }), { status: 'unavailable' });
+    readSessionRun: async () => ({ requestId: 'older-attempt', recordedPlan }) }), { status: 'unavailable' });
 });
 
 test('no active status, changed run, abort and read failure yield unavailable without another sample', async () => {
@@ -71,7 +69,7 @@ test('no active status, changed run, abort and read failure yield unavailable wi
         if (failure === 'abort') controller.abort();
         if (failure === 'lost') current = false;
         if (failure === 'not-running') return undefined;
-        return { requestId: failure === 'different-run' ? 'run-b' : run.requestId, latestDelivery: 'Must not leak' };
+        return { requestId: failure === 'different-run' ? 'run-b' : run.requestId, recordedPlan: { items: [{ id: 'other', capability: 'work', task: 'Must not leak', status: 'pending' }] } };
       } });
     assert.deepEqual(result, { status: 'unavailable' }, failure);
     assert.equal(reads, 1);

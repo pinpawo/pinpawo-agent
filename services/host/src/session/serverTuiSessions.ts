@@ -80,11 +80,11 @@ export type TuiCheckpointPoint = {
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingInterrupt: ActivePendingInterrupt | null;
   currentPlan: AgentPlan | null;
-  latestDelivery?: string;
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
 type TuiSessionGraphService = Pick<HostGraphService, 'readThreadState'>;
+
 
 export class ServerTuiSessionService {
   private readonly state: TuiSessionState;
@@ -296,7 +296,6 @@ export class ServerTuiSessionService {
   async readSessionCheckpointPoint(
     deps: ServerDeps,
     session: TuiSessionRecord,
-    includeLatestDelivery?: true,
   ): Promise<TuiCheckpointPoint> {
     const ctx = await this.loadContext(deps.petId);
     let checkpointReaderProfileId = session.modelProfileId;
@@ -315,17 +314,6 @@ export class ServerTuiSessionService {
       checkpointReaderProfileId,
     );
     const state = await this.graphService.readThreadState(setup);
-    let latestDelivery: string | undefined;
-    if (includeLatestDelivery) {
-      try {
-        // Optional in-process evidence from this Session, not its active request.
-        latestDelivery = readCapabilityExecutions(state.messages)
-          .filter(({ result }) => result.status === 'returned' && result.delivery !== null)
-          .at(-1)?.result.delivery?.text;
-      } catch {
-        // An invalid execution record is not evidence. Ordinary status still works.
-      }
-    }
     const pendingInterrupt = state.pendingInterrupt
       ? { sessionId: session.id, ...state.pendingInterrupt }
       : null;
@@ -337,7 +325,6 @@ export class ServerTuiSessionService {
       sessionTokenUsage: state.sessionTokenUsage ?? readTuiCheckpointTokenUsage(state.messages),
       pendingInterrupt,
       currentPlan: state.currentPlan,
-      ...(latestDelivery ? { latestDelivery } : {}),
     };
   }
 

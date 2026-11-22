@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import type { AgentPlan } from '@pinpawo/agent-session';
-import { createCapabilityExecutionMessage } from '@pinpawo/pet-agent/testing';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import {
   stampAgentMessageCreatedAt,
 } from '@pinpawo/pet-agent';
@@ -286,74 +284,6 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.equal(checkpoint.sessionTokenUsage, null);
   assert.equal(capturedThreadId, session.threadId);
   assert.equal(readCount, 1);
-});
-
-async function readCheckpoint(messages: BaseMessage[], currentPlan: AgentPlan | null, includeLatestDelivery?: true) {
-  const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-session-progress-test');
-  const service = new ServerTuiSessionService({
-    runtimeConfig,
-    state: createEmptyTuiSessionState(),
-    saveState: () => {},
-    checkpointer: new MemorySaver(),
-    graphService: { readThreadState: async () => ({ messages, currentPlan, pendingInterrupt: null, acceptsResume: false }) },
-    loadContext: async () => ({ pet: { id: 'pet-a', name: 'Paw' } }),
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
-  });
-  const deps = { runtimeConfig, petId: 'pet-a', ...createTestModelServerDeps() };
-  return service.readSessionCheckpointPoint(deps, service.getActiveSession('pet-a'), includeLatestDelivery);
-}
-
-const receiptScope = { runId: 'current', taskId: 'current-task' };
-const olderReceipt = { runId: 'older', taskId: 'older-task' };
-
-function returnedCapability(n: string, text: string, identity = receiptScope, privateLane?: string) {
-  const metadata = { ...identity, lane: privateLane };
-  const callId = `call:${n}`;
-  const tool = new AIMessage({ content: '', additional_kwargs: { pinpawo: metadata },
-    tool_calls: [{ id: callId, name: 'delegate_capability', args: { briefing: 'PRIVATE_BRIEFING' } }] });
-  return [tool, createCapabilityExecutionMessage({ callId, metadata,
-    execution: { planItemId: n, capability: 'general', task: 'PRIVATE_TITLE', delegationId: n, briefing: 'PRIVATE_BRIEFING' },
-    result: { status: 'returned', deliverables: [{ uri: 'artifact://private/x' }],
-      delivery: { id: n, task: 'PRIVATE_TITLE', text, scope: { ...identity, lane: 'capability:general', delegationId: n } } },
-  })];
-}
-
-const recordedPlan = (...items: Array<[AgentPlan['items'][number]['status'], string]>): AgentPlan => ({
-  items: items.map(([status, task], index) => ({ id: String(index), capability: 'general', task, status })),
-});
-
-test('latest formal root delivery and recorded plan are distinct Session evidence', async () => {
-  const messages = [...returnedCapability('0', 'Previous delivery', olderReceipt), ...returnedCapability('1', 'Earlier finding.'),
-    ...returnedCapability('2', 'A verified; two sources agree.\n```json\n{"raw":"no"}\n```'),
-    ...returnedCapability('3', 'Nested result', receiptScope, 'capability:general'),
-    new ToolMessage({ name: 'not_a_handoff', tool_call_id: '4', content: 'RAW TOOL OUTPUT' })];
-  const plan = recordedPlan(['completed', 'A'], ['active', 'Verify B']);
-  const ordinary = await readCheckpoint(messages, plan);
-  const optedIn = await readCheckpoint(messages, plan, true);
-  assert.equal(ordinary.latestDelivery, undefined);
-  assert.ok(optedIn.latestDelivery?.startsWith('A verified; two sources agree.'));
-  assert.deepEqual(optedIn.currentPlan, ordinary.currentPlan);
-  assert.deepEqual(optedIn.currentPlan, plan);
-  assert.deepEqual(optedIn.messages, ordinary.messages);
-});
-
-test('uses the Session’s previous Root delivery until the Session records a newer one', async () => {
-  const previous = returnedCapability('1', 'Previous delivery', olderReceipt);
-  const previousPlan = recordedPlan(['pending', 'Previous objective']);
-  const checkpoint = await readCheckpoint(previous, previousPlan, true);
-  assert.equal(checkpoint.latestDelivery, 'Previous delivery');
-  assert.deepEqual(checkpoint.currentPlan, previousPlan);
-  const requested = new AIMessage({ content: '', additional_kwargs: { pinpawo: receiptScope },
-    tool_calls: [{ id: 'unreturned', name: 'delegate_capability', args: { briefing: 'NOT RETURNED' } }] });
-  assert.equal((await readCheckpoint([...previous, requested], null, true)).latestDelivery, 'Previous delivery');
-  assert.equal((await readCheckpoint([...previous, ...returnedCapability('2', 'New delivery')], null, true)).latestDelivery, 'New delivery');
-});
-
-test('no delivery is selected when only the recorded plan exists', async () => {
-  const plan = recordedPlan(['pending', 'Check B']);
-  const checkpoint = await readCheckpoint([], plan, true);
-  assert.equal(checkpoint.latestDelivery, undefined);
-  assert.deepEqual(checkpoint.currentPlan, plan);
 });
 
 test('reserved dispatch sessions retry failed persistence without changing the active TUI session', () => {

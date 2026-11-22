@@ -9,10 +9,10 @@ import {
   agentNoticeToText,
   type AgentModelProfileSummary,
   type AgentRuntimeEvent,
+  type AgentSessionSnapshot,
   type AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import { ActiveRunRegister } from './agent/activeRunRegister';
-import type { PetSessionPort } from './host/contracts';
 import type {
   HostSessionServerMessage,
   InterruptResumeMessage,
@@ -47,7 +47,7 @@ export type ServerHandlers = {
    * for a session this Pet does not own; it never falls back to the active
    * session and never creates one.
    */
-  readSessionSnapshot: PetSessionPort['snapshot'];
+  readSessionSnapshot: (sessionId: string, timelineLimit?: number) => Promise<AgentSessionSnapshot>;
   /**
    * Answer the current human review of one exact session, in that session's
    * own thread. Admission, validation and dispatch continuation are the same
@@ -219,18 +219,16 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot: PetSessionPort['snapshot'] = async (sessionId, options) => {
+  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
       throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
     }
-    const captured = options?.includeLatestDelivery ? activeRuns.read(sessionId) : null;
     const checkpoint = await readCheckpointAtRun(
-      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session, captured ? true : undefined),
+      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session),
     );
-    const activeRun = activeRuns.read(checkpoint.sessionId);
-    const snapshot = buildHostSessionSnapshot({
+    return buildHostSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',
       messages: checkpoint.messages,
@@ -239,12 +237,10 @@ export function createChatHostHandlers(
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
-      activeRun,
+      activeRun: activeRuns.read(checkpoint.sessionId),
       currentPlan: checkpoint.currentPlan,
-      timelineLimit: options?.timelineLimit,
+      timelineLimit,
     });
-    return captured && captured === activeRun && !checkpoint.pendingInterrupt && checkpoint.latestDelivery
-      ? { ...snapshot, latestDelivery: checkpoint.latestDelivery } : snapshot;
   };
 
   const loadSnapshot = async (peer?: ServerPeer, timelineLimit?: number) => {

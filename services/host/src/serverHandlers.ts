@@ -12,7 +12,7 @@ import {
   type AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import { ActiveRunRegister } from './agent/activeRunRegister';
-import type { PetSessionSnapshot } from './host/contracts';
+import type { PetSessionPort } from './host/contracts';
 import type {
   HostSessionServerMessage,
   InterruptResumeMessage,
@@ -47,7 +47,7 @@ export type ServerHandlers = {
    * for a session this Pet does not own; it never falls back to the active
    * session and never creates one.
    */
-  readSessionSnapshot: (sessionId: string, timelineLimit?: number, includeSessionProgress?: true) => Promise<PetSessionSnapshot>;
+  readSessionSnapshot: PetSessionPort['snapshot'];
   /**
    * Answer the current human review of one exact session, in that session's
    * own thread. Admission, validation and dispatch continuation are the same
@@ -219,13 +219,13 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number, includeSessionProgress?: true) => {
+  const readSessionSnapshot: PetSessionPort['snapshot'] = async (sessionId, options) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
       throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
     }
-    const captured = includeSessionProgress ? activeRuns.read(sessionId) : null;
+    const captured = options?.includeLatestDelivery ? activeRuns.read(sessionId) : null;
     const checkpoint = await readCheckpointAtRun(
       () => tuiSessions.readSessionCheckpointPoint(requestDeps, session, captured ? true : undefined),
     );
@@ -241,10 +241,10 @@ export function createChatHostHandlers(
       pendingInterrupt: chatHandler.buildPendingInterruptSnapshot(requestDeps, checkpoint.pendingInterrupt),
       activeRun,
       currentPlan: checkpoint.currentPlan,
-      timelineLimit,
+      timelineLimit: options?.timelineLimit,
     });
-    return captured && captured === activeRun && !checkpoint.pendingInterrupt && checkpoint.sessionProgress
-      ? { ...snapshot, sessionProgress: checkpoint.sessionProgress } : snapshot;
+    return captured && captured === activeRun && !checkpoint.pendingInterrupt && checkpoint.latestDelivery
+      ? { ...snapshot, latestDelivery: checkpoint.latestDelivery } : snapshot;
   };
 
   const loadSnapshot = async (peer?: ServerPeer, timelineLimit?: number) => {

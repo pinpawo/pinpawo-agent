@@ -288,7 +288,7 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.equal(readCount, 1);
 });
 
-async function readSessionProgress(messages: BaseMessage[], currentPlan: AgentPlan | null, includeSessionProgress?: true) {
+async function readCheckpoint(messages: BaseMessage[], currentPlan: AgentPlan | null, includeLatestDelivery?: true) {
   const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-session-progress-test');
   const service = new ServerTuiSessionService({
     runtimeConfig,
@@ -300,7 +300,7 @@ async function readSessionProgress(messages: BaseMessage[], currentPlan: AgentPl
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const deps = { runtimeConfig, petId: 'pet-a', ...createTestModelServerDeps() };
-  return (await service.readSessionCheckpointPoint(deps, service.getActiveSession('pet-a'), includeSessionProgress)).sessionProgress;
+  return service.readSessionCheckpointPoint(deps, service.getActiveSession('pet-a'), includeLatestDelivery);
 }
 
 const receiptScope = { runId: 'current', taskId: 'current-task' };
@@ -327,38 +327,33 @@ test('latest formal root delivery and recorded plan are distinct Session evidenc
     ...returnedCapability('2', 'A verified; two sources agree.\n```json\n{"raw":"no"}\n```'),
     ...returnedCapability('3', 'Nested result', receiptScope, 'capability:general'),
     new ToolMessage({ name: 'not_a_handoff', tool_call_id: '4', content: 'RAW TOOL OUTPUT' })];
-  assert.deepEqual(await readSessionProgress(messages, recordedPlan(['completed', 'A'], ['active', 'Verify B']), true), {
-    latestDelivery: 'A verified; two sources agree.', recordedPendingObjectives: ['Verify B'],
-  });
+  const plan = recordedPlan(['completed', 'A'], ['active', 'Verify B']);
+  const ordinary = await readCheckpoint(messages, plan);
+  const optedIn = await readCheckpoint(messages, plan, true);
+  assert.equal(ordinary.latestDelivery, undefined);
+  assert.ok(optedIn.latestDelivery?.startsWith('A verified; two sources agree.'));
+  assert.deepEqual(optedIn.currentPlan, ordinary.currentPlan);
+  assert.deepEqual(optedIn.currentPlan, plan);
+  assert.deepEqual(optedIn.messages, ordinary.messages);
 });
 
 test('uses the Session’s previous Root delivery until the Session records a newer one', async () => {
   const previous = returnedCapability('1', 'Previous delivery', olderReceipt);
   const previousPlan = recordedPlan(['pending', 'Previous objective']);
-  assert.deepEqual(await readSessionProgress(previous, previousPlan, true), {
-    latestDelivery: 'Previous delivery', recordedPendingObjectives: ['Previous objective'],
-  });
+  const checkpoint = await readCheckpoint(previous, previousPlan, true);
+  assert.equal(checkpoint.latestDelivery, 'Previous delivery');
+  assert.deepEqual(checkpoint.currentPlan, previousPlan);
   const requested = new AIMessage({ content: '', additional_kwargs: { pinpawo: receiptScope },
     tool_calls: [{ id: 'unreturned', name: 'delegate_capability', args: { briefing: 'NOT RETURNED' } }] });
-  assert.deepEqual(await readSessionProgress([...previous, requested], null, true), { latestDelivery: 'Previous delivery' });
-  assert.deepEqual(await readSessionProgress([...previous, ...returnedCapability('2', 'New delivery')], null, true), { latestDelivery: 'New delivery' });
+  assert.equal((await readCheckpoint([...previous, requested], null, true)).latestDelivery, 'Previous delivery');
+  assert.equal((await readCheckpoint([...previous, ...returnedCapability('2', 'New delivery')], null, true)).latestDelivery, 'New delivery');
 });
 
-test('returns recorded plan when no eligible handoff and withholds secret text without replaying an earlier result', async () => {
-  const pending = recordedPlan(['pending', 'Check B']);
-  const messages = [...returnedCapability('1', 'Earlier A'), ...returnedCapability('2', 'api_key: fake-private-sample')];
-  assert.deepEqual(await readSessionProgress(messages, pending, true), { recordedPendingObjectives: ['Check B'] });
-  assert.deepEqual(await readSessionProgress([], pending, true), { recordedPendingObjectives: ['Check B'] });
-  assert.equal(await readSessionProgress([], null, true), undefined);
-});
-
-test('bounds prose and removes artifact links and local paths before transport', async () => {
-  const messages = returnedCapability('1', `Results recorded in [proof](artifact://private/123) /Users/t/private.md. ${'z'.repeat(700)}`);
-  assert.equal(await readSessionProgress(messages, null), undefined);
-  const progress = await readSessionProgress(messages, null, true);
-  assert.ok(progress?.latestDelivery);
-  assert.equal(progress.latestDelivery.length, 641);
-  assert.doesNotMatch(progress.latestDelivery, /artifact:|Users|private\.md|PRIVATE_/);
+test('no delivery is selected when only the recorded plan exists', async () => {
+  const plan = recordedPlan(['pending', 'Check B']);
+  const checkpoint = await readCheckpoint([], plan, true);
+  assert.equal(checkpoint.latestDelivery, undefined);
+  assert.deepEqual(checkpoint.currentPlan, plan);
 });
 
 test('reserved dispatch sessions retry failed persistence without changing the active TUI session', () => {

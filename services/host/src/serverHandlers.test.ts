@@ -738,9 +738,10 @@ test('opt-in Session progress can read A during B, stays in the bound Session, a
     await handlers.peerHandlers.onSessionNew(peer, { type: 'session.new', requestId });
     const created = sent.find(x => x.type === 'session.new.result' && x.requestId === requestId);
     assert.ok(created?.type === 'session.new.result');
-    await handlers.readSessionSnapshot(created.session.id, 1);
+    await handlers.readSessionSnapshot(created.session.id, { timelineLimit: 1 });
     return { id: created.session.id, thread: readThread };
   };
+  const withDelivery = { timelineLimit: 1, includeLatestDelivery: true } as const;
   try {
     const a = await createSession('session-a');
     const other = await createSession('session-other');
@@ -749,25 +750,25 @@ test('opt-in Session progress can read A during B, stays in the bound Session, a
     messagesByThread.set(other.thread, returned('other', 'Another Session result.'));
     const run = handlers.runHostTurn(peer, { requestId: 'host-b', message: 'B' }, a.id);
     await started.promise;
-    const early = await handlers.readSessionSnapshot(a.id, 1, true);
-    const ordinary = await handlers.readSessionSnapshot(a.id, 1);
+    const early = await handlers.readSessionSnapshot(a.id, withDelivery);
+    const ordinary = await handlers.readSessionSnapshot(a.id, { timelineLimit: 1 });
     assert.equal(early.session.activeRun?.requestId, 'host-b');
-    assert.deepEqual(early.sessionProgress, { latestDelivery: 'A returned in this Session.' });
-    assert.equal(ordinary.sessionProgress, undefined);
+    assert.equal(early.latestDelivery, 'A returned in this Session.');
+    assert.equal(ordinary.latestDelivery, undefined);
     assert.deepEqual(early.session.timeline, ordinary.session.timeline);
 
-    const unrelated = await handlers.readSessionSnapshot(other.id, 1, true);
+    const unrelated = await handlers.readSessionSnapshot(other.id, withDelivery);
     assert.equal(unrelated.session.activeRun, null);
-    assert.equal(unrelated.sessionProgress, undefined, 'an active request for A must not expose another Session’s result');
-    await assert.rejects(handlers.readSessionSnapshot('unknown-session', 1, true), { code: 'session_not_found' });
+    assert.equal(unrelated.latestDelivery, undefined, 'an active request for A must not expose another Session’s result');
+    await assert.rejects(handlers.readSessionSnapshot('unknown-session', withDelivery), { code: 'session_not_found' });
 
     messagesByThread.set(a.thread, [...messagesByThread.get(a.thread)!, ...returned('b', 'B later returned.')]);
-    assert.deepEqual((await handlers.readSessionSnapshot(a.id, 1, true)).sessionProgress, { latestDelivery: 'B later returned.' });
+    assert.equal((await handlers.readSessionSnapshot(a.id, withDelivery)).latestDelivery, 'B later returned.');
     holdRead = true;
-    const late = handlers.readSessionSnapshot(a.id, 1, true);
+    const late = handlers.readSessionSnapshot(a.id, withDelivery);
     await enteredRead.promise;
     finish.resolve(); await run; releaseRead.resolve();
-    assert.equal((await late).sessionProgress, undefined, 'no status evidence after the active request settles');
+    assert.equal((await late).latestDelivery, undefined, 'no status evidence after the active request settles');
   } finally {
     finish.resolve(); releaseRead.resolve();
     handlers.close(); rmSync(workdir, { recursive: true, force: true });

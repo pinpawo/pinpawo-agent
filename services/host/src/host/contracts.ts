@@ -159,13 +159,10 @@ export type PetSessionReadOptions = {
   timelineLimit?: number;
 };
 
-/** Bounded evidence from the exact Session’s checkpoint, not attributed to its active request. */
-export type PetSessionProgress = { latestDelivery?: string; recordedPendingObjectives?: string[] };
-export type PetSessionSnapshot = AgentSessionSnapshot & { sessionProgress?: PetSessionProgress };
-
 export interface PetSessionPort {
-  /** The session's authoritative snapshot. */
-  snapshot(sessionId: string, options?: PetSessionReadOptions & { includeSessionProgress?: true }): Promise<PetSessionSnapshot>;
+  /** The authoritative snapshot. A formal delivery is opt-in for trusted in-process readers, not active-run proof. */
+  snapshot(sessionId: string, options?: PetSessionReadOptions & { includeLatestDelivery?: true })
+    : Promise<AgentSessionSnapshot & { latestDelivery?: string }>;
   /**
    * Follow one session. The first message is a `session.snapshot.result`;
    * every later one is a message of that session only, in order. Messages

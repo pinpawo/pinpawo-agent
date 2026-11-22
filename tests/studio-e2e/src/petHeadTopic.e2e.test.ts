@@ -194,6 +194,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     let activeDispatch: PetDispatchQueueSnapshot['activeDispatch'];
     let switchDuringRead: PetDispatchQueueSnapshot['activeDispatch'];
     let continuingAfterReview = false;
+    let reviewPending = false;
     resident.resident.dispatch.getQueueSnapshot = () => ({
       state: activeDispatch || continuingAfterReview ? 'busy' : 'open',
       activeOperation: activeDispatch ? 'dispatch' : null,
@@ -202,17 +203,20 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     });
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
     resident.sessions.snapshot = async (sessionId, options) => {
-      assert.deepEqual(options, { timelineLimit: 1, includeSessionProgress: true });
+      assert.deepEqual(options, { timelineLimit: 1, includeLatestDelivery: true });
       sessionReads.push(sessionId);
       if (switchDuringRead) activeDispatch = switchDuringRead;
       return {
         version: 5,
-        sessionProgress: { latestDelivery: 'Previous request: inventory source verified.', recordedPendingObjectives: ['Earlier recorded cross-check.'] },
+        latestDelivery: 'Previous request: inventory source verified.',
         session: {
           sessionId, kind: 'chat',
           activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
-          pendingInterrupt: null,
-          currentPlan: { items: [{ id: 'old', capability: 'internal', task: 'private stale plan', status: 'active' }] },
+          pendingInterrupt: reviewPending ? { interruptId: 'review-pending', payload: { kind: 'human_review', interactions: [] } } : null,
+          currentPlan: { items: [
+            { id: 'old', capability: 'internal', task: 'Earlier recorded cross-check.', status: 'active' },
+            { id: 'secret', capability: 'internal', task: 'password: synthetic-private-plan', status: 'pending' },
+          ] },
           timeline: [
             { type: 'message', id: 'old-text', role: 'assistant', text: 'private checkpoint text', status: 'completed' },
             {
@@ -250,8 +254,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     });
     lifecycle('running');
     const liveSignal = new AbortController().signal;
-    assert.equal(await channel.head.readProgressSession(ownerChannelId, 'alpha', 'wrong-session', liveSignal, () => true, true), undefined);
-    await assert.rejects(channel.head.readProgressSession(owners.beta!, 'alpha', a.session.id, liveSignal, () => true, true), {
+    assert.equal(await channel.head.readProgressSession(ownerChannelId, 'alpha', 'wrong-session', liveSignal, () => true), undefined);
+    await assert.rejects(channel.head.readProgressSession(owners.beta!, 'alpha', a.session.id, liveSignal, () => true), {
       message: `pet:alpha is not a member of Channel "${owners.beta}".`,
     });
     assert.equal(sessionReads.length, 0, 'a foreign Session or Channel must not be read');
@@ -279,8 +283,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
     assert.deepEqual(composeInputs, [check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
       message: { messageId, channelId, sequence, author, body, replyTo, mentions },
-      evidence: { status: 'running', sessionProgress: { latestDelivery: 'Previous request: inventory source verified.',
-        recordedPendingObjectives: ['Earlier recorded cross-check.'] } },
+      evidence: { status: 'running', latestDelivery: 'Previous request: inventory source verified.',
+        recordedPendingObjectives: ['Earlier recorded cross-check.'] },
       source: { messageId: sourceA.messageId, body: sourceA.body },
     })));
     for (const input of canonicalDecisions.slice(1)) {
@@ -324,9 +328,19 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'unavailable' });
     assert.equal(admissions.length, 2);
 
+    switchDuringRead = undefined;
+    reviewPending = true;
+    activeDispatch = activeA;
+    const duringReview = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(duringReview.messageId));
+    assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'running' },
+      'pending review may not expose recorded Session history');
+    assert.equal(admissions.length, 2);
+
     // A resumed review emits dispatch.running, but executes as a conversation
     // hold and does not occupy the ordinary dispatch queue slot.
-    switchDuringRead = undefined;
+    reviewPending = false;
+    const readsBeforeApproval = sessionReads.length;
     lifecycle('waiting');
     activeDispatch = undefined;
     continuingAfterReview = true;
@@ -334,7 +348,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const approvalFollowup = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(approvalFollowup.messageId));
     assert.equal(replyFor(approvalFollowup.messageId)?.body, 'I cannot verify the current status.');
-    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'continuation is outside the ordinary dispatch slot');
+    assert.equal(sessionReads.length, readsBeforeApproval, 'continuation is outside the ordinary dispatch slot');
     assert.equal(admissions.length, 2);
 
     const beforeOfficial = decisions.alpha!.length;

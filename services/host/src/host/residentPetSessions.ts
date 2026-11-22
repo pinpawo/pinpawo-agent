@@ -35,9 +35,9 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
   };
   // An answer is being resumed; the next one waits for its outcome.
   let reviewing = false;
-  const readSnapshot = async (sessionId: string, timelineLimit?: number, includeSessionProgress?: true) => {
+  const readSnapshot: PetSessionPort['snapshot'] = async (sessionId, options) => {
     try {
-      return await context.localHandlers.readSessionSnapshot(sessionId, timelineLimit, includeSessionProgress);
+      return await context.localHandlers.readSessionSnapshot(sessionId, options);
     } catch (error) {
       throw readSessionNotFound(error, sessionId);
     }
@@ -46,7 +46,7 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
   return {
     snapshot: async (sessionId, options) => {
       assertOpen();
-      return readSnapshot(sessionId, options?.timelineLimit, options?.includeSessionProgress);
+      return readSnapshot(sessionId, options);
     },
     observe: async (sessionId, listener, options) => {
       assertOpen();
@@ -58,7 +58,7 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
         else listener(message);
       });
       try {
-        const snapshot = await readSnapshot(sessionId, options?.timelineLimit);
+        const snapshot = await readSnapshot(sessionId, { timelineLimit: options?.timelineLimit });
         listener({ type: 'session.snapshot.result', requestId: randomUUID(), snapshot });
         const pending = buffered;
         buffered = null;

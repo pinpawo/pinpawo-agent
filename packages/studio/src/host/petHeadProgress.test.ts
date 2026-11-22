@@ -49,13 +49,14 @@ test('one exact Session status sample yields only running', async () => {
 });
 
 test('previous Session delivery and recorded plan remain separate from verified live request status', async () => {
-  const sessionProgress = { latestDelivery: 'A previously delivered.', recordedPendingObjectives: ['Earlier plan objective'] };
-  const readSessionRun = async () => ({ requestId: run.requestId, sessionProgress });
-  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, readSessionRun }), { status: 'running' });
-  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, readSessionRun, includeSessionProgress: true }),
-    { status: 'running', sessionProgress });
-  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, includeSessionProgress: true,
-    readSessionRun: async () => ({ requestId: 'older-attempt', sessionProgress }) }), { status: 'unavailable' });
+  const history = { latestDelivery: 'A previously delivered.', recordedPlan: {
+    items: [{ id: 'old', capability: 'check', task: 'Earlier plan objective', status: 'pending' as const }],
+  } };
+  const readSessionRun = async () => ({ requestId: run.requestId, ...history });
+  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, readSessionRun }),
+    { status: 'running', ...history });
+  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true,
+    readSessionRun: async () => ({ requestId: 'older-attempt', ...history }) }), { status: 'unavailable' });
 });
 
 test('no active status, changed run, abort and read failure yield unavailable without another sample', async () => {
@@ -63,14 +64,14 @@ test('no active status, changed run, abort and read failure yield unavailable wi
     const controller = new AbortController();
     let current = true;
     let reads = 0;
-    const result = await readHeadProgress({ run, signal: controller.signal, isCurrent: () => current, includeSessionProgress: true,
+    const result = await readHeadProgress({ run, signal: controller.signal, isCurrent: () => current,
       readSessionRun: async () => {
         reads++;
         if (failure === 'error') throw new Error('private checkpoint path');
         if (failure === 'abort') controller.abort();
         if (failure === 'lost') current = false;
         if (failure === 'not-running') return undefined;
-        return { requestId: failure === 'different-run' ? 'run-b' : run.requestId, sessionProgress: { latestDelivery: 'Must not leak' } };
+        return { requestId: failure === 'different-run' ? 'run-b' : run.requestId, latestDelivery: 'Must not leak' };
       } });
     assert.deepEqual(result, { status: 'unavailable' }, failure);
     assert.equal(reads, 1);

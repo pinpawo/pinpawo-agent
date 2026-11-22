@@ -725,19 +725,46 @@ test('the status model sees checked status and separately recorded Session histo
   const current = message('20', { author: { kind: 'pet', id: 'reviewer' }, body: 'Check the status of this report.',
     mentions, replyTo: '12', externalRef: 'internal-delivery-ref', deliverables: [{ uri: 'https://example.test/internal-report' }] });
   const source = { messageId: '12', body: 'Prepare the report.' };
-  const sessionProgress = { latestDelivery: 'A different report was delivered earlier.',
-    recordedPendingObjectives: ['Check earlier figures.'], requestId: 'internal-request-id' };
+  const history = { latestDelivery: 'A different report was delivered earlier.', requestId: 'internal-request-id',
+    recordedPlan: { items: [
+      { id: 'plan-storage-id', capability: 'internal', task: 'Check earlier figures.', status: 'active' as const },
+      { id: 'done', capability: 'internal', task: 'Completed old item.', status: 'completed' as const },
+      { id: 'sensitive', capability: 'internal', task: 'password: synthetic-private-plan', status: 'pending' as const },
+    ] },
+  };
   const mock = mockEndpoint([new AIMessage('The report is still running.')]);
   const reply = await createHeadModel(() => mock.endpoint).composeReply({
-    message: current, evidence: { status: 'running', sessionProgress }, source,
+    message: current, evidence: { status: 'running', ...history }, source,
   }, new AbortController().signal);
   assert.equal(reply, 'The report is still running.');
   assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
     message: { channelId: current.channelId, messageId: current.messageId, sequence: current.sequence, author: current.author,
       body: current.body, replyTo: source.messageId, attachmentCount: 1, mentions },
-    evidence: { status: 'running', sessionProgress: { latestDelivery: sessionProgress.latestDelivery,
-      recordedPendingObjectives: sessionProgress.recordedPendingObjectives } }, source,
+    evidence: { status: 'running', latestDelivery: history.latestDelivery,
+      recordedPendingObjectives: ['Check earlier figures.'] }, source,
   });
+});
+
+test('the model cannot see unverified or withheld Session text, and safe excerpts are bounded', async () => {
+  const current = message('21');
+  const source = { messageId: '12', body: 'Prepare the report.' };
+  const mock = mockEndpoint([new AIMessage('running'), new AIMessage('running'), new AIMessage('running')]);
+  const compose = createHeadModel(() => mock.endpoint).composeReply;
+  const signal = new AbortController().signal;
+  const recordedPlan = { items: [
+    { id: 'i1', capability: 'work', task: 'Check the earlier facts.', status: 'pending' as const },
+    { id: 'i2', capability: 'work', task: 'credential password: synthetic-fixture', status: 'pending' as const },
+  ] };
+  const withheld = { status: 'running' as const, latestDelivery: 'api_key: synthetic-private-result', recordedPlan };
+  await compose({ message: current, evidence: withheld }, signal);
+  await compose({ message: current, evidence: withheld, source }, signal);
+  const safe = `Proof [file](artifact://private/123) /Users/t/private.md.\n\`\`\`json\n{"raw":"no"}\n\`\`\`\n${'z'.repeat(700)}`;
+  await compose({ message: current, evidence: { status: 'running', latestDelivery: safe }, source }, signal);
+  const inputs = mock.calls.map(call => JSON.parse((call.messages as string[][])[1]![1]!).evidence);
+  assert.deepEqual(inputs[0], { status: 'running' });
+  assert.deepEqual(inputs[1], { status: 'running', recordedPendingObjectives: ['Check the earlier facts.'] });
+  assert.equal(inputs[2].latestDelivery.length, 641);
+  assert.doesNotMatch(inputs[2].latestDelivery, /artifact:|Users|private\.md|"raw"/);
 });
 
 test('failed or cancelled progress composition does not return late or partial prose', async () => {

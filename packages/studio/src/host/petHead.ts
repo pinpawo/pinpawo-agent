@@ -216,12 +216,12 @@ export function createPetHead(options: {
             reference.replyTo === active.messageId && reference.externalRef === `head-reply:${active.messageId}`);
         try {
           let evidence = targetsActive && run && progress.readSessionRun && isCurrent()
-            ? await readHeadProgress({ run, signal, isCurrent, readSessionRun: progress.readSessionRun,
-              ...(active?.messageId ? { includeSessionProgress: true } : {}) })
+            ? await readHeadProgress({ run, signal, isCurrent, readSessionRun: progress.readSessionRun })
             : { status: 'unavailable' as const };
           if (signal.aborted) return;
           let source: HeadMessage | undefined;
           const sourceId = active?.messageId;
+          if (evidence.status === 'running' && !sourceId) evidence = { status: 'running' };
           if (evidence.status === 'running' && sourceId) {
             const isSource = (candidate: HeadMessage | undefined) =>
               candidate?.messageId === sourceId && candidate.channelId === message.channelId;

@@ -1,6 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { Deliverable } from '@pinpawo/agent-contracts';
+import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
@@ -61,14 +62,12 @@ export type ChannelPlugin = StudioPlugin & {
   head: ChannelHeadPort;
 };
 
-type ChannelSessionProgress = Awaited<ReturnType<StudioPluginContext['petSessions']['snapshot']>>['sessionProgress'];
-
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
   dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal) => Promise<void>;
-  readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean,
-    includeSessionProgress?: true) => Promise<{ requestId: string; sessionProgress?: ChannelSessionProgress } | undefined>;
+  readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
+    => Promise<{ requestId: string; latestDelivery?: string; recordedPlan?: AgentPlan } | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -237,7 +236,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
-    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent, includeSessionProgress) => {
+    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {
       const service = channelService();
       const studio = host();
       const authorized = async () => {
@@ -248,11 +247,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           binding?.registered === true && binding.sessionId === sessionId;
       };
       if (!await authorized()) return;
-      const { session, sessionProgress } = await studio.petSessions.snapshot(petId, sessionId, {
-        timelineLimit: 1, ...(includeSessionProgress ? { includeSessionProgress } : {}),
+      const { session, latestDelivery } = await studio.petSessions.snapshot(petId, sessionId, {
+        timelineLimit: 1, includeLatestDelivery: true,
       });
       if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
-        return { requestId: session.activeRun.requestId, ...(includeSessionProgress && sessionProgress ? { sessionProgress } : {}) };
+        return { requestId: session.activeRun.requestId,
+          ...(!session.pendingInterrupt ? { latestDelivery, recordedPlan: session.currentPlan ?? undefined } : {}) };
       }
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {

@@ -83,7 +83,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
   } finally { await studio.shutdown(); }
 });
 
-test('duplicate Pet externalRef emits only one event to another live Head', async () => {
+test('a live Head consumes Agent output once and a human reply, but not an automated Head reply', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
   const observed: string[] = [];
   const prepared = prepareStudio({
@@ -114,9 +114,14 @@ test('duplicate Pet externalRef emits only one event to another live Head', asyn
     assert.equal(first.created, true);
     assert.equal(duplicate.created, false);
     assert.equal(duplicate.message.messageId, first.message.messageId);
+    await channel.head.reply(channelId, source.id, first.message.messageId, 'automated ack', new AbortController().signal);
+    const timeline = (await channel.service.readContext(human, channelId)).messages;
+    const ack = timeline.find(message => message.body === 'automated ack');
+    assert.ok(ack, 'the automated reply is still visible in the Timeline');
+    await channel.service.postMessage(human, channelId, { body: 'thanks', replyTo: ack.messageId });
     await channel.service.postMessage(human, channelId, { body: 'barrier' });
     await waitFor(() => observed.includes('barrier'));
-    assert.deepEqual(observed, ['first output', 'barrier']);
+    assert.deepEqual(observed, ['first output', 'thanks', 'barrier']);
   } finally { await studio.shutdown(); }
 });
 

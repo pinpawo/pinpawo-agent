@@ -34,7 +34,7 @@ flowchart LR
 
 本节替代 `458f3952` 及之前的动作初判说明；[此前的时序图](https://github.com/pinpawo/pinpawo-agent/blob/fec24f028d54ecb6b214881269b220739a2eab11/docs/design/studio/pet-head-mechanism.md#L51-L127)作为历史设计保留，不代表当前可接纳行为。
 
-当前消息中的服务端解析 `@Pet` 建立相关性，跳过模型的相关性判断；它不是工作授权，也不意味着必须回复或派发。没有规范点名时，`assessRelevance` 只返回 `{ relevant: boolean }`，不含动作、回复或任务重写。相关的消息才进入后续状态分支；不相关则静默。Human 与 Pet 使用同一语义判断，不按作者类别压制参与。
+当前消息中的服务端解析 `@Pet` 建立相关性，跳过模型的相关性判断；它不是工作授权，也不意味着必须回复或派发。没有规范点名时，`assessRelevance` 只返回 `{ relevant: boolean }`，不含动作、回复或任务重写。相关的消息才进入后续状态分支；不相关则静默。Human 消息与 Pet Agent 的正式消息使用同一语义判断。Head 自动回复仍显示在 Timeline 中，但不触发其他 Head；用户引用它发出的新消息照常处理。
 
 | 运行代码核对的状态 | 后续行为 |
 | --- | --- |

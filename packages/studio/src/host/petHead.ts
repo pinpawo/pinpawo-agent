@@ -183,6 +183,9 @@ export function createPetHead(options: {
   return async (message, signal) => {
     if (signal.aborted || message.channelId !== options.pet.channelId || !message.author ||
       (message.author.kind === 'pet' && message.author.id === options.pet.petId)) return;
+    // Automated Head replies stay in the Timeline but never trigger another Head.
+    if (message.author.kind === 'pet' && message.replyTo &&
+      message.externalRef === `head-reply:${message.replyTo}`) return;
     // The exclusive bound keeps the current message out of its own history.
     const context = await options.channel.readContext(options.pet.petId, message.sequence, message.replyTo);
     if (signal.aborted) return;

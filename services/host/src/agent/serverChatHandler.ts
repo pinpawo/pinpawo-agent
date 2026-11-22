@@ -15,7 +15,6 @@ import {
 } from './agentStreamEvents';
 import {
   runAgentSessionTurn,
-  type AgentSessionTurnOptions,
   type AgentSessionTurnRequest,
 } from './chatSessionAdapter';
 import {
@@ -75,7 +74,6 @@ type ChatTurnSource =
 type ChatTurnHooks = {
   /** Decorates this turn's run, as a dispatch adds its own attribution. */
   runAgentTurn?: RunAgentSessionTurn;
-  onRunInput?: AgentSessionTurnOptions['onRunInput'];
   /** Receives the error behind a `failed` or `fatal_failed` outcome. */
   onFailure?: (error: unknown) => void;
   /** Receives the native review a cancelled run settled into. */
@@ -277,8 +275,7 @@ export class ServerChatHandler {
    */
   async runHostTurn(
     peer: ServerPeer,
-    turn: { requestId: string; message: string; artifactReferences?: readonly Deliverable[]; runAgentTurn?: RunAgentSessionTurn;
-      onRunInput?: AgentSessionTurnOptions['onRunInput'] },
+    turn: { requestId: string; message: string; artifactReferences?: readonly Deliverable[]; runAgentTurn?: RunAgentSessionTurn },
     deps: ServerDeps,
     target?: ChatTurnTarget,
   ): Promise<HostTurnOutcome> {
@@ -291,7 +288,6 @@ export class ServerChatHandler {
       ...(turn.artifactReferences ? { artifactReferences: turn.artifactReferences } : {}),
     }, deps, { type: 'host_dispatch' }, target, {
       ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
-      ...(turn.onRunInput ? { onRunInput: turn.onRunInput } : {}),
       onFailure: (failure) => { error = failure; },
       onSettledInterrupt: (pending) => { pendingInterrupt = pending; },
     });
@@ -506,7 +502,6 @@ export class ServerChatHandler {
         setup,
         graphService: this.graphService,
         isCurrent,
-        ...(hooks.onRunInput ? { onRunInput: hooks.onRunInput } : {}),
         emitEvent: (event) => {
           if (!isCurrent()) return;
           this.publishRuntimeEvent(peer, event);

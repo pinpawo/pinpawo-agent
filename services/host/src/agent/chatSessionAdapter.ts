@@ -44,7 +44,6 @@ import {
   type RootProtocolEvent,
 } from '../events/rootStreamEventAdapter';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
-import type { OrchestratorRunIdentity } from './activeRunRegister';
 import {
   currentPlansEqual,
   projectCurrentPlan,
@@ -76,8 +75,6 @@ export type AgentSessionTurnOptions = {
   isCurrent: () => boolean;
   emitEvent: (event: AgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
-  /** Binds a new graph input to the caller's exact live turn, not a checkpoint guess. */
-  onRunInput?: (identity: OrchestratorRunIdentity) => void;
   /**
    * Receives a delegation's `subagent_operations` announcement so the
    * caller's operation registry can join display metadata for
@@ -375,7 +372,7 @@ export async function runAgentSessionTurn(
       if (!isCurrent()) return;
       latestSessionUsage = usage;
       emitEvent({ type: 'usage.updated', requestId, usage: { ...usage, scope: 'session' } });
-    }, options.onRunInput);
+    });
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {

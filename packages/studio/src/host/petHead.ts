@@ -217,7 +217,7 @@ export function createPetHead(options: {
         try {
           let evidence = targetsActive && run && progress.readSessionRun && isCurrent()
             ? await readHeadProgress({ run, signal, isCurrent, readSessionRun: progress.readSessionRun,
-              ...(active?.messageId ? { includeRunProgress: true } : {}) })
+              ...(active?.messageId ? { includeSessionProgress: true } : {}) })
             : { status: 'unavailable' as const };
           if (signal.aborted) return;
           let source: HeadMessage | undefined;

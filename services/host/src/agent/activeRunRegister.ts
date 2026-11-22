@@ -2,7 +2,6 @@ import type { AgentRunView } from '@pinpawo/agent-session';
 
 /** The run currently holding this Host, in the protocol's own shape. */
 export type ActiveRun = Extract<AgentRunView, { state: 'running' }>;
-export type OrchestratorRunIdentity = Readonly<{ runId: string; taskId: string }>;
 
 /**
  * The one record of which run is in flight.
@@ -37,20 +36,11 @@ export type OrchestratorRunIdentity = Readonly<{ runId: string; taskId: string }
 export class ActiveRunRegister {
   private current: ActiveRun | null = null;
   private sessionId: string | undefined;
-  private orchestratorRun: OrchestratorRunIdentity | undefined;
 
   /** The run in flight, or null. */
   read(sessionId?: string): ActiveRun | null {
     if (sessionId && this.sessionId && sessionId !== this.sessionId) return null;
     return this.current;
-  }
-
-  bindOrchestratorRun(run: ActiveRun, identity: OrchestratorRunIdentity): void {
-    if (this.current === run) this.orchestratorRun = { ...identity };
-  }
-
-  readOrchestratorRun(run: ActiveRun): OrchestratorRunIdentity | undefined {
-    return this.current === run ? this.orchestratorRun : undefined;
   }
 
   /**
@@ -72,7 +62,6 @@ export class ActiveRunRegister {
     };
     this.current = run;
     this.sessionId = sessionId;
-    this.orchestratorRun = undefined;
     return run;
   }
 
@@ -80,13 +69,11 @@ export class ActiveRunRegister {
   finish(run: ActiveRun): void {
     if (this.current === run) {
       this.current = null;
-      this.orchestratorRun = undefined;
     }
   }
 
   /** Release unconditionally, for a Host tearing down. */
   clear(): void {
     this.current = null;
-    this.orchestratorRun = undefined;
   }
 }

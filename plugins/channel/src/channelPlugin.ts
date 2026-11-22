@@ -61,14 +61,14 @@ export type ChannelPlugin = StudioPlugin & {
   head: ChannelHeadPort;
 };
 
-type ChannelRunProgress = Awaited<ReturnType<StudioPluginContext['petSessions']['snapshot']>>['runProgress'];
+type ChannelSessionProgress = Awaited<ReturnType<StudioPluginContext['petSessions']['snapshot']>>['sessionProgress'];
 
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
   dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal) => Promise<void>;
   readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean,
-    includeRunProgress?: true) => Promise<{ requestId: string; runProgress?: ChannelRunProgress } | undefined>;
+    includeSessionProgress?: true) => Promise<{ requestId: string; sessionProgress?: ChannelSessionProgress } | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -237,7 +237,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
-    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent, includeRunProgress) => {
+    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent, includeSessionProgress) => {
       const service = channelService();
       const studio = host();
       const authorized = async () => {
@@ -248,11 +248,11 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           binding?.registered === true && binding.sessionId === sessionId;
       };
       if (!await authorized()) return;
-      const { session, runProgress } = await studio.petSessions.snapshot(petId, sessionId, {
-        timelineLimit: 1, ...(includeRunProgress ? { includeRunProgress } : {}),
+      const { session, sessionProgress } = await studio.petSessions.snapshot(petId, sessionId, {
+        timelineLimit: 1, ...(includeSessionProgress ? { includeSessionProgress } : {}),
       });
       if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
-        return { requestId: session.activeRun.requestId, ...(includeRunProgress && runProgress ? { runProgress } : {}) };
+        return { requestId: session.activeRun.requestId, ...(includeSessionProgress && sessionProgress ? { sessionProgress } : {}) };
       }
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {

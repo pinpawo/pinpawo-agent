@@ -720,19 +720,23 @@ test('progress composition uses only SDK text without binding tools or retrying'
   }
 });
 
-test('the status model sees checked evidence and public addressing, not storage or file metadata', async () => {
+test('the status model sees checked status and separately recorded Session history, not storage or file metadata', async () => {
   const mentions = [{ participantId: 'pet:a', label: 'Analyst' }];
   const current = message('20', { author: { kind: 'pet', id: 'reviewer' }, body: 'Check the status of this report.',
     mentions, replyTo: '12', externalRef: 'internal-delivery-ref', deliverables: [{ uri: 'https://example.test/internal-report' }] });
   const source = { messageId: '12', body: 'Prepare the report.' };
+  const sessionProgress = { latestDelivery: 'A different report was delivered earlier.',
+    recordedPendingObjectives: ['Check earlier figures.'], requestId: 'internal-request-id' };
   const mock = mockEndpoint([new AIMessage('The report is still running.')]);
-  const reply = await createHeadModel(() => mock.endpoint).composeReply({ message: current, evidence: { status: 'running' }, source },
-    new AbortController().signal);
+  const reply = await createHeadModel(() => mock.endpoint).composeReply({
+    message: current, evidence: { status: 'running', sessionProgress }, source,
+  }, new AbortController().signal);
   assert.equal(reply, 'The report is still running.');
   assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
     message: { channelId: current.channelId, messageId: current.messageId, sequence: current.sequence, author: current.author,
       body: current.body, replyTo: source.messageId, attachmentCount: 1, mentions },
-    evidence: { status: 'running' }, source,
+    evidence: { status: 'running', sessionProgress: { latestDelivery: sessionProgress.latestDelivery,
+      recordedPendingObjectives: sessionProgress.recordedPendingObjectives } }, source,
   });
 });
 

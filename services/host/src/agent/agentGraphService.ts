@@ -17,9 +17,6 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Command, type GraphRunStream } from '@langchain/langgraph';
 import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
-import type { PetSessionRunProgress } from '../host/contracts';
-import { projectRunProgress } from '../conversation/runProgressProjection';
-import type { OrchestratorRunIdentity } from './activeRunRegister';
 import { HOST_INTERFACE_CONFIG_KEY } from '../chatInterface';
 import { projectCurrentPlan } from '../conversation/currentPlanProjection';
 import { createLangfuseCallbacks } from '../langfuseTracing';
@@ -82,7 +79,6 @@ export type HostGraphThreadState = {
    */
   acceptsResume: boolean;
   currentPlan: AgentPlan | null;
-  runProgress?: PetSessionRunProgress;
 };
 
 function acceptsResume(snapshot: unknown) {
@@ -166,7 +162,6 @@ export class HostGraphService {
     setup: AgentChannelSetup,
     resume?: InterruptResume,
     onUsage?: (usage: TokenUsageSnapshot) => void,
-    onRunInput?: (identity: OrchestratorRunIdentity) => void,
   ): Promise<HostGraphEventStream> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
@@ -182,12 +177,10 @@ export class HostGraphService {
       ? createSessionUsageTracker({ store, threadId, onUsage,
           baseline: store.readSessionUsage(threadId) ? undefined : await this.readLegacyUsageBaseline(setup),
         }) : null;
-    const input = resume === undefined
-      ? buildOrchestratorRunInput(setup.input.messages, setup.input)
-      : buildResumeCommand(resume);
-    if ('runId' in input) onRunInput?.({ runId: input.runId, taskId: input.taskId });
     return await graph.streamEvents(
-      input as Parameters<OrchestratorGraph['streamEvents']>[0],
+      (resume === undefined
+        ? buildOrchestratorRunInput(setup.input.messages, setup.input)
+        : buildResumeCommand(resume)) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
         ...buildAgentGraphRunConfig(setup),
@@ -224,11 +217,10 @@ export class HostGraphService {
     return ledger ? { ...summarizeSessionUsage(ledger), scope: 'session' } : undefined;
   }
 
-  async readThreadState(setup: AgentChannelSetup, progressRun?: OrchestratorRunIdentity): Promise<HostGraphThreadState> {
+  async readThreadState(setup: AgentChannelSetup): Promise<HostGraphThreadState> {
     const snapshot = await this.getRawState(setup);
     const values = readSnapshotValues(snapshot);
     const usage = this.readSessionTokenUsage(setup);
-    const runProgress = progressRun ? projectRunProgress(values, progressRun) : undefined;
     return {
       ...(usage ? { sessionTokenUsage: { ...usage,
         latestInputTokens: readLatestProviderInputTokens(mainConversationMessages(readSnapshotMessages(snapshot))) ?? undefined,
@@ -237,7 +229,6 @@ export class HostGraphService {
       pendingInterrupt: readPendingInterrupt(snapshot),
       acceptsResume: acceptsResume(snapshot),
       currentPlan: projectCurrentPlan(values),
-      ...(runProgress ? { runProgress } : {}),
     };
   }
 

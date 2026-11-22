@@ -202,12 +202,12 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     });
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
     resident.sessions.snapshot = async (sessionId, options) => {
-      assert.deepEqual(options, { timelineLimit: 1, includeRunProgress: true });
+      assert.deepEqual(options, { timelineLimit: 1, includeSessionProgress: true });
       sessionReads.push(sessionId);
       if (switchDuringRead) activeDispatch = switchDuringRead;
       return {
         version: 5,
-        runProgress: { latestDelivery: 'Inventory source verified.', pendingObjectives: ['Cross-check the remaining items.'] },
+        sessionProgress: { latestDelivery: 'Previous request: inventory source verified.', recordedPendingObjectives: ['Earlier recorded cross-check.'] },
         session: {
           sessionId, kind: 'chat',
           activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
@@ -249,6 +249,12 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
         requestId: 'opaque-live-request', ...extra },
     });
     lifecycle('running');
+    const liveSignal = new AbortController().signal;
+    assert.equal(await channel.head.readProgressSession(ownerChannelId, 'alpha', 'wrong-session', liveSignal, () => true, true), undefined);
+    await assert.rejects(channel.head.readProgressSession(owners.beta!, 'alpha', a.session.id, liveSignal, () => true, true), {
+      message: `pet:alpha is not a member of Channel "${owners.beta}".`,
+    });
+    assert.equal(sessionReads.length, 0, 'a foreign Session or Channel must not be read');
     const elsewhere = await post('Unrelated request for another Pet.');
     const directWhileBusy = await post(direct);
     await waitFor(() => handled.includes(elsewhere.messageId) && !!replyFor(directWhileBusy.messageId));
@@ -273,7 +279,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
     assert.deepEqual(composeInputs, [check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
       message: { messageId, channelId, sequence, author, body, replyTo, mentions },
-      evidence: { status: 'running', latestDelivery: 'Inventory source verified.', pendingObjectives: ['Cross-check the remaining items.'] },
+      evidence: { status: 'running', sessionProgress: { latestDelivery: 'Previous request: inventory source verified.',
+        recordedPendingObjectives: ['Earlier recorded cross-check.'] } },
       source: { messageId: sourceA.messageId, body: sourceA.body },
     })));
     for (const input of canonicalDecisions.slice(1)) {

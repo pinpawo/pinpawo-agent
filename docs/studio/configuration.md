@@ -304,10 +304,11 @@ When asked about an active ordinary dispatch, the Head uses the owning Pet's
 live queue slot and run event to identify it. After the Channel verifies
 membership and the exact Session binding, it reads one existing snapshot.
 The reply model receives the sampled status (running or unavailable). For a
-known Channel source, a snapshot that matches the same live request and graph
-run can also supply bounded prose from the latest formally returned Capability
-and the pending plan for that run. A Capability return is not task completion.
-No timeline text, raw tool output, or result from a prior run is used. Reviewed work resuming
+known Channel source, the same read can also supply bounded prose from the
+exact bound Session: its latest formally returned Capability delivery and the
+latest recorded unfinished plan objectives. These can predate the live request.
+They are not proof of that execution’s plan, progress, or completion. No
+timeline text or raw tool output is used. Reviewed work resuming
 outside the ordinary dispatch slot is not sampled. Asking for progress alone
 never dispatches; independent work still goes through the usual queue without
 interrupting or changing the active execution.

@@ -47,7 +47,7 @@ export {
   type PetDispatchState,
   type PetSessionPort,
   type PetSessionReviewRequest,
-  type PetSessionRunProgress,
+  type PetSessionProgress,
   type ResidentPet,
   type ResidentPetCoordinatorOptions,
   type ResidentPetHost,

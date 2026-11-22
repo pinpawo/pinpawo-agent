@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { createCapabilityExecutionMessage } from '@pinpawo/pet-agent/testing';
+import type { AgentChannelSetup } from './agent/agentChannel';
 import type { HostGraphService } from './agent/agentGraphService';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { createChatHostHandlers as createProductionChatHostHandlers } from './serverHandlers';
@@ -696,62 +698,78 @@ test('a run claims the register for the whole admitted turn', async () => {
   }
 });
 
-test('opt-in progress follows the admitted graph input and is dropped when the run settles during a read', async () => {
-  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-bound-progress-'));
+test('opt-in Session progress can read A during B, stays in the bound Session, and drops on settle', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-session-progress-'));
   const sent: HostServerMessage[] = [];
   const peer = createPeer(sent);
-  const start = deferred<void>();
-  const bind = deferred<void>();
-  const bound = deferred<void>();
+  const started = deferred<void>();
   const finish = deferred<void>();
   const enteredRead = deferred<void>();
   const releaseRead = deferred<void>();
-  const graphA = { runId: 'graph-a', taskId: 'task-a' };
-  const graphB = { runId: 'graph-b', taskId: 'task-b' };
-  let checkpoint = graphA;
+  const messagesByThread = new Map<string, BaseMessage[]>();
   let holdRead = false;
+  let readThread = '';
   const graphService = {
-    readThreadState: async (_setup: unknown, requested?: typeof graphA) => {
+    readThreadState: async ({ input: { threadId } }: AgentChannelSetup) => {
+      assert.ok(threadId);
+      readThread = threadId;
       if (holdRead) { holdRead = false; enteredRead.resolve(); await releaseRead.promise; }
-      return { messages: [], pendingInterrupt: null, currentPlan: null,
-        ...(requested?.runId === checkpoint.runId && requested.taskId === checkpoint.taskId
-          ? { runProgress: { latestDelivery: 'Verified B result.' } } : {}) };
+      return { messages: messagesByThread.get(threadId) ?? [], pendingInterrupt: null, currentPlan: null };
     },
   } as unknown as HostGraphService;
   const handlers = createChatHostHandlers({ petId: 'pet-a', runtimeConfig: buildHostRuntimeConfig(workdir),
     ...createTestModelServerDeps() }, {
     chatGraphService: graphService, loadContext: loadTestContext,
-    runAgentTurn: async ({ onRunInput }) => {
-      start.resolve(); await bind.promise;
-      onRunInput?.(graphB); bound.resolve(); await finish.promise;
-      return { status: 'completed', reply: 'done' };
-    },
+    runAgentTurn: async () => { started.resolve(); await finish.promise; return { status: 'completed', reply: 'done' }; },
   });
+  const returned = (id: string, text: string) => {
+    const metadata = { runId: `graph-${id}`, taskId: `task-${id}` };
+    return [
+      new AIMessage({ content: '', additional_kwargs: { pinpawo: metadata },
+        tool_calls: [{ id, name: 'delegate_capability', args: {} }] }),
+      createCapabilityExecutionMessage({ callId: id, metadata,
+        execution: { planItemId: id, capability: 'general', task: text, delegationId: id, briefing: 'internal' },
+        result: { status: 'returned', deliverables: [],
+          delivery: { id, task: text, text, scope: { ...metadata, lane: 'capability:general', delegationId: id } } },
+      }),
+    ];
+  };
+  const createSession = async (requestId: string) => {
+    await handlers.peerHandlers.onSessionNew(peer, { type: 'session.new', requestId });
+    const created = sent.find(x => x.type === 'session.new.result' && x.requestId === requestId);
+    assert.ok(created?.type === 'session.new.result');
+    await handlers.readSessionSnapshot(created.session.id, 1);
+    return { id: created.session.id, thread: readThread };
+  };
   try {
-    await handlers.peerHandlers.onSessionSnapshotGet(peer, { type: 'session.snapshot.get', requestId: 'session-id' });
-    const initial = sent.find(x => x.type === 'session.snapshot.result' && x.requestId === 'session-id');
-    assert.ok(initial?.type === 'session.snapshot.result');
-    const sessionId = initial.snapshot.session.sessionId;
-    const run = handlers.runHostTurn(peer, { requestId: 'host-b', message: 'B' }, sessionId);
-    await start.promise;
-    const unbound = await handlers.readSessionSnapshot(sessionId, 1, true);
-    assert.equal(unbound.session.activeRun?.requestId, 'host-b');
-    assert.equal(unbound.runProgress, undefined);
-    bind.resolve(); await bound.promise;
-    assert.equal((await handlers.readSessionSnapshot(sessionId, 1, true)).runProgress, undefined, 'B may not read A checkpoint');
-    checkpoint = graphB;
-    const full = await handlers.readSessionSnapshot(sessionId, 1, true);
-    const ordinary = await handlers.readSessionSnapshot(sessionId, 1);
-    assert.deepEqual(full.runProgress, { latestDelivery: 'Verified B result.' });
-    assert.equal(ordinary.runProgress, undefined);
-    assert.deepEqual(full.session.timeline, ordinary.session.timeline);
+    const a = await createSession('session-a');
+    const other = await createSession('session-other');
+    assert.notEqual(a.thread, other.thread);
+    messagesByThread.set(a.thread, returned('a', 'A returned in this Session.'));
+    messagesByThread.set(other.thread, returned('other', 'Another Session result.'));
+    const run = handlers.runHostTurn(peer, { requestId: 'host-b', message: 'B' }, a.id);
+    await started.promise;
+    const early = await handlers.readSessionSnapshot(a.id, 1, true);
+    const ordinary = await handlers.readSessionSnapshot(a.id, 1);
+    assert.equal(early.session.activeRun?.requestId, 'host-b');
+    assert.deepEqual(early.sessionProgress, { latestDelivery: 'A returned in this Session.' });
+    assert.equal(ordinary.sessionProgress, undefined);
+    assert.deepEqual(early.session.timeline, ordinary.session.timeline);
+
+    const unrelated = await handlers.readSessionSnapshot(other.id, 1, true);
+    assert.equal(unrelated.session.activeRun, null);
+    assert.equal(unrelated.sessionProgress, undefined, 'an active request for A must not expose another Session’s result');
+    await assert.rejects(handlers.readSessionSnapshot('unknown-session', 1, true), { code: 'session_not_found' });
+
+    messagesByThread.set(a.thread, [...messagesByThread.get(a.thread)!, ...returned('b', 'B later returned.')]);
+    assert.deepEqual((await handlers.readSessionSnapshot(a.id, 1, true)).sessionProgress, { latestDelivery: 'B later returned.' });
     holdRead = true;
-    const late = handlers.readSessionSnapshot(sessionId, 1, true);
+    const late = handlers.readSessionSnapshot(a.id, 1, true);
     await enteredRead.promise;
     finish.resolve(); await run; releaseRead.resolve();
-    assert.equal((await late).runProgress, undefined);
+    assert.equal((await late).sessionProgress, undefined, 'no status evidence after the active request settles');
   } finally {
-    bind.resolve(); finish.resolve(); releaseRead.resolve();
+    finish.resolve(); releaseRead.resolve();
     handlers.close(); rmSync(workdir, { recursive: true, force: true });
   }
 });

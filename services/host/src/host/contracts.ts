@@ -159,13 +159,13 @@ export type PetSessionReadOptions = {
   timelineLimit?: number;
 };
 
-/** Bounded content selected for an exact active run, separate from the timeline. */
-export type PetSessionRunProgress = { latestDelivery?: string; pendingObjectives?: string[] };
-export type PetSessionSnapshot = AgentSessionSnapshot & { runProgress?: PetSessionRunProgress };
+/** Bounded evidence from the exact Session’s checkpoint, not attributed to its active request. */
+export type PetSessionProgress = { latestDelivery?: string; recordedPendingObjectives?: string[] };
+export type PetSessionSnapshot = AgentSessionSnapshot & { sessionProgress?: PetSessionProgress };
 
 export interface PetSessionPort {
   /** The session's authoritative snapshot. */
-  snapshot(sessionId: string, options?: PetSessionReadOptions & { includeRunProgress?: true }): Promise<PetSessionSnapshot>;
+  snapshot(sessionId: string, options?: PetSessionReadOptions & { includeSessionProgress?: true }): Promise<PetSessionSnapshot>;
   /**
    * Follow one session. The first message is a `session.snapshot.result`;
    * every later one is a message of that session only, in order. Messages

@@ -162,8 +162,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
     input: { messages: [new HumanMessage('inspect')], threadId: randomUUID(), taskId,
       allowedCapabilityNames: [], context: { workdir: workdirs[0] } },
   };
-  const identities: Array<{ runId: string; taskId: string }> = [];
-  const initial = await service.streamEvents(input, undefined, undefined, identity => identities.push(identity));
+  const initial = await service.streamEvents(input);
   for await (const _event of initial) { /* Reach the interrupt. */ }
   await initial.output;
   assert.equal(seen.length, 1);
@@ -175,9 +174,6 @@ test('local stream resume refreshes invocation metadata while preserving the che
   const snapshot = await graph.getState({
     configurable: buildAgentGraphConfigurable(input),
   });
-  assert.equal(identities.length, 1);
-  const checkpoint = snapshot.values as { runId: string; taskId: string };
-  assert.deepEqual(identities[0], { runId: checkpoint.runId, taskId: checkpoint.taskId });
   const interruptId = snapshot.tasks.flatMap(
     (task) => task.interrupts ?? [],
   )[0]?.id ?? '';
@@ -185,7 +181,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
   const stream = await service.streamEvents(resumed, {
     interruptId,
     value: true,
-  }, undefined, () => assert.fail('a resumed review is not a new bound graph input'));
+  });
   for await (const _event of stream) { /* Resume through the production streaming path. */ }
   await stream.output;
   assert.deepEqual(seen, [

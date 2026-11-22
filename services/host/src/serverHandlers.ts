@@ -47,7 +47,7 @@ export type ServerHandlers = {
    * for a session this Pet does not own; it never falls back to the active
    * session and never creates one.
    */
-  readSessionSnapshot: (sessionId: string, timelineLimit?: number, includeRunProgress?: true) => Promise<PetSessionSnapshot>;
+  readSessionSnapshot: (sessionId: string, timelineLimit?: number, includeSessionProgress?: true) => Promise<PetSessionSnapshot>;
   /**
    * Answer the current human review of one exact session, in that session's
    * own thread. Admission, validation and dispatch continuation are the same
@@ -219,16 +219,15 @@ export function createChatHostHandlers(
     }
   };
 
-  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number, includeRunProgress?: true) => {
+  const readSessionSnapshot = async (sessionId: string, timelineLimit?: number, includeSessionProgress?: true) => {
     const requestDeps = runtimeDeps.get();
     const session = tuiSessions.getSession(requestDeps.petId, sessionId);
     if (!session) {
       throw Object.assign(new Error('session not found'), { code: 'session_not_found' });
     }
-    const captured = includeRunProgress ? activeRuns.read(sessionId) : null;
-    const progressRun = captured ? activeRuns.readOrchestratorRun(captured) : undefined;
+    const captured = includeSessionProgress ? activeRuns.read(sessionId) : null;
     const checkpoint = await readCheckpointAtRun(
-      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session, progressRun),
+      () => tuiSessions.readSessionCheckpointPoint(requestDeps, session, captured ? true : undefined),
     );
     const activeRun = activeRuns.read(checkpoint.sessionId);
     const snapshot = buildHostSessionSnapshot({
@@ -244,9 +243,8 @@ export function createChatHostHandlers(
       currentPlan: checkpoint.currentPlan,
       timelineLimit,
     });
-    return captured && captured === activeRun && progressRun && activeRuns.readOrchestratorRun(captured) === progressRun
-      && !checkpoint.pendingInterrupt && checkpoint.runProgress
-      ? { ...snapshot, runProgress: checkpoint.runProgress } : snapshot;
+    return captured && captured === activeRun && !checkpoint.pendingInterrupt && checkpoint.sessionProgress
+      ? { ...snapshot, sessionProgress: checkpoint.sessionProgress } : snapshot;
   };
 
   const loadSnapshot = async (peer?: ServerPeer, timelineLimit?: number) => {
@@ -871,9 +869,7 @@ export function createChatHostHandlers(
         session?.id ?? tuiSessions.getActiveSessionId(requestDeps.petId),
       );
       try {
-        return await chatHandler.runHostTurn(peer, { ...turn,
-          onRunInput: identity => activeRuns.bindOrchestratorRun(activeRun, identity),
-        }, requestDeps, session);
+        return await chatHandler.runHostTurn(peer, turn, requestDeps, session);
       } finally {
         activeRuns.finish(activeRun);
       }

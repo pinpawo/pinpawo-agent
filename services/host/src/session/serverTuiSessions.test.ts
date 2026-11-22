@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import type { AgentPlan } from '@pinpawo/agent-session';
+import { createCapabilityExecutionMessage } from '@pinpawo/pet-agent/testing';
 import {
   stampAgentMessageCreatedAt,
 } from '@pinpawo/pet-agent';
@@ -284,6 +286,79 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.equal(checkpoint.sessionTokenUsage, null);
   assert.equal(capturedThreadId, session.threadId);
   assert.equal(readCount, 1);
+});
+
+async function readSessionProgress(messages: BaseMessage[], currentPlan: AgentPlan | null, includeSessionProgress?: true) {
+  const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-session-progress-test');
+  const service = new ServerTuiSessionService({
+    runtimeConfig,
+    state: createEmptyTuiSessionState(),
+    saveState: () => {},
+    checkpointer: new MemorySaver(),
+    graphService: { readThreadState: async () => ({ messages, currentPlan, pendingInterrupt: null, acceptsResume: false }) },
+    loadContext: async () => ({ pet: { id: 'pet-a', name: 'Paw' } }),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const deps = { runtimeConfig, petId: 'pet-a', ...createTestModelServerDeps() };
+  return (await service.readSessionCheckpointPoint(deps, service.getActiveSession('pet-a'), includeSessionProgress)).sessionProgress;
+}
+
+const receiptScope = { runId: 'current', taskId: 'current-task' };
+const olderReceipt = { runId: 'older', taskId: 'older-task' };
+
+function returnedCapability(n: string, text: string, identity = receiptScope, privateLane?: string) {
+  const metadata = { ...identity, lane: privateLane };
+  const callId = `call:${n}`;
+  const tool = new AIMessage({ content: '', additional_kwargs: { pinpawo: metadata },
+    tool_calls: [{ id: callId, name: 'delegate_capability', args: { briefing: 'PRIVATE_BRIEFING' } }] });
+  return [tool, createCapabilityExecutionMessage({ callId, metadata,
+    execution: { planItemId: n, capability: 'general', task: 'PRIVATE_TITLE', delegationId: n, briefing: 'PRIVATE_BRIEFING' },
+    result: { status: 'returned', deliverables: [{ uri: 'artifact://private/x' }],
+      delivery: { id: n, task: 'PRIVATE_TITLE', text, scope: { ...identity, lane: 'capability:general', delegationId: n } } },
+  })];
+}
+
+const recordedPlan = (...items: Array<[AgentPlan['items'][number]['status'], string]>): AgentPlan => ({
+  items: items.map(([status, task], index) => ({ id: String(index), capability: 'general', task, status })),
+});
+
+test('latest formal root delivery and recorded plan are distinct Session evidence', async () => {
+  const messages = [...returnedCapability('0', 'Previous delivery', olderReceipt), ...returnedCapability('1', 'Earlier finding.'),
+    ...returnedCapability('2', 'A verified; two sources agree.\n```json\n{"raw":"no"}\n```'),
+    ...returnedCapability('3', 'Nested result', receiptScope, 'capability:general'),
+    new ToolMessage({ name: 'not_a_handoff', tool_call_id: '4', content: 'RAW TOOL OUTPUT' })];
+  assert.deepEqual(await readSessionProgress(messages, recordedPlan(['completed', 'A'], ['active', 'Verify B']), true), {
+    latestDelivery: 'A verified; two sources agree.', recordedPendingObjectives: ['Verify B'],
+  });
+});
+
+test('uses the Session’s previous Root delivery until the Session records a newer one', async () => {
+  const previous = returnedCapability('1', 'Previous delivery', olderReceipt);
+  const previousPlan = recordedPlan(['pending', 'Previous objective']);
+  assert.deepEqual(await readSessionProgress(previous, previousPlan, true), {
+    latestDelivery: 'Previous delivery', recordedPendingObjectives: ['Previous objective'],
+  });
+  const requested = new AIMessage({ content: '', additional_kwargs: { pinpawo: receiptScope },
+    tool_calls: [{ id: 'unreturned', name: 'delegate_capability', args: { briefing: 'NOT RETURNED' } }] });
+  assert.deepEqual(await readSessionProgress([...previous, requested], null, true), { latestDelivery: 'Previous delivery' });
+  assert.deepEqual(await readSessionProgress([...previous, ...returnedCapability('2', 'New delivery')], null, true), { latestDelivery: 'New delivery' });
+});
+
+test('returns recorded plan when no eligible handoff and withholds secret text without replaying an earlier result', async () => {
+  const pending = recordedPlan(['pending', 'Check B']);
+  const messages = [...returnedCapability('1', 'Earlier A'), ...returnedCapability('2', 'api_key: fake-private-sample')];
+  assert.deepEqual(await readSessionProgress(messages, pending, true), { recordedPendingObjectives: ['Check B'] });
+  assert.deepEqual(await readSessionProgress([], pending, true), { recordedPendingObjectives: ['Check B'] });
+  assert.equal(await readSessionProgress([], null, true), undefined);
+});
+
+test('bounds prose and removes artifact links and local paths before transport', async () => {
+  const messages = returnedCapability('1', `Results recorded in [proof](artifact://private/123) /Users/t/private.md. ${'z'.repeat(700)}`);
+  assert.equal(await readSessionProgress(messages, null), undefined);
+  const progress = await readSessionProgress(messages, null, true);
+  assert.ok(progress?.latestDelivery);
+  assert.equal(progress.latestDelivery.length, 641);
+  assert.doesNotMatch(progress.latestDelivery, /artifact:|Users|private\.md|PRIVATE_/);
 });
 
 test('reserved dispatch sessions retry failed persistence without changing the active TUI session', () => {

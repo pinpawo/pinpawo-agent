@@ -422,7 +422,8 @@ test('official Flash sends a committed review handoff to work and a matching sta
     assert.ok(fixture);
     let content: string;
     if (input.evidence) {
-      assert.deepEqual(input.message, fixture.incoming);
+      const { messageId, sequence, channelId, author, body: sourceBody, mentions } = fixture.incoming;
+      assert.deepEqual(input.message, { messageId, sequence, channelId, author, body: sourceBody, mentions });
       assert.equal(fixture.route, 'status');
       assert.equal(body.response_format, undefined);
       assert.deepEqual(input.evidence, { status: 'unavailable' });
@@ -711,9 +712,28 @@ test('progress composition uses only SDK text without binding tools or retrying'
     const mock = mockEndpoint([reply], 'functionCalling');
     assert.equal(await createHeadModel(() => mock.endpoint).composeReply(input, new AbortController().signal), expected);
     assert.deepEqual(mock.calls.map(call => call.mode), ['unbound']);
-    assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), input);
+    assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
+      message: { channelId: 'team', messageId: '4', sequence: 4, author: input.message.author, body: input.message.body, mentions: [] },
+      evidence: input.evidence,
+    });
     assert.equal(mock.binding(), undefined);
   }
+});
+
+test('the status model sees checked evidence and public addressing, not storage or file metadata', async () => {
+  const mentions = [{ participantId: 'pet:a', label: 'Analyst' }];
+  const current = message('20', { author: { kind: 'pet', id: 'reviewer' }, body: 'Check the status of this report.',
+    mentions, replyTo: '12', externalRef: 'internal-delivery-ref', deliverables: [{ uri: 'https://example.test/internal-report' }] });
+  const source = { messageId: '12', body: 'Prepare the report.' };
+  const mock = mockEndpoint([new AIMessage('The report is still running.')]);
+  const reply = await createHeadModel(() => mock.endpoint).composeReply({ message: current, evidence: { status: 'running' }, source },
+    new AbortController().signal);
+  assert.equal(reply, 'The report is still running.');
+  assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
+    message: { channelId: current.channelId, messageId: current.messageId, sequence: current.sequence, author: current.author,
+      body: current.body, replyTo: source.messageId, attachmentCount: 1, mentions },
+    evidence: { status: 'running' }, source,
+  });
 });
 
 test('failed or cancelled progress composition does not return late or partial prose', async () => {

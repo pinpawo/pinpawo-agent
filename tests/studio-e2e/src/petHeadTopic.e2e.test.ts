@@ -270,10 +270,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.equal(factoryCalls.length, 2);
     const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
     assert.deepEqual(replyClients, [alphaClient, alphaClient], 'unbound composition reuses the deciding client');
-    assert.deepEqual(composeInputs, [
-      { message: check, evidence: { status: 'running' }, source: { messageId: sourceA.messageId, body: sourceA.body } },
-      { message: both, evidence: { status: 'running' }, source: { messageId: sourceA.messageId, body: sourceA.body } },
-    ]);
+    assert.deepEqual(composeInputs, [check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
+      message: { messageId, channelId, sequence, author, body, replyTo, mentions },
+      evidence: { status: 'running' }, source: { messageId: sourceA.messageId, body: sourceA.body },
+    })));
     for (const input of canonicalDecisions.slice(1)) {
       assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
     }

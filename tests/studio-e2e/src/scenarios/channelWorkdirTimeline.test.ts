@@ -1,3 +1,4 @@
+import { headFixtureStage } from './headFixtureStage';
 import './isolateScenarioConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -51,10 +52,10 @@ async function createWorkdirModel() {
         let content = '';
         let call: { name: string; args: Record<string, unknown> } | undefined;
         if (input.response_format?.type === 'json_object' && names.length === 0) {
-          const { pet, message, addressed } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
+          const { pet, message } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
-          decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
-          content = JSON.stringify({ action: 'dispatch', reply: '', readProgress: false, ...(!addressed ? { engage: true } : {}), intent: message.body });
+          if (headFixtureStage(input) === 'idle') decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
+          content = JSON.stringify(headFixtureStage(input) === 'relevance' ? { relevant: true } : { shouldDispatch: true, reply: null });
         } else if (names.includes('plan_request')) {
           call = { name: 'plan_request', args: { goal: 'Read marker.txt and report the exact result.' } };
         } else if (names.includes('view_file_chunk')) {

@@ -43,9 +43,18 @@ test('Head observes only its instance topic and exact scope, with no payload ret
 test('one exact Session status sample yields only running', async () => {
   let reads = 0;
   const result = await readHeadProgress({ run, signal, isCurrent: () => true,
-    readSessionRunId: async id => { reads++; assert.equal(id, run.sessionId); return run.requestId; } });
+    readSessionRun: async id => { reads++; assert.equal(id, run.sessionId); return { requestId: run.requestId }; } });
   assert.equal(reads, 1);
   assert.deepEqual(result, { status: 'running' });
+});
+
+test('the recorded Session plan remains separate from verified live request status', async () => {
+  const recordedPlan = { items: [{ id: 'old', capability: 'check', task: 'Earlier plan objective', status: 'pending' as const }] };
+  const readSessionRun = async () => ({ requestId: run.requestId, recordedPlan });
+  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, readSessionRun }),
+    { status: 'running', recordedPlan });
+  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true,
+    readSessionRun: async () => ({ requestId: 'older-attempt', recordedPlan }) }), { status: 'unavailable' });
 });
 
 test('no active status, changed run, abort and read failure yield unavailable without another sample', async () => {
@@ -54,17 +63,17 @@ test('no active status, changed run, abort and read failure yield unavailable wi
     let current = true;
     let reads = 0;
     const result = await readHeadProgress({ run, signal: controller.signal, isCurrent: () => current,
-      readSessionRunId: async () => {
+      readSessionRun: async () => {
         reads++;
         if (failure === 'error') throw new Error('private checkpoint path');
         if (failure === 'abort') controller.abort();
         if (failure === 'lost') current = false;
         if (failure === 'not-running') return undefined;
-        return failure === 'different-run' ? 'run-b' : run.requestId;
+        return { requestId: failure === 'different-run' ? 'run-b' : run.requestId, recordedPlan: { items: [{ id: 'other', capability: 'work', task: 'Must not leak', status: 'pending' }] } };
       } });
     assert.deepEqual(result, { status: 'unavailable' }, failure);
     assert.equal(reads, 1);
   }
   assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => false,
-    readSessionRunId: async () => assert.fail('no Session read for stale work') }), { status: 'unavailable' });
+    readSessionRun: async () => assert.fail('no Session read for stale work') }), { status: 'unavailable' });
 });

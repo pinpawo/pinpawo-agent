@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prepareStudio } from '../../../packages/studio/src/createStudio';
-import { bindPetHeadChannel, createPetHead, type HeadDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
+import { bindPetHeadChannel, createPetHead, type HeadIdleResult, type HeadInput } from '../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -22,15 +22,15 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
   const channel = createChannelPlugin({ httpRoute: false });
   const seen: Record<string, string[]> = { slow: [], fast: [], elsewhere: [] };
   const dispatches: string[] = [];
-  const held = deferred<HeadDecision>();
+  const held = deferred<HeadIdleResult>();
   let inFlightSignal: AbortSignal | undefined;
-  const decide = async ({ pet, message }: HeadInput, signal: AbortSignal): Promise<HeadDecision> => {
+  const handleIdle = async ({ pet, message }: HeadInput, signal: AbortSignal): Promise<HeadIdleResult> => {
     seen[pet.petId]!.push(message.body);
     if (pet.petId === 'slow' && message.body === 'first') {
       inFlightSignal = signal;
       return held.promise;
     }
-    return { action: 'ignore', reply: '', intent: '' };
+    return { shouldDispatch: false, reply: null };
   };
   const prepared = prepareStudio({
     studioId: 'head-subscription-fifo', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
@@ -46,7 +46,8 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
         assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: bound, decide });
+      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
+        assessRelevance: async () => ({ relevant: true }), handleIdle });
       return bound.subscribe(message => handle(message, signal));
     },
   });
@@ -70,7 +71,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
 
     await studio.pets.closeInstance('slow', { confirmStop: true });
     assert.equal(inFlightSignal?.aborted, true);
-    held.resolve({ action: 'dispatch', reply: '', intent: 'late task' });
+    held.resolve({ shouldDispatch: true, reply: null });
     await post('offline');
     await waitFor(() => seen.fast!.includes('offline'));
     await studio.pets.reopenInstance('slow');
@@ -81,7 +82,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
     assert.deepEqual(seen.elsewhere, ['another Channel'], 'each Channel has an independent live subscription');
     assert.deepEqual(dispatches, [], 'cancelled in-flight work cannot dispatch after Close');
   } finally {
-    held.resolve({ action: 'ignore', reply: '', intent: '' });
+    held.resolve({ shouldDispatch: false, reply: null });
     await studio.shutdown();
   }
 });

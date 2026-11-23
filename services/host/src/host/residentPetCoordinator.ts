@@ -153,16 +153,51 @@ export class ResidentPetCoordinator {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    void this.enqueue(operation, ready, observation).catch((error) => {
-      if (error instanceof ResidentPetOperationCancelledError) return;
-      this.logError('[resident-pet] dispatch execution failed:', error);
-    });
+    void this.enqueue(operation, ready, observation).catch((error) => this.reportDispatchFailure(error));
     // A pending review can be resolved through a reconnect or another
     // session client. Do not let the queue keep that old settled state and
     // strand a later one-way dispatch behind it.
     void this.refreshState().catch((error) => {
       this.logError('[resident-pet] failed to refresh dispatch admission state:', error);
     });
+  }
+
+  /** Check the exact target without reserving the gate, then claim it without an intervening await. */
+  async submitDispatchIfIdle(
+    operation: () => Promise<void>,
+    options: {
+      signal?: AbortSignal;
+      ready: () => Promise<boolean>;
+      observation: PetDispatchQueueEntry;
+      onAdmitted: () => void;
+    },
+  ): Promise<boolean> {
+    options.signal?.throwIfAborted();
+    if (!this.isDispatchSlotIdle()) return false;
+    const version = this.schedulingVersion;
+    // A turn might have started and already finished while reading the
+    // checkpoint. Do not use readiness observed before intervening work.
+    const ready = await options.ready();
+    options.signal?.throwIfAborted();
+    if (!ready || version !== this.schedulingVersion || !this.isDispatchSlotIdle()) return false;
+    this.schedulingVersion++;
+    this.startDispatch({
+      kind: 'dispatch', run: operation, observation: structuredClone(options.observation),
+      resolve: () => undefined,
+      reject: error => this.reportDispatchFailure(error),
+    });
+    options.onAdmitted();
+    return true;
+  }
+
+  private isDispatchSlotIdle(): boolean {
+    return this.state === 'open' && !this.closing && !this.active && !this.refreshing &&
+      this.conversations === 0 && this.dispatchQueue.length === 0;
+  }
+
+  private reportDispatchFailure(error: unknown): void {
+    if (error instanceof ResidentPetOperationCancelledError) return;
+    this.logError('[resident-pet] dispatch execution failed:', error);
   }
 
   async refreshState(): Promise<PetDispatchState> {
@@ -267,6 +302,10 @@ export class ResidentPetCoordinator {
     const entry = this.state === 'open' ? this.dispatchQueue.splice(index < 0 ? 0 : index, 1)[0] : undefined;
     if (!entry) return;
     if (this.preferredDispatch === entry) this.preferredDispatch = undefined;
+    this.startDispatch(entry);
+  }
+
+  private startDispatch(entry: QueuedOperation): void {
     this.activeOperation = entry.kind;
     this.activeDispatch = entry.observation;
     const active = Promise.resolve().then(() => this.run(entry));

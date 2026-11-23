@@ -507,7 +507,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
   }));
   const configuration = await resolveStudioHostConfig({ workdir });
   let channelContext: StudioPluginContext | undefined;
-  const replies: Array<{ petId: string; messageId: string; body: string }> = [];
+  const replies: Array<{ petId: string; messageId: string }> = [];
   let repliesDone!: () => void;
   const completed = new Promise<void>(resolve => { repliesDone = resolve; });
   const channel = {
@@ -520,13 +520,13 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     head: {
       readContext: async () => ({ messages: [] }),
       reply: async () => { assert.fail('Head routing must not write a final reply'); },
-      dispatch: async (_channelId: string, petId: string, message: { messageId: string }, body: string) => {
-        replies.push({ petId, messageId: message.messageId, body });
+      dispatch: async (_channelId: string, petId: string, messageId: string) => {
+        replies.push({ petId, messageId });
         if (replies.length === 3) repliesDone();
       },
     },
   };
-  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown }> = [];
+  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown; stage: 'relevance' | 'idle' }> = [];
   const tracingKeys = ['LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2'];
   const tracing = tracingKeys.map(key => process.env[key]);
   for (const key of tracingKeys) process.env[key] = 'false';
@@ -546,8 +546,6 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     if (usesTool) {
       assert.equal(request.response_format, undefined);
       assert.equal(request.tools.length, 1);
-      assert.equal(request.tools[0].function.name, 'pet_head_decision');
-      assert.deepEqual(request.tool_choice, { type: 'function', function: { name: 'pet_head_decision' } });
       schema = request.tools[0].function.parameters;
     } else {
       assert.deepEqual(request.response_format, { type: 'json_object' });
@@ -555,16 +553,22 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.equal(request.tool_choice, undefined);
       schema = JSON.parse(system.content.split('\n').at(-1));
     }
-    assert.deepEqual(schema.required, ['engage', 'action', 'reply', 'intent', 'readProgress']);
+    const stage = 'relevant' in schema.properties ? 'relevance' : 'idle';
+    const name = `pet_head_${stage}`;
+    assert.deepEqual(Object.keys(schema.properties), stage === 'relevance' ? ['relevant'] : ['shouldDispatch', 'reply']);
+    assert.deepEqual(schema.required, Object.keys(schema.properties));
     assert.equal(schema.additionalProperties, false);
-    assert.deepEqual(schema.properties.action.enum, ['ignore', 'dispatch']);
+    if (usesTool) {
+      assert.equal(request.tools[0].function.name, name);
+      assert.deepEqual(request.tool_choice, { type: 'function', function: { name } });
+    }
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
-    calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking });
-    const args = JSON.stringify({ action: 'dispatch', reply: '', intent: `hello from ${input.pet.petId}`, engage: true, readProgress: false });
+    calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking, stage });
+    const args = JSON.stringify(stage === 'relevance' ? { relevant: true } : { shouldDispatch: true, reply: null });
     const output = usesTool
-      ? { content: null, tool_calls: [{ id: `head-decision-${input.pet.petId}`, type: 'function',
-        function: { name: 'pet_head_decision', arguments: args } }] }
+      ? { content: null, tool_calls: [{ id: `head-${stage}-${input.pet.petId}`, type: 'function',
+        function: { name, arguments: args } }] }
       : { content: args };
     return Response.json({ id: 'head-test', object: 'chat.completion', created: 0, model: request.model,
       choices: [{ index: 0, message: { role: 'assistant', ...output }, finish_reason: usesTool ? 'tool_calls' : 'stop' }],
@@ -585,7 +589,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     });
     const diagnostics: unknown[] = [];
     result.studio.subscribe(event => {
-      if (event.type === 'pet.head.decision') diagnostics.push(event.payload);
+      if (event.type === 'pet.head.relevance') diagnostics.push(event.payload);
     });
     await result.studio.pets.create({ channelId: 'one', petId: 'planner', definitionId: 'planner', name: 'Planner' });
     await result.studio.pets.create({ channelId: 'one', petId: 'writer', definitionId: 'writer', name: 'Writer' });
@@ -606,17 +610,16 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     for (const entry of diagnostics as Array<Record<string, unknown>>) {
       assert.equal(entry.channelId, 'one');
       assert.equal(entry.messageId, 'message-1');
-      assert.equal(entry.outcome, 'selected');
-      assert.equal(entry.action, 'dispatch');
+      assert.equal(entry.outcome, 'related');
       assert.equal(entry.attempts, 1);
       assert.ok(['planner', 'writer', 'official'].includes(String(entry.petId)));
-      assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'action', 'attempts', 'code'].includes(key)));
+      assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'attempts', 'code'].includes(key)));
     }
     assert.deepEqual(calls.sort((a, b) => a.petId.localeCompare(b.petId)), [
       { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions', thinking: { type: 'disabled' } },
       { petId: 'planner', model: 'deepseek-flash', url: 'https://specialist.example.test/v1/chat/completions', thinking: undefined },
       { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions', thinking: undefined },
-    ]);
+    ].flatMap(call => ([{ ...call, stage: 'relevance' }, { ...call, stage: 'idle' }])));
     assert.deepEqual(replies.map(({ petId, messageId }) => ({ petId, messageId })).sort((a, b) => a.petId.localeCompare(b.petId)), [
       { petId: 'official', messageId: 'message-1' },
       { petId: 'planner', messageId: 'message-1' },

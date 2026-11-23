@@ -55,7 +55,7 @@ export type PetDispatchRequest = {
   /** Source identity for queue observation only; not execution or review context. */
   origin?: PetInvocationScope;
   request: string;
-  /** In-process cancellation until the request enters the resident queue. */
+  /** In-process cancellation until the resident accepts the request. */
   signal?: AbortSignal;
   /** Explicit in-process input references; never inferred from request text. */
   attachments?: readonly Deliverable[];
@@ -64,8 +64,8 @@ export type PetDispatchRequest = {
   session?: { id: string; create?: boolean };
   /** Explicit Host-admitted domain scope, independent of the Agent Session. */
   scope?: PetInvocationScope;
-  /** Trusted Host caller only: interrupt the same scoped session after admission. */
-  delivery?: 'interrupt';
+  /** Trusted Host caller only: interrupt the target, or admit only if it can start without queueing. */
+  delivery?: 'interrupt' | 'idle-only';
 };
 
 export type PetDispatchLifecycleState =
@@ -113,7 +113,7 @@ export interface PetDispatchPort {
   getQueueSnapshot(): PetDispatchQueueSnapshot;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
-  /** Accept one-way input into the resident queue. Execution is observed through Agent Session. */
+  /** Accept one-way input for resident execution, which is observed through Agent Session. */
   dispatch(request: PetDispatchRequest): Promise<void>;
 }
 
@@ -239,6 +239,14 @@ export class PetSessionReviewRefusedError extends Error {
   constructor(readonly code: 'review_closed' | 'session_busy', message: string) {
     super(message);
     this.name = 'PetSessionReviewRefusedError';
+  }
+}
+
+/** An idle-only dispatch could not claim the slot for its exact target. */
+export class PetDispatchRefusedError extends Error {
+  constructor() {
+    super('The resident dispatch slot or target session is not ready.');
+    this.name = 'PetDispatchRefusedError';
   }
 }
 

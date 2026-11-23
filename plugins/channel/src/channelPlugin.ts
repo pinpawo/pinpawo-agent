@@ -1,6 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { Deliverable } from '@pinpawo/agent-contracts';
+import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
@@ -64,9 +65,9 @@ export type ChannelPlugin = StudioPlugin & {
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
-  dispatch: (channelId: string, petId: string, message: ChannelMessage, request: string, signal: AbortSignal) => Promise<void>;
+  dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal) => Promise<void>;
   readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
-    => Promise<string | undefined>;
+    => Promise<{ requestId: string; recordedPlan?: AgentPlan } | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -128,7 +129,11 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     check();
     const receipt = await studio.dispatch({
       petId, request,
-      ...(headInput ? { signal: headInput.signal, origin: { namespace: 'channel', id: headInput.messageId } } : {}),
+      ...(headInput ? {
+        delivery: 'idle-only' as const,
+        signal: headInput.signal,
+        origin: { namespace: 'channel', id: headInput.messageId },
+      } : {}),
       ...(headInput?.attachments?.length ? { attachments: headInput.attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
@@ -229,8 +234,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   const head: ChannelHeadPort = {
     readContext: async (channelId, petId, before, replyTo) => {
       const service = channelService();
-      const context = await service.readContext({ kind: 'pet', id: petId }, channelId, { before, limit: 50 });
-      const referencedMessage = replyTo ? await service.getMessage(channelId, replyTo) : undefined;
+      const context = await service.readContext({ kind: 'pet', id: petId }, channelId, { before, limit: 10 });
+      const referencedMessage = replyTo
+        ? context.messages.find(message => message.messageId === replyTo) ?? await service.getMessage(channelId, replyTo)
+        : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
     readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {
@@ -246,25 +253,25 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       if (!await authorized()) return;
       const { session } = await studio.petSessions.snapshot(petId, sessionId, { timelineLimit: 1 });
       if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
-        return session.activeRun.requestId;
+        return { requestId: session.activeRun.requestId,
+          ...(!session.pendingInterrupt && session.currentPlan?.items.length ? { recordedPlan: session.currentPlan } : {}) };
       }
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();
       await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options, headReplyTo: replyTo });
     },
-    dispatch: async (channelId, petId, message, request, signal) => {
-      if (message.channelId !== channelId) throw new Error('Message does not belong to this Channel.');
+    dispatch: async (channelId, petId, messageId, signal) => {
       signal.throwIfAborted();
       const service = channelService();
       await service.requireMember(channelId, { kind: 'pet', id: petId });
       signal.throwIfAborted();
-      const canonical = await service.getMessage(channelId, message.messageId);
+      const canonical = await service.getMessage(channelId, messageId);
       if (!canonical) throw new Error('Head source message does not exist in this Channel.');
       const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(canonical, request, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
+      await dispatchPet(channelId, petId, channelMessageInput(canonical, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
     },
   };
 

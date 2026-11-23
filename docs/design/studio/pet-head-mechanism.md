@@ -20,103 +20,100 @@ flowchart LR
     E["本 Pet 的 dispatch.*<br/>只观察"] --> H
     subgraph HEAD["每个在线 Pet 的 Head"]
         H["处理消息并绑定本次执行"] --> M["一个模型客户端"]
-        M --- D["decide：按模型配置做一次结构化判断"]
+        M --- D["assessRelevance / handleIdle：分开判断相关性和空闲处理"]
         M --- W["composeReply：直接调用，不绑工具"]
     end
     H -->|关联原消息回复| C["Channel 接口"]
-    H -->|提交独立工作| C
+    H -->|确认空闲才提交原消息| C
     C --> Q["Studio Dispatch 原队列"]
     H -->|按需查证运行状态| C
     C -->|校验成员和绑定后只读一次| S["当前普通派发对应的既有 Session"]
 ```
 
-## 2. 谁接，怎么处理
+## 2. 相关性先行，实际状态选路
 
-先确定这条消息是否归本 Pet。**当前消息里的有效 `@Pet` 已经明确指定了响应者**，只跳过「要不要接」的模型判断，不绕过 Head，也不意味着要派发或打断。没有明确点名本 Pet 时，Head 用职责和 Channel 上下文判断；不接就静默。能直接答的就直接答，不读 Session、不启动 Agent。
+本节替代 `458f3952` 及之前的动作初判说明；[此前的时序图](https://github.com/pinpawo/pinpawo-agent/blob/fec24f028d54ecb6b214881269b220739a2eab11/docs/design/studio/pet-head-mechanism.md#L51-L127)作为历史设计保留，不代表当前可接纳行为。
 
-**每条消息只做一次处理决定。** 明确需要 Agent 做的工作，交给现有 Studio Dispatch。不改正在跑的任务。问进度时，只查本 Pet 普通派发槽中当前执行的状态；明确追加的独立工作走现有队列。只问进度不派发。
+当前消息中的服务端解析 `@Pet` 建立相关性，跳过模型的相关性判断；它不是工作授权，也不意味着必须回复或派发。没有规范点名时，`assessRelevance` 只返回 `{ relevant: boolean }`，不含动作、回复或任务重写。相关的消息才进入后续状态分支；不相关则静默。Human 消息与 Pet Agent 的正式消息使用同一语义判断。Head 自动回复仍显示在 Timeline 中，但不触发其他 Head；用户引用它发出的新消息照常处理。
 
-| 场景 | 行为 |
+| 运行代码核对的状态 | 后续行为 |
 | --- | --- |
-| 需要 Agent，Session 空闲 | 派发，不读取 Session 内容。 |
-| 本 Pet 的普通派发正在执行，用户问进度 | 核对同一次执行，只回复「正在运行」或「无法确认」。 |
-| 审批后续跑，不在普通派发槽 | 首版不读 Session；进度无法确认。审批行为不变。 |
-| 已有执行，用户明确加一件独立工作 | 将独立工作提交现有 Studio 队列，不打断当前执行。 |
-| 用户要求停止或修改正在跑的任务 | 首版不新增聊天打断，也不注入新材料。已有停止入口不变；Head 不声称已停止或已修改。 |
+| 派发槽确认空闲：开放、无占用、无待派发项 | `handleIdle` 判断原消息的真实语义，返回 `{ shouldDispatch: boolean, reply: string | null }`。允许直接回答、独立工作、先回应再工作或不做任何事。裸点名不自动变成工作。 |
+| 本 Pet 普通派发正在执行 | 查证同一次执行，仅经 `composeReply` 写事实性回复或保持空回复；不调用空闲判断、不接纳追加工作。 |
+| 其他范围、会话占用、目标不明、审批后续跑或状态不可确认 | 不当作空闲；只能事实性说明无法确认或静默，不派发。 |
 
-## 3. 忙时只查证、写回复
+空闲分支在提交前再次核对普通派发槽；这只是初筛。Channel 和 Host 准备好原消息和调用上下文后，resident 检查准确绑定的 Session 是否在等待审核，并在同一处同步检查并占用现有派发槽。槽已被占用、有待派发项、检查期间有其他接纳活动或目标未就绪时，拒绝 Head 请求，不入队、不打断；其他来源仍走原有的接纳规则。先回应再工作的回复关联同一条规范来源，先尝试发布，再独立尝试接纳；回复不是已接纳、已开始或已完成的证明。取消阻止剩余动作。
 
-模型层只有一个客户端：`decide` 按已解析的模型配置做一次结构化调用（例如 DeepSeek 官方 Flash / Pro 用 JSON mode，Anthropic 默认用工具调用），无效输出不补救、不重试、不切换格式。`composeReply` 直接调用同一个未绑定工具的客户端，只写回复。读取由 Head 按第一次决定调用现有 Session 入口，不是模型的新任务，也不改其他模型调用的协议。
+派发不让 Head 摘写任务。Channel 按源消息 ID 取同一 Channel 的已提交记录，复用现有 `channel_message` 放入 Agent 的原生输入。保留正文、作者、点名、附件和一层明确引用，不附带 Head 判定或整段 Timeline。引用和历史只是背景，不构成额外授权。
 
-需要查证时，Head 对齐本 Pet 当前的普通派发与运行事件。Channel 验证当前成员及精确 Session 绑定后，只读一次 Session，只返回运行身份供核对。传给 `composeReply` 的只有原消息和「正在运行／无法确认」；不看计划、工具或 Session 正文，也不查历史结果或待排任务。Head 使用 LangChain 的回复文本；写入前复核当前执行是否已换。回复描述的是查证时的状态，不与 Channel 写入做跨系统原子提交。
+## 3. 模型与事实边界
 
-例如「@Pet，A 做到哪了？另外帮我做 B」：第一次判断认出 B 是独立工作；Head 只核对 A 的运行状态，再尝试回复；B 仍由原有 Studio 队列接纳。查不到 A 就如实说，不把 A 的状态套到 B 上。首版不从正式结果反推中间进展。
+每个 Head 共用一个懒加载模型客户端。`assessRelevance` 与 `handleIdle` 分别使用严格声明 `pet_head_relevance`、`pet_head_idle`，按解析后的 `structuredOutputMethod` 调用，各阶段不补救、不重试、不切换格式。结构化输出合法不代表语义正确。`composeReply` 使用同一未绑定工具的客户端，只输出正文或空，不提供调度决定。
 
-## 4. 分场景时序
+相关性确定后，忙时才读取本 Pet 的普通派发槽并固定当前运行。派发的公开来源必须在同一 Channel、早于追问的 Timeline 序号，且不能与显式引用冲突。Channel 验证成员及精确 Session 绑定后，只读一次 Session，以请求身份核对运行。来源或运行无法核实时，只能说无法确认；不把请求身份与 graph run/task 绑定。有核对结果时，回复可引用绑定 Session 已记录的计划条目状态和简短描述。已完成条目不代表整个任务完成；活动条目可能等待评审；记录计划可能早于本次执行，不能证明正在做哪一步。没有计划则只报核对到的运行状态。禁止从交付正文、Session 对话或原始工具输出推断进度。
 
-### 4.1 指定对象、静默与直接回复
+稳定规则、格式与 Pet 角色在前，公开 Channel 上下文按固定顺序传入。历史仅取当前消息之前最近 10 条；窗口之外的显式引用仅补一次，当前消息和规范成员点名在最后，不重复发送。缓存指标与语义准确率分开。相关的忙时消息可调用一次正文生成，即使最后没有正文；相关性结果本身不代表是否要回复。写入前再次核对执行身份；查证和 Channel 写入不是跨系统原子事务。
+
+例如「@Pet，A 做到哪了？另外帮我做 B」始终相关，但若正在跑 A，只能查证并回复，不把 B 接入队列；空闲时才判断 B 的独立工作语义。「如果 A 没做完就换 B」不能因查不到 A 而直接接纳 B。停止、替换和注入不属于本轮 Head 权限，显式 Stop 和 review 接口保持原状。
+
+## 4. 当前分场景时序
+
+### 4.1 相关性
 
 ```mermaid
 sequenceDiagram
     participant B as Studio EventBus
     participant H as Pet Head
-    participant C as Channel Timeline
+    participant M as 同一个 Head 模型客户端
     B->>H: 已提交的 Channel 消息
-    alt 有效 @ 本 Pet
-        Note over H: 跳过要不要接的模型判断
-    else 没有指定本 Pet
-        H->>H: 按职责判断
+    alt 当前规范 @ 本 Pet
+        Note over H: 相关，但尚无工作或回复决定
+    else 无规范点名
+        H->>M: assessRelevance
+        M-->>H: relevant
     end
-    alt 不接
-        Note over H: 静默
-    else 能直接回答
-        H->>C: 关联原消息并回复
-    else 需要执行或查证
-        Note over H: 按下方场景处理
-    end
+    Note over H: 无关则结束；相关再按实际状态选路
 ```
 
-### 4.2 空闲派发
-
-```mermaid
-sequenceDiagram
-    participant H as Pet Head
-    participant C as Channel 接口
-    participant D as Studio Dispatch
-    participant A as Pet Agent
-    Note over H: 确认工作意图和 Session 空闲，不读 Session 正文
-    H->>C: 提交该工作
-    C->>D: 沿用现有派发
-    D->>A: 按现有规则接纳和执行
-```
-
-### 4.3 忙时追问与独立追加
+### 4.2 已确认空闲
 
 ```mermaid
 sequenceDiagram
     participant H as Pet Head
     participant M as 同一个 Head 模型客户端
-    participant S as Agent Session
     participant C as Channel 接口
     participant D as Studio Dispatch
-    H->>M: decide（按模型配置一次结构化调用）
-    M-->>H: 识别追问 A 和独立的新工作 B
-    opt 需要回答当前执行的情况
-        opt 能对齐当前普通派发与运行事件
-            H->>C: 请求查证本次运行
-            C->>C: 校验成员及精确 Session 绑定
-            C->>S: 只读一份快照
-            S-->>C: 快照
-            C-->>H: 校验后只返回运行身份
-        end
-        H->>M: composeReply（不绑工具），传原消息和已核对状态
-        M-->>H: 回复正文或空
-        H->>C: 写入前复核，有正文才回复原消息
+    H->>H: 确认普通派发槽空闲
+    H->>M: handleIdle（原消息与公开上下文）
+    M-->>H: shouldDispatch, reply
+    opt reply 非空
+        H->>C: 回复规范来源
     end
-    opt 首次判断已识别独立新工作
-        H->>C: 提交独立工作
-        C->>D: 走现有队列，不打断
+    H->>H: 如需接纳，复核空闲状态
+    opt shouldDispatch 且仍空闲
+        H->>C: 提交同一规范来源 ID
+        C->>D: 仅空闲接纳，目标未就绪或槽被占用则拒绝
     end
+```
+
+### 4.3 忙或状态不明
+
+```mermaid
+sequenceDiagram
+    participant H as Pet Head
+    participant M as 同一个 Head 模型客户端
+    participant C as Channel 接口
+    participant S as Agent Session
+    opt 能对齐当前普通派发、运行事件与较早的公开来源
+        H->>C: 请求核对精确运行
+        C->>C: 校验成员及 Session 绑定
+        C->>S: 只读一次快照
+        S-->>H: 运行身份与已记录的计划
+    end
+    H->>M: composeReply（核对状态；允许时附记录计划）
+    M-->>H: 事实性正文或空
+    H->>C: 复核身份，有正文才回复
+    Note over H: 不调用 handleIdle，不接纳追加工作
 ```
 
 ### 4.4 执行通知与正式结果
@@ -139,7 +136,7 @@ sequenceDiagram
 
 以下用例验证 Head 的行为，以及每次 Pet 激活只有一对订阅和一个按需创建的模型客户端。
 
-- 被明确点名和主动接下消息，后续使用同一条 Head 路径。静默、直接答复和空闲派发都不读 Session 正文。
-- 忙时同一条追问只查一次；只问进度不派发，独立追加只提交一次；写回复的步骤没有调度权。
-- 只核对普通派发的状态，审批后续跑不采样，A 换成 B 前后不混用状态。Head 的回复和 Agent 的正式结果各走原链路。
+- 被明确点名和主动接下消息，后续使用同一条 Head 路径。相关性判断和空闲处理不读 Session 正文。
+- 忙时同一条追问只查一次；只问进度和独立追加都不派发；写回复的步骤没有调度权。
+- 只核对普通派发，审批后续跑不采样。运行状态仍只属于核对的那次执行；进度只读绑定 Session 的现有计划，不读交付正文。Head 的回复和 Agent 的正式结果各走原链路。
 - 不新增队列、通用工具循环、自动或聊天打断、主动长时提醒、历史事件重放或失败恢复。Channel、Studio Dispatch 和 Pet Agent 原有职责不变。

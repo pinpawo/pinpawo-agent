@@ -16,6 +16,7 @@ test('wire dispatch rejects session targets, scope and attachments reserved for 
     { session: { id: 'worker:12345678' } },
     { session: { id: 'worker:12345678', create: true } },
     { delivery: 'interrupt' },
+    { delivery: 'idle-only' },
     { delivery: 'queue' },
     { attachments: [{ uri: 'artifact://workspace/image.png' }] },
   ]) {

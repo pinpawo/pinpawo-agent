@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prepareStudio } from '../../../packages/studio/src/createStudio';
-import { bindPetHeadChannel, createPetHead, type HeadDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
+import { bindPetHeadChannel, createPetHead, type HeadIdleResult, type HeadInput } from '../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -24,11 +24,11 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
   const subscriptionTopics: string[] = [];
   const observed: string[] = [];
   const dispatched: unknown[] = [];
-  const pending = new Map<string, ReturnType<typeof deferred<HeadDecision>>>();
-  const decide = async ({ message }: HeadInput): Promise<HeadDecision> => {
+  const pending = new Map<string, ReturnType<typeof deferred<HeadIdleResult>>>();
+  const handleIdle = async ({ message }: HeadInput): Promise<HeadIdleResult> => {
     observed.push(message.body);
     const wait = pending.get(message.body);
-    return wait ? wait.promise : { action: 'ignore', reply: '', intent: '' };
+    return wait ? wait.promise : { shouldDispatch: false, reply: null };
   };
   const prepared = prepareStudio({
     studioId: 'head-lifecycle', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
@@ -46,7 +46,8 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
         subscriptionTopics.push(filter.topic);
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: bound, decide });
+      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
+        assessRelevance: async () => ({ relevant: true }), handleIdle });
       return bound.subscribe(message => handle(message, signal));
     },
   });
@@ -56,12 +57,12 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     const { channel: { channelId } } = await channel.service.createChannel(human, { title: 'Lifecycle', pets: [] });
     await studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker', channelId });
     const post = async (body: string) => channel.service.postMessage(human, channelId, { body });
-    const first = deferred<HeadDecision>();
+    const first = deferred<HeadIdleResult>();
     pending.set('held before close', first);
     await post('held before close');
     await waitFor(() => observed.includes('held before close'));
     await studio.pets.closeInstance('worker', { confirmStop: true });
-    first.resolve({ action: 'dispatch', reply: '', intent: 'late task' });
+    first.resolve({ shouldDispatch: true, reply: null });
     await post('while closed');
     await studio.pets.reopenInstance('worker');
     assert.deepEqual(subscriptionTopics, [channelId, channelId], 'reopening creates a fresh owner-Channel subscription');
@@ -69,12 +70,12 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     await waitFor(() => observed.includes('after reopen'));
     assert.deepEqual(observed, ['held before close', 'after reopen']);
     assert.equal(dispatched.length, 0, 'a decision finishing after Close cannot dispatch');
-    const second = deferred<HeadDecision>();
+    const second = deferred<HeadIdleResult>();
     pending.set('held before remove', second);
     await post('held before remove');
     await waitFor(() => observed.includes('held before remove'));
     await studio.pets.removeInstance('worker', { confirmStop: true });
-    second.resolve({ action: 'dispatch', reply: '', intent: 'late task after remove' });
+    second.resolve({ shouldDispatch: true, reply: null });
     await post('after remove');
     await tick();
     assert.deepEqual(observed, ['held before close', 'after reopen', 'held before remove']);
@@ -82,7 +83,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
   } finally { await studio.shutdown(); }
 });
 
-test('duplicate Pet externalRef emits only one event to another live Head', async () => {
+test('a live Head consumes Agent output once and a human reply, but not an automated Head reply', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
   const observed: string[] = [];
   const prepared = prepareStudio({
@@ -95,8 +96,9 @@ test('duplicate Pet externalRef emits only one event to another live Head', asyn
     }),
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: bound,
-        decide: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { action: 'ignore', reply: '', intent: '' }; },
+      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
+        assessRelevance: async () => ({ relevant: true }),
+        handleIdle: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { shouldDispatch: false, reply: null }; },
       });
       return bound.subscribe(message => handle(message, signal));
     },
@@ -112,16 +114,21 @@ test('duplicate Pet externalRef emits only one event to another live Head', asyn
     assert.equal(first.created, true);
     assert.equal(duplicate.created, false);
     assert.equal(duplicate.message.messageId, first.message.messageId);
+    await channel.head.reply(channelId, source.id, first.message.messageId, 'automated ack', new AbortController().signal);
+    const timeline = (await channel.service.readContext(human, channelId)).messages;
+    const ack = timeline.find(message => message.body === 'automated ack');
+    assert.ok(ack, 'the automated reply is still visible in the Timeline');
+    await channel.service.postMessage(human, channelId, { body: 'thanks', replyTo: ack.messageId });
     await channel.service.postMessage(human, channelId, { body: 'barrier' });
     await waitFor(() => observed.includes('barrier'));
-    assert.deepEqual(observed, ['first output', 'barrier']);
+    assert.deepEqual(observed, ['first output', 'thanks', 'barrier']);
   } finally { await studio.shutdown(); }
 });
 
 test('response and work both use Host admission without Head final text and preserve source attachments', async () => {
   const channel = createChannelPlugin({ httpRoute: false });
   const observed: string[] = [];
-  const dispatched: Array<{ request: string; attachments?: unknown; scope?: unknown; session?: unknown }> = [];
+  const dispatched: Array<{ request: string; attachments?: unknown; scope?: unknown; session?: unknown; delivery?: unknown }> = [];
   let triggerInput: HeadInput | undefined;
   const prepared = prepareStudio({
     studioId: 'head-delivery', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
@@ -134,14 +141,15 @@ test('response and work both use Host admission without Head final text and pres
     }),
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: bound,
-        decide: async (input) => {
+      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
+        assessRelevance: async () => ({ relevant: true }),
+        handleIdle: async (input) => {
           const { message } = input;
           observed.push(message.body);
           if (message.body === 'inspect attachment') triggerInput = input;
-          if (message.body === 'short question') return { action: 'dispatch', reply: '', intent: 'Short answer' };
-          if (message.body === 'inspect attachment') return { action: 'dispatch', reply: '', intent: 'Inspect the attachment' };
-          return { action: 'ignore', reply: '', intent: '' };
+          if (message.body === 'short question') return { shouldDispatch: true, reply: null };
+          if (message.body === 'inspect attachment') return { shouldDispatch: true, reply: null };
+          return { shouldDispatch: false, reply: null };
         },
       });
       return bound.subscribe(message => handle(message, signal));
@@ -169,11 +177,13 @@ test('response and work both use Host admission without Head final text and pres
     await channel.service.postMessage(human, channelId, { body: 'inspect attachment', replyTo: referenced.message.messageId, deliverables: attachments });
     await waitFor(() => dispatched.length === 2);
     assert.deepEqual(dispatched[1]!.attachments, [...attachments, ...referencedAttachments]);
+    assert.equal(triggerInput?.context.messages.length, 10);
     assert.equal(triggerInput?.context.messages.some(message => message.messageId === referenced.message.messageId), false);
     assert.deepEqual(triggerInput?.context.referencedMessage, referenced.message, 'an explicit older reply remains available outside the context window');
     assert.ok(dispatched[1]!.request.includes(referenced.message.messageId), 'dispatch preserves the referenced source');
     assert.deepEqual(dispatched[1]!.scope, { namespace: 'channel', id: channelId });
     assert.ok(dispatched[1]!.session, 'admission uses the Channel session');
+    assert.equal(dispatched[1]!.delivery, 'idle-only', 'Head uses the resident no-queue admission with its binding');
     assert.deepEqual(await channel.service.listSessions(human, channelId), firstSession, 'work after response reuses the same retained session');
     assert.deepEqual(observed, ['short question', 'inspect attachment'], 'own reply does not trigger the Head');
   } finally { await studio.shutdown(); }

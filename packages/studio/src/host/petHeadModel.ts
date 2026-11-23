@@ -2,27 +2,19 @@ import { AIMessage } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
 import type { StudioModelEndpoint } from '../studioContract';
-import type { HeadDecision, HeadInput, HeadMessage } from './petHead';
-import type { HeadProgressEvidence } from './petHeadProgress';
-import { headDecisionMessages, headReplyMessages } from './petHeadPrompts';
+import type { HeadIdleResult, HeadInput, HeadRelevance, HeadReplyInput } from './petHead';
+import { headIdleMessages, headRelevanceMessages, headReplyMessages } from './petHeadPrompts';
 
-export type HeadDecisionDiagnostic = {
+export type HeadRelevanceDiagnostic = {
   petId: string; channelId: string; messageId: string;
-  outcome: 'selected' | 'ignore' | 'error'; action?: 'ignore' | 'dispatch'; attempts: number; code?: string;
+  outcome: 'related' | 'unrelated' | 'error'; attempts: number; code?: string;
 };
 
-const decisionName = 'pet_head_decision';
-const decisionSchema = z.object({
-  engage: z.boolean(),
-  action: z.enum(['ignore', 'dispatch']),
-  reply: z.string(),
-  intent: z.string(),
-  readProgress: z.boolean(),
-}).strict();
-const addressedSchema = decisionSchema.omit({ engage: true });
+const relevanceSchema = z.object({ relevant: z.boolean() }).strict();
+const idleSchema = z.object({ shouldDispatch: z.boolean(), reply: z.union([z.string(), z.null()]) }).strict();
 
-class DecisionFailure extends Error {
-  constructor(readonly code: string) { super('Invalid Pet Head decision.'); }
+class StructuredFailure extends Error {
+  constructor(readonly code: string) { super('Invalid Pet Head model output.'); }
 }
 
 function failedFinish(message: AIMessage): 'truncated' | 'refusal' | undefined {
@@ -34,8 +26,8 @@ function failedFinish(message: AIMessage): 'truncated' | 'refusal' | undefined {
 
 type HeadChatClient = ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
 
-/** One lazy client for the active Head. Binding creates a decision view, not another client. */
-export function createHeadModel(resolve: () => StudioModelEndpoint, options: { onDiagnostic?: (event: HeadDecisionDiagnostic) => void } = {}) {
+/** One lazy client for the active Head. Each structured call binds only its own contract. */
+export function createHeadModel(resolve: () => StudioModelEndpoint, options: { onDiagnostic?: (event: HeadRelevanceDiagnostic) => void } = {}) {
   let cached: { method: NonNullable<StudioModelEndpoint['structuredOutputMethod']>; model: HeadChatClient } | undefined;
   function client() {
     if (cached) return cached;
@@ -46,58 +38,71 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     return cached = { method, model };
   }
 
-  async function decide(input: HeadInput, signal: AbortSignal): Promise<HeadDecision> {
+  async function runStructured<Schema extends typeof relevanceSchema | typeof idleSchema>(
+    name: string,
+    schema: Schema,
+    messages: (format: string) => Array<[string, string]>,
+    signal: AbortSignal,
+    onInvoke?: () => void,
+  ): Promise<z.infer<Schema>> {
+    signal.throwIfAborted();
+    const { method, model } = client();
+    const structured = model.withStructuredOutput(schema, { name, method, includeRaw: true });
+    // JSON mode carries no schema on the wire; only this mode needs a prompt copy.
+    const format = method === 'jsonMode'
+      ? 'Return only a JSON object matching this schema:\n' + JSON.stringify(toJsonSchema(schema), (key, value) => key === '$schema' ? undefined : value)
+      : method === 'functionCalling' ? 'Return the result using the provided tool.' : '';
+    const prompt = messages(format);
+    onInvoke?.();
+    const { raw, parsed } = await structured.invoke(prompt, { signal });
+    signal.throwIfAborted();
+    if (!AIMessage.isInstance(raw)) throw new StructuredFailure('malformed');
+    const failure = failedFinish(raw);
+    if (failure) throw new StructuredFailure(failure);
+    const tools = raw.tool_calls ?? [];
+    if (raw.invalid_tool_calls?.length ||
+      (method === 'functionCalling' ? tools.length !== 1 || tools[0]!.name !== name : tools.length !== 0)) {
+      throw new StructuredFailure('invalid_tool');
+    }
+    const validated = schema.safeParse(parsed);
+    if (!validated.success) throw new StructuredFailure('malformed');
+    return validated.data as z.infer<Schema>;
+  }
+
+  async function assessRelevance(input: HeadInput, signal: AbortSignal): Promise<HeadRelevance> {
     let attempts = 0;
-    const report = (event: Pick<HeadDecisionDiagnostic, 'outcome' | 'action' | 'code'>) => {
-      try { options.onDiagnostic?.({ petId: input.pet.petId, channelId: input.message.channelId, messageId: input.message.messageId, attempts, ...event }); } catch { /* Diagnostics cannot change routing. */ }
+    const report = (event: Pick<HeadRelevanceDiagnostic, 'outcome' | 'code'>) => {
+      try { options.onDiagnostic?.({ petId: input.pet.petId, channelId: input.message.channelId, messageId: input.message.messageId, attempts, ...event }); }
+      catch { /* Diagnostics cannot change behavior. */ }
     };
-    // The owning Head has already resolved the canonical participant mention.
-    const schema = input.addressed ? addressedSchema : decisionSchema;
     try {
-      signal.throwIfAborted();
-      const { method, model } = client();
-      const structured = model.withStructuredOutput(schema, { name: decisionName, method, includeRaw: true });
-      // JSON mode carries no schema on the wire; only this mode needs a prompt copy.
-      const format = method === 'jsonMode'
-        ? 'Return only a JSON object matching this schema:\n' + JSON.stringify(toJsonSchema(schema), (key, value) => key === '$schema' ? undefined : value)
-        : method === 'functionCalling' ? 'Declare the decision using the provided tool.' : '';
-      const messages = headDecisionMessages(input, format);
-      attempts = 1;
-      const { raw, parsed } = await structured.invoke(messages, { signal });
-      signal.throwIfAborted();
-      if (!AIMessage.isInstance(raw)) throw new DecisionFailure('malformed');
-      const failure = failedFinish(raw);
-      if (failure) throw new DecisionFailure(failure);
-      const tools = raw.tool_calls ?? [];
-      if (raw.invalid_tool_calls?.length ||
-        (method === 'functionCalling' ? tools.length !== 1 || tools[0]!.name !== decisionName : tools.length !== 0)) {
-        throw new DecisionFailure('invalid_tool');
-      }
-      const validated = schema.safeParse(parsed);
-      if (!validated.success) throw new DecisionFailure('malformed');
-      const decision = validated.data;
-      if ((decision.action === 'dispatch' ? !decision.intent.trim() : decision.intent !== '') ||
-        (decision.readProgress && decision.reply !== '') ||
-        ('engage' in decision && !decision.engage && (decision.action !== 'ignore' || decision.reply !== '' || decision.readProgress))) {
-        throw new DecisionFailure('malformed');
-      }
-      report(decision.action === 'ignore' && !decision.reply.trim() && !decision.readProgress ? { outcome: 'ignore' } : { outcome: 'selected', action: decision.action });
-      return decision;
+      const result = await runStructured('pet_head_relevance', relevanceSchema, format => headRelevanceMessages(input, format), signal,
+        () => { attempts = 1; });
+      report({ outcome: result.relevant ? 'related' : 'unrelated' });
+      return result;
     } catch (error) {
-      report({ outcome: 'error', code: signal.aborted ? 'aborted' : error instanceof DecisionFailure ? error.code : 'provider_error' });
+      report({ outcome: 'error', code: signal.aborted ? 'aborted' : error instanceof StructuredFailure ? error.code : 'provider_error' });
       // Provider errors can contain prompts and credentials. Keep them out of event logs.
-      throw new Error(signal.aborted ? 'Pet Head decision aborted.' : 'Invalid Pet Head decision.');
+      throw new Error(signal.aborted ? 'Pet Head relevance check aborted.' : 'Invalid Pet Head relevance result.');
     }
   }
 
-  /** Write only public reply text. Never bind tools, request a decision, or retry. */
-  async function composeReply({ message, evidence }: { message: HeadMessage; evidence: HeadProgressEvidence }, signal: AbortSignal): Promise<string> {
+  async function handleIdle(input: HeadInput, signal: AbortSignal): Promise<HeadIdleResult> {
+    try {
+      return await runStructured('pet_head_idle', idleSchema, format => headIdleMessages(input, format), signal);
+    } catch {
+      throw new Error(signal.aborted ? 'Pet Head idle handler aborted.' : 'Invalid Pet Head idle result.');
+    }
+  }
+
+  /** Write only public reply text. Never bind tools, request another judgment, or retry. */
+  async function composeReply(input: HeadReplyInput, signal: AbortSignal): Promise<string> {
     signal.throwIfAborted();
-    const reply = await client().model.invoke(headReplyMessages(message, evidence), { signal });
+    const reply = await client().model.invoke(headReplyMessages(input), { signal });
     signal.throwIfAborted();
     if (failedFinish(reply)) throw new Error('Pet Head progress reply did not finish.');
     return reply.text.trim();
   }
 
-  return { decide, composeReply };
+  return { assessRelevance, handleIdle, composeReply };
 }

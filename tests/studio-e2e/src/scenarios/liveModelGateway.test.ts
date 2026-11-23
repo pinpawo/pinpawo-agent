@@ -111,22 +111,31 @@ test('the complete synthetic runtime tool surface and text-only history remain u
   assert.equal(response.status, 200);
 });
 
-test('the Head declaration is standalone, non-streaming, and never treated as executable history', async t => {
-  const decision = { id: 'call', type: 'function', function: { name: 'pet_head_decision', arguments: '{"engage":false,"action":"ignore","reply":"","intent":"","readProgress":false}' } };
-  const tool = { type: 'function', function: { name: decision.function.name, parameters: {
-    type: 'object', properties: { engage: { type: 'boolean' }, action: { type: 'string', enum: ['ignore', 'dispatch'] },
-      reply: { type: 'string' }, intent: { type: 'string' }, readProgress: { type: 'boolean' } }, additionalProperties: false,
-  } } };
-  const answer = { ...completion, choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [decision] }, finish_reason: 'tool_calls' }] };
-  const value = await gateway(t, asFetch(async () => Response.json(answer)));
-  const response = await post(value, { ...request(), tools: [tool] });
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), answer);
-  assert.equal((await post(value, { ...request(), tools: [tool, lookup()] })).status, 400);
-  assert.equal((await post(value, { ...request(), stream: true, tools: [tool] })).status, 400);
-  assert.equal((await post(value, { ...request(), messages: [...request().messages, { role: 'assistant', content: '', tool_calls: [decision] }] })).status, 400);
-  assert.equal((await post(value, request())).status, 502, 'an unbound reply cannot receive the synthetic Head tool');
-});
+for (const [name, properties, args] of [
+  ['pet_head_relevance', { relevant: { type: 'boolean' } }, { relevant: false }],
+  ['pet_head_idle', { shouldDispatch: { type: 'boolean' }, reply: { type: ['string', 'null'] } }, { shouldDispatch: false, reply: null }],
+] as const) {
+  test(`Head ${name} declaration supports configured formats, never execution history`, async t => {
+    const decision = { id: 'call', type: 'function', function: { name, arguments: JSON.stringify(args) } };
+    const schema = { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
+    const tool = { type: 'function', function: { name, parameters: schema } };
+    const answer = { ...completion, choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [decision] }, finish_reason: 'tool_calls' }] };
+    const value = await gateway(t, asFetch(async () => Response.json(answer)));
+    const response = await post(value, { ...request(), tools: [tool], tool_choice: { type: 'function', function: { name } } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), answer);
+    assert.equal((await post(value, { ...request(), tools: [tool, lookup()] })).status, 400);
+    assert.equal((await post(value, { ...request(), stream: true, tools: [tool] })).status, 400);
+    assert.equal((await post(value, { ...request(), messages: [...request().messages, { role: 'assistant', content: '', tool_calls: [decision] }] })).status, 400);
+    assert.equal((await post(value, request())).status, 502, 'unbound composer cannot receive a Head declaration');
+    const json = await gateway(t, asFetch(async () => Response.json({ ...completion, choices: [{ index: 0,
+      message: { role: 'assistant', content: JSON.stringify(args) }, finish_reason: 'stop' }] })));
+    for (const response_format of [{ type: 'json_object' }, { type: 'json_schema', json_schema: { name, schema, strict: true } }]) {
+      assert.equal((await post(json, { ...request(), response_format })).status, 200);
+    }
+    assert.equal((await post(json, { ...request(), response_format: { type: 'json_schema', json_schema: { name: 'unapproved', schema } } })).status, 400);
+  });
+}
 
 test('provider errors, redirects and transport exceptions expose only fixed codes', async t => {
   const sensitive = `${providerKey} /Users/private-person/data https://private.invalid`;

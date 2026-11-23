@@ -21,7 +21,7 @@ test('Existing report is rejected before model configuration and preserved exact
   const output = path.join(dir, 'existing.json');
   try {
     writeFileSync(output, 'keep');
-    const result = spawnSync(process.execPath, ['--import', 'tsx/esm', script, '--live', '--profile', 'synthetic', '--output', output], { encoding: 'utf8', timeout: 5000 });
+    const result = spawnSync(process.execPath, ['--import', 'tsx/esm', script, '--live', '--profile', 'synthetic', '--cases', 'combined', '--output', output], { encoding: 'utf8', timeout: 5000 });
     assert.equal(result.status, 1); assert.equal(result.stdout, '');
     assert.equal(readFileSync(output, 'utf8'), 'keep');
   } finally { rmSync(dir, { recursive: true, force: true }); }

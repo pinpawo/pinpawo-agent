@@ -11,10 +11,11 @@ import { createTestModelProfiles } from '../testing/modelProfiles';
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 import { FileSaver } from '../fileSaver';
 import { createResidentPet } from './residentPetDispatch';
+import { createResidentPetInteraction } from './residentPetInteraction';
 import { createResidentPetSessions } from './residentPetSessions';
 import { readResidentPetRuntimeContext } from './runtimeContext';
 import { readPetInvocationContext } from './petInvocationContext';
-import type { PetDispatchLifecycleEvent } from './contracts';
+import { PetDispatchRefusedError, type PetDispatchLifecycleEvent } from './contracts';
 
 function deferred() {
   let resolve!: () => void;
@@ -33,6 +34,8 @@ async function waitFor(predicate: () => boolean) {
 const sessionId = 'worker:00000001';
 const scope = { namespace: 'channel', id: 'one' };
 const target = { session: { id: sessionId, create: true }, scope };
+const head = { ...target, delivery: 'idle-only' as const, request: 'Head input',
+  dispatchId: 'head', origin: { namespace: 'channel', id: 'source-message' } };
 
 test('cancellation during context resolution prevents admission', async () => {
   const entered = deferred(), release = deferred();
@@ -51,6 +54,100 @@ test('cancellation during context resolution prevents admission', async () => {
     assert.equal(turns, 0);
     assert.deepEqual(h.events, []);
   } finally { release.resolve(); await h.close(); }
+});
+
+test('idle-only dispatch does not join or interrupt a scheduler dispatch admitted during context resolution', async () => {
+  const preparing = deferred(), releaseContext = deferred(), started = deferred(), finish = deferred();
+  let workSignal!: AbortSignal;
+  const h = await fixture(async turn => {
+    const text = turn.request.kind === 'user_message' ? turn.request.message : '';
+    assert.equal(text, 'scheduled');
+    workSignal = turn.setup.input.signal!;
+    started.resolve();
+    await finish.promise;
+    workSignal.throwIfAborted();
+    return reply(turn, text);
+  }, { resolveInvocationContext: async ({ request }) => {
+    if (request === head.request) { preparing.resolve(); await releaseContext.promise; }
+    return undefined;
+  } });
+  try {
+    const admission = h.resident.dispatch.dispatch(head);
+    await preparing.promise;
+    assert.equal(h.resident.dispatch.getQueueSnapshot().state, 'open');
+    await h.resident.dispatch.dispatch({ ...target, request: 'scheduled', dispatchId: 'scheduler' });
+    await started.promise;
+    releaseContext.resolve();
+    await assert.rejects(admission, PetDispatchRefusedError);
+    const snapshot = h.resident.dispatch.getQueueSnapshot();
+    assert.equal(snapshot.activeDispatch?.dispatchId, 'scheduler');
+    assert.equal(snapshot.queuedDispatches, 0);
+    assert.equal(workSignal.aborted, false);
+    finish.resolve();
+    await waitFor(() => h.resident.dispatch.getQueueSnapshot().activeOperation === null);
+    assert.ok(h.events.every(event => event.dispatchId === 'scheduler'));
+  } finally { releaseContext.resolve(); finish.resolve(); await h.close(); }
+});
+
+test('idle-only dispatch cannot use readiness read across a conversation that already settled', async () => {
+  const reading = deferred(), releaseRead = deferred();
+  let holdRead = false;
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    return reply(turn, 'done');
+  }, { beforeReadState: async () => {
+    if (!holdRead) return;
+    holdRead = false;
+    reading.resolve();
+    await releaseRead.promise;
+  } });
+  try {
+    holdRead = true;
+    const admission = h.resident.dispatch.dispatch(head);
+    await reading.promise;
+    // TUI owns this same resident gate for a conversation. Even if it has
+    // finished by the time the target read returns, that read must not win.
+    await h.interaction.request({ type: 'chat_request', requestId: 'tui', message: 'TUI conversation' });
+    assert.equal(h.resident.dispatch.getQueueSnapshot().state, 'open');
+    releaseRead.resolve();
+    await assert.rejects(admission, PetDispatchRefusedError);
+    assert.deepEqual(turns, ['TUI conversation']);
+    assert.deepEqual(h.events, []);
+  } finally { releaseRead.resolve(); await h.close(); }
+});
+
+test('idle-only dispatch refuses the bound session waiting for review even while the interactive session is idle', async () => {
+  const h = await fixture(async turn => reply(turn, 'done'));
+  try {
+    const session = h.context.sessions.ensureDispatchSession('worker', sessionId, true);
+    assert.notEqual(h.context.sessions.getActiveSession('worker').id, session.id);
+    h.reviews.set(session.threadId, buildReviewSpec({ id: 'approval',
+      view: { kind: 'plain', body: 'Approve this operation?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    const dispatch = h.resident.dispatch;
+    assert.equal(await h.context.coordinator.refreshState(), 'open');
+    await assert.rejects(dispatch.dispatch(head), PetDispatchRefusedError);
+    assert.equal(dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.equal(h.events.length, 0);
+    assert.equal((await h.sessions.snapshot(sessionId)).session.pendingInterrupt?.interruptId, 'review-interrupt');
+    // Ordinary producers still queue for the same target and run after review.
+    await dispatch.dispatch({ ...target, request: 'scheduled', dispatchId: 'scheduler' });
+    assert.equal(dispatch.getQueueSnapshot().queuedDispatches, 1);
+    assert.deepEqual(h.events.map(event => [event.dispatchId, event.state]), [['scheduler', 'queued']]);
+    await waitFor(() => dispatch.getQueueSnapshot().state === 'waiting');
+    h.reviews.delete(session.threadId);
+    await h.context.coordinator.refreshState();
+    await waitFor(() => dispatch.getQueueSnapshot().activeOperation === null && dispatch.getQueueSnapshot().queuedDispatches === 0);
+
+    await dispatch.dispatch(head);
+    assert.equal(dispatch.getQueueSnapshot().queuedDispatches, 0);
+    await waitFor(() => h.events.some(event => event.dispatchId === 'head' && event.state === 'completed'));
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'head').map(event => [event.state, event.sessionId]),
+      [['queued', sessionId], ['running', sessionId], ['message', sessionId], ['completed', sessionId]]);
+  } finally { await h.close(); }
 });
 
 async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>, hooks: {
@@ -87,7 +184,8 @@ async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSess
   const events: PetDispatchLifecycleEvent[] = [];
   resident.dispatch.onDispatchLifecycle(event => events.push(event));
   return {
-    resident, context, events, reviews, sessions: createResidentPetSessions(runtime),
+    resident, context, events, reviews,
+    interaction: createResidentPetInteraction(runtime), sessions: createResidentPetSessions(runtime),
     close: async () => { await resident.close(); await rm(directory, { recursive: true, force: true }); },
   };
 }

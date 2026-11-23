@@ -1,12 +1,15 @@
 import { addAbortListener } from 'node:events';
+import type { PetSessionPort } from 'pinpawo/host-runtime';
 
 export type HeadRun = { invocationId: string; sessionId: string; requestId: string };
-export type HeadSessionRunReader = (sessionId: string, signal: AbortSignal, isCurrent: () => boolean) => Promise<string | undefined>;
-export type HeadProgressEvidence = { status: 'unavailable' | 'running' };
+type RecordedPlan = NonNullable<Awaited<ReturnType<PetSessionPort['snapshot']>>['session']['currentPlan']>;
+export type HeadSessionRunReader = (sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
+  => Promise<{ requestId: string; recordedPlan?: RecordedPlan } | undefined>;
+export type HeadProgressEvidence = { status: 'unavailable' } | { status: 'running'; recordedPlan?: RecordedPlan };
 
 /** Bound one status sample to its deadline, the caller's signal and the exact run. */
 export async function readHeadProgress(input: {
-  run: HeadRun; signal: AbortSignal; isCurrent: () => boolean; readSessionRunId: HeadSessionRunReader;
+  run: HeadRun; signal: AbortSignal; isCurrent: () => boolean; readSessionRun: HeadSessionRunReader;
 }): Promise<HeadProgressEvidence> {
   const { run, isCurrent } = input;
   const unavailable = { status: 'unavailable' } as const;
@@ -17,8 +20,9 @@ export async function readHeadProgress(input: {
     const cancelled = new Promise<undefined>(resolve => {
       listener = addAbortListener(signal, () => resolve(undefined));
     });
-    const requestId = await Promise.race([input.readSessionRunId(run.sessionId, signal, isCurrent), cancelled]);
-    return !signal.aborted && isCurrent() && requestId === run.requestId ? { status: 'running' } : unavailable;
+    const sample = await Promise.race([input.readSessionRun(run.sessionId, signal, isCurrent), cancelled]);
+    if (signal.aborted || !isCurrent() || sample?.requestId !== run.requestId) return unavailable;
+    return { status: 'running', ...(sample.recordedPlan ? { recordedPlan: sample.recordedPlan } : {}) };
   } catch {
     return unavailable;
   } finally {

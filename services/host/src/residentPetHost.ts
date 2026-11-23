@@ -31,6 +31,7 @@ import type { LocalModelProfileRegistry } from './config/llmConfig';
  * not have to know which file inside host/ declares what.
  */
 export {
+  PetDispatchRefusedError,
   PetSessionNotFoundError,
   PetSessionReviewRefusedError,
   ResidentPetInteractionBusyError,

@@ -1,5 +1,5 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { PetDispatchQueueSnapshot } from 'pinpawo/host-runtime';
+import { PetDispatchRefusedError, type PetDispatchQueueSnapshot } from 'pinpawo/host-runtime';
 import type { Studio, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import { readHeadProgress, type HeadRun, type HeadProgressEvidence, type HeadSessionRunReader } from './petHeadProgress';
@@ -265,7 +265,7 @@ export function createPetHead(options: {
     // Admit the canonical source; Head does not rewrite the work passed to Agent.
     if (shouldDispatch && !signal.aborted && options.readWorkState().kind === 'idle') {
       try { await options.channel.dispatch(options.pet.petId, message.messageId, signal); }
-      catch { failures.push('dispatch'); }
+      catch (error) { if (!(error instanceof PetDispatchRefusedError)) failures.push('dispatch'); }
     }
     if (signal.aborted) throw new Error('Pet Head processing aborted.');
     // Do not let a failed publication suppress independent authorized execution,

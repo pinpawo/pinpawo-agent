@@ -7,7 +7,7 @@ import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
-import { readPetDispatchMessage, type PetDispatchPort, type ResidentPet } from './contracts';
+import { PetDispatchRefusedError, readPetDispatchMessage, type PetDispatchPort, type ResidentPet } from './contracts';
 import {
   readResidentPetRuntimeContext,
   type ResidentPetRuntime,
@@ -49,9 +49,11 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, origin: suppliedOrigin, session: suppliedSession, delivery, signal }) => {
       signal?.throwIfAborted();
       const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
-      if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
-      if (delivery === 'interrupt' && (!suppliedSession?.id || !suppliedScope)) {
-        throw new Error('Interrupt delivery requires an explicit session and scope.');
+      if (delivery !== undefined && delivery !== 'interrupt' && delivery !== 'idle-only') throw new Error('Unsupported dispatch delivery.');
+      if (delivery && (!suppliedSession?.id || !suppliedScope)) {
+        throw new Error(delivery === 'interrupt'
+          ? 'Interrupt delivery requires an explicit session and scope.'
+          : 'Idle-only delivery requires an explicit session and scope.');
       }
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
@@ -91,7 +93,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       };
 
       signal?.throwIfAborted();
-      coordinator.submitDispatch(() => AsyncLocalStorageProviderSingleton.runWithConfig(
+      const run = () => AsyncLocalStorageProviderSingleton.runWithConfig(
         { callbacks: [] },
         async () => {
           // A Plugin can submit the next Pet while still inside the current Pet's
@@ -166,19 +168,30 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           }
         },
         true,
-      ), target ? async () => {
-        // A vanished target is not held by a review. Admit it so the run fails
-        // through its own failed lifecycle instead of parking forever.
-        if (!sessions.getSession(petId, target.id)) return true;
-        // Read failures propagate: the Coordinator keeps this work queued.
-        return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
-      } : undefined, {
+      );
+      const observation = {
         dispatchId, enqueuedAt: new Date().toISOString(),
         ...(origin ? { origin } : {}),
         ...(target ? { sessionId: target.id } : {}),
         ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
-      });
-      publishLifecycle({ dispatchId, request, state: 'queued' });
+      };
+      const onAdmitted = () => publishLifecycle({ dispatchId, request, state: 'queued' });
+      const isTargetReady = async () => !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
+      if (delivery === 'idle-only') {
+        const admitted = await coordinator.submitDispatchIfIdle(run, {
+          signal, observation, onAdmitted,
+          ready: async () => !!sessions.getSession(petId, target!.id) && await isTargetReady(),
+        });
+        if (!admitted) throw new PetDispatchRefusedError();
+        return;
+      }
+      coordinator.submitDispatch(run, target ? async () => {
+        // A vanished target is not held by a review. Admit it so the run fails
+        // through its own failed lifecycle instead of parking forever.
+        // Read failures propagate: the Coordinator keeps this work queued.
+        return !sessions.getSession(petId, target.id) || await isTargetReady();
+      } : undefined, observation);
+      onAdmitted();
       if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });
     },
   };

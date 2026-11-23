@@ -308,13 +308,15 @@ to identify an active ordinary dispatch. To check progress, it needs its
 same-Channel public source to predate the inquiry and match any explicit
 reference. After verifying membership and the exact Session binding, the
 Channel reads one snapshot. The reply model receives the sampled status
-(running or unavailable). That same snapshot can supply the bound Session’s
-recorded plan items: completed, active, and pending, with brief
-descriptions. An active item may be awaiting review; a completed item does not
-mean the whole task is complete. The recorded plan may predate this execution.
-Without a plan, the reply reports only the checked status. Delivery text,
-timeline text, and raw tool output are not used. Reviewed work resuming
-outside the ordinary dispatch slot is not sampled. Asking for progress alone
+(running or unavailable). From that same snapshot, the Head passes only each
+recorded plan item's status (completed, active or pending) and unchanged task
+description to the reply model. The Pet Agent must keep sensitive details out of
+plan descriptions; the Head does not redact or truncate them. An active item may
+be awaiting review; a completed item does not mean the whole task is complete.
+The recorded plan may predate this execution. Without a plan, the reply reports
+only the checked status. Attachment contents, raw Session messages, and tool
+output are not used as progress evidence. Reviewed work resuming outside the
+ordinary dispatch slot is not sampled. Asking for progress alone
 never dispatches. Busy or unknown state never admits an addition, even when it
 is independent work; it does not interrupt or change the active execution.
 

@@ -20,8 +20,8 @@ export type StudioDispatchRequest = {
   scope?: PetInvocationScope;
   /** Trusted source identity for queue observation only; not Agent execution context. */
   origin?: PetInvocationScope;
-  /** In-process only: interrupt this same scoped session after the input is queued. */
-  delivery?: 'interrupt';
+  /** In-process only: interrupt this scoped session or refuse if it cannot start without queueing. */
+  delivery?: 'interrupt' | 'idle-only';
 };
 
 /** The public wire form: Host-trusted fields are deliberately absent. */

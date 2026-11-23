@@ -240,9 +240,11 @@ export function prepareStudioWithHead(input: CreateStudioInput, attachHead?: Att
     const origin = request.origin ? copyPetInvocationScope(request.origin) : undefined;
     if (origin && (!scope || origin.namespace !== scope.namespace)) throw new Error('Dispatch origin requires a matching scope namespace.');
     const delivery = request.delivery;
-    if (delivery !== undefined && delivery !== 'interrupt') throw new Error('Unsupported dispatch delivery.');
-    if (delivery === 'interrupt' && (!session?.id || !scope)) {
-      throw new Error('Interrupt delivery requires an explicit session and scope.');
+    if (delivery !== undefined && delivery !== 'interrupt' && delivery !== 'idle-only') throw new Error('Unsupported dispatch delivery.');
+    if (delivery && (!session?.id || !scope)) {
+      throw new Error(delivery === 'interrupt'
+        ? 'Interrupt delivery requires an explicit session and scope.'
+        : 'Idle-only delivery requires an explicit session and scope.');
     }
     await registry.restore();
     signal?.throwIfAborted();

@@ -1,7 +1,7 @@
 import { withTestPetChannel } from './testing/petChannel';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
+import { PetDispatchRefusedError, type PetDispatchPort, type PetSessionPort } from 'pinpawo/host-runtime';
 
 import { prepareStudio, type CreateStudioInput, type PreparedStudio } from './createStudio';
 import { StudioPetError } from './pets/studioPets';
@@ -373,6 +373,31 @@ test('idempotency returns the same receipt and invokes the port once', async () 
   assert.equal(calls, 1);
   assert.equal(acceptedEvents, 1);
   await studio.shutdown();
+});
+
+test('declined idle-only input emits no accepted event and does not consume the admission key', async (t) => {
+  const pet = binding('worker');
+  let attempts = 0;
+  pet.dispatch.dispatch = async ({ delivery }) => {
+    assert.equal(delivery, 'idle-only');
+    if (++attempts === 1) throw new PetDispatchRefusedError();
+  };
+  const studio = await createStudio({ studioId: 'idle-only', pets: [pet] });
+  t.after(() => studio.shutdown());
+  const accepted: StudioEvent[] = [];
+  studio.subscribe(event => { if (event.type === 'dispatch.accepted') accepted.push(event); });
+  const request = { petId: 'worker', request: 'Head work', idempotencyKey: 'head-key',
+    delivery: 'idle-only' as const, scope: { namespace: 'channel', id: 'one' }, session: { id: 'session-1' } };
+
+  await assert.rejects(studio.dispatch(request), PetDispatchRefusedError);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(accepted.length, 0);
+  const receipt = await studio.dispatch(request);
+  assert.equal(await studio.dispatch(request), receipt);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(accepted.length, 1);
+  assert.equal((accepted[0]!.payload as { invocationId: string }).invocationId, receipt.invocationId);
 });
 
 test('dispatch owns simultaneous admission deduplication and isolates producer keys', async () => {

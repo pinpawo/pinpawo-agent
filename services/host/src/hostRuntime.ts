@@ -14,6 +14,7 @@ export {
   createResidentPetInteraction,
   createResidentPetRuntime,
   createResidentPetSessions,
+  PetDispatchRefusedError,
   PetSessionNotFoundError,
   PetSessionReviewRefusedError,
   ResidentPetCoordinator,

@@ -129,7 +129,11 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     check();
     const receipt = await studio.dispatch({
       petId, request,
-      ...(headInput ? { signal: headInput.signal, origin: { namespace: 'channel', id: headInput.messageId } } : {}),
+      ...(headInput ? {
+        delivery: 'idle-only' as const,
+        signal: headInput.signal,
+        origin: { namespace: 'channel', id: headInput.messageId },
+      } : {}),
       ...(headInput?.attachments?.length ? { attachments: headInput.attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },

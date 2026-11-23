@@ -84,6 +84,7 @@ test('messages retain references and mentions without dispatching a Pet', async 
   const request = dispatched[0]!;
   assert.equal(request.petId, 'writer');
   assert.equal(request.signal, signal);
+  assert.equal(request.delivery, 'idle-only');
   assert.deepEqual(request.origin, { namespace: 'channel', id: mentioned.message.messageId });
   assert.deepEqual(request.scope, { namespace: 'channel', id: channelId });
   assert.equal(request.idempotencyKey, JSON.stringify(['head-dispatch', channelId, 'writer', mentioned.message.messageId]));

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import { toJsonSchema, Validator } from '@langchain/core/utils/json_schema';
-import { buildModel } from 'pinpawo/host-runtime';
+import { PetDispatchRefusedError, buildModel } from 'pinpawo/host-runtime';
 import test from 'node:test';
 import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadWorkState, type HeadMessage, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
@@ -665,7 +665,7 @@ test('progress composition uses only SDK text without binding tools or retrying'
   }
 });
 
-test('the status model sees the recorded plan’s status and description, not internal fields or deliverables', async () => {
+test('the status model receives each recorded plan description verbatim, without internal fields or deliverables', async () => {
   const mentions = [{ participantId: 'pet:a', label: 'Analyst' }];
   const current = message('20', { author: { kind: 'pet', id: 'reviewer' }, body: 'Check the status of this report.',
     mentions, replyTo: '12', externalRef: 'internal-delivery-ref', deliverables: [{ uri: 'https://example.test/internal-report' }] });
@@ -674,13 +674,13 @@ test('the status model sees the recorded plan’s status and description, not in
     { status: 'completed' as const, description: 'Collect source material.' },
     { status: 'active' as const, description: 'Review the draft.' },
     { status: 'pending' as const, description: 'Verify the figures.' },
-    { status: 'pending' as const, description: 'Check the captions.' },
-    { status: 'pending' as const, description: 'Compare the references.' },
-    { status: 'pending' as const, description: 'Proofread the labels.' },
+    { status: 'pending' as const, description: 'Test the sample form with password: fixture-only.' },
+    { status: 'pending' as const, description: '["one", "two"]' },
+    { status: 'pending' as const, description: '  Check [the example](https://example.test/guide) and /tmp/example.md.\n```ts\nconst example = 1;\n```\n' +
+      'Keep the rest of this plan description. '.repeat(12) + '  ' },
   ];
   const recordedPlan = { items: [
     ...objectives.map(({ status, description }, i) => ({ id: `internal-${i}`, capability: 'private-capability', task: description, status })),
-    { id: 'sensitive', capability: 'internal', task: 'password: synthetic-private-plan', status: 'pending' as const },
   ] };
   const mock = mockEndpoint([new AIMessage('The report is still running.')]);
   const reply = await createHeadModel(() => mock.endpoint).composeReply({
@@ -694,25 +694,19 @@ test('the status model sees the recorded plan’s status and description, not in
   });
 });
 
-test('missing, empty, unverified, or withheld plan leaves only checked status; descriptions are bounded', async () => {
+test('missing or empty plans and plans without a verified public source leave only checked status', async () => {
   const current = message('21');
   const source = { messageId: '12', body: 'Prepare the report.' };
-  const mock = mockEndpoint(Array.from({ length: 5 }, () => new AIMessage('running')));
+  const mock = mockEndpoint(Array.from({ length: 3 }, () => new AIMessage('running')));
   const compose = createHeadModel(() => mock.endpoint).composeReply;
   const signal = new AbortController().signal;
   const running = { status: 'running' as const };
   const item = { id: 'p1', capability: 'internal', status: 'pending' as const };
-  const safe = `Proof [file](artifact://private/123) /Users/t/private.md.\n\`\`\`json\n{"raw":"no"}\n\`\`\`\n${'z'.repeat(700)}`;
   await compose({ message: current, evidence: running, source }, signal);
   await compose({ message: current, evidence: { ...running, recordedPlan: { items: [] } }, source }, signal);
   await compose({ message: current, evidence: { ...running, recordedPlan: { items: [{ ...item, task: 'No public source' }] } } }, signal);
-  await compose({ message: current, evidence: { ...running, recordedPlan: { items: [{ ...item, task: 'api_key: synthetic-fixture' }] } }, source }, signal);
-  await compose({ message: current, evidence: { ...running, recordedPlan: { items: [{ ...item, task: safe }] } }, source }, signal);
   const inputs = mock.calls.map(call => JSON.parse((call.messages as string[][])[1]![1]!).evidence);
-  assert.deepEqual(inputs.slice(0, 4), Array.from({ length: 4 }, () => running));
-  assert.equal(inputs[4].plan[0].status, 'pending');
-  assert.equal(inputs[4].plan[0].description.length, 161);
-  assert.doesNotMatch(inputs[4].plan[0].description, /artifact:|Users|private\.md|"raw"/);
+  assert.deepEqual(inputs, [running, running, running]);
 });
 
 test('failed or cancelled progress composition does not return late or partial prose', async () => {
@@ -980,6 +974,20 @@ test('idle admission rechecks after publication and does not re-decide as busy',
   });
   await handle(message('2'), new AbortController().signal);
   assert.deepEqual(calls, ['idle', 'reply']);
+});
+
+test('a refused idle-only admission is a skip rather than a failed Head handler', async () => {
+  const calls: string[] = [];
+  const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
+    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
+      dispatch: async () => { calls.push('admission'); throw new PetDispatchRefusedError(); },
+      reply: async () => { calls.push('acknowledgement'); },
+    },
+    assessRelevance: relevant,
+    handleIdle: async () => ({ shouldDispatch: true, reply: 'I see the request.' }),
+  });
+  await handle(message('2'), new AbortController().signal);
+  assert.deepEqual(calls, ['acknowledgement', 'admission']);
 });
 
 test('if the run changes inside the reply operation, its guard blocks stale status without queued B', async () => {

@@ -5,7 +5,7 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { stampAgentMessageCreatedAt } from '@pinpawo/pet-agent';
 import { createContextCompactionMessage } from '../../../../packages/pet-agent/src/agent/orchestrator/contextCompaction';
-import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
+import { ENTRY_ROUTING_LANE, setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import {
   readTuiCheckpointInputModalities,
   readTuiCheckpointMessages,
@@ -66,6 +66,21 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
     { role: 'assistant', text: 'Verified delivery' },
   ]);
   assert.equal(result.content, before);
+});
+
+test('checkpoint display keeps the Entry goal and associates its completed receipt', () => {
+  const routing = { lane: ENTRY_ROUTING_LANE, runId: 'entry-run' };
+  const goal = 'Verify the earlier inspection.';
+  const call = setAgentMessageMetadata(new AIMessage({ id: 'route-message', content: '',
+    tool_calls: [{ id: 'route', name: 'plan_request', args: { goal } }],
+  }), routing);
+  const receipt = setAgentMessageMetadata(new ToolMessage({
+    name: 'plan_request', tool_call_id: 'route', content: 'Routed.',
+  }), routing);
+  assert.deepEqual(readTuiCheckpointMessages([call, receipt]), [{
+    id: 'route-message', role: 'assistant', text: '', runId: 'entry-run',
+    toolCalls: [{ id: 'route', name: 'plan_request', args: { goal }, status: 'completed' }],
+  }]);
 });
 
 test('readTuiCheckpointMessages hides internal Capability transcript messages', () => {

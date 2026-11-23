@@ -14,10 +14,9 @@ import { buildReviewSpec } from '../../../types/reviewSpec';
 import { defineInstructionDocument } from '../../../types/capability';
 
 import {
-  ENTRY_ROUTING_SOURCE,
+  ENTRY_ROUTING_LANE,
   getAgentMessageMetadata,
   getAgentMessageLane,
-  isPublicConversationMessage,
   queryAgentMessages,
   setAgentMessageMetadata,
 } from '../../messages';
@@ -61,6 +60,12 @@ function entryRoutingRecords(messages: readonly BaseMessage[]) {
   const isRoutingTool = (name?: string) => name === 'plan_request' || name === 'continue';
   return messages.filter((message) => ToolMessage.isInstance(message) ? isRoutingTool(message.name)
     : AIMessage.isInstance(message) && message.tool_calls?.some((call) => isRoutingTool(call.name)));
+}
+function entryResolvedGoal(messages: readonly BaseMessage[], runId: string) {
+  const context = messages.find(message => message.id === `supervisor-context:${runId}`);
+  const goal = context?.text.match(/<run_user_request\b[^>]*\bsource="entry_answer"[^>]*>\s*<request>\s*<!\[CDATA\[([\s\S]*?)\]\]>/)?.[1];
+  assert.ok(goal, 'Supervisor receives an Entry Answer goal frame');
+  return goal.trim();
 }
 const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   name: 'general', description: 'Inspect repositories.', uses: [],
@@ -177,7 +182,9 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   assert.equal(second.runSupervisorState.runId, second.runId);
   const messages = nextSupervisor.inputs[0];
   assert.ok(messages.some((message) => message.text.includes('Repository inspection evidence.')));
-  assert.ok(messages.some((message) => message.text === 'Check compatibility next.'));
+  assert.ok(messages.some((message) => HumanMessage.isInstance(message) && message.text === 'Check compatibility next.'));
+  assert.equal(entryResolvedGoal(messages, second.runId), first.runSupervisorState.goal,
+    'continue adopts the earlier goal rather than relabeling the latest human utterance');
   assert.ok(messages.some((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability'));
   assert.deepEqual(entryRoutingRecords(messages), [], 'Supervisor sees neither previous plan_request nor current continue');
   const planFacts = messages.at(-1)?.text.match(/<supervisor_plan>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/supervisor_plan>/)?.[1];
@@ -191,8 +198,7 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   assert.equal(continueReceipt.name, 'continue');
   assert.equal(continueReceipt.tool_call_id, callToContinue.tool_calls?.[0]?.id);
   for (const message of routing) {
-    assert.equal(getAgentMessageMetadata(message).source, ENTRY_ROUTING_SOURCE);
-    assert.equal(isPublicConversationMessage(message), true);
+    assert.equal(getAgentMessageLane(message), ENTRY_ROUTING_LANE);
   }
   assert.equal(messages.some((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.id === 'call-question')), false);
@@ -378,7 +384,7 @@ test('Supervisor restarts from the resolved goal and selects only history withou
     tool_calls: [{ name: 'plan_request', args: { goal: 'List earlier references.' }, id: 'old-plan' }],
   });
   const priorPlanReceipt = new ToolMessage({ id: 'untagged-receipt', name: 'plan_request', tool_call_id: 'old-plan', content: 'Handed off.' });
-  const differentRouting = { source: ENTRY_ROUTING_SOURCE, runId: 'previous-run' };
+  const differentRouting = { lane: ENTRY_ROUTING_LANE, runId: 'previous-run' };
   const differentRoutingCall = setAgentMessageMetadata(call('another_routing_name', {}, 'reused-id'), differentRouting);
   const differentRoutingReceipt = setAgentMessageMetadata(new ToolMessage({
     name: 'another_routing_name', tool_call_id: 'reused-id', content: 'A labeled earlier routing receipt.',
@@ -386,7 +392,8 @@ test('Supervisor restarts from the resolved goal and selects only history withou
   const priorLookup = call('lookup_reference', {}, 'reused-id');
   const priorLookupReceipt = new ToolMessage({ name: 'lookup_reference', tool_call_id: 'reused-id', content: 'Found the earlier checklist.' });
   const priorReply = new AIMessage('The earlier checklist is ready.');
-  const fresh = buildOrchestratorRunInput([new HumanMessage('Go ahead with the new inspection.')]);
+  const rawRequest = 'Go ahead with the new inspection.';
+  const fresh = buildOrchestratorRunInput([new HumanMessage(rawRequest)]);
   await graph.invoke({
     ...fresh,
     messages: [priorPlanCall, priorPlanReceipt, differentRoutingCall, differentRoutingReceipt,
@@ -396,15 +403,13 @@ test('Supervisor restarts from the resolved goal and selects only history withou
     ] },
   }, { ...options, interruptBefore: ['runSupervisor'] });
   const saved = await graph.getState(options);
-  const main = queryAgentMessages(saved.values.messages).main().select().messages;
-  const [routingCall, confirmation] = main.slice(-2);
+  const [routingCall, confirmation] = saved.values.messages.slice(-2);
   assert.ok(AIMessage.isInstance(routingCall) && ToolMessage.isInstance(confirmation));
   assert.equal(confirmation.name, 'plan_request');
   assert.equal(confirmation.tool_call_id, routingCall.tool_calls?.[0]?.id);
   assert.equal(confirmation.tool_call_id, 'entry-call');
   for (const message of [routingCall, confirmation]) {
-    assert.equal(getAgentMessageMetadata(message).source, ENTRY_ROUTING_SOURCE);
-    assert.equal(isPublicConversationMessage(message), true);
+    assert.equal(getAgentMessageLane(message), ENTRY_ROUTING_LANE);
   }
   assert.equal(saved.values.runUserRequest, task.objective);
   assert.deepEqual(saved.values.runSupervisorState, { runId: null, goal: null, plan: [] });
@@ -428,8 +433,9 @@ test('Supervisor restarts from the resolved goal and selects only history withou
       && message.tool_call_id === 'reused-id' && message.text === priorLookupReceipt.text));
     assert.ok(turn.some(message => AIMessage.isInstance(message) && message.text === priorReply.text));
   }
-  assert.ok(supervisor.inputs[0].some(message => message.id === `supervisor-context:${output.runId}`
-    && message.text.includes(task.objective)));
+  assert.equal(entryResolvedGoal(supervisor.inputs[0], output.runId), task.objective);
+  assert.ok(supervisor.inputs[0].some(message => HumanMessage.isInstance(message) && message.text === rawRequest));
+  assert.doesNotMatch(supervisor.inputs[0].at(-1)!.text, /<supervisor_plan>/);
   const planCall = supervisor.modelTurns[1].flatMap(message => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
     .find(call => call.name === 'submit_plan');
   assert.ok(planCall?.id);

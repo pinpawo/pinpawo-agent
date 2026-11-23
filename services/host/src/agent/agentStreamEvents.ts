@@ -6,8 +6,10 @@ import type { AgentMessageToolCall, AgentOperationEvent } from '@pinpawo/agent-s
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   getAgentMessageRunId,
+  isEntryRoutingMessage,
   isMainConversationMessage,
   isPublicConversationMessage,
+  isSyntheticAgentMessage,
   readMessageText,
 } from '@pinpawo/pet-agent';
 import {
@@ -31,9 +33,19 @@ export function readMessageToolCalls(message: BaseMessage): Array<Omit<AgentMess
   return (message.tool_calls ?? []).flatMap(call => call.id ? [{ id: call.id, name: call.name, args: call.args ?? {} }] : []);
 }
 
-/** Main-conversation tool results keyed by the call they answer; lane results are private work. */
+function isVisibleEntryRoutingMessage(message: BaseMessage): boolean {
+  return isEntryRoutingMessage(message) && !isSyntheticAgentMessage(message);
+}
+
+/** The UI shows Entry's goal and handoff alongside ordinary public conversation. */
+export function isDisplayConversationMessage(message: BaseMessage): boolean {
+  return isPublicConversationMessage(message) || isVisibleEntryRoutingMessage(message);
+}
+
+/** Displayed tool results keyed by their call, including Entry's handoff receipt. */
 export function readToolResults(messages: readonly unknown[]) {
-  return new Map(messages.flatMap(message => ToolMessage.isInstance(message) && isMainConversationMessage(message)
+  return new Map(messages.flatMap(message => ToolMessage.isInstance(message)
+    && (isMainConversationMessage(message) || isVisibleEntryRoutingMessage(message))
     ? [[message.tool_call_id, readToolResult(message)]]
     : []));
 }
@@ -45,8 +57,8 @@ function readToolResult(message: ToolMessage): { status: 'completed' | 'failed';
     : { status: 'completed' };
 }
 
-/** A public main-conversation message that this run wrote. */
+/** A displayed conversation message that this run wrote. */
 export function isPublicRunMessage(message: BaseMessage, runId: unknown) {
   const messageRunId = getAgentMessageRunId(message);
-  return isPublicConversationMessage(message) && messageRunId !== null && messageRunId === runId;
+  return isDisplayConversationMessage(message) && messageRunId !== null && messageRunId === runId;
 }

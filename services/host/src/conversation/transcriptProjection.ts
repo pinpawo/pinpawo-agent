@@ -1,6 +1,5 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
-  isPublicConversationMessage,
   mainConversationMessages,
   readCapabilityExecutions,
   readAgentMessageCreatedAt,
@@ -13,7 +12,7 @@ import {
 import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import { readLocalChatDisplayText } from './chatDisplayText';
-import { readMessageToolCalls, readToolResults } from '../agent/agentStreamEvents';
+import { isDisplayConversationMessage, readMessageToolCalls, readToolResults } from '../agent/agentStreamEvents';
 
 /**
  * Transcript projection for the interface.
@@ -112,7 +111,7 @@ function readTuiCheckpointMessageSource(
 ): TuiCheckpointMessageSource | null {
   const type = message._getType();
   if (type !== 'human' && type !== 'ai') return null;
-  if (!isPublicConversationMessage(message)) return null;
+  if (!isDisplayConversationMessage(message)) return null;
   if (type === 'human') return { role: 'user' };
   return { role: 'assistant' };
 }

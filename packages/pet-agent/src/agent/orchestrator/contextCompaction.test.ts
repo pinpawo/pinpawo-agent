@@ -12,6 +12,7 @@ import {
   isContextCompactionMessage,
 } from './contextCompaction';
 import {
+  ENTRY_ROUTING_LANE,
   getAgentMessageMetadata,
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
@@ -46,7 +47,7 @@ function executionResult(id: string, planItemId: string, text: string, taskId = 
     metadata: { runId: 'run', taskId } });
 }
 
-test('compaction retains unfinished execution pairs and private lanes without exposing them to the summary', async () => {
+test('compaction retains unfinished execution, private work and Entry handoff records without exposing them to the summary', async () => {
   const call = executionCall('execution-1', 'task-1');
   const result = executionResult('execution-1', 'task-1', 'unaccepted evidence');
   const privateMessage = setAgentMessageMetadata(new HumanMessage('private executor context'), {
@@ -55,17 +56,30 @@ test('compaction retains unfinished execution pairs and private lanes without ex
   const workMessage = setAgentMessageMetadata(new AIMessage('private supervisor context'), {
     lane: 'supervisor', runId: 'old-run',
   });
+  const routing = { lane: ENTRY_ROUTING_LANE, runId: 'old-run' };
+  const routeCall = setAgentMessageMetadata(new AIMessage({
+    content: 'entry routing explanation',
+    tool_calls: [{ name: 'plan_request', id: 'old-routing', args: { goal: 'entry routing goal' } }],
+  }), routing);
+  const routeReceipt = setAgentMessageMetadata(new ToolMessage({
+    name: 'plan_request', tool_call_id: 'old-routing', content: 'entry routing receipt',
+  }), routing);
   let summarized = '';
   const compacted = await compactOrchestratorMessages({
-    messages: [new HumanMessage('old request'), call, result, privateMessage, workMessage, new HumanMessage('latest')],
+    messages: [new HumanMessage('old request'), routeCall, routeReceipt, call, result,
+      privateMessage, workMessage, new HumanMessage('latest')],
     model: fakeSummaryModel('summary', (messages) => { summarized = JSON.stringify(messages); }),
     options: { keepMessages: 1, preservePlanItemIds: ['task-1'] },
   });
   assert.equal(compacted.compacted, true);
-  for (const message of [call, result, privateMessage, workMessage]) assert.ok(compacted.messages.includes(message));
+  for (const message of [routeCall, routeReceipt, call, result, privateMessage, workMessage]) {
+    assert.ok(compacted.messages.includes(message));
+  }
   assert.ok(!summarized.includes('unaccepted evidence'));
   assert.ok(!summarized.includes('private executor context'));
   assert.ok(!summarized.includes('private supervisor context'));
+  assert.ok(summarized.includes('old request'));
+  assert.doesNotMatch(summarized, /entry routing|plan_request/);
 });
 
 test('declared references follow ordinary compaction of completed execution groups', async () => {

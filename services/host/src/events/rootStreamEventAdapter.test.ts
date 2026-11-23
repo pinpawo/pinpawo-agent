@@ -1,4 +1,4 @@
-import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
+import { ENTRY_ROUTING_LANE, setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
@@ -220,18 +220,20 @@ test('adapted Entry Answer text is emitted only when root state accepts it as th
           id: 'entry-message',
           content: '只在直答时展示',
           tool_calls: [{ id: 'call:plan', name: 'plan_request', args: { goal: '问题' }, type: 'tool_call' }],
-          additional_kwargs: { pinpawo: { runId: 'entry-run' } },
-        })],
+          additional_kwargs: { pinpawo: { runId: 'entry-run', lane: ENTRY_ROUTING_LANE } },
+        }), setAgentMessageMetadata(new ToolMessage({
+          name: 'plan_request', tool_call_id: 'call:plan', content: 'Routed.',
+        }), { runId: 'entry-run', lane: ENTRY_ROUTING_LANE })],
       },
     },
   }]);
   assert.equal(handoff.some((event) => event.type === 'assistant.delta'), false);
-  assert.deepEqual(handoff.filter((event) => event.type === 'tool_calls.message'), [{
+  assert.deepEqual(handoff.filter((event) => event.type === 'tool_calls.message' || event.type === 'tool_call.settled'), [{
     type: 'tool_calls.message',
     messageId: 'entry-message',
     text: '只在直答时展示',
     toolCalls: [{ id: 'call:plan', name: 'plan_request', args: { goal: '问题' } }],
-  }]);
+  }, { type: 'tool_call.settled', messageId: 'entry-message', callId: 'call:plan', status: 'completed' }]);
 });
 
 test('adapter drops synthetic assistant messages written by prepare', () => {

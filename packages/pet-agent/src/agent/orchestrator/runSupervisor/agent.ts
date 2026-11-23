@@ -49,8 +49,7 @@ export function createRunSupervisorAgent(params: {
         defaultCapabilityName: params.defaultCapabilityName,
       });
       const disclosedDocuments = documents.readCapabilities(input.capabilityDisclosure.disclosedCapabilityNames, signal);
-      const selected = queryAgentMessages(input.messages)
-        .main({ includeEntryRouting: false }).supervisor(input.runId).select().messages;
+      const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
       // Supervisor writes its calls back to Root, where Entry's IDs are still in use.
       const reservedToolCallIds = input.messages.filter(isEntryRoutingMessage).flatMap(readMessageToolCallIds);
       // Run-stable facts sit right before this run's messages: earlier history

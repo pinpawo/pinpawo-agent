@@ -6,7 +6,7 @@ import { Command, END, START, StateGraph } from '@langchain/langgraph';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
 import {
-  ENTRY_ROUTING_SOURCE,
+  ENTRY_ROUTING_LANE,
   mainConversationMessages,
   observeAgentMessageSelection,
   queryAgentMessages,
@@ -99,8 +99,8 @@ function entryHandoff(
   if (!AIMessage.isInstance(last) || last.tool_calls?.length !== 1 || last.tool_calls[0].id !== runtime.toolCallId) {
     throw new Error('Entry routing requires one exclusive tool call.');
   }
-  // These are public handoff records, not messages Supervisor needs to reason over.
-  const routing = { source: ENTRY_ROUTING_SOURCE, runId: runtime.state.runId, taskId: runtime.state.taskId };
+  // Keep the handoff in Root for audit; it is not part of model conversation.
+  const routing = { lane: ENTRY_ROUTING_LANE, runId: runtime.state.runId, taskId: runtime.state.taskId };
   const confirmation = setAgentMessageMetadata(new ToolMessage({
     name: last.tool_calls[0].name, tool_call_id: runtime.toolCallId,
     content: 'Request handed to Supervisor.',

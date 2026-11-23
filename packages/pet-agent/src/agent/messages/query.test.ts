@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { ENTRY_ROUTING_SOURCE, setAgentMessageDelegationScope, setAgentMessageMetadata } from './metadata';
+import { ENTRY_ROUTING_LANE, setAgentMessageDelegationScope, setAgentMessageMetadata } from './metadata';
 import { isMainConversationMessage, isPublicConversationMessage, queryAgentMessages } from './query';
 import { createContextCompactionMessage } from '../orchestrator/contextCompaction';
 
@@ -136,8 +136,8 @@ test('Supervisor messages cannot fall back to main when their run identity is mi
   assert.throws(() => queryAgentMessages([message]).main().select(), /missing its run id/);
 });
 
-test('a model view can omit labeled Entry records without changing the public conversation', () => {
-  const routing = { source: ENTRY_ROUTING_SOURCE };
+test('Entry lane stays out of main and Supervisor work regardless of record position', () => {
+  const routing = { lane: ENTRY_ROUTING_LANE };
   const call = setAgentMessageMetadata(new AIMessage({
     id: 'routing-call', content: '', tool_calls: [{ name: 'route', id: 'route-id', args: {} }],
   }), routing);
@@ -147,14 +147,8 @@ test('a model view can omit labeled Entry records without changing the public co
   }), routing);
   const canonical = [call, user, receipt];
   const query = queryAgentMessages(canonical);
-  const selection = query.main({ includeEntryRouting: false }).supervisor('run-1').select();
-  assert.deepEqual(selection.messages, [user]);
-  assert.deepEqual(selection.diagnostics.excluded, [
-    { messageId: 'routing-call', reason: 'entry_routing_not_selected' },
-    { messageId: 'routing-receipt', reason: 'entry_routing_not_selected' },
-  ]);
-  assert.deepEqual(query.main().select().messages, canonical);
-  assert.deepEqual(canonical.filter(isPublicConversationMessage), canonical);
+  assert.deepEqual(query.main().supervisor('run-1').select().messages, [user]);
+  assert.deepEqual(query.main().select().messages, [user]);
 });
 
 test('conversation predicates: lanes are private, compaction stays main but is not public', () => {

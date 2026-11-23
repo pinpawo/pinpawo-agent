@@ -10,6 +10,8 @@ export type DelegationMessageScope = {
 
 export type AgentMessageMetadata = Record<string, unknown>;
 
+export const ENTRY_ROUTING_LANE = 'entry_routing';
+
 export function getAgentMessageMetadata(message: BaseMessage): AgentMessageMetadata {
   const pinpawo = message.additional_kwargs?.pinpawo;
   return pinpawo && typeof pinpawo === 'object'
@@ -38,6 +40,10 @@ export function markToolResultAttachment(message: HumanMessage, toolCallId: stri
 export function getAgentMessageLane(message: BaseMessage): string | null {
   const lane = getAgentMessageMetadata(message).lane;
   return typeof lane === 'string' ? lane : null;
+}
+
+export function isEntryRoutingMessage(message: BaseMessage): boolean {
+  return getAgentMessageLane(message) === ENTRY_ROUTING_LANE;
 }
 
 /**

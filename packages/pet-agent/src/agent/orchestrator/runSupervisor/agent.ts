@@ -12,7 +12,8 @@ import { createAgent } from 'langchain';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentSystemPrompt, buildRunSupervisorContextInput, buildRunSupervisorTurnInput } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { queryAgentMessages, getAgentMessageMetadata, getAgentMessageRunId, stampAgentMessageCreatedAt } from '../../messages';
+import { queryAgentMessages, getAgentMessageMetadata, getAgentMessageRunId, isEntryRoutingMessage, stampAgentMessageCreatedAt } from '../../messages';
+import { readMessageToolCallIds } from '../../../utils/messages';
 import { createToolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
@@ -49,6 +50,8 @@ export function createRunSupervisorAgent(params: {
       });
       const disclosedDocuments = documents.readCapabilities(input.capabilityDisclosure.disclosedCapabilityNames, signal);
       const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
+      // Supervisor writes its calls back to Root, where Entry's IDs are still in use.
+      const reservedToolCallIds = input.messages.filter(isEntryRoutingMessage).flatMap(readMessageToolCallIds);
       // Run-stable facts sit right before this run's messages: earlier history
       // and this context stay a cacheable prefix across the run's invocations,
       // and only the turn message changes at the end.
@@ -78,7 +81,7 @@ export function createRunSupervisorAgent(params: {
         middleware: [
           createSupervisorControlValidationMiddleware(input, agentMessages.length),
           systemPromptMiddleware,
-          createToolProtocolMiddleware({ uniqueInHistory: true }),
+          createToolProtocolMiddleware({ uniqueInHistory: true, reservedToolCallIds }),
         ],
       });
       // A stricter caller limit stays the caller's hard breaker; only this

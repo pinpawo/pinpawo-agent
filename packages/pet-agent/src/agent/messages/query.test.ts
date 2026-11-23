@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { setAgentMessageDelegationScope, setAgentMessageMetadata } from './metadata';
+import { ENTRY_ROUTING_LANE, setAgentMessageDelegationScope, setAgentMessageMetadata } from './metadata';
 import { isMainConversationMessage, isPublicConversationMessage, queryAgentMessages } from './query';
 import { createContextCompactionMessage } from '../orchestrator/contextCompaction';
 
@@ -134,6 +134,21 @@ test('Supervisor working history is run-scoped without changing main or Capabili
 test('Supervisor messages cannot fall back to main when their run identity is missing', () => {
   const message = setAgentMessageMetadata(new AIMessage({ content: 'private' }), { lane: 'supervisor' });
   assert.throws(() => queryAgentMessages([message]).main().select(), /missing its run id/);
+});
+
+test('Entry lane stays out of main and Supervisor work regardless of record position', () => {
+  const routing = { lane: ENTRY_ROUTING_LANE };
+  const call = setAgentMessageMetadata(new AIMessage({
+    id: 'routing-call', content: '', tool_calls: [{ name: 'route', id: 'route-id', args: {} }],
+  }), routing);
+  const user = new HumanMessage({ id: 'user', content: 'Continue.' });
+  const receipt = setAgentMessageMetadata(new ToolMessage({
+    id: 'routing-receipt', name: 'route', content: 'Routed.', tool_call_id: 'route-id',
+  }), routing);
+  const canonical = [call, user, receipt];
+  const query = queryAgentMessages(canonical);
+  assert.deepEqual(query.main().supervisor('run-1').select().messages, [user]);
+  assert.deepEqual(query.main().select().messages, [user]);
 });
 
 test('conversation predicates: lanes are private, compaction stays main but is not public', () => {

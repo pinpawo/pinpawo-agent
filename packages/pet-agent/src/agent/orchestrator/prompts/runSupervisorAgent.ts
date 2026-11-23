@@ -7,7 +7,8 @@ import {
   RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT,
   RUN_SUPERVISOR_TURN_PROMPT,
 } from './templates/runSupervisorAgent.prompt';
-import { buildRunUserRequestContext } from './context';
+import { buildEntryResolvedGoalContext } from './context';
+import { planGoal } from '../runSupervisor/state';
 import { buildCapabilityRoutingManifest } from './capabilityRoutingManifest';
 import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
 import { buildInvocationHintContext } from '../../../prompts/invocationHint';
@@ -46,8 +47,9 @@ export function buildRunSupervisorContextInput(
   disclosedCapabilities: readonly RunSupervisorCapabilityDocument[],
   routingManifest: CapabilityRoutingManifest,
 ) {
+  const resolvedGoal = input.mode === 'entry' ? input.userRequest : planGoal(input);
   return RUN_SUPERVISOR_CONTEXT_PROMPT.render({
-    userRequest: [buildRunUserRequestContext(input.userRequest),
+    userRequest: [buildEntryResolvedGoalContext(resolvedGoal),
       ...(input.hint ? [buildInvocationHintContext(input.hint, 'supervisor')] : []),
     ].join('\n\n'),
     routingContext: buildCapabilityRoutingManifest(routingManifest),

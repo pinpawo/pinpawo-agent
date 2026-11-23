@@ -13,7 +13,13 @@ import { compileAgentRegistry } from '../registry';
 import { buildReviewSpec } from '../../../types/reviewSpec';
 import { defineInstructionDocument } from '../../../types/capability';
 
-import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages } from '../../messages';
+import {
+  ENTRY_ROUTING_LANE,
+  getAgentMessageMetadata,
+  getAgentMessageLane,
+  queryAgentMessages,
+  setAgentMessageMetadata,
+} from '../../messages';
 import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
@@ -49,6 +55,17 @@ class ScriptedModel extends BaseChatModel {
 const task = { capability: 'general', objective: 'Inspect the repository.' };
 function call(name: string, args: Record<string, unknown>, id: string) {
   return new AIMessage({ content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
+}
+function entryRoutingRecords(messages: readonly BaseMessage[]) {
+  const isRoutingTool = (name?: string) => name === 'plan_request' || name === 'continue';
+  return messages.filter((message) => ToolMessage.isInstance(message) ? isRoutingTool(message.name)
+    : AIMessage.isInstance(message) && message.tool_calls?.some((call) => isRoutingTool(call.name)));
+}
+function entryResolvedGoal(messages: readonly BaseMessage[], runId: string) {
+  const context = messages.find(message => message.id === `supervisor-context:${runId}`);
+  const goal = context?.text.match(/<run_user_request\b[^>]*\bsource="entry_answer"[^>]*>\s*<request>\s*<!\[CDATA\[([\s\S]*?)\]\]>/)?.[1];
+  assert.ok(goal, 'Supervisor receives an Entry Answer goal frame');
+  return goal.trim();
 }
 const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   name: 'general', description: 'Inspect repositories.', uses: [],
@@ -165,8 +182,24 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   assert.equal(second.runSupervisorState.runId, second.runId);
   const messages = nextSupervisor.inputs[0];
   assert.ok(messages.some((message) => message.text.includes('Repository inspection evidence.')));
-  assert.ok(messages.some((message) => message.text === 'Check compatibility next.'));
+  assert.ok(messages.some((message) => HumanMessage.isInstance(message) && message.text === 'Check compatibility next.'));
+  assert.equal(entryResolvedGoal(messages, second.runId), first.runSupervisorState.goal,
+    'continue adopts the earlier goal rather than relabeling the latest human utterance');
   assert.ok(messages.some((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability'));
+  assert.deepEqual(entryRoutingRecords(messages), [], 'Supervisor sees neither previous plan_request nor current continue');
+  const planFacts = messages.at(-1)?.text.match(/<supervisor_plan>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/supervisor_plan>/)?.[1];
+  assert.ok(planFacts);
+  assert.deepEqual(JSON.parse(planFacts), second.runSupervisorState);
+  const routing = entryRoutingRecords(second.messages);
+  assert.deepEqual(routing.slice(0, 2).map(message => message.toDict()), entryRoutingRecords(first.messages).map(message => message.toDict()));
+  const [callToContinue, continueReceipt] = routing.slice(2);
+  assert.ok(AIMessage.isInstance(callToContinue) && ToolMessage.isInstance(continueReceipt));
+  assert.equal(callToContinue.tool_calls?.[0]?.name, 'continue');
+  assert.equal(continueReceipt.name, 'continue');
+  assert.equal(continueReceipt.tool_call_id, callToContinue.tool_calls?.[0]?.id);
+  for (const message of routing) {
+    assert.equal(getAgentMessageLane(message), ENTRY_ROUTING_LANE);
+  }
   assert.equal(messages.some((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.id === 'call-question')), false);
 });
@@ -336,22 +369,79 @@ test('missing delivery checkpoints an error result, leaves the plan untouched an
   assert.equal(executor.inputs.length, 2);
 });
 
-test('Entry handoff checkpoints one canonical state and Supervisor reads it after restart', async () => {
-  const { graph, config, supervisor } = setup();
+test('Supervisor restarts from the resolved goal and selects only history without an Entry routing label', async () => {
+  const { config, executor } = setup();
+  const supervisor = new ScriptedModel([
+    // This provider reuses the current Entry ID. Hiding it from the model
+    // must not free it for use by a new Supervisor call in canonical history.
+    call('submit_plan', { tasks: [task] }, 'entry-call'),
+    call('review_current', { completed: true, reason: 'Inspected.', reply: 'Inspection complete.' }, 'review-call'),
+  ]);
+  const graphConfig = { ...config, models: { ...config.models, act: supervisor } };
+  const graph = createOrchestratorGraph(graphConfig);
   const options = { configurable: { thread_id: 'entry-canonical-state', registry } };
-  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
-    ...options, interruptBefore: ['runSupervisor'],
+  const priorPlanCall = new AIMessage({ id: 'untagged-call', content: '',
+    tool_calls: [{ name: 'plan_request', args: { goal: 'List earlier references.' }, id: 'old-plan' }],
   });
+  const priorPlanReceipt = new ToolMessage({ id: 'untagged-receipt', name: 'plan_request', tool_call_id: 'old-plan', content: 'Handed off.' });
+  const differentRouting = { lane: ENTRY_ROUTING_LANE, runId: 'previous-run' };
+  const differentRoutingCall = setAgentMessageMetadata(call('another_routing_name', {}, 'reused-id'), differentRouting);
+  const differentRoutingReceipt = setAgentMessageMetadata(new ToolMessage({
+    name: 'another_routing_name', tool_call_id: 'reused-id', content: 'A labeled earlier routing receipt.',
+  }), differentRouting);
+  const priorLookup = call('lookup_reference', {}, 'reused-id');
+  const priorLookupReceipt = new ToolMessage({ name: 'lookup_reference', tool_call_id: 'reused-id', content: 'Found the earlier checklist.' });
+  const priorReply = new AIMessage('The earlier checklist is ready.');
+  const rawRequest = 'Go ahead with the new inspection.';
+  const fresh = buildOrchestratorRunInput([new HumanMessage(rawRequest)]);
+  await graph.invoke({
+    ...fresh,
+    messages: [priorPlanCall, priorPlanReceipt, differentRoutingCall, differentRoutingReceipt,
+      priorLookup, priorLookupReceipt, priorReply, ...fresh.messages],
+    runSupervisorState: { runId: 'previous-run', goal: 'List earlier references.', plan: [
+      { id: 'old-item', capability: 'general', objective: 'Check earlier references.', status: 'pending' },
+    ] },
+  }, { ...options, interruptBefore: ['runSupervisor'] });
   const saved = await graph.getState(options);
-  const main = queryAgentMessages(saved.values.messages).main().select().messages;
-  const confirmation = main.at(-1) as ToolMessage;
+  const [routingCall, confirmation] = saved.values.messages.slice(-2);
+  assert.ok(AIMessage.isInstance(routingCall) && ToolMessage.isInstance(confirmation));
   assert.equal(confirmation.name, 'plan_request');
-  assert.equal(confirmation.tool_call_id, (main.at(-2) as AIMessage).tool_calls![0].id);
+  assert.equal(confirmation.tool_call_id, routingCall.tool_calls?.[0]?.id);
+  assert.equal(confirmation.tool_call_id, 'entry-call');
+  for (const message of [routingCall, confirmation]) {
+    assert.equal(getAgentMessageLane(message), ENTRY_ROUTING_LANE);
+  }
+  assert.equal(saved.values.runUserRequest, task.objective);
+  assert.deepEqual(saved.values.runSupervisorState, { runId: null, goal: null, plan: [] });
   assert.equal(supervisor.inputs.length, 0);
-  const output = await createOrchestratorGraph(config).invoke(null, options);
+  const output = await createOrchestratorGraph(graphConfig).invoke(null, options);
   assert.equal(output.runSupervisorState.goal, saved.values.runUserRequest);
   assert.equal(output.runId, saved.values.runId);
-  assert.equal(supervisor.inputs[0].some((message) => message.id === confirmation.id), true);
+  assert.equal(executor.inputs.length, 1);
+  const savedRouting = entryRoutingRecords(saved.values.messages);
+  assert.equal(savedRouting.length, 4);
+  assert.deepEqual(entryRoutingRecords(output.messages).map(message => message.toDict()), savedRouting.map(message => message.toDict()));
+  for (const turn of supervisor.modelTurns) {
+    assert.deepEqual(entryRoutingRecords(turn).map(message => message.id), [priorPlanCall.id, priorPlanReceipt.id],
+      'old untagged records are unchanged; only the tagged pair is omitted');
+    assert.equal(turn.some(message => AIMessage.isInstance(message)
+      && message.tool_calls?.some(call => call.name === 'another_routing_name')), false);
+    assert.equal(turn.some(message => ToolMessage.isInstance(message) && message.name === 'another_routing_name'), false);
+    assert.ok(turn.some(message => AIMessage.isInstance(message) && message.tool_calls?.some(call =>
+      call.name === 'lookup_reference' && call.id === 'reused-id')));
+    assert.ok(turn.some(message => ToolMessage.isInstance(message) && message.name === 'lookup_reference'
+      && message.tool_call_id === 'reused-id' && message.text === priorLookupReceipt.text));
+    assert.ok(turn.some(message => AIMessage.isInstance(message) && message.text === priorReply.text));
+  }
+  assert.equal(entryResolvedGoal(supervisor.inputs[0], output.runId), task.objective);
+  assert.ok(supervisor.inputs[0].some(message => HumanMessage.isInstance(message) && message.text === rawRequest));
+  assert.doesNotMatch(supervisor.inputs[0].at(-1)!.text, /<supervisor_plan>/);
+  const planCall = supervisor.modelTurns[1].flatMap(message => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
+    .find(call => call.name === 'submit_plan');
+  assert.ok(planCall?.id);
+  assert.notEqual(planCall.id, confirmation.tool_call_id);
+  assert.ok(supervisor.modelTurns[1].some(message => ToolMessage.isInstance(message) && message.name === 'submit_plan'
+    && message.tool_call_id === planCall.id));
 });
 
 test('checkpointed Supervisor reply publishes once after restart without a reply state slot', async () => {

@@ -17,7 +17,6 @@ import type { AgentSessionPeerHandlers } from '../wire/messageDispatcher';
 import type { ServerTuiSessionService, TuiSessionCheckpointer } from '../session/serverTuiSessions';
 import type { ServerDeps, ServerRuntimeDepsStore } from '../serverTypes';
 import type { HostExecutionConfig } from '../config/hostExecutionConfig';
-import type { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from '../config/llmConfig';
 import type {
   AgentSessionPeer,
@@ -48,7 +47,7 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   defaultCapabilityName?: string;
   petDocument?: PetDocument;
   capabilities: readonly AgentCapability[];
-  toolkitInventory: HostToolkitInventoryStore;
+  toolkitInventory: ServerDeps['toolkitInventory'];
   artifactStore?: ServerDeps['artifactStore'];
   checkpointer: TuiSessionCheckpointer;
   /** Pet-scoped Agent Session registry path owned by the composing Host. */

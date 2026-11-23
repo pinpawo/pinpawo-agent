@@ -67,6 +67,24 @@ export function selectStudioPetCapabilities(input: {
     : [...input.petCapabilities];
 }
 
+export function selectStudioPetToolkitInventory(
+  inventory: Pick<HostToolkitInventoryStore, 'getSnapshot'>,
+  browserCapability: boolean,
+): Pick<HostToolkitInventoryStore, 'getSnapshot'> {
+  if (browserCapability) return inventory;
+  return {
+    getSnapshot: () => {
+      const snapshot = inventory.getSnapshot();
+      // A local Capability's uses list cannot opt a Pet into the browser.
+      if (!snapshot.entries.some(({ toolkit }) => toolkit.name === 'browser')) return snapshot;
+      return Object.freeze({
+        entries: Object.freeze(snapshot.entries.filter(({ toolkit }) => toolkit.name !== 'browser')),
+        effectiveToolkits: Object.freeze(snapshot.effectiveToolkits.filter(({ name }) => name !== 'browser')),
+      });
+    },
+  };
+}
+
 export type ResolveStudioHostConfigInput = {
   studioConfigPath?: string;
   petsDir?: string;
@@ -275,7 +293,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ...(document ? { petDocument: document } : {}),
       resolveInvocationContext: async (target) => prepared.resolveInvocationContext(target),
       capabilities: definition.capabilities,
-      toolkitInventory: input.toolkitInventory,
+      toolkitInventory: selectStudioPetToolkitInventory(input.toolkitInventory, config.browserCapability === true),
       artifactStore: input.artifactStore,
       checkpointer: input.checkpoint,
       runtimeConfig,

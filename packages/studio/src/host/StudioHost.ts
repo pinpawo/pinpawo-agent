@@ -86,7 +86,7 @@ export class StudioHost {
       sourceId: 'studio-host',
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
-      includeBrowser: false,
+      includeBrowser: 'opt-in',
     });
     this.buildStudioImpl = options.buildStudio ?? buildStudio;
     this.resolveStudioHostConfigImpl = options.resolveStudioHostConfig ?? resolveStudioHostConfig;
@@ -134,10 +134,13 @@ export class StudioHost {
       await this.caps.init({
         toolkitSources: pluginToolkitSources,
         credentialSource: this.credentialSource,
+        includeBrowser: configuration.resolved.definitions.some(({ browserCapability }) => browserCapability),
       });
+      const hostCapabilities = this.caps.getCapabilityCatalog().getSnapshot().capabilities;
+      const browser = hostCapabilities.find(({ name }) => name === 'browser');
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();
-      for (const { definitionId, sharedCapabilities } of configuration.resolved.definitions) {
+      for (const { definitionId, sharedCapabilities, browserCapability } of configuration.resolved.definitions) {
         const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, definitionId);
         const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
           rootDir: capabilityDir,
@@ -149,10 +152,10 @@ export class StudioHost {
             },
           } : {}),
         });
-        petCapabilities.set(
-          definitionId,
-          snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
-        );
+        petCapabilities.set(definitionId, [
+          ...snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
+          ...(browserCapability && browser ? [browser] : []),
+        ]);
         const document = await loadPetDocument(configuration.petsDir, definitionId);
         if (document) petDocuments.set(definitionId, document);
       }
@@ -162,9 +165,7 @@ export class StudioHost {
       this.studio = await this.buildStudioImpl({
         configuration,
         modelProfiles: this.caps.getModelProfiles(),
-        hostCapabilities: this.caps.getCapabilityCatalog().getSnapshot().capabilities.filter(
-          ({ name }) => name === GENERAL_CAPABILITY_NAME,
-        ),
+        hostCapabilities: hostCapabilities.filter(({ name }) => name === GENERAL_CAPABILITY_NAME),
         petCapabilities,
         petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),

@@ -16,7 +16,6 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
       { role: 'assistant', text: 'hi', deliverables: [{ uri: 'https://example.test/result', title: 'Result' }] },
     ],
     deps: {
-      petId: 'pet-a',
       ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
       runtimeConfig: {
         workdir: '/tmp/work',
@@ -26,11 +25,13 @@ test('buildHostSessionSnapshot returns a native HostSession snapshot', () => {
           rootPath: '/tmp/work',
         },
         stateRoot: '/tmp/work/.pinpawo',
+        sessionRoot: '/tmp/work/.pinpawo/sessions',
+        petsDir: '/tmp/work/.pinpawo/pets',
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
       },
-    } as ServerDeps,
+    },
     requiredInputModalities: ['text', 'image'],
     sessionTokenUsage: {
       inputTokens: 100,
@@ -127,7 +128,6 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
     kind: 'chat',
     messages: [],
     deps: {
-      petId: 'pet-a',
       ...createTestModelServerDeps(),
       runtimeConfig: {
         workdir: '/tmp/work',
@@ -137,11 +137,13 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
           rootPath: '/tmp/work',
         },
         stateRoot: '/tmp/work/.pinpawo',
+        sessionRoot: '/tmp/work/.pinpawo/sessions',
+        petsDir: '/tmp/work/.pinpawo/pets',
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
       },
-    } as ServerDeps,
+    },
     activeRun: {
       requestId: 'req-live',
       state: 'running',
@@ -210,14 +212,16 @@ test('Host runtime snapshot preserves native PDF modality through the session pa
   const snapshot = buildHostSessionSnapshot({
     sessionId: 'chat:pdf', kind: 'chat', messages: [],
     deps: {
-      petId: 'pdf', ...createTestModelServerDeps({ inputModalities: ['text', 'file'] }),
+      ...createTestModelServerDeps({ inputModalities: ['text', 'file'] }),
       runtimeConfig: {
         workdir: '/tmp/work', stateRoot: '/tmp/work/.pinpawo',
+        sessionRoot: '/tmp/work/.pinpawo/sessions',
+        petsDir: '/tmp/work/.pinpawo/pets',
         checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
         tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
       },
-    } as ServerDeps,
+    },
     requiredInputModalities: ['text', 'file'],
   });
   assert.deepEqual(snapshot.session.runtime?.inputModalities, ['text', 'file']);

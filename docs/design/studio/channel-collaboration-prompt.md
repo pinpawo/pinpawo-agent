@@ -7,7 +7,7 @@
 
 Pet 的 `PET.md` 适合描述它是什么、承担什么长期定位。Channel 是多个参与者共同工作的场所，需要一份属于该 Channel 的协作约定，让成员理解彼此的定位以及如何围绕实际情况合作。Capability 负责具体工作能力和工具依赖。三者作用域不同：不把整个团队的固定流程塞进每个 Pet 的身份文档，也不把一个 Channel 的约定写回 Pet 定义或跨 Channel 共享的实例配置。
 
-例如一个 Channel 可以描述 Issuer 跟进事项、Executor 实施和自验、Reviewer 独立审查、Wiki 维护项目知识，并说明何时协调、核验、询问人类或判断合并。角色由 Channel 配置者按当前成员和工作需要描述；这些只是协作建议，不把每次工作固定成相同的派发顺序，不要求 Channel 必须有这四个成员。普通对话、直接回答和不需要交接的完成依旧允许。
+例如一个 Channel 可以描述 Issuer 跟进事项、Executor 实施和自验、Reviewer 独立审查、Tester 实测验收、Wiki 维护项目知识，并说明何时协调、核验、询问人类或判断合并。角色由 Channel 配置者按当前成员和工作需要描述；这些只是协作建议，不把每次工作固定成相同的派发顺序，不要求 Channel 必须有全部角色。普通对话、直接回答和不需要交接的完成依旧允许。
 
 ## 当前机制与改动边界
 
@@ -28,7 +28,7 @@ Channel 公共说明集中描述按需读取上下文、来源辨识和成员寻
 
 ## 共享能力的选择与装配
 
-共享能力是 Host 配置，定义集中在 `.pinpawo/capabilities/<directory>/CAPABILITY.md`。Pet JSON 的 `sharedCapabilities` 按文档 frontmatter `name` 显式引用，例如 `["channel_context"]`。没有引用的 Pet 不获得共享能力；Pet 私有目录中的能力继续照常加载。默认模板维护一份 `channel_context`，四个 Pet 配置分别引用它；它仍是普通分析子任务，将总结返回主 Pet。
+共享能力是 Host 配置，定义集中在 `.pinpawo/capabilities/<directory>/CAPABILITY.md`。Pet JSON 的 `sharedCapabilities` 按文档 frontmatter `name` 显式引用，例如 `["channel_context"]`。没有引用的 Pet 不获得共享能力；Pet 私有目录中的能力继续照常加载。默认模板维护一份 `channel_context`，各默认 Pet 配置分别引用它；它仍是普通分析子任务，将总结返回主 Pet。
 
 [HostCapabilityCatalog](../../../services/host/src/hostCapabilityCatalog.ts) 复用既有目录加载、名称冲突和快照逻辑，将选中的共享定义与该 Pet 的私有定义装配。引用不存在、私有/共享同名或覆盖必需的 Host general 都明确失败，不静默优先某一来源。共享目录在一次 catalog load 中复用同一加载结果；定义或配置修改后重启 Host。
 

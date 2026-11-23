@@ -39,11 +39,13 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
       name: 'Script Pet',
       modelProfileId: 'qwen-max',
       defaultCapabilityName: 'studio_planning',
+      browserCapability: true,
     },
     'test-source',
   );
   assert.equal(config.modelProfileId, 'qwen-max');
   assert.equal(config.defaultCapabilityName, 'studio_planning');
+  assert.equal(config.browserCapability, true);
 });
 
 test('parsePetLocalConfig rejects non-object input', () => {
@@ -60,6 +62,10 @@ test('parsePetLocalConfig rejects bad types in optional fields', () => {
   assert.throws(
     () => parsePet({ definitionId: 'p1', name: 'X', modelProfileId: '' }, 'src'),
     /"modelProfileId" must be a non-empty string/,
+  );
+  assert.throws(
+    () => parsePet({ definitionId: 'p1', name: 'X', browserCapability: 'true' }, 'src'),
+    /"browserCapability" must be a boolean/,
   );
 });
 

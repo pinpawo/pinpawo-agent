@@ -69,10 +69,10 @@ export type HostCapabilityAssemblyOptions = {
   loadUserCapabilities?: boolean;
   /**
    * Whether this Host offers the Browser Toolkit (through its client of the
-   * RS service's BrowserRS). Chat keeps the user-selected default; a Studio
-   * must opt in explicitly.
+   * RS service's BrowserRS). Chat keeps the user-selected default. 'opt-in'
+   * defers the decision to init, without overriding a stored Browser disable.
    */
-  includeBrowser?: boolean;
+  includeBrowser?: boolean | 'opt-in';
   /** Optional Office Toolkit; disabled unless explicitly enabled. */
   includeOffice?: boolean;
 };
@@ -80,6 +80,8 @@ export type HostCapabilityAssemblyOptions = {
 export type HostCapabilityAssemblyInitOptions = {
   /** Additional Toolkit definitions supplied by the concrete Host. */
   toolkitSources?: readonly ToolkitDefinitionSource[];
+  /** Request Browser for a Host configured with includeBrowser: 'opt-in'. */
+  includeBrowser?: boolean;
   /**
    * A Studio Host's Pet credentials for every ShellRS-backed Toolkit. Passed at
    * init so any assembly the Host uses receives them the same way; with it,
@@ -90,6 +92,7 @@ export type HostCapabilityAssemblyInitOptions = {
 
 type NormalizedHostCapabilityAssemblyInitOptions = Readonly<{
   toolkitSources: readonly ToolkitDefinitionSource[];
+  includeBrowser: boolean;
   credentialSource?: PetCredentialSource;
 }>;
 
@@ -98,6 +101,7 @@ function normalizeInitOptions(
 ): NormalizedHostCapabilityAssemblyInitOptions {
   return Object.freeze({
     toolkitSources: Object.freeze([...(options.toolkitSources ?? [])]),
+    includeBrowser: options.includeBrowser === true,
     ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
   });
 }
@@ -116,6 +120,9 @@ function assertInitOptionsCompatible(
   initialized: NormalizedHostCapabilityAssemblyInitOptions,
   requested: NormalizedHostCapabilityAssemblyInitOptions,
 ): void {
+  if (requested.includeBrowser && !initialized.includeBrowser) {
+    throw new Error('HostCapabilityAssembly initialization already started without the Browser opt-in.');
+  }
   if (requested.credentialSource !== initialized.credentialSource) {
     throw new Error(
       'HostCapabilityAssembly initialization already started with a different Pet credential source. '
@@ -142,6 +149,8 @@ export class HostCapabilityAssembly {
   /** In-process RS instances this Host created and injects into Toolkits. */
   private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
+  private readonly allowBrowserOptIn: boolean;
+  private browserToolkit: AgentToolkit | undefined;
   private readonly artifactStore: ArtifactStore;
   private readonly capabilityCatalog: HostCapabilityCatalog;
   private readonly checkpointer: FileSaver;
@@ -158,8 +167,9 @@ export class HostCapabilityAssembly {
     const storedConfig = loadStoredConfig();
     this.artifactStore = createHostArtifactStore(options.runtimeConfig, storedConfig);
     const officeSelected = officeEnabled(storedConfig, options.includeOffice);
-    const browserSelected = options.includeBrowser
-      ?? storedConfig.capabilities?.browser !== false;
+    const browserEnabled = storedConfig.capabilities?.browser !== false;
+    const browserSelected = options.includeBrowser ?? browserEnabled;
+    this.allowBrowserOptIn = browserSelected === 'opt-in' && browserEnabled;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.
@@ -169,9 +179,7 @@ export class HostCapabilityAssembly {
     }));
     // BrowserRS also runs only in the RS service, which holds the one
     // extension bridge for every Host (#862).
-    const browser = browserSelected
-      ? this.rsInstances.add('browser', new BrowserRSClient())
-      : null;
+    if (browserSelected === true) this.browserToolkit = this.assembleBrowserToolkit();
     this.hostBuiltInToolkits = [
       createFilesToolkit(),
       createArtifactsToolkit({ store: this.artifactStore, sourceReader: readArtifactSource,
@@ -183,9 +191,6 @@ export class HostCapabilityAssembly {
       this.rsInstances.assemble(createProjectInspectionToolkit, { shell }),
       createCapabilityCreatorToolkit(),
       ...(officeSelected ? [this.rsInstances.assemble(createOfficeToolkit, { shell })] : []),
-      ...(browser
-        ? [this.rsInstances.assemble(createBrowserToolkit, { browser })]
-        : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({
       ...(options.loadUserCapabilities === false
@@ -195,12 +200,17 @@ export class HostCapabilityAssembly {
         ...createHostBaselineCapabilities(),
         createCapabilityCreatorCapability(),
         ...(officeSelected ? [createOfficeCapability()] : []),
-        ...(browserSelected ? [createBrowserCapability()] : []),
+        ...(this.browserToolkit ? [createBrowserCapability()] : []),
       ],
     });
     this.checkpointer = new FileSaver(
       options.checkpointPath ?? this.runtimeConfig.checkpointPath,
     );
+  }
+
+  private assembleBrowserToolkit(): AgentToolkit {
+    const browser = this.rsInstances.add('browser', new BrowserRSClient());
+    return this.rsInstances.assemble(createBrowserToolkit, { browser });
   }
 
   getArtifactStore(): ArtifactStore {
@@ -263,6 +273,9 @@ export class HostCapabilityAssembly {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
+    if (this.allowBrowserOptIn && options.includeBrowser && !this.browserToolkit) {
+      this.browserToolkit = this.assembleBrowserToolkit();
+    }
     // Validate Capability sources before starting any RS instance. A
     // configured name collision must fail without acquiring dynamic resources.
     await this.capabilityCatalog.load();
@@ -283,7 +296,10 @@ export class HostCapabilityAssembly {
       {
         id: this.sourceId,
         kind: 'host_builtin',
-        definitions: this.hostBuiltInToolkits,
+        definitions: [
+          ...this.hostBuiltInToolkits,
+          ...(this.browserToolkit ? [this.browserToolkit] : []),
+        ],
       },
     ]);
   }

@@ -360,6 +360,41 @@ Read and summarize context.
   } finally { await host.shutdown(); }
 });
 
+test('StudioHost offers the Host Browser Capability only to Pets that opt in', async () => {
+  const general = agentCapability('general');
+  const browser = { ...agentCapability('browser'), uses: ['browser', 'artifacts'] };
+
+  for (const { requested, available } of [
+    { requested: true, available: true },
+    { requested: true, available: false },
+    { requested: false, available: true },
+  ]) {
+    const configured = configuration([], ['tester', 'issuer', 'executor', 'reviewer', 'wiki']);
+    configured.resolved.definitions[0]!.browserCapability = requested;
+    const assembly = fakeCapabilityAssembly([], {
+      onInit: (options) => assert.equal(options.includeBrowser, requested),
+    });
+    assembly.getCapabilityCatalog().getSnapshot = () => ({
+      capabilities: available ? [general, browser] : [general],
+    });
+    const host = new StudioHost({
+      capabilityAssembly: assembly,
+      resolveStudioHostConfig: async () => configured,
+      buildStudio: async (input) => {
+        assert.deepEqual(input.hostCapabilities, [general]);
+        assert.deepEqual(input.petCapabilities.get('tester'), requested && available ? [browser] : []);
+        for (const definitionId of ['issuer', 'executor', 'reviewer', 'wiki']) {
+          assert.deepEqual(input.petCapabilities.get(definitionId), []);
+        }
+        return result(fakeStudio(() => undefined));
+      },
+    });
+    try {
+      await host.init();
+    } finally { await host.shutdown(); }
+  }
+});
+
 test('StudioHost claims writer ownership before resolving executable extensions', async () => {
   const events: string[] = [];
   const assembly = fakeCapabilityAssembly(events);

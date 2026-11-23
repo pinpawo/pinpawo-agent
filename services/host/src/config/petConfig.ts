@@ -24,6 +24,8 @@ export type PetConfig = {
   defaultCapabilityName?: string;
   /** Explicit names from the shared Capability collection beside the pets directory. */
   sharedCapabilities?: string[];
+  /** Explicit Studio opt-in to the Host's existing Browser Capability. */
+  browserCapability?: boolean;
 };
 
 export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
@@ -31,6 +33,10 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
   parse: (reader) => {
     const modelProfileId = reader.optionalString('modelProfileId');
     const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
+    const browserCapability = reader.raw.browserCapability;
+    if (browserCapability !== undefined && typeof browserCapability !== 'boolean') {
+      reader.fail('"browserCapability" must be a boolean', 'browserCapability');
+    }
     const sharedCapabilities = reader.optionalStringArray('sharedCapabilities')?.map((name) => name.trim());
     if (sharedCapabilities?.some((name) => !/^[a-z0-9][a-z0-9_-]*$/.test(name))) {
       reader.fail('"sharedCapabilities" must contain non-empty Capability names using lowercase letters, numbers, "_" or "-"', 'sharedCapabilities');
@@ -73,6 +79,7 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
       ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
       ...(sharedCapabilities !== undefined ? { sharedCapabilities } : {}),
+      ...(typeof browserCapability === 'boolean' ? { browserCapability } : {}),
     };
   },
 });

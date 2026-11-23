@@ -163,11 +163,20 @@ parent outside it. The selected absolute Wiki path is stored in the configuratio
 option is only needed at initialization. The package ships its source template under
 `packages/studio/templates/default/`; it is not itself a runnable workdir.
 
-The default template includes Issuer, Executor, Reviewer and Wiki definitions in
+The default template includes Issuer, Executor, Reviewer, Tester and Wiki definitions in
 `studio.json`'s `definitions` list. Their JSON files use the existing
 `pets/<definitionId>.json` layout; each role's PET.md and dedicated Capabilities
 live in `pets/<definitionId>/`. Issuer uses `studio_issue` as its default and
 retains the shared files, shell, web, git, github and channel Toolkits.
+
+Tester uses `studio_test` to plan functional acceptance cases and report test
+evidence. In Studio, `"browserCapability": true` in a Pet definition explicitly
+adds the Host's existing `browser` Capability to that Pet only. It is not a
+`sharedCapabilities` reference. The Host does not assemble the Browser Toolkit
+for this use unless a loaded definition opts in and the user's Browser setting
+allows it. Testing in Chrome requires the [Browser bridge](../guides/browser-bridge.md)
+and follows existing Host and browser-origin approval. When Browser is disabled
+or unavailable, Tester can still plan tests and report blockers.
 
 ## Pet instance setup
 
@@ -224,8 +233,11 @@ to bypass the refusal. See the [ownership migration](../../packages/studio/src/p
 
 Existing workdirs are not upgraded by initialization. Copy missing definitions
 and merge the `definitions` list while preserving local customizations, then
-restart the Host. Role definitions do not grant Issue write permissions or
-configure a polling schedule.
+restart the Host. To add Tester, copy `pets/tester.json` and `pets/tester/` from the
+shipped template into `.pinpawo/pets/`, ensure `channel_context` is present in
+`.pinpawo/capabilities/`, and add `"tester"` to `definitions` in `.pinpawo/studio.json`.
+After restart, add a Tester instance to the intended Channel. Role definitions do
+not grant Issue write permissions or configure a polling schedule.
 
 ## Plugin assembly
 
@@ -270,7 +282,8 @@ automatically. Adapt the purpose and roles to the actual Channel members.
 本 Channel 围绕项目事项协调进度和交付，帮助人类和成员对齐意图与结果。
 
 Issuer 关注 Issue 的意图、状态和与人类的沟通；Executor 负责实现和自验；
-Reviewer 独立判断交付是否符合意图；Wiki 关注项目知识与实际变化是否一致。
+Reviewer 独立判断交付是否符合意图；Tester 实测产品流程并记录验收证据；
+Wiki 关注项目知识与实际变化是否一致。
 
 结合当前上下文和事实判断如何协作，不预设固定顺序。优先处理自己职责和能力
 范围内的事；即使具备工具，也不要默认代替其他角色承担其主要工作。可以适度
@@ -281,7 +294,7 @@ Reviewer 独立判断交付是否符合意图；Wiki 关注项目知识与实际
 
 The Channel Plugin owns the common context-reading and addressing instructions.
 The default template ships one shared `channel_context` Capability, explicitly
-referenced by its four Pet configurations. It performs a separate analysis subtask
+referenced by each default Pet configuration. It performs a separate analysis subtask
 and returns a summary to the main Pet. PET.md defines only the Pet's own
 role and boundaries; the Channel announcement defines team roles and collaboration.
 The Host still saves public replies as Timeline messages.

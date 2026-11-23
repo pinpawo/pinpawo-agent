@@ -13,6 +13,7 @@ import {
   resolveChannelWorkdir,
   resolveStudioHostConfig,
   selectStudioPetCapabilities,
+  selectStudioPetToolkitInventory,
 } from './buildStudio';
 import { createTestModelProfileRegistry } from '../../../../services/host/src/testing/modelProfiles';
 import { createLocalModelProfileRegistry } from '../../../../services/host/src/config/llmConfig';
@@ -27,7 +28,7 @@ import {
   buildHostRuntimeConfig,
   FileSaver,
 } from 'pinpawo/host-runtime';
-import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
+import { buildHostToolkitInventory, HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
 
 function fakePlugin(name = 'example-work'): StudioPlugin {
   const toolkit: AgentToolkit = {
@@ -81,6 +82,23 @@ test('an explicit Pet default excludes the general fallback Capability', () => {
     }).map(({ name }) => name),
     ['general', 'studio_planning'],
   );
+});
+
+test('only an opted-in Studio Pet can bind the Browser Toolkit from the live Host inventory', async () => {
+  const browser = { name: 'browser', description: 'Test Browser Toolkit.', instructions: 'Fixture.', tools: [] };
+  const channel = { name: 'channel', description: 'Test Channel Toolkit.', instructions: 'Fixture.', tools: [] };
+  const snapshot = await buildHostToolkitInventory({
+    sources: [{ id: 'test', kind: 'host_builtin', definitions: [browser, channel] }],
+  });
+  const store = new HostToolkitInventoryStore(snapshot);
+  const tester = selectStudioPetToolkitInventory(store, true);
+  const otherPet = selectStudioPetToolkitInventory(store, false);
+  assert.deepEqual(tester.getSnapshot().effectiveToolkits.map(({ name }) => name), ['browser', 'channel']);
+  assert.deepEqual(otherPet.getSnapshot().effectiveToolkits.map(({ name }) => name), ['channel']);
+  assert.deepEqual(otherPet.getSnapshot().entries.map(({ toolkit }) => toolkit.name), ['channel']);
+  store.updateAvailability('browser', { available: false, reason: 'Disconnected' });
+  assert.deepEqual(tester.getSnapshot().effectiveToolkits.map(({ name }) => name), ['channel']);
+  assert.deepEqual(otherPet.getSnapshot().entries.map(({ toolkit }) => toolkit.name), ['channel']);
 });
 
 function residentBuildResources(workdir: string) {

@@ -126,7 +126,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
   const base = `http://127.0.0.1:${http.address()!.port}`;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   assert.deepEqual(studio.listPets(), [], 'init installs definitions, not orphan instances');
-  assert.deepEqual(studio.pets.definitions().map(({ definitionId }) => definitionId).sort(), ['executor', 'issuer', 'reviewer', 'wiki']);
+  assert.deepEqual(studio.pets.definitions().map(({ definitionId }) => definitionId).sort(), ['executor', 'issuer', 'reviewer', 'tester', 'wiki']);
   for (const route of ['/kanban', '/kanban/events']) {
     assert.equal((await fetch(base + route, { headers })).status, 404);
   }

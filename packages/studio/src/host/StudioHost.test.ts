@@ -46,6 +46,7 @@ function fakeCapabilityAssembly(
   let initialized = false;
   const capabilityCatalog = {
     getSnapshot: () => ({ capabilities: hostCapabilities }),
+    getSharedHostCapabilities: () => [],
     createDirectorySnapshot: async ({ rootDir }: { rootDir: string }) => {
       if (!initialized) {
         throw new Error('Pet capability snapshots require an initialized Host catalog');
@@ -358,6 +359,42 @@ Read and summarize context.
   try {
     await host.init();
   } finally { await host.shutdown(); }
+});
+
+test('StudioHost resolves each Pet’s explicit Host shared selections alongside its workspace files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-host-offering-'));
+  const general = agentCapability('general');
+  const optional = agentCapability('reference_lookup');
+
+  for (const enabled of [true, false]) {
+    const configured = { ...configuration([], ['selected', 'another']), petsDir: path.join(root, 'pets') };
+    configured.resolved.definitions[0]!.sharedCapabilities = [optional.name];
+    const assembly = fakeCapabilityAssembly([], {
+      onInit: (options) => assert.deepEqual(options.sharedCapabilityNames, [optional.name]),
+    });
+    const offerings = [{ capability: optional, enabled, restrictedToolkits: ['reference'] }];
+    const catalog = new HostCapabilityCatalog({
+      createHostCapabilities: () => [general],
+      loadConfiguredCapabilities: async () => [],
+      sharedHostCapabilities: offerings,
+    });
+    await catalog.load();
+    assembly.getCapabilityCatalog = () => catalog;
+    const host = new StudioHost({
+      capabilityAssembly: assembly,
+      resolveStudioHostConfig: async () => configured,
+      buildStudio: async (input) => {
+        assert.deepEqual(input.hostCapabilities, [general]);
+        assert.deepEqual(input.sharedHostCapabilities, offerings);
+        assert.deepEqual(input.petCapabilities.get('selected'), enabled ? [optional] : []);
+        assert.deepEqual(input.petCapabilities.get('another'), []);
+        return result(fakeStudio(() => undefined));
+      },
+    });
+    try {
+      await host.init();
+    } finally { await host.shutdown(); }
+  }
 });
 
 test('StudioHost claims writer ownership before resolving executable extensions', async () => {

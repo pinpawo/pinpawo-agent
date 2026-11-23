@@ -124,7 +124,7 @@ test('Studio init does not add Project Files to a custom template', async () => 
   assert.equal(await readFile(path.join(result.wikiDirectory, 'PROJECT.md'), 'utf8'), '# Project\n');
 });
 
-test('shipped Pet definitions support Issue, execution, review, and Wiki requests', async () => {
+test('shipped Pet definitions support Issue, execution, review, testing, and Wiki requests', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
   await initStudioWorkdir({ workdir, studioDataRoot: await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-data-')) });
 
@@ -132,7 +132,7 @@ test('shipped Pet definitions support Issue, execution, review, and Wiki request
     path.join(workdir, '.pinpawo', 'studio.json'),
     'utf8',
   )) as { definitions: string[]; plugins: Array<{ id: string; options?: Record<string, unknown> }> };
-  assert.deepEqual(studioConfig.definitions, ['issuer', 'executor', 'reviewer', 'wiki']);
+  assert.deepEqual(studioConfig.definitions, ['issuer', 'executor', 'reviewer', 'tester', 'wiki']);
   await assert.rejects(access(path.join(workdir, '.pinpawo', 'studio', 'studio.sqlite')), { code: 'ENOENT' });
   const petsDir = path.join(workdir, '.pinpawo', 'pets');
   const definitions = await loadPetConfigs(petsDir);
@@ -140,14 +140,19 @@ test('shipped Pet definitions support Issue, execution, review, and Wiki request
   assert.deepEqual(definitions.find(({ definitionId }) => definitionId === 'issuer'), {
     definitionId: 'issuer', name: 'Issuer', defaultCapabilityName: 'studio_issue', sharedCapabilities: ['channel_context'],
   });
+  assert.deepEqual(definitions.find(({ definitionId }) => definitionId === 'tester'), {
+    definitionId: 'tester', name: 'Tester', defaultCapabilityName: 'studio_test',
+    sharedCapabilities: ['channel_context', 'browser'],
+  });
   assert.ok(await loadPetDocument(petsDir, 'issuer'));
+  assert.ok(await loadPetDocument(petsDir, 'tester'));
   const sharedRoot = path.join(workdir, '.pinpawo', 'capabilities');
   const shared = await loadCapabilityDirectory(sharedRoot);
   assert.deepEqual(shared.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
     { name: 'channel_context', uses: ['channel'] },
   ]);
   for (const definition of definitions) {
-    assert.deepEqual(definition.sharedCapabilities, ['channel_context']);
+    if (definition.definitionId !== 'tester') assert.deepEqual(definition.sharedCapabilities, ['channel_context']);
   }
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
@@ -189,6 +194,7 @@ test('shipped Pet definitions support Issue, execution, review, and Wiki request
     'reviewer',
     'capabilities',
   ));
+  const testerCapabilities = await loadCapabilityDirectory(path.join(petsDir, 'tester', 'capabilities'));
   const wikiCapabilities = await loadCapabilityDirectory(path.join(
     workdir,
     '.pinpawo',
@@ -204,6 +210,9 @@ test('shipped Pet definitions support Issue, execution, review, and Wiki request
   ]);
   assert.deepEqual(reviewerCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
     { name: 'studio_review', uses: ['files', 'shell', 'web', 'git', 'github', 'channel'] },
+  ]);
+  assert.deepEqual(testerCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
+    { name: 'studio_test', uses: ['channel'] },
   ]);
   assert.deepEqual(wikiCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
     { name: 'wiki_maintenance', uses: ['files', 'shell', 'web', 'git', 'github', 'channel', 'project_files'] },

@@ -16,6 +16,7 @@ import {
   type FileSaver,
   type ArtifactStore,
   type HostToolkitInventoryStore,
+  type SharedHostCapability,
   type HostExecutionConfig,
   type LocalModelProfileRegistry,
   type PetConfig,
@@ -47,6 +48,7 @@ export type BuildStudioInput = HostExecutionConfig & {
   hostCapabilities: readonly AgentCapability[];
   /** Host catalog snapshots for each Pet definition, including explicit shared references. */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
+  sharedHostCapabilities?: readonly SharedHostCapability[];
   /** Optional PET.md root-document snapshot keyed by definition id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
@@ -65,6 +67,30 @@ export function selectStudioPetCapabilities(input: {
   return defaultCapabilityName === GENERAL_CAPABILITY_NAME
     ? [input.generalCapability, ...input.petCapabilities]
     : [...input.petCapabilities];
+}
+
+export function selectStudioPetToolkitInventory(
+  inventory: Pick<HostToolkitInventoryStore, 'getSnapshot'>,
+  offerings: readonly SharedHostCapability[],
+  selected: readonly string[],
+): Pick<HostToolkitInventoryStore, 'getSnapshot'> {
+  const hidden = new Set(offerings.flatMap(({ restrictedToolkits }) => restrictedToolkits));
+  for (const { capability, enabled, restrictedToolkits } of offerings) {
+    if (enabled && selected.includes(capability.name)) {
+      for (const name of restrictedToolkits) hidden.delete(name);
+    }
+  }
+  if (!hidden.size) return inventory;
+  return {
+    getSnapshot: () => {
+      const snapshot = inventory.getSnapshot();
+      if (!snapshot.entries.some(({ toolkit }) => hidden.has(toolkit.name))) return snapshot;
+      return Object.freeze({
+        entries: Object.freeze(snapshot.entries.filter(({ toolkit }) => !hidden.has(toolkit.name))),
+        effectiveToolkits: Object.freeze(snapshot.effectiveToolkits.filter(({ name }) => !hidden.has(name))),
+      });
+    },
+  };
 }
 
 export type ResolveStudioHostConfigInput = {
@@ -275,7 +301,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ...(document ? { petDocument: document } : {}),
       resolveInvocationContext: async (target) => prepared.resolveInvocationContext(target),
       capabilities: definition.capabilities,
-      toolkitInventory: input.toolkitInventory,
+      toolkitInventory: selectStudioPetToolkitInventory(
+        input.toolkitInventory, input.sharedHostCapabilities ?? [], config.sharedCapabilities ?? [],
+      ),
       artifactStore: input.artifactStore,
       checkpointer: input.checkpoint,
       runtimeConfig,

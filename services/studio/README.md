@@ -78,7 +78,7 @@ fallback when `defaultCapabilityName` is omitted or set to `general`. Shared
 definitions live in `.pinpawo/capabilities/` and are selected explicitly by each
 Pet JSON's `sharedCapabilities` list; installing a Plugin does not add Capabilities.
 
-`pinpawo-studio init` creates the shipped Issuer, Executor, Reviewer and Wiki definitions and Capabilities
+`pinpawo-studio init` creates the shipped Issuer, Executor, Reviewer, Tester and Wiki definitions and Capabilities
 in the selected workdir, and an initial `PROJECT.md` in a separate durable Studio
 knowledge directory (`~/.pinpawo/studios/<random-uuid>/wiki/`). The absolute path
 is stored in the Project Files Plugin's `wikiDirectory` option and printed by init.
@@ -91,6 +91,11 @@ in the Studio configuration.
 Existing files are not overwritten. Init installs definitions, not Pet instances.
 Create an empty Channel, then create its instances as shown below. The package
 template itself contains no `.pinpawo/` runtime directory or generated state.
+
+Tester handles functional acceptance testing. Its definition opts in to the
+Host's existing `browser` Capability; other default roles do not receive it.
+Live testing requires a connected [Chrome bridge](../../docs/guides/browser-bridge.md)
+and remains subject to existing Browser and Host approvals.
 
 The default template enables the Trigger Plugin with no Triggers. A Trigger runs
 its Pet in its owner Channel, so create the Channel and that Pet instance first.

@@ -9,7 +9,7 @@ import type { LocalModelProfileRegistry } from './config/llmConfig';
 import type { HostExecutionConfig } from './config/hostExecutionConfig';
 import {
   type HostToolkitInventorySnapshot,
-  HostToolkitInventoryStore,
+  type HostToolkitInventoryStore,
 } from './toolkits/toolkitInventory';
 
 export type CapabilityCatalogReader = Pick<
@@ -33,7 +33,7 @@ export type ServerDeps = HostExecutionConfig & {
    */
   chatCheckpointer?: BaseCheckpointSaver;
   artifactStore?: ArtifactStore;
-  toolkitInventory: HostToolkitInventoryStore;
+  toolkitInventory: Pick<HostToolkitInventoryStore, 'getSnapshot'>;
   /** Host-owned Capability catalog; Chat consumes its configured snapshot. */
   capabilityCatalog: CapabilityCatalogReader;
   /** Capability preloaded by this resident Pet's entry Supervisor. */

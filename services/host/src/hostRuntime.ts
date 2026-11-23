@@ -45,6 +45,7 @@ export { loadCapabilityDirectory } from './capabilityLoader';
 export { HostCapabilityCatalog } from './hostCapabilityCatalog';
 export type {
   CapabilityCatalogSnapshot,
+  SharedHostCapability,
 } from './hostCapabilityCatalog';
 export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';

@@ -36,7 +36,16 @@ export type HostCapabilityCatalogDeps = {
   createHostCapabilities: () => AgentCapability[];
 };
 
-export type HostCapabilityCatalogOptions = Partial<HostCapabilityCatalogDeps>;
+/** An optional Host Capability a Pet can select explicitly, with its restricted Toolkits. */
+export type SharedHostCapability = Readonly<{
+  capability: AgentCapability;
+  enabled: boolean;
+  restrictedToolkits: readonly string[];
+}>;
+
+export type HostCapabilityCatalogOptions = Partial<HostCapabilityCatalogDeps> & {
+  sharedHostCapabilities?: readonly SharedHostCapability[];
+};
 
 const defaultDeps: HostCapabilityCatalogDeps = {
   loadConfiguredCapabilities: loadUserCapabilities,
@@ -133,8 +142,16 @@ export class HostCapabilityCatalog {
   private configuredCapabilities: readonly LoadedCapability[] = [];
   private readonly sharedDirectories = new Map<string, Promise<LoadedCapability[]>>();
 
-  constructor(options: HostCapabilityCatalogOptions = {}) {
+  private readonly sharedHostCapabilities: readonly SharedHostCapability[];
+
+  constructor({ sharedHostCapabilities = [], ...options }: HostCapabilityCatalogOptions = {}) {
     this.deps = { ...defaultDeps, ...options };
+    assertDistinctCapabilityNames(sharedHostCapabilities.map(({ capability }) => hostEntry(capability)));
+    this.sharedHostCapabilities = Object.freeze([...sharedHostCapabilities]);
+  }
+
+  getSharedHostCapabilities(): readonly SharedHostCapability[] {
+    return this.sharedHostCapabilities;
   }
 
   async load(): Promise<void> {
@@ -172,7 +189,8 @@ export class HostCapabilityCatalog {
     shared?: { rootDir: string; names: readonly string[] };
   }): Promise<CapabilityCatalogSnapshot> {
     const loaded = await loadCapabilityDirectory(options.rootDir);
-    let shared: LoadedCapability[] = [];
+    const shared: LoadedCapability[] = [];
+    const selected: Array<Omit<CapabilityCatalogEntry, 'enabled'>> = [];
     if (options.shared?.names.length) {
       const root = resolve(options.shared.rootDir);
       let pending = this.sharedDirectories.get(root);
@@ -181,20 +199,29 @@ export class HostCapabilityCatalog {
         this.sharedDirectories.set(root, pending);
       }
       const byName = new Map((await pending).map((entry) => [entry.capability.name, entry]));
-      shared = options.shared.names.map((name) => {
+      for (const name of options.shared.names) {
         const entry = byName.get(name);
-        if (!entry) {
-          throw new Error(`Shared Capability "${name}" requested by ${options.sourceId} was not found in "${root}"`);
+        const offered = this.sharedHostCapabilities.find(({ capability }) => capability.name === name);
+        if (offered) {
+          if (entry || loaded.some(({ capability }) => capability.name === name)) {
+            throw new Error(`Shared Host Capability "${name}" requested by ${options.sourceId} conflicts with a workspace Capability`);
+          }
+          if (offered.enabled) selected.push(hostEntry(offered.capability));
+        } else {
+          if (!entry) {
+            throw new Error(`Shared Capability "${name}" requested by ${options.sourceId} was not found in "${root}"`);
+          }
+          shared.push(entry);
+          selected.push(loadedEntry(entry, 'shared', root));
         }
-        return entry;
-      });
+      }
     }
     const hostEntries = this.hostCapabilities.map(hostEntry).filter((entry) => entry.required);
     return createSnapshot(
       [
         ...hostEntries,
         ...loaded.map((entry) => loadedEntry(entry, 'directory', options.sourceId)),
-        ...shared.map((entry) => loadedEntry(entry, 'shared', options.shared!.rootDir)),
+        ...selected,
       ],
       { capabilities: Object.fromEntries(
         [...loaded, ...shared].map(({ activation }) => [activation.id, true]),

@@ -22,7 +22,7 @@ export type PetConfig = {
   modelProfileId?: string;
   /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
   defaultCapabilityName?: string;
-  /** Explicit names from the shared Capability collection beside the pets directory. */
+  /** Explicit names from the workspace shared collection or the Host's shared offerings. */
   sharedCapabilities?: string[];
 };
 

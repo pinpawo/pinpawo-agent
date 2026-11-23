@@ -6,6 +6,7 @@ import test from 'node:test';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import { FileSaver } from './fileSaver';
 import type { HostRuntimeConfig } from './config/runtimeConfig';
+import { loadStoredConfig } from './storage';
 
 function buildTestConfig(root: string): HostRuntimeConfig {
   return {
@@ -50,8 +51,58 @@ test('HostCapabilityAssembly can omit the global Browser runtime for an independ
   const builtIns = (caps as unknown as {
     hostBuiltInToolkits: readonly { name: string }[];
   }).hostBuiltInToolkits;
-  assert.equal(builtIns.some(({ name }) => name === 'browser'), false);
   assert.equal(builtIns.some(({ name }) => name === 'project-inspection'), true);
+  assert.equal((caps as unknown as { browserToolkit?: unknown }).browserToolkit, undefined);
+  assert.deepEqual(caps.getCapabilityCatalog().getSharedHostCapabilities().map(({ capability, enabled, restrictedToolkits }) => ({
+    name: capability.name, enabled, restrictedToolkits,
+  })), [{ name: 'browser', enabled: false, restrictedToolkits: ['browser'] }]);
+});
+
+test('HostCapabilityAssembly opt-in reuses the Browser Capability and origin review', async () => {
+  const disabled = loadStoredConfig().capabilities?.browser === false;
+  for (const requested of [true, false]) {
+    const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-browser-opt-in-'));
+    const caps = new HostCapabilityAssembly({
+      runtimeConfig: buildTestConfig(root),
+      sourceId: 'studio-test',
+      scopeSharedCapabilities: true,
+      loadUserCapabilities: false,
+    });
+    const browserEnabled = requested && !disabled;
+    const catalog = caps.getCapabilityCatalog();
+    const load = catalog.load.bind(catalog);
+    const stopBeforeRSStart = new Error('stop test before starting RS');
+    catalog.load = async () => {
+      await load();
+      assert.equal(catalog.getSnapshot().capabilities.some(({ name }) => name === 'browser'), false);
+      const snapshot = await catalog.createDirectorySnapshot({
+        rootDir: join(root, 'pet'), sourceId: 'test',
+        shared: { rootDir: join(root, 'shared'), names: requested ? ['browser'] : [] },
+      });
+      const capability = snapshot.capabilities.find(({ name }) => name === 'browser');
+      const toolkit = (caps as unknown as {
+        browserToolkit?: import('@pinpawo/pet-agent').AgentToolkit;
+      }).browserToolkit;
+      if (browserEnabled) {
+        assert.deepEqual(capability?.uses, ['browser', 'artifacts']);
+        assert.equal(toolkit?.name, 'browser');
+        const open = toolkit?.tools.find(({ tool }) => tool.name === 'browser_open');
+        const context = {
+          toolkitName: 'browser', toolName: 'browser_open', input: { url: 'https://example.test/test' },
+        };
+        const matcher = await open?.review?.authorization?.buildMatcher(context);
+        assert.equal(matcher?.type, 'url_origin');
+        assert.ok(await open?.review?.request(context));
+      } else {
+        assert.equal(capability, undefined);
+        assert.equal(toolkit, undefined);
+      }
+      throw stopBeforeRSStart;
+    };
+    try {
+      await assert.rejects(caps.init({ sharedCapabilityNames: requested ? ['browser'] : [] }), stopBeforeRSStart);
+    } finally { await caps.shutdown(); }
+  }
 });
 
 test('HostCapabilityAssembly rejects extension definitions omitted from the first init call', async () => {

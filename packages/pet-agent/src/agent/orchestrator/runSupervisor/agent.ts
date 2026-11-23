@@ -3,16 +3,17 @@ import { createSubmitPlanTool } from './submitPlanTool';
 import { createReviewCurrentTool } from './reviewCurrentTool';
 import { createAdjustPlanTool } from './adjustPlanTool';
 import { createDelegateCapabilityTool } from './delegateCapabilityTool';
-import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { GraphRecursionError } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
-import { createAgent, createMiddleware } from 'langchain';
+import { createAgent } from 'langchain';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentSystemPrompt, buildRunSupervisorContextInput, buildRunSupervisorTurnInput } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { queryAgentMessages, getAgentMessageMetadata, getAgentMessageRunId, isMainConversationMessage, stampAgentMessageCreatedAt } from '../../messages';
+import { queryAgentMessages, getAgentMessageMetadata, getAgentMessageRunId, isEntryRoutingMessage, stampAgentMessageCreatedAt } from '../../messages';
+import { readMessageToolCallIds } from '../../../utils/messages';
 import { createToolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
@@ -28,37 +29,6 @@ import { supervisorControlContext } from './input';
 export const RUN_SUPERVISOR_RECURSION_LIMIT = 40;
 
 export const RUN_SUPERVISOR_STEP_LIMIT_NOTICE = '本轮规划的决策步数已达到上限，任务尚未完成，当前计划已保留。你可以继续当前任务。';
-
-function withoutEntryHandoffs(messages: readonly BaseMessage[]): BaseMessage[] {
-  const projected: BaseMessage[] = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index]!;
-    const call = AIMessage.isInstance(message) && message.tool_calls?.length === 1
-      ? message.tool_calls[0] : undefined;
-    const receipt = messages[index + 1];
-    // Entry commits an exclusive call and its receipt together in main.
-    // Match the adjacent pair, not every use of a provider's call ID.
-    if (call?.id && (call.name === 'plan_request' || call.name === 'continue')
-      && ToolMessage.isInstance(receipt) && receipt.name === call.name && receipt.tool_call_id === call.id
-      && receipt.status !== 'error' && isMainConversationMessage(message) && isMainConversationMessage(receipt)
-      && getAgentMessageRunId(message) === getAgentMessageRunId(receipt)) {
-      index += 1;
-    } else {
-      projected.push(message);
-    }
-  }
-  return projected;
-}
-
-const supervisorModelHistory = createMiddleware({
-  name: 'SupervisorModelHistory',
-  // Keep Root and agent state intact, including IDs reserved by hidden calls.
-  // The goal and plan are already supplied as structured Supervisor input.
-  wrapModelCall: (request, handler) => handler({
-    ...request,
-    messages: withoutEntryHandoffs(request.messages),
-  }),
-});
 
 export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
@@ -79,7 +49,10 @@ export function createRunSupervisorAgent(params: {
         defaultCapabilityName: params.defaultCapabilityName,
       });
       const disclosedDocuments = documents.readCapabilities(input.capabilityDisclosure.disclosedCapabilityNames, signal);
-      const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
+      const selected = queryAgentMessages(input.messages)
+        .main({ includeEntryRouting: false }).supervisor(input.runId).select().messages;
+      // Supervisor writes its calls back to Root, where Entry's IDs are still in use.
+      const reservedToolCallIds = input.messages.filter(isEntryRoutingMessage).flatMap(readMessageToolCallIds);
       // Run-stable facts sit right before this run's messages: earlier history
       // and this context stay a cacheable prefix across the run's invocations,
       // and only the turn message changes at the end.
@@ -109,8 +82,7 @@ export function createRunSupervisorAgent(params: {
         middleware: [
           createSupervisorControlValidationMiddleware(input, agentMessages.length),
           systemPromptMiddleware,
-          supervisorModelHistory,
-          createToolProtocolMiddleware({ uniqueInHistory: true }),
+          createToolProtocolMiddleware({ uniqueInHistory: true, reservedToolCallIds }),
         ],
       });
       // A stricter caller limit stays the caller's hard breaker; only this

@@ -5,12 +5,14 @@ import {
   getAgentMessageLane,
   getAgentMessageRunId,
   isCapabilityMessageLane,
+  isEntryRoutingMessage,
   isSyntheticAgentMessage,
   type DelegationMessageScope,
 } from './metadata';
 
 export type AgentMessageSelectionExclusionReason =
   | 'main_not_selected'
+  | 'entry_routing_not_selected'
   | 'delegation_not_selected'
   | 'supervisor_not_selected'
   | 'scope_mismatch'
@@ -31,8 +33,8 @@ export type AgentMessageSelection = {
 };
 
 export type AgentMessageQuery = {
-  /** Include the untagged main conversation. */
-  main(): AgentMessageQuery;
+  /** Include the main conversation, with Entry routing records by default. */
+  main(options?: { includeEntryRouting?: boolean }): AgentMessageQuery;
   /** Include only the Supervisor working messages owned by this business run. */
   supervisor(runId: string): AgentMessageQuery;
   /** Include the private messages for one exact delegation scope. */
@@ -45,6 +47,7 @@ export type AgentMessageQuery = {
 
 type AgentMessageQueryState = {
   includeMain: boolean;
+  includeEntryRouting: boolean;
   delegationScopes: readonly DelegationMessageScope[];
   supervisorRunIds: readonly string[];
   appendedMessages: readonly BaseMessage[];
@@ -59,10 +62,10 @@ function createQuery(
   state: AgentMessageQueryState,
 ): AgentMessageQuery {
   return Object.freeze({
-    main() {
-      return state.includeMain
+    main({ includeEntryRouting = state.includeEntryRouting } = {}) {
+      return state.includeMain && includeEntryRouting === state.includeEntryRouting
         ? createQuery(canonicalMessages, state)
-        : createQuery(canonicalMessages, { ...state, includeMain: true });
+        : createQuery(canonicalMessages, { ...state, includeMain: true, includeEntryRouting });
     },
     delegation(scope: DelegationMessageScope) {
       if (state.delegationScopes.some((candidate) =>
@@ -96,11 +99,13 @@ function createQuery(
         const messageId = messageIdentity(message, index);
         const lane = getAgentMessageLane(message);
         if (!lane) {
-          if (state.includeMain) {
+          if (!state.includeMain) {
+            excluded.push({ messageId, reason: 'main_not_selected' });
+          } else if (!state.includeEntryRouting && isEntryRoutingMessage(message)) {
+            excluded.push({ messageId, reason: 'entry_routing_not_selected' });
+          } else {
             messages.push(message);
             selectedMessageIds.push(messageId);
-          } else {
-            excluded.push({ messageId, reason: 'main_not_selected' });
           }
           return;
         }
@@ -163,6 +168,7 @@ export function queryAgentMessages(
   const snapshot = [...canonicalMessages];
   return createQuery(snapshot, {
     includeMain: false,
+    includeEntryRouting: true,
     delegationScopes: [],
     supervisorRunIds: [],
     appendedMessages: [],

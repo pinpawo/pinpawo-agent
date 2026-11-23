@@ -10,11 +10,17 @@ export type DelegationMessageScope = {
 
 export type AgentMessageMetadata = Record<string, unknown>;
 
+export const ENTRY_ROUTING_SOURCE = 'entry_routing';
+
 export function getAgentMessageMetadata(message: BaseMessage): AgentMessageMetadata {
   const pinpawo = message.additional_kwargs?.pinpawo;
   return pinpawo && typeof pinpawo === 'object'
     ? pinpawo as AgentMessageMetadata
     : {};
+}
+
+export function isEntryRoutingMessage(message: BaseMessage): boolean {
+  return getAgentMessageMetadata(message).source === ENTRY_ROUTING_SOURCE;
 }
 
 export function setAgentMessageMetadata(

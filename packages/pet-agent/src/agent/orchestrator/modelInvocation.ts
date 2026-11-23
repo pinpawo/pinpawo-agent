@@ -25,9 +25,13 @@ type InvokableMessageModel<TOutput extends BaseMessage> = {
  * repeats each call in its content blocks and raw `additional_kwargs`, so a
  * replaced ID is replaced in all of them and the message stays one shape.
  */
-export function assignToolCallIds<T extends BaseMessage>(response: T, history: readonly BaseMessage[]): T {
+export function assignToolCallIds<T extends BaseMessage>(
+  response: T,
+  history: readonly BaseMessage[],
+  reservedToolCallIds: readonly string[] = [],
+): T {
   if (!AIMessage.isInstance(response) || !response.tool_calls?.length) return response;
-  const used = new Set(history.flatMap((message) => readMessageToolCallIds(message)));
+  const used = new Set([...reservedToolCallIds, ...history.flatMap(readMessageToolCallIds)]);
   const toolCalls = response.tool_calls.map((call) => {
     if (call.id && !used.has(call.id)) {
       used.add(call.id);
@@ -68,7 +72,14 @@ export function assignToolCallIds<T extends BaseMessage>(response: T, history: r
  * already in the history and must keep its ID, so it only fills missing and
  * repeated-in-response IDs.
  */
-export function createToolProtocolMiddleware({ uniqueInHistory = false } = {}) {
+export function createToolProtocolMiddleware({
+  uniqueInHistory = false,
+  reservedToolCallIds = [],
+}: {
+  uniqueInHistory?: boolean;
+  /** IDs committed in canonical history but outside this agent's message view. */
+  reservedToolCallIds?: readonly string[];
+} = {}) {
   return createMiddleware({
     name: 'ToolProtocol',
     wrapModelCall: async (request, handler) => {
@@ -77,7 +88,7 @@ export function createToolProtocolMiddleware({ uniqueInHistory = false } = {}) {
         messages: toolProtocolSafeMessages(request.messages),
       });
       return AIMessage.isInstance(response)
-        ? assignToolCallIds(response, uniqueInHistory ? request.state.messages ?? [] : [])
+        ? assignToolCallIds(response, uniqueInHistory ? request.state.messages ?? [] : [], reservedToolCallIds)
         : response;
     },
   });

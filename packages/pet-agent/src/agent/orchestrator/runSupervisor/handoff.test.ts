@@ -13,7 +13,14 @@ import { compileAgentRegistry } from '../registry';
 import { buildReviewSpec } from '../../../types/reviewSpec';
 import { defineInstructionDocument } from '../../../types/capability';
 
-import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages } from '../../messages';
+import {
+  ENTRY_ROUTING_SOURCE,
+  getAgentMessageMetadata,
+  getAgentMessageLane,
+  isPublicConversationMessage,
+  queryAgentMessages,
+  setAgentMessageMetadata,
+} from '../../messages';
 import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
@@ -183,6 +190,10 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   assert.equal(callToContinue.tool_calls?.[0]?.name, 'continue');
   assert.equal(continueReceipt.name, 'continue');
   assert.equal(continueReceipt.tool_call_id, callToContinue.tool_calls?.[0]?.id);
+  for (const message of routing) {
+    assert.equal(getAgentMessageMetadata(message).source, ENTRY_ROUTING_SOURCE);
+    assert.equal(isPublicConversationMessage(message), true);
+  }
   assert.equal(messages.some((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.id === 'call-question')), false);
 });
@@ -352,7 +363,7 @@ test('missing delivery checkpoints an error result, leaves the plan untouched an
   assert.equal(executor.inputs.length, 2);
 });
 
-test('Entry checkpoints the routing pairs but Supervisor restarts with only the resolved goal and genuine history', async () => {
+test('Supervisor restarts from the resolved goal and selects only history without an Entry routing label', async () => {
   const { config, executor } = setup();
   const supervisor = new ScriptedModel([
     // This provider reuses the current Entry ID. Hiding it from the model
@@ -363,15 +374,23 @@ test('Entry checkpoints the routing pairs but Supervisor restarts with only the 
   const graphConfig = { ...config, models: { ...config.models, act: supervisor } };
   const graph = createOrchestratorGraph(graphConfig);
   const options = { configurable: { thread_id: 'entry-canonical-state', registry } };
-  const priorPlanCall = call('plan_request', { goal: 'List earlier references.' }, 'reused-id');
-  const priorPlanReceipt = new ToolMessage({ name: 'plan_request', tool_call_id: 'reused-id', content: 'Handed off.' });
+  const priorPlanCall = new AIMessage({ id: 'untagged-call', content: '',
+    tool_calls: [{ name: 'plan_request', args: { goal: 'List earlier references.' }, id: 'old-plan' }],
+  });
+  const priorPlanReceipt = new ToolMessage({ id: 'untagged-receipt', name: 'plan_request', tool_call_id: 'old-plan', content: 'Handed off.' });
+  const differentRouting = { source: ENTRY_ROUTING_SOURCE, runId: 'previous-run' };
+  const differentRoutingCall = setAgentMessageMetadata(call('another_routing_name', {}, 'reused-id'), differentRouting);
+  const differentRoutingReceipt = setAgentMessageMetadata(new ToolMessage({
+    name: 'another_routing_name', tool_call_id: 'reused-id', content: 'A labeled earlier routing receipt.',
+  }), differentRouting);
   const priorLookup = call('lookup_reference', {}, 'reused-id');
   const priorLookupReceipt = new ToolMessage({ name: 'lookup_reference', tool_call_id: 'reused-id', content: 'Found the earlier checklist.' });
   const priorReply = new AIMessage('The earlier checklist is ready.');
   const fresh = buildOrchestratorRunInput([new HumanMessage('Go ahead with the new inspection.')]);
   await graph.invoke({
     ...fresh,
-    messages: [priorPlanCall, priorPlanReceipt, priorLookup, priorLookupReceipt, priorReply, ...fresh.messages],
+    messages: [priorPlanCall, priorPlanReceipt, differentRoutingCall, differentRoutingReceipt,
+      priorLookup, priorLookupReceipt, priorReply, ...fresh.messages],
     runSupervisorState: { runId: 'previous-run', goal: 'List earlier references.', plan: [
       { id: 'old-item', capability: 'general', objective: 'Check earlier references.', status: 'pending' },
     ] },
@@ -383,6 +402,10 @@ test('Entry checkpoints the routing pairs but Supervisor restarts with only the 
   assert.equal(confirmation.name, 'plan_request');
   assert.equal(confirmation.tool_call_id, routingCall.tool_calls?.[0]?.id);
   assert.equal(confirmation.tool_call_id, 'entry-call');
+  for (const message of [routingCall, confirmation]) {
+    assert.equal(getAgentMessageMetadata(message).source, ENTRY_ROUTING_SOURCE);
+    assert.equal(isPublicConversationMessage(message), true);
+  }
   assert.equal(saved.values.runUserRequest, task.objective);
   assert.deepEqual(saved.values.runSupervisorState, { runId: null, goal: null, plan: [] });
   assert.equal(supervisor.inputs.length, 0);
@@ -394,7 +417,11 @@ test('Entry checkpoints the routing pairs but Supervisor restarts with only the 
   assert.equal(savedRouting.length, 4);
   assert.deepEqual(entryRoutingRecords(output.messages).map(message => message.toDict()), savedRouting.map(message => message.toDict()));
   for (const turn of supervisor.modelTurns) {
-    assert.deepEqual(entryRoutingRecords(turn), []);
+    assert.deepEqual(entryRoutingRecords(turn).map(message => message.id), [priorPlanCall.id, priorPlanReceipt.id],
+      'old untagged records are unchanged; only the tagged pair is omitted');
+    assert.equal(turn.some(message => AIMessage.isInstance(message)
+      && message.tool_calls?.some(call => call.name === 'another_routing_name')), false);
+    assert.equal(turn.some(message => ToolMessage.isInstance(message) && message.name === 'another_routing_name'), false);
     assert.ok(turn.some(message => AIMessage.isInstance(message) && message.tool_calls?.some(call =>
       call.name === 'lookup_reference' && call.id === 'reused-id')));
     assert.ok(turn.some(message => ToolMessage.isInstance(message) && message.name === 'lookup_reference'

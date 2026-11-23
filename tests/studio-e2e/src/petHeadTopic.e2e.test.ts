@@ -202,6 +202,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
       ...(activeDispatch ? { activeDispatch } : {}),
     });
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
+    const recordedPublicTask = 'Verify public reference:  https://example.com/';
     resident.sessions.snapshot = async (sessionId, options) => {
       assert.deepEqual(options, { timelineLimit: 1 });
       sessionReads.push(sessionId);
@@ -216,7 +217,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
             { id: 'one', capability: 'internal', task: 'Gather inputs.', status: 'completed' },
             { id: 'two', capability: 'internal', task: 'Check the report.', status: 'active' },
             { id: 'three', capability: 'internal', task: 'Verify the figures.', status: 'pending' },
-            { id: 'secret', capability: 'internal', task: 'password: synthetic-private-plan', status: 'pending' },
+            { id: 'four', capability: 'internal', task: recordedPublicTask, status: 'pending' },
           ] },
           timeline: [
             { type: 'message', id: 'old-text', role: 'assistant', text: 'private checkpoint text', status: 'completed' },
@@ -288,6 +289,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
         { status: 'completed', description: 'Gather inputs.' },
         { status: 'active', description: 'Check the report.' },
         { status: 'pending', description: 'Verify the figures.' },
+        { status: 'pending', description: recordedPublicTask },
       ] },
       source: { messageId: sourceA.messageId, body: sourceA.body },
     })));

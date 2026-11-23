@@ -53,6 +53,9 @@ test('HostCapabilityAssembly can omit the global Browser runtime for an independ
   }).hostBuiltInToolkits;
   assert.equal(builtIns.some(({ name }) => name === 'project-inspection'), true);
   assert.equal((caps as unknown as { browserToolkit?: unknown }).browserToolkit, undefined);
+  assert.deepEqual(caps.getCapabilityCatalog().getSharedHostCapabilities().map(({ capability, enabled, restrictedToolkits }) => ({
+    name: capability.name, enabled, restrictedToolkits,
+  })), [{ name: 'browser', enabled: false, restrictedToolkits: ['browser'] }]);
 });
 
 test('HostCapabilityAssembly opt-in reuses the Browser Capability and origin review', async () => {
@@ -62,7 +65,7 @@ test('HostCapabilityAssembly opt-in reuses the Browser Capability and origin rev
     const caps = new HostCapabilityAssembly({
       runtimeConfig: buildTestConfig(root),
       sourceId: 'studio-test',
-      includeBrowser: 'opt-in',
+      scopeSharedCapabilities: true,
       loadUserCapabilities: false,
     });
     const browserEnabled = requested && !disabled;
@@ -71,7 +74,12 @@ test('HostCapabilityAssembly opt-in reuses the Browser Capability and origin rev
     const stopBeforeRSStart = new Error('stop test before starting RS');
     catalog.load = async () => {
       await load();
-      const capability = catalog.getSnapshot().capabilities.find(({ name }) => name === 'browser');
+      assert.equal(catalog.getSnapshot().capabilities.some(({ name }) => name === 'browser'), false);
+      const snapshot = await catalog.createDirectorySnapshot({
+        rootDir: join(root, 'pet'), sourceId: 'test',
+        shared: { rootDir: join(root, 'shared'), names: requested ? ['browser'] : [] },
+      });
+      const capability = snapshot.capabilities.find(({ name }) => name === 'browser');
       const toolkit = (caps as unknown as {
         browserToolkit?: import('@pinpawo/pet-agent').AgentToolkit;
       }).browserToolkit;
@@ -92,7 +100,7 @@ test('HostCapabilityAssembly opt-in reuses the Browser Capability and origin rev
       throw stopBeforeRSStart;
     };
     try {
-      await assert.rejects(caps.init({ includeBrowser: requested }), stopBeforeRSStart);
+      await assert.rejects(caps.init({ sharedCapabilityNames: requested ? ['browser'] : [] }), stopBeforeRSStart);
     } finally { await caps.shutdown(); }
   }
 });

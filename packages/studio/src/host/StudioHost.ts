@@ -86,7 +86,7 @@ export class StudioHost {
       sourceId: 'studio-host',
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
-      includeBrowser: 'opt-in',
+      scopeSharedCapabilities: true,
     });
     this.buildStudioImpl = options.buildStudio ?? buildStudio;
     this.resolveStudioHostConfigImpl = options.resolveStudioHostConfig ?? resolveStudioHostConfig;
@@ -134,15 +134,15 @@ export class StudioHost {
       await this.caps.init({
         toolkitSources: pluginToolkitSources,
         credentialSource: this.credentialSource,
-        includeBrowser: configuration.resolved.definitions.some(({ browserCapability }) => browserCapability),
+        sharedCapabilityNames: configuration.resolved.definitions.flatMap(({ sharedCapabilities }) => sharedCapabilities ?? []),
       });
-      const hostCapabilities = this.caps.getCapabilityCatalog().getSnapshot().capabilities;
-      const browser = hostCapabilities.find(({ name }) => name === 'browser');
+      const catalog = this.caps.getCapabilityCatalog();
+      const hostCapabilities = catalog.getSnapshot().capabilities;
       const petCapabilities = new Map<string, AgentCapability[]>();
       const petDocuments = new Map<string, PetDocument>();
-      for (const { definitionId, sharedCapabilities, browserCapability } of configuration.resolved.definitions) {
+      for (const { definitionId, sharedCapabilities } of configuration.resolved.definitions) {
         const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, definitionId);
-        const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
+        const snapshot = await catalog.createDirectorySnapshot({
           rootDir: capabilityDir,
           sourceId: `studio-pet:${definitionId}`,
           ...(sharedCapabilities?.length ? {
@@ -152,10 +152,7 @@ export class StudioHost {
             },
           } : {}),
         });
-        petCapabilities.set(definitionId, [
-          ...snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
-          ...(browserCapability && browser ? [browser] : []),
-        ]);
+        petCapabilities.set(definitionId, snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME));
         const document = await loadPetDocument(configuration.petsDir, definitionId);
         if (document) petDocuments.set(definitionId, document);
       }
@@ -167,6 +164,7 @@ export class StudioHost {
         modelProfiles: this.caps.getModelProfiles(),
         hostCapabilities: hostCapabilities.filter(({ name }) => name === GENERAL_CAPABILITY_NAME),
         petCapabilities,
+        sharedHostCapabilities: catalog.getSharedHostCapabilities(),
         petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),
         artifactStore: this.caps.getArtifactStore(),

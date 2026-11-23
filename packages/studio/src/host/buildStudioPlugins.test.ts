@@ -20,6 +20,7 @@ import { createLocalModelProfileRegistry } from '../../../../services/host/src/c
 import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
+  definePetDocument,
   type AgentCapability,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
@@ -84,21 +85,15 @@ test('an explicit Pet default excludes the general fallback Capability', () => {
   );
 });
 
-test('only an opted-in Studio Pet can bind the Browser Toolkit from the live Host inventory', async () => {
-  const browser = { name: 'browser', description: 'Test Browser Toolkit.', instructions: 'Fixture.', tools: [] };
-  const channel = { name: 'channel', description: 'Test Channel Toolkit.', instructions: 'Fixture.', tools: [] };
-  const snapshot = await buildHostToolkitInventory({
-    sources: [{ id: 'test', kind: 'host_builtin', definitions: [browser, channel] }],
-  });
-  const store = new HostToolkitInventoryStore(snapshot);
-  const tester = selectStudioPetToolkitInventory(store, true);
-  const otherPet = selectStudioPetToolkitInventory(store, false);
-  assert.deepEqual(tester.getSnapshot().effectiveToolkits.map(({ name }) => name), ['browser', 'channel']);
-  assert.deepEqual(otherPet.getSnapshot().effectiveToolkits.map(({ name }) => name), ['channel']);
-  assert.deepEqual(otherPet.getSnapshot().entries.map(({ toolkit }) => toolkit.name), ['channel']);
-  store.updateAvailability('browser', { available: false, reason: 'Disconnected' });
-  assert.deepEqual(tester.getSnapshot().effectiveToolkits.map(({ name }) => name), ['channel']);
-  assert.deepEqual(otherPet.getSnapshot().entries.map(({ toolkit }) => toolkit.name), ['channel']);
+test('a disabled Host offering hides its Toolkit entry even when explicitly selected', async () => {
+  const toolkit = { name: 'reference', description: 'Reference Toolkit.', instructions: 'Fixture.', tools: [] };
+  const inventory = new HostToolkitInventoryStore(await buildHostToolkitInventory({
+    sources: [{ id: 'test', kind: 'host_builtin', definitions: [toolkit] }],
+  }));
+  const capability = { ...generalCapability(), name: 'lookup', uses: [toolkit.name] };
+  const scoped = selectStudioPetToolkitInventory(inventory,
+    [{ capability, enabled: false, restrictedToolkits: [toolkit.name] }], [capability.name]);
+  assert.deepEqual(scoped.getSnapshot(), { entries: [], effectiveToolkits: [] });
 });
 
 function residentBuildResources(workdir: string) {
@@ -167,6 +162,92 @@ test('a Host-selected shared Capability can serve as a resident Pet default', as
     assert.ok(residentPets.has('planner'));
   } finally { await studio.shutdown(); }
   await assert.rejects(buildStudio({ ...input, petCapabilities: new Map() }), /default Capability .* is not available/);
+});
+
+test('resident Pets see only their selected Host Toolkit, including after recovery', { timeout: 10_000 }, async (t) => {
+  const workdir = await writeStudioConfig([]);
+  const configuration = await resolveStudioHostConfig({ workdir });
+  configuration.resolved.definitions[0]!.sharedCapabilities = ['lookup'];
+  configuration.resolved.definitions.push({ definitionId: 'writer', name: 'Writer' });
+  configuration.resolved.studio.definitions.push('writer');
+  const toolkit = {
+    name: 'reference', description: 'Reference Toolkit.',
+    tools: [{ tool: tool(async () => 'fixture', { name: 'read_reference', description: 'Read fixture.', schema: z.object({}) }) }],
+  };
+  const capability = { ...generalCapability(), name: 'lookup', uses: [toolkit.name] };
+  // The other Pet has a local Capability asking to use the same Toolkit. uses is
+  // not an opt-in, so its requested Toolkit must still be unavailable.
+  const local = { ...capability, name: 'local_lookup' };
+  const inventory = new HostToolkitInventoryStore(await buildHostToolkitInventory({
+    sources: [{ id: 'test', kind: 'host_builtin', definitions: [toolkit] }],
+  }));
+  const document = definePetDocument({ content: 'Answer the fixture without taking action.' });
+  const profiles = createTestModelProfileRegistry([{
+    modelProfileId: 'default', model: 'gpt-4o-mini', baseUrl: 'https://fixture.example.test/v1',
+  }]);
+  const result = await buildStudio({
+    configuration: { ...configuration, plugins: withTestPetChannel(configuration.plugins) },
+    modelProfiles: createLocalModelProfileRegistry({ snapshot: profiles.snapshot, llmDefaults: { timeoutMs: 1_000, maxRetries: 0 } }),
+    hostCapabilities: [generalCapability()],
+    petCapabilities: new Map([['planner', [capability]], ['writer', [local]]]),
+    sharedHostCapabilities: [{ capability, enabled: true, restrictedToolkits: [toolkit.name] }],
+    petDocuments: new Map([['planner', document], ['writer', document]]),
+    ...residentBuildResources(workdir),
+    toolkitInventory: inventory,
+  });
+  const observed: string[][] = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    assert.equal(String(url), 'https://fixture.example.test/v1/chat/completions');
+    const body = JSON.parse(String(init?.body));
+    const system = body.messages.filter(({ role }: { role: string }) => role === 'system')
+      .map(({ content }: { content: string }) => content).join(' ');
+    observed.push(Array.from(system.matchAll(/<toolkit name="([^"]+)">/g), ([, name]) => name!));
+    const message = { role: 'assistant', content: 'OK' };
+    const common = { id: 'fixture', created: 0, model: 'gpt-4o-mini' };
+    if (body.stream) {
+      const event = (delta: object, finish_reason: string | null) =>
+        'data: ' + JSON.stringify({ ...common, object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta, finish_reason }] }) + '\n\n';
+      return new Response(event(message, null) + event({}, 'stop') + 'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } });
+    }
+    return Response.json({ ...common, object: 'chat.completion', choices: [{ index: 0, message, finish_reason: 'stop' }] });
+  });
+  async function turn(petId: string) {
+    const port = result.residentPets.get(petId)!.resident.dispatch;
+    let unsubscribe = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finished = new Promise<void>((resolve, reject) => {
+      unsubscribe = port.onDispatchLifecycle((event) => {
+        if (event.state === 'completed') resolve();
+        if (event.state === 'failed') reject(new Error(event.error ?? 'Fixture turn failed.'));
+      });
+    });
+    void finished.catch(() => {});
+    const watchdog = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('Fixture turn did not complete.')), 2_000);
+    });
+    try {
+      await result.studio.dispatch({ petId, request: 'Say OK.' });
+      await Promise.race([finished, watchdog]);
+    } finally {
+      clearTimeout(timer);
+      unsubscribe();
+    }
+  }
+  try {
+    for (const petId of ['planner', 'writer']) {
+      await result.studio.pets.create({ channelId: 'one', petId, definitionId: petId, name: petId });
+    }
+    await turn('planner');
+    await turn('writer');
+    inventory.updateAvailability(toolkit.name, { available: false, reason: 'Fixture offline' });
+    await turn('planner');
+    inventory.updateAvailability(toolkit.name, { available: true });
+    await turn('planner');
+    await turn('writer');
+    assert.deepEqual(observed, [['reference'], [], [], ['reference'], []]);
+  } finally { await result.studio.shutdown(); }
 });
 
 test('plugin options from studio.json reach the injected resolver', async () => {

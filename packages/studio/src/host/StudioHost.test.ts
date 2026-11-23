@@ -46,6 +46,7 @@ function fakeCapabilityAssembly(
   let initialized = false;
   const capabilityCatalog = {
     getSnapshot: () => ({ capabilities: hostCapabilities }),
+    getSharedHostCapabilities: () => [],
     createDirectorySnapshot: async ({ rootDir }: { rootDir: string }) => {
       if (!initialized) {
         throw new Error('Pet capability snapshots require an initialized Host catalog');
@@ -360,32 +361,33 @@ Read and summarize context.
   } finally { await host.shutdown(); }
 });
 
-test('StudioHost offers the Host Browser Capability only to Pets that opt in', async () => {
+test('StudioHost resolves each Pet’s explicit Host shared selections alongside its workspace files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-host-offering-'));
   const general = agentCapability('general');
-  const browser = { ...agentCapability('browser'), uses: ['browser', 'artifacts'] };
+  const optional = agentCapability('reference_lookup');
 
-  for (const { requested, available } of [
-    { requested: true, available: true },
-    { requested: true, available: false },
-    { requested: false, available: true },
-  ]) {
-    const configured = configuration([], ['tester', 'issuer', 'executor', 'reviewer', 'wiki']);
-    configured.resolved.definitions[0]!.browserCapability = requested;
+  for (const enabled of [true, false]) {
+    const configured = { ...configuration([], ['selected', 'another']), petsDir: path.join(root, 'pets') };
+    configured.resolved.definitions[0]!.sharedCapabilities = [optional.name];
     const assembly = fakeCapabilityAssembly([], {
-      onInit: (options) => assert.equal(options.includeBrowser, requested),
+      onInit: (options) => assert.deepEqual(options.sharedCapabilityNames, [optional.name]),
     });
-    assembly.getCapabilityCatalog().getSnapshot = () => ({
-      capabilities: available ? [general, browser] : [general],
+    const offerings = [{ capability: optional, enabled, restrictedToolkits: ['reference'] }];
+    const catalog = new HostCapabilityCatalog({
+      createHostCapabilities: () => [general],
+      loadConfiguredCapabilities: async () => [],
+      sharedHostCapabilities: offerings,
     });
+    await catalog.load();
+    assembly.getCapabilityCatalog = () => catalog;
     const host = new StudioHost({
       capabilityAssembly: assembly,
       resolveStudioHostConfig: async () => configured,
       buildStudio: async (input) => {
         assert.deepEqual(input.hostCapabilities, [general]);
-        assert.deepEqual(input.petCapabilities.get('tester'), requested && available ? [browser] : []);
-        for (const definitionId of ['issuer', 'executor', 'reviewer', 'wiki']) {
-          assert.deepEqual(input.petCapabilities.get(definitionId), []);
-        }
+        assert.deepEqual(input.sharedHostCapabilities, offerings);
+        assert.deepEqual(input.petCapabilities.get('selected'), enabled ? [optional] : []);
+        assert.deepEqual(input.petCapabilities.get('another'), []);
         return result(fakeStudio(() => undefined));
       },
     });

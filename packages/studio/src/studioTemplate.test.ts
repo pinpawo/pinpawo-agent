@@ -142,11 +142,8 @@ test('shipped Pet definitions support Issue, execution, review, testing, and Wik
   });
   assert.deepEqual(definitions.find(({ definitionId }) => definitionId === 'tester'), {
     definitionId: 'tester', name: 'Tester', defaultCapabilityName: 'studio_test',
-    sharedCapabilities: ['channel_context'], browserCapability: true,
+    sharedCapabilities: ['channel_context', 'browser'],
   });
-  assert.deepEqual(definitions.filter(({ browserCapability }) => browserCapability).map(({ definitionId }) => definitionId), [
-    'tester',
-  ]);
   assert.ok(await loadPetDocument(petsDir, 'issuer'));
   assert.ok(await loadPetDocument(petsDir, 'tester'));
   const sharedRoot = path.join(workdir, '.pinpawo', 'capabilities');
@@ -155,7 +152,7 @@ test('shipped Pet definitions support Issue, execution, review, testing, and Wik
     { name: 'channel_context', uses: ['channel'] },
   ]);
   for (const definition of definitions) {
-    assert.deepEqual(definition.sharedCapabilities, ['channel_context']);
+    if (definition.definitionId !== 'tester') assert.deepEqual(definition.sharedCapabilities, ['channel_context']);
   }
   assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
     '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',

@@ -169,6 +169,37 @@ test('explicit shared references select names and reuse the same authored defini
   assert.deepEqual(catalog.getSnapshot().capabilities.map(({ name }) => name), ['general', 'explore'], 'shared references do not change the Chat catalog');
 });
 
+test('shared Host offerings use the same selection without taking precedence over workspace names', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-host-shared-offering-'));
+  const local = join(root, 'pet');
+  const shared = join(root, 'shared');
+  const lookup = capability('lookup', ['source_reader']);
+  const disabled = capability('disabled_lookup');
+  await writeCapability(shared, 'context', 'shared_context');
+  const catalog = new HostCapabilityCatalog({
+    loadConfiguredCapabilities: async () => [],
+    createHostCapabilities: createHostBaselineCapabilities,
+    sharedHostCapabilities: [
+      { capability: lookup, enabled: true, restrictedToolkits: ['source_reader'] },
+      { capability: disabled, enabled: false, restrictedToolkits: [] },
+    ],
+  });
+  await catalog.load();
+  const select = (names: string[]) => catalog.createDirectorySnapshot({
+    rootDir: local, sourceId: 'pet:explicit', shared: { rootDir: shared, names },
+  });
+  assert.deepEqual((await select(['lookup', 'disabled_lookup', 'shared_context'])).capabilities.map(({ name }) => name),
+    ['general', 'lookup', 'shared_context']);
+  assert.deepEqual((await select(['shared_context'])).capabilities.map(({ name }) => name), ['general', 'shared_context']);
+  assert.deepEqual(catalog.getSnapshot().capabilities.map(({ name }) => name), ['general', 'explore']);
+
+  await writeCapability(local, 'shadow', 'lookup');
+  await assert.rejects(select(['lookup']), /lookup.*conflicts with a workspace Capability/);
+  await writeCapability(shared, 'disabled-shadow', 'disabled_lookup');
+  await catalog.load();
+  await assert.rejects(select(['disabled_lookup']), /disabled_lookup.*conflicts with a workspace Capability/);
+});
+
 test('unreferenced shared directories are not loaded or implicitly enabled', async () => {
   const { catalog, local, shared } = await sharedCatalogFixture();
   await mkdir(join(shared, 'invalid'), { recursive: true });

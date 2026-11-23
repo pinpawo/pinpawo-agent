@@ -10,9 +10,9 @@
 默认模板统一维护 Issuer、Executor、Reviewer、Tester 和 Wiki，并在 `definitions` 中加载这些
 定义。JSON 沿用 `pets/<definitionId>.json`，PET.md 和专用 Capability 放在相应定义目录中。
 Issuer 的默认能力为 `studio_issue`，保留 files、shell、web、git、github 和 channel 工具。
-Tester 用 `studio_test` 整理产品验收用例和实测证据。Pet 定义设置
-`"browserCapability": true` 明确为该 Pet 选择 Host 现有的 `browser` Capability，
-不影响其他角色，也不属于 `sharedCapabilities`。浏览器实测需要用户未禁用 Browser、
+Tester 用 `studio_test` 整理产品验收用例和实测证据。它通过 `sharedCapabilities`
+为自己的 Pet 定义选择 Host 提供的可选 `browser` Capability，不影响其他角色。
+浏览器实测需要用户未禁用 Browser、
 [Chrome 桥接已连接](../../guides/browser-bridge.md)，并遵守原有 Host 审核与浏览器来源授权。
 浏览器不可用时仍可整理用例和说明阻塞。
 `init` 只安装定义，不创建 Pet 实例；Host 启动时加载定义也不会自动新增实例。

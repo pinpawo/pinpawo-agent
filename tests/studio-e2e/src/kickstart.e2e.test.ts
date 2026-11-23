@@ -80,7 +80,13 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     createFilesToolkit(), createShellToolkit({ shell: shell }), createWebToolkit(), createGitToolkit({ shell: shell }), createGithubToolkit({ shell: shell }),
     ...configuration.plugins.flatMap((plugin) => plugin.toolkits),
   ];
-  const catalog = new HostCapabilityCatalog({ loadConfiguredCapabilities: async () => [] });
+  // No Browser runtime is bound in this Kickstart fixture. The shipped role still
+  // resolves and retains its local default Capability when that provider is disabled.
+  const { createBrowserCapability } = await import('../../../toolkits/browser/src/capability');
+  const catalog = new HostCapabilityCatalog({
+    loadConfiguredCapabilities: async () => [],
+    sharedHostCapabilities: [{ capability: createBrowserCapability(), enabled: false, restrictedToolkits: ['browser'] }],
+  });
   await catalog.load();
   for (const pet of configuration.resolved.definitions) {
     const snapshot = await catalog.createDirectorySnapshot({

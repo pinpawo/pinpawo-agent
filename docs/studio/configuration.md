@@ -131,9 +131,12 @@ by their frontmatter `name` in `sharedCapabilities`:
 
 `sharedCapabilities` supplements the Pet's private directory; omission or an empty
 list selects no shared capabilities. References are Capability names, not paths
-or Toolkit names. With a custom `petsDir`, the shared root is the sibling
-`capabilities` directory. The default Capability may come from either selected
-source, but `defaultCapabilityName` does not itself select a shared definition.
+or Toolkit names. They resolve to authored workspace definitions or optional
+Host-provided shared definitions, with no precedence on a name collision. A
+known Host Capability disabled in settings is omitted; its restricted Toolkit
+is not granted. With a custom `petsDir`, the shared root is the sibling
+`capabilities` directory. `defaultCapabilityName` does not itself select a shared
+definition and still requires an available declared definition at startup.
 
 The existing HostCapabilityCatalog loads the directories, resolves explicit
 references and creates each Pet's snapshot. Missing references, duplicate names,
@@ -170,13 +173,13 @@ live in `pets/<definitionId>/`. Issuer uses `studio_issue` as its default and
 retains the shared files, shell, web, git, github and channel Toolkits.
 
 Tester uses `studio_test` to plan functional acceptance cases and report test
-evidence. In Studio, `"browserCapability": true` in a Pet definition explicitly
-adds the Host's existing `browser` Capability to that Pet only. It is not a
-`sharedCapabilities` reference. The Host does not assemble the Browser Toolkit
-for this use unless a loaded definition opts in and the user's Browser setting
-allows it. Testing in Chrome requires the [Browser bridge](../guides/browser-bridge.md)
-and follows existing Host and browser-origin approval. When Browser is disabled
-or unavailable, Tester can still plan tests and report blockers.
+evidence. Its `sharedCapabilities` includes `browser`, an optional Capability
+provided by the Host. The selection applies only to this Pet definition. The
+Host assembles the Browser Toolkit only when a loaded definition selects it and
+the user's Browser setting allows it. Testing in Chrome requires the
+[Browser bridge](../guides/browser-bridge.md) and follows existing Host and
+browser-origin approval. When Browser is disabled or unavailable, Tester can
+still plan tests and report blockers.
 
 ## Pet instance setup
 

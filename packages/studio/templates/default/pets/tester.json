@@ -3,7 +3,7 @@
   "name": "Tester",
   "defaultCapabilityName": "studio_test",
   "sharedCapabilities": [
-    "channel_context"
-  ],
-  "browserCapability": true
+    "channel_context",
+    "browser"
+  ]
 }

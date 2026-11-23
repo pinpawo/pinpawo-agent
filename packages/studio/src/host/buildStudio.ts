@@ -16,6 +16,7 @@ import {
   type FileSaver,
   type ArtifactStore,
   type HostToolkitInventoryStore,
+  type SharedHostCapability,
   type HostExecutionConfig,
   type LocalModelProfileRegistry,
   type PetConfig,
@@ -47,6 +48,7 @@ export type BuildStudioInput = HostExecutionConfig & {
   hostCapabilities: readonly AgentCapability[];
   /** Host catalog snapshots for each Pet definition, including explicit shared references. */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
+  sharedHostCapabilities?: readonly SharedHostCapability[];
   /** Optional PET.md root-document snapshot keyed by definition id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
@@ -69,17 +71,23 @@ export function selectStudioPetCapabilities(input: {
 
 export function selectStudioPetToolkitInventory(
   inventory: Pick<HostToolkitInventoryStore, 'getSnapshot'>,
-  browserCapability: boolean,
+  offerings: readonly SharedHostCapability[],
+  selected: readonly string[],
 ): Pick<HostToolkitInventoryStore, 'getSnapshot'> {
-  if (browserCapability) return inventory;
+  const hidden = new Set(offerings.flatMap(({ restrictedToolkits }) => restrictedToolkits));
+  for (const { capability, enabled, restrictedToolkits } of offerings) {
+    if (enabled && selected.includes(capability.name)) {
+      for (const name of restrictedToolkits) hidden.delete(name);
+    }
+  }
+  if (!hidden.size) return inventory;
   return {
     getSnapshot: () => {
       const snapshot = inventory.getSnapshot();
-      // A local Capability's uses list cannot opt a Pet into the browser.
-      if (!snapshot.entries.some(({ toolkit }) => toolkit.name === 'browser')) return snapshot;
+      if (!snapshot.entries.some(({ toolkit }) => hidden.has(toolkit.name))) return snapshot;
       return Object.freeze({
-        entries: Object.freeze(snapshot.entries.filter(({ toolkit }) => toolkit.name !== 'browser')),
-        effectiveToolkits: Object.freeze(snapshot.effectiveToolkits.filter(({ name }) => name !== 'browser')),
+        entries: Object.freeze(snapshot.entries.filter(({ toolkit }) => !hidden.has(toolkit.name))),
+        effectiveToolkits: Object.freeze(snapshot.effectiveToolkits.filter(({ name }) => !hidden.has(name))),
       });
     },
   };
@@ -293,7 +301,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       ...(document ? { petDocument: document } : {}),
       resolveInvocationContext: async (target) => prepared.resolveInvocationContext(target),
       capabilities: definition.capabilities,
-      toolkitInventory: selectStudioPetToolkitInventory(input.toolkitInventory, config.browserCapability === true),
+      toolkitInventory: selectStudioPetToolkitInventory(
+        input.toolkitInventory, input.sharedHostCapabilities ?? [], config.sharedCapabilities ?? [],
+      ),
       artifactStore: input.artifactStore,
       checkpointer: input.checkpoint,
       runtimeConfig,

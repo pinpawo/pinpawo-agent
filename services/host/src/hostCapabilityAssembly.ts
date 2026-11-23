@@ -14,6 +14,7 @@ import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import {
+  BROWSER_TOOLKIT_NAME,
   createBrowserCapability,
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
@@ -69,10 +70,11 @@ export type HostCapabilityAssemblyOptions = {
   loadUserCapabilities?: boolean;
   /**
    * Whether this Host offers the Browser Toolkit (through its client of the
-   * RS service's BrowserRS). Chat keeps the user-selected default. 'opt-in'
-   * defers the decision to init, without overriding a stored Browser disable.
+   * RS service's BrowserRS). Chat keeps the user-selected default.
    */
-  includeBrowser?: boolean | 'opt-in';
+  includeBrowser?: boolean;
+  /** Make optional Host Capabilities available only through explicit Pet selection. */
+  scopeSharedCapabilities?: boolean;
   /** Optional Office Toolkit; disabled unless explicitly enabled. */
   includeOffice?: boolean;
 };
@@ -80,8 +82,8 @@ export type HostCapabilityAssemblyOptions = {
 export type HostCapabilityAssemblyInitOptions = {
   /** Additional Toolkit definitions supplied by the concrete Host. */
   toolkitSources?: readonly ToolkitDefinitionSource[];
-  /** Request Browser for a Host configured with includeBrowser: 'opt-in'. */
-  includeBrowser?: boolean;
+  /** Explicit shared selections of the Pet definitions loaded into this Host. */
+  sharedCapabilityNames?: readonly string[];
   /**
    * A Studio Host's Pet credentials for every ShellRS-backed Toolkit. Passed at
    * init so any assembly the Host uses receives them the same way; with it,
@@ -92,7 +94,7 @@ export type HostCapabilityAssemblyInitOptions = {
 
 type NormalizedHostCapabilityAssemblyInitOptions = Readonly<{
   toolkitSources: readonly ToolkitDefinitionSource[];
-  includeBrowser: boolean;
+  sharedCapabilityNames: readonly string[];
   credentialSource?: PetCredentialSource;
 }>;
 
@@ -101,7 +103,7 @@ function normalizeInitOptions(
 ): NormalizedHostCapabilityAssemblyInitOptions {
   return Object.freeze({
     toolkitSources: Object.freeze([...(options.toolkitSources ?? [])]),
-    includeBrowser: options.includeBrowser === true,
+    sharedCapabilityNames: Object.freeze([...new Set(options.sharedCapabilityNames ?? [])]),
     ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
   });
 }
@@ -120,8 +122,9 @@ function assertInitOptionsCompatible(
   initialized: NormalizedHostCapabilityAssemblyInitOptions,
   requested: NormalizedHostCapabilityAssemblyInitOptions,
 ): void {
-  if (requested.includeBrowser && !initialized.includeBrowser) {
-    throw new Error('HostCapabilityAssembly initialization already started without the Browser opt-in.');
+  const missingCapability = requested.sharedCapabilityNames.find((name) => !initialized.sharedCapabilityNames.includes(name));
+  if (missingCapability) {
+    throw new Error(`HostCapabilityAssembly initialization already started without shared Capability "${missingCapability}".`);
   }
   if (requested.credentialSource !== initialized.credentialSource) {
     throw new Error(
@@ -149,7 +152,8 @@ export class HostCapabilityAssembly {
   /** In-process RS instances this Host created and injects into Toolkits. */
   private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
-  private readonly allowBrowserOptIn: boolean;
+  private readonly browserCapability = createBrowserCapability();
+  private readonly allowSharedBrowser: boolean;
   private browserToolkit: AgentToolkit | undefined;
   private readonly artifactStore: ArtifactStore;
   private readonly capabilityCatalog: HostCapabilityCatalog;
@@ -168,8 +172,9 @@ export class HostCapabilityAssembly {
     this.artifactStore = createHostArtifactStore(options.runtimeConfig, storedConfig);
     const officeSelected = officeEnabled(storedConfig, options.includeOffice);
     const browserEnabled = storedConfig.capabilities?.browser !== false;
-    const browserSelected = options.includeBrowser ?? browserEnabled;
-    this.allowBrowserOptIn = browserSelected === 'opt-in' && browserEnabled;
+    const mayShareBrowser = options.includeBrowser !== false && browserEnabled;
+    const scoped = options.scopeSharedCapabilities === true;
+    this.allowSharedBrowser = scoped && mayShareBrowser;
     // ShellRS runs only in the standalone RS service (#853); the Host reaches
     // it through one client. Shell, git, github and project-inspection share
     // that client, and so one logical session per Agent session across them.
@@ -179,7 +184,7 @@ export class HostCapabilityAssembly {
     }));
     // BrowserRS also runs only in the RS service, which holds the one
     // extension bridge for every Host (#862).
-    if (browserSelected === true) this.browserToolkit = this.assembleBrowserToolkit();
+    if (!scoped && (options.includeBrowser ?? browserEnabled)) this.browserToolkit = this.assembleBrowserToolkit();
     this.hostBuiltInToolkits = [
       createFilesToolkit(),
       createArtifactsToolkit({ store: this.artifactStore, sourceReader: readArtifactSource,
@@ -193,6 +198,11 @@ export class HostCapabilityAssembly {
       ...(officeSelected ? [this.rsInstances.assemble(createOfficeToolkit, { shell })] : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({
+      sharedHostCapabilities: [{
+        capability: this.browserCapability,
+        enabled: mayShareBrowser,
+        restrictedToolkits: [BROWSER_TOOLKIT_NAME],
+      }],
       ...(options.loadUserCapabilities === false
         ? { loadConfiguredCapabilities: async () => [] }
         : {}),
@@ -200,7 +210,7 @@ export class HostCapabilityAssembly {
         ...createHostBaselineCapabilities(),
         createCapabilityCreatorCapability(),
         ...(officeSelected ? [createOfficeCapability()] : []),
-        ...(this.browserToolkit ? [createBrowserCapability()] : []),
+        ...(!scoped && this.browserToolkit ? [this.browserCapability] : []),
       ],
     });
     this.checkpointer = new FileSaver(
@@ -273,7 +283,7 @@ export class HostCapabilityAssembly {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
-    if (this.allowBrowserOptIn && options.includeBrowser && !this.browserToolkit) {
+    if (this.allowSharedBrowser && options.sharedCapabilityNames.includes(this.browserCapability.name) && !this.browserToolkit) {
       this.browserToolkit = this.assembleBrowserToolkit();
     }
     // Validate Capability sources before starting any RS instance. A

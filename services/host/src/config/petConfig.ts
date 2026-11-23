@@ -22,10 +22,8 @@ export type PetConfig = {
   modelProfileId?: string;
   /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
   defaultCapabilityName?: string;
-  /** Explicit names from the shared Capability collection beside the pets directory. */
+  /** Explicit names from the workspace shared collection or the Host's shared offerings. */
   sharedCapabilities?: string[];
-  /** Explicit Studio opt-in to the Host's existing Browser Capability. */
-  browserCapability?: boolean;
 };
 
 export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
@@ -33,10 +31,6 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
   parse: (reader) => {
     const modelProfileId = reader.optionalString('modelProfileId');
     const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
-    const browserCapability = reader.raw.browserCapability;
-    if (browserCapability !== undefined && typeof browserCapability !== 'boolean') {
-      reader.fail('"browserCapability" must be a boolean', 'browserCapability');
-    }
     const sharedCapabilities = reader.optionalStringArray('sharedCapabilities')?.map((name) => name.trim());
     if (sharedCapabilities?.some((name) => !/^[a-z0-9][a-z0-9_-]*$/.test(name))) {
       reader.fail('"sharedCapabilities" must contain non-empty Capability names using lowercase letters, numbers, "_" or "-"', 'sharedCapabilities');
@@ -79,7 +73,6 @@ export const petConfigSchema: ConfigSchema<PetConfig> = defineConfigSchema({
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
       ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
       ...(sharedCapabilities !== undefined ? { sharedCapabilities } : {}),
-      ...(typeof browserCapability === 'boolean' ? { browserCapability } : {}),
     };
   },
 });

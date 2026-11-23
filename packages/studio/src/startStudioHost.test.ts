@@ -20,6 +20,7 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
     getModelProfiles: () => ({}) as never,
     getCapabilityCatalog: () => ({
       getSnapshot: () => ({ capabilities: [{ name: 'general' }] }),
+      getSharedHostCapabilities: () => [],
       createDirectorySnapshot: async () => ({ capabilities: [{ name: 'general' }] }),
     }),
     getToolkitInventoryStore: () => ({

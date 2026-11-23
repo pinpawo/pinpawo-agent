@@ -50,6 +50,11 @@ const task = { capability: 'general', objective: 'Inspect the repository.' };
 function call(name: string, args: Record<string, unknown>, id: string) {
   return new AIMessage({ content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
 }
+function entryRoutingRecords(messages: readonly BaseMessage[]) {
+  const isRoutingTool = (name?: string) => name === 'plan_request' || name === 'continue';
+  return messages.filter((message) => ToolMessage.isInstance(message) ? isRoutingTool(message.name)
+    : AIMessage.isInstance(message) && message.tool_calls?.some((call) => isRoutingTool(call.name)));
+}
 const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   name: 'general', description: 'Inspect repositories.', uses: [],
   instructions: defineInstructionDocument({ content: 'Inspect the repository and report evidence.' }),
@@ -167,6 +172,17 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   assert.ok(messages.some((message) => message.text.includes('Repository inspection evidence.')));
   assert.ok(messages.some((message) => message.text === 'Check compatibility next.'));
   assert.ok(messages.some((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability'));
+  assert.deepEqual(entryRoutingRecords(messages), [], 'Supervisor sees neither previous plan_request nor current continue');
+  const planFacts = messages.at(-1)?.text.match(/<supervisor_plan>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/supervisor_plan>/)?.[1];
+  assert.ok(planFacts);
+  assert.deepEqual(JSON.parse(planFacts), second.runSupervisorState);
+  const routing = entryRoutingRecords(second.messages);
+  assert.deepEqual(routing.slice(0, 2).map(message => message.toDict()), entryRoutingRecords(first.messages).map(message => message.toDict()));
+  const [callToContinue, continueReceipt] = routing.slice(2);
+  assert.ok(AIMessage.isInstance(callToContinue) && ToolMessage.isInstance(continueReceipt));
+  assert.equal(callToContinue.tool_calls?.[0]?.name, 'continue');
+  assert.equal(continueReceipt.name, 'continue');
+  assert.equal(continueReceipt.tool_call_id, callToContinue.tool_calls?.[0]?.id);
   assert.equal(messages.some((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.id === 'call-question')), false);
 });
@@ -336,22 +352,63 @@ test('missing delivery checkpoints an error result, leaves the plan untouched an
   assert.equal(executor.inputs.length, 2);
 });
 
-test('Entry handoff checkpoints one canonical state and Supervisor reads it after restart', async () => {
-  const { graph, config, supervisor } = setup();
+test('Entry checkpoints the routing pairs but Supervisor restarts with only the resolved goal and genuine history', async () => {
+  const { config, executor } = setup();
+  const supervisor = new ScriptedModel([
+    // This provider reuses the current Entry ID. Hiding it from the model
+    // must not free it for use by a new Supervisor call in canonical history.
+    call('submit_plan', { tasks: [task] }, 'entry-call'),
+    call('review_current', { completed: true, reason: 'Inspected.', reply: 'Inspection complete.' }, 'review-call'),
+  ]);
+  const graphConfig = { ...config, models: { ...config.models, act: supervisor } };
+  const graph = createOrchestratorGraph(graphConfig);
   const options = { configurable: { thread_id: 'entry-canonical-state', registry } };
-  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
-    ...options, interruptBefore: ['runSupervisor'],
-  });
+  const priorPlanCall = call('plan_request', { goal: 'List earlier references.' }, 'reused-id');
+  const priorPlanReceipt = new ToolMessage({ name: 'plan_request', tool_call_id: 'reused-id', content: 'Handed off.' });
+  const priorLookup = call('lookup_reference', {}, 'reused-id');
+  const priorLookupReceipt = new ToolMessage({ name: 'lookup_reference', tool_call_id: 'reused-id', content: 'Found the earlier checklist.' });
+  const priorReply = new AIMessage('The earlier checklist is ready.');
+  const fresh = buildOrchestratorRunInput([new HumanMessage('Go ahead with the new inspection.')]);
+  await graph.invoke({
+    ...fresh,
+    messages: [priorPlanCall, priorPlanReceipt, priorLookup, priorLookupReceipt, priorReply, ...fresh.messages],
+    runSupervisorState: { runId: 'previous-run', goal: 'List earlier references.', plan: [
+      { id: 'old-item', capability: 'general', objective: 'Check earlier references.', status: 'pending' },
+    ] },
+  }, { ...options, interruptBefore: ['runSupervisor'] });
   const saved = await graph.getState(options);
   const main = queryAgentMessages(saved.values.messages).main().select().messages;
-  const confirmation = main.at(-1) as ToolMessage;
+  const [routingCall, confirmation] = main.slice(-2);
+  assert.ok(AIMessage.isInstance(routingCall) && ToolMessage.isInstance(confirmation));
   assert.equal(confirmation.name, 'plan_request');
-  assert.equal(confirmation.tool_call_id, (main.at(-2) as AIMessage).tool_calls![0].id);
+  assert.equal(confirmation.tool_call_id, routingCall.tool_calls?.[0]?.id);
+  assert.equal(confirmation.tool_call_id, 'entry-call');
+  assert.equal(saved.values.runUserRequest, task.objective);
+  assert.deepEqual(saved.values.runSupervisorState, { runId: null, goal: null, plan: [] });
   assert.equal(supervisor.inputs.length, 0);
-  const output = await createOrchestratorGraph(config).invoke(null, options);
+  const output = await createOrchestratorGraph(graphConfig).invoke(null, options);
   assert.equal(output.runSupervisorState.goal, saved.values.runUserRequest);
   assert.equal(output.runId, saved.values.runId);
-  assert.equal(supervisor.inputs[0].some((message) => message.id === confirmation.id), true);
+  assert.equal(executor.inputs.length, 1);
+  const savedRouting = entryRoutingRecords(saved.values.messages);
+  assert.equal(savedRouting.length, 4);
+  assert.deepEqual(entryRoutingRecords(output.messages).map(message => message.toDict()), savedRouting.map(message => message.toDict()));
+  for (const turn of supervisor.modelTurns) {
+    assert.deepEqual(entryRoutingRecords(turn), []);
+    assert.ok(turn.some(message => AIMessage.isInstance(message) && message.tool_calls?.some(call =>
+      call.name === 'lookup_reference' && call.id === 'reused-id')));
+    assert.ok(turn.some(message => ToolMessage.isInstance(message) && message.name === 'lookup_reference'
+      && message.tool_call_id === 'reused-id' && message.text === priorLookupReceipt.text));
+    assert.ok(turn.some(message => AIMessage.isInstance(message) && message.text === priorReply.text));
+  }
+  assert.ok(supervisor.inputs[0].some(message => message.id === `supervisor-context:${output.runId}`
+    && message.text.includes(task.objective)));
+  const planCall = supervisor.modelTurns[1].flatMap(message => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
+    .find(call => call.name === 'submit_plan');
+  assert.ok(planCall?.id);
+  assert.notEqual(planCall.id, confirmation.tool_call_id);
+  assert.ok(supervisor.modelTurns[1].some(message => ToolMessage.isInstance(message) && message.name === 'submit_plan'
+    && message.tool_call_id === planCall.id));
 });
 
 test('checkpointed Supervisor reply publishes once after restart without a reply state slot', async () => {

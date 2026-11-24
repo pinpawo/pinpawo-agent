@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480" role="img" aria-labelledby="title desc">
   <title id="title">Pet Head system structure</title>
-  <desc id="desc">Committed Channel Timeline messages reach a Pet Head through the Studio EventBus. The Head requests execution through the Channel port and Studio Dispatch. The resident Pet Agent reports scoped lifecycle through the same EventBus. Channel's existing bridge commits public replies back to the Timeline. The Channel port validates membership and Session binding before sampling the exact current dispatch's bound Session.</desc>
+  <desc id="desc">Committed Channel Timeline messages reach a Pet Head through the Studio EventBus. The Head checks relevance before routing dispatch, and publishes replies separately. Dispatch goes through the Channel port and Studio Dispatch. The resident Pet Agent reports scoped lifecycle through the same EventBus. Channel's existing bridge commits public replies back to the Timeline. The Channel port validates membership and Session binding before sampling the exact current dispatch's bound Session.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0L8 4L0 8Z" fill="#425b7b"/>
@@ -35,7 +35,7 @@
     <g text-anchor="middle" font-size="13" fill="#435874">
       <text x="145" y="161">Committed Human / Pet messages</text>
       <text x="500" y="161">Live, source + topic</text>
-      <text x="855" y="161">Judgment + validated decision</text>
+      <text x="855" y="161">Relevance → dispatch route</text>
       <text x="145" y="361">Own, current Channel binding</text>
       <text x="500" y="361">Queue, run and review</text>
       <text x="855" y="361">→ Studio Dispatch</text>

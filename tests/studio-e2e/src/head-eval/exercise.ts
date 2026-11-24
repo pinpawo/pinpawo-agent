@@ -4,7 +4,7 @@ import type { EvalCase } from './cases';
 import type { Observation } from './scorer';
 
 /** Production routing with fixed synthetic state and in-memory effect capture. */
-export async function exercise(test: EvalCase, model: Pick<ReturnType<typeof createHeadModel>, 'assessRelevance' | 'decideNewWorkAndReply' | 'decideExecutionHandling'>, signal: AbortSignal): Promise<Observation> {
+export async function exercise(test: EvalCase, model: Pick<ReturnType<typeof createHeadModel>, 'assessRelevance' | 'decideNewWorkAndReply' | 'suggestDispatchForExistingWork'>, signal: AbortSignal): Promise<Observation> {
   const result = { relevant: isHeadAddressed(test.input), dispatched: false, hasReply: false };
   const source = test.input.context.messages[0];
   const dispatch = { dispatchId: 'd-7c31', sessionId: 's-4f8a', ...(source ? { messageId: source.messageId } : {}) };
@@ -22,7 +22,7 @@ export async function exercise(test: EvalCase, model: Pick<ReturnType<typeof cre
     },
     decideNewWorkAndReply: model.decideNewWorkAndReply,
     execution: { readRun: () => ({ invocationId: dispatch.dispatchId, sessionId: dispatch.sessionId, requestId: 'r-92a1' }),
-      decide: model.decideExecutionHandling },
+      suggestDispatch: model.suggestDispatchForExistingWork },
   });
   await head(test.input.message, signal);
   return result;

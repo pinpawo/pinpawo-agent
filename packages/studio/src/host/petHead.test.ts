@@ -30,7 +30,7 @@ function createPetHead({ channel, progress, ...options }: Omit<HeadOptions, 'cha
     execution: {
       readRun: progress?.readRun ?? (() => undefined),
       readResult: progress?.readResult,
-      decide: async (input, signal) => {
+      suggestDispatch: async (input, signal) => {
         const { message, evidence, source } = input;
         if (evidence.status === 'running' && source && progress?.decideRunning) {
           return progress.decideRunning({ ...input, evidence, source }, signal);
@@ -112,10 +112,13 @@ test('the bound Channel exposes only its committed live messages and forwards op
   const signal = new AbortController().signal;
   await channel.reply('a', '2', 'yes', signal);
   await channel.dispatch('a', current.messageId, signal);
+  const queue = { kind: 'queue', sessionId: 'retained' } as const;
+  await channel.dispatch('a', current.messageId, signal, queue);
   assert.deepEqual(calls, [
     ['read', 'team', 'a', 3, '1'],
     ['reply', 'team', 'a', '2', 'yes', signal, undefined],
     ['dispatch', 'team', 'a', current.messageId, signal],
+    ['dispatch', 'team', 'a', current.messageId, signal, queue],
   ]);
   unsubscribe();
   assert.equal(handler, undefined);

@@ -125,11 +125,11 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     return reply.text.trim();
   }
 
-  async function decideExecutionHandling(input: HeadExecutionInput, signal: AbortSignal): Promise<HeadRunningResult> {
+  async function suggestDispatchForExistingWork(input: HeadExecutionInput, signal: AbortSignal): Promise<HeadRunningResult> {
     const { evidence, source, message } = input;
     if (evidence.status === 'running' && source) return decideRunning({ ...input, evidence, source }, signal);
     return { delivery: null, reply: await composeReply({ message, evidence, source }, signal) };
   }
 
-  return { assessRelevance, decideNewWorkAndReply, decideExecutionHandling, composeReply };
+  return { assessRelevance, decideNewWorkAndReply, suggestDispatchForExistingWork, composeReply };
 }

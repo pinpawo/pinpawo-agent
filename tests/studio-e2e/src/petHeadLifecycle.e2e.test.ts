@@ -47,7 +47,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
         return prepared.studio.subscribe(handler, filter);
       });
       const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
         assessRelevance: async () => ({ relevant: true }), decideNewWorkAndReply });
       return bound.subscribe(message => handle(message, signal));
     },
@@ -98,7 +98,7 @@ test('a live Head consumes Agent output once and a human reply, but not an autom
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
       const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
         assessRelevance: async () => ({ relevant: true }),
         decideNewWorkAndReply: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { shouldDispatch: false, reply: null }; },
       });
@@ -144,7 +144,7 @@ test('response and work both use Host admission without Head final text and pres
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
       const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
         assessRelevance: async () => ({ relevant: true }),
         decideNewWorkAndReply: async (input) => {
           const { message } = input;

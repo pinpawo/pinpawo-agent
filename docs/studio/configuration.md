@@ -314,9 +314,10 @@ An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
 
-For a relevant message, the Head checks the dispatch slot and the existing
-Channel-bound Session. If ready, `decideNewWorkAndReply` may produce a reply,
-request independent new work, both, or neither. In JSON mode an omitted `reply`
+For a relevant message, `routeDispatch` checks the dispatch slot and the existing
+Channel-bound Session before applying any dispatch. Reply publication is separate.
+If ready, `decideNewWorkAndReply` may produce a reply, request independent new work,
+both, or neither. In JSON mode an omitted `reply`
 is equivalent to `null`; the dispatch decision must still be explicit. A bare
 mention does not by itself require work or a reply.
 

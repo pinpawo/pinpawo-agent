@@ -48,7 +48,7 @@ test('Production routing exercise separates relevance from Session handling', as
     const result = await exercise(item, {
       assessRelevance: async () => { calls.push('relevance'); return { relevant: id !== 'ignore-unrelated' }; },
       decideNewWorkAndReply: async () => { calls.push('idle'); return { shouldDispatch: id === 'combined', reply: id === 'combined' ? '收到' : null }; },
-      decideExecutionHandling: async () => { calls.push('handling'); return { delivery: null, reply: null }; },
+      suggestDispatchForExistingWork: async () => { calls.push('handling'); return { delivery: null, reply: null }; },
     }, new AbortController().signal);
     assert.equal(score(item, result).pass, true, id);
     if (id.startsWith('bare-mention')) assert.equal(calls.includes('relevance'), false, 'canonical mention is relevance, not model routing');

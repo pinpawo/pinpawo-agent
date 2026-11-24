@@ -47,7 +47,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
         return prepared.studio.subscribe(handler, filter);
       });
       const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
         assessRelevance: async () => ({ relevant: true }), decideNewWorkAndReply });
       return bound.subscribe(message => handle(message, signal));
     },

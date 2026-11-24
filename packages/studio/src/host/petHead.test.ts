@@ -295,7 +295,8 @@ const contracts = [
   { name: relevanceName, invoke: 'assessRelevance', value: { relevant: true },
     invalid: [{}, { relevant: 42 }, { relevant: true, shouldDispatch: true }] },
   { name: idleName, invoke: 'handleIdle', value: { shouldDispatch: true, reply: null },
-    invalid: [{ shouldDispatch: true }, { shouldDispatch: true, reply: 42 }, { shouldDispatch: true, reply: null, intent: 'rewritten work' }] },
+    invalid: [{ reply: null }, { shouldDispatch: 'true', reply: null }, { shouldDispatch: true, reply: 42 },
+      { shouldDispatch: true, reply: null, intent: 'rewritten work' }] },
 ] as const;
 
 test('both structured contracts use only their declared schema and configured wire method', async () => {
@@ -313,6 +314,7 @@ test('both structured contracts use only their declared schema and configured wi
     assert.equal(schema.additionalProperties, false);
     const validator = new Validator(schema, '7');
     assert.equal(validator.validate(contract.value).valid, true);
+    if (contract.name === idleName) assert.equal(validator.validate({ shouldDispatch: true }).valid, !method || method === 'jsonMode');
     for (const value of contract.invalid) assert.equal(validator.validate(value).valid, false);
   }
 });
@@ -389,9 +391,9 @@ test('abort before or during relevance provider work prevents selection', async 
   }
 });
 
-function nativeEndpoint(protocol: NonNullable<StudioModelEndpoint['protocol']>, model: string, method?: StudioModelEndpoint['structuredOutputMethod']): StudioModelEndpoint {
-  const baseUrl = protocol === 'anthropic-compatible' ? 'https://api.anthropic.test'
-    : model.startsWith('deepseek-') ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1';
+function nativeEndpoint(protocol: NonNullable<StudioModelEndpoint['protocol']>, model: string, method?: StudioModelEndpoint['structuredOutputMethod'],
+  baseUrl = protocol === 'anthropic-compatible' ? 'https://api.anthropic.test'
+    : model.startsWith('deepseek-') ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1'): StudioModelEndpoint {
   const endpoint = { profileId: 'fixture', protocol, model, baseUrl, apiKey: 'fixture-only', structuredOutputMethod: method };
   return { ...endpoint, createChatModel: options => buildModel({ ...endpoint, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries, timeoutMs: 2_000 },
     { streaming: options.streaming, preferDeterministic: options.preferDeterministic, purpose: options.purpose }) };
@@ -427,19 +429,24 @@ test('official DeepSeek Flash / Pro sends each contract through actual JSON mode
   }
 });
 
-test('an addressed human or peer artifact review uses idle admission, but its status inquiry does not', async t => {
+test('an addressed human or peer request still uses idle handling through a JSON-mode gateway', async t => {
   const participantId = 'pet:a';
   const fixtures = (['human', 'pet'] as const).flatMap((kind, index) => [
-    { work: true, incoming: message(String(index * 2 + 1), { author: { kind, id: 'other' }, mentions: [{ participantId }],
-      body: '[@Reviewer](participant:pet:a) 请独立复核已交付的方案，指出缺失的证据。' }) },
-    { work: false, incoming: message(String(index * 2 + 2), { author: { kind, id: 'other' }, mentions: [{ participantId }],
+    { route: 'work', incoming: message(String(index * 3 + 1), { author: { kind, id: 'other' }, mentions: [{ participantId }],
+      body: '[@Reviewer](participant:pet:a) 能不能独立复核已交付的方案，指出缺失的证据？' }) },
+    { route: 'status', incoming: message(String(index * 3 + 2), { author: { kind, id: 'other' }, mentions: [{ participantId }],
       body: '[@Reviewer](participant:pet:a) 这项复核进行到哪了？不要重做。' }) },
+    { route: 'silent', incoming: message(String(index * 3 + 3), { author: { kind, id: 'other' }, mentions: [{ participantId }],
+      body: '[@Reviewer](participant:pet:a)' }) },
   ]);
   const seen: string[] = [];
   const admitted: string[] = [];
   const replies: Array<[string, string]> = [];
   const cannotConfirm = '无法确认这项复核的状态。';
-  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+  const gateway = 'https://head-gateway.example.test/v1';
+  const model = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-v4.1-flash', 'jsonMode', gateway));
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    assert.equal(String(url), `${gateway}/chat/completions`);
     const body = JSON.parse(String(init?.body));
     const input = JSON.parse(body.messages.find((entry: { role: string }) => entry.role === 'user').content);
     const fixture = fixtures.find(item => item.incoming.messageId === input.message.messageId);
@@ -447,13 +454,20 @@ test('an addressed human or peer artifact review uses idle admission, but its st
     assert.equal(input.addressed, true);
     assert.deepEqual(input.message.mentions, [{ participantId, kind: 'pet', id: 'a' }]);
     assert.deepEqual(body.response_format, { type: 'json_object' });
+    assert.equal(body.thinking, undefined);
+    const system = body.messages.find((entry: { role: string }) => entry.role === 'system').content;
+    const [example, schema] = system.split('\n').map((line: string) => {
+      try { return JSON.parse(line); } catch { return undefined; }
+    }).filter(Boolean);
+    assert.equal(new Validator(schema, '7').validate(example).valid, true);
     seen.push(fixture.incoming.messageId);
-    const content = JSON.stringify({ shouldDispatch: fixture.work, reply: fixture.work ? null : cannotConfirm });
+    // JSON mode can omit an unused reply while still making the work decision explicit.
+    const content = JSON.stringify(fixture.route === 'status' ? { shouldDispatch: false, reply: cannotConfirm }
+      : { shouldDispatch: fixture.route === 'work' });
     return Response.json({ id: 'fixture', object: 'chat.completion', created: 0, model: body.model,
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content } }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   });
-  const model = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-flash'));
   const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
     channel: { subscribe: () => () => {},
       readContext: async () => ({ messages: [], members: [{ kind: 'pet', id: 'a', participantId }] }),
@@ -465,8 +479,30 @@ test('an addressed human or peer artifact review uses idle admission, but its st
   });
   for (const { incoming } of fixtures) await handle(incoming, new AbortController().signal);
   assert.deepEqual(seen, fixtures.map(item => item.incoming.messageId));
-  assert.deepEqual(admitted, fixtures.filter(item => item.work).map(item => item.incoming.messageId));
-  assert.deepEqual(replies, fixtures.filter(item => !item.work).map(item => [item.incoming.messageId, cannotConfirm]));
+  assert.deepEqual(admitted, fixtures.filter(item => item.route === 'work').map(item => item.incoming.messageId));
+  assert.deepEqual(replies, fixtures.filter(item => item.route === 'status').map(item => [item.incoming.messageId, cannotConfirm]));
+});
+
+test('JSON-mode idle still rejects bad decisions, blank output, refusals and truncation in one attempt', async t => {
+  let content = '';
+  let finishReason = 'stop';
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    requests++;
+    const body = JSON.parse(String(init?.body));
+    return Response.json({ id: 'fixture', object: 'chat.completion', created: 0, model: body.model,
+      choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+  });
+  const model = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-v4.1-flash', 'jsonMode', 'https://head-gateway.example.test/v1'));
+  const fixtures = [...contracts[1].invalid.map(output => [JSON.stringify(output), 'stop'] as const),
+    ['   ', 'stop'], ['{"shouldDispatch":true}', 'content_filter'], ['{"shouldDispatch":true}', 'length']] as const;
+  for (const [index, [text, reason]] of fixtures.entries()) {
+    content = text;
+    finishReason = reason;
+    await assert.rejects(model.handleIdle(decisionInput, new AbortController().signal), /Invalid Pet Head idle result/);
+    assert.equal(requests, index + 1);
+  }
 });
 
 test('native OpenAI schema keeps relevance boolean-only and idle reply required nullable', async t => {
@@ -486,6 +522,7 @@ test('native OpenAI schema keeps relevance boolean-only and idle reply required 
     const validator = new Validator(schema, '7');
     assert.equal(validator.validate(output).valid, true);
     for (const value of invalid) assert.equal(validator.validate(value).valid, false);
+    if (expected === idleName) assert.equal(validator.validate({ shouldDispatch: true }).valid, false);
     return Response.json({ id: 'fixture', object: 'chat.completion', created: 0, model: body.model,
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(output) } }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });

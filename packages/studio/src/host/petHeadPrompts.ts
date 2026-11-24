@@ -55,9 +55,9 @@ export function headRelevanceMessages(input: HeadInput, format: string): Array<[
 
 export function headIdleMessages(input: HeadInput, format: string): Array<[string, string]> {
   return headMessages(input, format, [
-    'The runtime has sent this relevant message because the Pet’s work slot is idle. No execution or Session status is available here.',
-    'Set shouldDispatch=true only for an explicit independent new assignment to this Pet. The Agent receives the original message. Ongoing work, requests to wait or stop, and work conditioned on an unverified result are not independent new assignments.',
-    'Use reply for a direct answer from public context or a brief acknowledgement. If asked about execution progress, say it cannot be verified here; do not infer it from public history. A progress question alone is not new work. For a bare mention, thanks, acknowledgement, or context without a request, set shouldDispatch=false and reply=null.',
+    'The runtime has already established relevance and verified that the Pet’s work slot is idle. An address identifies the recipient, not what to do. No execution or Session status is available here.',
+    'Set shouldDispatch=true only for an independent new request that needs the Agent to act, even if it is phrased as a question or refers to earlier Channel material. The Agent receives the original message. Ongoing work, requests to wait or stop, and work conditioned on an unverified result are not independent new requests.',
+    'Use reply for a direct answer from public context or a brief acknowledgement. If asked about execution progress, say it cannot be verified here; do not infer it from public history. A progress question alone is not new work. A bare mention, thanks, acknowledgement, or context without a request needs neither work nor a reply. Use null when there is no reply.',
     'Follow an explicit request to acknowledge first or not to acknowledge. Do not claim the work was admitted, queued, completed or stopped, or commit to future work; an acknowledgement precedes admission. Do not address another Pet in a peer reply.',
   ]);
 }

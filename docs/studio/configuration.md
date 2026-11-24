@@ -313,8 +313,10 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-Only a verified idle slot permits `handleIdle`, whose strict output is
-`{ shouldDispatch: boolean, reply: string | null }`. It interprets the canonical
+Only a verified idle slot permits `handleIdle`, which returns
+`{ shouldDispatch: boolean, reply: string | null }`. JSON mode normalizes an
+omitted `reply` to `null`; it still requires the explicit boolean decision. The
+native structured methods require both properties. The Head interprets the canonical
 source's actual meaning: a direct answer, independent work, acknowledgement plus
 work, or neither. A bare mention does not by itself require work or a reply.
 Busy or unknown state uses factual composition or silence, never idle admission.

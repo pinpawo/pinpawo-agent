@@ -48,7 +48,7 @@ flowchart LR
 
 ## 3. 模型与事实边界
 
-每个 Head 共用一个懒加载模型客户端。`assessRelevance` 与 `handleIdle` 分别使用严格声明 `pet_head_relevance`、`pet_head_idle`，按解析后的 `structuredOutputMethod` 调用，各阶段不补救、不重试、不切换格式。结构化输出合法不代表语义正确。`composeReply` 使用同一未绑定工具的客户端，只输出正文或空，不提供调度决定。
+每个 Head 共用一个懒加载模型客户端。`assessRelevance` 与 `handleIdle` 分别声明 `pet_head_relevance`、`pet_head_idle`，按解析后的 `structuredOutputMethod` 调用，各阶段不补救、不重试、不切换格式。JSON mode 在提示中给出格式示例；空闲结果仍必须明确给出布尔型 `shouldDispatch`，只允许省略没有内容的 `reply`，省略等同于 `null`。其他结构化方式仍要求 `reply` 字段。结构化输出合法不代表语义正确。`composeReply` 使用同一未绑定工具的客户端，只输出正文或空，不提供调度决定。
 
 相关性确定后，忙时才读取本 Pet 的普通派发槽并固定当前运行。派发的公开来源必须在同一 Channel、早于追问的 Timeline 序号，且不能与显式引用冲突。Channel 验证成员及精确 Session 绑定后，只读一次 Session，以请求身份核对运行。来源或运行无法核实时，只能说无法确认；不把请求身份与 graph run/task 绑定。有核对结果时，回复可引用绑定 Session 已记录的计划条目状态和简短描述。已完成条目不代表整个任务完成；活动条目可能等待评审；记录计划可能早于本次执行，不能证明正在做哪一步。没有计划则只报核对到的运行状态。禁止从交付正文、Session 对话或原始工具输出推断进度。
 

@@ -655,7 +655,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     const stage = 'relevant' in schema.properties ? 'relevance' : 'idle';
     const name = `pet_head_${stage}`;
     assert.deepEqual(Object.keys(schema.properties), stage === 'relevance' ? ['relevant'] : ['shouldDispatch', 'reply']);
-    assert.deepEqual(schema.required, Object.keys(schema.properties));
+    assert.deepEqual(schema.required, !usesTool && stage === 'idle' ? ['shouldDispatch'] : Object.keys(schema.properties));
     assert.equal(schema.additionalProperties, false);
     if (usesTool) {
       assert.equal(request.tools[0].function.name, name);

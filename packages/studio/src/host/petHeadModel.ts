@@ -12,6 +12,9 @@ export type HeadRelevanceDiagnostic = {
 
 const relevanceSchema = z.object({ relevant: z.boolean() }).strict();
 const idleSchema = z.object({ shouldDispatch: z.boolean(), reply: z.union([z.string(), z.null()]) }).strict();
+// JSON mode cannot enforce our schema on the provider. An omitted optional
+// acknowledgement is equivalent to null, but the work decision is mandatory.
+const idleJsonModeSchema = idleSchema.partial({ reply: true });
 
 class StructuredFailure extends Error {
   constructor(readonly code: string) { super('Invalid Pet Head model output.'); }
@@ -25,10 +28,11 @@ function failedFinish(message: AIMessage): 'truncated' | 'refusal' | undefined {
 }
 
 type HeadChatClient = ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
+type StructuredOutputMethod = NonNullable<StudioModelEndpoint['structuredOutputMethod']>;
 
 /** One lazy client for the active Head. Each structured call binds only its own contract. */
 export function createHeadModel(resolve: () => StudioModelEndpoint, options: { onDiagnostic?: (event: HeadRelevanceDiagnostic) => void } = {}) {
-  let cached: { method: NonNullable<StudioModelEndpoint['structuredOutputMethod']>; model: HeadChatClient } | undefined;
+  let cached: { method: StructuredOutputMethod; model: HeadChatClient } | undefined;
   function client() {
     if (cached) return cached;
     const endpoint = resolve();
@@ -38,19 +42,22 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     return cached = { method, model };
   }
 
-  async function runStructured<Schema extends typeof relevanceSchema | typeof idleSchema>(
+  async function runStructured<Schema extends z.AnyZodObject>(
     name: string,
-    schema: Schema,
+    schemaForMethod: (method: StructuredOutputMethod) => Schema,
+    jsonExample: z.input<Schema>,
     messages: (format: string) => Array<[string, string]>,
     signal: AbortSignal,
     onInvoke?: () => void,
   ): Promise<z.infer<Schema>> {
     signal.throwIfAborted();
     const { method, model } = client();
+    const schema = schemaForMethod(method);
     const structured = model.withStructuredOutput(schema, { name, method, includeRaw: true });
-    // JSON mode carries no schema on the wire; only this mode needs a prompt copy.
+    // JSON mode carries no schema on the wire; show both the format and schema.
     const format = method === 'jsonMode'
-      ? 'Return only a JSON object matching this schema:\n' + JSON.stringify(toJsonSchema(schema), (key, value) => key === '$schema' ? undefined : value)
+      ? 'Return only a JSON object. Format example (not a decision):\n' + JSON.stringify(jsonExample)
+        + '\nThe JSON object must match this schema:\n' + JSON.stringify(toJsonSchema(schema), (key, value) => key === '$schema' ? undefined : value)
       : method === 'functionCalling' ? 'Return the result using the provided tool.' : '';
     const prompt = messages(format);
     onInvoke?.();
@@ -76,7 +83,7 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
       catch { /* Diagnostics cannot change behavior. */ }
     };
     try {
-      const result = await runStructured('pet_head_relevance', relevanceSchema, format => headRelevanceMessages(input, format), signal,
+      const result = await runStructured('pet_head_relevance', () => relevanceSchema, { relevant: true }, format => headRelevanceMessages(input, format), signal,
         () => { attempts = 1; });
       report({ outcome: result.relevant ? 'related' : 'unrelated' });
       return result;
@@ -89,7 +96,9 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
 
   async function handleIdle(input: HeadInput, signal: AbortSignal): Promise<HeadIdleResult> {
     try {
-      return await runStructured('pet_head_idle', idleSchema, format => headIdleMessages(input, format), signal);
+      const result = await runStructured('pet_head_idle', method => method === 'jsonMode' ? idleJsonModeSchema : idleSchema,
+        { shouldDispatch: false, reply: null }, format => headIdleMessages(input, format), signal);
+      return { shouldDispatch: result.shouldDispatch, reply: result.reply ?? null };
     } catch {
       throw new Error(signal.aborted ? 'Pet Head idle handler aborted.' : 'Invalid Pet Head idle result.');
     }

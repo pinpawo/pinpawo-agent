@@ -4,8 +4,7 @@
 > 更新：2026-10-19
 
 Scheduler 与 Trigger 是两个可选 Studio Plugin。Scheduler 表达时间条件；Trigger
-表达“满足某个事件源条件时，向哪个 Pet 派发什么请求”。二者只通过
-`StudioPluginContext.dispatch()` 向 Pet 提交单向输入，通过 `notify()` 发布领域事件。
+表达“满足某个事件源条件时，向哪个 Pet 派发什么请求”。二者都通过 Channel 的 `inputs.run()` 向目标 Pet 提交执行请求，通过 `notify()` 发布领域事件。
 
 Trigger 的 `request` 可以是静态字符串，也可以是有限的 request template。模板只把规范化
 Trigger envelope 投射成一条 dispatch request；它不选择 Capability、Toolkit、模型、thread
@@ -27,9 +26,7 @@ payload 塞给 Agent。静态字符串继续保留原有的“固定 request + �
 event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自补发事件。
 
 ```text
-Scheduler store -> due claim -> context.dispatch()
 Scheduler store -> due claim (channelId) -> Channel `inputs.run()` -> Pet's Channel session
-event source -> Trigger binding condition -> context.dispatch()
 event source -> Trigger binding condition (channelId) -> Channel `inputs.run()` -> Pet's Channel session
 
 Scheduler/Trigger -X-> Agent / thread / checkpoint / Agent Session
@@ -39,10 +36,10 @@ Studio core       -X-> Scheduler/Trigger concrete package
 
 Channel 是对话和结果的汇集处。schedule / trigger 是 Pet 的自发行为，本身不是 Channel 成员或发言者。
 每条规则都必须配置 `channelId`。Trigger 不自己 dispatch，而是调用 Channel Plugin 暴露的 `inputs` hook：
-`run(channelId, petId, request, {kind:'trigger', id: triggerId}, {idempotencyKey})`。Channel 只校验目标 Pet
+`run(channelId, petId, request, {kind:'trigger', id: triggerId}, {idempotencyKey})`。Channel 校验目标 Pet
 是该 Channel 的成员，然后在 `(channel, pet)` 绑定的 session、带 `channel` scope 派发
 `{type:'channel_task', version:1, channelId, origin, body}`。指令不写入 Channel；Pet 随后的公开回复照常以
-Pet 身份成为 Channel 消息，其中的 @ 只记录寻址，不触发派发。指令不是消息，正文里的寻址链接不会投递给任何成员。
+Pet 身份成为 Channel 消息，并沿用其他 Channel 消息的 Head 参与规则。指令不是消息，正文里的寻址链接不会投递给任何成员。
 `run()` 返回 Host 回执（invocationId、sessionId），Trigger 存在 delivery 记录的 `receipt` 里。
 Channel 是软依赖：没有安装或没有启动 Channel Plugin、或 Pet 不是成员时，这类 delivery 记为 failed，
 并不会退回到无 session 的 dispatch。没有 `channelId` 的规则在 Plugin 创建时就被拒绝：没有 Channel，
@@ -54,7 +51,7 @@ HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 
 
 ## Scheduler 第一版
 
-第一版支持 durable one-shot schedule：`scheduleId/petId/request/runAt/status`。启动时把所有
+第一版支持 durable one-shot schedule：`scheduleId/channelId/petId/request/runAt/status`。启动时把所有
 已到期且仍为 `scheduled` 的记录视为 missed fire，并按原计划只 claim/dispatch 一次。
 一次带条件的更新（只在仍是 `scheduled` 时生效）先把记录转成 `dispatching`，所以多个 Studio 共用一个数据库时
 同一条 schedule 只会被 claim 一次；然后经 Channel 派发（见下）；接受后
@@ -75,7 +72,7 @@ schedule，所以停机期间到期的 channel-bound schedule 不会因为 Chann
 管理 API：
 
 - `GET /scheduler`：snapshot；
-- `POST /scheduler`：创建 `{ petId, request, runAt }`；
+- `POST /scheduler`：创建 `{ channelId, petId, request, runAt }`；
 - `POST /scheduler/control`：`cancel` 尚未 claim 的 schedule；
 - `GET /scheduler/events`：durable history cursor。
 
@@ -100,7 +97,7 @@ HTTP 与 GitHub source 是当前 Trigger Plugin 内置的 ingress adapter。HTTP
 `POST /triggers/invoke`，携带 `Authorization: Trigger <secret>` 和
 `{ triggerId, idempotencyKey, payload }`。存储只保存该 HTTP delivery，不保存明文
 secret。Trigger 先验证定义、secret、body 和 idempotency key，再以
-`(triggerId, idempotencyKey)` 原子创建 delivery；首次接收调用 `context.dispatch()`，重复
+`(triggerId, idempotencyKey)` 原子创建 delivery；首次接收经 Channel `inputs.run()` 派发，重复
 调用返回已有 delivery，不再次派发。admission 失败持久化为 `failed`，不自动重试。
 
 Trigger 的数据在 [Studio 存储](storage.md)里（表 `trigger_deliveries`、`trigger_delivery_events`，迁移
@@ -127,8 +124,9 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 
 - `{ kind: 'pet', petId }`：固定目标。旧的顶层 `petId` 是它的简写，仍然接受，解析时折叠成这个形式；
 - `{ kind: 'event_payload', path, allowedPetIds? }`：从 Trigger envelope 的点路径（如 `payload.assigneeId`）
-  读出 petId。路径必须解析为非空字符串，且必须是已注册的 Pet；配置了 `allowedPetIds` 时还必须在名单里，
-  否则这次 delivery 记为 `failed`。名单在启动时校验，名单里的未知 Pet 会让启动失败。
+  读出 `petId`。路径必须解析为非空字符串；配置了 `allowedPetIds` 时还必须在名单里，否则不接收
+  这次投递。启动时不要求目标 Pet 已存在；若投递时目标不是归属 Channel 的在线 Pet，已接收的 delivery
+  会记为 `failed`。
 
 事件生产方只提供事实，选择目标的始终是规则本身。
 
@@ -154,12 +152,11 @@ Trigger source 负责“何时触发”，request template 负责“发送什么
 
 ## Pet 与事件
 
-Plugin 在 `start()` 时通过 `listPets()` 验证目标 Pet。运行中所有 dispatch 都使用标准
-`context.dispatch()`，所有事件只包含领域 identity/status，不向 Agent execution metadata
-注入 scheduler/trigger/channel 字段。
+实际派发由归属 Channel 的 `inputs.run()` 检查目标、绑定对应 Session 和执行 scope。
+Plugin 发布的领域事件不是 Channel 消息或 Agent 执行输入。
 
 ## Kanban 退役后的默认装配
 
-默认仅保留外部请求 → Executor 的显式 HTTP 规则；Wiki 更新需要明确请求，
+默认模板不预置 Trigger 规则；需要时在 Channel 建立、Pet 实例可用后显式配置。Wiki 更新需要明确请求，
 不以 dispatch.completed 替代交付验收。旧规则迁移见[配置](../../studio/configuration.md#retired-kanban-workdirs)，
 可选周期队列巡检见[Queue Notices](../studio-dispatch-queue-notices.md)。

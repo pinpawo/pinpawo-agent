@@ -11,7 +11,7 @@ test('messages retain references and mentions without dispatching a Pet', async 
   const dispatched: StudioDispatchRequest[] = [];
   const notified: StudioEventInput[] = [];
   const live: ReturnType<StudioPluginContext['listPets']> = [];
-  let activeRun: { requestId: string; state: 'running' } | null = null;
+  let activeRun: { requestId: string; state: 'running' | 'interrupting' } | null = null;
   let pendingInterrupt: { interruptId: string } | null = null;
   let snapshots = 0;
   const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
@@ -122,9 +122,21 @@ test('messages retain references and mentions without dispatching a Pet', async 
     { body: 'Published result.' }, { externalRef: result.messageId });
   assert.deepEqual(await read('older-run'), { status: 'running', requestId: 'run-a' }, 'an older request cannot supply current evidence');
   assert.deepEqual(await read('run-a'), { status: 'running', requestId: 'run-a', result: { body: 'Published result.' } });
-  await assert.rejects(plugin.head.dispatch(channelId, 'writer', publication.message.messageId, signal, {
-    kind: 'interrupt', expectedRun: { invocationId: 'dispatch-a', requestId: 'run-a', sessionId: 'writer-session' },
-  }), /Only a human Channel message/);
+  activeRun = { requestId: 'run-a', state: 'interrupting' };
+  assert.equal(await read('run-a'), undefined, 'a non-running snapshot state cannot supply execution evidence');
+  activeRun = { requestId: 'run-a', state: 'running' };
+  const replacement = await plugin.sendMessage(channelId, {
+    body: 'Stop your current work and replace it with the audit.', mentions: [{ participantId: 'pet:writer' }],
+  }, owner);
+  const forcedInterrupt = {
+    kind: 'interrupt', sessionId: 'writer-session',
+    expectedRun: { invocationId: 'dispatch-a', requestId: 'run-a', sessionId: 'writer-session' },
+  } as unknown as Parameters<typeof plugin.head.dispatch>[4];
+  for (const source of [publication, mentioned, replacement]) {
+    await assert.rejects(plugin.head.dispatch(channelId, 'writer', source.message.messageId, signal, forcedInterrupt),
+      /Unsupported Channel Head dispatch delivery/);
+  }
+  assert.equal(dispatched.length, 1, 'even human replacement text with canonical @ has no stop authority or queue fallback');
   await assert.rejects(plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal, {
     kind: 'queue', sessionId: 'other-session',
   }), /registered Channel Session/);
@@ -132,12 +144,7 @@ test('messages retain references and mentions without dispatching a Pet', async 
     kind: 'queue', sessionId: 'writer-session',
   });
   assert.equal(dispatched[1]!.delivery, undefined, 'queue uses existing ordinary admission');
-  await plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal, {
-    kind: 'interrupt', expectedRun: { invocationId: 'dispatch-a', requestId: 'run-a', sessionId: 'writer-session' },
-  });
-  assert.equal(dispatched[2]!.delivery, 'interrupt');
-  assert.deepEqual((dispatched[2] as StudioDispatchRequest & { expectedInterrupt?: unknown }).expectedInterrupt,
-    { dispatchId: 'dispatch-a', requestId: 'run-a' });
+  assert.equal(dispatched[1]!.expectedInterrupt, undefined);
 });
 
 test('a Pet works in a Channel only while its run there is running, and context reads say so', async (t) => {

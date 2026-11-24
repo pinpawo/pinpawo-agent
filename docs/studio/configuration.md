@@ -321,14 +321,12 @@ both, or neither. In JSON mode an omitted `reply`
 is equivalent to `null`; the dispatch decision must still be explicit. A bare
 mention does not by itself require work or a reply.
 
-A verified ordinary running dispatch may receive a factual reply, ordinary queue
-admission for independent follow-up work, or guarded interrupt and replacement
-when the current human message explicitly requests it. A progress inquiry or
-additional guidance to the running Agent is not a request to start more work.
-An interrupt must still match the exact active dispatch and request at admission;
-it is never downgraded to a queue request. Only acceptance can be acknowledged,
-not a completed interruption or started replacement. The Stop and approval
-controls remain separate.
+A verified ordinary running dispatch may receive a factual reply or ordinary queue
+admission for independent follow-up work. Progress inquiries and additional guidance
+do not start more work. Channel messages, including canonical mentions, cannot stop
+or replace a running dispatch. The Head rejects interrupt suggestions and does not
+downgrade them to queue admission. Existing explicit Host controls and approval
+remain separate. Queue acknowledgements report acceptance, not that work started.
 
 The Head looks up only the matching owned Session. Model-visible evidence is
 limited to the checked status, recorded plan and any already-public result of

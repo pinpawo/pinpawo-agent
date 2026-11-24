@@ -6,14 +6,14 @@ type RecordedPlan = NonNullable<Awaited<ReturnType<PetSessionPort['snapshot']>>[
 export type HeadResultMessage = { messageId: string; requestId: string };
 type PublicResult = { body: string };
 type SessionSample = {
-  status: 'ready' | 'running' | 'waiting' | 'interrupting';
+  status: 'ready' | 'running' | 'waiting';
   requestId?: string;
   recordedPlan?: RecordedPlan;
   result?: PublicResult;
 };
 type ReadOptions = [signal: AbortSignal, isCurrent: () => boolean, result?: HeadResultMessage];
 export type HeadSessionReader = (sessionId: string | undefined, ...options: ReadOptions) => Promise<SessionSample | undefined>;
-export type HeadProgressEvidence = { status: 'unavailable' | 'waiting' | 'interrupting' }
+export type HeadProgressEvidence = { status: 'unavailable' | 'waiting' }
   | { status: 'running'; recordedPlan?: RecordedPlan; result?: PublicResult };
 
 /** Bound a Session port read to the turn's lifetime. Missing evidence is not readiness. */
@@ -37,8 +37,9 @@ export async function readHeadProgress(input: {
   run: HeadRun; signal: AbortSignal; isCurrent: () => boolean; read: (signal: AbortSignal) => ReturnType<HeadSessionReader>;
 }): Promise<HeadProgressEvidence> {
   const sample = await readHeadSession(input);
-  if (sample?.requestId !== input.run.requestId || sample.status === 'ready') return { status: 'unavailable' };
-  if (sample.status === 'waiting' || sample.status === 'interrupting') return { status: sample.status };
+  if (!sample || sample.requestId !== input.run.requestId) return { status: 'unavailable' };
+  if (sample.status === 'waiting') return { status: 'waiting' };
+  if (sample.status !== 'running') return { status: 'unavailable' };
   return { status: 'running', ...(sample.recordedPlan ? { recordedPlan: sample.recordedPlan } : {}),
     ...(sample.result ? { result: sample.result } : {}) };
 }

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
-export const fixtureVersion = 'head-relevance-session-handling-v2';
+export const fixtureVersion = 'head-relevance-session-handling-v3';
 export type Route = 'silent' | 'reply-only' | 'dispatch-only' | 'combined';
-export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[]; relevance: boolean[]; state: 'idle' | 'busy' | 'unknown' };
+export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[];
+  relevance: boolean[]; state: 'idle' | 'busy' | 'unknown'; expectedDelivery?: 'queue' | 'interrupt' };
 const message = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadMessage => ({
   messageId: id, channelId: 'synthetic-eval', sequence: 2, author: { kind, id: kind === 'human' ? 'owner' : 'peer' },
   occurredAt: '2026-01-01T00:00:00Z', body, mentions: [],
@@ -15,7 +16,7 @@ const active = { ...message('active-source', '核对季度报告中的收入口�
 function queued(id: string, body: string, author: 'human' | 'pet'): HeadInput {
   return { ...base(id, body, author), context: { messages: [active] } };
 }
-const fixtures: Array<{ id: string; kind: EvalCase['kind']; input: HeadInput; routes: Route[] }> = [
+const fixtures: Array<Omit<EvalCase, 'state' | 'relevance'>> = [
   { id: 'ignore-unrelated', kind: 'contrast', input: base('ignore-unrelated', '给设计师：封面颜色由你定，数据分析员不用回复。'), routes: ['silent'] },
   { id: 'reply-only', kind: 'contrast', input: base('reply-only', '数据分析员，只确认你是否负责数据核对，用一句话回复，不启动任何工作。'), routes: ['reply-only'] },
   { id: 'dispatch-only', kind: 'contrast', input: base('dispatch-only', '数据分析员，开始核对本季度两份报表的差异。不要先确认或发进度消息，完成后再汇报。'), routes: ['dispatch-only'] },
@@ -51,8 +52,9 @@ const fixtures: Array<{ id: string; kind: EvalCase['kind']; input: HeadInput; ro
   { id: 'progress-only', kind: 'contrast', input: queued('progress-only', '当前收入核对进行到哪了？', 'human'), routes: ['reply-only'] },
   { id: 'conditional-work', kind: 'contrast', input: queued('conditional-work', '只有当前收入核对还没完成，你才去整理下周指标清单；不需要回复。', 'human'), routes: ['silent'] },
   { id: 'conditional-and-independent-work', kind: 'contrast', input: queued('conditional-and-independent-work', '只有当前收入核对还没完成，才去整理下周指标清单。另外，不论核对结果如何，请独立对比四月的两张报表。', 'human'), routes: ['reply-only'] },
-  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？请把整理下周的指标清单作为独立任务排队。', 'human'), routes: ['combined'] },
-  { id: 'busy-independent-work', kind: 'contrast', input: queued('busy-independent-work', '请另外独立整理下周的指标清单，排在当前工作后面。', 'human'), routes: ['dispatch-only', 'combined'] },
+  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？请把整理下周的指标清单作为独立任务排队。', 'human'), routes: ['combined'], expectedDelivery: 'queue' },
+  { id: 'busy-independent-work', kind: 'contrast', input: queued('busy-independent-work', '请另外独立整理下周的指标清单，排在当前工作后面。', 'human'), routes: ['dispatch-only', 'combined'], expectedDelivery: 'queue' },
+  { id: 'busy-explicit-replacement', kind: 'contrast', input: queued('busy-explicit-replacement', '请停止正在进行的收入核对，改做一项独立任务：核对四月的两张采购报表。如果不能停止，请告诉我，不要排队。', 'human'), routes: ['reply-only'] },
   ...(['human', 'pet'] as const).flatMap(author => [
     { id: `queue-${author}`, kind: 'contrast' as const, input: queued(`queue-${author}`, '仅在当前核对成功完成后，才整理下周的指标清单，不要打断当前工作。', author), routes: ['silent', 'reply-only'] as Route[] },
     { id: `unsupported-edit-${author}`, kind: 'contrast' as const, input: queued(`unsupported-edit-${author}`, '刚确认当前报告所用源表版本错误。请停止当前核对，不启动新任务，也不要发布旧结论。', author), routes: ['silent', 'reply-only'] as Route[] },
@@ -80,6 +82,7 @@ export const cases: EvalCase[] = fixtures.map(test => {
     relevance: test.id === 'organic-peer' ? [true, false]
       : [!['ignore-unrelated', 'peer-ack-not-new-request', 'peer-neutral-noop'].includes(test.id)],
     routes: test.routes,
+    ...(test.expectedDelivery ? { expectedDelivery: test.expectedDelivery } : {}),
     input: { ...test.input, message: remap(test.input.message),
       context: { ...test.input.context, messages: test.input.context.messages.map(remap) } },
   };

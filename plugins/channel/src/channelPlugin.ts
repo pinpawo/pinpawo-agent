@@ -62,10 +62,9 @@ export type ChannelPlugin = StudioPlugin & {
   head: ChannelHeadPort;
 };
 
-type HeadDelivery = { kind: 'queue'; sessionId: string } |
-  { kind: 'interrupt'; expectedRun: { invocationId: string; requestId: string; sessionId: string } };
+type HeadDelivery = { kind: 'queue'; sessionId: string };
 type HeadSessionEvidence = {
-  status: 'ready' | 'running' | 'waiting' | 'interrupting';
+  status: 'ready' | 'running' | 'waiting';
   requestId?: string;
   recordedPlan?: AgentPlan;
   result?: { body: string };
@@ -138,17 +137,13 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const binding = delivery ? await service.getSession(channelId, petId)
       : await service.reserveSession(channelId, petId, () => studio.allocateSessionId(petId));
     check();
-    if (!binding || (delivery && (!binding.registered ||
-      binding.sessionId !== (delivery.kind === 'queue' ? delivery.sessionId : delivery.expectedRun.sessionId)))) {
+    if (!binding || (delivery && (!binding.registered || binding.sessionId !== delivery.sessionId))) {
       throw new ChannelAccessError('Head dispatch no longer targets the registered Channel Session.');
     }
     const receipt = await studio.dispatch({
       petId, request,
       ...(headInput ? {
-        ...(delivery?.kind === 'interrupt' ? {
-          delivery: 'interrupt' as const,
-          expectedInterrupt: { dispatchId: delivery.expectedRun.invocationId, requestId: delivery.expectedRun.requestId },
-        } : delivery?.kind === 'queue' ? {} : { delivery: 'idle-only' as const }),
+        ...(!delivery ? { delivery: 'idle-only' as const } : {}),
         signal: headInput.signal,
         origin: { namespace: 'channel', id: headInput.messageId },
       } : {}),
@@ -291,8 +286,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         ...(session.activeRun ? { requestId: session.activeRun.requestId } : {}) };
       if (!session.activeRun) return { status: 'ready' };
       if (!binding.registered) return;
+      // Host snapshots project an in-flight register, not a reliable stop state.
       const { requestId, state } = session.activeRun;
-      if (state === 'interrupting') return { status: 'interrupting', requestId };
+      if (state !== 'running') return;
       let result: HeadSessionEvidence['result'];
       if (resultMessage?.requestId === requestId) {
         const { messages } = await service.readContext(actor, channelId, { limit: 10 });
@@ -311,17 +307,16 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     },
     dispatch: async (channelId, petId, messageId, signal, delivery) => {
       signal.throwIfAborted();
+      // No committed Channel message authorizes stopping work. Reject unsupported
+      // delivery at this boundary too; an untyped caller must not fall into the queue.
+      if (delivery !== undefined && delivery?.kind !== 'queue') {
+        throw new ChannelAccessError('Unsupported Channel Head dispatch delivery.');
+      }
       const service = channelService();
       await service.requireMember(channelId, { kind: 'pet', id: petId });
       signal.throwIfAborted();
       const canonical = await service.getMessage(channelId, messageId);
       if (!canonical) throw new Error('Head source message does not exist in this Channel.');
-      if (delivery?.kind === 'interrupt') {
-        if (canonical.author.kind !== 'human') {
-          throw new ChannelAccessError('Only a human Channel message can authorize interrupt delivery.');
-        }
-        await service.requireMember(channelId, canonical.author);
-      }
       const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];

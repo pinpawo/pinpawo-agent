@@ -36,6 +36,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
   const direct = '[@alpha](participant:pet:alpha) Are you the analyst?';
   const progress = '[@alpha](participant:pet:alpha) How is A going?';
   const mixed = '[@alpha](participant:pet:alpha) How is A going? Also do work B.';
+  const queueOnly = '[@alpha](participant:pet:alpha) Keep A running and queue the independent audit.';
   const interimA = 'Published evidence for work A.';
   const finalA = 'This is A’s official result.';
   const canonicalDecisions: HeadInput[] = [];
@@ -43,6 +44,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
   const factoryCalls: number[] = [];
   const decisionClients: Array<{ body: string; client: number }> = [];
   let resolutionCount = 0;
+  let acceptsInterruptOutput: boolean | undefined;
   let heldSignal: AbortSignal | undefined;
   let releaseHeld!: () => void;
   const holdJudgment = new Promise<void>(resolve => { releaseHeld = resolve; });
@@ -63,8 +65,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
             if (options.name === 'pet_head_running') {
               runningCalls.push({ messageId: message.messageId, execution: input.execution, client });
               assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request|private checkpoint text|private tool output/);
-              const parsed = { delivery: null, reply: 'A is still running.' };
-              assert.equal(schema.safeParse(parsed).success, true);
+              const parsed = message.body === queueOnly ? { delivery: 'interrupt', reply: 'I stopped A.' }
+                : { delivery: null, reply: 'A is still running.' };
+              if (message.body === queueOnly) acceptsInterruptOutput = schema.safeParse(parsed).success;
+              else assert.equal(schema.safeParse(parsed).success, true);
               return { raw: new AIMessage(JSON.stringify(parsed)), parsed };
             }
             if (options.name === 'pet_head_relevance' || addressed) decisions[pet.petId]!.push(message.body);
@@ -300,7 +304,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
         { status: 'active', description: 'Check the report.' },
         { status: 'pending', description: 'Verify the figures.' },
         { status: 'pending', description: recordedPublicTask },
-      ], result: { body: interimA }, source: { messageId: sourceA.messageId, body: sourceA.body }, mayInterrupt: true },
+      ], result: { body: interimA }, source: { messageId: sourceA.messageId, body: sourceA.body } },
     })));
     assert.equal(otherQueueReads, 0, 'alpha Head samples only its own dispatch port');
     assert.equal(admissions.length, 1, 'busy mixed question cannot admit new work');
@@ -334,8 +338,16 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.equal(admissions.length, 1);
 
     switchDuringRead = undefined;
-    reviewPending = true;
     activeDispatch = activeA;
+    const hallucinatedInterrupt = await post(queueOnly, sourceA.messageId);
+    await waitFor(() => handled.includes(hallucinatedInterrupt.messageId));
+    assert.equal(runningCalls.at(-1)?.messageId, hallucinatedInterrupt.messageId);
+    assert.equal(acceptsInterruptOutput, false, 'the production structured-output contract excludes interruption');
+    assert.equal(replyFor(hallucinatedInterrupt.messageId), undefined, 'a rejected interrupt cannot publish a false acknowledgement');
+    assert.equal(admissions.length, 1, 'a rejected interrupt must not stop A or fall back to queue');
+    assert.equal(activeDispatch, activeA);
+
+    reviewPending = true;
     const duringReview = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(duringReview.messageId));
     assert.equal(replyFor(duringReview.messageId)?.body, 'Waiting for review.');

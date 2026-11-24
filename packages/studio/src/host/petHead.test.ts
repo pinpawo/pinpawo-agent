@@ -341,7 +341,7 @@ test('both structured contracts use only their declared schema and configured wi
     const signal = new AbortController().signal;
     const model = createHeadModel(() => mock.endpoint);
     assert.deepEqual(await model[contract.invoke](decisionInput, signal), contract.value);
-    assert.deepEqual(mock.factory(), { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
+    assert.deepEqual(mock.factory(), { maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
     assert.deepEqual(mock.binding(), { name: contract.name, method: method ?? 'jsonMode', includeRaw: true });
     assert.deepEqual(mock.calls.map(call => call.mode), ['structured']);
     assert.equal(mock.calls[0]!.signal, signal);
@@ -431,7 +431,7 @@ function nativeEndpoint(protocol: NonNullable<StudioModelEndpoint['protocol']>, 
   baseUrl = protocol === 'anthropic-compatible' ? 'https://api.anthropic.test'
     : model.startsWith('deepseek-') ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1'): StudioModelEndpoint {
   const endpoint = { profileId: 'fixture', protocol, model, baseUrl, apiKey: 'fixture-only', structuredOutputMethod: method };
-  return { ...endpoint, createChatModel: options => buildModel({ ...endpoint, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries, timeoutMs: 2_000 },
+  return { ...endpoint, createChatModel: options => buildModel({ ...endpoint, maxOutputTokens: options.maxOutputTokens ?? 4096, maxRetries: options.maxRetries, timeoutMs: 2_000 },
     { streaming: options.streaming, preferDeterministic: options.preferDeterministic, purpose: options.purpose }) };
 }
 
@@ -461,7 +461,7 @@ test('official DeepSeek Flash / Pro sends each contract through actual JSON mode
     assert.deepEqual(body.response_format, { type: 'json_object' });
     assert.equal(body.tools, undefined);
     assert.deepEqual(body.thinking, { type: 'disabled' });
-    assert.equal(body.max_completion_tokens ?? body.max_tokens, 512);
+    assert.equal(body.max_completion_tokens ?? body.max_tokens, 4096);
   }
 });
 
@@ -1071,8 +1071,8 @@ test('busy handling admits only the current selected work and publishes no accep
   const source = message('19', { body: 'Check A.' });
   const active = { dispatchId: 'a', sessionId: 'same-session', messageId: source.messageId };
   const run = { invocationId: 'a', sessionId: active.sessionId, requestId: 'req-a' };
-  for (const [delivery, scenario] of [['queue', 'accepted'], ['queue', 'refused'], ['interrupt', 'accepted'],
-    ['interrupt', 'stale'], ['interrupt', 'peer'], [null, 'progress']] as const) {
+  for (const [delivery, scenario] of [['queue', 'accepted'], ['queue', 'refused'], ['queue', 'stale'],
+    [null, 'progress'], [null, 'replacement']] as const) {
     const signal = new AbortController().signal;
     const admitted = deferred<void>();
     const request = deferred<void>();
@@ -1080,14 +1080,13 @@ test('busy handling admits only the current selected work and publishes no accep
     let state: ReturnType<typeof readHeadWorkState> = { kind: 'active', dispatch: active };
     const participantId = 'pet:a';
     const current = message('20', { replyTo: source.messageId, mentions: [{ participantId }],
-      author: { kind: scenario === 'peer' ? 'pet' : 'human', id: 'other' },
-      body: delivery === 'interrupt' ? 'Stop A and start B.' : 'How is A going? Also queue independent B.' });
+      body: scenario === 'replacement' ? 'Stop A and replace it with B.' : 'How is A going? Also queue independent B.' });
     const handle = createPetHead({ pet: pet('a'), readWorkState: () => state,
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [source], members: [{ kind: 'pet', id: 'a', participantId }] }),
         reply: async (_pet, id) => { assert.equal(id, current.messageId); calls.push('reply'); },
         dispatch: async (_pet, id, _signal, options) => {
           assert.equal(id, current.messageId, 'dispatch the original committed message');
-          assert.deepEqual(options, delivery === 'queue' ? { kind: 'queue', sessionId: run.sessionId } : { kind: 'interrupt', expectedRun: run });
+          assert.deepEqual(options, { kind: 'queue', sessionId: run.sessionId });
           calls.push('dispatch');
           if (scenario === 'refused') throw new PetDispatchRefusedError();
           request.resolve(); await admitted.promise;
@@ -1098,10 +1097,9 @@ test('busy handling admits only the current selected work and publishes no accep
         compose: async () => assert.fail('verified work reaches the handling model'),
         decideRunning: async input => {
           assert.deepEqual(input.evidence, { status: 'running', result: { body: 'Public A result' } });
-          assert.equal(input.mayInterrupt, scenario !== 'peer');
           calls.push('decision');
           if (scenario === 'stale') state = { kind: 'active', dispatch: { ...active, dispatchId: 'b' } };
-          return { delivery, reply: 'Reply' };
+          return { delivery, reply: scenario === 'replacement' ? 'I did not stop A or queue B.' : 'Reply' };
         },
       },
     });
@@ -1113,8 +1111,43 @@ test('busy handling admits only the current selected work and publishes no accep
     }
     await handling;
     assert.deepEqual(calls, ['session', 'decision', ...(scenario === 'accepted' || scenario === 'refused' ? ['dispatch'] : []),
-      ...(scenario === 'accepted' || scenario === 'progress' ? ['reply'] : [])], scenario);
+      ...(scenario === 'accepted' || scenario === 'progress' || scenario === 'replacement' ? ['reply'] : [])], scenario);
   }
+});
+
+test('no addressed or related Head may act on an untrusted interrupt suggestion', async () => {
+  const members = ['a', 'b'].map(id => ({ kind: 'pet' as const, id, participantId: `pet:${id}` }));
+  const events = bus();
+  const suggested: string[] = [];
+  const effects: string[] = [];
+  const detach = members.map(({ id }) => {
+    const source = message(id === 'a' ? '11' : '12', { body: `Check report for ${id}.` });
+    const active = { dispatchId: `dispatch-${id}`, sessionId: `session-${id}`, messageId: source.messageId };
+    const run = { invocationId: active.dispatchId, sessionId: active.sessionId, requestId: `run-${id}` };
+    return activate({ pet: pet(id), readWorkState: () => ({ kind: 'active', dispatch: active }),
+      channel: { readContext: async () => ({ messages: [source], members }),
+        reply: async () => { effects.push(`reply-${id}`); },
+        dispatch: async () => { effects.push(`dispatch-${id}`); },
+      }, assessRelevance: relevant, decideNewWorkAndReply: noIdle,
+      progress: { readRun: () => run, readSessionRun: async () => ({ requestId: run.requestId }),
+        compose: async () => assert.fail('each Pet has a verified live run'),
+        decideRunning: async input => {
+          assert.equal(input.addressed, id === 'a');
+          assert.equal(input.source.messageId, source.messageId);
+          suggested.push(`${input.message.messageId}-${id}`);
+          // Inject an unsupported transport value after structural validation.
+          return { delivery: 'interrupt', reply: 'Stopped the existing run.' } as unknown as HeadRunningResult;
+        },
+      },
+    }, events);
+  });
+  try {
+    const mentions = [{ participantId: 'pet:a' }];
+    await events.publish(message('20', { body: 'Stop report A and do new work instead.', mentions }));
+    await events.publish(message('21', { body: 'Keep the report running and queue the independent audit.', mentions }));
+    assert.deepEqual(suggested.sort(), ['20-a', '20-b', '21-a', '21-b'], 'even a misjudgment by another Pet can reach the guard');
+    assert.deepEqual(effects, [], 'neither cancellation, queue fallback nor a false acknowledgement is allowed');
+  } finally { detach.forEach(close => close()); }
 });
 
 test('a refused idle-only admission is a skip rather than a failed Head handler', async () => {

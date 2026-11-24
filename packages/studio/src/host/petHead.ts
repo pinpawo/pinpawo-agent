@@ -48,11 +48,11 @@ export function readHeadWorkState(channelId: string, queue: PetDispatchQueueSnap
 export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; addressed?: boolean };
 
 export type HeadReplyInput = { message: HeadMessage; evidence: HeadProgressEvidence; source?: Pick<HeadMessage, 'messageId' | 'body'> };
-export type HeadExecutionInput = HeadInput & HeadReplyInput & { mayInterrupt: boolean };
+export type HeadExecutionInput = HeadInput & HeadReplyInput;
 export type HeadRunningInput = HeadExecutionInput & { evidence: Extract<HeadProgressEvidence, { status: 'running' }>;
   source: Pick<HeadMessage, 'messageId' | 'body'> };
-export type HeadRunningResult = { delivery: 'queue' | 'interrupt' | null; reply: string | null };
-type HeadDelivery = { kind: 'queue'; sessionId: string } | { kind: 'interrupt'; expectedRun: HeadRun };
+export type HeadRunningResult = { delivery: 'queue' | null; reply: string | null };
+type HeadDelivery = { kind: 'queue'; sessionId: string };
 
 /** Mentions are server-resolved participant IDs on this committed message, not labels or quoted/history text. */
 export function isHeadAddressed(input: Pick<HeadInput, 'pet' | 'context' | 'message'>): boolean {
@@ -190,7 +190,7 @@ export function createPetHead(options: {
 }): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
   const { channel, execution, pet } = options;
   const slotIsIdle = () => options.readWorkState().kind === 'idle';
-  const blocked = (status: 'unavailable' | 'waiting' | 'interrupting' = 'unavailable'): DispatchContext =>
+  const blocked = (status: 'unavailable' | 'waiting' = 'unavailable'): DispatchContext =>
     ({ kind: 'existing', evidence: { status } });
 
   async function readDispatchContext(input: HeadInput, signal: AbortSignal): Promise<DispatchContext> {
@@ -201,7 +201,7 @@ export function createPetHead(options: {
       const sample = await readHeadSession({ signal, isCurrent,
         read: readSignal => channel.readSession(pet.petId, undefined, readSignal, isCurrent) });
       if (state.kind === 'idle' && sample?.status === 'ready') return { kind: 'ready' };
-      return blocked(sample?.status === 'waiting' || sample?.status === 'interrupting' ? sample.status : 'unavailable');
+      return blocked(sample?.status === 'waiting' ? 'waiting' : 'unavailable');
     }
 
     const { dispatch: active } = state;
@@ -267,19 +267,19 @@ export function createPetHead(options: {
     }
 
     const { current, evidence, source } = context;
-    const mayInterrupt = message.author.kind === 'human';
     let suggestion: HeadRunningResult;
-    try { suggestion = await execution.suggestDispatch({ ...input, evidence, source, mayInterrupt }, signal); }
+    try { suggestion = await execution.suggestDispatch({ ...input, evidence, source }, signal); }
     catch {
       if (signal.aborted) return;
       throw new Error('Pet Head execution handling failed.');
     }
     if (signal.aborted || (current && !current.isCurrent())) return;
     const { delivery: suggestedDelivery, reply } = suggestion;
-    if (suggestedDelivery) {
-      if (evidence.status !== 'running' || !current || (suggestedDelivery === 'interrupt' && !mayInterrupt)) return;
-      const delivery: HeadDelivery = suggestedDelivery === 'queue' ? { kind: 'queue', sessionId: current.run.sessionId }
-        : { kind: 'interrupt', expectedRun: current.run };
+    if (suggestedDelivery !== null) {
+      // A Timeline message, even with a canonical mention, is not a stop control.
+      // Refuse unsupported suggestions without queueing or publishing an acknowledgement.
+      if (suggestedDelivery !== 'queue' || evidence.status !== 'running' || !current) return;
+      const delivery: HeadDelivery = { kind: 'queue', sessionId: current.run.sessionId };
       try { await channel.dispatch(pet.petId, message.messageId, signal, delivery); }
       catch (error) {
         if (error instanceof PetDispatchRefusedError || signal.aborted) return;

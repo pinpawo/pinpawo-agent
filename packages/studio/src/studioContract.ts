@@ -180,7 +180,8 @@ export type StudioModelEndpoint = {
   createChatModel?: (options: {
     /** Invocation-local role; never mutates the resolved model profile. */
     purpose?: 'pet-head';
-    maxOutputTokens: number;
+    /** Optional invocation override; otherwise use the resolved profile budget. */
+    maxOutputTokens?: number;
     maxRetries: number;
     preferDeterministic: boolean;
     streaming?: boolean;

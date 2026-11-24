@@ -45,7 +45,7 @@ async function fixture() {
         assert.equal(request.url, '/v1/chat/completions');
         const input = JSON.parse(raw) as WireRequest;
         const names = input.tools?.map(t => t.function.name) ?? [];
-        let head: (HeadInput & { execution?: { status: string; source?: { body: string }; mayInterrupt: boolean } }) | undefined;
+        let head: (HeadInput & { execution?: { status: string; source?: { body: string } } }) | undefined;
         for (const message of input.messages) {
           if (message.role !== 'user') continue;
           try {
@@ -75,7 +75,6 @@ async function fixture() {
             assert.equal(source, queuedRequest);
             assert.equal(head.execution?.status, 'running');
             assert.match(head.execution?.source?.body ?? '', /^ACTIVE_(HUMAN|PEER)$/);
-            assert.equal(head.execution?.mayInterrupt, head.message.author.kind === 'human');
             runningDecisions.push(head.message.messageId);
           }
           content = JSON.stringify(stage === 'relevance' ? { relevant: !!route }

@@ -5,7 +5,7 @@ import type { Observation } from './scorer';
 
 /** Production routing with fixed synthetic state and in-memory effect capture. */
 export async function exercise(test: EvalCase, model: Pick<ReturnType<typeof createHeadModel>, 'assessRelevance' | 'decideNewWorkAndReply' | 'suggestDispatchForExistingWork'>, signal: AbortSignal): Promise<Observation> {
-  const result = { relevant: isHeadAddressed(test.input), dispatched: false, hasReply: false };
+  const result: Observation = { relevant: isHeadAddressed(test.input), delivery: null, hasReply: false };
   const source = test.input.context.messages[0];
   const dispatch = { dispatchId: 'd-7c31', sessionId: 's-4f8a', ...(source ? { messageId: source.messageId } : {}) };
   const head = createPetHead({
@@ -13,7 +13,7 @@ export async function exercise(test: EvalCase, model: Pick<ReturnType<typeof cre
     channel: { subscribe: () => () => {}, readContext: async () => test.input.context,
       readSession: async (_pet, id) => id ? { status: 'running', requestId: 'r-92a1' } : { status: 'ready' },
       reply: async (_pet, _source, body, _signal, options) => { options?.assertCurrent?.(); result.hasReply ||= !!body.trim(); },
-      dispatch: async () => { result.dispatched = true; } },
+      dispatch: async (_pet, _source, _signal, options) => { result.delivery = options?.kind ?? 'idle-only'; } },
     readWorkState: () => test.state === 'busy' ? { kind: 'active', dispatch } : { kind: test.state },
     assessRelevance: async (input, signal) => {
       const relevance = await model.assessRelevance(input, signal);

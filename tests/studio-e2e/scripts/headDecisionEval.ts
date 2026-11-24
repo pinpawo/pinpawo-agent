@@ -5,7 +5,7 @@ import { fixtureVersion } from '../src/head-eval/cases';
 import { selectCases } from '../src/head-eval/selection';
 import { readCacheUsage } from '../src/head-eval/cacheUsage';
 import { exercise } from '../src/head-eval/exercise';
-import { score, summarize } from '../src/head-eval/scorer';
+import { score, summarize, type Observation } from '../src/head-eval/scorer';
 import type { HeadRelevanceDiagnostic } from '../../../packages/studio/src/host/petHeadModel';
 
 for (const key of ['LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2', 'LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGFUSE_TRACING_ENABLED']) process.env[key] = 'false';
@@ -37,9 +37,9 @@ async function main() {
   type Wire = { elapsedMs: number; status: number; finishReasons: string[]; inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; cacheHitTokens?: number; cacheMissTokens?: number; maxOutputTokens?: number; thinking?: string; format?: string };
   let wire: Wire[] = [];
 
-  const report = { schemaVersion: 3, fixtureVersion, commit, profile, model: '',
+  const report = { schemaVersion: 4, fixtureVersion, commit, profile, model: '',
     startedAt: new Date().toISOString(), providerCalls: 0, providerCallLimit: 20,
-    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; observation?: { relevant: boolean; dispatched: boolean; hasReply: boolean }; score: ReturnType<typeof score> }>,
+    rows: [] as Array<{ case: string; kind: 'contrast' | 'organic'; repeat: number; attempts: number; elapsedMs: number; wire: Wire[]; outcome?: string; code?: string; observation?: Observation; score: ReturnType<typeof score> }>,
     summary: {} as ReturnType<typeof summarize> | object };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240_000);
@@ -94,7 +94,11 @@ async function main() {
       const model = createHeadModel(() => ({
         profileId: profile, protocol: config.protocol ?? 'openai-compatible', model: config.model,
         baseUrl: config.baseUrl, apiKey: config.apiKey, structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
-        createChatModel: options => buildModel({ ...config, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries }, options),
+        createChatModel: options => buildModel({
+          ...config,
+          ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+          maxRetries: options.maxRetries,
+        }, options),
       }), { onDiagnostic: value => { diagnostic = value; } });
       let observation;
       try {

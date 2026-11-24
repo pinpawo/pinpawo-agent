@@ -17,6 +17,7 @@ import {
 } from './buildStudio';
 import { createTestModelProfileRegistry } from '../../../../services/host/src/testing/modelProfiles';
 import { createLocalModelProfileRegistry } from '../../../../services/host/src/config/llmConfig';
+import { buildModelProfileRegistry, MODEL_PROFILES_VERSION } from '../../../../services/host/src/config/modelProfiles';
 import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
@@ -626,7 +627,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       },
     },
   };
-  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown; stage: 'relevance' | 'idle' }> = [];
+  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown; maxOutputTokens: number; stage: 'relevance' | 'idle' }> = [];
   const tracingKeys = ['LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2'];
   const tracing = tracingKeys.map(key => process.env[key]);
   for (const key of tracingKeys) process.env[key] = 'false';
@@ -664,7 +665,9 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     }
     const human = request.messages.find((message: { role: string }) => message.role === 'user');
     const input = JSON.parse(human.content);
-    calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking, stage });
+    assert.equal(request.stream, false);
+    calls.push({ url: String(url), model: request.model, petId: input.pet.petId, thinking: request.thinking,
+      maxOutputTokens: request.max_completion_tokens ?? request.max_tokens, stage });
     const args = JSON.stringify(stage === 'relevance' ? { relevant: true } : { shouldDispatch: true, reply: null });
     const output = usesTool
       ? { content: null, tool_calls: [{ id: `head-${stage}-${input.pet.petId}`, type: 'function',
@@ -674,12 +677,20 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       choices: [{ index: 0, message: { role: 'assistant', ...output }, finish_reason: usesTool ? 'tool_calls' : 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   };
-  const profiles = createTestModelProfileRegistry([
-    { modelProfileId: 'default', model: 'default-model', baseUrl: 'https://default.example.test/v1', structuredOutputMethod: 'functionCalling' },
-    { modelProfileId: 'specialist', model: 'deepseek-flash', baseUrl: 'https://specialist.example.test/v1' },
-    { modelProfileId: 'official', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com/v1' },
-  ]);
-  const modelProfiles = createLocalModelProfileRegistry({ snapshot: profiles.snapshot, llmDefaults: { timeoutMs: 1000 } });
+  const profile = (id: string, model: string, baseUrl: string) => ({
+    id, label: id, provider: 'fixture-provider', model, baseUrl, apiKey: 'fixture-only',
+    contextWindowTokens: 1_000_000, inputModalities: ['text'] as const,
+  });
+  const snapshot = buildModelProfileRegistry({ stored: { models: {
+    version: MODEL_PROFILES_VERSION, defaultProfileId: 'default',
+    profiles: {
+      default: { ...profile('default', 'default-model', 'https://default.example.test/v1'),
+        structuredOutputMethod: 'functionCalling', maxOutputTokens: 1536 },
+      specialist: { ...profile('specialist', 'deepseek-v4.1-flash', 'https://specialist.example.test/v1'), sourcePreset: 'deepseek-flash' },
+      official: { ...profile('official', 'deepseek-flash', 'https://api.deepseek.com/v1'), sourcePreset: 'deepseek-flash' },
+    },
+  } }, env: {} });
+  const modelProfiles = createLocalModelProfileRegistry({ snapshot, llmDefaults: { timeoutMs: 1000 } });
   let result: Awaited<ReturnType<typeof buildStudio>> | undefined;
   try {
     result = await buildStudio({
@@ -716,9 +727,12 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'attempts', 'code'].includes(key)));
     }
     assert.deepEqual(calls.sort((a, b) => a.petId.localeCompare(b.petId)), [
-      { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions', thinking: { type: 'disabled' } },
-      { petId: 'planner', model: 'deepseek-flash', url: 'https://specialist.example.test/v1/chat/completions', thinking: undefined },
-      { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions', thinking: undefined },
+      { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions',
+        thinking: { type: 'disabled' }, maxOutputTokens: 384_000 },
+      { petId: 'planner', model: 'deepseek-v4.1-flash', url: 'https://specialist.example.test/v1/chat/completions',
+        thinking: undefined, maxOutputTokens: 384_000 },
+      { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions',
+        thinking: undefined, maxOutputTokens: 1536 },
     ].flatMap(call => ([{ ...call, stage: 'relevance' }, { ...call, stage: 'idle' }])));
     assert.deepEqual(replies.map(({ petId, messageId }) => ({ petId, messageId })).sort((a, b) => a.petId.localeCompare(b.petId)), [
       { petId: 'official', messageId: 'message-1' },

@@ -15,7 +15,7 @@ const idleSchema = z.object({ shouldDispatch: z.boolean(), reply: z.union([z.str
 // JSON mode cannot enforce our schema on the provider. An omitted optional
 // acknowledgement is equivalent to null, but the work decision is mandatory.
 const idleJsonModeSchema = idleSchema.partial({ reply: true });
-const runningSchema = z.object({ delivery: z.enum(['queue', 'interrupt']).nullable(), reply: z.string().nullable() }).strict();
+const runningSchema = z.object({ delivery: z.literal('queue').nullable(), reply: z.string().nullable() }).strict();
 const runningJsonModeSchema = runningSchema.partial({ reply: true });
 
 class StructuredFailure extends Error {
@@ -39,7 +39,7 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     if (cached) return cached;
     const endpoint = resolve();
     if (!endpoint.createChatModel) throw new Error('The configured model cannot create a Pet Head model.');
-    const model = endpoint.createChatModel({ maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
+    const model = endpoint.createChatModel({ maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
     const method = endpoint.structuredOutputMethod ?? 'jsonMode';
     return cached = { method, model };
   }

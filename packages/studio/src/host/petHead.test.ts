@@ -4,41 +4,56 @@ import { toJsonSchema, Validator } from '@langchain/core/utils/json_schema';
 import { PetDispatchRefusedError, buildModel } from 'pinpawo/host-runtime';
 import test from 'node:test';
 import { bindPetHeadChannel, createPetHead as createProductionPetHead, isHeadAddressed, readHeadWorkState, type HeadMessage,
-  type HeadReplyInput, type HeadRunningInput, type HeadRunningResult, type PetHeadChannel } from './petHead';
+  type HeadInput, type HeadReplyInput, type HeadRunningFacts, type HeadRunningResult, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
 import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
 type HeadOptions = Parameters<typeof createProductionPetHead>[0];
+type HeadRunReader = NonNullable<Parameters<ReturnType<typeof createProductionPetHead>['receive']>[2]>;
 type TestRunSample = Omit<NonNullable<Awaited<ReturnType<PetHeadChannel['readSession']>>>, 'status'>;
 type TestChannel = Omit<PetHeadChannel, 'readSession'> & Partial<Pick<PetHeadChannel, 'readSession'>>;
-function createPetHead({ channel, progress, ...options }: Omit<HeadOptions, 'channel' | 'execution'> & {
-  channel: TestChannel;
-  progress?: Pick<HeadOptions['execution'], 'readRun' | 'readResult'> & {
-    readSessionRun?: (id: string, signal: AbortSignal, isCurrent: () => boolean) => Promise<TestRunSample | undefined>;
-    compose: (input: HeadReplyInput, signal: AbortSignal) => Promise<string>;
-    decideRunning?: (input: HeadRunningInput, signal: AbortSignal) => Promise<HeadRunningResult>;
+type TestHeadOptions = Omit<HeadOptions, 'channel' | 'model'> &
+  Pick<HeadOptions['model'], 'assessRelevance' | 'decideNewWorkAndReply'> & {
+    channel: TestChannel;
+    progress?: {
+      readRun: HeadRunReader['read'];
+      readResult?: HeadRunReader['readResult'];
+      readSessionRun?: (id: string, signal: AbortSignal, isCurrent: () => boolean) => Promise<TestRunSample | undefined>;
+      compose: (input: HeadReplyInput, signal: AbortSignal) => Promise<string>;
+      decideRunning?: (input: HeadInput, facts: HeadRunningFacts, signal: AbortSignal) => Promise<HeadRunningResult>;
+    };
   };
-}) {
+
+function testHead({ channel, progress, assessRelevance, decideNewWorkAndReply, ...options }: TestHeadOptions) {
+  const reader = runReader(progress);
   return createProductionPetHead({ ...options,
+    observeRun: reader ? () => ({ ...reader, close: () => {} }) : undefined,
     channel: { ...channel, readSession: channel.readSession ?? (async (_pet, id, signal, isCurrent) => {
       if (!id) return { status: 'ready' };
       const sample = await progress?.readSessionRun?.(id, signal, isCurrent);
       return sample ? { ...sample, status: 'running' } : undefined;
     }) },
-    execution: {
-      readRun: progress?.readRun ?? (() => undefined),
-      readResult: progress?.readResult,
-      suggestDispatch: async (input, signal) => {
-        const { message, evidence, source } = input;
-        if (evidence.status === 'running' && source && progress?.decideRunning) {
-          return progress.decideRunning({ ...input, evidence, source }, signal);
-        }
-        return { delivery: null, reply: progress ? await progress.compose({ message, evidence, ...(source ? { source } : {}) }, signal) : null };
+    model: { assessRelevance, decideNewWorkAndReply,
+      suggestDispatchForExistingWork: async (input, facts, signal) => {
+        const source = 'source' in facts ? facts.source : undefined;
+        if ('source' in facts && progress?.decideRunning) return progress.decideRunning(input, facts, signal);
+        return { delivery: null, reply: progress
+          ? await progress.compose({ message: input.message, evidence: facts.evidence, ...(source ? { source } : {}) }, signal) : null };
       },
     },
   });
+}
+
+function runReader(progress: TestHeadOptions['progress']): HeadRunReader | undefined {
+  return progress && { read: progress.readRun, readResult: progress.readResult };
+}
+
+function createPetHead(options: TestHeadOptions) {
+  const head = testHead(options);
+  const reader = runReader(options.progress);
+  return (value: HeadMessage, signal: AbortSignal) => head.receive(value, signal, reader);
 }
 
 const idle = () => ({ kind: 'idle' as const });
@@ -67,7 +82,7 @@ function bus() {
 }
 /** Exercise the same ownership contract as an active instance: abort and unsubscribe together. */
 function activate(
-  options: Omit<Parameters<typeof createPetHead>[0], 'channel'> & { channel: Omit<TestChannel, 'subscribe'> },
+  options: Omit<TestHeadOptions, 'channel'> & { channel: Omit<TestChannel, 'subscribe'> },
   events: ReturnType<typeof bus>,
 ) {
   const channel: TestChannel = {
@@ -75,9 +90,9 @@ function activate(
     subscribe: handler => events.subscribe(options.pet.channelId, handler),
   };
   const controller = new AbortController();
-  const handle = createPetHead({ ...options, channel });
-  const unsubscribe = channel.subscribe(value => handle(value, controller.signal));
-  return () => { controller.abort(); unsubscribe(); };
+  const head = testHead({ ...options, channel });
+  head.start(controller.signal);
+  return () => { controller.abort(); head.close(); };
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -1095,8 +1110,8 @@ test('busy handling admits only the current selected work and publishes no accep
       progress: { readRun: () => run,
         readSessionRun: async () => { calls.push('session'); return { requestId: run.requestId, result: { body: 'Public A result' } }; },
         compose: async () => assert.fail('verified work reaches the handling model'),
-        decideRunning: async input => {
-          assert.deepEqual(input.evidence, { status: 'running', result: { body: 'Public A result' } });
+        decideRunning: async (_input, facts) => {
+          assert.deepEqual(facts.evidence, { status: 'running', result: { body: 'Public A result' } });
           calls.push('decision');
           if (scenario === 'stale') state = { kind: 'active', dispatch: { ...active, dispatchId: 'b' } };
           return { delivery, reply: scenario === 'replacement' ? 'I did not stop A or queue B.' : 'Reply' };
@@ -1131,9 +1146,9 @@ test('no addressed or related Head may act on an untrusted interrupt suggestion'
       }, assessRelevance: relevant, decideNewWorkAndReply: noIdle,
       progress: { readRun: () => run, readSessionRun: async () => ({ requestId: run.requestId }),
         compose: async () => assert.fail('each Pet has a verified live run'),
-        decideRunning: async input => {
+        decideRunning: async (input, facts) => {
           assert.equal(input.addressed, id === 'a');
-          assert.equal(input.source.messageId, source.messageId);
+          assert.equal(facts.source.messageId, source.messageId);
           suggested.push(`${input.message.messageId}-${id}`);
           // Inject an unsupported transport value after structural validation.
           return { delivery: 'interrupt', reply: 'Stopped the existing run.' } as unknown as HeadRunningResult;

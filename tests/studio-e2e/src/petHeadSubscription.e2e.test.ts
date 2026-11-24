@@ -5,6 +5,10 @@ import { bindPetHeadChannel, createPetHead, type HeadNewWorkResult, type HeadInp
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
+const idleModel = {
+  assessRelevance: async () => ({ relevant: true }),
+  suggestDispatchForExistingWork: async () => assert.fail('fixture stays idle'),
+};
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
@@ -46,10 +50,10 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
         assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
-        assessRelevance: async () => ({ relevant: true }), decideNewWorkAndReply });
-      return bound.subscribe(message => handle(message, signal));
+      const head = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), model: { ...idleModel, decideNewWorkAndReply } });
+      head.start(signal);
+      return head.close;
     },
   });
   const studio = prepared.studio;

@@ -2,7 +2,7 @@
 
 状态：Head 组装和单客户端复用已实现，待评审。不改变 Channel、Studio Dispatch 或 resident Pet Agent 的职责。
 
-首版（`a9b59036`）曾由 Studio Host 装配两个订阅，并分别懒建判断和写回复的模型客户端。现在每个在线 Pet 的 Head 自己管理两个订阅，共用一个懒加载的模型客户端。Host 只提供依赖，Pet 实例仍决定何时启动和停用 Head；不新增 Head 开关。
+首版（`a9b59036`）曾由 Studio Host 装配两个订阅，并分别懒建判断和写回复的模型客户端。现在每个在线 Pet 实例绑定一个 Head，由 Head 管理两个订阅和一个懒加载的模型客户端。Host 只提供依赖，Pet 实例决定何时启动和停用 Head；不新增 Head 开关。
 
 ## 1. 总体结构
 
@@ -12,7 +12,7 @@
 - **Head → Channel port → Studio Dispatch → resident Pet Agent。** Head 做判断；现有 Channel port 校验成员和原消息、绑定 Session、传递附件和去重键；Studio 和 resident Pet 负责接纳、排队、执行与审核。
 - **resident Pet Agent → Studio EventBus → 本实例的 Head。** Studio 已发布以 Pet 实例为 topic 的 `dispatch.*` 生命周期；Head 只观察本实例的执行状态，不因事件发消息。事件只用来绑定当前运行及已公开结果的消息 ID，不保留回复正文。查证经 Channel 授权后走既有只读 Session 入口。
 
-**Head 的职责边界。** Head 随 Pet 实例启动，自己订阅归属 Channel 的 Timeline 和本实例的派发生命周期；停用时取消进行中的判断或回复并释放两个订阅。Host 不为每条消息逐步转交。Channel 仍负责原消息的校验、回复和派发入口；Studio 仍负责接纳；Session 仍提供现有只读入口。
+**Head 的职责边界。** Head 随 Pet 实例启动，自己订阅归属 Channel 的 Timeline 和本实例的派发生命周期；停用时取消进行中的判断或回复并释放两个订阅。EventBus 仍保证每条订阅按序交付；Head 只读 resident 派发槽的快照，不持有或另建派发队列。Host 不为每条消息逐步转交。Channel 仍负责原消息的校验、回复和派发入口；Studio 仍负责接纳；Session 仍提供现有只读入口。
 
 ```mermaid
 flowchart LR
@@ -47,7 +47,7 @@ flowchart LR
 
 每个 Head 共用一个懒加载客户端。`pet_head_relevance` 只有相关性；就绪分支用 `pet_head_idle`，可核对的运行用 `pet_head_running`。JSON mode 给出格式示例，可省略无内容的 `reply` 并归一化为 `null`，但必须显式给出分支决定；原生结构化方法仍要求 `reply`。每个分支不补救、不重试、不切换格式。无法核对或不可操作时，`composeReply` 只写事实性正文或留空，不带调度权。
 
-可读取的运行以同一归属 Channel、绑定 Session、当前请求和较早的公开来源为边界。带明确引用的消息不能用另一工作的状态冒充它所问的工作。模型只接收查证后的状态、已有计划条目和如有的同一次运行已经发表的公开结果；不得用 Session 私有正文、原始工具调用、内部请求 ID 或其他运行的输出。计划项完成或已有公开结果都不能证明整个运行已完成。计划可能早于该次运行；不能由活动标签推断正在执行的步骤。
+模型的 Channel 输入与已查证的 Session 事实分开传递；运行标识和新鲜度复核留在 Head，纯回复分支只接收当前消息和可发布的事实。可读取的运行以同一归属 Channel、绑定 Session、当前请求和较早的公开来源为边界。带明确引用的消息不能用另一工作的状态冒充它所问的工作。模型只接收查证后的状态、已有计划条目和如有的同一次运行已经发表的公开结果；不得用 Session 私有正文、原始工具调用、内部请求 ID 或其他运行的输出。计划项完成或已有公开结果都不能证明整个运行已完成。计划可能早于该次运行；不能由活动标签推断正在执行的步骤。
 
 正常相关性和处理保留当前消息之前最近 10 条公开消息，窗口外的显式引用只补一次。写入状态回复前复核同一次运行；等待审核仅指查证时看到的状态。
 

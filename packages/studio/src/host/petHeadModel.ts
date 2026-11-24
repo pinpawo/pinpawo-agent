@@ -2,7 +2,7 @@ import { AIMessage } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
 import type { StudioModelEndpoint } from '../studioContract';
-import type { HeadExecutionInput, HeadNewWorkResult, HeadInput, HeadRelevance, HeadReplyInput, HeadRunningInput, HeadRunningResult } from './petHead';
+import type { HeadInput, HeadNewWorkResult, HeadRelevance, HeadReplyInput, HeadRunningFacts, HeadRunningResult, HeadSessionFacts } from './petHead';
 import { headNewWorkMessages, headRelevanceMessages, headReplyMessages, headRunningMessages } from './petHeadPrompts';
 
 export type HeadRelevanceDiagnostic = {
@@ -106,10 +106,10 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     }
   }
 
-  async function decideRunning(input: HeadRunningInput, signal: AbortSignal): Promise<HeadRunningResult> {
+  async function decideRunning(input: HeadInput, facts: HeadRunningFacts, signal: AbortSignal): Promise<HeadRunningResult> {
     try {
       const result = await runStructured('pet_head_running', method => method === 'jsonMode' ? runningJsonModeSchema : runningSchema,
-        { delivery: null, reply: null }, format => headRunningMessages(input, format), signal);
+        { delivery: null, reply: null }, format => headRunningMessages(input, facts, format), signal);
       return { delivery: result.delivery, reply: result.reply ?? null };
     } catch {
       throw new Error(signal.aborted ? 'Pet Head running decision aborted.' : 'Invalid Pet Head running decision.');
@@ -125,10 +125,9 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     return reply.text.trim();
   }
 
-  async function suggestDispatchForExistingWork(input: HeadExecutionInput, signal: AbortSignal): Promise<HeadRunningResult> {
-    const { evidence, source, message } = input;
-    if (evidence.status === 'running' && source) return decideRunning({ ...input, evidence, source }, signal);
-    return { delivery: null, reply: await composeReply({ message, evidence, source }, signal) };
+  async function suggestDispatchForExistingWork(input: HeadInput, facts: HeadSessionFacts, signal: AbortSignal): Promise<HeadRunningResult> {
+    if ('source' in facts) return decideRunning(input, facts, signal);
+    return { delivery: null, reply: await composeReply({ message: input.message, evidence: facts.evidence }, signal) };
   }
 
   return { assessRelevance, decideNewWorkAndReply, suggestDispatchForExistingWork, composeReply };

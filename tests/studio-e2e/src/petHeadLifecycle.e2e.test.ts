@@ -5,6 +5,10 @@ import { bindPetHeadChannel, createPetHead, type HeadNewWorkResult, type HeadInp
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
+const idleModel = {
+  assessRelevance: async () => ({ relevant: true }),
+  suggestDispatchForExistingWork: async () => assert.fail('fixture stays idle'),
+};
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -46,10 +50,10 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
         subscriptionTopics.push(filter.topic);
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
-        assessRelevance: async () => ({ relevant: true }), decideNewWorkAndReply });
-      return bound.subscribe(message => handle(message, signal));
+      const head = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), model: { ...idleModel, decideNewWorkAndReply } });
+      head.start(signal);
+      return head.close;
     },
   });
   const studio = prepared.studio;
@@ -97,12 +101,16 @@ test('a live Head consumes Agent output once and a human reply, but not an autom
     }),
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
-        assessRelevance: async () => ({ relevant: true }),
-        decideNewWorkAndReply: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { shouldDispatch: false, reply: null }; },
+      const head = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), model: { ...idleModel,
+          decideNewWorkAndReply: async ({ pet, message }) => {
+            if (pet.petId === 'observer') observed.push(message.body);
+            return { shouldDispatch: false, reply: null };
+          },
+        },
       });
-      return bound.subscribe(message => handle(message, signal));
+      head.start(signal);
+      return head.close;
     },
   });
   const studio = prepared.studio;
@@ -143,19 +151,20 @@ test('response and work both use Host admission without Head final text and pres
     }),
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
-        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, suggestDispatch: async () => assert.fail('fixture stays idle') },
-        assessRelevance: async () => ({ relevant: true }),
-        decideNewWorkAndReply: async (input) => {
-          const { message } = input;
-          observed.push(message.body);
-          if (message.body === 'inspect attachment') triggerInput = input;
-          if (message.body === 'short question') return { shouldDispatch: true, reply: null };
-          if (message.body === 'inspect attachment') return { shouldDispatch: true, reply: null };
-          return { shouldDispatch: false, reply: null };
+      const head = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), model: { ...idleModel,
+          decideNewWorkAndReply: async (input) => {
+            const { message } = input;
+            observed.push(message.body);
+            if (message.body === 'inspect attachment') triggerInput = input;
+            if (message.body === 'short question') return { shouldDispatch: true, reply: null };
+            if (message.body === 'inspect attachment') return { shouldDispatch: true, reply: null };
+            return { shouldDispatch: false, reply: null };
+          },
         },
       });
-      return bound.subscribe(message => handle(message, signal));
+      head.start(signal);
+      return head.close;
     },
   });
   const studio = prepared.studio;

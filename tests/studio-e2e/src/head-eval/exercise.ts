@@ -15,15 +15,14 @@ export async function exercise(test: EvalCase, model: Pick<ReturnType<typeof cre
       reply: async (_pet, _source, body, _signal, options) => { options?.assertCurrent?.(); result.hasReply ||= !!body.trim(); },
       dispatch: async (_pet, _source, _signal, options) => { result.delivery = options?.kind ?? 'idle-only'; } },
     readWorkState: () => test.state === 'busy' ? { kind: 'active', dispatch } : { kind: test.state },
-    assessRelevance: async (input, signal) => {
+    model: { ...model, assessRelevance: async (input, signal) => {
       const relevance = await model.assessRelevance(input, signal);
       result.relevant = isHeadAddressed(input) || relevance.relevant;
       return relevance;
-    },
-    decideNewWorkAndReply: model.decideNewWorkAndReply,
-    execution: { readRun: () => ({ invocationId: dispatch.dispatchId, sessionId: dispatch.sessionId, requestId: 'r-92a1' }),
-      suggestDispatch: model.suggestDispatchForExistingWork },
+    } },
   });
-  await head(test.input.message, signal);
+  await head.receive(test.input.message, signal, {
+    read: () => ({ invocationId: dispatch.dispatchId, sessionId: dispatch.sessionId, requestId: 'r-92a1' }),
+  });
   return result;
 }

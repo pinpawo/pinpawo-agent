@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prepareStudio } from '../../../packages/studio/src/createStudio';
-import { bindPetHeadChannel, createPetHead, type HeadIdleResult, type HeadInput } from '../../../packages/studio/src/host/petHead';
+import { bindPetHeadChannel, createPetHead, type HeadNewWorkResult, type HeadInput } from '../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -24,8 +24,8 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
   const subscriptionTopics: string[] = [];
   const observed: string[] = [];
   const dispatched: unknown[] = [];
-  const pending = new Map<string, ReturnType<typeof deferred<HeadIdleResult>>>();
-  const handleIdle = async ({ message }: HeadInput): Promise<HeadIdleResult> => {
+  const pending = new Map<string, ReturnType<typeof deferred<HeadNewWorkResult>>>();
+  const decideNewWorkAndReply = async ({ message }: HeadInput): Promise<HeadNewWorkResult> => {
     observed.push(message.body);
     const wait = pending.get(message.body);
     return wait ? wait.promise : { shouldDispatch: false, reply: null };
@@ -46,8 +46,9 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
         subscriptionTopics.push(filter.topic);
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
-        assessRelevance: async () => ({ relevant: true }), handleIdle });
+      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
+        assessRelevance: async () => ({ relevant: true }), decideNewWorkAndReply });
       return bound.subscribe(message => handle(message, signal));
     },
   });
@@ -57,7 +58,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     const { channel: { channelId } } = await channel.service.createChannel(human, { title: 'Lifecycle', pets: [] });
     await studio.pets.create({ petId: 'worker', definitionId: 'worker', name: 'Worker', channelId });
     const post = async (body: string) => channel.service.postMessage(human, channelId, { body });
-    const first = deferred<HeadIdleResult>();
+    const first = deferred<HeadNewWorkResult>();
     pending.set('held before close', first);
     await post('held before close');
     await waitFor(() => observed.includes('held before close'));
@@ -70,7 +71,7 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     await waitFor(() => observed.includes('after reopen'));
     assert.deepEqual(observed, ['held before close', 'after reopen']);
     assert.equal(dispatched.length, 0, 'a decision finishing after Close cannot dispatch');
-    const second = deferred<HeadIdleResult>();
+    const second = deferred<HeadNewWorkResult>();
     pending.set('held before remove', second);
     await post('held before remove');
     await waitFor(() => observed.includes('held before remove'));
@@ -96,9 +97,10 @@ test('a live Head consumes Agent output once and a human reply, but not an autom
     }),
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
+      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
         assessRelevance: async () => ({ relevant: true }),
-        handleIdle: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { shouldDispatch: false, reply: null }; },
+        decideNewWorkAndReply: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { shouldDispatch: false, reply: null }; },
       });
       return bound.subscribe(message => handle(message, signal));
     },
@@ -141,9 +143,10 @@ test('response and work both use Host admission without Head final text and pres
     }),
     subscribePetTimeline: ({ registration }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
+      const handle = createPetHead({ pet: registration, channel: { ...bound, readSession: async () => ({ status: 'ready' }) },
+        readWorkState: () => ({ kind: 'idle' }), execution: { readRun: () => undefined, decide: async () => assert.fail('fixture stays idle') },
         assessRelevance: async () => ({ relevant: true }),
-        handleIdle: async (input) => {
+        decideNewWorkAndReply: async (input) => {
           const { message } = input;
           observed.push(message.body);
           if (message.body === 'inspect attachment') triggerInput = input;

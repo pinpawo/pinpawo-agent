@@ -66,6 +66,8 @@ export type PetDispatchRequest = {
   scope?: PetInvocationScope;
   /** Trusted Host caller only: interrupt the target, or admit only if it can start without queueing. */
   delivery?: 'interrupt' | 'idle-only';
+  /** If supplied, interrupt only this exact in-flight dispatch and request. */
+  expectedInterrupt?: { dispatchId: string; requestId: string };
 };
 
 export type PetDispatchLifecycleState =
@@ -242,7 +244,7 @@ export class PetSessionReviewRefusedError extends Error {
   }
 }
 
-/** An idle-only dispatch could not claim the slot for its exact target. */
+/** A guarded dispatch could not claim its exact target. */
 export class PetDispatchRefusedError extends Error {
   constructor() {
     super('The resident dispatch slot or target session is not ready.');

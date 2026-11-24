@@ -2,8 +2,8 @@ import { AIMessage } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
 import type { StudioModelEndpoint } from '../studioContract';
-import type { HeadIdleResult, HeadInput, HeadRelevance, HeadReplyInput } from './petHead';
-import { headIdleMessages, headRelevanceMessages, headReplyMessages } from './petHeadPrompts';
+import type { HeadExecutionInput, HeadNewWorkResult, HeadInput, HeadRelevance, HeadReplyInput, HeadRunningInput, HeadRunningResult } from './petHead';
+import { headNewWorkMessages, headRelevanceMessages, headReplyMessages, headRunningMessages } from './petHeadPrompts';
 
 export type HeadRelevanceDiagnostic = {
   petId: string; channelId: string; messageId: string;
@@ -15,6 +15,8 @@ const idleSchema = z.object({ shouldDispatch: z.boolean(), reply: z.union([z.str
 // JSON mode cannot enforce our schema on the provider. An omitted optional
 // acknowledgement is equivalent to null, but the work decision is mandatory.
 const idleJsonModeSchema = idleSchema.partial({ reply: true });
+const runningSchema = z.object({ delivery: z.enum(['queue', 'interrupt']).nullable(), reply: z.string().nullable() }).strict();
+const runningJsonModeSchema = runningSchema.partial({ reply: true });
 
 class StructuredFailure extends Error {
   constructor(readonly code: string) { super('Invalid Pet Head model output.'); }
@@ -94,13 +96,23 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     }
   }
 
-  async function handleIdle(input: HeadInput, signal: AbortSignal): Promise<HeadIdleResult> {
+  async function decideNewWorkAndReply(input: HeadInput, signal: AbortSignal): Promise<HeadNewWorkResult> {
     try {
       const result = await runStructured('pet_head_idle', method => method === 'jsonMode' ? idleJsonModeSchema : idleSchema,
-        { shouldDispatch: false, reply: null }, format => headIdleMessages(input, format), signal);
+        { shouldDispatch: false, reply: null }, format => headNewWorkMessages(input, format), signal);
       return { shouldDispatch: result.shouldDispatch, reply: result.reply ?? null };
     } catch {
       throw new Error(signal.aborted ? 'Pet Head idle handler aborted.' : 'Invalid Pet Head idle result.');
+    }
+  }
+
+  async function decideRunning(input: HeadRunningInput, signal: AbortSignal): Promise<HeadRunningResult> {
+    try {
+      const result = await runStructured('pet_head_running', method => method === 'jsonMode' ? runningJsonModeSchema : runningSchema,
+        { delivery: null, reply: null }, format => headRunningMessages(input, format), signal);
+      return { delivery: result.delivery, reply: result.reply ?? null };
+    } catch {
+      throw new Error(signal.aborted ? 'Pet Head running decision aborted.' : 'Invalid Pet Head running decision.');
     }
   }
 
@@ -113,5 +125,11 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     return reply.text.trim();
   }
 
-  return { assessRelevance, handleIdle, composeReply };
+  async function decideExecutionHandling(input: HeadExecutionInput, signal: AbortSignal): Promise<HeadRunningResult> {
+    const { evidence, source, message } = input;
+    if (evidence.status === 'running' && source) return decideRunning({ ...input, evidence, source }, signal);
+    return { delivery: null, reply: await composeReply({ message, evidence, source }, signal) };
+  }
+
+  return { assessRelevance, decideNewWorkAndReply, decideExecutionHandling, composeReply };
 }

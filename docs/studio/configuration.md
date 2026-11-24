@@ -313,36 +313,30 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-Only a verified idle slot permits `handleIdle`, which returns
-`{ shouldDispatch: boolean, reply: string | null }`. JSON mode normalizes an
-omitted `reply` to `null`; it still requires the explicit boolean decision. The
-native structured methods require both properties. The Head interprets the canonical
-source's actual meaning: a direct answer, independent work, acknowledgement plus
-work, or neither. A bare mention does not by itself require work or a reply.
-Busy or unknown state uses factual composition or silence, never idle admission.
 
-After relevance, the Head uses the owning Pet's live queue slot and run event
-to identify an active ordinary dispatch. To check progress, it needs its
-same-Channel public source to predate the inquiry and match any explicit
-reference. After verifying membership and the exact Session binding, the
-Channel reads one snapshot. The reply model receives the sampled status
-(running or unavailable). From that same snapshot, the Head passes only each
-recorded plan item's status (completed, active or pending) and unchanged task
-description to the reply model. The Pet Agent must keep sensitive details out of
-plan descriptions; the Head does not redact or truncate them. An active item may
-be awaiting review; a completed item does not mean the whole task is complete.
-The recorded plan may predate this execution. Without a plan, the reply reports
-only the checked status. Attachment contents, raw Session messages, and tool
-output are not used as progress evidence. Reviewed work resuming outside the
-ordinary dispatch slot is not sampled. Asking for progress alone
-never dispatches. Busy or unknown state never admits an addition, even when it
-is independent work; it does not interrupt or change the active execution.
+For a relevant message, the Head checks the dispatch slot and the existing
+Channel-bound Session. If ready, `decideNewWorkAndReply` may produce a reply,
+request independent new work, both, or neither. In JSON mode an omitted `reply`
+is equivalent to `null`; the dispatch decision must still be explicit. A bare
+mention does not by itself require work or a reply.
 
-Reply and execution are independent: failure of publication does not suppress
-an independent dispatch, and failure of dispatch does not roll back a committed
-reply. Cancellation fences remaining actions. An acknowledgement does not
-prove admission or completion. The Head never executes a model tool;
-explicit scheduler, trigger and Host dispatch remain available.
+A verified ordinary running dispatch may receive a factual reply, ordinary queue
+admission for independent follow-up work, or guarded interrupt and replacement
+when the current human message explicitly requests it. A progress inquiry or
+additional guidance to the running Agent is not a request to start more work.
+An interrupt must still match the exact active dispatch and request at admission;
+it is never downgraded to a queue request. Only acceptance can be acknowledged,
+not a completed interruption or started replacement. The Stop and approval
+controls remain separate.
+
+The Head looks up only the matching owned Session. Model-visible evidence is
+limited to the checked status, recorded plan and any already-public result of
+that exact request. The plan may predate the running request; a completed plan
+item or a published result does not prove the execution completed. The Head
+never uses private Session dialogue, tool output or raw identifiers as evidence.
+If it cannot verify an actionable state, it can reply factually or stay silent;
+it does not dispatch or bypass review. Explicit scheduler, trigger and Host
+dispatch remain available.
 
 Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
 internal Head-write option that always checks active membership and the actual

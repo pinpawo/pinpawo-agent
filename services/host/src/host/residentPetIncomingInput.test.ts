@@ -232,6 +232,105 @@ test('ordinary same-session queued input waits through delegation completion and
   } finally { delivered.resolve(); await h.close(); }
 });
 
+test('guarded interrupt refuses a replacement run in the same Session before admission', async () => {
+  const aStarted = deferred(), bStarted = deferred(), releaseA = deferred(), releaseB = deferred();
+  const checking = deferred(), releaseCheck = deferred();
+  let holdRead = false;
+  let aRequest = '';
+  let bSignal!: AbortSignal;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    if (turn.request.message === 'A') {
+      aRequest = turn.request.requestId;
+      aStarted.resolve();
+      await releaseA.promise;
+    } else if (turn.request.message === 'B') {
+      bSignal = turn.setup.input.signal!;
+      bStarted.resolve();
+      await releaseB.promise;
+      bSignal.throwIfAborted();
+    }
+    return reply(turn, turn.request.message);
+  }, { beforeReadState: async () => {
+    if (!holdRead) return;
+    holdRead = false;
+    checking.resolve();
+    await releaseCheck.promise;
+  } });
+  try {
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'A', request: 'A' });
+    await aStarted.promise;
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'B', request: 'B' });
+    holdRead = true;
+    const stale = h.resident.dispatch.dispatch({
+      ...target, dispatchId: 'stale', request: 'replace A', delivery: 'interrupt',
+      expectedInterrupt: { dispatchId: 'A', requestId: aRequest },
+    });
+    const refused = assert.rejects(stale, PetDispatchRefusedError);
+    await checking.promise;
+    releaseA.resolve();
+    await bStarted.promise;
+    releaseCheck.resolve();
+    await refused;
+    assert.equal(bSignal.aborted, false);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.ok(h.events.every(event => event.dispatchId !== 'stale'));
+    const run = h.events.find(event => event.dispatchId === 'B' && event.state === 'running');
+    assert.ok(run?.requestId);
+    const next = {
+      ...target, dispatchId: 'next', request: 'replace B', delivery: 'interrupt' as const,
+      expectedInterrupt: { dispatchId: 'B', requestId: run.requestId },
+    };
+    const session = h.context.sessions.getSession('worker', sessionId);
+    assert.ok(session);
+    h.reviews.set(session.threadId, buildReviewSpec({ id: 'approval',
+      view: { kind: 'plain', body: 'Approve this operation?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    await assert.rejects(h.resident.dispatch.dispatch(next), PetDispatchRefusedError);
+    assert.equal(bSignal.aborted, false);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.ok(h.events.every(event => event.dispatchId !== 'next'));
+    h.reviews.delete(session.threadId);
+    // A fresh request for B must still use the real interrupt delivery path.
+    await h.resident.dispatch.dispatch(next);
+    assert.equal(bSignal.aborted, true);
+    await assert.rejects(h.resident.dispatch.dispatch({ ...next, dispatchId: 'duplicate' }), PetDispatchRefusedError);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 1);
+    assert.ok(h.events.every(event => event.dispatchId !== 'duplicate'));
+    releaseB.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
+    assert.deepEqual(h.events.filter(event => event.state === 'interrupted').map(event => event.dispatchId), ['B']);
+  } finally { releaseA.resolve(); releaseB.resolve(); releaseCheck.resolve(); await h.close(); }
+});
+
+test('guarded interrupt does not enqueue during completed-run summary refresh', async () => {
+  const summarizing = deferred(), release = deferred();
+  const h = await fixture(async turn => reply(turn, 'done'));
+  const original = h.context.sessions.refreshSessionSummary.bind(h.context.sessions);
+  h.context.sessions.refreshSessionSummary = async (...args) => {
+    summarizing.resolve();
+    await release.promise;
+    return original(...args);
+  };
+  try {
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'A', request: 'A' });
+    await summarizing.promise;
+    const running = h.events.find(event => event.dispatchId === 'A' && event.state === 'running');
+    assert.ok(running?.requestId);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().activeDispatch?.dispatchId, 'A');
+    assert.equal(h.context.activeRuns.read(sessionId)?.requestId, running.requestId);
+    await assert.rejects(h.resident.dispatch.dispatch({
+      ...target, dispatchId: 'replacement', request: 'replace A', delivery: 'interrupt',
+      expectedInterrupt: { dispatchId: 'A', requestId: running.requestId },
+    }), PetDispatchRefusedError);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.ok(h.events.every(event => event.dispatchId !== 'replacement'));
+    release.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'A' && event.state === 'completed'));
+  } finally { release.resolve(); await h.close(); }
+});
+
 test('immediate input during setup interrupts the admitted request without cancelling its successor', async () => {
   const preparing = deferred(), releaseSetup = deferred();
   let blockSetup = false;

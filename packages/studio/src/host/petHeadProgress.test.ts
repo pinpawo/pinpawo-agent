@@ -29,11 +29,15 @@ test('Head observes only its instance topic and exact scope, with no payload ret
   await listener?.(event('running'));
   assert.deepEqual(observation.read(active), run);
   assert.equal(observation.read({ ...active, sessionId: 'other' }), undefined);
+  await listener?.(event('message', { requestId: 'prior', message: { type: 'message.completed', messageId: 'old-result' } }));
+  assert.equal(observation.readResult(active), undefined);
   await listener?.(event('message', { message: { type: 'message.completed', messageId: 'public', text: 'do not retain result text' } }));
+  assert.deepEqual(observation.readResult(active), { messageId: 'public', requestId: run.requestId });
   await listener?.(event('completed', { requestId: 'old' }));
   assert.deepEqual(observation.read(active), run);
   await listener?.(event('completed', { reply: 'never republish' }));
   assert.equal(observation.read(active), undefined);
+  assert.equal(observation.readResult(active), undefined);
   await listener?.(event('running'));
   observation.close();
   assert.equal(listener, undefined);
@@ -43,18 +47,18 @@ test('Head observes only its instance topic and exact scope, with no payload ret
 test('one exact Session status sample yields only running', async () => {
   let reads = 0;
   const result = await readHeadProgress({ run, signal, isCurrent: () => true,
-    readSessionRun: async id => { reads++; assert.equal(id, run.sessionId); return { requestId: run.requestId }; } });
+    read: async () => { reads++; return { status: 'running', requestId: run.requestId }; } });
   assert.equal(reads, 1);
   assert.deepEqual(result, { status: 'running' });
 });
 
 test('the recorded Session plan remains separate from verified live request status', async () => {
   const recordedPlan = { items: [{ id: 'old', capability: 'check', task: 'Earlier plan objective', status: 'pending' as const }] };
-  const readSessionRun = async () => ({ requestId: run.requestId, recordedPlan });
-  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, readSessionRun }),
+  const read = async () => ({ status: 'running' as const, requestId: run.requestId, recordedPlan });
+  assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true, read }),
     { status: 'running', recordedPlan });
   assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => true,
-    readSessionRun: async () => ({ requestId: 'older-attempt', recordedPlan }) }), { status: 'unavailable' });
+    read: async () => ({ status: 'running', requestId: 'older-attempt', recordedPlan }) }), { status: 'unavailable' });
 });
 
 test('no active status, changed run, abort and read failure yield unavailable without another sample', async () => {
@@ -63,17 +67,17 @@ test('no active status, changed run, abort and read failure yield unavailable wi
     let current = true;
     let reads = 0;
     const result = await readHeadProgress({ run, signal: controller.signal, isCurrent: () => current,
-      readSessionRun: async () => {
+      read: async () => {
         reads++;
         if (failure === 'error') throw new Error('private checkpoint path');
         if (failure === 'abort') controller.abort();
         if (failure === 'lost') current = false;
         if (failure === 'not-running') return undefined;
-        return { requestId: failure === 'different-run' ? 'run-b' : run.requestId, recordedPlan: { items: [{ id: 'other', capability: 'work', task: 'Must not leak', status: 'pending' }] } };
+        return { status: 'running', requestId: failure === 'different-run' ? 'run-b' : run.requestId, recordedPlan: { items: [{ id: 'other', capability: 'work', task: 'Must not leak', status: 'pending' }] } };
       } });
     assert.deepEqual(result, { status: 'unavailable' }, failure);
     assert.equal(reads, 1);
   }
   assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => false,
-    readSessionRun: async () => assert.fail('no Session read for stale work') }), { status: 'unavailable' });
+    read: async () => assert.fail('no Session read for stale work') }), { status: 'unavailable' });
 });

@@ -10,6 +10,7 @@ const pet = {
 const dependencies = {
   pet,
   channel: {
+    readSession: async () => { throw new Error('unexpected Session read'); },
     readContext: async () => { throw new Error('unexpected context read'); },
     reply: async () => { throw new Error('unexpected reply'); },
     dispatch: async () => { throw new Error('unexpected dispatch'); },

@@ -1,4 +1,4 @@
-import { readPetInvocationContext, type PetInvocationScope } from 'pinpawo/host-runtime';
+import { readPetInvocationContext, type PetDispatchRequest, type PetInvocationScope } from 'pinpawo/host-runtime';
 import { isJsonObject, isJsonValue, type Deliverable, type JsonObject } from '@pinpawo/agent-contracts';
 
 export type StudioDispatchRequest = {
@@ -22,10 +22,12 @@ export type StudioDispatchRequest = {
   origin?: PetInvocationScope;
   /** In-process only: interrupt this scoped session or refuse if it cannot start without queueing. */
   delivery?: 'interrupt' | 'idle-only';
+  /** In-process only: do not accept this interrupt if the observed run has changed. */
+  expectedInterrupt?: PetDispatchRequest['expectedInterrupt'];
 };
 
 /** The public wire form: Host-trusted fields are deliberately absent. */
-export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'origin' | 'delivery' | 'attachments' | 'signal'>;
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope' | 'origin' | 'delivery' | 'expectedInterrupt' | 'attachments' | 'signal'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {

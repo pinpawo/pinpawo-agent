@@ -11,7 +11,7 @@ import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet
 import { buildHostRuntimeConfig, FileSaver } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../../packages/studio/src/host/studioConfig';
-import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
+import type { HeadInput } from '../../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../../services/host/src/testing/modelProfiles';
 import { createTestHostToolkitInventory } from '../../../../services/host/src/testing/toolkitInventory';
@@ -33,8 +33,8 @@ async function until(predicate: () => boolean | Promise<boolean>) {
 }
 async function fixture() {
   const errors: unknown[] = [];
-  const heads: Array<{ petId: string; messageId: string; action: string; addressed?: boolean }> = [];
-  const composed: string[] = [];
+  const heads: Array<{ petId: string; messageId: string; action: string; stage: ReturnType<typeof headFixtureStage>; addressed?: boolean }> = [];
+  const runningDecisions: string[] = [];
   let sequence = 0, held = false, aborted = false, released = false, queuedExecutions = 0, parentResumes = 0;
   let release = () => {};
   const server = createServer((request, response) => {
@@ -45,14 +45,12 @@ async function fixture() {
         assert.equal(request.url, '/v1/chat/completions');
         const input = JSON.parse(raw) as WireRequest;
         const names = input.tools?.map(t => t.function.name) ?? [];
-        let head: HeadInput | undefined;
-        let composition: { message: HeadMessage; evidence: { status: string } } | undefined;
+        let head: (HeadInput & { execution?: { status: string; source?: { body: string }; mayInterrupt: boolean } }) | undefined;
         for (const message of input.messages) {
           if (message.role !== 'user') continue;
           try {
             const value = JSON.parse(text(message.content));
             if (value.pet?.petId && value.message?.messageId && value.context) head = value;
-            else if (value.message?.messageId && value.evidence?.status) composition = value;
           } catch { /* Executor. */ }
         }
         let content = '';
@@ -67,17 +65,22 @@ async function fixture() {
             : petId === 'origin' && source === 'EMIT_QUEUED_PEER' ? 'SEED_QUEUED'
             : petId === 'target' && (source === 'ACTIVE_HUMAN' || source === 'ACTIVE_PEER') ? 'ACTIVE'
             : petId === 'target' && source === queuedRequest ? 'QUEUED' : '';
-          const action = route ? 'dispatch' : 'ignore';
           const stage = headFixtureStage(input);
-          if (stage === 'idle' || !route) heads.push({ petId, messageId: head.message.messageId, action, addressed: head.addressed });
-          content = JSON.stringify(stage === 'relevance' ? { relevant: !!route } : { shouldDispatch: !!route, reply: null });
-        } else if (composition) {
-          assert.deepEqual(names, [], 'reply composition cannot expose scheduling or execution tools');
-          assert.equal(input.response_format, undefined);
-          assert.equal(composition.message.body, queuedRequest);
-          assert.equal(composition.evidence.status, 'running');
-          composed.push(composition.message.messageId);
-          // Independent B does not ask about A; leave the public reply empty.
+          const action = route ? (stage === 'running' ? 'queue' : 'dispatch') : 'ignore';
+          if (stage !== 'relevance' || head.addressed || !route) {
+            heads.push({ petId, messageId: head.message.messageId, action, stage, addressed: head.addressed });
+          }
+          if (stage === 'running') {
+            assert.equal(petId, 'target');
+            assert.equal(source, queuedRequest);
+            assert.equal(head.execution?.status, 'running');
+            assert.match(head.execution?.source?.body ?? '', /^ACTIVE_(HUMAN|PEER)$/);
+            assert.equal(head.execution?.mayInterrupt, head.message.author.kind === 'human');
+            runningDecisions.push(head.message.messageId);
+          }
+          content = JSON.stringify(stage === 'relevance' ? { relevant: !!route }
+            : stage === 'running' ? { delivery: route ? 'queue' : null, reply: null }
+            : { shouldDispatch: !!route, reply: null });
         } else {
           const source = readChannelEnvelope(input.messages, text)?.message.body;
           const marker = source === 'EMIT_ACTIVE_PEER' ? 'SEED_ACTIVE' : source === 'EMIT_QUEUED_PEER' ? 'SEED_QUEUED'
@@ -137,13 +140,13 @@ async function fixture() {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, heads, composed, errors,
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, heads, runningDecisions, errors,
     state: () => ({ held, aborted, queuedExecutions, parentResumes }), release: () => release(),
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
 for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor of ['human', 'peer'] as const) {
-  test(`busy ${queuedAuthor} mention preserves active ${activeAuthor} subject without admitting more work`, { timeout: 120_000 }, async () => {
+  test(`busy ${queuedAuthor} mention queues behind the active ${activeAuthor} subject without interrupting it`, { timeout: 120_000 }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'studio-queued-peer-'));
     const model = await fixture();
     const channel = createChannelPlugin({ httpRoute: false });
@@ -180,36 +183,39 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       const original = (await messages()).find(m => m.body === (activeAuthor === 'human' ? 'ACTIVE_HUMAN' : 'ACTIVE_PEER'))!;
       assert.deepEqual(sampled, [], 'idle admission does not read Session contents');
       await channel.service.postMessage(human, channelId, { body: queuedAuthor === 'human' ? queuedRequest : 'EMIT_QUEUED_PEER', mentions: [] });
-      await until(() => model.composed.length === 1);
+      await until(() => model.runningDecisions.length === 1 && target.resident.dispatch.getQueueSnapshot().queuedDispatches === 1);
       const queued = (await messages()).find(m => m.body === queuedRequest)!;
       assert.ok(queued);
       assert.equal(queued.author.kind, queuedAuthor === 'human' ? 'human' : 'pet');
       assert.deepEqual(queued.mentions.map(mention => mention.participantId), ['pet:target']);
-      assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId), [], 'canonical mention establishes relevance without asking the idle admission model');
+      assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId), [
+        { petId: 'target', messageId: queued.messageId, action: 'queue', stage: 'running', addressed: true },
+      ], 'canonical mention skips relevance, then chooses queue in the running branch');
       assert.deepEqual(sampled, [binding!.sessionId], 'busy work samples only the target’s exact Session once');
-      assert.deepEqual(model.composed, [queued.messageId], 'text-only follow-up has the same path for human and peer mentions');
+      assert.deepEqual(model.runningDecisions, [queued.messageId]);
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().queuedExecutions, 0);
       assert.equal(lifecycle.filter(e => e.state === 'running').length, 1);
+      assert.equal(lifecycle.filter(e => e.state === 'queued').length, 2);
       model.release();
-      await until(() => lifecycle.filter(e => e.state === 'completed').length === 1);
-      await until(async () => (await messages()).filter(m => m.author.id === 'target').length === 1);
+      await until(() => lifecycle.filter(e => e.state === 'completed').length === 2);
+      await until(async () => (await messages()).filter(m => m.author.id === 'target').length === 2);
       const final = await messages();
       const targetReplies = final.filter(m => m.author.kind === 'pet' && m.author.id === 'target');
-      assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE']);
+      assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE', 'RESULT_QUEUED']);
       await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'ignore')));
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().parentResumes, 1, 'Original parent receives its delegated result without a second execution');
-      assert.equal(model.state().queuedExecutions, 0, 'busy follow-up is never admitted');
+      assert.equal(model.state().queuedExecutions, 1, 'busy follow-up executes once after the original work');
       assert.equal(lifecycle.some(e => ['failed', 'interrupted', 'cancelled'].includes(e.state)), false);
-      assert.equal(lifecycle.filter(e => e.state === 'message').length, 1);
+      assert.equal(lifecycle.filter(e => e.state === 'message').length, 2);
       assert.ok(lifecycle.filter(e => e.state === 'completed').every(e => e.sessionId === binding!.sessionId));
       assert.equal((await channel.service.getSession(channelId, 'target'))?.sessionId, binding!.sessionId);
       const snapshot = await built.residentPets.get('target')!.sessions.snapshot(binding!.sessionId);
       assert.equal(snapshot.session.activeRun, null);
       const userMessages = snapshot.session.timeline.filter(e => e.type === 'message' && e.role === 'user');
       assert.ok(userMessages.some(e => e.type === 'message' && e.text.includes(original.messageId)));
-      assert.equal(userMessages.some(e => e.type === 'message' && e.text.includes(queued.messageId)), false, 'busy follow-up does not enter the execution Session');
+      assert.equal(userMessages.some(e => e.type === 'message' && e.text.includes(queued.messageId)), true, 'queued work receives the original canonical message in the same Session');
       assert.deepEqual(model.errors, []);
     } finally {
       model.release();

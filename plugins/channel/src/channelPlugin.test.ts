@@ -11,6 +11,9 @@ test('messages retain references and mentions without dispatching a Pet', async 
   const dispatched: StudioDispatchRequest[] = [];
   const notified: StudioEventInput[] = [];
   const live: ReturnType<StudioPluginContext['listPets']> = [];
+  let activeRun: { requestId: string; state: 'running' } | null = null;
+  let pendingInterrupt: { interruptId: string } | null = null;
+  let snapshots = 0;
   const removeInstance = async (petId: string) => { const index = live.findIndex(pet => pet.petId === petId); if (index >= 0) live.splice(index, 1); };
   const plugin = createChannelPlugin({ httpRoute: false });
   const context = {
@@ -19,6 +22,12 @@ test('messages retain references and mentions without dispatching a Pet', async 
       return { petId: request.petId, invocationId: `dispatch-${dispatched.length}` };
     },
     allocateSessionId: () => 'writer-session',
+    petSessions: {
+      snapshot: async (_petId: string, sessionId: string) => {
+        snapshots++;
+        return { session: { sessionId, activeRun, pendingInterrupt, timeline: [{ type: 'operation', raw: 'private' }] } };
+      },
+    },
     registerContextProvider: () => () => undefined,
     notify: (event: StudioEventInput) => { notified.push(event); },
     subscribe: () => () => undefined,
@@ -79,6 +88,12 @@ test('messages retain references and mentions without dispatching a Pet', async 
   await assert.rejects(plugin.head.dispatch(channelId, 'writer', otherMessage.messageId, signal), /does not exist in this Channel/);
   await assert.rejects(plugin.head.dispatch(other, 'writer', otherMessage.messageId, signal), ChannelAccessError);
   assert.equal(dispatched.length, 0);
+  assert.deepEqual(await plugin.head.readSession(channelId, 'writer', undefined, signal, () => true), { status: 'ready' });
+  assert.equal(snapshots, 0, 'readiness must not create a Session');
+  await assert.rejects(plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal, {
+    kind: 'queue', sessionId: 'writer-session',
+  }), /registered Channel Session/);
+  assert.equal(await plugin.service.getSession(channelId, 'writer'), undefined, 'queue cannot reserve a replacement Session');
   await plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal);
   assert.equal(dispatched.length, 1);
   const request = dispatched[0]!;
@@ -93,6 +108,36 @@ test('messages retain references and mentions without dispatching a Pet', async 
     type: 'channel_message', version: 1, message: mentioned.message, referencedMessage: original.message,
   });
   assert.deepEqual(request.attachments, [current[0], ...original.message.deliverables!]);
+
+  pendingInterrupt = { interruptId: 'held' };
+  assert.deepEqual(await plugin.head.readSession(channelId, 'writer', undefined, signal, () => true), { status: 'waiting' });
+  pendingInterrupt = null;
+  activeRun = { requestId: 'run-a', state: 'running' };
+  const result = { messageId: 'public-result', requestId: 'run-a' };
+  const read = (requestId: string) => plugin.head.readSession(channelId, 'writer', 'writer-session', signal, () => true, {
+    ...result, requestId,
+  });
+  assert.deepEqual(await read('run-a'), { status: 'running', requestId: 'run-a' }, 'no published result yet');
+  const publication = await plugin.service.postMessage({ kind: 'pet', id: 'writer' }, channelId,
+    { body: 'Published result.' }, { externalRef: result.messageId });
+  assert.deepEqual(await read('older-run'), { status: 'running', requestId: 'run-a' }, 'an older request cannot supply current evidence');
+  assert.deepEqual(await read('run-a'), { status: 'running', requestId: 'run-a', result: { body: 'Published result.' } });
+  await assert.rejects(plugin.head.dispatch(channelId, 'writer', publication.message.messageId, signal, {
+    kind: 'interrupt', expectedRun: { invocationId: 'dispatch-a', requestId: 'run-a', sessionId: 'writer-session' },
+  }), /Only a human Channel message/);
+  await assert.rejects(plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal, {
+    kind: 'queue', sessionId: 'other-session',
+  }), /registered Channel Session/);
+  await plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal, {
+    kind: 'queue', sessionId: 'writer-session',
+  });
+  assert.equal(dispatched[1]!.delivery, undefined, 'queue uses existing ordinary admission');
+  await plugin.head.dispatch(channelId, 'writer', mentioned.message.messageId, signal, {
+    kind: 'interrupt', expectedRun: { invocationId: 'dispatch-a', requestId: 'run-a', sessionId: 'writer-session' },
+  });
+  assert.equal(dispatched[2]!.delivery, 'interrupt');
+  assert.deepEqual((dispatched[2] as StudioDispatchRequest & { expectedInterrupt?: unknown }).expectedInterrupt,
+    { dispatchId: 'dispatch-a', requestId: 'run-a' });
 });
 
 test('a Pet works in a Channel only while its run there is running, and context reads say so', async (t) => {

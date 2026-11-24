@@ -3,11 +3,43 @@ import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import { toJsonSchema, Validator } from '@langchain/core/utils/json_schema';
 import { PetDispatchRefusedError, buildModel } from 'pinpawo/host-runtime';
 import test from 'node:test';
-import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadWorkState, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createPetHead as createProductionPetHead, isHeadAddressed, readHeadWorkState, type HeadMessage,
+  type HeadReplyInput, type HeadRunningInput, type HeadRunningResult, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
 import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
+
+type HeadOptions = Parameters<typeof createProductionPetHead>[0];
+type TestRunSample = Omit<NonNullable<Awaited<ReturnType<PetHeadChannel['readSession']>>>, 'status'>;
+type TestChannel = Omit<PetHeadChannel, 'readSession'> & Partial<Pick<PetHeadChannel, 'readSession'>>;
+function createPetHead({ channel, progress, ...options }: Omit<HeadOptions, 'channel' | 'execution'> & {
+  channel: TestChannel;
+  progress?: Pick<HeadOptions['execution'], 'readRun' | 'readResult'> & {
+    readSessionRun?: (id: string, signal: AbortSignal, isCurrent: () => boolean) => Promise<TestRunSample | undefined>;
+    compose: (input: HeadReplyInput, signal: AbortSignal) => Promise<string>;
+    decideRunning?: (input: HeadRunningInput, signal: AbortSignal) => Promise<HeadRunningResult>;
+  };
+}) {
+  return createProductionPetHead({ ...options,
+    channel: { ...channel, readSession: channel.readSession ?? (async (_pet, id, signal, isCurrent) => {
+      if (!id) return { status: 'ready' };
+      const sample = await progress?.readSessionRun?.(id, signal, isCurrent);
+      return sample ? { ...sample, status: 'running' } : undefined;
+    }) },
+    execution: {
+      readRun: progress?.readRun ?? (() => undefined),
+      readResult: progress?.readResult,
+      decide: async (input, signal) => {
+        const { message, evidence, source } = input;
+        if (evidence.status === 'running' && source && progress?.decideRunning) {
+          return progress.decideRunning({ ...input, evidence, source }, signal);
+        }
+        return { delivery: null, reply: progress ? await progress.compose({ message, evidence, ...(source ? { source } : {}) }, signal) : null };
+      },
+    },
+  });
+}
 
 const idle = () => ({ kind: 'idle' as const });
 const relevant = async () => ({ relevant: true });
@@ -35,10 +67,10 @@ function bus() {
 }
 /** Exercise the same ownership contract as an active instance: abort and unsubscribe together. */
 function activate(
-  options: Omit<Parameters<typeof createPetHead>[0], 'channel'> & { channel: Omit<PetHeadChannel, 'subscribe'> },
+  options: Omit<Parameters<typeof createPetHead>[0], 'channel'> & { channel: Omit<TestChannel, 'subscribe'> },
   events: ReturnType<typeof bus>,
 ) {
-  const channel: PetHeadChannel = {
+  const channel: TestChannel = {
     ...options.channel,
     subscribe: handler => events.subscribe(options.pet.channelId, handler),
   };
@@ -58,6 +90,7 @@ test('the bound Channel exposes only its committed live messages and forwards op
   let filter: StudioEventSubscriptionFilter | undefined;
   const calls: unknown[][] = [];
   const channel = bindPetHeadChannel('team', {
+    readSession: async () => ({ status: 'ready' }),
     readContext: async (...args) => { calls.push(['read', ...args]); return { messages: [] }; },
     reply: async (...args) => { calls.push(['reply', ...args]); },
     dispatch: async (...args) => { calls.push(['dispatch', ...args]); },
@@ -98,7 +131,7 @@ test('only live messages in the owned Channel reach each Head; reactivation neve
   };
   const make = (petId: string, channelId = 'team') => activate({
     pet: pet(petId, channelId), channel,
-    readWorkState: idle, handleIdle: noIdle,
+    readWorkState: idle, decideNewWorkAndReply: noIdle,
     assessRelevance: async input => { seen.push({ petId: input.pet.petId, message: input.message }); return { relevant: false }; },
   }, events);
   await events.publish(message('1')); // no instances are subscribed
@@ -121,7 +154,7 @@ test('a Head ignores its own messages and messages in other Channels', async () 
   const seen: unknown[] = [];
   const unsubscribe = activate({ pet: pet('a'),
     channel: { readContext: async () => ({ messages: [] }), reply: async () => {}, dispatch: async () => {} },
-    readWorkState: idle, handleIdle: noIdle,
+    readWorkState: idle, decideNewWorkAndReply: noIdle,
     assessRelevance: async input => { seen.push(input.message); return { relevant: false }; },
   }, events);
   await events.publish(message('1', { author: { kind: 'pet', id: 'a' } }));
@@ -138,7 +171,7 @@ test('verified idle can choose publication and dispatch independently with exact
     const handler = createPetHead({ pet: pet('a'),
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async (...args) => { calls.push(['reply', ...args]); }, dispatch: async (...args) => { calls.push(['dispatch', ...args]); } },
-      readWorkState: idle, assessRelevance: relevant, handleIdle: async () => ({ shouldDispatch, reply }),
+      readWorkState: idle, assessRelevance: relevant, decideNewWorkAndReply: async () => ({ shouldDispatch, reply }),
     });
     await handler(source, signal);
     assert.equal(calls.filter(call => call[0] === 'reply').length, reply ? 1 : 0);
@@ -156,7 +189,7 @@ test('publication and admission failures are independent and do not leak provide
         reply: async () => { calls.push('reply'); if (fail !== 'dispatch') throw new Error('private reply detail'); },
         dispatch: async () => { calls.push('dispatch'); if (fail !== 'reply') throw new Error('private dispatch detail'); } },
       readWorkState: idle, assessRelevance: relevant,
-      handleIdle: async () => ({ shouldDispatch: true, reply: 'I can look into this.' }),
+      decideNewWorkAndReply: async () => ({ shouldDispatch: true, reply: 'I can look into this.' }),
     });
     await assert.rejects(handler(message('1'), new AbortController().signal), error => {
       assert.equal((error as Error).message, 'Pet Head processing failed: ' + (fail === 'both' ? 'reply, dispatch' : fail) + '.'); return true;
@@ -173,7 +206,7 @@ test('deactivation cancels an in-flight decision and never publishes or dispatch
   const handler = createPetHead({ pet: pet('a'),
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
       reply: async () => { effects.push('reply'); }, dispatch: async () => { effects.push('dispatch'); } },
-    readWorkState: idle, handleIdle: noIdle,
+    readWorkState: idle, decideNewWorkAndReply: noIdle,
     assessRelevance: async () => { started.resolve(); return pending.promise; },
   });
   const run = handler(message('1'), controller.signal);
@@ -190,7 +223,7 @@ test('cancellation during publication prevents execution admission', async () =>
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
       reply: async () => { controller.abort(); }, dispatch: async () => { admissions++; } },
     readWorkState: idle, assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: 'Acknowledged' }),
+    decideNewWorkAndReply: async () => ({ shouldDispatch: true, reply: 'Acknowledged' }),
   });
   await assert.rejects(handler(message('1'), controller.signal), /aborted/);
   assert.equal(admissions, 0);
@@ -203,7 +236,7 @@ test('cancellation while context is loading never starts a decision', async () =
   let decisions = 0;
   const unsubscribe = activate({ pet: pet('a'),
     channel: { readContext: async () => { started.resolve(); return context.promise; }, reply: async () => {}, dispatch: async () => {} },
-    readWorkState: idle, handleIdle: noIdle,
+    readWorkState: idle, decideNewWorkAndReply: noIdle,
     assessRelevance: async () => { decisions++; return { relevant: false }; },
   }, events);
   const pending = events.publish(message('1'));
@@ -294,7 +327,7 @@ function mockEndpoint(outputs: unknown[], method?: StudioModelEndpoint['structur
 const contracts = [
   { name: relevanceName, invoke: 'assessRelevance', value: { relevant: true },
     invalid: [{}, { relevant: 42 }, { relevant: true, shouldDispatch: true }] },
-  { name: idleName, invoke: 'handleIdle', value: { shouldDispatch: true, reply: null },
+  { name: idleName, invoke: 'decideNewWorkAndReply', value: { shouldDispatch: true, reply: null },
     invalid: [{ reply: null }, { shouldDispatch: 'true', reply: null }, { shouldDispatch: true, reply: 42 },
       { shouldDispatch: true, reply: null, intent: 'rewritten work' }] },
 ] as const;
@@ -348,7 +381,7 @@ test('failure at either model stage produces no reply or admission', async () =>
         reply: async () => assert.fail('invalid output cannot publish'),
         dispatch: async () => assert.fail('invalid output cannot admit work'),
       },
-      assessRelevance: model.assessRelevance, handleIdle: model.handleIdle,
+      assessRelevance: model.assessRelevance, decideNewWorkAndReply: model.decideNewWorkAndReply,
     });
     await assert.rejects(handle(message('2'), new AbortController().signal), /Invalid Pet Head/);
     assert.equal(mock.calls.length, expectedCalls);
@@ -475,7 +508,7 @@ test('an addressed human or peer request still uses idle handling through a JSON
       dispatch: async (_pet, id) => { admitted.push(id); },
     },
     assessRelevance: async () => assert.fail('canonical @ is already relevant'),
-    handleIdle: model.handleIdle,
+    decideNewWorkAndReply: model.decideNewWorkAndReply,
   });
   for (const { incoming } of fixtures) await handle(incoming, new AbortController().signal);
   assert.deepEqual(seen, fixtures.map(item => item.incoming.messageId));
@@ -500,7 +533,7 @@ test('JSON-mode idle still rejects bad decisions, blank output, refusals and tru
   for (const [index, [text, reason]] of fixtures.entries()) {
     content = text;
     finishReason = reason;
-    await assert.rejects(model.handleIdle(decisionInput, new AbortController().signal), /Invalid Pet Head idle result/);
+    await assert.rejects(model.decideNewWorkAndReply(decisionInput, new AbortController().signal), /Invalid Pet Head idle result/);
     assert.equal(requests, index + 1);
   }
 });
@@ -606,7 +639,7 @@ test('only relevant messages inspect the slot and ground an older public source 
             return { messages: [], ...(reference === original.messageId ? { referencedMessage: original } : {}) };
           },
           dispatch: async () => assert.fail('status is never work') },
-        handleIdle: noIdle,
+        decideNewWorkAndReply: noIdle,
         assessRelevance: async input => {
           calls.push('relevance');
           assert.deepEqual(Object.keys(input).sort(), ['addressed', 'context', 'message', 'pet']);
@@ -647,7 +680,7 @@ test('an explicit acknowledgement is published before slow independent execution
         entered.resolve(); await admission.promise; effects.push('admitted');
       } },
     readWorkState: idle, assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: '收到，我会先核对口径，再整理差异。' }),
+    decideNewWorkAndReply: async () => ({ shouldDispatch: true, reply: '收到，我会先核对口径，再整理差异。' }),
   });
   const pending = handler(source, signal);
   await entered.promise;
@@ -672,7 +705,7 @@ test('a canonical mention establishes relevance, not dispatch; a label or quotat
       dispatch: async () => assert.fail('bare mention is not admission'),
     },
     assessRelevance: async input => { calls.push(['relevance', input.addressed]); return { relevant: false }; },
-    handleIdle: async input => { calls.push(['idle', input.addressed]); return { shouldDispatch: false, reply: null }; },
+    decideNewWorkAndReply: async input => { calls.push(['idle', input.addressed]); return { shouldDispatch: false, reply: null }; },
   });
   const signal = new AbortController().signal;
   await handle(named, signal);
@@ -771,7 +804,7 @@ test('decision binding and unbound plain reply share one lazily resolved model c
   assert.deepEqual(await model.assessRelevance(decisionInput, signal), assessed);
   assert.equal(await model.composeReply({ message: decisionInput.message, evidence: { status: 'unavailable' } }, signal),
     '[Known update](https://example.test)');
-  assert.deepEqual(await model.handleIdle(decisionInput, signal), idleResult);
+  assert.deepEqual(await model.decideNewWorkAndReply(decisionInput, signal), idleResult);
   assert.deepEqual(mock.calls.map(call => call.mode), ['structured', 'unbound', 'structured']);
   assert.equal(resolved, 1);
   assert.equal(mock.factoryCalls(), 1);
@@ -790,7 +823,7 @@ test('a run switch during busy composition cannot publish A as B or enqueue B', 
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [original], referencedMessage: original }),
       reply: async (_pet, _messageId, body) => { replies.push(body); }, dispatch: async (_pet, source) => { admitted.push(source); } },
     readWorkState: () => ({ kind: 'active', dispatch: { dispatchId, messageId: original.messageId, sessionId: 'same-session' } }),
-    assessRelevance: relevant, handleIdle: noIdle,
+    assessRelevance: relevant, decideNewWorkAndReply: noIdle,
     progress: {
       readRun: () => ({ invocationId: dispatchId, requestId, sessionId: 'same-session' }),
       readSessionRun: async id => { assert.equal(id, 'same-session'); reads++; return { requestId }; },
@@ -819,7 +852,7 @@ test('unrelated explicit reply targets are not replaced by the latest run', asyn
       reply: async (_pet, id, text) => { assert.equal(id, inquiry.messageId); replies.push(text); },
       dispatch: async () => { throw new Error('progress-only never dispatches'); } },
     readWorkState: () => ({ kind: 'active', dispatch: { dispatchId: 'd', messageId: source.messageId, sessionId: 's' } }),
-    assessRelevance: relevant, handleIdle: noIdle,
+    assessRelevance: relevant, decideNewWorkAndReply: noIdle,
     progress: {
       readRun: () => ({ invocationId: 'd', sessionId: 's', requestId: 'r' }),
       readSessionRun: async () => { reads++; return undefined; },
@@ -858,7 +891,7 @@ test('verified busy reads its exact run once; composer alone can answer, decline
         dispatch: async () => assert.fail('busy can never admit dispatch'),
       },
       assessRelevance: async () => { calls.push('relevance'); return { relevant: true }; },
-      handleIdle: noIdle,
+      decideNewWorkAndReply: noIdle,
       progress: {
         readRun: entry => { assert.deepEqual(entry, active); return run; },
         readSessionRun: async (sessionId, _signal, isCurrent) => {
@@ -899,7 +932,7 @@ test('a newer active source appearing during relevance is not evidence for an ol
       reply: async (_pet, id, text) => { assert.equal(id, inquiry.messageId); calls.push(text); },
       dispatch: async () => assert.fail('pure status never dispatches') },
     assessRelevance: async () => { started.resolve(); await relevantGate.promise; return { relevant: true }; },
-    handleIdle: noIdle,
+    decideNewWorkAndReply: noIdle,
     progress: {
       readRun: entry => ({ invocationId: entry.dispatchId, sessionId: entry.sessionId, requestId: 'r' }),
       readSessionRun: async () => assert.fail('do not read the Session of work sourced after the inquiry'),
@@ -933,7 +966,7 @@ test('unknown can compose an unconfirmed reply, but cannot read a Session or adm
       },
       dispatch: async () => assert.fail('unknown is not idle'),
     },
-    assessRelevance: relevant, handleIdle: noIdle,
+    assessRelevance: relevant, decideNewWorkAndReply: noIdle,
     progress: {
       readRun: () => assert.fail('no exact ordinary slot is known'),
       readSessionRun: async () => assert.fail('do not open a Session without a verified run'),
@@ -960,7 +993,7 @@ test('relevant input routes through the current idle slot even if the Pet was bu
       reply: async () => assert.fail('no idle reply selected'),
     },
     assessRelevance: async () => { started.resolve(); await relevanceGate.promise; return { relevant: true }; },
-    handleIdle: async () => { calls.push('idle'); return { shouldDispatch: true, reply: null }; },
+    decideNewWorkAndReply: async () => { calls.push('idle'); return { shouldDispatch: true, reply: null }; },
     progress: {
       readRun: () => assert.fail('do not sample the earlier busy slot'),
       readSessionRun: async () => assert.fail('no Session lookup while idle'),
@@ -983,7 +1016,7 @@ test('unrelated input never inspects the slot or its Session', async () => {
       dispatch: async () => assert.fail('unrelated messages must not dispatch'),
       reply: async () => assert.fail('unrelated messages must not publish'),
     },
-    assessRelevance: async () => ({ relevant: false }), handleIdle: noIdle,
+    assessRelevance: async () => ({ relevant: false }), decideNewWorkAndReply: noIdle,
     progress: {
       readRun: () => assert.fail('unrelated messages must not check run identity'),
       readSessionRun: async () => assert.fail('unrelated messages must not inspect Session'),
@@ -1002,7 +1035,7 @@ test('idle admission rechecks after publication and does not re-decide as busy',
       reply: async () => { calls.push('reply'); state = { kind: 'unknown' }; },
     },
     assessRelevance: relevant,
-    handleIdle: async () => { calls.push('idle'); return { shouldDispatch: true, reply: 'I see the request.' }; },
+    decideNewWorkAndReply: async () => { calls.push('idle'); return { shouldDispatch: true, reply: 'I see the request.' }; },
     progress: {
       readRun: () => assert.fail('no late run sampling'),
       readSessionRun: async () => assert.fail('no late Session read'),
@@ -1013,6 +1046,74 @@ test('idle admission rechecks after publication and does not re-decide as busy',
   assert.deepEqual(calls, ['idle', 'reply']);
 });
 
+test('an open slot does not decide new work before checking its bound Session', async () => {
+  const calls: string[] = [];
+  const signal = new AbortController().signal;
+  const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
+    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
+      readSession: async (_pet, sessionId) => { assert.equal(sessionId, undefined); calls.push('session'); return { status: 'waiting' }; },
+      reply: async () => { calls.push('reply'); }, dispatch: async () => assert.fail('review is not readiness'),
+    },
+    assessRelevance: async () => { calls.push('relevance'); return { relevant: true }; },
+    decideNewWorkAndReply: noIdle,
+    progress: { readRun: () => assert.fail('do not pretend the review is a running dispatch'),
+      compose: async ({ evidence }) => { assert.deepEqual(evidence, { status: 'waiting' }); calls.push('compose'); return 'The Session is awaiting review.'; },
+    },
+  });
+  await handle(message('1'), signal);
+  assert.deepEqual(calls, ['relevance', 'session', 'compose', 'reply']);
+});
+
+test('busy handling admits only the current selected work and publishes no acceptance before a receipt', async () => {
+  const source = message('19', { body: 'Check A.' });
+  const active = { dispatchId: 'a', sessionId: 'same-session', messageId: source.messageId };
+  const run = { invocationId: 'a', sessionId: active.sessionId, requestId: 'req-a' };
+  for (const [delivery, scenario] of [['queue', 'accepted'], ['queue', 'refused'], ['interrupt', 'accepted'],
+    ['interrupt', 'stale'], ['interrupt', 'peer'], [null, 'progress']] as const) {
+    const signal = new AbortController().signal;
+    const admitted = deferred<void>();
+    const request = deferred<void>();
+    const calls: string[] = [];
+    let state: ReturnType<typeof readHeadWorkState> = { kind: 'active', dispatch: active };
+    const participantId = 'pet:a';
+    const current = message('20', { replyTo: source.messageId, mentions: [{ participantId }],
+      author: { kind: scenario === 'peer' ? 'pet' : 'human', id: 'other' },
+      body: delivery === 'interrupt' ? 'Stop A and start B.' : 'How is A going? Also queue independent B.' });
+    const handle = createPetHead({ pet: pet('a'), readWorkState: () => state,
+      channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [source], members: [{ kind: 'pet', id: 'a', participantId }] }),
+        reply: async (_pet, id) => { assert.equal(id, current.messageId); calls.push('reply'); },
+        dispatch: async (_pet, id, _signal, options) => {
+          assert.equal(id, current.messageId, 'dispatch the original committed message');
+          assert.deepEqual(options, delivery === 'queue' ? { kind: 'queue', sessionId: run.sessionId } : { kind: 'interrupt', expectedRun: run });
+          calls.push('dispatch');
+          if (scenario === 'refused') throw new PetDispatchRefusedError();
+          request.resolve(); await admitted.promise;
+        },
+      }, assessRelevance: async () => assert.fail('@ already established relevance'), decideNewWorkAndReply: noIdle,
+      progress: { readRun: () => run,
+        readSessionRun: async () => { calls.push('session'); return { requestId: run.requestId, result: { body: 'Public A result' } }; },
+        compose: async () => assert.fail('verified work reaches the handling model'),
+        decideRunning: async input => {
+          assert.deepEqual(input.evidence, { status: 'running', result: { body: 'Public A result' } });
+          assert.equal(input.mayInterrupt, scenario !== 'peer');
+          calls.push('decision');
+          if (scenario === 'stale') state = { kind: 'active', dispatch: { ...active, dispatchId: 'b' } };
+          return { delivery, reply: 'Reply' };
+        },
+      },
+    });
+    const handling = handle(current, signal);
+    if (scenario === 'accepted') {
+      await Promise.race([request.promise, handling]);
+      assert.deepEqual(calls, ['session', 'decision', 'dispatch']);
+      admitted.resolve();
+    }
+    await handling;
+    assert.deepEqual(calls, ['session', 'decision', ...(scenario === 'accepted' || scenario === 'refused' ? ['dispatch'] : []),
+      ...(scenario === 'accepted' || scenario === 'progress' ? ['reply'] : [])], scenario);
+  }
+});
+
 test('a refused idle-only admission is a skip rather than a failed Head handler', async () => {
   const calls: string[] = [];
   const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
@@ -1021,7 +1122,7 @@ test('a refused idle-only admission is a skip rather than a failed Head handler'
       reply: async () => { calls.push('acknowledgement'); },
     },
     assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: 'I see the request.' }),
+    decideNewWorkAndReply: async () => ({ shouldDispatch: true, reply: 'I see the request.' }),
   });
   await handle(message('2'), new AbortController().signal);
   assert.deepEqual(calls, ['acknowledgement', 'admission']);
@@ -1048,7 +1149,7 @@ test('if the run changes inside the reply operation, its guard blocks stale stat
         calls.push('dispatch');
       },
     },
-    assessRelevance: relevant, handleIdle: noIdle,
+    assessRelevance: relevant, decideNewWorkAndReply: noIdle,
     progress: {
       readRun: () => ({ invocationId: active.dispatchId, sessionId: active.sessionId, requestId }),
       readSessionRun: async () => ({ requestId }),
@@ -1071,7 +1172,7 @@ test('idle can answer an unconfirmed status request without a Session read or di
       dispatch: async () => assert.fail('status does not start work'),
     },
     assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: false, reply: 'I cannot confirm the report’s status.' }),
+    decideNewWorkAndReply: async () => ({ shouldDispatch: false, reply: 'I cannot confirm the report’s status.' }),
     progress: {
       readRun: () => assert.fail('idle has no verified run'),
       readSessionRun: async () => assert.fail('idle cannot inspect a Session'),
@@ -1099,7 +1200,7 @@ test('idle mixed request can acknowledge unconfirmed earlier work and dispatch B
       },
     },
     assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: 'I cannot confirm the earlier report’s progress.' }),
+    decideNewWorkAndReply: async () => ({ shouldDispatch: true, reply: 'I cannot confirm the earlier report’s progress.' }),
     progress: {
       readRun: () => assert.fail('there is no currently bound attempt'),
       readSessionRun: async () => assert.fail('idle work never reads Session'),

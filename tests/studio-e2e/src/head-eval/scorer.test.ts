@@ -15,7 +15,7 @@ test('Relevance and observable reply/admission effects are scored separately; er
   assert.deepEqual(summary.contrast.conditionalPass, { pass: 1, total: 2 });
   assert.equal(summary.contrast.total, 3); assert.equal(summary.errors, 1);
 });
-test('Busy additions are relevant but cannot admit work for either author', () => {
+test('Busy additions conditional on success cannot be queued for either author', () => {
   for (const author of ['human', 'pet']) {
     const item = fixture('queue-' + author);
     assert.equal(score(item, { relevant: true, dispatched: false, hasReply: false }).pass, true);
@@ -23,13 +23,16 @@ test('Busy additions are relevant but cannot admit work for either author', () =
     assert.equal(score(item, { relevant: true, dispatched: true, hasReply: false }).pass, false);
   }
 });
-test('A busy progress question cannot pass with no reply or with another admission', () => {
-  for (const id of ['progress-only', 'progress-and-addition', 'busy-independent-work']) {
-    const item = fixture(id);
-    assert.equal(score(item, { relevant: true, dispatched: false, hasReply: true }).pass, true, id);
-    assert.equal(score(item, { relevant: true, dispatched: false, hasReply: false }).pass, false, id);
-    assert.equal(score(item, { relevant: true, dispatched: true, hasReply: true }).pass, false, id);
-  }
+test('Plain progress stays reply-only; independent work can be queued', () => {
+  const plain = fixture('progress-only');
+  const followup = fixture('progress-and-addition');
+  const work = fixture('busy-independent-work');
+  const answered = { relevant: true, dispatched: false, hasReply: true };
+  assert.equal(score(plain, answered).pass, true);
+  assert.equal(score(plain, { ...answered, dispatched: true }).pass, false);
+  assert.equal(score(plain, { ...answered, hasReply: false }).pass, false);
+  assert.equal(score(followup, { ...answered, dispatched: true }).pass, true);
+  assert.equal(score(work, { ...answered, dispatched: true, hasReply: false }).pass, true);
 });
 test('Fixture identities do not disclose route labels and preserve references', () => {
   for (const item of cases) {
@@ -38,14 +41,14 @@ test('Fixture identities do not disclose route labels and preserve references', 
     if (item.input.message.replyTo) assert.ok(item.input.context.messages.some(message => message.messageId === item.input.message.replyTo));
   }
 });
-test('Production routing exercise separates relevance, idle semantics and busy composer', async () => {
+test('Production routing exercise separates relevance from Session handling', async () => {
   for (const id of ['combined', 'queue-human', 'bare-mention-idle', 'bare-mention-busy', 'bare-mention-unknown', 'ignore-unrelated']) {
     const item = fixture(id);
     const calls: string[] = [];
     const result = await exercise(item, {
       assessRelevance: async () => { calls.push('relevance'); return { relevant: id !== 'ignore-unrelated' }; },
-      handleIdle: async () => { calls.push('idle'); return { shouldDispatch: id === 'combined', reply: id === 'combined' ? '收到' : null }; },
-      composeReply: async () => { calls.push('composer'); return ''; },
+      decideNewWorkAndReply: async () => { calls.push('idle'); return { shouldDispatch: id === 'combined', reply: id === 'combined' ? '收到' : null }; },
+      decideExecutionHandling: async () => { calls.push('handling'); return { delivery: null, reply: null }; },
     }, new AbortController().signal);
     assert.equal(score(item, result).pass, true, id);
     if (id.startsWith('bare-mention')) assert.equal(calls.includes('relevance'), false, 'canonical mention is relevance, not model routing');

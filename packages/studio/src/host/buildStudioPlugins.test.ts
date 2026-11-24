@@ -617,6 +617,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
     },
     start(context: StudioPluginContext) { channelContext = context; },
     head: {
+      readSession: async () => ({ status: 'ready' }),
       readContext: async () => ({ messages: [] }),
       reply: async () => { assert.fail('Head routing must not write a final reply'); },
       dispatch: async (_channelId: string, petId: string, messageId: string) => {

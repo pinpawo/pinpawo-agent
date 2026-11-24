@@ -46,7 +46,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, origin: suppliedOrigin, session: suppliedSession, delivery, signal }) => {
+    dispatch: async ({ request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, origin: suppliedOrigin, session: suppliedSession, delivery, expectedInterrupt: suppliedExpectedInterrupt, signal }) => {
       signal?.throwIfAborted();
       const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
       if (delivery !== undefined && delivery !== 'interrupt' && delivery !== 'idle-only') throw new Error('Unsupported dispatch delivery.');
@@ -54,6 +54,10 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         throw new Error(delivery === 'interrupt'
           ? 'Interrupt delivery requires an explicit session and scope.'
           : 'Idle-only delivery requires an explicit session and scope.');
+      }
+      const expectedInterrupt = suppliedExpectedInterrupt === undefined ? undefined : { ...suppliedExpectedInterrupt };
+      if (expectedInterrupt && (delivery !== 'interrupt' || !expectedInterrupt.dispatchId || !expectedInterrupt.requestId)) {
+        throw new Error('An expected interrupt requires interrupt delivery and an exact dispatch and request.');
       }
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
@@ -185,14 +189,38 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         if (!admitted) throw new PetDispatchRefusedError();
         return;
       }
+      const matchesExpectedInterrupt = () => {
+        const queue = coordinator.getQueueSnapshot();
+        const active = queue.activeDispatch;
+        return queue.state === 'busy' && queue.activeOperation === 'dispatch' && !!active &&
+          active.dispatchId === expectedInterrupt!.dispatchId && active.sessionId === target!.id &&
+          active.scope?.namespace === scope!.namespace && active.scope.id === scope!.id &&
+          context.activeRuns.read(target!.id)?.requestId === expectedInterrupt!.requestId;
+      };
+      if (expectedInterrupt) {
+        if (!matchesExpectedInterrupt() || !await isTargetReady()) throw new PetDispatchRefusedError();
+        signal?.throwIfAborted();
+        // Readiness may await a checkpoint while the same Session starts a new
+        // run. Check the exact old target again before touching the queue.
+        if (context.isClosing() || !matchesExpectedInterrupt() || !localHandlers.interruptRun(expectedInterrupt.requestId, { onlyIfRunning: true })) {
+          throw new PetDispatchRefusedError();
+        }
+      }
       coordinator.submitDispatch(run, target ? async () => {
         // A vanished target is not held by a review. Admit it so the run fails
         // through its own failed lifecycle instead of parking forever.
         // Read failures propagate: the Coordinator keeps this work queued.
         return !sessions.getSession(petId, target.id) || await isTargetReady();
       } : undefined, observation);
-      onAdmitted();
-      if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });
+      if (expectedInterrupt) {
+        // Cancellation of the exact request was accepted synchronously before enqueue.
+        // Retain normal same-Session ordering; never fall back to matching by scope.
+        coordinator.prioritizePendingDispatch({ sessionId: target!.id, scope: scope! });
+        onAdmitted();
+      } else {
+        onAdmitted();
+        if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });
+      }
     },
   };
 

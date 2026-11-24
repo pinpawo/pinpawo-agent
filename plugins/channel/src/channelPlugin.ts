@@ -62,12 +62,21 @@ export type ChannelPlugin = StudioPlugin & {
   head: ChannelHeadPort;
 };
 
+type HeadDelivery = { kind: 'queue'; sessionId: string } |
+  { kind: 'interrupt'; expectedRun: { invocationId: string; requestId: string; sessionId: string } };
+type HeadSessionEvidence = {
+  status: 'ready' | 'running' | 'waiting' | 'interrupting';
+  requestId?: string;
+  recordedPlan?: AgentPlan;
+  result?: { body: string };
+};
+
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
-  dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal) => Promise<void>;
-  readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
-    => Promise<{ requestId: string; recordedPlan?: AgentPlan } | undefined>;
+  dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal, options?: HeadDelivery) => Promise<void>;
+  readSession: (channelId: string, petId: string, sessionId: string | undefined, signal: AbortSignal, isCurrent: () => boolean,
+    resultMessage?: { messageId: string; requestId: string }) => Promise<HeadSessionEvidence | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -114,7 +123,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
-    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string },
+    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string; delivery?: HeadDelivery },
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     const studio = host();
@@ -125,12 +134,21 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     check();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     check();
-    const binding = await service.reserveSession(channelId, petId, () => studio.allocateSessionId(petId));
+    const delivery = headInput?.delivery;
+    const binding = delivery ? await service.getSession(channelId, petId)
+      : await service.reserveSession(channelId, petId, () => studio.allocateSessionId(petId));
     check();
+    if (!binding || (delivery && (!binding.registered ||
+      binding.sessionId !== (delivery.kind === 'queue' ? delivery.sessionId : delivery.expectedRun.sessionId)))) {
+      throw new ChannelAccessError('Head dispatch no longer targets the registered Channel Session.');
+    }
     const receipt = await studio.dispatch({
       petId, request,
       ...(headInput ? {
-        delivery: 'idle-only' as const,
+        ...(delivery?.kind === 'interrupt' ? {
+          delivery: 'interrupt' as const,
+          expectedInterrupt: { dispatchId: delivery.expectedRun.invocationId, requestId: delivery.expectedRun.requestId },
+        } : delivery?.kind === 'queue' ? {} : { delivery: 'idle-only' as const }),
         signal: headInput.signal,
         origin: { namespace: 'channel', id: headInput.messageId },
       } : {}),
@@ -240,38 +258,74 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
-    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {
+    readSession: async (channelId, petId, sessionId, signal, isCurrent, resultMessage) => {
       const service = channelService();
       const studio = host();
-      const authorized = async () => {
-        if (signal.aborted || current !== service || context !== studio || !isCurrent()) return false;
-        await service.requireMember(channelId, { kind: 'pet', id: petId });
-        const binding = await service.getSession(channelId, petId);
-        return !signal.aborted && current === service && context === studio && isCurrent() &&
-          binding?.registered === true && binding.sessionId === sessionId;
+      const stillCurrent = () => !signal.aborted && current === service && context === studio && isCurrent();
+      const actor = { kind: 'pet' as const, id: petId };
+      if (!stillCurrent()) return;
+      await service.requireMember(channelId, actor);
+      const binding = await service.getSession(channelId, petId);
+      if (!stillCurrent()) return;
+      if (!binding) return sessionId === undefined ? { status: 'ready' } : undefined;
+      if (sessionId !== undefined && (binding.sessionId !== sessionId || !binding.registered)) return;
+      const revalidateBinding = async () => {
+        if (!stillCurrent()) return false;
+        await service.requireMember(channelId, actor);
+        const latest = await service.getSession(channelId, petId);
+        return stillCurrent() && latest?.sessionId === binding.sessionId && latest.registered === binding.registered;
       };
-      if (!await authorized()) return;
-      const { session } = await studio.petSessions.snapshot(petId, sessionId, { timelineLimit: 1 });
-      if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
-        return { requestId: session.activeRun.requestId,
-          ...(!session.pendingInterrupt && session.currentPlan?.items.length ? { recordedPlan: session.currentPlan } : {}) };
+      let snapshot: Awaited<ReturnType<StudioPluginContext['petSessions']['snapshot']>>;
+      try {
+        snapshot = await studio.petSessions.snapshot(petId, binding.sessionId, { timelineLimit: 1 });
+      } catch (error) {
+        // A refused first admission may have reserved an ID without creating a
+        // Host Session. Only a definite absence allows an idle-only retry.
+        if (!binding.registered && sessionId === undefined && error instanceof Error &&
+          'code' in error && error.code === 'session_not_found' && await revalidateBinding()) return { status: 'ready' };
+        throw error;
       }
+      const { session } = snapshot;
+      if (session.sessionId !== binding.sessionId || !await revalidateBinding()) return;
+      if (session.pendingInterrupt) return { status: 'waiting',
+        ...(session.activeRun ? { requestId: session.activeRun.requestId } : {}) };
+      if (!session.activeRun) return { status: 'ready' };
+      if (!binding.registered) return;
+      const { requestId, state } = session.activeRun;
+      if (state === 'interrupting') return { status: 'interrupting', requestId };
+      let result: HeadSessionEvidence['result'];
+      if (resultMessage?.requestId === requestId) {
+        const { messages } = await service.readContext(actor, channelId, { limit: 10 });
+        const published = messages.find(message => message.author.kind === 'pet' && message.author.id === petId &&
+          message.externalRef === resultMessage.messageId);
+        if (!await revalidateBinding()) return;
+        if (published) result = { body: published.body };
+      }
+      return { status: 'running', requestId,
+        ...(session.currentPlan?.items.length ? { recordedPlan: session.currentPlan } : {}),
+        ...(result ? { result } : {}) };
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();
       await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options, headReplyTo: replyTo });
     },
-    dispatch: async (channelId, petId, messageId, signal) => {
+    dispatch: async (channelId, petId, messageId, signal, delivery) => {
       signal.throwIfAborted();
       const service = channelService();
       await service.requireMember(channelId, { kind: 'pet', id: petId });
       signal.throwIfAborted();
       const canonical = await service.getMessage(channelId, messageId);
       if (!canonical) throw new Error('Head source message does not exist in this Channel.');
+      if (delivery?.kind === 'interrupt') {
+        if (canonical.author.kind !== 'human') {
+          throw new ChannelAccessError('Only a human Channel message can authorize interrupt delivery.');
+        }
+        await service.requireMember(channelId, canonical.author);
+      }
       const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(canonical, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
+      await dispatchPet(channelId, petId, channelMessageInput(canonical, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId, delivery });
     },
   };
 

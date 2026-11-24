@@ -23,12 +23,14 @@ type StartInflightRequestOptions = {
 
 type InterruptInflightRequestOptions = {
   requestId?: string;
+  onlyIfRunning?: boolean;
 };
 
 export class InflightRequestController<TKey> {
   private readonly requests = new Map<TKey, Set<InflightOperationRun>>();
   private readonly emitOperation: (key: TKey, event: AgentOperationEvent) => void;
   private readonly sendControl: (key: TKey, message: InflightInterruptMessage) => void;
+  private readonly unavailableForInterrupt = new WeakSet<InflightOperationRun>();
   private readonly operationObservers = new WeakMap<
     InflightOperationRun,
     (event: AgentOperationEvent) => void
@@ -84,6 +86,7 @@ export class InflightRequestController<TKey> {
     phase: TerminalOperationPhase,
     error?: unknown,
   ) {
+    this.unavailableForInterrupt.add(run);
     finishInflightOperations(run, phase, (event) => {
       this.emitOperation(key, event);
       this.operationObservers.get(run)?.(event);
@@ -95,9 +98,11 @@ export class InflightRequestController<TKey> {
       ? [...(this.requests.get(key) ?? [])]
         .find((candidate) => candidate.requestId === options.requestId) ?? null
       : this.get(key);
-    if (!run) {
+    if (!run || (options.onlyIfRunning && (run.controller.signal.aborted || this.unavailableForInterrupt.has(run)))) {
       return null;
     }
+    // Claim before notification: a synchronous observer must not admit a second replacement.
+    this.unavailableForInterrupt.add(run);
 
     this.sendControl(key, {
       type: 'interrupting',
@@ -109,9 +114,9 @@ export class InflightRequestController<TKey> {
   }
 
   /** Host control can stop a run without owning its transport connection. */
-  interruptById(requestId: string) {
+  interruptById(requestId: string, options: { onlyIfRunning?: boolean } = {}) {
     for (const key of this.requests.keys()) {
-      const run = this.interrupt(key, { requestId });
+      const run = this.interrupt(key, { requestId, ...options });
       if (run) return run;
     }
     return null;

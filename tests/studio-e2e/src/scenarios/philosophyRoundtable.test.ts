@@ -57,10 +57,14 @@ async function scriptedModel(mode: HeadWireMode) {
   const reviewed = new Map<string, ChannelEnvelope>();
   const modelErrors: unknown[] = [];
   let sequence = 0;
+  let allowPeerReport!: () => void;
+  // This scenario tests retained Sessions and peer trigger attribution. The
+  // dedicated scheduling scenario deliberately exercises active work instead.
+  const peerReportReady = new Promise<void>(resolve => { allowPeerReport = resolve; });
   const server = createServer((request, response) => {
     let raw = '';
     request.on('data', chunk => { raw += String(chunk); });
-    request.on('end', () => {
+    request.on('end', async () => {
       try {
         assert.equal(request.url, '/v1/chat/completions');
         const input = JSON.parse(raw) as WireRequest;
@@ -79,7 +83,7 @@ async function scriptedModel(mode: HeadWireMode) {
         let call: { name: string; args: Record<string, unknown> } | undefined;
         if (head) {
           const stage = headFixtureStage(input);
-          const name = stage === 'relevance' ? 'pet_head_relevance' : 'pet_head_idle';
+          const name = `pet_head_${stage}`;
           const key = `${head.pet.petId}:${head.message.messageId}:${stage}`;
           const attempt = (attempts.get(key) ?? 0) + 1;
           attempts.set(key, attempt);
@@ -104,9 +108,11 @@ async function scriptedModel(mode: HeadWireMode) {
           const round = peerEligible ? 3 : head.message.body === question ? 1 : head.message.body === followup ? 2 : 0;
           const eligible = peerEligible || (head.message.author.kind === 'human' && round > 0);
           const action = eligible ? 'dispatch' : 'ignore';
-          if (stage === 'idle' || !eligible) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
+          if (stage !== 'relevance' || !eligible) decisions.push({ petId: head.pet.petId, channelId: head.message.channelId, messageId: head.message.messageId, action,
             mentioned: head.addressed === true });
-          const decision = stage === 'relevance' ? { relevant: eligible } : { shouldDispatch: eligible, reply: null };
+          const decision = stage === 'relevance' ? { relevant: eligible }
+            : stage === 'running' ? { delivery: eligible ? 'queue' : null, reply: null }
+            : { shouldDispatch: eligible, reply: null };
           if (mode === 'tool') call = { name, args: decision };
           else content = JSON.stringify(decision);
         } else if (compose) {
@@ -166,6 +172,7 @@ async function scriptedModel(mode: HeadWireMode) {
             else content = answer;
           } else content = answer;
         }
+        if (content === peerReport) await peerReportReady;
         const id = `roundtable-model-${++sequence}`;
         const message = { role: 'assistant', content, ...(call ? { tool_calls: [{ id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] } : {}) };
         const finish = call ? 'tool_calls' : 'stop';
@@ -188,7 +195,7 @@ async function scriptedModel(mode: HeadWireMode) {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'roundtable-fixture', decisions, attempts, compositions, reviewed, modelErrors,
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'roundtable-fixture', decisions, attempts, compositions, reviewed, modelErrors, allowPeerReport,
     close: () => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }) };
 }
 
@@ -232,7 +239,11 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
       await studio.pets.create({ ...role, channelId: ownerId });
       completed.set(role.petId, []);
       built.residentPets.get(role.petId)!.resident.dispatch.onDispatchLifecycle(event => {
-        if (event.state === 'completed') completed.get(role.petId)!.push(event.sessionId ?? '');
+        if (event.state === 'completed') {
+          const done = completed.get(role.petId)!;
+          done.push(event.sessionId ?? '');
+          if (role.petId === 'roundtable-being' && done.length === 2) model.allowPeerReport();
+        }
         if (event.state === 'failed') failed.push(role.petId);
       });
     }
@@ -319,6 +330,7 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     assert.ok(model.attempts.size > 0);
     for (const count of model.attempts.values()) assert.equal(count, 1);
   } finally {
+    model.allowPeerReport();
     await built?.studio.shutdown();
     for (const resident of built?.residentPets.values() ?? []) await resident.close();
     await model.close();

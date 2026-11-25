@@ -219,6 +219,7 @@ export type QueuedOperation = {
   reject: (error: unknown) => void;
   observation?: PetDispatchQueueEntry;
   stop?: () => boolean;
+  confirmStop?: () => Promise<void>;
   onSuperseded?: () => void;
 };
 

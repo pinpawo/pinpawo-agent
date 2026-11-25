@@ -113,6 +113,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       if (executingRequestId && !localHandlers.interruptRun(executingRequestId)) stopRequested = false;
       return stopRequested;
     };
+    let confirmFailedStop: (() => Promise<void>) | undefined;
+    const confirmStop = async () => { await confirmFailedStop?.(); };
     const run = () => AsyncLocalStorageProviderSingleton.runWithConfig(
       { callbacks: [] },
       async () => {
@@ -188,13 +190,31 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           throw error ?? new Error('internal error');
         } catch (failure) {
           executionEnded = true;
-          publishLifecycle({
+          const reportFailure = () => publishLifecycle({
             dispatchId,
             request,
             requestId,
             state: 'failed',
             error: failure instanceof Error ? failure.message : 'internal error',
           });
+          if (stopRequested && turnSetup) {
+            // The Host could not settle this stopped turn. Retry its own
+            // checkpoint, never the TUI's currently selected Session.
+            const setup = turnSetup;
+            confirmFailedStop = async () => {
+              const pending = await graphService.settleAbortedRun(setup);
+              if (pending) {
+                pendingInterrupt = projectPendingInterrupt(pending);
+                suspend(setup, pendingInterrupt);
+                publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
+              } else {
+                reportFailure();
+              }
+              confirmFailedStop = undefined;
+            };
+          } else {
+            reportFailure();
+          }
           throw failure;
         } finally {
           opened?.release();
@@ -213,7 +233,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     const onSuperseded = () => publishLifecycle({ dispatchId, request, state: 'superseded' });
     if (delivery === 'idle-only') {
       const admitted = await coordinator.submitDispatchIfIdle(run, {
-        signal, observation, onAdmitted, stop,
+        signal, observation, onAdmitted, stop, confirmStop,
         ready: async () => !!sessions.getSession(petId, target!.id) && await isTargetReady(),
       });
       if (!admitted) throw new PetDispatchRefusedError();
@@ -229,13 +249,13 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       const matches = (item: PetDispatchQueueEntry) => item.sessionId === target!.id &&
         item.scope?.namespace === scope!.namespace && item.scope.id === scope!.id;
       coordinator.supersedeDispatch({
-        run, ready, observation, stop, onSuperseded,
+        run, ready, observation, stop, confirmStop, onSuperseded,
       }, replacement.pendingDispatchIds, matches);
       onAdmitted();
       if (replacement.stopDispatchId === undefined) return { stop: 'not_requested' };
       return { stop: coordinator.stopDispatch(replacement.stopDispatchId, matches) ? 'requested' : 'not_active' };
     }
-    coordinator.submitDispatch(run, ready, observation, { stop, onSuperseded });
+    coordinator.submitDispatch(run, ready, observation, { stop, confirmStop, onSuperseded });
     onAdmitted();
     if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });
     return { stop: 'not_requested' };

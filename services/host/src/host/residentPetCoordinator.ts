@@ -32,7 +32,7 @@ export class ResidentPetCoordinator {
   private activeEntry: QueuedOperation | undefined;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
-  private stopping = false;
+  private stopping: QueuedOperation | undefined;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
   private schedulingVersion = 0;
   private preferredDispatch: QueuedOperation | undefined;
@@ -156,7 +156,7 @@ export class ResidentPetCoordinator {
   }
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
-  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'onSuperseded'>): void {
+  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'confirmStop' | 'onSuperseded'>): void {
     this.assertDispatchWritable();
     if (observation) this.recordDispatchId(observation.dispatchId);
     void this.enqueue(operation, ready, observation, controls).catch((error) => this.reportDispatchFailure(error));
@@ -176,18 +176,18 @@ export class ResidentPetCoordinator {
         (matches && !matches(observation))) return false;
     // Cancellation notifies listeners synchronously. Fence writes before asking
     // the Agent to stop, including writes from those listeners.
-    this.stopping = true;
+    this.stopping = entry;
     let accepted = false;
     try {
       accepted = entry.stop();
       return accepted;
     } finally {
-      if (!accepted) this.stopping = false;
+      if (!accepted) this.stopping = undefined;
     }
   }
 
   /** Publish no intermediate queue snapshot between invalidating old input and admitting its replacement. */
-  supersedeDispatch(entry: Pick<QueuedOperation, 'run' | 'ready' | 'stop' | 'onSuperseded'> & { observation: PetDispatchQueueEntry }, ids: readonly string[], matches: (entry: PetDispatchQueueEntry) => boolean): void {
+  supersedeDispatch(entry: Pick<QueuedOperation, 'run' | 'ready' | 'stop' | 'confirmStop' | 'onSuperseded'> & { observation: PetDispatchQueueEntry }, ids: readonly string[], matches: (entry: PetDispatchQueueEntry) => boolean): void {
     this.assertDispatchWritable();
     const expected = new Set(ids);
     const removed = this.dispatchQueue.filter(item => item.observation && expected.has(item.observation.dispatchId));
@@ -220,6 +220,7 @@ export class ResidentPetCoordinator {
       observation: PetDispatchQueueEntry;
       onAdmitted: () => void;
       stop?: QueuedOperation['stop'];
+      confirmStop?: QueuedOperation['confirmStop'];
     },
   ): Promise<boolean> {
     options.signal?.throwIfAborted();
@@ -235,7 +236,7 @@ export class ResidentPetCoordinator {
     this.recordDispatchId(options.observation.dispatchId);
     this.schedulingVersion++;
     this.startDispatch({
-      kind: 'dispatch', run: operation, observation: structuredClone(options.observation), stop: options.stop,
+      kind: 'dispatch', run: operation, observation: structuredClone(options.observation), stop: options.stop, confirmStop: options.confirmStop,
       resolve: () => undefined,
       reject: error => this.reportDispatchFailure(error),
     });
@@ -282,7 +283,7 @@ export class ResidentPetCoordinator {
     const refreshing = Promise.resolve().then(async () => {
       try {
         const next = await this.readNextSettledState();
-        this.stopping = false;
+        this.stopping = undefined;
         this.setState(next);
         return next;
       } catch (error) {
@@ -308,7 +309,7 @@ export class ResidentPetCoordinator {
     await Promise.allSettled([this.active, this.refreshing, ...this.conversationHolds]);
   }
 
-  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'onSuperseded'>): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'confirmStop' | 'onSuperseded'>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this.assertDispatchWritable();
       this.schedulingVersion++;
@@ -416,7 +417,7 @@ export class ResidentPetCoordinator {
     }
     try {
       this.setState(await this.readNextSettledState());
-      this.stopping = false;
+      this.stopping = undefined;
     } catch (error) {
       this.setState('blocked');
       if (operationError === undefined) operationError = error;
@@ -427,6 +428,7 @@ export class ResidentPetCoordinator {
   }
 
   private async readNextSettledState(): Promise<PetDispatchSettledState> {
+    await this.stopping?.confirmStop?.();
     const next = await this.readSettledState();
     if (next === 'busy') {
       throw new Error('Resident Pet remained busy after its active operation settled.');

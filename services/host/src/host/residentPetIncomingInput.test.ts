@@ -153,6 +153,7 @@ test('idle-only dispatch refuses the bound session waiting for review even while
 async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>, hooks: {
   beforeContextLoad?: () => Promise<void>;
   beforeReadState?: (threadId: string) => Promise<void>;
+  beforeSettleAbort?: (threadId: string) => Promise<void>;
   resolveInvocationContext?: CreateResidentPetRuntimeOptions['resolveInvocationContext'];
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'pet-incoming-'));
@@ -175,7 +176,10 @@ async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSess
         await hooks.beforeReadState?.(input.threadId!);
         return { messages: [], pendingInterrupt: pending(input.threadId!), acceptsResume: reviews.has(input.threadId!), currentPlan: null };
       },
-      settleAbortedRun: async ({ input }: AgentSessionTurnOptions['setup']) => pending(input.threadId!),
+      settleAbortedRun: async ({ input }: AgentSessionTurnOptions['setup']) => {
+        await hooks.beforeSettleAbort?.(input.threadId!);
+        return pending(input.threadId!);
+      },
     } as never,
     runAgentTurn: run,
   });
@@ -648,6 +652,63 @@ test('failed stop confirmation keeps the queue fenced until a successful refresh
     await h.context.coordinator.refreshState();
     await waitFor(() => h.events.some(event => event.dispatchId === 'b' && event.state === 'completed'));
     assert.deepEqual(turns, ['A', 'B']);
+  } finally { exit.resolve(); await h.close(); }
+});
+
+test('stop cannot settle a bound dispatch with the open TUI Session checkpoint', async () => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  const reads: string[] = [];
+  let stoppedThread: string;
+  let failSettlement = true;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      stoppedThread = turn.setup.input.threadId!;
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, { beforeSettleAbort: async threadId => {
+    reads.push(threadId);
+    if (threadId === stoppedThread && failSettlement) throw new Error('Stopped checkpoint unavailable');
+  } });
+  try {
+    const service = h.resident.dispatch;
+    const tui = h.context.sessions.getActiveSession('worker');
+    const bound = h.context.sessions.ensureDispatchSession('worker', sessionId, true);
+    assert.notEqual(bound.threadId, tui.threadId);
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    // C targets the open TUI Session and could run ahead of B if the
+    // coordinator mistook that Session's readiness for A's confirmation.
+    await service.dispatch({ request: 'C', dispatchId: 'c', session: { id: tui.id } });
+    h.reviews.set(bound.threadId, buildReviewSpec({ id: 'approval',
+      view: { kind: 'plain', body: 'Approve this operation?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    assert.equal(service.stop('a'), true);
+    exit.resolve();
+    await waitFor(() => reads.length > 1 || turns.length > 1);
+    await waitFor(() => service.getQueueSnapshot().activeOperation === null);
+    assert.equal(service.getQueueSnapshot().state, 'blocked');
+    assert.deepEqual(turns, ['A']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b', 'c']);
+    await assert.rejects(service.dispatch({ ...target, request: 'D', dispatchId: 'd' }), /stopping/);
+    await assert.rejects(h.context.coordinator.refreshState(), /Stopped checkpoint unavailable/);
+
+    failSettlement = false;
+    await h.context.coordinator.refreshState();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'C']);
+    assert.ok(reads.every(threadId => threadId === bound.threadId));
+    assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch?.dispatchId, 'a');
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'a').map(event => event.state),
+      ['queued', 'running', 'waiting']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
   } finally { exit.resolve(); await h.close(); }
 });
 

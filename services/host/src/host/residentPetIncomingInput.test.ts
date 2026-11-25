@@ -152,7 +152,8 @@ test('idle-only dispatch refuses the bound session waiting for review even while
 
 async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>, hooks: {
   beforeContextLoad?: () => Promise<void>;
-  beforeReadState?: () => Promise<void>;
+  beforeReadState?: (threadId: string) => Promise<void>;
+  beforeSettleAbort?: (threadId: string) => Promise<void>;
   resolveInvocationContext?: CreateResidentPetRuntimeOptions['resolveInvocationContext'];
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'pet-incoming-'));
@@ -172,10 +173,13 @@ async function fixture(run: (turn: AgentSessionTurnOptions) => Promise<AgentSess
     resolveInvocationContext: hooks.resolveInvocationContext ?? (async ({ scope }) => [{ id: 'domain', owner: scope.namespace, content: scope.id }]),
     graphService: {
       readThreadState: async ({ input }: AgentSessionTurnOptions['setup']) => {
-        await hooks.beforeReadState?.();
+        await hooks.beforeReadState?.(input.threadId!);
         return { messages: [], pendingInterrupt: pending(input.threadId!), acceptsResume: reviews.has(input.threadId!), currentPlan: null };
       },
-      settleAbortedRun: async ({ input }: AgentSessionTurnOptions['setup']) => pending(input.threadId!),
+      settleAbortedRun: async ({ input }: AgentSessionTurnOptions['setup']) => {
+        await hooks.beforeSettleAbort?.(input.threadId!);
+        return pending(input.threadId!);
+      },
     } as never,
     runAgentTurn: run,
   });
@@ -495,4 +499,521 @@ test('explicit interruption is retained on either side of a delegation boundary'
       assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['urgent']);
     } finally { release.resolve(); await h.close(); }
   }
+});
+
+test('standalone stop holds the dispatch slot until Agent settlement; a late stop leaves the successor alone', async () => {
+  const started = deferred(), release = deferred(), nextStarted = deferred(), releaseNext = deferred();
+  const turns: string[] = [];
+  let signal!: AbortSignal;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    const text = turn.request.message;
+    turns.push(text);
+    if (text === 'A') {
+      signal = turn.setup.input.signal!;
+      started.resolve();
+      await release.promise;
+      signal.throwIfAborted();
+    } else {
+      signal = turn.setup.input.signal!;
+      nextStarted.resolve();
+      await releaseNext.promise;
+    }
+    return reply(turn, text);
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await assert.rejects(service.dispatch({ ...target, request: 'duplicate A', dispatchId: 'a' }), /already been admitted/);
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    const stop = service.getQueueSnapshot().activeDispatch!.dispatchId;
+    assert.equal(service.stop(stop), true);
+    assert.equal(signal.aborted, true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(turns, ['A']);
+    assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'a');
+    release.resolve();
+    await nextStarted.promise;
+    assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'b');
+    await assert.rejects(service.dispatch({ ...target, request: 'duplicate A after settlement', dispatchId: 'a' }), /already been admitted/);
+    assert.equal(service.stop(stop), false);
+    assert.equal(signal.aborted, false);
+    assert.deepEqual(turns, ['A', 'B']);
+    assert.ok(h.events.some(event => event.dispatchId === 'a' && event.state === 'interrupted'));
+  } finally { release.resolve(); releaseNext.resolve(); await h.close(); }
+});
+
+test('Stop waits silently before admitting writes, including during Host confirmation', async () => {
+  const started = deferred(), exit = deferred(), confirming = deferred(), confirm = deferred();
+  const resolving = deferred(), resolveInput = deferred();
+  const turns: string[] = [];
+  let signal!: AbortSignal;
+  let holdConfirmation = false;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      signal = turn.setup.input.signal!;
+      started.resolve();
+      await exit.promise;
+      signal.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, {
+    beforeReadState: async () => {
+      if (!holdConfirmation) return;
+      holdConfirmation = false;
+      confirming.resolve();
+      await confirm.promise;
+    },
+    resolveInvocationContext: async ({ request }) => {
+      if (request === 'R') { resolving.resolve(); await resolveInput.promise; }
+      return [];
+    },
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    const r = { ...target, request: 'R', dispatchId: 'r' };
+    const inFlightWrite = service.dispatch(r);
+    await resolving.promise;
+    let writeFromAbort: Promise<void> | undefined;
+    signal.addEventListener('abort', () => {
+      writeFromAbort = service.dispatch({ ...target, request: 'from abort', dispatchId: 'sync' });
+    }, { once: true });
+    let terminalStop: boolean | undefined;
+    service.onDispatchLifecycle(event => {
+      if (event.dispatchId === 'a' && event.state === 'interrupted') {
+        terminalStop = service.stop('a');
+        holdConfirmation = true;
+      }
+    });
+
+    assert.equal(service.stop('a'), true);
+    assert.ok(writeFromAbort);
+    resolveInput.resolve();
+    const cancel = new AbortController();
+    const cancelled = assert.rejects(service.dispatch({ ...target, request: 'Cancel', dispatchId: 'cancel', signal: cancel.signal }), { name: 'AbortError' });
+    cancel.abort();
+    await cancelled;
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    exit.resolve();
+    await confirming.promise;
+    assert.equal(terminalStop, false);
+    assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'a');
+    const duringConfirmation = service.dispatch({ ...target, request: 'C', dispatchId: 'c' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(turns, ['A']);
+    assert.deepEqual(h.events.filter(event => event.state === 'queued').map(event => event.dispatchId), ['a', 'b']);
+    confirm.resolve();
+    await Promise.all([writeFromAbort, inFlightWrite, duringConfirmation]);
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    assert.equal(turns[1], 'B');
+    assert.deepEqual(turns.slice(2).sort(), ['C', 'R', 'from abort']);
+    assert.ok(h.events.every(event => event.dispatchId !== 'cancel'));
+  } finally { resolveInput.resolve(); exit.resolve(); confirm.resolve(); await h.close(); }
+});
+
+test('idle-only dispatch waits for Stop before testing the free slot', async () => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    assert.equal(service.stop('a'), true);
+    const write = service.dispatch(head);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(h.events.map(event => [event.dispatchId, event.state]), [['a', 'queued'], ['a', 'running']]);
+    exit.resolve();
+    await write;
+    await waitFor(() => h.events.some(event => event.dispatchId === 'head' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', head.request]);
+  } finally { exit.resolve(); await h.close(); }
+});
+
+test('supersede waits for Stop, then validates and replaces only live pending work', async () => {
+  const started = deferred(), exit = deferred();
+  const h = await fixture(async turn => {
+    started.resolve();
+    await exit.promise;
+    turn.setup.input.signal!.throwIfAborted();
+    return reply(turn, 'done');
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    const session = h.context.sessions.getSession('worker', sessionId)!;
+    h.reviews.set(session.threadId, buildReviewSpec({ id: 'approval',
+      view: { kind: 'plain', body: 'Approve this operation?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    assert.equal(service.stop('a'), true);
+    const replacement = service.supersede({ ...target, request: 'D', dispatchId: 'd' }, { pendingDispatchIds: ['b'] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    assert.ok(h.events.every(event => event.dispatchId !== 'd' && event.state !== 'superseded'));
+    exit.resolve();
+    assert.deepEqual(await replacement, { stop: 'not_requested' });
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['d']);
+    assert.ok(h.events.some(event => event.dispatchId === 'b' && event.state === 'superseded'));
+  } finally { exit.resolve(); await h.close(); }
+});
+
+test('already waiting writes share one retry when the first Stop confirmation fails', async () => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  let confirmations = 0;
+  let confirmationsAtAdmission: number | undefined;
+  let interrupted = false;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, { beforeReadState: async () => {
+    if (interrupted && turns.length === 1 && ++confirmations === 1) throw new Error('transient read failure');
+  } });
+  const cancel = new AbortController();
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    service.onDispatchLifecycle(event => {
+      if (event.dispatchId === 'a' && event.state === 'interrupted') interrupted = true;
+      if (event.dispatchId === 'b' && event.state === 'queued') confirmationsAtAdmission = confirmations;
+    });
+    assert.equal(service.stop('a'), true);
+    const writes = Promise.all([
+      service.dispatch({ ...target, request: 'B', dispatchId: 'b', signal: cancel.signal }),
+      service.dispatch({ ...target, request: 'C', dispatchId: 'c', signal: cancel.signal }),
+    ]);
+    void writes.catch(() => {});
+    exit.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    await writes;
+    assert.deepEqual(turns, ['A', 'B', 'C']);
+    assert.equal(confirmationsAtAdmission, 2);
+  } finally { cancel.abort(); exit.resolve(); await h.close(); }
+});
+
+test('failed stop confirmation keeps the queue fenced until a successful refresh', async () => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  let failRead = false;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, { beforeReadState: async () => { if (failRead) throw new Error('confirmation unavailable'); } });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    service.onDispatchLifecycle(event => {
+      if (event.dispatchId === 'a' && event.state === 'interrupted') failRead = true;
+    });
+    assert.equal(service.stop('a'), true);
+    exit.resolve();
+    await waitFor(() => service.getQueueSnapshot().state === 'blocked' &&
+      service.getQueueSnapshot().activeOperation === null);
+    assert.deepEqual(turns, ['A']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    const write = service.dispatch({ ...target, request: 'C', dispatchId: 'c' });
+    await assert.rejects(h.context.coordinator.refreshState(), /confirmation unavailable/);
+    failRead = false;
+    await h.context.coordinator.refreshState();
+    await write;
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'B', 'C']);
+  } finally { exit.resolve(); await h.close(); }
+});
+
+test('stop cannot settle a bound dispatch with the open TUI Session checkpoint', async t => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  const reads: string[] = [];
+  let stoppedThread: string;
+  let failSettlement = true;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      stoppedThread = turn.setup.input.threadId!;
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, { beforeSettleAbort: async threadId => {
+    reads.push(threadId);
+    if (threadId === stoppedThread && failSettlement) throw new Error('Stopped checkpoint unavailable');
+  } });
+  try {
+    const service = h.resident.dispatch;
+    const tui = h.context.sessions.getActiveSession('worker');
+    const bound = h.context.sessions.ensureDispatchSession('worker', sessionId, true);
+    assert.notEqual(bound.threadId, tui.threadId);
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    // C targets the open TUI Session and could run ahead of B if the
+    // coordinator mistook that Session's readiness for A's confirmation.
+    await service.dispatch({ request: 'C', dispatchId: 'c', session: { id: tui.id } });
+    h.reviews.set(bound.threadId, buildReviewSpec({ id: 'approval',
+      view: { kind: 'plain', body: 'Approve this operation?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    assert.equal(service.stop('a'), true);
+    exit.resolve();
+    await waitFor(() => reads.length > 1 || turns.length > 1);
+    await waitFor(() => service.getQueueSnapshot().activeOperation === null);
+    assert.equal(service.getQueueSnapshot().state, 'blocked');
+    assert.deepEqual(turns, ['A']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b', 'c']);
+    const timeout = new AbortController();
+    t.mock.method(AbortSignal, 'timeout', () => timeout.signal);
+    const timedOut = assert.rejects(service.dispatch({ ...target, request: 'D', dispatchId: 'd' }), { name: 'TimeoutError' });
+    timeout.abort(new DOMException('Stop settlement timed out', 'TimeoutError'));
+    await timedOut;
+    await assert.rejects(h.context.coordinator.refreshState(), /Stopped checkpoint unavailable/);
+
+    failSettlement = false;
+    await h.context.coordinator.refreshState();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'C']);
+    assert.ok(reads.every(threadId => threadId === bound.threadId));
+    assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch?.dispatchId, 'a');
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'a').map(event => event.state),
+      ['queued', 'running', 'waiting']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    assert.ok(h.events.every(event => event.dispatchId !== 'd'));
+  } finally { exit.resolve(); await h.close(); }
+});
+
+test('supersede of a missing Session cannot create a Session or admit work', async () => {
+  const h = await fixture(async turn => reply(turn, 'unexpected'));
+  const id = 'worker:000000ff';
+  // Simulate an older caller carrying ordinary dispatch's create flag.
+  const session = { id, create: true };
+  try {
+    await assert.rejects(h.resident.dispatch.supersede({ request: 'D', scope, session },
+      { pendingDispatchIds: ['stale'] }), /target Session does not exist/);
+    assert.equal(h.context.sessions.getSession('worker', id), null);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.deepEqual(h.events, []);
+  } finally { await h.close(); }
+});
+
+test('standalone stop can cancel a selected Dispatch before the Host opens its Agent request', async () => {
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    return reply(turn, 'done');
+  });
+  try {
+    const service = h.resident.dispatch;
+    const stopped: boolean[] = [];
+    service.onQueueChange(snapshot => {
+      if (snapshot.activeDispatch?.dispatchId === 'a' && !stopped.length) stopped.push(service.stop(snapshot.activeDispatch.dispatchId));
+    });
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'b' && event.state === 'completed'));
+    assert.deepEqual(stopped, [true]);
+    assert.deepEqual(turns, ['B']);
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'a').map(event => event.state), ['queued', 'interrupted']);
+  } finally { await h.close(); }
+});
+
+test('supersede cancels a pending candidate during readiness without touching the unrelated FIFO order', async () => {
+  const started = deferred(), releaseActive = deferred(), reading = deferred(), releaseRead = deferred();
+  let candidateThread: string | undefined;
+  const candidate = { ...target, session: { id: 'worker:00000002', create: true } };
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    const text = turn.request.message;
+    turns.push(text);
+    if (text === 'A') { started.resolve(); await releaseActive.promise; }
+    return reply(turn, text);
+  }, { beforeReadState: async threadId => {
+    if (threadId !== candidateThread) return;
+    candidateThread = undefined;
+    reading.resolve();
+    await releaseRead.promise;
+  } });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...candidate, request: 'B', dispatchId: 'b' });
+    await service.dispatch({ ...target, scope: { ...scope, id: 'unrelated' }, request: 'U', dispatchId: 'u' });
+    const replacement = { ...candidate, request: 'D', dispatchId: 'd' };
+    await assert.rejects(service.supersede(replacement, { pendingDispatchIds: ['b', 'u'] }), PetDispatchRefusedError);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b', 'u']);
+    candidateThread = h.context.sessions.getSession('worker', candidate.session.id)!.threadId;
+    releaseActive.resolve();
+    await reading.promise;
+    assert.deepEqual(await service.supersede(replacement, { pendingDispatchIds: ['b'] }), { stop: 'not_requested' });
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['u', 'd']);
+    releaseRead.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'd' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'U', 'D']);
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'b').map(event => event.state), ['queued', 'superseded']);
+  } finally { releaseActive.resolve(); releaseRead.resolve(); await h.close(); }
+});
+
+test('a scoped supersede commits pending replacements before requesting stop on the exact execution', async () => {
+  const started = deferred(), release = deferred();
+  let signal!: AbortSignal;
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    const text = turn.request.message;
+    turns.push(text);
+    if (text === 'A') {
+      signal = turn.setup.input.signal!;
+      started.resolve();
+      await release.promise;
+      signal.throwIfAborted();
+    }
+    return reply(turn, text);
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    const stopDispatchId = service.getQueueSnapshot().activeDispatch!.dispatchId;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    await service.dispatch({ ...target, request: 'U', dispatchId: 'u' });
+    const replacement = { ...target, request: 'D', dispatchId: 'd' };
+    await assert.rejects(service.supersede(replacement, { pendingDispatchIds: ['b', 'missing'], stopDispatchId }), PetDispatchRefusedError);
+    assert.equal(signal.aborted, false);
+    let queuedOnAbort: string[] | undefined;
+    signal.addEventListener('abort', () => {
+      queuedOnAbort = service.getQueueSnapshot().entries?.map(entry => entry.dispatchId);
+    }, { once: true });
+    assert.deepEqual(await service.supersede(replacement, { pendingDispatchIds: ['b'], stopDispatchId }), { stop: 'requested' });
+    assert.deepEqual(queuedOnAbort, ['u', 'd']);
+    assert.deepEqual(turns, ['A']);
+    release.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'd' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'U', 'D']);
+  } finally { release.resolve(); await h.close(); }
+});
+
+test('a standalone stop that settles into review keeps same-Session work waiting and lets other ready work run', async () => {
+  const started = deferred(), release = deferred();
+  const turns: string[] = [];
+  let h!: Awaited<ReturnType<typeof fixture>>;
+  h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    const text = turn.request.message;
+    turns.push(text);
+    if (text === 'A') {
+      started.resolve();
+      await release.promise;
+      h.reviews.set(turn.setup.input.threadId!, buildReviewSpec({ id: 'approval',
+        view: { kind: 'plain', body: 'Approve this operation?' },
+        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+      }));
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, text);
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    await service.dispatch({ ...target, session: { id: 'worker:00000002', create: true }, request: 'C', dispatchId: 'c' });
+    assert.equal(service.stop(service.getQueueSnapshot().activeDispatch!.dispatchId), true);
+    release.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    await waitFor(() => service.getQueueSnapshot().activeOperation === null);
+    assert.deepEqual(turns, ['A', 'C']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    assert.ok(h.events.some(event => event.dispatchId === 'a' && event.state === 'waiting'));
+    assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch?.dispatchId, 'a');
+  } finally { release.resolve(); await h.close(); }
+});
+
+test('dispatch IDs cannot be reused after settlement or supersession; stale replacement changes nothing', async () => {
+  const started = deferred(), release = deferred();
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    if (turn.request.message === 'active') { started.resolve(); await release.promise; }
+    return reply(turn, 'done');
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'settled', dispatchId: 'old' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'old' && event.state === 'completed'));
+    await service.dispatch({ ...target, request: 'active', dispatchId: 'active' });
+    await started.promise;
+    await assert.rejects(service.dispatch({ ...target, request: 'reuse old', dispatchId: 'old' }), /already been admitted/);
+    await service.dispatch({ ...target, request: 'pending', dispatchId: 'pending' });
+    await assert.rejects(service.supersede({ ...target, request: 'stale', dispatchId: 'new' },
+      { pendingDispatchIds: ['old', 'pending'] }), PetDispatchRefusedError);
+    await assert.rejects(service.supersede({ ...target, request: 'reuse old as replacement', dispatchId: 'old' },
+      { pendingDispatchIds: ['pending'] }), /already been admitted/);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['pending']);
+    assert.deepEqual(await service.supersede({ ...target, request: 'valid', dispatchId: 'new' },
+      { pendingDispatchIds: ['pending'], stopDispatchId: 'old' }), { stop: 'not_active' });
+    await assert.rejects(service.dispatch({ ...target, request: 'reuse superseded', dispatchId: 'pending' }), /already been admitted/);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['new']);
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'pending').map(event => event.state), ['queued', 'superseded']);
+    release.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'new' && event.state === 'completed'));
+  } finally { release.resolve(); await h.close(); }
+});
+
+test('concurrent submissions of a dispatch ID admit it only once across context resolution', async () => {
+  const resolving = deferred(), release = deferred();
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    return reply(turn, 'done');
+  }, { resolveInvocationContext: async ({ request }) => {
+    if (request === 'slower') { resolving.resolve(); await release.promise; }
+    return [];
+  } });
+  try {
+    const service = h.resident.dispatch;
+    const slow = service.dispatch({ ...target, request: 'slower', dispatchId: 'same' });
+    await resolving.promise;
+    await service.dispatch({ ...target, request: 'winner', dispatchId: 'same' });
+    release.resolve();
+    await assert.rejects(slow, /already been admitted/);
+    await waitFor(() => h.events.some(event => event.dispatchId === 'same' && event.state === 'completed'));
+    assert.deepEqual(turns, ['winner']);
+  } finally { release.resolve(); await h.close(); }
 });

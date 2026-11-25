@@ -299,17 +299,12 @@ test('trusted interrupt delivery snapshots its explicit target and idempotency a
       { petId: 'worker', request: 'missing scope', delivery: 'interrupt' as const, session: { id: 'worker:00000001' } },
       { petId: 'worker', request: 'missing session', delivery: 'interrupt' as const, scope: { namespace: 'channel', id: 'one' } },
     ]) await assert.rejects(studio.dispatch(request), /explicit session and scope/);
-    await assert.rejects(studio.dispatch({ petId: 'worker', request: 'unexpected guard',
-      expectedInterrupt: { dispatchId: 'old-dispatch', requestId: 'old-request' },
-    }), /requires interrupt delivery/);
     assert.equal(seen.length, 0);
     const request: Parameters<typeof studio.dispatch>[0] = {
       petId: 'worker', request: 'new evidence', idempotencyKey: 'once', delivery: 'interrupt',
-      expectedInterrupt: { dispatchId: 'old-dispatch', requestId: 'old-request' },
       session: { id: 'worker:00000001' }, scope: { namespace: 'channel', id: 'one' },
     };
     const pending = studio.dispatch(request);
-    request.expectedInterrupt!.requestId = 'different-request';
     request.delivery = undefined;
     request.session!.id = 'worker:00000002';
     request.scope = { namespace: 'channel', id: 'two' };
@@ -318,7 +313,6 @@ test('trusted interrupt delivery snapshots its explicit target and idempotency a
     assert.equal(repeated.invocationId, receipt.invocationId);
     assert.equal(seen.length, 1);
     assert.equal(seen[0]!.delivery, 'interrupt');
-    assert.deepEqual(seen[0]!.expectedInterrupt, { dispatchId: 'old-dispatch', requestId: 'old-request' });
     assert.deepEqual(seen[0]!.session, { id: 'worker:00000001' });
     assert.deepEqual(seen[0]!.scope, { namespace: 'channel', id: 'one' });
     assert.equal(seen[0]!.request, 'new evidence');

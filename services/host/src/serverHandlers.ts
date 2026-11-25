@@ -40,7 +40,7 @@ import {
 } from './serverTypes';
 
 export type ServerHandlers = {
-  interruptRun: (requestId: string, options?: { onlyIfRunning?: boolean }) => boolean;
+  interruptRun: (requestId: string) => boolean;
   peerHandlers: AgentSessionPeerHandlers;
   /**
    * Read one exact session without selecting it. Throws `session_not_found`
@@ -870,7 +870,7 @@ export function createChatHostHandlers(
         activeRuns.finish(activeRun);
       }
     },
-    interruptRun: (requestId: string, options?: { onlyIfRunning?: boolean }) => inflightRequests.interruptById(requestId, options) !== null,
+    interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
     close: () => { sessionCommands.close(); chatHandler.close(); },
     handleHttpRequest: (req, res, authToken) => handleLocalHttpRequest(req, res, {
       authToken, artifactStore: initialDeps.artifactStore,

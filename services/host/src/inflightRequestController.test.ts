@@ -103,29 +103,6 @@ test('InflightRequestController routes interrupts by requestId', () => {
   assert.equal(second.controller.signal.aborted, false);
 });
 
-test('guarded interruption refuses aborted, settled, and cleared runs', () => {
-  const { controller } = createTestController();
-  const active = controller.start('client', 'active');
-  assert.equal(controller.interruptById('active', { onlyIfRunning: true }), active);
-  assert.equal(controller.interruptById('active', { onlyIfRunning: true }), null);
-  const settled = controller.start('client', 'settled');
-  controller.finish('client', settled, 'interrupted');
-  assert.equal(controller.interruptById('settled', { onlyIfRunning: true }), null);
-  assert.equal(settled.controller.signal.aborted, false);
-  controller.clear('client', settled);
-  assert.equal(controller.interruptById('settled', { onlyIfRunning: true }), null);
-});
-
-test('guarded interruption claims the run before notifying synchronous observers', () => {
-  const controller = new InflightRequestController<string>({
-    emitOperation: () => {},
-    sendControl: () => assert.equal(controller.interruptById('request', { onlyIfRunning: true }), null),
-  });
-  const run = controller.start('client', 'request');
-  assert.equal(controller.interruptById('request', { onlyIfRunning: true }), run);
-  assert.equal(run.controller.signal.aborted, true);
-});
-
 test('InflightRequestController keeps runs isolated per key', () => {
   const { controller } = createTestController();
 

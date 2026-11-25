@@ -144,7 +144,6 @@ test('messages retain references and mentions without dispatching a Pet', async 
     kind: 'queue', sessionId: 'writer-session',
   });
   assert.equal(dispatched[1]!.delivery, undefined, 'queue uses existing ordinary admission');
-  assert.equal(dispatched[1]!.expectedInterrupt, undefined);
 });
 
 test('a Pet works in a Channel only while its run there is running, and context reads say so', async (t) => {

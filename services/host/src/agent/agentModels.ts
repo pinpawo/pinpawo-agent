@@ -56,7 +56,7 @@ export function buildModel(
   }
   const openaiFields: ChatOpenAIFields = {
     ...fields,
-    // Official DeepSeek Head decisions don't need a reasoning pass. Leave
+    // Official DeepSeek Head decisions have a small bounded JSON budget. Leave
     // every Agent role, gateway and other protocol on its unchanged defaults.
     ...(isOfficialDeepSeekHead(llmConfig, generationOptions) ? { modelKwargs: { thinking: { type: 'disabled' } } } : {}),
     timeout: llmConfig.timeoutMs ?? 45000,

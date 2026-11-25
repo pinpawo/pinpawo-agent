@@ -41,6 +41,7 @@ export {
   type PetDispatchLifecycleState,
   type PetDispatchMessage,
   type PetDispatchPort,
+  type ResidentPetDispatchService,
   type PetDispatchQueueSnapshot,
   type PetDispatchQueueEntry,
   type PetDispatchRequest,

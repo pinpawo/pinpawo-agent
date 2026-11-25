@@ -246,10 +246,6 @@ export function prepareStudioWithHead(input: CreateStudioInput, attachHead?: Att
         ? 'Interrupt delivery requires an explicit session and scope.'
         : 'Idle-only delivery requires an explicit session and scope.');
     }
-    const expectedInterrupt = request.expectedInterrupt === undefined ? undefined : { ...request.expectedInterrupt };
-    if (expectedInterrupt && (delivery !== 'interrupt' || !expectedInterrupt.dispatchId || !expectedInterrupt.requestId)) {
-      throw new Error('An expected interrupt requires interrupt delivery and an exact dispatch and request.');
-    }
     await registry.restore();
     signal?.throwIfAborted();
     if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
@@ -298,7 +294,6 @@ export function prepareStudioWithHead(input: CreateStudioInput, attachHead?: Att
         ...(scope ? { scope } : {}),
         ...(origin ? { origin } : {}),
         ...(delivery ? { delivery } : {}),
-        ...(expectedInterrupt ? { expectedInterrupt } : {}),
       });
 
       const receipt: StudioDispatchReceipt = Object.freeze({

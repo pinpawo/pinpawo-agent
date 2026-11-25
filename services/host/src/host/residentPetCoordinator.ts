@@ -34,7 +34,7 @@ export class ResidentPetCoordinator {
   private activeEntry: QueuedOperation | undefined;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
-  private stopping: { entry: QueuedOperation; release: AbortController; confirmed?: boolean } | undefined;
+  private stopping: { entry: QueuedOperation; release: AbortController; waiters: number; confirmed?: boolean } | undefined;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
   private schedulingVersion = 0;
   private preferredDispatch: QueuedOperation | undefined;
@@ -181,7 +181,7 @@ export class ResidentPetCoordinator {
         (matches && !matches(observation))) return false;
     // Cancellation notifies listeners synchronously. Fence writes before asking
     // the Agent to stop, including writes from those listeners.
-    this.stopping = { entry, release: new AbortController() };
+    this.stopping = { entry, release: new AbortController(), waiters: 0 };
     let accepted = false;
     try {
       accepted = entry.stop();
@@ -254,10 +254,8 @@ export class ResidentPetCoordinator {
     if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     const stop = this.stopping;
     if (!stop) return;
-    // Retry an unconfirmed settlement on demand, never on the TUI's behalf.
-    if (!this.active && !this.refreshing) {
-      void this.refreshState().catch(error => this.logError('[resident-pet] failed to confirm stopped state:', error));
-    }
+    stop.waiters++;
+    this.retryStopConfirmation();
     const timeout = AbortSignal.timeout(STOP_WRITE_WAIT_MS);
     const wake = AbortSignal.any([stop.release.signal, timeout, ...(signal ? [signal] : [])]);
     return new Promise<void>(resolve => {
@@ -268,7 +266,13 @@ export class ResidentPetCoordinator {
       if (timeout.aborted && wake.reason === timeout.reason) {
         throw new DOMException('Timed out waiting for Dispatch Stop settlement.', 'TimeoutError');
       }
-    });
+    }).finally(() => { stop.waiters--; });
+  }
+
+  private retryStopConfirmation(): void {
+    if (!this.active && !this.refreshing && this.stopping?.waiters) {
+      void this.refreshState().catch(error => this.logError('[resident-pet] failed to confirm stopped state:', error));
+    }
   }
 
   private assertDispatchWritable(): void {
@@ -287,6 +291,9 @@ export class ResidentPetCoordinator {
     this.activeOperation = null;
     this.activeEntry = undefined;
     if (this.stopping?.confirmed) this.releaseStopBarrier();
+    // Writes that were already waiting do not need a second caller to
+    // trigger recovery. Refresh does not loop if this retry also fails.
+    else this.retryStopConfirmation();
   }
 
   assertDispatchIdAvailable(dispatchId: string): void {

@@ -675,6 +675,47 @@ test('supersede waits for Stop, then validates and replaces only live pending wo
   } finally { exit.resolve(); await h.close(); }
 });
 
+test('already waiting writes share one retry when the first Stop confirmation fails', async () => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  let confirmations = 0;
+  let confirmationsAtAdmission: number | undefined;
+  let interrupted = false;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, { beforeReadState: async () => {
+    if (interrupted && turns.length === 1 && ++confirmations === 1) throw new Error('transient read failure');
+  } });
+  const cancel = new AbortController();
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    service.onDispatchLifecycle(event => {
+      if (event.dispatchId === 'a' && event.state === 'interrupted') interrupted = true;
+      if (event.dispatchId === 'b' && event.state === 'queued') confirmationsAtAdmission = confirmations;
+    });
+    assert.equal(service.stop('a'), true);
+    const writes = Promise.all([
+      service.dispatch({ ...target, request: 'B', dispatchId: 'b', signal: cancel.signal }),
+      service.dispatch({ ...target, request: 'C', dispatchId: 'c', signal: cancel.signal }),
+    ]);
+    void writes.catch(() => {});
+    exit.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
+    await writes;
+    assert.deepEqual(turns, ['A', 'B', 'C']);
+    assert.equal(confirmationsAtAdmission, 2);
+  } finally { cancel.abort(); exit.resolve(); await h.close(); }
+});
+
 test('failed stop confirmation keeps the queue fenced until a successful refresh', async () => {
   const started = deferred(), exit = deferred();
   const turns: string[] = [];

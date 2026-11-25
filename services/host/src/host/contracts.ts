@@ -32,7 +32,7 @@ export type PetDispatchQueueSnapshot = {
   queuedDispatches: number;
   /** Runtime-owned entries in their current queue order; never includes input text. */
   entries?: PetDispatchQueueEntry[];
-  activeDispatch?: PetDispatchQueueEntry & { stopTarget?: PetDispatchStopTarget };
+  activeDispatch?: PetDispatchQueueEntry;
 };
 
 export type PetDispatchQueueEntry = {
@@ -47,10 +47,6 @@ export type PetDispatchQueueEntry = {
 /** A continuation is only eligible for this exact, explicitly addressed domain session. */
 export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope };
 
-/**
- * An opaque caller correlation key. The resident runtime does not interpret it;
- * it only returns the same key in lifecycle observations.
- */
 export type PetDispatchRequest = {
   /** Source identity for queue observation only; not execution or review context. */
   origin?: PetInvocationScope;
@@ -59,6 +55,7 @@ export type PetDispatchRequest = {
   signal?: AbortSignal;
   /** Explicit in-process input references; never inferred from request text. */
   attachments?: readonly Deliverable[];
+  /** One ID per admitted dispatch. Never reuse it for another submission. */
   dispatchId?: string;
   /** Explicit durable session; create only when registering a reserved identity. */
   session?: { id: string; create?: boolean };
@@ -110,26 +107,27 @@ export type PetDispatchLifecycleEvent = {
   pendingInterrupt?: PendingInterruptProjection;
 };
 
-export interface PetDispatchPort {
+type ScopedDispatchRequest = Omit<PetDispatchRequest, 'delivery' | 'session' | 'scope'> &
+  Required<Pick<PetDispatchRequest, 'session' | 'scope'>>;
+
+export interface ResidentPetDispatchService {
   getQueueSnapshot(): PetDispatchQueueSnapshot;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input for resident execution, which is observed through Agent Session. */
   dispatch(request: PetDispatchRequest): Promise<void>;
-}
-
-/** Exact selection, even if a caller reuses a dispatch correlation ID. */
-export type PetDispatchStopTarget = Readonly<{ dispatchId: string; token: string }>;
-
-export interface ResidentPetDispatchService extends PetDispatchPort {
-  /** Request cancellation for this exact dispatch. A true receipt is not settlement. */
-  stop(target: PetDispatchStopTarget): boolean;
+  /** Request cancellation of a coordinator-started execution. A true receipt is not settlement. */
+  stop(dispatchId: string): boolean;
   /** Admit at the tail and supersede exactly the named pending items in the same scope and Session. */
   supersede(
-    request: Omit<PetDispatchRequest, 'delivery'>,
-    options: { pendingDispatchIds: readonly string[]; stop?: PetDispatchStopTarget },
-  ): Promise<{ stopRequested: boolean }>;
+    request: ScopedDispatchRequest,
+    options: { pendingDispatchIds: readonly string[]; stopDispatchId?: string },
+  ): Promise<{ stop: 'not_requested' | 'requested' | 'not_active' }>;
 }
+
+/** The capabilities exposed to callers that only observe and submit, such as Studio. */
+export type PetDispatchPort = Pick<ResidentPetDispatchService,
+  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch'>;
 
 export interface ResidentPet {
   readonly dispatch: ResidentPetDispatchService;
@@ -220,7 +218,7 @@ export type QueuedOperation = {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   observation?: PetDispatchQueueEntry;
-  stop?: { target: PetDispatchStopTarget; request: () => boolean };
+  stop?: () => boolean;
   onSuperseded?: () => void;
 };
 
@@ -258,10 +256,10 @@ export class PetSessionReviewRefusedError extends Error {
   }
 }
 
-/** An idle-only dispatch could not claim the slot for its exact target. */
+/** A dispatch was rejected before admission. */
 export class PetDispatchRefusedError extends Error {
-  constructor() {
-    super('The resident dispatch slot or target session is not ready.');
+  constructor(message = 'The resident dispatch slot or target session is not ready.') {
+    super(message);
     this.name = 'PetDispatchRefusedError';
   }
 }

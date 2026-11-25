@@ -521,8 +521,9 @@ test('standalone stop holds the dispatch slot until Agent settlement; a late sto
     const service = h.resident.dispatch;
     await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
     await started.promise;
-    await service.dispatch({ ...target, request: 'B', dispatchId: 'a' });
-    const stop = service.getQueueSnapshot().activeDispatch!.stopTarget!;
+    await assert.rejects(service.dispatch({ ...target, request: 'duplicate A', dispatchId: 'a' }), /already been admitted/);
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    const stop = service.getQueueSnapshot().activeDispatch!.dispatchId;
     assert.equal(service.stop(stop), true);
     assert.equal(signal.aborted, true);
     await new Promise(resolve => setImmediate(resolve));
@@ -530,8 +531,9 @@ test('standalone stop holds the dispatch slot until Agent settlement; a late sto
     assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'a');
     release.resolve();
     await nextStarted.promise;
-    assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'a');
-    assert.equal(service.stop(stop), false, 'a reused correlation ID cannot redirect a stale Stop');
+    assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'b');
+    await assert.rejects(service.dispatch({ ...target, request: 'duplicate A after settlement', dispatchId: 'a' }), /already been admitted/);
+    assert.equal(service.stop(stop), false);
     assert.equal(signal.aborted, false);
     assert.deepEqual(turns, ['A', 'B']);
     assert.ok(h.events.some(event => event.dispatchId === 'a' && event.state === 'interrupted'));
@@ -549,7 +551,7 @@ test('standalone stop can cancel a selected Dispatch before the Host opens its A
     const service = h.resident.dispatch;
     const stopped: boolean[] = [];
     service.onQueueChange(snapshot => {
-      if (snapshot.activeDispatch?.dispatchId === 'a' && !stopped.length) stopped.push(service.stop(snapshot.activeDispatch.stopTarget!));
+      if (snapshot.activeDispatch?.dispatchId === 'a' && !stopped.length) stopped.push(service.stop(snapshot.activeDispatch.dispatchId));
     });
     await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
     await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
@@ -589,7 +591,7 @@ test('supersede cancels a pending candidate during readiness without touching th
     candidateThread = h.context.sessions.getSession('worker', candidate.session.id)!.threadId;
     releaseActive.resolve();
     await reading.promise;
-    assert.deepEqual(await service.supersede(replacement, { pendingDispatchIds: ['b'] }), { stopRequested: false });
+    assert.deepEqual(await service.supersede(replacement, { pendingDispatchIds: ['b'] }), { stop: 'not_requested' });
     assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['u', 'd']);
     releaseRead.resolve();
     await waitFor(() => h.events.some(event => event.dispatchId === 'd' && event.state === 'completed'));
@@ -618,17 +620,17 @@ test('a scoped supersede commits pending replacements before requesting stop on 
     const service = h.resident.dispatch;
     await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
     await started.promise;
-    const stop = service.getQueueSnapshot().activeDispatch!.stopTarget!;
+    const stopDispatchId = service.getQueueSnapshot().activeDispatch!.dispatchId;
     await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
     await service.dispatch({ ...target, request: 'U', dispatchId: 'u' });
     const replacement = { ...target, request: 'D', dispatchId: 'd' };
-    await assert.rejects(service.supersede(replacement, { pendingDispatchIds: ['b', 'missing'], stop }), PetDispatchRefusedError);
+    await assert.rejects(service.supersede(replacement, { pendingDispatchIds: ['b', 'missing'], stopDispatchId }), PetDispatchRefusedError);
     assert.equal(signal.aborted, false);
     let queuedOnAbort: string[] | undefined;
     signal.addEventListener('abort', () => {
       queuedOnAbort = service.getQueueSnapshot().entries?.map(entry => entry.dispatchId);
     }, { once: true });
-    assert.deepEqual(await service.supersede(replacement, { pendingDispatchIds: ['b'], stop }), { stopRequested: true });
+    assert.deepEqual(await service.supersede(replacement, { pendingDispatchIds: ['b'], stopDispatchId }), { stop: 'requested' });
     assert.deepEqual(queuedOnAbort, ['u', 'd']);
     assert.deepEqual(turns, ['A']);
     release.resolve();
@@ -662,7 +664,7 @@ test('a standalone stop that settles into review keeps same-Session work waiting
     await started.promise;
     await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
     await service.dispatch({ ...target, session: { id: 'worker:00000002', create: true }, request: 'C', dispatchId: 'c' });
-    assert.equal(service.stop(service.getQueueSnapshot().activeDispatch!.stopTarget!), true);
+    assert.equal(service.stop(service.getQueueSnapshot().activeDispatch!.dispatchId), true);
     release.resolve();
     await waitFor(() => h.events.some(event => event.dispatchId === 'c' && event.state === 'completed'));
     await waitFor(() => service.getQueueSnapshot().activeOperation === null);
@@ -670,5 +672,58 @@ test('a standalone stop that settles into review keeps same-Session work waiting
     assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
     assert.ok(h.events.some(event => event.dispatchId === 'a' && event.state === 'waiting'));
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch?.dispatchId, 'a');
+  } finally { release.resolve(); await h.close(); }
+});
+
+test('dispatch IDs cannot be reused after settlement or supersession; stale replacement changes nothing', async () => {
+  const started = deferred(), release = deferred();
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    if (turn.request.message === 'active') { started.resolve(); await release.promise; }
+    return reply(turn, 'done');
+  });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'settled', dispatchId: 'old' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'old' && event.state === 'completed'));
+    await service.dispatch({ ...target, request: 'active', dispatchId: 'active' });
+    await started.promise;
+    await assert.rejects(service.dispatch({ ...target, request: 'reuse old', dispatchId: 'old' }), /already been admitted/);
+    await service.dispatch({ ...target, request: 'pending', dispatchId: 'pending' });
+    await assert.rejects(service.supersede({ ...target, request: 'stale', dispatchId: 'new' },
+      { pendingDispatchIds: ['old', 'pending'] }), PetDispatchRefusedError);
+    await assert.rejects(service.supersede({ ...target, request: 'reuse old as replacement', dispatchId: 'old' },
+      { pendingDispatchIds: ['pending'] }), /already been admitted/);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['pending']);
+    assert.deepEqual(await service.supersede({ ...target, request: 'valid', dispatchId: 'new' },
+      { pendingDispatchIds: ['pending'], stopDispatchId: 'old' }), { stop: 'not_active' });
+    await assert.rejects(service.dispatch({ ...target, request: 'reuse superseded', dispatchId: 'pending' }), /already been admitted/);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['new']);
+    assert.deepEqual(h.events.filter(event => event.dispatchId === 'pending').map(event => event.state), ['queued', 'superseded']);
+    release.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'new' && event.state === 'completed'));
+  } finally { release.resolve(); await h.close(); }
+});
+
+test('concurrent submissions of a dispatch ID admit it only once across context resolution', async () => {
+  const resolving = deferred(), release = deferred();
+  const turns: string[] = [];
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    return reply(turn, 'done');
+  }, { resolveInvocationContext: async ({ request }) => {
+    if (request === 'slower') { resolving.resolve(); await release.promise; }
+    return [];
+  } });
+  try {
+    const service = h.resident.dispatch;
+    const slow = service.dispatch({ ...target, request: 'slower', dispatchId: 'same' });
+    await resolving.promise;
+    await service.dispatch({ ...target, request: 'winner', dispatchId: 'same' });
+    release.resolve();
+    await assert.rejects(slow, /already been admitted/);
+    await waitFor(() => h.events.some(event => event.dispatchId === 'same' && event.state === 'completed'));
+    assert.deepEqual(turns, ['winner']);
   } finally { release.resolve(); await h.close(); }
 });

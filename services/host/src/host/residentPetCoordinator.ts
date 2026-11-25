@@ -6,7 +6,6 @@ import {
   type PetDispatchTarget,
   type PetDispatchSettledState,
   type PetDispatchState,
-  type PetDispatchStopTarget,
   type QueuedOperation,
   type ResidentPetCoordinatorOptions,
 } from './contracts';
@@ -18,6 +17,8 @@ function defaultLogError(message: string, error: unknown): void {
 /** One non-preemptive graph admission point shared by conversation and dispatch. */
 export class ResidentPetCoordinator {
   private readonly dispatchQueue: QueuedOperation[] = [];
+  // Retain admitted IDs for the lifetime of this resident, including settled entries.
+  private readonly admittedDispatchIds = new Set<string>();
   /** Conversations currently holding the gate busy; they never enter a queue. */
   private conversations = 0;
   private readonly conversationHolds = new Set<Promise<void>>();
@@ -46,8 +47,7 @@ export class ResidentPetCoordinator {
   }
 
   getQueueSnapshot(): PetDispatchQueueSnapshot {
-    const { observation, stop } = this.activeEntry ?? {};
-    const activeDispatch = observation ? { ...observation, ...(stop ? { stopTarget: stop.target } : {}) } : undefined;
+    const activeDispatch = this.activeEntry?.observation;
     return {
       state: this.state,
       activeOperation: this.activeOperation,
@@ -157,6 +157,7 @@ export class ResidentPetCoordinator {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
+    if (observation) this.recordDispatchId(observation.dispatchId);
     void this.enqueue(operation, ready, observation, controls).catch((error) => this.reportDispatchFailure(error));
     // A pending review can be resolved through a reconnect or another
     // session client. Do not let the queue keep that old settled state and
@@ -166,13 +167,13 @@ export class ResidentPetCoordinator {
     });
   }
 
-  stopDispatch(target: PetDispatchStopTarget, matches?: (entry: PetDispatchQueueEntry) => boolean): boolean {
+  stopDispatch(dispatchId: string, matches?: (entry: PetDispatchQueueEntry) => boolean): boolean {
     const entry = this.activeEntry;
     const observation = entry?.observation;
     if (this.closing || !observation || !entry.stop ||
-        observation.dispatchId !== target.dispatchId || entry.stop.target.token !== target.token ||
+        observation.dispatchId !== dispatchId ||
         (matches && !matches(observation))) return false;
-    return entry.stop.request();
+    return entry.stop();
   }
 
   /** Publish no intermediate queue snapshot between invalidating old input and admitting its replacement. */
@@ -181,12 +182,10 @@ export class ResidentPetCoordinator {
     const expected = new Set(ids);
     const removed = this.dispatchQueue.filter(item => item.observation && expected.has(item.observation.dispatchId));
     if (!expected.size || expected.size !== ids.length || removed.length !== expected.size ||
-        new Set(removed.map(item => item.observation!.dispatchId)).size !== expected.size ||
-        removed.some(item => !matches(item.observation!)) ||
-        this.activeEntry?.observation?.dispatchId === entry.observation.dispatchId ||
-        this.dispatchQueue.some(item => item.observation?.dispatchId === entry.observation.dispatchId)) {
-      throw new PetDispatchRefusedError();
+        removed.some(item => !matches(item.observation!))) {
+      throw new PetDispatchRefusedError('A dispatch to supersede is no longer pending in the target Session and scope.');
     }
+    this.recordDispatchId(entry.observation.dispatchId);
     for (const item of removed) this.dispatchQueue.splice(this.dispatchQueue.indexOf(item), 1);
     if (this.preferredDispatch && removed.includes(this.preferredDispatch)) this.preferredDispatch = undefined;
     this.dispatchQueue.push({
@@ -221,6 +220,7 @@ export class ResidentPetCoordinator {
     const ready = await options.ready();
     options.signal?.throwIfAborted();
     if (!ready || version !== this.schedulingVersion || !this.isDispatchSlotIdle()) return false;
+    this.recordDispatchId(options.observation.dispatchId);
     this.schedulingVersion++;
     this.startDispatch({
       kind: 'dispatch', run: operation, observation: structuredClone(options.observation), stop: options.stop,
@@ -229,6 +229,17 @@ export class ResidentPetCoordinator {
     });
     options.onAdmitted();
     return true;
+  }
+
+  assertDispatchIdAvailable(dispatchId: string): void {
+    if (this.admittedDispatchIds.has(dispatchId)) {
+      throw new PetDispatchRefusedError('Dispatch ID has already been admitted.');
+    }
+  }
+
+  private recordDispatchId(dispatchId: string): void {
+    this.assertDispatchIdAvailable(dispatchId);
+    this.admittedDispatchIds.add(dispatchId);
   }
 
   private isDispatchSlotIdle(): boolean {

@@ -39,12 +39,12 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     publishDispatchLifecycle,
   } = context;
 
-  type Supersede = Parameters<ResidentPet['dispatch']['supersede']>[1];
+  type Supersede = ResidentPet['dispatch']['supersede'];
 
   async function submit(
     { request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, origin: suppliedOrigin, session: suppliedSession, delivery, signal }: PetDispatchRequest,
-    replacement?: Supersede,
-  ): Promise<{ stopRequested: boolean }> {
+    replacement?: Parameters<Supersede>[1],
+  ): ReturnType<Supersede> {
     signal?.throwIfAborted();
     const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
     if (replacement && (delivery !== undefined || !suppliedSession?.id || !suppliedScope)) {
@@ -57,6 +57,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         : 'Idle-only delivery requires an explicit session and scope.');
     }
     const dispatchId = suppliedDispatchId?.trim() || randomUUID();
+    coordinator.assertDispatchIdAvailable(dispatchId);
     const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
     const origin = suppliedOrigin ? copyPetInvocationScope(suppliedOrigin) : undefined;
     if (origin && (!scope || origin.namespace !== scope.namespace)) throw new Error('Dispatch origin requires a matching scope namespace.');
@@ -67,6 +68,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       : undefined;
     signal?.throwIfAborted();
     if (context.isClosing()) throw new Error('Resident Pet is closing.');
+    coordinator.assertDispatchIdAvailable(dispatchId);
     const invocationContext = snapshotInvocationContext(resolved);
     // Resolve and persist before admission; neither queue time nor a TUI switch
     // may change the target. Legacy callers retain active-session behavior.
@@ -96,15 +98,12 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     signal?.throwIfAborted();
     let executingRequestId: string | undefined;
     let stopRequested = false;
-    const stop = {
-      target: { dispatchId, token: randomUUID() },
-      request: () => {
-        if (stopRequested) return true;
-        // Before the Host owns a request, prevent the selected entry from starting.
-        stopRequested = true;
-        if (executingRequestId && !localHandlers.interruptRun(executingRequestId)) stopRequested = false;
-        return stopRequested;
-      },
+    const stop = () => {
+      if (stopRequested) return true;
+      // Before the Host owns a request, prevent the selected entry from starting.
+      stopRequested = true;
+      if (executingRequestId && !localHandlers.interruptRun(executingRequestId)) stopRequested = false;
+      return stopRequested;
     };
     const run = () => AsyncLocalStorageProviderSingleton.runWithConfig(
       { callbacks: [] },
@@ -206,7 +205,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         ready: async () => !!sessions.getSession(petId, target!.id) && await isTargetReady(),
       });
       if (!admitted) throw new PetDispatchRefusedError();
-      return { stopRequested: false };
+      return { stop: 'not_requested' };
     }
     const ready = target ? async () => {
       // A vanished target is not held by a review. Admit it so the run fails
@@ -221,12 +220,13 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         run, ready, observation, stop, onSuperseded,
       }, replacement.pendingDispatchIds, matches);
       onAdmitted();
-      return { stopRequested: replacement.stop !== undefined && coordinator.stopDispatch(replacement.stop, matches) };
+      if (replacement.stopDispatchId === undefined) return { stop: 'not_requested' };
+      return { stop: coordinator.stopDispatch(replacement.stopDispatchId, matches) ? 'requested' : 'not_active' };
     }
     coordinator.submitDispatch(run, ready, observation, { stop, onSuperseded });
     onAdmitted();
     if (delivery === 'interrupt') context.interruptDispatchForInput({ sessionId: target!.id, scope: scope! });
-    return { stopRequested: false };
+    return { stop: 'not_requested' };
   }
 
   const dispatch: ResidentPet['dispatch'] = {
@@ -237,8 +237,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       return () => dispatchLifecycleListeners.delete(listener);
     },
     dispatch: async request => { await submit(request); },
-    stop: target => coordinator.stopDispatch(target),
-    supersede: (request, options) => submit(request, { pendingDispatchIds: [...options.pendingDispatchIds], ...(options.stop ? { stop: { ...options.stop } } : {}) }),
+    stop: dispatchId => coordinator.stopDispatch(dispatchId),
+    supersede: (request, options) => submit(request, { ...options, pendingDispatchIds: [...options.pendingDispatchIds] }),
   };
 
   return { dispatch, close: context.close };

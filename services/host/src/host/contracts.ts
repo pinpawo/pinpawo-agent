@@ -108,7 +108,7 @@ export type PetDispatchLifecycleEvent = {
 };
 
 type ScopedDispatchRequest = Omit<PetDispatchRequest, 'delivery' | 'session' | 'scope'> &
-  Required<Pick<PetDispatchRequest, 'session' | 'scope'>>;
+  Required<Pick<PetDispatchRequest, 'scope'>> & { session: { id: string } };
 
 export interface ResidentPetDispatchService {
   getQueueSnapshot(): PetDispatchQueueSnapshot;

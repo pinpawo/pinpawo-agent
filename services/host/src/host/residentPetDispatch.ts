@@ -46,6 +46,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     replacement?: Parameters<Supersede>[1],
   ): ReturnType<Supersede> {
     signal?.throwIfAborted();
+    coordinator.assertDispatchWritable();
     const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
     if (replacement && (delivery !== undefined || !suppliedSession?.id || !suppliedScope)) {
       throw new Error('Supersede requires an explicit session and scope, without a delivery mode.');
@@ -68,13 +69,17 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       : undefined;
     signal?.throwIfAborted();
     if (context.isClosing()) throw new Error('Resident Pet is closing.');
+    coordinator.assertDispatchWritable();
     coordinator.assertDispatchIdAvailable(dispatchId);
     const invocationContext = snapshotInvocationContext(resolved);
-    // Resolve and persist before admission; neither queue time nor a TUI switch
-    // may change the target. Legacy callers retain active-session behavior.
+    // Replacement only targets an existing binding. Legacy dispatch can
+    // register a reserved Session before it admits ordinary work.
     const target = session
-      ? sessions.ensureDispatchSession(petId, session.id, session.create === true)
+      ? replacement
+        ? sessions.getSession(petId, session.id)
+        : sessions.ensureDispatchSession(petId, session.id, session.create === true)
       : undefined;
+    if (replacement && !target) throw new PetDispatchRefusedError('The target Session does not exist.');
     let pendingInterrupt: PendingInterruptProjection | undefined;
     const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
       ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
@@ -96,9 +101,12 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     };
 
     signal?.throwIfAborted();
+    coordinator.assertDispatchWritable();
     let executingRequestId: string | undefined;
     let stopRequested = false;
+    let executionEnded = false;
     const stop = () => {
+      if (executionEnded) return false;
       if (stopRequested) return true;
       // Before the Host owns a request, prevent the selected entry from starting.
       stopRequested = true;
@@ -114,6 +122,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         // caller's callbacks/run id.
         const requestId = `host-${randomUUID()}`;
         if (stopRequested) {
+          executionEnded = true;
           publishLifecycle({ dispatchId, request, state: 'interrupted' });
           return;
         }
@@ -124,6 +133,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         publishLifecycle({ dispatchId, request, requestId, state: 'running' });
         try {
           if (stopRequested) {
+            executionEnded = true;
             publishLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
             return;
           }
@@ -152,6 +162,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               },
             ),
           }, target?.id);
+          executionEnded = true;
           if (outcome === 'completed') {
             publishLifecycle({ dispatchId, request, requestId, state: 'completed', reply });
             return;
@@ -176,6 +187,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           }
           throw error ?? new Error('internal error');
         } catch (failure) {
+          executionEnded = true;
           publishLifecycle({
             dispatchId,
             request,

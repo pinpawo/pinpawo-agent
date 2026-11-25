@@ -32,6 +32,7 @@ export class ResidentPetCoordinator {
   private activeEntry: QueuedOperation | undefined;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
+  private stopping = false;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
   private schedulingVersion = 0;
   private preferredDispatch: QueuedOperation | undefined;
@@ -75,6 +76,7 @@ export class ResidentPetCoordinator {
 
   /** Select, but do not consume, the next input for an executing scoped turn. */
   prioritizePendingDispatch(target: PetDispatchTarget): boolean {
+    if (this.stopping || this.closing) return false;
     const matching = this.dispatchQueue.find(({ observation }) => observation
       && observation.sessionId === target.sessionId
       && observation.scope?.namespace === target.scope.namespace
@@ -120,6 +122,7 @@ export class ResidentPetCoordinator {
       if (this.closing) {
         throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
       }
+      this.assertDispatchWritable();
       this.setState('busy');
       this.publishQueueSnapshot();
       if (this.closing) {
@@ -154,9 +157,7 @@ export class ResidentPetCoordinator {
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
   submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'onSuperseded'>): void {
-    if (this.closing) {
-      throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
-    }
+    this.assertDispatchWritable();
     if (observation) this.recordDispatchId(observation.dispatchId);
     void this.enqueue(operation, ready, observation, controls).catch((error) => this.reportDispatchFailure(error));
     // A pending review can be resolved through a reconnect or another
@@ -170,15 +171,24 @@ export class ResidentPetCoordinator {
   stopDispatch(dispatchId: string, matches?: (entry: PetDispatchQueueEntry) => boolean): boolean {
     const entry = this.activeEntry;
     const observation = entry?.observation;
-    if (this.closing || !observation || !entry.stop ||
+    if (this.closing || this.stopping || !observation || !entry.stop ||
         observation.dispatchId !== dispatchId ||
         (matches && !matches(observation))) return false;
-    return entry.stop();
+    // Cancellation notifies listeners synchronously. Fence writes before asking
+    // the Agent to stop, including writes from those listeners.
+    this.stopping = true;
+    let accepted = false;
+    try {
+      accepted = entry.stop();
+      return accepted;
+    } finally {
+      if (!accepted) this.stopping = false;
+    }
   }
 
   /** Publish no intermediate queue snapshot between invalidating old input and admitting its replacement. */
   supersedeDispatch(entry: Pick<QueuedOperation, 'run' | 'ready' | 'stop' | 'onSuperseded'> & { observation: PetDispatchQueueEntry }, ids: readonly string[], matches: (entry: PetDispatchQueueEntry) => boolean): void {
-    if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    this.assertDispatchWritable();
     const expected = new Set(ids);
     const removed = this.dispatchQueue.filter(item => item.observation && expected.has(item.observation.dispatchId));
     if (!expected.size || expected.size !== ids.length || removed.length !== expected.size ||
@@ -213,12 +223,14 @@ export class ResidentPetCoordinator {
     },
   ): Promise<boolean> {
     options.signal?.throwIfAborted();
+    this.assertDispatchWritable();
     if (!this.isDispatchSlotIdle()) return false;
     const version = this.schedulingVersion;
     // A turn might have started and already finished while reading the
     // checkpoint. Do not use readiness observed before intervening work.
     const ready = await options.ready();
     options.signal?.throwIfAborted();
+    this.assertDispatchWritable();
     if (!ready || version !== this.schedulingVersion || !this.isDispatchSlotIdle()) return false;
     this.recordDispatchId(options.observation.dispatchId);
     this.schedulingVersion++;
@@ -229,6 +241,17 @@ export class ResidentPetCoordinator {
     });
     options.onAdmitted();
     return true;
+  }
+
+  assertDispatchWritable(): void {
+    if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    if (!this.stopping) return;
+    // If the Agent exited but the settled-state read failed, a retry can
+    // refresh that state. This write is still refused; nothing is queued.
+    if (!this.active && !this.refreshing) {
+      void this.refreshState().catch(error => this.logError('[resident-pet] failed to confirm stopped state:', error));
+    }
+    throw new PetDispatchRefusedError('The resident is stopping. Retry after it settles.');
   }
 
   assertDispatchIdAvailable(dispatchId: string): void {
@@ -259,6 +282,7 @@ export class ResidentPetCoordinator {
     const refreshing = Promise.resolve().then(async () => {
       try {
         const next = await this.readNextSettledState();
+        this.stopping = false;
         this.setState(next);
         return next;
       } catch (error) {
@@ -285,10 +309,8 @@ export class ResidentPetCoordinator {
   }
 
   private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'onSuperseded'>): Promise<T> {
-    if (this.closing) {
-      return Promise.reject(new ResidentPetOperationCancelledError());
-    }
     return new Promise<T>((resolve, reject) => {
+      this.assertDispatchWritable();
       this.schedulingVersion++;
       this.dispatchQueue.push({
         kind: 'dispatch',
@@ -307,7 +329,7 @@ export class ResidentPetCoordinator {
   private drain(): void {
     // A conversation holding the gate keeps dispatch waiting, same as an
     // active dispatch does.
-    if (this.active || this.refreshing || this.closing || this.conversations > 0) return;
+    if (this.active || this.refreshing || this.closing || this.stopping || this.conversations > 0) return;
     if (this.dispatchQueue.some((entry) => entry.ready)) {
       // Own the single slot while checking targets. Waiting sessions stay queued;
       // another session may run, but no two executions overlap.
@@ -394,6 +416,7 @@ export class ResidentPetCoordinator {
     }
     try {
       this.setState(await this.readNextSettledState());
+      this.stopping = false;
     } catch (error) {
       this.setState('blocked');
       if (operationError === undefined) operationError = error;

@@ -540,6 +540,131 @@ test('standalone stop holds the dispatch slot until Agent settlement; a late sto
   } finally { release.resolve(); releaseNext.resolve(); await h.close(); }
 });
 
+test('stop fences queue writes before cancellation and until Host confirmation', async () => {
+  const started = deferred(), exit = deferred(), confirming = deferred(), confirm = deferred();
+  const resolving = deferred(), resolveInput = deferred();
+  const turns: string[] = [];
+  let signal!: AbortSignal;
+  let holdConfirmation = false;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      signal = turn.setup.input.signal!;
+      started.resolve();
+      await exit.promise;
+      signal.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, {
+    beforeReadState: async () => {
+      if (!holdConfirmation) return;
+      holdConfirmation = false;
+      confirming.resolve();
+      await confirm.promise;
+    },
+    resolveInvocationContext: async ({ request }) => {
+      if (request === 'R') { resolving.resolve(); await resolveInput.promise; }
+      return [];
+    },
+  });
+  try {
+    const service = h.resident.dispatch;
+    const rejected = { name: 'PetDispatchRefusedError', message: /stopping/ };
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    const r = { ...target, request: 'R', dispatchId: 'r' };
+    const inFlightWrite = service.dispatch(r);
+    const checkInFlight = assert.rejects(inFlightWrite, rejected);
+    await resolving.promise;
+    let checkFromAbort: Promise<void> | undefined;
+    signal.addEventListener('abort', () => {
+      checkFromAbort = assert.rejects(
+        service.dispatch({ ...target, request: 'from abort', dispatchId: 'sync' }), rejected);
+    }, { once: true });
+    let terminalStop: boolean | undefined;
+    service.onDispatchLifecycle(event => {
+      if (event.dispatchId === 'a' && event.state === 'interrupted') {
+        terminalStop = service.stop('a');
+        holdConfirmation = true;
+      }
+    });
+
+    assert.equal(service.stop('a'), true);
+    assert.ok(checkFromAbort);
+    await checkFromAbort;
+    resolveInput.resolve();
+    await checkInFlight;
+    await assert.rejects(service.supersede({ ...target, request: 'D', dispatchId: 'd' },
+      { pendingDispatchIds: ['b'] }), rejected);
+    await assert.rejects(service.dispatch({ ...head, dispatchId: 'idle' }), rejected);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    exit.resolve();
+    await confirming.promise;
+    assert.equal(terminalStop, false);
+    assert.equal(service.getQueueSnapshot().activeDispatch?.dispatchId, 'a');
+    await assert.rejects(service.dispatch({ ...target, request: 'during confirmation', dispatchId: 'sync' }), rejected);
+    assert.deepEqual(turns, ['A']);
+    confirm.resolve();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'b' && event.state === 'completed'));
+    await service.dispatch(r); // Failed admissions did not reserve the ID.
+    await waitFor(() => h.events.some(event => event.dispatchId === 'r' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'B', 'R']);
+  } finally { resolveInput.resolve(); exit.resolve(); confirm.resolve(); await h.close(); }
+});
+
+test('failed stop confirmation keeps the queue fenced until a successful refresh', async () => {
+  const started = deferred(), exit = deferred();
+  const turns: string[] = [];
+  let failRead = false;
+  const h = await fixture(async turn => {
+    assert.equal(turn.request.kind, 'user_message');
+    turns.push(turn.request.message);
+    if (turn.request.message === 'A') {
+      started.resolve();
+      await exit.promise;
+      turn.setup.input.signal!.throwIfAborted();
+    }
+    return reply(turn, 'done');
+  }, { beforeReadState: async () => { if (failRead) throw new Error('confirmation unavailable'); } });
+  try {
+    const service = h.resident.dispatch;
+    await service.dispatch({ ...target, request: 'A', dispatchId: 'a' });
+    await started.promise;
+    await service.dispatch({ ...target, request: 'B', dispatchId: 'b' });
+    service.onDispatchLifecycle(event => {
+      if (event.dispatchId === 'a' && event.state === 'interrupted') failRead = true;
+    });
+    assert.equal(service.stop('a'), true);
+    exit.resolve();
+    await waitFor(() => service.getQueueSnapshot().state === 'blocked' &&
+      service.getQueueSnapshot().activeOperation === null);
+    assert.deepEqual(turns, ['A']);
+    assert.deepEqual(service.getQueueSnapshot().entries?.map(entry => entry.dispatchId), ['b']);
+    await assert.rejects(service.dispatch({ ...target, request: 'C', dispatchId: 'c' }), /stopping/);
+    await assert.rejects(h.context.coordinator.refreshState(), /confirmation unavailable/);
+    failRead = false;
+    await h.context.coordinator.refreshState();
+    await waitFor(() => h.events.some(event => event.dispatchId === 'b' && event.state === 'completed'));
+    assert.deepEqual(turns, ['A', 'B']);
+  } finally { exit.resolve(); await h.close(); }
+});
+
+test('supersede of a missing Session cannot create a Session or admit work', async () => {
+  const h = await fixture(async turn => reply(turn, 'unexpected'));
+  const id = 'worker:000000ff';
+  // Simulate an older caller carrying ordinary dispatch's create flag.
+  const session = { id, create: true };
+  try {
+    await assert.rejects(h.resident.dispatch.supersede({ request: 'D', scope, session },
+      { pendingDispatchIds: ['stale'] }), /target Session does not exist/);
+    assert.equal(h.context.sessions.getSession('worker', id), null);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.deepEqual(h.events, []);
+  } finally { await h.close(); }
+});
+
 test('standalone stop can cancel a selected Dispatch before the Host opens its Agent request', async () => {
   const turns: string[] = [];
   const h = await fixture(async turn => {

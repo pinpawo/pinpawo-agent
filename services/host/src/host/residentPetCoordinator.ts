@@ -1,10 +1,12 @@
 import {
   ResidentPetOperationCancelledError,
+  PetDispatchRefusedError,
   type PetDispatchQueueSnapshot,
   type PetDispatchQueueEntry,
   type PetDispatchTarget,
   type PetDispatchSettledState,
   type PetDispatchState,
+  type PetDispatchStopTarget,
   type QueuedOperation,
   type ResidentPetCoordinatorOptions,
 } from './contracts';
@@ -26,7 +28,7 @@ export class ResidentPetCoordinator {
   private state: PetDispatchState;
   private active: Promise<void> | null = null;
   private activeOperation: PetDispatchQueueSnapshot['activeOperation'] = null;
-  private activeDispatch: PetDispatchQueueEntry | undefined;
+  private activeEntry: QueuedOperation | undefined;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
@@ -44,6 +46,8 @@ export class ResidentPetCoordinator {
   }
 
   getQueueSnapshot(): PetDispatchQueueSnapshot {
+    const { observation, stop } = this.activeEntry ?? {};
+    const activeDispatch = observation ? { ...observation, ...(stop ? { stopTarget: stop.target } : {}) } : undefined;
     return {
       state: this.state,
       activeOperation: this.activeOperation,
@@ -55,7 +59,7 @@ export class ResidentPetCoordinator {
       ...(this.dispatchQueue.some(entry => entry.observation) ? {
         entries: this.dispatchQueue.flatMap(entry => entry.observation ? [structuredClone(entry.observation)] : []),
       } : {}),
-      ...(this.activeDispatch ? { activeDispatch: structuredClone(this.activeDispatch) } : {}),
+      ...(activeDispatch ? { activeDispatch: structuredClone(activeDispatch) } : {}),
     };
   }
 
@@ -149,17 +153,53 @@ export class ResidentPetCoordinator {
   }
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
-  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry): void {
+  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'onSuperseded'>): void {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    void this.enqueue(operation, ready, observation).catch((error) => this.reportDispatchFailure(error));
+    void this.enqueue(operation, ready, observation, controls).catch((error) => this.reportDispatchFailure(error));
     // A pending review can be resolved through a reconnect or another
     // session client. Do not let the queue keep that old settled state and
     // strand a later one-way dispatch behind it.
     void this.refreshState().catch((error) => {
       this.logError('[resident-pet] failed to refresh dispatch admission state:', error);
     });
+  }
+
+  stopDispatch(target: PetDispatchStopTarget, matches?: (entry: PetDispatchQueueEntry) => boolean): boolean {
+    const entry = this.activeEntry;
+    const observation = entry?.observation;
+    if (this.closing || !observation || !entry.stop ||
+        observation.dispatchId !== target.dispatchId || entry.stop.target.token !== target.token ||
+        (matches && !matches(observation))) return false;
+    return entry.stop.request();
+  }
+
+  /** Publish no intermediate queue snapshot between invalidating old input and admitting its replacement. */
+  supersedeDispatch(entry: Pick<QueuedOperation, 'run' | 'ready' | 'stop' | 'onSuperseded'> & { observation: PetDispatchQueueEntry }, ids: readonly string[], matches: (entry: PetDispatchQueueEntry) => boolean): void {
+    if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    const expected = new Set(ids);
+    const removed = this.dispatchQueue.filter(item => item.observation && expected.has(item.observation.dispatchId));
+    if (!expected.size || expected.size !== ids.length || removed.length !== expected.size ||
+        new Set(removed.map(item => item.observation!.dispatchId)).size !== expected.size ||
+        removed.some(item => !matches(item.observation!)) ||
+        this.activeEntry?.observation?.dispatchId === entry.observation.dispatchId ||
+        this.dispatchQueue.some(item => item.observation?.dispatchId === entry.observation.dispatchId)) {
+      throw new PetDispatchRefusedError();
+    }
+    for (const item of removed) this.dispatchQueue.splice(this.dispatchQueue.indexOf(item), 1);
+    if (this.preferredDispatch && removed.includes(this.preferredDispatch)) this.preferredDispatch = undefined;
+    this.dispatchQueue.push({
+      ...entry, kind: 'dispatch', resolve: () => undefined,
+      reject: error => this.reportDispatchFailure(error),
+    });
+    this.schedulingVersion++;
+    for (const item of removed) {
+      item.reject(new ResidentPetOperationCancelledError('Dispatch superseded.'));
+      item.onSuperseded?.();
+    }
+    this.publishQueueSnapshot();
+    void this.refreshState().catch(error => this.logError('[resident-pet] failed to refresh dispatch admission state:', error));
   }
 
   /** Check the exact target without reserving the gate, then claim it without an intervening await. */
@@ -170,6 +210,7 @@ export class ResidentPetCoordinator {
       ready: () => Promise<boolean>;
       observation: PetDispatchQueueEntry;
       onAdmitted: () => void;
+      stop?: QueuedOperation['stop'];
     },
   ): Promise<boolean> {
     options.signal?.throwIfAborted();
@@ -182,7 +223,7 @@ export class ResidentPetCoordinator {
     if (!ready || version !== this.schedulingVersion || !this.isDispatchSlotIdle()) return false;
     this.schedulingVersion++;
     this.startDispatch({
-      kind: 'dispatch', run: operation, observation: structuredClone(options.observation),
+      kind: 'dispatch', run: operation, observation: structuredClone(options.observation), stop: options.stop,
       resolve: () => undefined,
       reject: error => this.reportDispatchFailure(error),
     });
@@ -232,7 +273,7 @@ export class ResidentPetCoordinator {
     await Promise.allSettled([this.active, this.refreshing, ...this.conversationHolds]);
   }
 
-  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'onSuperseded'>): Promise<T> {
     if (this.closing) {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
@@ -245,6 +286,7 @@ export class ResidentPetCoordinator {
         resolve: (value) => resolve(value as T),
         reject,
         ...(observation ? { observation: structuredClone(observation) } : {}),
+        ...controls,
       });
       this.publishQueueSnapshot();
       this.drain();
@@ -279,11 +321,14 @@ export class ResidentPetCoordinator {
           }
           if (this.closing || this.conversations > 0) return;
           if (!ready) continue;
-          this.dispatchQueue.splice(this.dispatchQueue.indexOf(candidate), 1);
+          // A concurrent supersede can invalidate a candidate during readiness.
+          const index = this.dispatchQueue.indexOf(candidate);
+          if (index < 0) continue;
+          this.dispatchQueue.splice(index, 1);
           if (this.preferredDispatch === candidate) this.preferredDispatch = undefined;
           ran = true;
           this.activeOperation = candidate.kind;
-          this.activeDispatch = candidate.observation;
+          this.activeEntry = candidate;
           this.setState('busy');
           await this.run(candidate);
           return;
@@ -292,7 +337,7 @@ export class ResidentPetCoordinator {
       });
       this.active = active;
       void active.finally(() => {
-        if (this.active === active) { this.active = null; this.activeOperation = null; this.activeDispatch = undefined; }
+        if (this.active === active) { this.active = null; this.activeOperation = null; this.activeEntry = undefined; }
         this.publishQueueSnapshot();
         if (ran || this.schedulingVersion !== schedulingVersion) this.drain();
       });
@@ -307,7 +352,7 @@ export class ResidentPetCoordinator {
 
   private startDispatch(entry: QueuedOperation): void {
     this.activeOperation = entry.kind;
-    this.activeDispatch = entry.observation;
+    this.activeEntry = entry;
     const active = Promise.resolve().then(() => this.run(entry));
     this.active = active;
     this.setState('busy');
@@ -315,7 +360,7 @@ export class ResidentPetCoordinator {
       if (this.active === active) {
         this.active = null;
         this.activeOperation = null;
-        this.activeDispatch = undefined;
+        this.activeEntry = undefined;
         this.publishQueueSnapshot();
       }
       this.drain();

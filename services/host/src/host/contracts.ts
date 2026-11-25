@@ -32,7 +32,7 @@ export type PetDispatchQueueSnapshot = {
   queuedDispatches: number;
   /** Runtime-owned entries in their current queue order; never includes input text. */
   entries?: PetDispatchQueueEntry[];
-  activeDispatch?: PetDispatchQueueEntry;
+  activeDispatch?: PetDispatchQueueEntry & { stopTarget?: PetDispatchStopTarget };
 };
 
 export type PetDispatchQueueEntry = {
@@ -74,6 +74,7 @@ export type PetDispatchLifecycleState =
   | 'waiting'
   | 'completed'
   | 'interrupted'
+  | 'superseded'
   | 'failed'
   /** Non-terminal: the running dispatch's conversation completed its public reply. */
   | 'message';
@@ -117,8 +118,21 @@ export interface PetDispatchPort {
   dispatch(request: PetDispatchRequest): Promise<void>;
 }
 
+/** Exact selection, even if a caller reuses a dispatch correlation ID. */
+export type PetDispatchStopTarget = Readonly<{ dispatchId: string; token: string }>;
+
+export interface ResidentPetDispatchService extends PetDispatchPort {
+  /** Request cancellation for this exact dispatch. A true receipt is not settlement. */
+  stop(target: PetDispatchStopTarget): boolean;
+  /** Admit at the tail and supersede exactly the named pending items in the same scope and Session. */
+  supersede(
+    request: Omit<PetDispatchRequest, 'delivery'>,
+    options: { pendingDispatchIds: readonly string[]; stop?: PetDispatchStopTarget },
+  ): Promise<{ stopRequested: boolean }>;
+}
+
 export interface ResidentPet {
-  readonly dispatch: PetDispatchPort;
+  readonly dispatch: ResidentPetDispatchService;
   close(): Promise<void>;
 }
 
@@ -206,6 +220,8 @@ export type QueuedOperation = {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   observation?: PetDispatchQueueEntry;
+  stop?: { target: PetDispatchStopTarget; request: () => boolean };
+  onSuperseded?: () => void;
 };
 
 /** A second interactive client tried to attach to a Host that already has one. */

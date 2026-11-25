@@ -45,8 +45,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     { request, attachments, dispatchId: suppliedDispatchId, scope: suppliedScope, origin: suppliedOrigin, session: suppliedSession, delivery, signal }: PetDispatchRequest,
     replacement?: Parameters<Supersede>[1],
   ): ReturnType<Supersede> {
-    signal?.throwIfAborted();
-    coordinator.assertDispatchWritable();
+    let wait;
+    while ((wait = coordinator.dispatchWriteBarrier(signal))) await wait;
     const artifactReferences = attachments === undefined ? [] : parseDeliverables(attachments);
     if (replacement && (delivery !== undefined || !suppliedSession?.id || !suppliedScope)) {
       throw new Error('Supersede requires an explicit session and scope, without a delivery mode.');
@@ -69,7 +69,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       : undefined;
     signal?.throwIfAborted();
     if (context.isClosing()) throw new Error('Resident Pet is closing.');
-    coordinator.assertDispatchWritable();
+    while ((wait = coordinator.dispatchWriteBarrier(signal))) await wait;
     coordinator.assertDispatchIdAvailable(dispatchId);
     const invocationContext = snapshotInvocationContext(resolved);
     // Replacement only targets an existing binding. Legacy dispatch can
@@ -100,8 +100,6 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       });
     };
 
-    signal?.throwIfAborted();
-    coordinator.assertDispatchWritable();
     let executingRequestId: string | undefined;
     let stopRequested = false;
     let executionEnded = false;

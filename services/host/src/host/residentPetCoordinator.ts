@@ -10,6 +10,8 @@ import {
   type ResidentPetCoordinatorOptions,
 } from './contracts';
 
+const STOP_WRITE_WAIT_MS = 30_000;
+
 function defaultLogError(message: string, error: unknown): void {
   console.error(message, error instanceof Error ? error.message : error);
 }
@@ -32,7 +34,7 @@ export class ResidentPetCoordinator {
   private activeEntry: QueuedOperation | undefined;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
-  private stopping: QueuedOperation | undefined;
+  private stopping: { entry: QueuedOperation; release: AbortController; confirmed?: boolean } | undefined;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
   private schedulingVersion = 0;
   private preferredDispatch: QueuedOperation | undefined;
@@ -122,7 +124,8 @@ export class ResidentPetCoordinator {
       if (this.closing) {
         throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
       }
-      this.assertDispatchWritable();
+      let wait;
+      while ((wait = this.dispatchWriteBarrier())) await wait;
       this.setState('busy');
       this.publishQueueSnapshot();
       if (this.closing) {
@@ -151,7 +154,9 @@ export class ResidentPetCoordinator {
     }
   }
 
-  enqueueDispatch<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
+  async enqueueDispatch<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
+    let wait;
+    while ((wait = this.dispatchWriteBarrier())) await wait;
     return this.enqueue(operation, ready);
   }
 
@@ -176,13 +181,13 @@ export class ResidentPetCoordinator {
         (matches && !matches(observation))) return false;
     // Cancellation notifies listeners synchronously. Fence writes before asking
     // the Agent to stop, including writes from those listeners.
-    this.stopping = entry;
+    this.stopping = { entry, release: new AbortController() };
     let accepted = false;
     try {
       accepted = entry.stop();
       return accepted;
     } finally {
-      if (!accepted) this.stopping = undefined;
+      if (!accepted) this.releaseStopBarrier();
     }
   }
 
@@ -223,15 +228,14 @@ export class ResidentPetCoordinator {
       confirmStop?: QueuedOperation['confirmStop'];
     },
   ): Promise<boolean> {
-    options.signal?.throwIfAborted();
-    this.assertDispatchWritable();
+    let wait;
+    while ((wait = this.dispatchWriteBarrier(options.signal))) await wait;
     if (!this.isDispatchSlotIdle()) return false;
     const version = this.schedulingVersion;
     // A turn might have started and already finished while reading the
     // checkpoint. Do not use readiness observed before intervening work.
     const ready = await options.ready();
-    options.signal?.throwIfAborted();
-    this.assertDispatchWritable();
+    while ((wait = this.dispatchWriteBarrier(options.signal))) await wait;
     if (!ready || version !== this.schedulingVersion || !this.isDispatchSlotIdle()) return false;
     this.recordDispatchId(options.observation.dispatchId);
     this.schedulingVersion++;
@@ -244,15 +248,45 @@ export class ResidentPetCoordinator {
     return true;
   }
 
-  assertDispatchWritable(): void {
+  /** Wait outside the work queue. Call again after each await before writing. */
+  dispatchWriteBarrier(signal?: AbortSignal): Promise<void> | undefined {
+    signal?.throwIfAborted();
     if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
-    if (!this.stopping) return;
-    // If the Agent exited but the settled-state read failed, a retry can
-    // refresh that state. This write is still refused; nothing is queued.
+    const stop = this.stopping;
+    if (!stop) return;
+    // Retry an unconfirmed settlement on demand, never on the TUI's behalf.
     if (!this.active && !this.refreshing) {
       void this.refreshState().catch(error => this.logError('[resident-pet] failed to confirm stopped state:', error));
     }
-    throw new PetDispatchRefusedError('The resident is stopping. Retry after it settles.');
+    const timeout = AbortSignal.timeout(STOP_WRITE_WAIT_MS);
+    const wake = AbortSignal.any([stop.release.signal, timeout, ...(signal ? [signal] : [])]);
+    return new Promise<void>(resolve => {
+      if (wake.aborted) resolve();
+      else wake.addEventListener('abort', () => resolve(), { once: true });
+    }).then(() => {
+      signal?.throwIfAborted();
+      if (timeout.aborted && wake.reason === timeout.reason) {
+        throw new DOMException('Timed out waiting for Dispatch Stop settlement.', 'TimeoutError');
+      }
+    });
+  }
+
+  private assertDispatchWritable(): void {
+    if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    if (this.stopping) throw new Error('Dispatch write attempted before Stop settlement.');
+  }
+
+  private releaseStopBarrier(): void {
+    const stop = this.stopping;
+    this.stopping = undefined;
+    stop?.release.abort();
+  }
+
+  private clearActive(): void {
+    this.active = null;
+    this.activeOperation = null;
+    this.activeEntry = undefined;
+    if (this.stopping?.confirmed) this.releaseStopBarrier();
   }
 
   assertDispatchIdAvailable(dispatchId: string): void {
@@ -283,7 +317,6 @@ export class ResidentPetCoordinator {
     const refreshing = Promise.resolve().then(async () => {
       try {
         const next = await this.readNextSettledState();
-        this.stopping = undefined;
         this.setState(next);
         return next;
       } catch (error) {
@@ -293,7 +326,9 @@ export class ResidentPetCoordinator {
     });
     this.refreshing = refreshing;
     try {
-      return await refreshing;
+      const next = await refreshing;
+      this.releaseStopBarrier();
+      return next;
     } finally {
       if (this.refreshing === refreshing) this.refreshing = null;
       this.drain();
@@ -303,6 +338,7 @@ export class ResidentPetCoordinator {
   async close(): Promise<void> {
     if (!this.closing) {
       this.closing = true;
+      this.releaseStopBarrier();
       this.cancelQueue(this.dispatchQueue);
     }
     // Execution failures belong to their callers, not to resource cleanup.
@@ -371,7 +407,7 @@ export class ResidentPetCoordinator {
       });
       this.active = active;
       void active.finally(() => {
-        if (this.active === active) { this.active = null; this.activeOperation = null; this.activeEntry = undefined; }
+        if (this.active === active) this.clearActive();
         this.publishQueueSnapshot();
         if (ran || this.schedulingVersion !== schedulingVersion) this.drain();
       });
@@ -392,9 +428,7 @@ export class ResidentPetCoordinator {
     this.setState('busy');
     void active.then(() => {
       if (this.active === active) {
-        this.active = null;
-        this.activeOperation = null;
-        this.activeEntry = undefined;
+        this.clearActive();
         this.publishQueueSnapshot();
       }
       this.drain();
@@ -417,7 +451,7 @@ export class ResidentPetCoordinator {
     }
     try {
       this.setState(await this.readNextSettledState());
-      this.stopping = undefined;
+      if (this.stopping) this.stopping.confirmed = true;
     } catch (error) {
       this.setState('blocked');
       if (operationError === undefined) operationError = error;
@@ -428,7 +462,7 @@ export class ResidentPetCoordinator {
   }
 
   private async readNextSettledState(): Promise<PetDispatchSettledState> {
-    await this.stopping?.confirmStop?.();
+    await this.stopping?.entry.confirmStop?.();
     const next = await this.readSettledState();
     if (next === 'busy') {
       throw new Error('Resident Pet remained busy after its active operation settled.');

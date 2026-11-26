@@ -178,8 +178,6 @@ export type StudioModelEndpoint = {
   structuredOutputMethod?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
   /** Creates a model from the complete Host-resolved profile. */
   createChatModel?: (options: {
-    /** Invocation-local role; never mutates the resolved model profile. */
-    purpose?: 'pet-head';
     /** Omit to inherit the resolved profile output budget. */
     maxOutputTokens?: number;
     maxRetries: number;

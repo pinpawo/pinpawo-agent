@@ -2,14 +2,12 @@ import type { AgentModels } from '@pinpawo/pet-agent';
 import type { ChatOpenAIFields } from '@langchain/openai';
 import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 import type { AgentLlmConfig } from '../config/agentConfig';
-import { inferLlmModelPreset, requiresLlmStreaming } from '../config/llmModelPresets';
+import { requiresLlmStreaming } from '../config/llmModelPresets';
 import { createReasoningPassbackChatOpenAI, ReasoningPassbackCompletions } from './reasoningPassback';
 
 export { resolveLlmGenerationReserveTokens } from '../config/llmModelPresets';
 
 export type HostModelGenerationOptions = {
-  /** Only the narrow Studio Head decision, not ordinary Agent roles. */
-  purpose?: 'pet-head';
   /** Explicit experimental override; when omitted the provider chooses. */
   temperature?: number;
   /** Ask compatible OpenAI endpoints for deterministic output. */
@@ -19,26 +17,6 @@ export type HostModelGenerationOptions = {
   /** Preserve Channel's legacy Chat Completions, max_tokens and system-role wire contract. */
   forceChatCompletions?: boolean;
 };
-
-function endpointIdentity(baseUrl: string | undefined): string | undefined {
-  if (!baseUrl) return undefined;
-  try {
-    const url = new URL(baseUrl);
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return undefined;
-    // A root endpoint may also be configured with its /v1 API prefix.
-    const path = url.pathname === '/v1' || url.pathname === '/v1/' ? '/' : url.pathname;
-    return url.origin + path;
-  } catch { return undefined; }
-}
-
-function headThinkingKwargs(config: AgentLlmConfig, options: HostModelGenerationOptions) {
-  if (options.purpose !== 'pet-head') return undefined;
-  const preset = inferLlmModelPreset(config.model);
-  if (!preset?.headThinking || preset.model !== config.model || preset.thinkingControl !== 'thinking_type') return undefined;
-  const endpoint = endpointIdentity(config.baseUrl);
-  if (!endpoint || endpoint !== endpointIdentity(preset.baseUrl)) return undefined;
-  return { thinking: { type: preset.headThinking } };
-}
 
 /** Construct one model using the Host's protocol and generation settings. */
 export function buildModel(
@@ -64,10 +42,8 @@ export function buildModel(
       clientOptions: { baseURL: llmConfig.baseUrl, timeout: llmConfig.timeoutMs ?? 45000 },
     });
   }
-  const modelKwargs = headThinkingKwargs(llmConfig, generationOptions);
   const openaiFields: ChatOpenAIFields = {
     ...fields,
-    ...(modelKwargs ? { modelKwargs } : {}),
     timeout: llmConfig.timeoutMs ?? 45000,
     streaming: generationOptions.streaming ?? requiresLlmStreaming(llmConfig.model),
     streamUsage: true,

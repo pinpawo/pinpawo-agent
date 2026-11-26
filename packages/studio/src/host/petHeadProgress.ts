@@ -6,7 +6,8 @@ type RecordedPlan = NonNullable<Awaited<ReturnType<PetSessionPort['snapshot']>>[
 export type HeadResultMessage = { messageId: string; requestId: string };
 type PublicResult = { body: string };
 type SessionSample = {
-  status: 'ready' | 'running' | 'waiting';
+  status: 'ready' | 'running' | 'waiting' | 'unavailable';
+  sessionId?: string;
   requestId?: string;
   recordedPlan?: RecordedPlan;
   result?: PublicResult;
@@ -32,14 +33,10 @@ export async function readHeadSession(
   } finally { listener?.[Symbol.dispose](); }
 }
 
-/** Bound one status sample to its deadline, the caller's signal and the exact run. */
-export async function readHeadProgress(input: {
-  run: HeadRun; signal: AbortSignal; isCurrent: () => boolean; read: (signal: AbortSignal) => ReturnType<HeadSessionReader>;
-}): Promise<HeadProgressEvidence> {
-  const sample = await readHeadSession(input);
-  if (!sample || sample.requestId !== input.run.requestId) return { status: 'unavailable' };
-  if (sample.status === 'waiting') return { status: 'waiting' };
-  if (sample.status !== 'running') return { status: 'unavailable' };
+/** Interpret a Session sample as evidence for one observed request, never as queue authority. */
+export function headProgress(sample: SessionSample | undefined, requestId: string): HeadProgressEvidence {
+  if (sample?.status === 'waiting') return { status: 'waiting' };
+  if (sample?.status !== 'running' || sample.requestId !== requestId) return { status: 'unavailable' };
   return { status: 'running', ...(sample.recordedPlan ? { recordedPlan: sample.recordedPlan } : {}),
     ...(sample.result ? { result: sample.result } : {}) };
 }

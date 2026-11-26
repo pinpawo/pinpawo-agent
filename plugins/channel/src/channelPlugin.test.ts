@@ -117,13 +117,14 @@ test('messages retain references and mentions without dispatching a Pet', async 
   const read = (requestId: string) => plugin.head.readSession(channelId, 'writer', 'writer-session', signal, () => true, {
     ...result, requestId,
   });
-  assert.deepEqual(await read('run-a'), { status: 'running', requestId: 'run-a' }, 'no published result yet');
+  assert.deepEqual(await read('run-a'), { status: 'running', sessionId: 'writer-session', requestId: 'run-a' }, 'no published result yet');
   const publication = await plugin.service.postMessage({ kind: 'pet', id: 'writer' }, channelId,
     { body: 'Published result.' }, { externalRef: result.messageId });
-  assert.deepEqual(await read('older-run'), { status: 'running', requestId: 'run-a' }, 'an older request cannot supply current evidence');
-  assert.deepEqual(await read('run-a'), { status: 'running', requestId: 'run-a', result: { body: 'Published result.' } });
+  assert.deepEqual(await read('older-run'), { status: 'running', sessionId: 'writer-session', requestId: 'run-a' }, 'an older request cannot supply current evidence');
+  assert.deepEqual(await read('run-a'), { status: 'running', sessionId: 'writer-session', requestId: 'run-a', result: { body: 'Published result.' } });
   activeRun = { requestId: 'run-a', state: 'interrupting' };
-  assert.equal(await read('run-a'), undefined, 'a non-running snapshot state cannot supply execution evidence');
+  assert.deepEqual(await read('run-a'), { status: 'unavailable', sessionId: 'writer-session' },
+    'a non-running snapshot supplies the registered submission target, not execution evidence');
   activeRun = { requestId: 'run-a', state: 'running' };
   const replacement = await plugin.sendMessage(channelId, {
     body: 'Stop your current work and replace it with the audit.', mentions: [{ participantId: 'pet:writer' }],

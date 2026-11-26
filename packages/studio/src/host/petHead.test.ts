@@ -1044,12 +1044,12 @@ test('unrelated input never inspects the slot or its Session', async () => {
   await handle(message('2'), new AbortController().signal);
 });
 
-test('idle admission rechecks after publication and does not re-decide as busy', async () => {
+test('Host decides idle admission after acknowledgement without a second Head decision', async () => {
   let state: ReturnType<typeof readHeadWorkState> = { kind: 'idle' };
   const calls: string[] = [];
   const handle = createPetHead({ pet: pet('a'), readWorkState: () => state,
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      dispatch: async () => assert.fail('must not admit after idle was lost'),
+      dispatch: async () => { calls.push('dispatch'); assert.equal(state.kind, 'unknown'); throw new PetDispatchRefusedError(); },
       reply: async () => { calls.push('reply'); state = { kind: 'unknown' }; },
     },
     assessRelevance: relevant,
@@ -1061,7 +1061,7 @@ test('idle admission rechecks after publication and does not re-decide as busy',
     },
   });
   await handle(message('2'), new AbortController().signal);
-  assert.deepEqual(calls, ['idle', 'reply']);
+  assert.deepEqual(calls, ['idle', 'reply', 'dispatch']);
 });
 
 test('an open slot does not decide new work before checking its bound Session', async () => {
@@ -1104,7 +1104,8 @@ test('busy handling admits only the current selected work and publishes no accep
           assert.deepEqual(options, { kind: 'queue', sessionId: run.sessionId });
           calls.push('dispatch');
           if (scenario === 'refused') throw new PetDispatchRefusedError();
-          request.resolve(); await admitted.promise;
+          request.resolve();
+          if (scenario === 'accepted') await admitted.promise;
         },
       }, assessRelevance: async () => assert.fail('@ already established relevance'), decideNewWorkAndReply: noIdle,
       progress: { readRun: () => run,
@@ -1125,7 +1126,7 @@ test('busy handling admits only the current selected work and publishes no accep
       admitted.resolve();
     }
     await handling;
-    assert.deepEqual(calls, ['session', 'decision', ...(scenario === 'accepted' || scenario === 'refused' ? ['dispatch'] : []),
+    assert.deepEqual(calls, ['session', 'decision', ...(delivery === 'queue' ? ['dispatch'] : []),
       ...(scenario === 'accepted' || scenario === 'progress' || scenario === 'replacement' ? ['reply'] : [])], scenario);
   }
 });

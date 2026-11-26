@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 import { observeHeadRun } from './petHead';
-import { readHeadProgress } from './petHeadProgress';
+import { headProgress, readHeadSession } from './petHeadProgress';
 
 const active = { dispatchId: 'dispatch-a', sessionId: 'shared-session', messageId: 'question-a' };
 const run = { invocationId: active.dispatchId, sessionId: active.sessionId, requestId: 'run-a' };
 const signal = new AbortController().signal;
+
+async function readHeadProgress(input: Parameters<typeof readHeadSession>[0] & { run: typeof run }) {
+  return headProgress(await readHeadSession(input), input.run.requestId);
+}
 
 function event(type: string, overrides: Record<string, unknown> = {}): StudioEvent {
   return { type: `dispatch.${type}`, eventId: type, source: 'resident-pet', topic: 'pet-a', occurredAt: '2026-11-20T01:01:00Z',

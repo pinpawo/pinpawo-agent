@@ -333,9 +333,11 @@ limited to the checked status, recorded plan and any already-public result of
 that exact request. The plan may predate the running request; a completed plan
 item or a published result does not prove the execution completed. The Head
 never uses private Session dialogue, tool output or raw identifiers as evidence.
-If it cannot verify an actionable state, it can reply factually or stay silent;
-it does not dispatch or bypass review. Explicit scheduler, trigger and Host
-dispatch remain available.
+Lacking progress evidence does not block an independent new request for a verified
+bound Session. The Host Dispatch service owns admission, FIFO, and Stop settlement;
+a submission waits there without a Head reply until admission or timeout. A pending
+review or an unverified target cannot use this path. Explicit scheduler, trigger
+and Host dispatch remain available.
 
 Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
 internal Head-write option that always checks active membership and the actual
@@ -348,7 +350,7 @@ ignores acknowledgement-only chatter while allowing useful peer contributions.
 
 Each structured stage uses the resolved profile's `structuredOutputMethod`.
 Function-calling profiles must return one valid named declaration:
-`pet_head_relevance` or `pet_head_idle`, each with its own strict schema. Invalid or failed decisions do not produce a reply
+`pet_head_relevance`, `pet_head_idle`, or `pet_head_running`, with the schema for its branch. Invalid or failed decisions do not produce a reply
 or dispatch. The Head does not repair output, retry, or switch formats.
 
 Safe `pet.head.relevance` diagnostics identify Pet, Channel, source message,

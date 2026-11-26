@@ -64,7 +64,8 @@ export type ChannelPlugin = StudioPlugin & {
 
 type HeadDelivery = { kind: 'queue'; sessionId: string };
 type HeadSessionEvidence = {
-  status: 'ready' | 'running' | 'waiting';
+  status: 'ready' | 'running' | 'waiting' | 'unavailable';
+  sessionId?: string;
   requestId?: string;
   recordedPlan?: AgentPlan;
   result?: { body: string };
@@ -284,11 +285,12 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       if (session.sessionId !== binding.sessionId || !await revalidateBinding()) return;
       if (session.pendingInterrupt) return { status: 'waiting',
         ...(session.activeRun ? { requestId: session.activeRun.requestId } : {}) };
-      if (!session.activeRun) return { status: 'ready' };
+      const registered = binding.registered ? { sessionId: binding.sessionId } : {};
+      if (!session.activeRun) return { status: 'ready', ...registered };
       if (!binding.registered) return;
       // Host snapshots project an in-flight register, not a reliable stop state.
       const { requestId, state } = session.activeRun;
-      if (state !== 'running') return;
+      if (state !== 'running') return { status: 'unavailable', ...registered };
       let result: HeadSessionEvidence['result'];
       if (resultMessage?.requestId === requestId) {
         const { messages } = await service.readContext(actor, channelId, { limit: 10 });
@@ -297,7 +299,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         if (!await revalidateBinding()) return;
         if (published) result = { body: published.body };
       }
-      return { status: 'running', requestId,
+      return { status: 'running', requestId, ...registered,
         ...(session.currentPlan?.items.length ? { recordedPlan: session.currentPlan } : {}),
         ...(result ? { result } : {}) };
     },

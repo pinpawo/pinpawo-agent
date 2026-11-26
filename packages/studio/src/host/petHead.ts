@@ -62,14 +62,16 @@ export type PetHeadChannel = {
   subscribe(handler: (message: HeadMessage) => Promise<void>): () => void;
   readContext(petId: string, before: number, replyTo?: string): Promise<HeadContext>;
   reply(petId: string, messageId: string, body: string, signal: AbortSignal, options?: HeadReplyOptions): Promise<unknown>;
-  dispatch(petId: string, messageId: string, signal: AbortSignal): Promise<unknown>;
+  dispatch(petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string): Promise<unknown>;
+  readBoundSessionId?(petId: string): Promise<string | undefined>;
   readProgressSession?: (petId: string, ...args: Parameters<HeadSessionRunReader>) => ReturnType<HeadSessionRunReader>;
 };
 
 export type PetHeadChannelOperations = {
   readContext(channelId: string, petId: string, before: number, replyTo?: string): Promise<HeadContext>;
   reply(channelId: string, petId: string, messageId: string, body: string, signal: AbortSignal, options?: HeadReplyOptions): Promise<unknown>;
-  dispatch(channelId: string, petId: string, messageId: string, signal: AbortSignal): Promise<unknown>;
+  dispatch(channelId: string, petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string): Promise<unknown>;
+  readBoundSessionId?(channelId: string, petId: string): Promise<string | undefined>;
   readProgressSession?: (channelId: string, ...args: Parameters<NonNullable<PetHeadChannel['readProgressSession']>>) => ReturnType<HeadSessionRunReader>;
 };
 
@@ -80,6 +82,7 @@ export function bindPetHeadChannel(
   subscribe: Studio['subscribe'],
 ): PetHeadChannel {
   const snapshot = operations.readProgressSession;
+  const readBoundSessionId = operations.readBoundSessionId;
   return {
     subscribe: handler => subscribe(async event => {
       if (event.source !== 'channel' || event.topic !== channelId || event.type !== 'channel.message.created') return;
@@ -89,7 +92,8 @@ export function bindPetHeadChannel(
     }, { source: 'channel', topic: channelId }),
     readContext: (petId, before, replyTo) => operations.readContext(channelId, petId, before, replyTo),
     reply: (petId, messageId, body, signal, options) => operations.reply(channelId, petId, messageId, body, signal, options),
-    dispatch: (petId, messageId, signal) => operations.dispatch(channelId, petId, messageId, signal),
+    dispatch: (...args) => operations.dispatch(channelId, ...args),
+    ...(readBoundSessionId ? { readBoundSessionId: (petId: string) => readBoundSessionId(channelId, petId) } : {}),
     ...(snapshot ? { readProgressSession: (...args: Parameters<NonNullable<PetHeadChannel['readProgressSession']>>) => snapshot(channelId, ...args) } : {}),
   };
 }
@@ -201,13 +205,18 @@ export function createPetHead(options: {
     // Relevance is settled without consulting the runtime. Pin this branch once.
     const state = options.readWorkState();
     const progress = options.progress;
-    if (state.kind === 'idle') {
+    const active = state.kind === 'active' ? state.dispatch : undefined;
+    const run = active && progress?.readRun(active);
+    // A live slot can outlast its run observation (e.g. during Stop settlement).
+    // If this Channel already has a Session, let Host accept new work in either case.
+    const boundSessionId = !run
+      ? await options.channel.readBoundSessionId?.(options.pet.petId) : undefined;
+    if (signal.aborted) return;
+    if (state.kind === 'idle' || boundSessionId) {
       const result = await options.handleIdle(input, signal);
       reply = result.reply ?? '';
       shouldDispatch = result.shouldDispatch;
     } else if (progress) {
-      const active = state.kind === 'active' ? state.dispatch : undefined;
-      const run = active && progress.readRun(active);
       const isCurrent = () => {
         const now = options.readWorkState();
         return !!active && !!run && now.kind === 'active' && now.dispatch.dispatchId === active.dispatchId &&
@@ -250,6 +259,21 @@ export function createPetHead(options: {
       }
     }
     if (signal.aborted) return;
+    const submit = async (sessionId?: string) => {
+      try {
+        if (sessionId) await options.channel.dispatch(options.pet.petId, message.messageId, signal, sessionId);
+        else await options.channel.dispatch(options.pet.petId, message.messageId, signal);
+        return true;
+      } catch (error) {
+        if (!(error instanceof PetDispatchRefusedError) && !signal.aborted) {
+          failures.push(error instanceof Error && error.name === 'TimeoutError' ? 'dispatch timed out' : 'dispatch');
+        }
+        return false;
+      }
+    };
+    // The registered path waits for Host admission, including a Stop barrier.
+    if (shouldDispatch && boundSessionId && !await submit(boundSessionId)) reply = '';
+    if (signal.aborted) return;
     if (reply.trim()) {
       try {
         const peer = message.author.kind === 'pet';
@@ -263,10 +287,7 @@ export function createPetHead(options: {
       } catch (error) { if (!(error instanceof StaleProgressReply)) failures.push('reply'); }
     }
     // Admit the canonical source; Head does not rewrite the work passed to Agent.
-    if (shouldDispatch && !signal.aborted && options.readWorkState().kind === 'idle') {
-      try { await options.channel.dispatch(options.pet.petId, message.messageId, signal); }
-      catch (error) { if (!(error instanceof PetDispatchRefusedError)) failures.push('dispatch'); }
-    }
+    if (shouldDispatch && !boundSessionId && !signal.aborted && options.readWorkState().kind === 'idle') await submit();
     if (signal.aborted) throw new Error('Pet Head processing aborted.');
     // Do not let a failed publication suppress independent authorized execution,
     // or imply that a successful acknowledgement proves admission succeeded.

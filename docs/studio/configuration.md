@@ -313,11 +313,12 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-Only a verified idle slot permits `handleIdle`, whose strict output is
+An idle slot or a registered Channel Session without a verified live run uses
+`handleIdle`, whose strict output is
 `{ shouldDispatch: boolean, reply: string | null }`. It interprets the canonical
 source's actual meaning: a direct answer, independent work, acknowledgement plus
 work, or neither. A bare mention does not by itself require work or a reply.
-Busy or unknown state uses factual composition or silence, never idle admission.
+The existing verified-run branch uses factual composition or silence.
 
 After relevance, the Head uses the owning Pet's live queue slot and run event
 to identify an active ordinary dispatch. To check progress, it needs its
@@ -333,13 +334,14 @@ The recorded plan may predate this execution. Without a plan, the reply reports
 only the checked status. Attachment contents, raw Session messages, and tool
 output are not used as progress evidence. Reviewed work resuming outside the
 ordinary dispatch slot is not sampled. Asking for progress alone
-never dispatches. Busy or unknown state never admits an addition, even when it
-is independent work; it does not interrupt or change the active execution.
+never dispatches. A registered Session submits independently selected new work
+through ordinary Dispatch. Host, not Head, owns admission, FIFO and Stop waits.
+No Head path interrupts or changes the active execution.
 
-Reply and execution are independent: failure of publication does not suppress
-an independent dispatch, and failure of dispatch does not roll back a committed
-reply. Cancellation fences remaining actions. An acknowledgement does not
-prove admission or completion. The Head never executes a model tool;
+For registered Sessions, a submission-related reply is held until admission;
+no reply is published for a timed-out submission. First-time Session registration
+keeps the idle-only path and may acknowledge before attempting admission.
+Cancellation fences remaining actions. A reply does not prove completion. The Head never executes a model tool;
 explicit scheduler, trigger and Host dispatch remain available.
 
 Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
@@ -479,9 +481,9 @@ For dispatch, gate, and event behavior, read the [Studio API](../reference/api/s
 ### Historical timing trial and current routing
 
 The earlier reply/action/intent/timing experiment is historical, not the current
-contract. The current contract separates relevance from semantic idle handling.
-Only a freshly verified idle slot permits admission. A busy/unknown slot permits
-factual composition or silence, not queued additions or model-requested preemption.
+contract. The current contract separates relevance from independent-work decisions
+and factual progress replies. Ordinary Dispatch owns admission for registered
+Sessions; Head does not request preemption.
 Explicit Stop and review retain their own existing interfaces. This does not add
 durable responsibility tracking, restart recovery or autonomous-loop guarantees.
 See [the operative mechanism and historical diagram link](../design/studio/pet-head-mechanism.md).
@@ -495,8 +497,8 @@ For the official HTTPS `api.deepseek.com` OpenAI-compatible route and the
 budget available for its structured answer. It does not edit the saved profile,
 Agent models, gateway routes, other model names or Anthropic-compatible routes.
 Each structured stage uses the same schema across tool output and JSON mode.
-When idle, explicit requests to acknowledge before processing can select both
-reply and dispatch without claiming admission has already succeeded.
+An explicit acknowledgement request can select both reply and dispatch.
+Registered-Session submissions acknowledge only after Host admission.
 Routine dispatch still need not produce an acknowledgement.
 
 A prior six-call isolated synthetic A/B reproduced truncated JSON when default

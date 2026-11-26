@@ -183,7 +183,7 @@ test('response and work both use Host admission without Head final text and pres
     assert.ok(dispatched[1]!.request.includes(referenced.message.messageId), 'dispatch preserves the referenced source');
     assert.deepEqual(dispatched[1]!.scope, { namespace: 'channel', id: channelId });
     assert.ok(dispatched[1]!.session, 'admission uses the Channel session');
-    assert.equal(dispatched[1]!.delivery, 'idle-only', 'Head uses the resident no-queue admission with its binding');
+    assert.equal(dispatched[1]!.delivery, undefined, 'Head uses ordinary admission for a registered Session');
     assert.deepEqual(await channel.service.listSessions(human, channelId), firstSession, 'work after response reuses the same retained session');
     assert.deepEqual(observed, ['short question', 'inspect attachment'], 'own reply does not trigger the Head');
   } finally { await studio.shutdown(); }

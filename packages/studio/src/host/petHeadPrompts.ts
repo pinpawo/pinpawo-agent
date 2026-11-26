@@ -55,10 +55,10 @@ export function headRelevanceMessages(input: HeadInput, format: string): Array<[
 
 export function headIdleMessages(input: HeadInput, format: string): Array<[string, string]> {
   return headMessages(input, format, [
-    'The runtime has sent this relevant message because the Pet’s work slot is idle. No execution or Session status is available here.',
+    'The current message is relevant to this Pet. No verified execution progress is available here.',
     'Set shouldDispatch=true only for an explicit independent new assignment to this Pet. The Agent receives the original message. Ongoing work, requests to wait or stop, and work conditioned on an unverified result are not independent new assignments.',
     'Use reply for a direct answer from public context or a brief acknowledgement. If asked about execution progress, say it cannot be verified here; do not infer it from public history. A progress question alone is not new work. For a bare mention, thanks, acknowledgement, or context without a request, set shouldDispatch=false and reply=null.',
-    'Follow an explicit request to acknowledge first or not to acknowledge. Do not claim the work was admitted, queued, completed or stopped, or commit to future work; an acknowledgement precedes admission. Do not address another Pet in a peer reply.',
+    'Follow an explicit request to acknowledge first or not to acknowledge. Do not claim the work was admitted, queued, completed or stopped, or commit to future work; an acknowledgement is not proof of admission. Do not address another Pet in a peer reply.',
   ]);
 }
 

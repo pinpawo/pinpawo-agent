@@ -12,6 +12,7 @@ import type { HeadInput, HeadMessage } from '../../../packages/studio/src/host/p
 import type { StudioEventSubscriptionFilter, StudioModelEndpoint, StudioPlugin } from '../../../packages/studio/src/studioContract';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
+import { ResidentPetCoordinator } from '../../../services/host/src/host/residentPetCoordinator';
 import { HostToolkitInventoryStore } from '../../../services/host/src/toolkits/toolkitInventory';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -24,7 +25,7 @@ async function waitFor(predicate: () => boolean) {
   throw new Error('Timed out waiting for the owner Head.');
 }
 
-test('production Head stays scoped to its Channel, samples only live runs, and does not republish results', async () => {
+test('production Head stays scoped to its Channel, samples only live runs, and submits new work through ordinary Dispatch', async t => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'head-topic-e2e-'));
   const channel = createChannelPlugin({ httpRoute: false });
   const decisions: Record<string, string[]> = { alpha: [], beta: [] };
@@ -35,6 +36,11 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
   const direct = '[@alpha](participant:pet:alpha) Are you the analyst?';
   const progress = '[@alpha](participant:pet:alpha) How is A going?';
   const mixed = '[@alpha](participant:pet:alpha) How is A going? Also do work B.';
+  const becameBusy = '[@alpha](participant:pet:alpha) Start independent work while the slot changes.';
+  const expires = '[@alpha](participant:pet:alpha) Start a new task whose admission will time out.';
+  const afterStop = '[@alpha](participant:pet:alpha) Start independent work after Stop.';
+  const independent = [becameBusy, expires, afterStop];
+  let duringDecision: (() => void) | undefined;
   const finalA = 'This is A’s official result.';
   const canonicalDecisions: HeadInput[] = [];
   const held = '[@alpha](participant:pet:alpha) Hold Head judgment through close.';
@@ -63,8 +69,9 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
             decisionClients.push({ body: message.body, client });
             if (addressed) canonicalDecisions.push(input);
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
-            const dispatch = [startA, mixed, held].includes(message.body);
-            const reply = message.body === direct ? 'Yes, I am.' : message.body === held ? 'This reply is too late.' : '';
+            if (options.name === 'pet_head_idle' && message.body === becameBusy) duringDecision?.();
+            const dispatch = [startA, mixed, held, ...independent].includes(message.body);
+            const reply = message.body === direct ? 'Yes, I am.' : message.body === progress ? 'I cannot verify the current status.' : message.body === held ? 'This reply is too late.' : independent.includes(message.body) ? 'I see the request.' : '';
             const parsed = options.name === 'pet_head_relevance'
               ? { relevant: [startA, mixed, held, progress, direct].includes(message.body) }
               : { shouldDispatch: dispatch, reply: reply || null };
@@ -124,6 +131,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     const registrations: Array<{ petId: string; filter: StudioEventSubscriptionFilter | undefined }> = [];
     const detachments: Array<typeof registrations[number]> = [];
     const handled: string[] = [];
+    const headFailures = new Map<string, string>();
     studio.subscribe = (handler, filter) => {
       const petId = subscribingPet;
       const registration = { petId, filter };
@@ -135,6 +143,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
           ? event.payload as HeadMessage : undefined;
         if (message) deliveries[petId]!.push(message.body);
         try { await handler(event); }
+        catch (error) {
+          if (message) headFailures.set(message.messageId, String(error));
+          throw error;
+        }
         finally { if (message) handled.push(message.messageId); }
       }, filter);
       return () => {
@@ -246,6 +258,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     }
     assert.equal(sessionReads.length, 0, 'idle dispatch does not read Session content');
     const a = admissions[0]!;
+    assert.equal(a.delivery, 'idle-only', 'first binding still uses its original admission policy');
     assert.equal(a.origin?.id, sourceA.messageId);
     assert.ok(a.dispatchId && a.session && a.scope && a.origin);
     activeDispatch = { dispatchId: a.dispatchId, sessionId: a.session.id, scope: a.scope, origin: a.origin, enqueuedAt: new Date().toISOString() };
@@ -360,6 +373,67 @@ test('production Head stays scoped to its Channel, samples only live runs, and d
     assert.equal(decisions.alpha!.length, beforeOfficial + 1, 'resident events or own output must not start another judgment');
     assert.equal(published.filter(({ message }) => message.body === finalA).length, 1, 'official result uses only the existing Channel bridge');
     assert.equal(admissions.length, 1);
+
+    // Real Host coordinator, scripted model, and controlled execution settlement.
+    const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+    let releaseA!: () => void;
+    const heldA = new Promise<void>(resolve => { releaseA = resolve; });
+    const seen: PetDispatchRequest[] = [];
+    const started: string[] = [];
+    const realSnapshot = resident.resident.dispatch.getQueueSnapshot;
+    const realDispatch = resident.resident.dispatch.dispatch;
+    resident.resident.dispatch.getQueueSnapshot = () => coordinator.getQueueSnapshot();
+    resident.resident.dispatch.dispatch = async request => {
+      seen.push(request);
+      let wait;
+      while ((wait = coordinator.dispatchWriteBarrier(request.signal))) await wait;
+      coordinator.submitDispatch(async () => { started.push(request.origin!.id); });
+    };
+    const timeout = new AbortController();
+    const normalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const clock = t.mock.method(AbortSignal, 'timeout', (ms: number) => ms === 30_000 ? timeout.signal : normalTimeout(ms));
+    try {
+      duringDecision = () => {
+        coordinator.submitDispatch(async () => { await heldA; }, undefined, activeA, { stop: () => true });
+        assert.equal(coordinator.getQueueSnapshot().activeDispatch?.dispatchId, activeA.dispatchId);
+      };
+      const raceTask = await post(becameBusy);
+      await waitFor(() => !!replyFor(raceTask.messageId));
+      assert.equal(seen[0]?.origin?.id, raceTask.messageId);
+      assert.equal(seen[0]?.session?.id, a.session.id);
+      assert.equal(seen[0]?.delivery, undefined);
+      assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1, 'Host queues new work if the slot became busy');
+      assert.deepEqual(started, []);
+
+      assert.equal(coordinator.stopDispatch(activeA.dispatchId), true);
+      lifecycle('running');
+      lifecycle('interrupted');
+      const timedOut = await post(expires);
+      await waitFor(() => seen.length === 2);
+      assert.equal(seen[1]?.delivery, undefined);
+      assert.equal(replyFor(timedOut.messageId), undefined);
+      timeout.abort(new DOMException('Controlled timeout', 'TimeoutError'));
+      await waitFor(() => handled.includes(timedOut.messageId));
+      assert.match(headFailures.get(timedOut.messageId) ?? '', /dispatch timed out/);
+      assert.equal(replyFor(timedOut.messageId), undefined);
+      clock.mock.restore();
+
+      const waiting = await post(afterStop);
+      await waitFor(() => seen.length === 3);
+      assert.equal(seen[2]?.session?.id, a.session.id);
+      assert.equal(seen[2]?.delivery, undefined);
+      assert.equal(replyFor(waiting.messageId), undefined, 'no acknowledgement while Stop is unsettled');
+      assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1, 'Stop waits outside FIFO');
+      releaseA();
+      await waitFor(() => started.length === 2 && !!replyFor(waiting.messageId));
+      assert.deepEqual(started, [raceTask.messageId, waiting.messageId], 'FIFO continues and timed-out work never runs');
+    } finally {
+      clock.mock.restore();
+      releaseA();
+      await coordinator.close();
+      resident.resident.dispatch.getQueueSnapshot = realSnapshot;
+      resident.resident.dispatch.dispatch = realDispatch;
+    }
 
     const oldRegistrations = registrations.filter(entry => entry.petId === 'alpha');
     const realClose = resident.close.bind(resident);

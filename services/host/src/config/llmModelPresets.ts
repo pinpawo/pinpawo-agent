@@ -25,6 +25,8 @@ export type LlmModelPreset = {
    */
   inputModalities: readonly ModelInputModality[];
   thinkingControl?: LlmThinkingControl;
+  /** Optional override for Head calls to this preset's own endpoint. */
+  headThinking?: 'enabled' | 'disabled';
   /**
    * Request token streaming. A non-streaming request must deliver the whole
    * reply within the LLM timeout, so long generations time out and every retry
@@ -205,6 +207,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     structuredOutputMethod: 'jsonMode',
     inputModalities: ['text'],
     thinkingControl: 'thinking_type',
+    headThinking: 'disabled',
     requiresStreaming: true,
     aliases: [
       'deepseek-v4-pro',
@@ -228,6 +231,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     // a compatible endpoint can opt into file input through its profile.
     inputModalities: ['text', 'image'],
     thinkingControl: 'thinking_type',
+    headThinking: 'disabled',
     requiresStreaming: true,
     aliases: [
       'deepseek-v4.1-flash',

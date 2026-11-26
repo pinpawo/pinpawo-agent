@@ -254,11 +254,14 @@ test('ordinary OpenAI role keeps SDK system-to-developer behavior for reasoning 
   assert.equal(requested, true);
 });
 
-test('only official DeepSeek Head generation disables thinking without mutating profiles or Agent roles', () => {
+test('Head thinking follows the matching preset and endpoint without changing Agent roles', () => {
   const base = { apiKey: 'test-key', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com', maxOutputTokens: 512 };
   const before = JSON.stringify(base);
   for (const model of ['deepseek-flash', 'deepseek-v4-pro']) {
-    assert.deepEqual(readInvocationParams(buildModel({ ...base, model }, { purpose: 'pet-head', streaming: false })).thinking, { type: 'disabled' });
+    for (const baseUrl of [base.baseUrl, `${base.baseUrl}/v1`, `${base.baseUrl}/v1/`]) {
+      assert.deepEqual(readInvocationParams(buildModel({ ...base, model, baseUrl },
+        { purpose: 'pet-head', streaming: false })).thinking, { type: 'disabled' });
+    }
   }
   for (const config of [base, { ...base, baseUrl: 'https://api.deepseek.com/v1' }]) {
     for (const instance of Object.values(buildHostModels(config))) assert.equal(readInvocationParams(instance).thinking, undefined);
@@ -269,7 +272,10 @@ test('only official DeepSeek Head generation disables thinking without mutating 
     { ...base, baseUrl: 'http://api.deepseek.com' },
     { ...base, baseUrl: 'https://api.deepseek.com:8443' },
     { ...base, baseUrl: 'https://api.deepseek.com/proxy' },
+    { ...base, baseUrl: 'https://api.deepseek.com/v1?compat=true' },
+    { ...base, model: 'deepseek-v4.1-flash' }, // Alias inference alone does not grant a wire override.
     { ...base, model: 'another-model' },
+    { ...base, model: 'glm-5.2', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
   ]) assert.equal(readInvocationParams(buildModel(config, { purpose: 'pet-head', streaming: false })).thinking, undefined);
   const anthropic = buildModel({ ...base, protocol: 'anthropic-compatible' }, { purpose: 'pet-head', streaming: false });
   assert.deepEqual((anthropic as unknown as { thinking?: unknown }).thinking,

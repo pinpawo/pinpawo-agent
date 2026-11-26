@@ -2,7 +2,7 @@ import type { AgentModels } from '@pinpawo/pet-agent';
 import type { ChatOpenAIFields } from '@langchain/openai';
 import { AnthropicCompatibleChatModel } from './anthropicCompatibleChatModel';
 import type { AgentLlmConfig } from '../config/agentConfig';
-import { requiresLlmStreaming } from '../config/llmModelPresets';
+import { inferLlmModelPreset, requiresLlmStreaming } from '../config/llmModelPresets';
 import { createReasoningPassbackChatOpenAI, ReasoningPassbackCompletions } from './reasoningPassback';
 
 export { resolveLlmGenerationReserveTokens } from '../config/llmModelPresets';
@@ -20,14 +20,24 @@ export type HostModelGenerationOptions = {
   forceChatCompletions?: boolean;
 };
 
-function isOfficialDeepSeekHead(config: AgentLlmConfig, options: HostModelGenerationOptions): boolean {
-  if (options.purpose !== 'pet-head' || (config.protocol && config.protocol !== 'openai-compatible')
-    || !['deepseek-flash', 'deepseek-v4-pro'].includes(config.model)) return false;
+function endpointIdentity(baseUrl: string | undefined): string | undefined {
+  if (!baseUrl) return undefined;
   try {
-    const url = new URL(config.baseUrl);
-    return url.protocol === 'https:' && url.hostname === 'api.deepseek.com' && (!url.port || url.port === '443')
-      && !url.username && !url.password && !url.search && !url.hash && ['/', '/v1', '/v1/'].includes(url.pathname);
-  } catch { return false; }
+    const url = new URL(baseUrl);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return undefined;
+    // A root endpoint may also be configured with its /v1 API prefix.
+    const path = url.pathname === '/v1' || url.pathname === '/v1/' ? '/' : url.pathname;
+    return url.origin + path;
+  } catch { return undefined; }
+}
+
+function headThinkingKwargs(config: AgentLlmConfig, options: HostModelGenerationOptions) {
+  if (options.purpose !== 'pet-head') return undefined;
+  const preset = inferLlmModelPreset(config.model);
+  if (!preset?.headThinking || preset.model !== config.model || preset.thinkingControl !== 'thinking_type') return undefined;
+  const endpoint = endpointIdentity(config.baseUrl);
+  if (!endpoint || endpoint !== endpointIdentity(preset.baseUrl)) return undefined;
+  return { thinking: { type: preset.headThinking } };
 }
 
 /** Construct one model using the Host's protocol and generation settings. */
@@ -54,11 +64,10 @@ export function buildModel(
       clientOptions: { baseURL: llmConfig.baseUrl, timeout: llmConfig.timeoutMs ?? 45000 },
     });
   }
+  const modelKwargs = headThinkingKwargs(llmConfig, generationOptions);
   const openaiFields: ChatOpenAIFields = {
     ...fields,
-    // Official DeepSeek Head decisions have a small bounded JSON budget. Leave
-    // every Agent role, gateway and other protocol on its unchanged defaults.
-    ...(isOfficialDeepSeekHead(llmConfig, generationOptions) ? { modelKwargs: { thinking: { type: 'disabled' } } } : {}),
+    ...(modelKwargs ? { modelKwargs } : {}),
     timeout: llmConfig.timeoutMs ?? 45000,
     streaming: generationOptions.streaming ?? requiresLlmStreaming(llmConfig.model),
     streamUsage: true,

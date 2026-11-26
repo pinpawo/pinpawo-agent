@@ -33,7 +33,7 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     if (cached) return cached;
     const endpoint = resolve();
     if (!endpoint.createChatModel) throw new Error('The configured model cannot create a Pet Head model.');
-    const model = endpoint.createChatModel({ maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
+    const model = endpoint.createChatModel({ maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
     const method = endpoint.structuredOutputMethod ?? 'jsonMode';
     return cached = { method, model };
   }

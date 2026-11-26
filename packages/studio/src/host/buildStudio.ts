@@ -340,7 +340,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         model: config.model,
         createChatModel: (options) => buildModel({
           ...config,
-          maxOutputTokens: options.maxOutputTokens,
+          ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
           maxRetries: options.maxRetries,
         }, {
           ...(options.purpose ? { purpose: options.purpose } : {}),

@@ -304,7 +304,7 @@ test('both structured contracts use only their declared schema and configured wi
     const signal = new AbortController().signal;
     const model = createHeadModel(() => mock.endpoint);
     assert.deepEqual(await model[contract.invoke](decisionInput, signal), contract.value);
-    assert.deepEqual(mock.factory(), { maxOutputTokens: 512, maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
+    assert.deepEqual(mock.factory(), { maxRetries: 0, preferDeterministic: true, streaming: false, purpose: 'pet-head' });
     assert.deepEqual(mock.binding(), { name: contract.name, method: method ?? 'jsonMode', includeRaw: true });
     assert.deepEqual(mock.calls.map(call => call.mode), ['structured']);
     assert.equal(mock.calls[0]!.signal, signal);
@@ -389,11 +389,11 @@ test('abort before or during relevance provider work prevents selection', async 
   }
 });
 
-function nativeEndpoint(protocol: NonNullable<StudioModelEndpoint['protocol']>, model: string, method?: StudioModelEndpoint['structuredOutputMethod']): StudioModelEndpoint {
-  const baseUrl = protocol === 'anthropic-compatible' ? 'https://api.anthropic.test'
-    : model.startsWith('deepseek-') ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1';
+function nativeEndpoint(protocol: NonNullable<StudioModelEndpoint['protocol']>, model: string, method?: StudioModelEndpoint['structuredOutputMethod'],
+  baseUrl = protocol === 'anthropic-compatible' ? 'https://api.anthropic.test'
+    : model.startsWith('deepseek-') ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1'): StudioModelEndpoint {
   const endpoint = { profileId: 'fixture', protocol, model, baseUrl, apiKey: 'fixture-only', structuredOutputMethod: method };
-  return { ...endpoint, createChatModel: options => buildModel({ ...endpoint, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries, timeoutMs: 2_000 },
+  return { ...endpoint, createChatModel: options => buildModel({ ...endpoint, maxOutputTokens: options.maxOutputTokens ?? 4096, maxRetries: options.maxRetries, timeoutMs: 2_000 },
     { streaming: options.streaming, preferDeterministic: options.preferDeterministic, purpose: options.purpose }) };
 }
 
@@ -423,8 +423,22 @@ test('official DeepSeek Flash / Pro sends each contract through actual JSON mode
     assert.deepEqual(body.response_format, { type: 'json_object' });
     assert.equal(body.tools, undefined);
     assert.deepEqual(body.thinking, { type: 'disabled' });
-    assert.equal(body.max_completion_tokens ?? body.max_tokens, 512);
+    assert.equal(body.max_completion_tokens ?? body.max_tokens, 4096);
   }
+});
+
+test('a custom DeepSeek gateway also receives the configured profile output budget', async t => {
+  const requests: number[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    requests.push(body.max_completion_tokens ?? body.max_tokens);
+    return Response.json({ id: 'fixture', object: 'chat.completion', created: 0, model: body.model,
+      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{"shouldDispatch":true,"reply":null}' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+  });
+  const head = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-flash', 'jsonMode', 'https://gateway.test/v1'));
+  assert.deepEqual(await head.handleIdle(decisionInput, new AbortController().signal), { shouldDispatch: true, reply: null });
+  assert.deepEqual(requests, [4096]);
 });
 
 test('an addressed human or peer artifact review uses idle admission, but its status inquiry does not', async t => {

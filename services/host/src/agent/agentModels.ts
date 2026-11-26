@@ -56,8 +56,8 @@ export function buildModel(
   }
   const openaiFields: ChatOpenAIFields = {
     ...fields,
-    // Official DeepSeek Head decisions have a small bounded JSON budget. Leave
-    // every Agent role, gateway and other protocol on its unchanged defaults.
+    // Only official DeepSeek Head calls opt out of thinking. Leave Agent
+    // roles, custom gateways and other protocols on their existing defaults.
     ...(isOfficialDeepSeekHead(llmConfig, generationOptions) ? { modelKwargs: { thinking: { type: 'disabled' } } } : {}),
     timeout: llmConfig.timeoutMs ?? 45000,
     streaming: generationOptions.streaming ?? requiresLlmStreaming(llmConfig.model),

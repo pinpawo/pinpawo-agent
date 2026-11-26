@@ -475,7 +475,7 @@ test('Plugin model factories use complete resolved profiles for native and gatew
     { modelProfileId: 'responses-preferred', model: 'gpt-5.5-pro',
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway', maxOutputTokens: 4096 },
     { modelProfileId: 'official-deepseek', model: 'deepseek-flash',
-      baseUrl: 'https://api.deepseek.com/v1', apiKey: 'mock-deepseek' },
+      baseUrl: 'https://api.deepseek.com/v1', apiKey: 'mock-deepseek', maxOutputTokens: 4096 },
     { modelProfileId: 'unknown', model: 'example-model',
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway' },
   ], 'native');
@@ -548,8 +548,8 @@ test('Plugin model factories use complete resolved profiles for native and gatew
     const officialEndpoint = models.resolve('official-deepseek');
     for (const purpose of [undefined, 'pet-head'] as const) {
       const model = officialEndpoint.createChatModel!({
-        maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false,
-        forceChatCompletions: true, ...(purpose ? { purpose } : {}),
+        maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true,
+        ...(purpose ? { purpose } : { maxOutputTokens: 300 }),
       });
       let requests = 0;
       const transport = model as unknown as { clientConfig: { fetch: typeof fetch } };
@@ -558,6 +558,7 @@ test('Plugin model factories use complete resolved profiles for native and gatew
         assert.equal(String(url), 'https://api.deepseek.com/v1/chat/completions');
         const body = JSON.parse(String(init?.body));
         assert.deepEqual(body.thinking, purpose === 'pet-head' ? { type: 'disabled' } : undefined);
+        assert.equal(body.max_completion_tokens ?? body.max_tokens, purpose === 'pet-head' ? 4096 : 300);
         return Response.json({ id: 'mock', object: 'chat.completion', created: 0, model: 'deepseek-flash',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });

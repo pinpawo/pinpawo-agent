@@ -50,7 +50,7 @@ async function until(predicate: () => boolean | Promise<boolean>) {
 }
 
 /** Script only model decisions/content. Runtime, queues, SQLite and session snapshots are production. */
-async function scriptedModel(mode: HeadWireMode) {
+async function scriptedModel(mode: HeadWireMode, waitForReviewSlot: () => Promise<void>) {
   const attempts = new Map<string, number>();
   const decisions: Array<{ petId: string; channelId: string; messageId: string; action: string; mentioned: boolean }> = [];
   const compositions = new Map<string, number>();
@@ -60,7 +60,7 @@ async function scriptedModel(mode: HeadWireMode) {
   const server = createServer((request, response) => {
     let raw = '';
     request.on('data', chunk => { raw += String(chunk); });
-    request.on('end', () => {
+    request.on('end', async () => {
       try {
         assert.equal(request.url, '/v1/chat/completions');
         const input = JSON.parse(raw) as WireRequest;
@@ -166,6 +166,9 @@ async function scriptedModel(mode: HeadWireMode) {
             else content = answer;
           } else content = answer;
         }
+        // This scenario exercises a peer assignment after round two, not a
+        // follow-up while the target is still executing its own round-two answer.
+        if (content === peerReport) await waitForReviewSlot();
         const id = `roundtable-model-${++sequence}`;
         const message = { role: 'assistant', content, ...(call ? { tool_calls: [{ id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] } : {}) };
         const finish = call ? 'tool_calls' : 'stop';
@@ -195,9 +198,14 @@ async function scriptedModel(mode: HeadWireMode) {
 for (const mode of ['tool', 'json'] as const) {
 test(`manual three-Pet roundtable retains execution sessions and bounded ${mode} Head decisions`, { timeout: 120_000 }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'studio-roundtable-eval-'));
-  const model = await scriptedModel(mode);
-  const channel = createChannelPlugin({ httpRoute: false });
   let built: Awaited<ReturnType<typeof buildStudio>> | undefined;
+  const completed = new Map<string, string[]>();
+  const model = await scriptedModel(mode, () => until(() => {
+    const petId = 'roundtable-being';
+    const slot = built?.residentPets.get(petId)?.resident.dispatch.getQueueSnapshot();
+    return (completed.get(petId)?.length ?? 0) === 2 && slot?.state === 'open' && slot.activeOperation === null;
+  }));
+  const channel = createChannelPlugin({ httpRoute: false });
   let directHeadWrites = 0;
   const directReply = channel.head.reply;
   channel.head.reply = async (...args) => { directHeadWrites++; return directReply(...args); };
@@ -226,7 +234,6 @@ test(`manual three-Pet roundtable retains execution sessions and bounded ${mode}
     const studio = built.studio;
     const ownerId = (await channel.service.createChannel(human, { title: 'Synthetic collective-experience roundtable', pets: [] })).channel.channelId;
     const foreignId = (await channel.service.createChannel(human, { title: 'Unrelated synthetic Channel', pets: [] })).channel.channelId;
-    const completed = new Map<string, string[]>();
     const failed: string[] = [];
     for (const role of philosophers) {
       await studio.pets.create({ ...role, channelId: ownerId });

@@ -63,13 +63,16 @@ test('a resume for another interrupt is an ordinary conversation turn', async ()
   assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
 });
 
-test('answering the recorded review continues the dispatch under its original identity', async () => {
+test('answering the recorded review continues the Session under a separate dispatch identity', async () => {
   const h = harness();
   await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-1'));
-  assert.deepEqual(h.contexts, [{ petId: 'pet', dispatchId: 'dispatch-1', sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } }]);
+  const id = h.events[0]?.dispatchId;
+  assert.ok(id && id !== 'dispatch-1' && id !== 'req-2');
+  assert.ok(h.events.every(event => event.resumesDispatchId === 'dispatch-1'));
+  assert.deepEqual(h.contexts, [{ petId: 'pet', dispatchId: id, sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } }]);
   assert.deepEqual(h.events.map((event) => [event.state, event.dispatchId, event.scope?.id, event.reply]), [
-    ['running', 'dispatch-1', 'ch-1', undefined],
-    ['completed', 'dispatch-1', 'ch-1', 'done'],
+    ['running', id, 'ch-1', undefined],
+    ['completed', id, 'ch-1', 'done'],
   ]);
   assert.equal(h.session.pendingDispatch, undefined);
 });
@@ -81,8 +84,14 @@ test('a continuation that stops on another review stays suspended on it', async 
   assert.equal(h.events.at(-1)?.state, 'waiting');
   assert.equal(h.events.at(-1)?.pendingInterrupt?.interruptId, 'review-2');
   assert.equal(h.session.pendingDispatch?.interruptId, 'review-2');
-  assert.equal(h.session.pendingDispatch?.dispatchId, 'dispatch-1');
+  assert.equal(h.session.pendingDispatch?.dispatchId, h.events[0]?.dispatchId);
   assert.deepEqual(h.session.pendingDispatch?.systemPromptSections, [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }]);
+  const firstAnswer = h.events[0]?.dispatchId;
+  await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-2'));
+  const nextAnswer = h.events.at(-1);
+  assert.ok(nextAnswer && nextAnswer.dispatchId !== firstAnswer);
+  assert.equal(nextAnswer.resumesDispatchId, firstAnswer);
+  assert.equal(nextAnswer.sessionId, h.session.id);
 });
 
 test('a stop that leaves the review pending keeps the dispatch waiting', async () => {
@@ -99,7 +108,7 @@ test('a stop with nothing pending interrupts the dispatch', async () => {
   assert.equal(h.session.pendingDispatch, undefined);
 });
 
-test('a failed continuation reports the original dispatch failed and rethrows', async () => {
+test('a failed continuation reports the review answer failed and rethrows', async () => {
   const h = harness();
   await assert.rejects(h.continueWith(async () => { throw new Error('model down'); })(h.turn('review-1')), /model down/);
   assert.deepEqual(h.events.map((event) => [event.state, event.error]), [['running', undefined], ['failed', 'model down']]);
@@ -119,17 +128,19 @@ test('an unreadable outcome keeps the suspension so a retry still continues the 
   h.graph.settle = async () => { throw new Error('checkpoint unavailable'); };
   await assert.rejects(h.continueWith(async () => { throw new Error('state read failed'); })(h.turn('review-1')), /checkpoint unavailable/);
   await assert.rejects(h.continueWith(async () => ({ status: 'interrupted' }))(h.turn('review-1')), /checkpoint unavailable/);
-  assert.deepEqual(h.events.map((event) => event.state), ['running', 'running']);
+  assert.deepEqual(h.events.map((event) => event.state), ['running', 'failed', 'running', 'failed']);
   assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
 
   h.graph.settle = async () => null;
   await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-1'));
-  assert.deepEqual(h.contexts.at(-1), { petId: 'pet', dispatchId: 'dispatch-1', sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } });
-  assert.deepEqual([h.events.at(-1)?.state, h.events.at(-1)?.dispatchId, h.events.at(-1)?.scope?.id], ['completed', 'dispatch-1', 'ch-1']);
+  const id = h.events.at(-1)?.dispatchId;
+  assert.equal(new Set(h.events.map(event => event.dispatchId)).size, 3);
+  assert.deepEqual(h.contexts.at(-1), { petId: 'pet', dispatchId: id, sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } });
+  assert.deepEqual([h.events.at(-1)?.state, h.events.at(-1)?.dispatchId, h.events.at(-1)?.scope?.id], ['completed', id, 'ch-1']);
   assert.equal(h.session.pendingDispatch, undefined);
 });
 
-test('the continued run reply reports under the original dispatch', async () => {
+test('the continued run reply reports under the review answer identity', async () => {
   const h = harness();
   const settled = { type: 'message.completed', requestId: 'req-2', messageId: 'm1', role: 'assistant', text: 'done' } as const;
   await continueSuspendedDispatch({
@@ -137,10 +148,12 @@ test('the continued run reply reports under the original dispatch', async () => 
     publishLifecycle: (event) => h.events.push(event),
     run: async (options) => { options.emitEvent(settled); return { status: 'completed', reply: 'done' }; },
   })({ ...h.turn('review-1'), emitEvent: () => {} } as never);
+  const id = h.events[0]?.dispatchId;
+  assert.notEqual(id, 'dispatch-1');
   assert.deepEqual(h.events.map((event) => [event.state, event.dispatchId, event.scope?.id, event.message?.type]), [
-    ['running', 'dispatch-1', 'ch-1', undefined],
-    ['message', 'dispatch-1', 'ch-1', 'message.completed'],
-    ['completed', 'dispatch-1', 'ch-1', undefined],
+    ['running', id, 'ch-1', undefined],
+    ['message', id, 'ch-1', 'message.completed'],
+    ['completed', id, 'ch-1', undefined],
   ]);
 });
 

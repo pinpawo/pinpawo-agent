@@ -49,9 +49,9 @@ export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope }
 
 /** Scoped execution facts; not an admission check or a durable history. */
 export type PetDispatchExecution = {
-  active?: PetDispatchQueueEntry;
+  active?: PetDispatchQueueEntry & Pick<PetDispatchLifecycleEvent, 'resumesDispatchId'>;
   queued: PetDispatchQueueEntry[];
-  recent: Array<Pick<PetDispatchLifecycleEvent, 'dispatchId' | 'origin'> & {
+  recent: Array<Pick<PetDispatchLifecycleEvent, 'dispatchId' | 'origin' | 'resumesDispatchId'> & {
     state: Exclude<PetDispatchLifecycleState, 'queued' | 'running' | 'message'>;
   }>;
 };
@@ -103,6 +103,8 @@ export function readPetDispatchMessage(event: AgentRuntimeEvent): PetDispatchMes
  * execution handle: callers cannot cancel, resume, or read model output here.
  */
 export type PetDispatchLifecycleEvent = {
+  /** Independent answer to the interrupt left by this earlier dispatch. */
+  resumesDispatchId?: string;
   /** Public source identity for read-only correlation, not execution context. */
   origin?: PetInvocationScope;
   dispatchId: string;

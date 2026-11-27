@@ -30,6 +30,7 @@ export type HeadDispatchDecision = { shouldDispatch: boolean; reply: string | nu
 export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; addressed?: boolean };
 type HeadTaskFact = {
   messageId?: string;
+  kind?: 'review-answer';
   status: PetDispatchExecution['recent'][number]['state'] | 'running' | 'queued';
 };
 type ReadSession = (sessionId: string) => Promise<Awaited<ReturnType<PetSessionPort['snapshot']>> | undefined>;
@@ -170,9 +171,11 @@ export function createPetHead(options: {
     const sourceId = (origin?: { namespace: string; id: string }) => origin?.namespace === 'channel' ? origin.id : undefined;
     const activeId = sourceId(active?.origin);
     const tasks: HeadTaskFact[] = [
-      ...(active ? [{ messageId: activeId, status: 'running' as const }] : []),
+      ...(active ? [{ messageId: activeId, status: 'running' as const,
+        ...(active.resumesDispatchId ? { kind: 'review-answer' as const } : {}) }] : []),
       ...queued.map(item => ({ messageId: sourceId(item.origin), status: 'queued' as const })),
-      ...recent.map(item => ({ messageId: sourceId(item.origin), status: item.state })),
+      ...recent.map(item => ({ messageId: sourceId(item.origin), status: item.state,
+        ...(item.resumesDispatchId ? { kind: 'review-answer' as const } : {}) })),
     ];
     const session = active && boundSessionId && options.readSession
       ? await readSessionFacts(options.readSession, boundSessionId, signal) : undefined;

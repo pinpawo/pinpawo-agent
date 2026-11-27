@@ -316,22 +316,11 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     assert.equal(canonicalDecisions.at(-1)!.session, undefined);
     assert.equal(admissions.length, 1);
 
-    // A resumed review emits dispatch.running, but executes as a conversation
-    // hold and does not occupy the ordinary dispatch queue slot.
     sessionUnavailable = false;
-    const readsBeforeApproval = sessionReads.length;
-    lifecycle('waiting');
     activeDispatch = undefined;
-    lifecycle('running', { requestId: 'resumed-request' });
-    const approvalFollowup = await post(progress, sourceA.messageId);
-    await waitFor(() => !!replyFor(approvalFollowup.messageId));
-    assert.equal(replyFor(approvalFollowup.messageId)?.body, 'I cannot verify the current status.');
-    assert.equal(sessionReads.length, readsBeforeApproval, 'continuation is outside the ordinary dispatch slot');
-    assert.equal(admissions.length, 1);
-
     const beforeOfficial = decisions.alpha!.length;
-    lifecycle('message', { requestId: 'resumed-request', message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
-    lifecycle('completed', { requestId: 'resumed-request', reply: finalA });
+    lifecycle('message', { message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
+    lifecycle('completed', { reply: finalA });
     recent = [{ dispatchId: a.dispatchId, origin: a.origin, state: 'completed' }];
     await waitFor(() => published.some(({ message }) => message.externalRef === 'public-a'));
     const fence = (await post('alpha fence')).body;

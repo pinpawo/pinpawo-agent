@@ -25,7 +25,7 @@ export type TuiSessionRecord = {
 /**
  * A dispatch stopped on a review belongs to whoever resumes that review. The
  * session keeps it beside its pending interrupt: resuming the same interrupt
- * continues the dispatch under its original identity and scope.
+ * continues the Session in the original scope under a new dispatch identity.
  */
 export type TuiSessionPendingDispatch = {
   interruptId: string;

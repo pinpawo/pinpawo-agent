@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
@@ -12,13 +13,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }
 
-/**
- * A dispatch that stopped on a review is resumed through the conversation
- * surface, not the dispatch queue. When a resume answers the interrupt the
- * session recorded for a dispatch, that turn is the dispatch's continuation:
- * it runs under the original attribution and reports under the original
- * dispatch identity. Any other resume is an ordinary conversation turn.
- */
+/** A review answer is a new dispatch identity over the existing Session's resume path, not a FIFO item. */
 export function continueSuspendedDispatch(options: {
   petId: string;
   sessions: ServerTuiSessionService;
@@ -32,13 +27,19 @@ export function continueSuspendedDispatch(options: {
     const suspended = session?.pendingDispatch;
     if (!session || suspended?.interruptId !== turn.request.resume.interruptId) return run(turn);
 
-    const { dispatchId, request, scope } = suspended;
+    const { dispatchId: resumesDispatchId, scope } = suspended;
+    const dispatchId = randomUUID();
+    let reportedEnd = false;
     const requestId = turn.request.requestId;
-    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'message'>) => publishLifecycle({
-      ...event, dispatchId, request, requestId, sessionId: session.id, ...(scope ? { scope } : {}),
-    });
+    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'message'>) => {
+      reportedEnd ||= event.state !== 'running' && event.state !== 'message';
+      publishLifecycle({
+        ...event, dispatchId, resumesDispatchId, request: suspended.request, requestId,
+        sessionId: session.id, ...(scope ? { scope } : {}),
+      });
+    };
     const suspend = (pendingInterrupt: PendingInterruptProjection) => {
-      sessions.setPendingDispatch(session.id, { ...suspended, interruptId: pendingInterrupt.interruptId });
+      sessions.setPendingDispatch(session.id, { ...suspended, dispatchId, interruptId: pendingInterrupt.interruptId });
       report({ state: 'waiting', pendingInterrupt });
     };
     const settle = (event: Parameters<typeof report>[0]) => {
@@ -54,42 +55,48 @@ export function continueSuspendedDispatch(options: {
 
     let pendingInterrupt: PendingInterruptProjection | undefined;
     report({ state: 'running' });
-    let result: AgentSessionTurnResult;
     try {
-      result = await withPetInvocationContext(
-        { petId, dispatchId, sessionId: session.id, ...(scope ? { scope } : {}) },
-        () => run({
-          ...turn,
-          setup: withInvocationContext(turn.setup, suspended),
-          emitEvent: (event) => {
-            if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
-            const message = readPetDispatchMessage(event);
-            if (message) report({ state: 'message', message });
-            turn.emitEvent(event);
-          },
-        }),
-      );
-    } catch (error) {
-      // An unreadable outcome is not "nothing pending": keep the suspension so
-      // a retry of the same review still continues this dispatch.
-      const pending = await readPending();
-      if (pending) suspend(pending);
-      else if (turn.setup.input.signal?.aborted || isAbortError(error)) settle({ state: 'interrupted' });
-      else settle({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
-      throw error;
+      let result: AgentSessionTurnResult;
+      try {
+        result = await withPetInvocationContext(
+          { petId, dispatchId, sessionId: session.id, ...(scope ? { scope } : {}) },
+          () => run({
+            ...turn,
+            setup: withInvocationContext(turn.setup, suspended),
+            emitEvent: (event) => {
+              if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
+              const message = readPetDispatchMessage(event);
+              if (message) report({ state: 'message', message });
+              turn.emitEvent(event);
+            },
+          }),
+        );
+      } catch (error) {
+        // An unreadable outcome is not "nothing pending": keep the suspension so
+        // a retry of the same review still continues this dispatch.
+        const pending = await readPending();
+        if (pending) suspend(pending);
+        else if (turn.setup.input.signal?.aborted || isAbortError(error)) settle({ state: 'interrupted' });
+        else settle({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
+        throw error;
+      }
+      if (result.status === 'completed') {
+        settle({ state: 'completed', reply: result.reply });
+      } else if (result.status === 'waiting') {
+        const read = pendingInterrupt ? null : (await turn.graphService.readThreadState(turn.setup)).pendingInterrupt;
+        const pending = pendingInterrupt ?? (read ? projectPendingInterrupt(read) : null);
+        if (!pending) throw new Error('A waiting dispatch has no pending interrupt.');
+        suspend(pending);
+      } else {
+        const pending = await readPending();
+        if (pending) suspend(pending);
+        else settle({ state: 'interrupted' });
+      }
+      return result;
+    } finally {
+      // Even if checkpoint settlement failed, this answer is no longer running.
+      // Leave the existing pending interrupt available for the Session to retry.
+      if (!reportedEnd) report({ state: 'failed' });
     }
-    if (result.status === 'completed') {
-      settle({ state: 'completed', reply: result.reply });
-    } else if (result.status === 'waiting') {
-      const read = pendingInterrupt ? null : (await turn.graphService.readThreadState(turn.setup)).pendingInterrupt;
-      const pending = pendingInterrupt ?? (read ? projectPendingInterrupt(read) : null);
-      if (!pending) throw new Error('A waiting dispatch has no pending interrupt.');
-      suspend(pending);
-    } else {
-      const pending = await readPending();
-      if (pending) suspend(pending);
-      else settle({ state: 'interrupted' });
-    }
-    return result;
   };
 }

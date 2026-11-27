@@ -187,6 +187,7 @@ export function prepareStudioWithHead(input: CreateStudioInput, attachHead?: Att
         occurredAt: new Date().toISOString(),
         payload: {
           invocationId: event.dispatchId,
+          ...(event.resumesDispatchId ? { resumesInvocationId: event.resumesDispatchId } : {}),
           petId: pet.registration.petId,
           request: event.request,
           ...(event.requestId ? { requestId: event.requestId } : {}),

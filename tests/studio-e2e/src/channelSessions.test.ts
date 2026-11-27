@@ -131,6 +131,33 @@ test('a bound session alone does not publish; invalid scopes and late replies fa
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('a review answer has its own Studio dispatch identity and posts one reply in the same Channel', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-review-answer-'));
+  const f = await fixture(root);
+  try {
+    const channelId = await open(f);
+    const original = await f.channel.run(channelId, 'one', 'approval', { kind: 'trigger', id: 'test' });
+    await waitFor(() => f.events.some(event => event.type === 'dispatch.waiting' && event.payload.invocationId === original.invocationId));
+    const host = f.hosts[0]!;
+    const { session } = await host.sessions.snapshot(original.sessionId);
+    assert.ok(session.pendingInterrupt);
+    await host.sessions.review(original.sessionId, {
+      requestId: 'answer-request',
+      interruptId: session.pendingInterrupt.interruptId,
+      value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] },
+    });
+    await waitFor(() => f.events.some(event => event.type === 'dispatch.completed' &&
+      event.payload.resumesInvocationId === original.invocationId));
+    const answer = f.events.filter(event => event.payload?.resumesInvocationId === original.invocationId);
+    const invocationId = answer[0]?.payload.invocationId;
+    assert.ok(invocationId && invocationId !== original.invocationId && invocationId !== 'answer-request');
+    assert.deepEqual(answer.map(({ type }) => type), ['dispatch.running', 'dispatch.message', 'dispatch.completed']);
+    assert.ok(answer.every(({ payload }) => payload.invocationId === invocationId && payload.sessionId === original.sessionId));
+    await waitFor(async () => (await outputs(f, channelId)).length === 1);
+    assert.deepEqual((await outputs(f, channelId)).map(message => message.body), ['Answer 1: approval']);
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('explicit runs reuse a Pet session across restart and concurrent submissions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-run-session-'));
   let f = await fixture(root);

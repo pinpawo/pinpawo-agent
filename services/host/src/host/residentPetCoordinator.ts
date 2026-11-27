@@ -28,6 +28,7 @@ export class ResidentPetCoordinator {
   private readonly conversationHolds = new Set<Promise<void>>();
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
   private readonly recent = new Map<string, PetDispatchExecution['recent'][number] & PetDispatchTarget>();
+  private activeReview?: PetDispatchExecution['active'];
   private activeLifecycle?: { dispatchId: string; state: 'running' | 'settled' };
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
@@ -70,16 +71,20 @@ export class ResidentPetCoordinator {
     };
   }
 
-  observeDispatchLifecycle({ dispatchId, sessionId, scope, origin, state }: PetDispatchLifecycleEvent): void {
+  observeDispatchLifecycle({ dispatchId, sessionId, scope, origin, state, resumesDispatchId }: PetDispatchLifecycleEvent): void {
     if (!sessionId || !scope || state === 'queued' || state === 'message') return;
     const previous = this.recent.get(dispatchId);
     this.recent.delete(dispatchId);
     if (state === 'running') {
-      if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, state };
+      if (resumesDispatchId) {
+        this.recent.delete(resumesDispatchId);
+        this.activeReview = { dispatchId, sessionId, scope, resumesDispatchId, enqueuedAt: new Date().toISOString() };
+      } else if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, state };
       return;
     }
+    if (this.activeReview?.dispatchId === dispatchId) this.activeReview = undefined;
     if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, state: 'settled' };
-    this.recent.set(dispatchId, { dispatchId, sessionId, scope, origin: origin ?? previous?.origin, state });
+    this.recent.set(dispatchId, { dispatchId, sessionId, scope, origin: origin ?? previous?.origin, state, resumesDispatchId });
     if (this.recent.size > 10) this.recent.delete(this.recent.keys().next().value!);
   }
 
@@ -89,16 +94,16 @@ export class ResidentPetCoordinator {
     const entry = this.activeEntry?.observation;
     const selected = entry && matches(entry) ? entry : undefined;
     const lifecycle = this.activeLifecycle;
-    const active = selected && lifecycle?.dispatchId === selected.dispatchId && lifecycle.state === 'running'
-      ? selected : undefined;
+    const active = this.activeReview && matches(this.activeReview) ? this.activeReview
+      : selected && lifecycle?.dispatchId === selected.dispatchId && lifecycle.state === 'running' ? selected : undefined;
     return structuredClone({
       ...(active ? { active } : {}),
       queued: [
         ...(selected && selected.dispatchId !== lifecycle?.dispatchId ? [selected] : []),
         ...this.dispatchQueue.flatMap(({ observation }) => observation && matches(observation) ? [observation] : []),
       ],
-      recent: [...this.recent.values()].reverse().filter(matches).map(({ dispatchId, state, origin }) =>
-        ({ dispatchId, state, ...(origin ? { origin } : {}) })),
+      recent: [...this.recent.values()].reverse().filter(matches).map(({ dispatchId, state, origin, resumesDispatchId }) =>
+        ({ dispatchId, state, ...(origin ? { origin } : {}), ...(resumesDispatchId ? { resumesDispatchId } : {}) })),
     });
   }
 

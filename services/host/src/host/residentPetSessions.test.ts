@@ -120,7 +120,12 @@ test('an exact session is read, followed and reviewed without changing the activ
     const activeId = active.type === 'session.snapshot.result' ? active.snapshot.session.sessionId : '';
 
     const target = 'pet:0000000b';
-    await host.resident.dispatch.dispatch({ request: 'work in B', dispatchId: 'd-1', session: { id: target, create: true } });
+    const scope = { namespace: 'channel', id: 'test-channel' };
+    const dispatchTarget = { scope, sessionId: target };
+    await host.resident.dispatch.dispatch({
+      request: 'work in B', dispatchId: 'd-1', session: { id: target, create: true }, scope,
+      origin: { namespace: 'channel', id: 'original-message' },
+    });
     await waitFor(() => lifecycle.some((event) => event.state === 'waiting'), 'B did not wait for review');
 
     // The waiting run belongs to B: neither the TUI nor the Pet-level stream saw it.
@@ -145,10 +150,14 @@ test('an exact session is read, followed and reviewed without changing the activ
     });
     await waitFor(() => lifecycle.some((event) => event.state === 'completed'), 'the dispatch did not continue');
 
-    // The resumed run is B's original dispatch, observed on B only.
+    // Same Session, distinct submissions. Only the first came from a Channel message.
     assert.equal(turns.at(-1)?.endsWith(':resume'), true);
     const completed = lifecycle.find((event) => event.state === 'completed');
-    assert.equal(completed?.dispatchId, 'd-1');
+    assert.ok(completed?.dispatchId && completed.dispatchId !== 'd-1');
+    assert.equal(completed.resumesDispatchId, 'd-1');
+    assert.equal(completed.requestId, 'approve-b');
+    assert.deepEqual(host.resident.dispatch.readExecution(dispatchTarget).recent,
+      [{ dispatchId: completed.dispatchId, state: 'completed', resumesDispatchId: 'd-1' }]);
     assert.equal(completed?.sessionId, target);
     assert.deepEqual(
       events(observed).filter((event) => event.requestId === 'approve-b').map((event) => event.type),
@@ -210,7 +219,7 @@ test('provider snapshots stay scoped across dispatch, mutation, resume and ordin
     await host.sessions.review(a, {
       requestId: 'resume-a', interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
     });
-    await waitFor(() => lifecycle.some((event) => event.dispatchId === 'dispatch-a' && event.state === 'completed'), 'A did not resume');
+    await waitFor(() => lifecycle.some((event) => event.resumesDispatchId === 'dispatch-a' && event.state === 'completed'), 'A did not resume');
     assert.deepEqual(starts.map(entry => entry.hint), [
       { source: 'channel', instruction: 'A original instruction', focus: 'A original focus' },
       { source: 'channel', instruction: 'B instruction' },

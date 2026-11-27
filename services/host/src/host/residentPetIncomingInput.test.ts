@@ -304,7 +304,9 @@ test('immediate input during review settlement cannot cancel a later human appro
     assert.equal(resumed, true, 'the incoming input must not leave a cancellation flag for the review resume');
     await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch, undefined);
-    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['first', 'next']);
+    const answer = h.events.find(event => event.resumesDispatchId === 'first' && event.state === 'completed');
+    assert.ok(answer && answer.dispatchId !== 'first');
+    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), [answer.dispatchId, 'next']);
   } finally { releaseSettlement.resolve(); await h.close(); }
 });
 
@@ -384,7 +386,7 @@ test('an immediate interruption that races with native review preserves approval
   h = await fixture(async turn => {
     if (turn.request.kind === 'resume') {
       resumed = true;
-      assert.equal(readPetInvocationContext()?.dispatchId, 'first');
+      assert.notEqual(readPetInvocationContext()?.dispatchId, 'first');
       assert.equal(turn.setup.input.context?.systemPromptSections?.find(section => section.id === 'domain')?.content, scope.id);
       h.reviews.delete(turn.setup.input.threadId!);
       resumeStarted.resolve(); await resumeBoundary.promise;
@@ -417,10 +419,19 @@ test('an immediate interruption that races with native review preserves approval
     await h.sessions.review(sessionId, { requestId: 'human-approval', interruptId: 'review-interrupt',
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
     await resumeStarted.promise;
+    const active = h.resident.dispatch.readExecution({ sessionId, scope });
+    const answerRunning = h.events.find(event => event.resumesDispatchId === 'first' && event.state === 'running');
+    assert.ok(answerRunning);
+    assert.equal(active.active?.dispatchId, answerRunning.dispatchId);
+    assert.deepEqual(active.queued.map(item => item.dispatchId), ['next']);
+    assert.ok(!active.recent.some(item => item.dispatchId === 'first' && item.state === 'waiting'));
+    assert.equal(h.resident.dispatch.getQueueSnapshot().activeDispatch, undefined, 'review answer does not enter FIFO');
     resumeBoundary.resolve();
     await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch, undefined);
-    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['first', 'next']);
+    const answer = h.events.find(event => event.resumesDispatchId === 'first' && event.state === 'completed');
+    assert.ok(answer && answer.dispatchId !== 'first');
+    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), [answer.dispatchId, 'next']);
   } finally { resumeBoundary.resolve(); await h.close(); }
 });
 

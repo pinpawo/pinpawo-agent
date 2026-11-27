@@ -558,7 +558,7 @@ test('a canonical mention establishes relevance, not dispatch; a label or quotat
   assert.deepEqual(calls, [['dispatch', true], ['relevance', false]]);
 });
 
-test('only relevant input reads task facts before one Dispatch decision', async () => {
+test('only relevant input reads task facts and a missing Session does not prevent dispatch', async () => {
   const calls: string[] = [];
   const source = message('1', { body: 'Do A.' });
   const handle = createPetHead({
@@ -575,15 +575,21 @@ test('only relevant input reads task facts before one Dispatch decision', async 
       calls.push('relevance');
       return { relevant: input.message.messageId === '3' };
     },
-    readExecution: async target => {
+    readExecution: target => {
       assert.deepEqual(target, { sessionId: 'session', scope: { namespace: 'channel', id: source.channelId } });
       calls.push('readExecution');
       return { active: { dispatchId: 'dispatch-a', enqueuedAt: '', origin: { namespace: 'channel', id: source.messageId } },
         queued: [], recent: [] };
     },
+    readSession: async id => {
+      assert.equal(id, 'session');
+      calls.push('readSession');
+      throw new Error('Session unavailable');
+    },
     decideDispatch: async input => {
       assert.deepEqual(input.tasks, [{ messageId: '1', status: 'running' }]);
       assert.equal(input.activeSource, source);
+      assert.equal(input.session, undefined);
       calls.push('decision');
       return { shouldDispatch: true, reply: 'A is done.' };
     },
@@ -591,5 +597,5 @@ test('only relevant input reads task facts before one Dispatch decision', async 
   const signal = new AbortController().signal;
   await handle(message('2'), signal);
   await handle(message('3'), signal);
-  assert.deepEqual(calls, ['relevance', 'relevance', 'binding', 'readExecution', 'source', 'decision', 'submit', 'reply']);
+  assert.deepEqual(calls, ['relevance', 'relevance', 'binding', 'readExecution', 'readSession', 'source', 'decision', 'submit', 'reply']);
 });

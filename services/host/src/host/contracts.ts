@@ -1,7 +1,6 @@
 import type { PetInvocationScope } from './petInvocationContext';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import type {
-  AgentPlan,
   PendingInterruptProjection,
   AgentClientMessage,
   AgentRuntimeEvent,
@@ -50,12 +49,11 @@ export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope }
 
 /** Scoped execution facts; not an admission check or a durable history. */
 export type PetDispatchExecution = {
-  active?: PetDispatchQueueEntry & { requestId?: string };
+  active?: PetDispatchQueueEntry;
   queued: PetDispatchQueueEntry[];
   recent: Array<Pick<PetDispatchLifecycleEvent, 'dispatchId' | 'origin'> & {
     state: Exclude<PetDispatchLifecycleState, 'queued' | 'running' | 'message'>;
   }>;
-  plan?: AgentPlan;
 };
 
 export type PetDispatchRequest = {
@@ -125,7 +123,7 @@ type ScopedDispatchRequest = Omit<PetDispatchRequest, 'delivery' | 'session' | '
 
 export interface ResidentPetDispatchService {
   getQueueSnapshot(): PetDispatchQueueSnapshot;
-  readExecution(target: PetDispatchTarget, signal: AbortSignal): Promise<PetDispatchExecution>;
+  readExecution(target: PetDispatchTarget): PetDispatchExecution;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input for resident execution, which is observed through Agent Session. */

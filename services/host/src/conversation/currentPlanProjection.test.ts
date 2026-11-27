@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage } from '@langchain/core/messages';
 import { createCapabilityExecutionMessage } from '@pinpawo/pet-agent/testing';
-import { currentPlansEqual, projectCurrentPlan, projectPlanForRequest } from './currentPlanProjection';
+import { currentPlansEqual, projectCurrentPlan } from './currentPlanProjection';
 
 function execution(planItemId: string, capability: string, lane?: string) {
   const metadata = { runId: 'run', taskId: 'trace', lane };
@@ -71,22 +71,4 @@ test('native pending handoff marks only the current task active, including inter
   ] }, messages: [execution('a', 'general')[0]] };
   assert.deepEqual(projectCurrentPlan(state)?.items.map(item => item.status), ['active', 'pending']);
   assert.deepEqual(projectCurrentPlan({ ...state, runId: 'other' })?.items.map(item => item.status), ['pending', 'pending']);
-});
-
-test('an active request cannot inherit the previous turn’s checkpoint Plan', () => {
-  const priorUser = new HumanMessage({ id: 'host-a', content: 'A' });
-  const currentUser = new HumanMessage({ id: 'host-b', content: 'B' });
-  const old = { runId: 'run-a', messages: [priorUser], runSupervisorState: { runId: 'run-a', plan: [
-    { id: 'a', capability: 'general', objective: 'Finish A', status: 'completed' },
-  ] } };
-  assert.equal(projectPlanForRequest(old, 'host-b'), null, 'B was registered but has not checkpointed');
-  const started = { ...old, runId: 'run-b', messages: [priorUser, currentUser] };
-  assert.equal(projectPlanForRequest(started, 'host-b'), null, 'B has checkpointed, but the Plan still belongs to A');
-  const planned = { ...started, runSupervisorState: { runId: 'run-b', plan: [
-    { id: 'b', capability: 'general', objective: 'Inspect B', status: 'completed' },
-    { id: 'verify-b', capability: 'general', objective: 'Verify B', status: 'pending' },
-  ] } };
-  assert.equal(projectPlanForRequest(planned, 'host-a'), null);
-  assert.deepEqual(projectPlanForRequest(planned, 'host-b')?.items.map(item => [item.task, item.status]),
-    [['Inspect B', 'completed'], ['Verify B', 'pending']]);
 });

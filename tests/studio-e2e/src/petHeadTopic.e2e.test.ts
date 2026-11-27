@@ -197,30 +197,34 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const resident = result.residentPets.get('alpha')!;
     const otherDispatch = result.residentPets.get('beta')!.resident.dispatch;
     let otherExecutionReads = 0;
-    otherDispatch.readExecution = async () => { otherExecutionReads++; return { queued: [], recent: [] }; };
+    otherDispatch.readExecution = () => { otherExecutionReads++; return { queued: [], recent: [] }; };
     const admissions: PetDispatchRequest[] = [];
     const sessionReads: string[] = [];
     let activeDispatch: PetDispatchExecution['active'];
-    let switchDuringRead: PetDispatchExecution['active'];
-    let reviewPending = false;
+    let sessionUnavailable = false;
     let recent: PetDispatchExecution['recent'] = [];
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
     const recordedPublicTask = 'Verify public reference:  https://example.com/';
-    resident.resident.dispatch.readExecution = async target => {
+    resident.resident.dispatch.readExecution = target => {
       assert.equal(target.scope.id, ownerChannelId);
-      if (!activeDispatch) return { queued: [], recent };
-      assert.equal(target.sessionId, activeDispatch.sessionId);
-      sessionReads.push(target.sessionId);
-      if (switchDuringRead) {
-        activeDispatch = switchDuringRead;
-        return { active: activeDispatch, queued: [], recent };
-      }
-      return { active: activeDispatch, queued: [], recent, ...(reviewPending ? {} : { plan: { items: [
-        { id: 'one', capability: 'internal', task: 'Gather inputs.', status: 'completed' },
-        { id: 'two', capability: 'internal', task: 'Check the report.', status: 'active' },
-        { id: 'three', capability: 'internal', task: 'Verify the figures.', status: 'pending' },
-        { id: 'four', capability: 'internal', task: recordedPublicTask, status: 'pending' },
-      ] } }) };
+      if (activeDispatch) assert.equal(target.sessionId, activeDispatch.sessionId);
+      return { ...(activeDispatch ? { active: activeDispatch } : {}), queued: [], recent };
+    };
+    resident.sessions.snapshot = async (sessionId, options) => {
+      sessionReads.push(sessionId);
+      assert.deepEqual(options, { timelineLimit: 0 });
+      if (sessionUnavailable) throw new Error('Session unavailable');
+      return { version: 5, session: { sessionId, kind: 'chat',
+        activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
+        pendingInterrupt: null,
+        timeline: [{ type: 'message', id: 'internal', role: 'assistant', text: 'internal transcript', status: 'completed' }],
+        currentPlan: { items: [
+          { id: 'one', capability: 'internal', task: 'Gather inputs.', status: 'completed' },
+          { id: 'two', capability: 'internal', task: 'Check the report.', status: 'active' },
+          { id: 'three', capability: 'internal', task: 'Verify the figures.', status: 'pending' },
+          { id: 'four', capability: 'internal', task: recordedPublicTask, status: 'pending' },
+        ] },
+      } };
     };
     const post = async (body: string, replyTo?: string) => (await channel.service.postMessage(human, ownerChannelId, { body, ...(replyTo ? { replyTo } : {}) })).message;
     const replyFor = (id: string) => published.find(item => item.message.replyTo === id)?.message;
@@ -275,15 +279,18 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     assert.equal(factoryCalls.length, 2);
     const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
     assert.deepEqual(canonicalDecisions.slice(1).map(input => input.tasks), [directWhileBusy, check, both].map(() => [{
-      messageId: sourceA.messageId, status: 'running', plan: [
+      messageId: sourceA.messageId, status: 'running',
+    }]));
+    assert.deepEqual(canonicalDecisions.slice(1).map(input => input.session), [directWhileBusy, check, both].map(() => ({
+      activeRunState: 'running', recordedPlan: [
         { status: 'completed', description: 'Gather inputs.' },
         { status: 'active', description: 'Check the report.' },
         { status: 'pending', description: 'Verify the figures.' },
         { status: 'pending', description: recordedPublicTask },
       ],
-    }]));
+    })));
     for (const input of canonicalDecisions.slice(1)) {
-      assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
+      assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request|internal transcript/);
     }
     assert.equal(otherExecutionReads, 0, 'alpha Head samples only its own dispatch port');
     assert.equal(admissions.length, 1, 'a request conditional on unknown progress cannot admit new work');
@@ -300,27 +307,18 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     assert.ok(!oldSourceInput.context.messages.some(item => item.messageId === sourceA.messageId));
     assert.equal(oldSourceInput.activeSource?.messageId, sourceA.messageId);
     const activeA = activeDispatch;
-    const activeB = { ...activeA, dispatchId: 'synthetic-other-dispatch', origin: { namespace: 'channel', id: both.messageId } };
-    switchDuringRead = activeB;
-    const race = await post(progress, sourceA.messageId);
-    await waitFor(() => !!replyFor(race.messageId));
-    assert.equal(replyFor(race.messageId)?.body, 'I cannot verify the current status.');
-    assert.equal(sessionReads.length, 5, 'each race reads once and never retries on B');
-    assert.ok(!canonicalDecisions.at(-1)!.tasks?.some(task => task.messageId === sourceA.messageId));
-    assert.equal(admissions.length, 1);
-
-    switchDuringRead = undefined;
-    reviewPending = true;
-    activeDispatch = activeA;
-    const duringReview = await post(progress, sourceA.messageId);
-    await waitFor(() => !!replyFor(duringReview.messageId));
-    assert.deepEqual(canonicalDecisions.at(-1)!.tasks, [{ messageId: sourceA.messageId, status: 'running' }],
-      'pending review may not expose the recorded plan');
+    sessionUnavailable = true;
+    const didNotRead = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(didNotRead.messageId));
+    assert.equal(replyFor(didNotRead.messageId)?.body, 'A is still running.');
+    assert.equal(sessionReads.length, 5);
+    assert.deepEqual(canonicalDecisions.at(-1)!.tasks, [{ messageId: sourceA.messageId, status: 'running' }]);
+    assert.equal(canonicalDecisions.at(-1)!.session, undefined);
     assert.equal(admissions.length, 1);
 
     // A resumed review emits dispatch.running, but executes as a conversation
     // hold and does not occupy the ordinary dispatch queue slot.
-    reviewPending = false;
+    sessionUnavailable = false;
     const readsBeforeApproval = sessionReads.length;
     lifecycle('waiting');
     activeDispatch = undefined;
@@ -354,7 +352,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const started: string[] = [];
     const realExecution = resident.resident.dispatch.readExecution;
     const realDispatch = resident.resident.dispatch.dispatch;
-    resident.resident.dispatch.readExecution = async target => ({ ...coordinator.readExecution(target), recent });
+    resident.resident.dispatch.readExecution = target => ({ ...coordinator.readExecution(target), recent });
     resident.resident.dispatch.dispatch = async request => {
       seen.push(request);
       let wait;

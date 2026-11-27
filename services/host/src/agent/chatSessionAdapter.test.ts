@@ -21,7 +21,6 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { HostGraphService } from './agentGraphService';
 import { runAgentSessionTurn } from './chatSessionAdapter';
-import { withPetInvocationContext } from '../host/petInvocationContext';
 import { AgentNoticeError } from './agentNoticeError';
 import type { StreamToolsPayload } from './agentStreamEvents';
 
@@ -1409,29 +1408,4 @@ test('native multi-block final reply agrees across committed delta and completio
   assert.deepEqual(result, { status: 'completed', reply: 'Hello world' });
   const visible = events.filter(event => event.type === 'message.delta' || event.type === 'message.completed');
   assert.deepEqual(visible.map(event => event.type === 'message.delta' || event.type === 'message.completed' ? event.text : null), ['Hello world', 'Hello world']);
-});
-
-test('scoped dispatch uses the existing request ID as checkpoint input provenance without rewriting content', async () => {
-  const setup = { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup;
-  const content = [{ type: 'text' as const, text: 'Inspect this file.' }];
-  const original = new HumanMessage({ id: 'original-id', content, additional_kwargs: { existing: true } });
-  const dispatch = {
-    petId: 'p', dispatchId: 'dispatch-9', sessionId: 'session', scope: { namespace: 'channel', id: 'ch' },
-  };
-  const graphService = {
-    readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }),
-    async *streamEvents() {
-      const input = setup.input.messages.at(-1);
-      assert.equal(input?.id, 'host-request');
-      assert.deepEqual(input?.content, content);
-      assert.deepEqual(input?.additional_kwargs, original.additional_kwargs);
-      yield protocolEvent('values', { messages: [new AIMessage('done')] });
-    },
-  };
-  await withPetInvocationContext(dispatch, () => runAgentSessionTurn({
-    request: { kind: 'user_message', requestId: 'host-request', message: 'Inspect this file.' },
-    setup, graphService: graphService as unknown as HostGraphService, isCurrent: () => true,
-    emitEvent: () => {}, emitToolEvent: () => {}, prepareUserMessage: async () => original,
-  }));
-  assert.equal(original.id, 'original-id');
 });

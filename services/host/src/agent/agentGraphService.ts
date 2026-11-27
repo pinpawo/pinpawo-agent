@@ -18,7 +18,7 @@ import { Command, type GraphRunStream } from '@langchain/langgraph';
 import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
 import { HOST_INTERFACE_CONFIG_KEY } from '../chatInterface';
-import { projectCurrentPlan, projectPlanForRequest } from '../conversation/currentPlanProjection';
+import { projectCurrentPlan } from '../conversation/currentPlanProjection';
 import { createLangfuseCallbacks } from '../langfuseTracing';
 
 const HEADLESS_REVIEW_CAPABILITIES = {
@@ -230,11 +230,6 @@ export class HostGraphService {
       acceptsResume: acceptsResume(snapshot),
       currentPlan: projectCurrentPlan(values),
     };
-  }
-
-  async readPlanForRequest(setup: AgentChannelSetup, requestId: string): Promise<AgentPlan | null> {
-    const snapshot = await this.getRawState(setup);
-    return readPendingInterrupt(snapshot) ? null : projectPlanForRequest(readSnapshotValues(snapshot), requestId);
   }
 
   async updateState(

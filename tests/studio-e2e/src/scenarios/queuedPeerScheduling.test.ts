@@ -166,10 +166,17 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       for (const petId of ['origin', 'target']) await studio.pets.create({ petId, definitionId: petId, name: petId, channelId });
       const target = built.residentPets.get('target')!;
       const readExecution = target.resident.dispatch.readExecution.bind(target.resident.dispatch);
-      const sampled: Array<{ sessionId: string; sourceId?: string; planTask?: string }> = [];
-      target.resident.dispatch.readExecution = async (scope, signal) => {
-        const snapshot = await readExecution(scope, signal);
-        sampled.push({ sessionId: scope.sessionId, sourceId: snapshot.active?.origin?.id, planTask: snapshot.plan?.items[0]?.task });
+      const sampled: Array<{ sessionId: string; sourceId?: string }> = [];
+      target.resident.dispatch.readExecution = scope => {
+        const snapshot = readExecution(scope);
+        if (snapshot.active) sampled.push({ sessionId: scope.sessionId, sourceId: snapshot.active.origin?.id });
+        return snapshot;
+      };
+      const readSession = target.sessions.snapshot.bind(target.sessions);
+      const sessionPlans: Array<string | undefined> = [];
+      target.sessions.snapshot = async (sessionId, options) => {
+        const snapshot = await readSession(sessionId, options);
+        sessionPlans.push(snapshot.session.currentPlan?.items[0]?.task);
         return snapshot;
       };
       target.resident.dispatch.onDispatchLifecycle(e => lifecycle.push({ state: e.state, sessionId: e.sessionId }));
@@ -188,8 +195,8 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       assert.deepEqual(queued.mentions.map(mention => mention.participantId), ['pet:target']);
       assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId),
         [{ petId: 'target', messageId: queued.messageId, action: 'dispatch', addressed: true }], 'mention skips relevance, not the work decision');
-      assert.deepEqual(sampled, [{ sessionId: binding!.sessionId, sourceId: original.messageId, planTask: 'ROUTE_ACTIVE' }],
-        'second stage samples the real scoped execution and its checkpoint Plan once, without controlling admission');
+      assert.deepEqual(sampled, [{ sessionId: binding!.sessionId, sourceId: original.messageId }]);
+      assert.deepEqual(sessionPlans, ['ROUTE_ACTIVE'], 'second stage samples the existing Session snapshot separately');
       assert.deepEqual(model.composed, [], 'independent work does not compose a progress reply');
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().queuedExecutions, 0);

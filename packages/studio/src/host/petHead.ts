@@ -1,5 +1,6 @@
+import { addAbortListener } from 'node:events';
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { PetDispatchExecution, PetDispatchPort } from 'pinpawo/host-runtime';
+import type { PetDispatchExecution, PetDispatchPort, PetSessionPort } from 'pinpawo/host-runtime';
 import type { Studio, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import { createHeadModel, type HeadRelevanceDiagnostic } from './petHeadModel';
@@ -30,9 +31,34 @@ export type HeadInput = { pet: StudioPetRegistration; description?: string; mess
 type HeadTaskFact = {
   messageId?: string;
   status: PetDispatchExecution['recent'][number]['state'] | 'running' | 'queued';
-  plan?: Array<{ status: string; description: string }>;
 };
-export type HeadDispatchInput = HeadInput & { tasks?: HeadTaskFact[]; activeSource?: HeadMessage };
+type ReadSession = (sessionId: string) => Promise<Awaited<ReturnType<PetSessionPort['snapshot']>> | undefined>;
+type HeadSession = {
+  activeRunState: 'running' | 'interrupting' | null;
+  recordedPlan?: Array<{ status: string; description: string }>;
+};
+export type HeadDispatchInput = HeadInput & { tasks?: HeadTaskFact[]; activeSource?: HeadMessage; session?: HeadSession };
+
+async function readSessionFacts(read: ReadSession, sessionId: string, signal: AbortSignal): Promise<HeadSession | undefined> {
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(2500)]);
+  let listener: Disposable | undefined;
+  try {
+    const result = await Promise.race([
+      new Promise<undefined>(resolve => { listener = addAbortListener(deadline, () => resolve(undefined)); }),
+      read(sessionId),
+    ]);
+    const session = result?.session;
+    if (deadline.aborted || session?.sessionId !== sessionId) return;
+    return {
+      activeRunState: session.activeRun?.state ?? null,
+      ...(session.currentPlan ? { recordedPlan: session.currentPlan.items.map(({ task, status }) => ({ status, description: task })) } : {}),
+    };
+  } catch {
+    // A missing Session sample does not change Dispatch facts or admission.
+  } finally {
+    listener?.[Symbol.dispose]();
+  }
+}
 
 /** Mentions are server-resolved participant IDs on this committed message, not labels or quoted/history text. */
 export function isHeadAddressed(input: Pick<HeadInput, 'pet' | 'context' | 'message'>): boolean {
@@ -90,6 +116,7 @@ export function attachPetHead(input: {
   channel: PetHeadChannelOperations;
   subscribe: Studio['subscribe'];
   readExecution?: PetDispatchPort['readExecution'];
+  readSession?: ReadSession;
   resolveModel: () => StudioModelEndpoint;
   onDiagnostic?: (event: HeadRelevanceDiagnostic) => void;
 }, signal: AbortSignal): () => void {
@@ -102,6 +129,7 @@ export function attachPetHead(input: {
     ...(description ? { description } : {}),
     channel,
     readExecution: input.readExecution,
+    readSession: input.readSession,
     assessRelevance: model.assessRelevance,
     decideDispatch: model.decideDispatch,
   });
@@ -114,6 +142,7 @@ export function createPetHead(options: {
   description?: string;
   channel: PetHeadChannel;
   readExecution?: PetDispatchPort['readExecution'];
+  readSession?: ReadSession;
   assessRelevance: (input: HeadInput, signal: AbortSignal) => Promise<HeadRelevance>;
   decideDispatch: (input: HeadDispatchInput, signal: AbortSignal) => Promise<HeadDispatchDecision>;
 }): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
@@ -134,18 +163,20 @@ export function createPetHead(options: {
     const boundSessionId = await options.channel.readBoundSessionId?.(options.pet.petId);
     if (signal.aborted) return;
     const execution = boundSessionId
-      ? await options.readExecution?.({ sessionId: boundSessionId, scope: { namespace: 'channel', id: message.channelId } }, signal)
+      ? options.readExecution?.({ sessionId: boundSessionId, scope: { namespace: 'channel', id: message.channelId } })
       : undefined;
     if (signal.aborted) return;
-    const { active, queued, recent, plan } = execution ?? { queued: [], recent: [] };
+    const { active, queued, recent } = execution ?? { queued: [], recent: [] };
     const sourceId = (origin?: { namespace: string; id: string }) => origin?.namespace === 'channel' ? origin.id : undefined;
     const activeId = sourceId(active?.origin);
     const tasks: HeadTaskFact[] = [
-      ...(active ? [{ messageId: activeId, status: 'running' as const,
-        ...(plan ? { plan: plan.items.map(({ task, status }) => ({ status, description: task })) } : {}) }] : []),
+      ...(active ? [{ messageId: activeId, status: 'running' as const }] : []),
       ...queued.map(item => ({ messageId: sourceId(item.origin), status: 'queued' as const })),
       ...recent.map(item => ({ messageId: sourceId(item.origin), status: item.state })),
     ];
+    const session = active && boundSessionId && options.readSession
+      ? await readSessionFacts(options.readSession, boundSessionId, signal) : undefined;
+    if (signal.aborted) return;
     let activeSource: HeadMessage | undefined;
     if (activeId && activeId !== message.messageId && !context.messages.some(source => source.messageId === activeId)
       && context.referencedMessage?.messageId !== activeId && options.channel.readMessage) {
@@ -158,7 +189,7 @@ export function createPetHead(options: {
     }
     if (signal.aborted) return;
     const decision = await options.decideDispatch({ ...input, ...(tasks.length ? { tasks } : {}),
-      ...(activeSource ? { activeSource } : {}) }, signal);
+      ...(activeSource ? { activeSource } : {}), ...(session ? { session } : {}) }, signal);
     if (signal.aborted) return;
     let reply = decision.reply?.trim() ?? '';
     let dispatchFailure: string | undefined;

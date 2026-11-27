@@ -368,7 +368,8 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     description: input.petDocuments?.get(registration.definitionId)?.content,
     channel: channelHead,
     subscribe: prepared.studio.subscribe,
-    readExecution: async (target, signal) => runtime.dispatch.readExecution?.(target, signal) ?? { queued: [], recent: [] },
+    readExecution: target => runtime.dispatch.readExecution?.(target) ?? { queued: [], recent: [] },
+    readSession: async sessionId => runtime.sessions?.snapshot(sessionId, { timelineLimit: 0 }),
     resolveModel: () => models.resolve(definitions.get(registration.definitionId)?.config.modelProfileId),
     onDiagnostic: diagnostic => {
       const occurredAt = new Date().toISOString();

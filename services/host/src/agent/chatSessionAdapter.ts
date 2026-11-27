@@ -1,6 +1,6 @@
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import { readReplyResultReferences } from '../conversation/transcriptProjection';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import {
   createTokenUsageSnapshot,
@@ -48,7 +48,6 @@ import {
   currentPlansEqual,
   projectCurrentPlan,
 } from '../conversation/currentPlanProjection';
-import { readPetInvocationContext } from '../host/petInvocationContext';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮内完成。已保留当前进度，可继续提交下一步让我接着推进。';
@@ -343,11 +342,7 @@ export async function runAgentSessionTurn(
       : createLocalChatHumanMessage(message, attachments);
     setup.input.messages = [
       ...setup.input.messages.slice(0, -1),
-      // Reuse the Host request ID on scoped dispatch input so a checkpoint can
-      // prove it belongs to this request, not just to the same Session.
-      readPetInvocationContext()?.scope && HumanMessage.isInstance(userMessage)
-        ? new HumanMessage({ ...userMessage, id: requestId })
-        : userMessage,
+      userMessage,
     ];
   }
 

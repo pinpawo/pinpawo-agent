@@ -28,7 +28,7 @@ export class ResidentPetCoordinator {
   private readonly conversationHolds = new Set<Promise<void>>();
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
   private readonly recent = new Map<string, PetDispatchExecution['recent'][number] & PetDispatchTarget>();
-  private activeLifecycle?: { dispatchId: string; requestId?: string; state: 'running' | 'settled' };
+  private activeLifecycle?: { dispatchId: string; state: 'running' | 'settled' };
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
   private readonly logError: NonNullable<ResidentPetCoordinatorOptions['logError']>;
@@ -70,12 +70,12 @@ export class ResidentPetCoordinator {
     };
   }
 
-  observeDispatchLifecycle({ dispatchId, sessionId, scope, origin, state, requestId }: PetDispatchLifecycleEvent): void {
+  observeDispatchLifecycle({ dispatchId, sessionId, scope, origin, state }: PetDispatchLifecycleEvent): void {
     if (!sessionId || !scope || state === 'queued' || state === 'message') return;
     const previous = this.recent.get(dispatchId);
     this.recent.delete(dispatchId);
     if (state === 'running') {
-      if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, requestId, state };
+      if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, state };
       return;
     }
     if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, state: 'settled' };
@@ -90,7 +90,7 @@ export class ResidentPetCoordinator {
     const selected = entry && matches(entry) ? entry : undefined;
     const lifecycle = this.activeLifecycle;
     const active = selected && lifecycle?.dispatchId === selected.dispatchId && lifecycle.state === 'running'
-      ? { ...selected, requestId: lifecycle.requestId } : undefined;
+      ? selected : undefined;
     return structuredClone({
       ...(active ? { active } : {}),
       queued: [

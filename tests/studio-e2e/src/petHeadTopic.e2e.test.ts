@@ -35,11 +35,12 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
   const startA = 'Start work A.';
   const direct = '[@alpha](participant:pet:alpha) Are you the analyst?';
   const progress = '[@alpha](participant:pet:alpha) How is A going?';
-  const mixed = '[@alpha](participant:pet:alpha) How is A going? Also do work B.';
+  const mixed = '[@alpha](participant:pet:alpha) How is A going? If A has failed, switch to B.';
   const becameBusy = '[@alpha](participant:pet:alpha) Start independent work while the slot changes.';
+  const alreadyBusy = '[@alpha](participant:pet:alpha) New independent task: verify the inventory file.';
   const expires = '[@alpha](participant:pet:alpha) Start a new task whose admission will time out.';
   const afterStop = '[@alpha](participant:pet:alpha) Start independent work after Stop.';
-  const independent = [becameBusy, expires, afterStop];
+  const independent = [becameBusy, alreadyBusy, expires, afterStop];
   let duringDecision: (() => void) | undefined;
   const finalA = 'This is A’s official result.';
   const canonicalDecisions: HeadInput[] = [];
@@ -70,8 +71,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
             if (addressed) canonicalDecisions.push(input);
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
             if (options.name === 'pet_head_idle' && message.body === becameBusy) duringDecision?.();
-            const dispatch = [startA, mixed, held, ...independent].includes(message.body);
-            const reply = message.body === direct ? 'Yes, I am.' : message.body === progress ? 'I cannot verify the current status.' : message.body === held ? 'This reply is too late.' : independent.includes(message.body) ? 'I see the request.' : '';
+            const dispatch = [startA, held, ...independent].includes(message.body);
+            const reply = message.body === direct ? 'Yes, I am.' : (message.body === progress || message.body === mixed) ? 'I cannot verify the current status.' : message.body === held ? 'This reply is too late.' : independent.includes(message.body) ? 'I see the request.' : '';
             const parsed = options.name === 'pet_head_relevance'
               ? { relevant: [startA, mixed, held, progress, direct].includes(message.body) }
               : { shouldDispatch: dispatch, reply: reply || null };
@@ -290,7 +291,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     await waitFor(() => admissions.length === 1 && !!replyFor(both.messageId));
     assert.equal(replyFor(both.messageId)?.body, 'A is still running.');
     assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id], 'mixed asks still sample only A once each');
-    assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion.messageId]);
+    assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion, directWhileBusy, check, both].map(message => message.messageId));
     assert.equal(composeInputs.length, 3);
     assert.equal(resolutionCount, 2, 'each active Head resolves only one client');
     assert.equal(factoryCalls.length, 2);
@@ -310,7 +311,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
     }
     assert.equal(otherQueueReads, 0, 'alpha Head samples only its own dispatch port');
-    assert.equal(admissions.length, 1, 'busy mixed question cannot admit new work');
+    assert.equal(admissions.length, 1, 'a request conditional on unknown progress cannot admit new work');
     assert.equal(activeDispatch.dispatchId, a.dispatchId);
     const activeA = activeDispatch;
     const activeB = { ...activeA, dispatchId: 'synthetic-other-dispatch', origin: { namespace: 'channel', id: both.messageId } };
@@ -405,12 +406,20 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1, 'Host queues new work if the slot became busy');
       assert.deepEqual(started, []);
 
-      assert.equal(coordinator.stopDispatch(activeA.dispatchId), true);
       lifecycle('running');
+      const readsBeforeNewWork = sessionReads.length;
+      const busyTask = await post(alreadyBusy);
+      await waitFor(() => !!replyFor(busyTask.messageId));
+      assert.equal(seen[1]?.origin?.id, busyTask.messageId);
+      assert.equal(seen[1]?.session?.id, a.session.id);
+      assert.equal(sessionReads.length, readsBeforeNewWork, 'new work does not depend on progress evidence');
+      assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 2);
+
+      assert.equal(coordinator.stopDispatch(activeA.dispatchId), true);
       lifecycle('interrupted');
       const timedOut = await post(expires);
-      await waitFor(() => seen.length === 2);
-      assert.equal(seen[1]?.delivery, undefined);
+      await waitFor(() => seen.length === 3);
+      assert.equal(seen[2]?.delivery, undefined);
       assert.equal(replyFor(timedOut.messageId), undefined);
       timeout.abort(new DOMException('Controlled timeout', 'TimeoutError'));
       await waitFor(() => handled.includes(timedOut.messageId));
@@ -419,14 +428,14 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       clock.mock.restore();
 
       const waiting = await post(afterStop);
-      await waitFor(() => seen.length === 3);
-      assert.equal(seen[2]?.session?.id, a.session.id);
-      assert.equal(seen[2]?.delivery, undefined);
+      await waitFor(() => seen.length === 4);
+      assert.equal(seen[3]?.session?.id, a.session.id);
+      assert.equal(seen[3]?.delivery, undefined);
       assert.equal(replyFor(waiting.messageId), undefined, 'no acknowledgement while Stop is unsettled');
-      assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1, 'Stop waits outside FIFO');
+      assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 2, 'Stop waits outside FIFO');
       releaseA();
-      await waitFor(() => started.length === 2 && !!replyFor(waiting.messageId));
-      assert.deepEqual(started, [raceTask.messageId, waiting.messageId], 'FIFO continues and timed-out work never runs');
+      await waitFor(() => started.length === 3 && !!replyFor(waiting.messageId));
+      assert.deepEqual(started, [raceTask.messageId, busyTask.messageId, waiting.messageId], 'FIFO continues and timed-out work never runs');
     } finally {
       clock.mock.restore();
       releaseA();

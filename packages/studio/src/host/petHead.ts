@@ -199,24 +199,24 @@ export function createPetHead(options: {
     if (signal.aborted) return;
 
     const failures: string[] = [];
-    let reply = '';
-    let shouldDispatch = false;
     let stillCurrent: (() => boolean) | undefined;
     // Relevance is settled without consulting the runtime. Pin this branch once.
     const state = options.readWorkState();
+    const boundSessionId = await options.channel.readBoundSessionId?.(options.pet.petId);
+    if (signal.aborted) return;
+    const decision = state.kind === 'idle' || boundSessionId
+      ? await options.handleIdle(input, signal) : undefined;
+    if (signal.aborted) return;
+    let reply = decision?.reply ?? '';
+    const shouldDispatch = decision?.shouldDispatch ?? false;
+
+    // Execution evidence refines a reply, never the admission of selected work.
     const progress = options.progress;
     const active = state.kind === 'active' ? state.dispatch : undefined;
-    const run = active && progress?.readRun(active);
-    // A live slot can outlast its run observation (e.g. during Stop settlement).
-    // If this Channel already has a Session, let Host accept new work in either case.
-    const boundSessionId = !run
-      ? await options.channel.readBoundSessionId?.(options.pet.petId) : undefined;
-    if (signal.aborted) return;
-    if (state.kind === 'idle' || boundSessionId) {
-      const result = await options.handleIdle(input, signal);
-      reply = result.reply ?? '';
-      shouldDispatch = result.shouldDispatch;
-    } else if (progress) {
+    if (!shouldDispatch && state.kind !== 'idle' && progress && (!decision || reply.trim())) {
+      const run = active && progress.readRun(active);
+      // Do not publish the preliminary reply if factual composition fails.
+      reply = '';
       const isCurrent = () => {
         const now = options.readWorkState();
         return !!active && !!run && now.kind === 'active' && now.dispatch.dispatchId === active.dispatchId &&

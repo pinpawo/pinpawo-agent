@@ -313,15 +313,18 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-An idle slot or a registered Channel Session without a verified live run uses
+An idle slot or a registered Channel Session uses
 `handleIdle`, whose strict output is
 `{ shouldDispatch: boolean, reply: string | null }`. It interprets the canonical
 source's actual meaning: a direct answer, independent work, acknowledgement plus
 work, or neither. A bare mention does not by itself require work or a reply.
-The existing verified-run branch uses factual composition or silence.
+A live run does not block submission of an independent assignment. If no work
+is selected and a reply is needed in a non-idle slot, Head uses factual
+composition or silence rather than publishing an unverified reply.
 
-After relevance, the Head uses the owning Pet's live queue slot and run event
-to identify an active ordinary dispatch. To check progress, it needs its
+After relevance, the Head can use the owning Pet's live queue slot and run event
+to identify an active ordinary dispatch for a reply. This is not a submission
+condition. To check progress, it needs its
 same-Channel public source to predate the inquiry and match any explicit
 reference. After verifying membership and the exact Session binding, the
 Channel reads one snapshot. The reply model receives the sampled status
@@ -488,14 +491,10 @@ Explicit Stop and review retain their own existing interfaces. This does not add
 durable responsibility tracking, restart recovery or autonomous-loop guarantees.
 See [the operative mechanism and historical diagram link](../design/studio/pet-head-mechanism.md).
 
-### Official DeepSeek Head decision budget
+### Pet Head model settings
 
-Only Studio Head calls are tagged with the invocation-local `pet-head` purpose.
-For the official HTTPS `api.deepseek.com` OpenAI-compatible route and the
-`deepseek-flash` / `deepseek-v4-pro` models, this purpose sends
-`thinking: { type: disabled }`. This keeps the Head's bounded 512-token decision
-budget available for its structured answer. It does not edit the saved profile,
-Agent models, gateway routes, other model names or Anthropic-compatible routes.
+Pet Head inherits its resolved model profile's output budget. It does not
+override the provider's thinking behavior.
 Each structured stage uses the same schema across tool output and JSON mode.
 An explicit acknowledgement request can select both reply and dispatch.
 Registered-Session submissions acknowledge only after Host admission.

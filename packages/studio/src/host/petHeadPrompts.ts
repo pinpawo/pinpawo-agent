@@ -7,8 +7,9 @@ function publicMessage(message: HeadMessage) {
 }
 
 /** Stable rules and role precede a bounded, deterministic projection of public Channel data. */
-function headMessages(input: HeadInput, format: string, rules: string[], tasks?: HeadDispatchInput['tasks']): Array<[string, string]> {
+function headMessages(input: HeadInput, format: string, rules: string[], execution?: Pick<HeadDispatchInput, 'tasks' | 'activeSource'>): Array<[string, string]> {
   const { message, context } = input;
+  const { tasks, activeSource } = execution ?? {};
   const seen = new Set<string>();
   const previous = [...context.messages].sort((a, b) => b.sequence - a.sequence).filter(item => {
     if (item.channelId !== message.channelId || item.sequence >= message.sequence || item.messageId === message.messageId ||
@@ -43,6 +44,7 @@ function headMessages(input: HeadInput, format: string, rules: string[], tasks?:
       message: { channelId: message.channelId, ...publicMessage(message), ...(mentions.length ? { mentions } : {}) },
       addressed: input.addressed === true,
       ...(tasks?.length ? { tasks } : {}),
+      ...(activeSource ? { activeSource: publicMessage(activeSource) } : {}),
     })],
   ];
 }
@@ -58,7 +60,7 @@ export function headDispatchMessages(input: HeadDispatchInput, format: string): 
   return headMessages(input, format, [
     'The current message is relevant. Decide from the original message, Channel context and checked task facts. A reply and submission of an independent new assignment can both be appropriate.',
     'Set shouldDispatch=true only for an explicit independent new assignment to this Pet. The Agent receives the original message. Do not submit a progress question, context for existing work, a stop or wait request, or a task whose stated condition is not verified.',
-    'For a progress question, report the last checked facts for that task only, identified by its source messageId. Queued means not started; waiting does not mean completed. Missing evidence means unknown. A recorded Session plan may predate a run: describe it separately and do not treat a completed plan item as a completed assignment. Do not infer deliverables or progress from labels or other tasks.',
+    'For a progress question, report only checked facts about the work the user means. Use Channel context and source message IDs as clues, not rigid task matches. Queued means not started; waiting does not mean completed. Missing evidence means unknown. A plan describes checked steps of the active execution; a completed step does not mean the assignment completed. Do not infer deliverables or progress from labels or other tasks.',
     'Reply in the language of the current message. Keep a direct answer or acknowledgement brief; for a bare mention, thanks, acknowledgement or context with no request, use null. Respect explicit requests not to reply. Never claim the new work was accepted, queued, started, stopped or done in this reply; the runtime handles submission separately. Do not address another Pet in a peer reply.',
-  ], input.tasks);
+  ], input);
 }

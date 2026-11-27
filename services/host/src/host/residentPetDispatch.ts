@@ -1,5 +1,6 @@
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { parseDeliverables } from '@pinpawo/agent-contracts';
+import { addAbortListener } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
 import { snapshotInvocationContext, withInvocationContext } from './invocationSystemContext';
@@ -261,6 +262,33 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
 
   const dispatch: ResidentPet['dispatch'] = {
     getQueueSnapshot: () => coordinator.getQueueSnapshot(),
+    readExecution: async (target, signal) => {
+      signal.throwIfAborted();
+      const before = coordinator.readExecution(target);
+      if (!before.active?.requestId) return before;
+      const { dispatchId, requestId } = before.active;
+      const deadline = AbortSignal.any([signal, AbortSignal.timeout(2500)]);
+      let listener: Disposable | undefined;
+      let plan;
+      try {
+        plan = await Promise.race([
+          new Promise<null>(resolve => { listener = addAbortListener(deadline, () => resolve(null)); }),
+          (async () => {
+            const setup = sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(runtime.petId), target.sessionId);
+            if (deadline.aborted) return null;
+            return graphService.readPlanForRequest(setup, requestId);
+          })(),
+        ]);
+      } catch {
+        // A failed Plan read says nothing about the queue or execution.
+      } finally {
+        listener?.[Symbol.dispose]();
+      }
+      signal.throwIfAborted();
+      const after = coordinator.readExecution(target);
+      return !deadline.aborted && plan && after.active?.dispatchId === dispatchId && after.active.requestId === requestId
+        ? { ...after, plan } : after;
+    },
     onQueueChange: listener => coordinator.onQueueChange(listener),
     onDispatchLifecycle: listener => {
       dispatchLifecycleListeners.add(listener);

@@ -40,6 +40,7 @@ export {
   type PetDispatchLifecycleEvent,
   type PetDispatchLifecycleState,
   type PetDispatchMessage,
+  type PetDispatchExecution,
   type PetDispatchPort,
   type ResidentPetDispatchService,
   type PetDispatchQueueSnapshot,
@@ -264,6 +265,7 @@ export async function createResidentPetRuntime(
     send: (message) => { publishMessage(message); return closing === null; },
   };
   const publishDispatchLifecycle = (event: PetDispatchLifecycleEvent) => {
+    coordinator.observeDispatchLifecycle(event);
     for (const listener of dispatchLifecycleListeners) {
       try {
         listener(event);

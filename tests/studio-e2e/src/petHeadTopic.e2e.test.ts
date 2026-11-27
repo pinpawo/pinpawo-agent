@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AIMessage } from '@langchain/core/messages';
 import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet-agent';
-import { buildHostRuntimeConfig, FileSaver, type PetDispatchQueueSnapshot, type PetDispatchRequest } from 'pinpawo/host-runtime';
+import { buildHostRuntimeConfig, FileSaver, type PetDispatchExecution, type PetDispatchRequest } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../packages/studio/src/host/studioConfig';
 import type { HeadDispatchInput, HeadMessage } from '../../../packages/studio/src/host/petHead';
@@ -70,7 +70,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
             if (options.name === 'pet_head_dispatch' && message.body === becameBusy) duringDecision?.();
             const dispatch = [startA, held, ...independent].includes(message.body);
-            const state = input.tasks?.find(task => task.messageId === message.replyTo)?.status;
+            const state = input.tasks?.find(task => task.messageId === (message.replyTo ?? input.activeSource?.messageId))?.status;
             const statusReply = state === 'running' ? 'A is still running.' : state === 'completed' ? 'A completed.' :
               state === 'queued' ? 'A is queued.' : 'I cannot verify the current status.';
             const reply = message.body === direct ? 'Yes, I am.' :
@@ -149,7 +149,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
         finally { if (message) handled.push(message.messageId); }
       }, filter);
       return () => {
-        if (petId === 'alpha' && heldSignal) assert.equal(heldSignal.aborted, true, 'Pet aborts before either Head unsubscribe');
+        if (petId === 'alpha' && heldSignal) assert.equal(heldSignal.aborted, true, 'Pet aborts before Head unsubscribe');
         detachments.push(registration);
         detach();
       };
@@ -166,14 +166,13 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       subscribingPet = petId;
       await studio.pets.create({ petId, definitionId: 'worker', name: petId, channelId });
     }
-    assert.equal(registrations.length, 4);
+    assert.equal(registrations.length, 2);
     assert.equal(resolutionCount, 0, 'subscription must not resolve or instantiate an LLM');
     assert.deepEqual(factoryCalls, []);
     for (const petId of ['alpha', 'beta']) {
       assert.deepEqual(registrations.filter(r => r.petId === petId).map(r => r.filter)
         .sort((a, b) => a!.source.localeCompare(b!.source)), [
         { source: 'channel', topic: owners[petId] },
-        { source: 'resident-pet', topic: petId },
       ]);
     }
     const { channel: { channelId: emptyChannelId } } = await channel.service.createChannel(human, { title: 'No Pets', pets: [] });
@@ -197,48 +196,31 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const ownerChannelId = owners.alpha!;
     const resident = result.residentPets.get('alpha')!;
     const otherDispatch = result.residentPets.get('beta')!.resident.dispatch;
-    const otherQueue = otherDispatch.getQueueSnapshot.bind(otherDispatch);
-    let otherQueueReads = 0;
-    otherDispatch.getQueueSnapshot = () => { otherQueueReads++; return otherQueue(); };
+    let otherExecutionReads = 0;
+    otherDispatch.readExecution = async () => { otherExecutionReads++; return { queued: [], recent: [] }; };
     const admissions: PetDispatchRequest[] = [];
     const sessionReads: string[] = [];
-    let activeDispatch: PetDispatchQueueSnapshot['activeDispatch'];
-    let switchDuringRead: PetDispatchQueueSnapshot['activeDispatch'];
-    let continuingAfterReview = false;
+    let activeDispatch: PetDispatchExecution['active'];
+    let switchDuringRead: PetDispatchExecution['active'];
     let reviewPending = false;
-    resident.resident.dispatch.getQueueSnapshot = () => ({
-      state: activeDispatch || continuingAfterReview ? 'busy' : 'open',
-      activeOperation: activeDispatch ? 'dispatch' : null,
-      queuedConversations: continuingAfterReview ? 1 : 0, queuedDispatches: Math.max(0, admissions.length - 1),
-      ...(activeDispatch ? { activeDispatch } : {}),
-    });
+    let recent: PetDispatchExecution['recent'] = [];
     resident.resident.dispatch.dispatch = async request => { admissions.push(request); };
     const recordedPublicTask = 'Verify public reference:  https://example.com/';
-    resident.sessions.snapshot = async (sessionId, options) => {
-      assert.deepEqual(options, { timelineLimit: 1 });
-      sessionReads.push(sessionId);
-      if (switchDuringRead) activeDispatch = switchDuringRead;
-      return {
-        version: 5,
-        session: {
-          sessionId, kind: 'chat',
-          activeRun: { requestId: 'opaque-live-request', state: 'running', activity: 'thinking' },
-          pendingInterrupt: reviewPending ? { interruptId: 'review-pending', payload: { kind: 'human_review', interactions: [] } } : null,
-          currentPlan: { items: [
-            { id: 'one', capability: 'internal', task: 'Gather inputs.', status: 'completed' },
-            { id: 'two', capability: 'internal', task: 'Check the report.', status: 'active' },
-            { id: 'three', capability: 'internal', task: 'Verify the figures.', status: 'pending' },
-            { id: 'four', capability: 'internal', task: recordedPublicTask, status: 'pending' },
-          ] },
-          timeline: [
-            { type: 'message', id: 'old-text', role: 'assistant', text: 'private checkpoint text', status: 'completed' },
-            {
-              type: 'operation', id: 'private-tool', requestId: 'opaque-live-request', operationKey: 'private-call',
-              kind: 'tool', title: 'Private tool', phase: 'completed', raw: { output: 'private tool output' },
-            },
-          ],
-        },
-      };
+    resident.resident.dispatch.readExecution = async target => {
+      assert.equal(target.scope.id, ownerChannelId);
+      if (!activeDispatch) return { queued: [], recent };
+      assert.equal(target.sessionId, activeDispatch.sessionId);
+      sessionReads.push(target.sessionId);
+      if (switchDuringRead) {
+        activeDispatch = switchDuringRead;
+        return { active: activeDispatch, queued: [], recent };
+      }
+      return { active: activeDispatch, queued: [], recent, ...(reviewPending ? {} : { plan: { items: [
+        { id: 'one', capability: 'internal', task: 'Gather inputs.', status: 'completed' },
+        { id: 'two', capability: 'internal', task: 'Check the report.', status: 'active' },
+        { id: 'three', capability: 'internal', task: 'Verify the figures.', status: 'pending' },
+        { id: 'four', capability: 'internal', task: recordedPublicTask, status: 'pending' },
+      ] } }) };
     };
     const post = async (body: string, replyTo?: string) => (await channel.service.postMessage(human, ownerChannelId, { body, ...(replyTo ? { replyTo } : {}) })).message;
     const replyFor = (id: string) => published.find(item => item.message.replyTo === id)?.message;
@@ -267,12 +249,11 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
         requestId: 'opaque-live-request', origin: a.origin, ...extra },
     });
     lifecycle('running');
-    const liveSignal = new AbortController().signal;
-    assert.equal(await channel.head.readSessionPlan(ownerChannelId, 'alpha', 'wrong-session', liveSignal, () => true), undefined);
-    await assert.rejects(channel.head.readSessionPlan(owners.beta!, 'alpha', a.session.id, liveSignal, () => true), {
+    await assert.rejects(channel.head.readMessage(owners.beta!, 'alpha', sourceA.messageId), {
       message: `pet:alpha is not a member of Channel "${owners.beta}".`,
     });
-    assert.equal(sessionReads.length, 0, 'a foreign Session or Channel must not be read');
+    assert.equal(await channel.head.readMessage(ownerChannelId, 'alpha', '00000000-0000-0000-0000-000000000000'), undefined);
+    assert.equal(sessionReads.length, 0);
     const elsewhere = await post('Unrelated request for another Pet.');
     const directWhileBusy = await post(direct);
     await waitFor(() => handled.includes(elsewhere.messageId) && !!replyFor(directWhileBusy.messageId));
@@ -304,16 +285,27 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     for (const input of canonicalDecisions.slice(1)) {
       assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
     }
-    assert.equal(otherQueueReads, 0, 'alpha Head samples only its own dispatch port');
+    assert.equal(otherExecutionReads, 0, 'alpha Head samples only its own dispatch port');
     assert.equal(admissions.length, 1, 'a request conditional on unknown progress cannot admit new work');
     assert.equal(activeDispatch.dispatchId, a.dispatchId);
+    for (let i = 0; i < 11; i++) {
+      const noise = await post(`unrelated note ${i}`);
+      await waitFor(() => handled.includes(noise.messageId));
+    }
+    const oldSourceCheck = await post(progress);
+    await waitFor(() => !!replyFor(oldSourceCheck.messageId));
+    const oldSourceInput = canonicalDecisions.at(-1)!;
+    assert.equal(replyFor(oldSourceCheck.messageId)?.body, 'A is still running.');
+    assert.equal(oldSourceInput.context.messages.length, 10);
+    assert.ok(!oldSourceInput.context.messages.some(item => item.messageId === sourceA.messageId));
+    assert.equal(oldSourceInput.activeSource?.messageId, sourceA.messageId);
     const activeA = activeDispatch;
     const activeB = { ...activeA, dispatchId: 'synthetic-other-dispatch', origin: { namespace: 'channel', id: both.messageId } };
     switchDuringRead = activeB;
     const race = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(race.messageId));
     assert.equal(replyFor(race.messageId)?.body, 'I cannot verify the current status.');
-    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'each race reads once and never retries on B');
+    assert.equal(sessionReads.length, 5, 'each race reads once and never retries on B');
     assert.ok(!canonicalDecisions.at(-1)!.tasks?.some(task => task.messageId === sourceA.messageId));
     assert.equal(admissions.length, 1);
 
@@ -332,7 +324,6 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const readsBeforeApproval = sessionReads.length;
     lifecycle('waiting');
     activeDispatch = undefined;
-    continuingAfterReview = true;
     lifecycle('running', { requestId: 'resumed-request' });
     const approvalFollowup = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(approvalFollowup.messageId));
@@ -343,7 +334,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const beforeOfficial = decisions.alpha!.length;
     lifecycle('message', { requestId: 'resumed-request', message: { type: 'message.completed', messageId: 'public-a', role: 'assistant', text: finalA } });
     lifecycle('completed', { requestId: 'resumed-request', reply: finalA });
-    continuingAfterReview = false;
+    recent = [{ dispatchId: a.dispatchId, origin: a.origin, state: 'completed' }];
     await waitFor(() => published.some(({ message }) => message.externalRef === 'public-a'));
     const fence = (await post('alpha fence')).body;
     await waitFor(() => decisions.alpha!.includes(fence));
@@ -361,9 +352,9 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const heldA = new Promise<void>(resolve => { releaseA = resolve; });
     const seen: PetDispatchRequest[] = [];
     const started: string[] = [];
-    const realSnapshot = resident.resident.dispatch.getQueueSnapshot;
+    const realExecution = resident.resident.dispatch.readExecution;
     const realDispatch = resident.resident.dispatch.dispatch;
-    resident.resident.dispatch.getQueueSnapshot = () => coordinator.getQueueSnapshot();
+    resident.resident.dispatch.readExecution = async target => ({ ...coordinator.readExecution(target), recent });
     resident.resident.dispatch.dispatch = async request => {
       seen.push(request);
       let wait;
@@ -426,7 +417,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       clock.mock.restore();
       releaseA();
       await coordinator.close();
-      resident.resident.dispatch.getQueueSnapshot = realSnapshot;
+      resident.resident.dispatch.readExecution = realExecution;
       resident.resident.dispatch.dispatch = realDispatch;
     }
 
@@ -434,8 +425,8 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const realClose = resident.close.bind(resident);
     let closed = false;
     resident.close = async () => {
-      assert.equal(detachments.length, 2, 'each owned topic detaches exactly once');
-      assert.deepEqual(new Set(detachments), new Set(oldRegistrations), 'both alpha topics detach before its runtime stops; beta stays active');
+      assert.equal(detachments.length, 1, 'the owned topic detaches exactly once');
+      assert.deepEqual(new Set(detachments), new Set(oldRegistrations), 'the alpha topic detaches before its runtime stops; beta stays active');
       assert.equal(heldSignal?.aborted, true);
       await realClose();
       closed = true;
@@ -455,11 +446,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     // If the old Head incorrectly dispatches into the new activation, capture
     // it locally rather than allowing the resident to call a real endpoint.
     result.residentPets.get('alpha')!.resident.dispatch.dispatch = async request => { admissions.push(request); };
-    const newRegistrations = registrations.filter(entry => entry.petId === 'alpha').slice(2);
-    assert.equal(newRegistrations.length, 2, 'reopening establishes just one fresh subscription pair');
+    const newRegistrations = registrations.filter(entry => entry.petId === 'alpha').slice(1);
+    assert.equal(newRegistrations.length, 1, 'reopening establishes just one fresh subscription');
     assert.deepEqual(newRegistrations.map(entry => entry.filter).sort((a, b) => a!.source.localeCompare(b!.source)), [
       { source: 'channel', topic: ownerChannelId },
-      { source: 'resident-pet', topic: 'alpha' },
     ]);
     const testReopened = await post('alpha receives live traffic after reopen');
     await waitFor(() => handled.includes(testReopened.messageId));

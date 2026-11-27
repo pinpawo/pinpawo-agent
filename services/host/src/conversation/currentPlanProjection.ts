@@ -1,6 +1,6 @@
 import type { AgentPlan } from '@pinpawo/agent-session';
-import { AIMessage } from '@langchain/core/messages';
-import { readCapabilityExecutionCall, readCapabilityExecutions } from '@pinpawo/pet-agent';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { mainConversationMessages, readCapabilityExecutionCall, readCapabilityExecutions } from '@pinpawo/pet-agent';
 
 /** Project business progress directly; execution messages are not another plan. */
 export function projectCurrentPlan(state: unknown): AgentPlan | null {
@@ -27,6 +27,16 @@ export function projectCurrentPlan(state: unknown): AgentPlan | null {
           ? 'active' as const : 'pending' as const }];
   });
   return items.length ? { items } : null;
+}
+
+/** A Session can retain its last Plan before a new graph turn claims one. */
+export function projectPlanForRequest(state: unknown, requestId: string): AgentPlan | null {
+  const root = asRecord(state);
+  const runId = root?.runId;
+  if (typeof runId !== 'string' || asRecord(root?.runSupervisorState)?.runId !== runId ||
+      !Array.isArray(root?.messages)) return null;
+  const input = mainConversationMessages(root.messages).filter(HumanMessage.isInstance).at(-1);
+  return input?.id === requestId ? projectCurrentPlan(state) : null;
 }
 
 export function currentPlansEqual(

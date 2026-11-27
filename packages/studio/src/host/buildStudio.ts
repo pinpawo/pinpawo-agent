@@ -368,7 +368,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     description: input.petDocuments?.get(registration.definitionId)?.content,
     channel: channelHead,
     subscribe: prepared.studio.subscribe,
-    getQueueSnapshot: () => runtime.dispatch.getQueueSnapshot(),
+    readExecution: async (target, signal) => runtime.dispatch.readExecution?.(target, signal) ?? { queued: [], recent: [] },
     resolveModel: () => models.resolve(definitions.get(registration.definitionId)?.config.modelProfileId),
     onDiagnostic: diagnostic => {
       const occurredAt = new Date().toISOString();

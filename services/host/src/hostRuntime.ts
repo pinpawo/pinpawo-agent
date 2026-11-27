@@ -26,6 +26,7 @@ export type {
   PetDispatchLifecycleEvent,
   PetDispatchLifecycleState,
   PetDispatchMessage,
+  PetDispatchExecution,
   PetDispatchPort,
   ResidentPetDispatchService,
   PetDispatchQueueSnapshot,

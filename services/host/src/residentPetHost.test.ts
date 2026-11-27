@@ -1250,3 +1250,77 @@ test('a dispatch fails through the conversation pipeline: a broken tool history 
     assert.notEqual(sessions.getActiveSessionId('failure-pet'), before);
   } finally { await close(); }
 });
+
+test('the Dispatch port returns scoped FIFO facts and drops a Plan if the active request changes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-dispatch-execution-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const releaseA = deferred();
+  const releaseB = deferred();
+  const planRead = deferred<string>();
+  const staleRead = deferred<typeof plan>();
+  const plan = { items: [{ id: 'step-a', capability: 'general', task: 'Inspect A', status: 'completed' as const }] };
+  let waitForStalePlan = false;
+  let failPlanRead = false;
+  const runtime = await createResidentPetRuntime({
+    petId: 'snapshot-pet', petName: 'Snapshot', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: {
+      readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }),
+      readPlanForRequest: async (_setup: unknown, requestId: string) => {
+        if (failPlanRead) throw new Error('checkpoint unavailable');
+        if (!waitForStalePlan) return plan;
+        planRead.resolve(requestId);
+        return staleRead.promise;
+      },
+    } as never,
+    runAgentTurn: async ({ request }) => {
+      if (request.kind === 'user_message') {
+        if (request.message === 'A') await releaseA.promise;
+        if (request.message === 'B') await releaseB.promise;
+      }
+      return { status: 'completed', reply: 'official result' };
+    },
+  });
+  const { sessions, close } = readResidentPetRuntimeContext(runtime);
+  const { dispatch } = createResidentPet(runtime);
+  const sessionId = sessions.getActiveSessionId('snapshot-pet');
+  const scope = { namespace: 'channel', id: 'ch-1' };
+  const target = { sessionId, scope };
+  const signal = new AbortController().signal;
+  const queue = (id: string, channel = scope) => dispatch.dispatch({
+    request: id, dispatchId: id, session: { id: sessionId }, scope: channel, origin: { namespace: 'channel', id: `msg-${id}` },
+  });
+  const lifecycle: PetDispatchLifecycleEvent[] = [];
+  dispatch.onDispatchLifecycle(event => { lifecycle.push(event); });
+  try {
+    await queue('A');
+    await waitFor(() => lifecycle.some(event => event.dispatchId === 'A' && event.state === 'running'), 'A did not start');
+    await queue('B');
+    await queue('other', { ...scope, id: 'ch-2' });
+    const current = await dispatch.readExecution(target, signal);
+    assert.equal(current.active?.origin?.id, 'msg-A');
+    assert.deepEqual(current.queued.map(item => item.origin?.id), ['msg-B']);
+    assert.deepEqual(current.plan, plan);
+    assert.deepEqual((await dispatch.readExecution({ ...target, sessionId: 'wrong' }, signal)), { queued: [], recent: [] });
+    failPlanRead = true;
+    assert.equal((await dispatch.readExecution(target, signal)).plan, undefined);
+    failPlanRead = false;
+    waitForStalePlan = true;
+    const racing = dispatch.readExecution(target, signal);
+    assert.equal(await planRead.promise, current.active?.requestId);
+    releaseA.resolve();
+    await waitFor(() => lifecycle.some(event => event.dispatchId === 'B' && event.state === 'running'), 'B did not start');
+    staleRead.resolve(plan);
+    const next = await racing;
+    assert.equal(next.active?.origin?.id, 'msg-B');
+    assert.equal(next.plan, undefined, 'A’s Plan cannot be attached to B or make B disappear');
+    assert.deepEqual(next.recent, [{ dispatchId: 'A', origin: { namespace: 'channel', id: 'msg-A' }, state: 'completed' }]);
+  } finally {
+    releaseA.resolve();
+    releaseB.resolve();
+    staleRead.resolve(plan);
+    await close();
+  }
+});

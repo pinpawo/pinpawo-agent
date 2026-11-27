@@ -1,6 +1,7 @@
 import type { PetInvocationScope } from './petInvocationContext';
 import type { Deliverable } from '@pinpawo/agent-contracts';
 import type {
+  AgentPlan,
   PendingInterruptProjection,
   AgentClientMessage,
   AgentRuntimeEvent,
@@ -46,6 +47,16 @@ export type PetDispatchQueueEntry = {
 
 /** A continuation is only eligible for this exact, explicitly addressed domain session. */
 export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope };
+
+/** Scoped execution facts; not an admission check or a durable history. */
+export type PetDispatchExecution = {
+  active?: PetDispatchQueueEntry & { requestId?: string };
+  queued: PetDispatchQueueEntry[];
+  recent: Array<Pick<PetDispatchLifecycleEvent, 'dispatchId' | 'origin'> & {
+    state: Exclude<PetDispatchLifecycleState, 'queued' | 'running' | 'message'>;
+  }>;
+  plan?: AgentPlan;
+};
 
 export type PetDispatchRequest = {
   /** Source identity for queue observation only; not execution or review context. */
@@ -114,6 +125,7 @@ type ScopedDispatchRequest = Omit<PetDispatchRequest, 'delivery' | 'session' | '
 
 export interface ResidentPetDispatchService {
   getQueueSnapshot(): PetDispatchQueueSnapshot;
+  readExecution(target: PetDispatchTarget, signal: AbortSignal): Promise<PetDispatchExecution>;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input for resident execution, which is observed through Agent Session. */
@@ -129,7 +141,8 @@ export interface ResidentPetDispatchService {
 
 /** The capabilities exposed to callers that only observe and submit, such as Studio. */
 export type PetDispatchPort = Pick<ResidentPetDispatchService,
-  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch'>;
+  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch'> &
+  Partial<Pick<ResidentPetDispatchService, 'readExecution'>>;
 
 export interface ResidentPet {
   readonly dispatch: ResidentPetDispatchService;

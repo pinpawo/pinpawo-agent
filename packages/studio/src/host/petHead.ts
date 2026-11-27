@@ -1,8 +1,7 @@
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import { type PetDispatchQueueSnapshot } from 'pinpawo/host-runtime';
+import type { PetDispatchExecution, PetDispatchPort } from 'pinpawo/host-runtime';
 import type { Studio, StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
-import { observeHeadDispatch, type HeadTaskFact, type HeadSessionRunReader } from './petHeadProgress';
 import { createHeadModel, type HeadRelevanceDiagnostic } from './petHeadModel';
 
 /** The committed Timeline message as seen by a Pet. */
@@ -28,7 +27,12 @@ export type HeadContext = {
 export type HeadRelevance = { relevant: boolean };
 export type HeadDispatchDecision = { shouldDispatch: boolean; reply: string | null };
 export type HeadInput = { pet: StudioPetRegistration; description?: string; message: HeadMessage; context: HeadContext; addressed?: boolean };
-export type HeadDispatchInput = HeadInput & { tasks?: HeadTaskFact[] };
+type HeadTaskFact = {
+  messageId?: string;
+  status: PetDispatchExecution['recent'][number]['state'] | 'running' | 'queued';
+  plan?: Array<{ status: string; description: string }>;
+};
+export type HeadDispatchInput = HeadInput & { tasks?: HeadTaskFact[]; activeSource?: HeadMessage };
 
 /** Mentions are server-resolved participant IDs on this committed message, not labels or quoted/history text. */
 export function isHeadAddressed(input: Pick<HeadInput, 'pet' | 'context' | 'message'>): boolean {
@@ -45,7 +49,7 @@ export type PetHeadChannel = {
   reply(petId: string, messageId: string, body: string, signal: AbortSignal, options?: HeadReplyOptions): Promise<unknown>;
   dispatch(petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string): Promise<unknown>;
   readBoundSessionId?(petId: string): Promise<string | undefined>;
-  readSessionPlan?: (petId: string, ...args: Parameters<HeadSessionRunReader>) => ReturnType<HeadSessionRunReader>;
+  readMessage?(petId: string, messageId: string): Promise<HeadMessage | undefined>;
 };
 
 export type PetHeadChannelOperations = {
@@ -53,7 +57,7 @@ export type PetHeadChannelOperations = {
   reply(channelId: string, petId: string, messageId: string, body: string, signal: AbortSignal, options?: HeadReplyOptions): Promise<unknown>;
   dispatch(channelId: string, petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string): Promise<unknown>;
   readBoundSessionId?(channelId: string, petId: string): Promise<string | undefined>;
-  readSessionPlan?: (channelId: string, ...args: Parameters<NonNullable<PetHeadChannel['readSessionPlan']>>) => ReturnType<HeadSessionRunReader>;
+  readMessage?(channelId: string, petId: string, messageId: string): Promise<HeadMessage | undefined>;
 };
 
 /** Bind Channel operations and the Studio live bus to this instance's owner Channel. */
@@ -62,7 +66,7 @@ export function bindPetHeadChannel(
   operations: PetHeadChannelOperations,
   subscribe: Studio['subscribe'],
 ): PetHeadChannel {
-  const snapshot = operations.readSessionPlan;
+  const readMessage = operations.readMessage;
   const readBoundSessionId = operations.readBoundSessionId;
   return {
     subscribe: handler => subscribe(async event => {
@@ -75,7 +79,7 @@ export function bindPetHeadChannel(
     reply: (petId, messageId, body, signal, options) => operations.reply(channelId, petId, messageId, body, signal, options),
     dispatch: (...args) => operations.dispatch(channelId, ...args),
     ...(readBoundSessionId ? { readBoundSessionId: (petId: string) => readBoundSessionId(channelId, petId) } : {}),
-    ...(snapshot ? { readSessionPlan: (...args: Parameters<NonNullable<PetHeadChannel['readSessionPlan']>>) => snapshot(channelId, ...args) } : {}),
+    ...(readMessage ? { readMessage: (petId: string, messageId: string) => readMessage(channelId, petId, messageId) } : {}),
   };
 }
 
@@ -85,38 +89,23 @@ export function attachPetHead(input: {
   description?: string;
   channel: PetHeadChannelOperations;
   subscribe: Studio['subscribe'];
-  getQueueSnapshot: () => PetDispatchQueueSnapshot;
+  readExecution?: PetDispatchPort['readExecution'];
   resolveModel: () => StudioModelEndpoint;
   onDiagnostic?: (event: HeadRelevanceDiagnostic) => void;
 }, signal: AbortSignal): () => void {
   signal.throwIfAborted();
   const { pet, description, subscribe } = input;
   const channel = bindPetHeadChannel(pet.channelId, input.channel, subscribe);
-  const readSessionPlan = channel.readSessionPlan;
   const model = createHeadModel(input.resolveModel, { onDiagnostic: input.onDiagnostic });
-  const observation = observeHeadDispatch({ petId: pet.petId, channelId: pet.channelId, subscribe, snapshot: input.getQueueSnapshot }, signal);
-  let unsubscribe: () => void;
-  try {
-    const handleMessage = createPetHead({
-      pet,
-      ...(description ? { description } : {}),
-      channel,
-      readSession: (sessionId, sourceIds) => observation.readSession(sessionId, sourceIds, readSessionPlan
-        ? (...args) => readSessionPlan(pet.petId, ...args) : undefined),
-      assessRelevance: model.assessRelevance,
-      decideDispatch: model.decideDispatch,
-    });
-    unsubscribe = channel.subscribe(message => handleMessage(message, signal));
-  } catch (error) {
-    // PetInstance will abort on activation failure, but never received a
-    // disposer. Release the subscription already registered by the Head.
-    observation.close();
-    throw error;
-  }
-  return () => {
-    try { unsubscribe(); }
-    finally { observation.close(); }
-  };
+  const handleMessage = createPetHead({
+    pet,
+    ...(description ? { description } : {}),
+    channel,
+    readExecution: input.readExecution,
+    assessRelevance: model.assessRelevance,
+    decideDispatch: model.decideDispatch,
+  });
+  return channel.subscribe(message => handleMessage(message, signal));
 }
 
 /** Create the judgment for an instance; the instance owns the subscription. */
@@ -124,7 +113,7 @@ export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
   channel: PetHeadChannel;
-  readSession?: (sessionId: string, sourceIds: ReadonlySet<string>) => Promise<HeadTaskFact[]>;
+  readExecution?: PetDispatchPort['readExecution'];
   assessRelevance: (input: HeadInput, signal: AbortSignal) => Promise<HeadRelevance>;
   decideDispatch: (input: HeadDispatchInput, signal: AbortSignal) => Promise<HeadDispatchDecision>;
 }): (message: HeadMessage, signal: AbortSignal) => Promise<void> {
@@ -144,17 +133,32 @@ export function createPetHead(options: {
 
     const boundSessionId = await options.channel.readBoundSessionId?.(options.pet.petId);
     if (signal.aborted) return;
-    const sources = [...context.messages, ...(context.referencedMessage ? [context.referencedMessage] : [])]
-      .filter(source => source.channelId === message.channelId && source.sequence < message.sequence);
-    const sourceIds = new Set(sources.map(source => source.messageId));
-    // A reply to a Head acknowledgement still refers to its original source.
-    for (const source of sources) {
-      if (source.author.kind === 'pet' && source.author.id === options.pet.petId && source.replyTo &&
-        source.externalRef === `head-reply:${source.replyTo}`) sourceIds.add(source.replyTo);
-    }
-    const tasks = boundSessionId ? await options.readSession?.(boundSessionId, sourceIds) : undefined;
+    const execution = boundSessionId
+      ? await options.readExecution?.({ sessionId: boundSessionId, scope: { namespace: 'channel', id: message.channelId } }, signal)
+      : undefined;
     if (signal.aborted) return;
-    const decision = await options.decideDispatch({ ...input, ...(tasks?.length ? { tasks } : {}) }, signal);
+    const { active, queued, recent, plan } = execution ?? { queued: [], recent: [] };
+    const sourceId = (origin?: { namespace: string; id: string }) => origin?.namespace === 'channel' ? origin.id : undefined;
+    const activeId = sourceId(active?.origin);
+    const tasks: HeadTaskFact[] = [
+      ...(active ? [{ messageId: activeId, status: 'running' as const,
+        ...(plan ? { plan: plan.items.map(({ task, status }) => ({ status, description: task })) } : {}) }] : []),
+      ...queued.map(item => ({ messageId: sourceId(item.origin), status: 'queued' as const })),
+      ...recent.map(item => ({ messageId: sourceId(item.origin), status: item.state })),
+    ];
+    let activeSource: HeadMessage | undefined;
+    if (activeId && activeId !== message.messageId && !context.messages.some(source => source.messageId === activeId)
+      && context.referencedMessage?.messageId !== activeId && options.channel.readMessage) {
+      try {
+        const source = await options.channel.readMessage(options.pet.petId, activeId);
+        if (source?.channelId === message.channelId && source.messageId === activeId && source.sequence < message.sequence) activeSource = source;
+      } catch {
+        // Missing source text does not invalidate execution facts.
+      }
+    }
+    if (signal.aborted) return;
+    const decision = await options.decideDispatch({ ...input, ...(tasks.length ? { tasks } : {}),
+      ...(activeSource ? { activeSource } : {}) }, signal);
     if (signal.aborted) return;
     let reply = decision.reply?.trim() ?? '';
     let dispatchFailure: string | undefined;

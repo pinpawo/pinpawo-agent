@@ -564,7 +564,8 @@ test('only relevant input reads task facts before one Dispatch decision', async 
   const handle = createPetHead({
     pet: pet('a'),
     channel: { subscribe: () => () => {},
-      readContext: async () => ({ messages: [source, message('other', { channelId: 'elsewhere' })] }),
+      readContext: async () => ({ messages: [] }),
+      readMessage: async (_, id) => { assert.equal(id, source.messageId); calls.push('source'); return source; },
       readBoundSessionId: async () => { calls.push('binding'); return 'session'; },
       dispatch: async (_, id, _signal, sessionId) => { assert.equal(id, '3'); assert.equal(sessionId, 'session'); calls.push('submit'); },
       reply: async (_, _id, text) => { assert.equal(text, 'A is done.'); calls.push('reply'); },
@@ -574,14 +575,15 @@ test('only relevant input reads task facts before one Dispatch decision', async 
       calls.push('relevance');
       return { relevant: input.message.messageId === '3' };
     },
-    readSession: async (sessionId, sources) => {
-      assert.equal(sessionId, 'session');
-      assert.deepEqual([...sources], ['1']);
-      calls.push('readSession');
-      return [{ messageId: '1', status: 'completed' }];
+    readExecution: async target => {
+      assert.deepEqual(target, { sessionId: 'session', scope: { namespace: 'channel', id: source.channelId } });
+      calls.push('readExecution');
+      return { active: { dispatchId: 'dispatch-a', enqueuedAt: '', origin: { namespace: 'channel', id: source.messageId } },
+        queued: [], recent: [] };
     },
     decideDispatch: async input => {
-      assert.deepEqual(input.tasks, [{ messageId: '1', status: 'completed' }]);
+      assert.deepEqual(input.tasks, [{ messageId: '1', status: 'running' }]);
+      assert.equal(input.activeSource, source);
       calls.push('decision');
       return { shouldDispatch: true, reply: 'A is done.' };
     },
@@ -589,5 +591,5 @@ test('only relevant input reads task facts before one Dispatch decision', async 
   const signal = new AbortController().signal;
   await handle(message('2'), signal);
   await handle(message('3'), signal);
-  assert.deepEqual(calls, ['relevance', 'relevance', 'binding', 'readSession', 'decision', 'submit', 'reply']);
+  assert.deepEqual(calls, ['relevance', 'relevance', 'binding', 'readExecution', 'source', 'decision', 'submit', 'reply']);
 });

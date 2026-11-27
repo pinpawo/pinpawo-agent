@@ -4,6 +4,8 @@ import {
   type PetDispatchQueueSnapshot,
   type PetDispatchQueueEntry,
   type PetDispatchTarget,
+  type PetDispatchExecution,
+  type PetDispatchLifecycleEvent,
   type PetDispatchSettledState,
   type PetDispatchState,
   type QueuedOperation,
@@ -25,6 +27,8 @@ export class ResidentPetCoordinator {
   private conversations = 0;
   private readonly conversationHolds = new Set<Promise<void>>();
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
+  private readonly recent = new Map<string, PetDispatchExecution['recent'][number] & PetDispatchTarget>();
+  private activeLifecycle?: { dispatchId: string; requestId?: string; state: 'running' | 'settled' };
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
   private readonly logError: NonNullable<ResidentPetCoordinatorOptions['logError']>;
@@ -64,6 +68,38 @@ export class ResidentPetCoordinator {
       } : {}),
       ...(activeDispatch ? { activeDispatch: structuredClone(activeDispatch) } : {}),
     };
+  }
+
+  observeDispatchLifecycle({ dispatchId, sessionId, scope, origin, state, requestId }: PetDispatchLifecycleEvent): void {
+    if (!sessionId || !scope || state === 'queued' || state === 'message') return;
+    const previous = this.recent.get(dispatchId);
+    this.recent.delete(dispatchId);
+    if (state === 'running') {
+      if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, requestId, state };
+      return;
+    }
+    if (this.activeEntry?.observation?.dispatchId === dispatchId) this.activeLifecycle = { dispatchId, state: 'settled' };
+    this.recent.set(dispatchId, { dispatchId, sessionId, scope, origin: origin ?? previous?.origin, state });
+    if (this.recent.size > 10) this.recent.delete(this.recent.keys().next().value!);
+  }
+
+  readExecution(target: PetDispatchTarget): PetDispatchExecution {
+    const matches = (item: Pick<PetDispatchQueueEntry, 'scope' | 'sessionId'>) =>
+      item.sessionId === target.sessionId && item.scope?.namespace === target.scope.namespace && item.scope.id === target.scope.id;
+    const entry = this.activeEntry?.observation;
+    const selected = entry && matches(entry) ? entry : undefined;
+    const lifecycle = this.activeLifecycle;
+    const active = selected && lifecycle?.dispatchId === selected.dispatchId && lifecycle.state === 'running'
+      ? { ...selected, requestId: lifecycle.requestId } : undefined;
+    return structuredClone({
+      ...(active ? { active } : {}),
+      queued: [
+        ...(selected && selected.dispatchId !== lifecycle?.dispatchId ? [selected] : []),
+        ...this.dispatchQueue.flatMap(({ observation }) => observation && matches(observation) ? [observation] : []),
+      ],
+      recent: [...this.recent.values()].reverse().filter(matches).map(({ dispatchId, state, origin }) =>
+        ({ dispatchId, state, ...(origin ? { origin } : {}) })),
+    });
   }
 
   onStateChange(listener: (state: PetDispatchState) => void): () => void {

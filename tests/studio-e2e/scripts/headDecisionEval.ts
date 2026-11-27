@@ -94,7 +94,11 @@ async function main() {
       const model = createHeadModel(() => ({
         profileId: profile, protocol: config.protocol ?? 'openai-compatible', model: config.model,
         baseUrl: config.baseUrl, apiKey: config.apiKey, structuredOutputMethod: config.structuredOutputMethod ?? 'jsonMode',
-        createChatModel: options => buildModel({ ...config, maxOutputTokens: options.maxOutputTokens, maxRetries: options.maxRetries }, options),
+        createChatModel: options => buildModel({
+          ...config,
+          ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+          maxRetries: options.maxRetries,
+        }, options),
       }), { onDiagnostic: value => { diagnostic = value; } });
       let observation;
       try {

@@ -475,7 +475,7 @@ test('Plugin model factories use complete resolved profiles for native and gatew
     { modelProfileId: 'responses-preferred', model: 'gpt-5.5-pro',
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway', maxOutputTokens: 4096 },
     { modelProfileId: 'official-deepseek', model: 'deepseek-flash',
-      baseUrl: 'https://api.deepseek.com/v1', apiKey: 'mock-deepseek' },
+      baseUrl: 'https://api.deepseek.com/v1', apiKey: 'mock-deepseek', maxOutputTokens: 4096 },
     { modelProfileId: 'unknown', model: 'example-model',
       baseUrl: 'https://gateway.example.test/v1', apiKey: 'mock-gateway' },
   ], 'native');
@@ -546,10 +546,10 @@ test('Plugin model factories use complete resolved profiles for native and gatew
 
     // The shared profile stays unchanged: only explicitly Head-scoped requests opt in.
     const officialEndpoint = models.resolve('official-deepseek');
-    for (const purpose of [undefined, 'pet-head'] as const) {
+    for (const maxOutputTokens of [undefined, 300]) {
       const model = officialEndpoint.createChatModel!({
-        maxOutputTokens: 300, maxRetries: 0, preferDeterministic: true, streaming: false,
-        forceChatCompletions: true, ...(purpose ? { purpose } : {}),
+        maxRetries: 0, preferDeterministic: true, streaming: false, forceChatCompletions: true,
+        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       });
       let requests = 0;
       const transport = model as unknown as { clientConfig: { fetch: typeof fetch } };
@@ -557,7 +557,8 @@ test('Plugin model factories use complete resolved profiles for native and gatew
         requests++;
         assert.equal(String(url), 'https://api.deepseek.com/v1/chat/completions');
         const body = JSON.parse(String(init?.body));
-        assert.deepEqual(body.thinking, purpose === 'pet-head' ? { type: 'disabled' } : undefined);
+        assert.equal(Object.hasOwn(body, 'thinking'), false);
+        assert.equal(body.max_completion_tokens ?? body.max_tokens, maxOutputTokens ?? 4096);
         return Response.json({ id: 'mock', object: 'chat.completion', created: 0, model: 'deepseek-flash',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
@@ -715,7 +716,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.ok(Object.keys(entry).every(key => ['petId', 'channelId', 'messageId', 'outcome', 'attempts', 'code'].includes(key)));
     }
     assert.deepEqual(calls.sort((a, b) => a.petId.localeCompare(b.petId)), [
-      { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions', thinking: { type: 'disabled' } },
+      { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions', thinking: undefined },
       { petId: 'planner', model: 'deepseek-flash', url: 'https://specialist.example.test/v1/chat/completions', thinking: undefined },
       { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions', thinking: undefined },
     ].flatMap(call => ([{ ...call, stage: 'relevance' }, { ...call, stage: 'idle' }])));

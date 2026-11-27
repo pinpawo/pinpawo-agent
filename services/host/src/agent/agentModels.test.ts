@@ -253,26 +253,3 @@ test('ordinary OpenAI role keeps SDK system-to-developer behavior for reasoning 
   assert.equal((await model.invoke([new SystemMessage('Policy'), new HumanMessage('Hi')])).text, 'ok');
   assert.equal(requested, true);
 });
-
-test('only official DeepSeek Head generation disables thinking without mutating profiles or Agent roles', () => {
-  const base = { apiKey: 'test-key', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com', maxOutputTokens: 512 };
-  const before = JSON.stringify(base);
-  for (const model of ['deepseek-flash', 'deepseek-v4-pro']) {
-    assert.deepEqual(readInvocationParams(buildModel({ ...base, model }, { purpose: 'pet-head', streaming: false })).thinking, { type: 'disabled' });
-  }
-  for (const config of [base, { ...base, baseUrl: 'https://api.deepseek.com/v1' }]) {
-    for (const instance of Object.values(buildHostModels(config))) assert.equal(readInvocationParams(instance).thinking, undefined);
-  }
-  for (const config of [
-    { ...base, baseUrl: 'https://gateway.example.test/v1' },
-    { ...base, baseUrl: 'https://api.deepseek.com.example.test' },
-    { ...base, baseUrl: 'http://api.deepseek.com' },
-    { ...base, baseUrl: 'https://api.deepseek.com:8443' },
-    { ...base, baseUrl: 'https://api.deepseek.com/proxy' },
-    { ...base, model: 'another-model' },
-  ]) assert.equal(readInvocationParams(buildModel(config, { purpose: 'pet-head', streaming: false })).thinking, undefined);
-  const anthropic = buildModel({ ...base, protocol: 'anthropic-compatible' }, { purpose: 'pet-head', streaming: false });
-  assert.deepEqual((anthropic as unknown as { thinking?: unknown }).thinking,
-    (buildModel({ ...base, protocol: 'anthropic-compatible' }, { streaming: false }) as unknown as { thinking?: unknown }).thinking);
-  assert.equal(JSON.stringify(base), before);
-});

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prepareStudio } from '../../../packages/studio/src/createStudio';
-import { bindPetHeadChannel, createPetHead, type HeadIdleResult, type HeadInput } from '../../../packages/studio/src/host/petHead';
+import { bindPetHeadChannel, createPetHead, type HeadDispatchDecision, type HeadInput } from '../../../packages/studio/src/host/petHead';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 
 const human = { kind: 'human' as const, id: 'local' };
@@ -22,9 +22,9 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
   const channel = createChannelPlugin({ httpRoute: false });
   const seen: Record<string, string[]> = { slow: [], fast: [], elsewhere: [] };
   const dispatches: string[] = [];
-  const held = deferred<HeadIdleResult>();
+  const held = deferred<HeadDispatchDecision>();
   let inFlightSignal: AbortSignal | undefined;
-  const handleIdle = async ({ pet, message }: HeadInput, signal: AbortSignal): Promise<HeadIdleResult> => {
+  const decideDispatch = async ({ pet, message }: HeadInput, signal: AbortSignal): Promise<HeadDispatchDecision> => {
     seen[pet.petId]!.push(message.body);
     if (pet.petId === 'slow' && message.body === 'first') {
       inFlightSignal = signal;
@@ -46,8 +46,7 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
         assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: bound, readWorkState: () => ({ kind: 'idle' }),
-        assessRelevance: async () => ({ relevant: true }), handleIdle });
+      const handle = createPetHead({ pet: registration, channel: bound, assessRelevance: async () => ({ relevant: true }), decideDispatch });
       return bound.subscribe(message => handle(message, signal));
     },
   });

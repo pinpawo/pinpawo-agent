@@ -117,7 +117,7 @@ test('Studio routes resident dispatch lifecycle by Pet instance while preserving
         if (lifecycleListeners.get(petId) === listener) lifecycleListeners.delete(petId);
       };
     },
-    dispatch: async ({ request, dispatchId }) => {
+    dispatch: async ({ request, dispatchId, origin }) => {
       assert.ok(dispatchId);
       const listener = lifecycleListeners.get(petId);
       listener?.({ dispatchId, request, state: 'queued' });
@@ -131,6 +131,7 @@ test('Studio routes resident dispatch lifecycle by Pet instance while preserving
         requestId: 'host-1',
         state: 'failed',
         error: 'Connection error',
+        origin,
       });
     },
   });
@@ -155,7 +156,7 @@ test('Studio routes resident dispatch lifecycle by Pet instance while preserving
     return seen;
   });
 
-  const receipt = await studio.dispatch({ petId: 'first-pet', request: 'draft' });
+  const receipt = await studio.dispatch({ petId: 'first-pet', request: 'draft', scope: { namespace: 'channel', id: 'one' }, origin: { namespace: 'channel', id: 'source-a' } });
   await studio.dispatch({ petId: 'second-pet', request: 'review' });
   await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -175,6 +176,7 @@ test('Studio routes resident dispatch lifecycle by Pet instance while preserving
     request: 'draft',
     requestId: 'host-1',
     error: 'Connection error',
+    origin: { namespace: 'channel', id: 'source-a' },
   });
   await studio.shutdown();
   assert.equal(lifecycleListeners.size, 0);

@@ -191,6 +191,7 @@ export function prepareStudioWithHead(input: CreateStudioInput, attachHead?: Att
           request: event.request,
           ...(event.requestId ? { requestId: event.requestId } : {}),
           ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+          ...(event.origin ? { origin: { ...event.origin } } : {}),
           ...(event.scope ? { scope: { ...event.scope } } : {}),
           ...(event.pendingInterrupt ? { pendingInterrupt: event.pendingInterrupt } : {}),
           ...(event.reply !== undefined ? { reply: event.reply } : {}),

@@ -8,7 +8,7 @@ import { defineInstructionDocument, GENERAL_CAPABILITY_NAME } from '@pinpawo/pet
 import { buildHostRuntimeConfig, FileSaver, type PetDispatchQueueSnapshot, type PetDispatchRequest } from 'pinpawo/host-runtime';
 import { buildStudio } from '../../../packages/studio/src/host/buildStudio';
 import { resolveStudio } from '../../../packages/studio/src/host/studioConfig';
-import type { HeadInput, HeadMessage } from '../../../packages/studio/src/host/petHead';
+import type { HeadDispatchInput, HeadMessage } from '../../../packages/studio/src/host/petHead';
 import type { StudioEventSubscriptionFilter, StudioModelEndpoint, StudioPlugin } from '../../../packages/studio/src/studioContract';
 import { createChannelPlugin } from '../../../plugins/channel/src/channelPlugin';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -31,23 +31,21 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
   const decisions: Record<string, string[]> = { alpha: [], beta: [] };
   const deliveries: Record<string, string[]> = { alpha: [], beta: [] };
   const published: Array<{ topic: string | undefined; message: HeadMessage }> = [];
-  const composeInputs: unknown[] = [];
   const startA = 'Start work A.';
   const direct = '[@alpha](participant:pet:alpha) Are you the analyst?';
   const progress = '[@alpha](participant:pet:alpha) How is A going?';
   const mixed = '[@alpha](participant:pet:alpha) How is A going? If A has failed, switch to B.';
   const becameBusy = '[@alpha](participant:pet:alpha) Start independent work while the slot changes.';
-  const alreadyBusy = '[@alpha](participant:pet:alpha) New independent task: verify the inventory file.';
-  const expires = '[@alpha](participant:pet:alpha) Start a new task whose admission will time out.';
+  const alreadyBusy = '[@alpha](participant:pet:alpha) How did A go? Also verify the inventory file.';
+  const expires = '[@alpha](participant:pet:alpha) How is A going? Also start a new task whose admission will time out.';
   const afterStop = '[@alpha](participant:pet:alpha) Start independent work after Stop.';
   const independent = [becameBusy, alreadyBusy, expires, afterStop];
   let duringDecision: (() => void) | undefined;
   const finalA = 'This is A’s official result.';
-  const canonicalDecisions: HeadInput[] = [];
+  const canonicalDecisions: HeadDispatchInput[] = [];
   const held = '[@alpha](participant:pet:alpha) Hold Head judgment through close.';
   const factoryCalls: number[] = [];
   const decisionClients: Array<{ body: string; client: number }> = [];
-  const replyClients: number[] = [];
   let resolutionCount = 0;
   let heldSignal: AbortSignal | undefined;
   let releaseHeld!: () => void;
@@ -59,20 +57,25 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     factoryCalls.push(client);
     return {
       withStructuredOutput: (schema: DecisionSchema, options: { name: string; method: string; includeRaw: boolean }) => {
-        assert.ok(['pet_head_relevance', 'pet_head_idle'].includes(options.name));
+        assert.ok(['pet_head_relevance', 'pet_head_dispatch'].includes(options.name));
         assert.equal(options.method, 'jsonMode');
         assert.equal(options.includeRaw, true);
         return {
           invoke: async (messages: Messages, { signal }: { signal: AbortSignal }) => {
-            const input = JSON.parse(messages[1]![1]) as HeadInput;
+            const input = JSON.parse(messages[1]![1]) as HeadDispatchInput;
             const { pet, message, addressed } = input;
             if (options.name === 'pet_head_relevance' || addressed) decisions[pet.petId]!.push(message.body);
             decisionClients.push({ body: message.body, client });
             if (addressed) canonicalDecisions.push(input);
             if (message.body === held) { heldSignal = signal; await holdJudgment; }
-            if (options.name === 'pet_head_idle' && message.body === becameBusy) duringDecision?.();
+            if (options.name === 'pet_head_dispatch' && message.body === becameBusy) duringDecision?.();
             const dispatch = [startA, held, ...independent].includes(message.body);
-            const reply = message.body === direct ? 'Yes, I am.' : (message.body === progress || message.body === mixed) ? 'I cannot verify the current status.' : message.body === held ? 'This reply is too late.' : independent.includes(message.body) ? 'I see the request.' : '';
+            const state = input.tasks?.find(task => task.messageId === message.replyTo)?.status;
+            const statusReply = state === 'running' ? 'A is still running.' : state === 'completed' ? 'A completed.' :
+              state === 'queued' ? 'A is queued.' : 'I cannot verify the current status.';
+            const reply = message.body === direct ? 'Yes, I am.' :
+              [progress, mixed, expires, alreadyBusy].includes(message.body) ? statusReply :
+              message.body === held ? 'This reply is too late.' : independent.includes(message.body) ? 'I see the request.' : '';
             const parsed = options.name === 'pet_head_relevance'
               ? { relevant: [startA, mixed, held, progress, direct].includes(message.body) }
               : { shouldDispatch: dispatch, reply: reply || null };
@@ -81,12 +84,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
           },
         };
       },
-      invoke: async (messages: Messages) => {
-        const input = JSON.parse(messages[1]![1]);
-        composeInputs.push(input);
-        replyClients.push(client);
-        return new AIMessage(input.evidence.status === 'running' ? 'A is still running.' : 'I cannot verify the current status.');
-      },
+      invoke: async () => assert.fail('No second-stage composition call.'),
     } as unknown as ReturnType<NonNullable<StudioModelEndpoint['createChatModel']>>;
   };
   const scriptedModels: StudioPlugin = {
@@ -266,12 +264,12 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const lifecycle = (type: string, extra: object = {}) => studio.notify({
       source: 'resident-pet', topic: 'alpha', type: `dispatch.${type}`, occurredAt: new Date().toISOString(),
       payload: { invocationId: a.dispatchId, petId: 'alpha', sessionId: a.session!.id, scope: a.scope,
-        requestId: 'opaque-live-request', ...extra },
+        requestId: 'opaque-live-request', origin: a.origin, ...extra },
     });
     lifecycle('running');
     const liveSignal = new AbortController().signal;
-    assert.equal(await channel.head.readProgressSession(ownerChannelId, 'alpha', 'wrong-session', liveSignal, () => true), undefined);
-    await assert.rejects(channel.head.readProgressSession(owners.beta!, 'alpha', a.session.id, liveSignal, () => true), {
+    assert.equal(await channel.head.readSessionPlan(ownerChannelId, 'alpha', 'wrong-session', liveSignal, () => true), undefined);
+    await assert.rejects(channel.head.readSessionPlan(owners.beta!, 'alpha', a.session.id, liveSignal, () => true), {
       message: `pet:alpha is not a member of Channel "${owners.beta}".`,
     });
     assert.equal(sessionReads.length, 0, 'a foreign Session or Channel must not be read');
@@ -279,7 +277,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     const directWhileBusy = await post(direct);
     await waitFor(() => handled.includes(elsewhere.messageId) && !!replyFor(directWhileBusy.messageId));
     assert.equal(replyFor(elsewhere.messageId), undefined, 'declining a message is silent even while A is active');
-    assert.equal(replyFor(directWhileBusy.messageId)?.body, 'A is still running.');
+    assert.equal(replyFor(directWhileBusy.messageId)?.body, 'Yes, I am.');
     assert.equal(sessionReads.length, 1, 'the relevant busy question samples A; irrelevant text does not');
     assert.equal(admissions.length, 1);
     const check = await post(progress, sourceA.messageId);
@@ -292,21 +290,17 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     assert.equal(replyFor(both.messageId)?.body, 'A is still running.');
     assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id], 'mixed asks still sample only A once each');
     assert.deepEqual(canonicalDecisions.map(input => input.message.messageId), [directQuestion, directWhileBusy, check, both].map(message => message.messageId));
-    assert.equal(composeInputs.length, 3);
     assert.equal(resolutionCount, 2, 'each active Head resolves only one client');
     assert.equal(factoryCalls.length, 2);
     const alphaClient = decisionClients.find(turn => turn.body === startA)!.client;
-    assert.deepEqual(replyClients, [alphaClient, alphaClient, alphaClient], 'unbound composition reuses the deciding client');
-    assert.deepEqual(composeInputs, [directWhileBusy, check, both].map(({ messageId, channelId, sequence, author, body, replyTo, mentions }) => ({
-      message: { messageId, channelId, sequence, author, body, ...(replyTo ? { replyTo } : {}), mentions },
-      evidence: { status: 'running', plan: [
+    assert.deepEqual(canonicalDecisions.slice(1).map(input => input.tasks), [directWhileBusy, check, both].map(() => [{
+      messageId: sourceA.messageId, status: 'running', plan: [
         { status: 'completed', description: 'Gather inputs.' },
         { status: 'active', description: 'Check the report.' },
         { status: 'pending', description: 'Verify the figures.' },
         { status: 'pending', description: recordedPublicTask },
-      ] },
-      source: { messageId: sourceA.messageId, body: sourceA.body },
-    })));
+      ],
+    }]));
     for (const input of canonicalDecisions.slice(1)) {
       assert.doesNotMatch(JSON.stringify(input), /dispatchId|sessionId|queuedDispatches|opaque-live-request/);
     }
@@ -315,30 +309,12 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     assert.equal(activeDispatch.dispatchId, a.dispatchId);
     const activeA = activeDispatch;
     const activeB = { ...activeA, dispatchId: 'synthetic-other-dispatch', origin: { namespace: 'channel', id: both.messageId } };
-    const realReply = channel.head.reply;
-    let staleAtWrite = false;
-    channel.head.reply = async (...args) => {
-      staleAtWrite = true;
-      activeDispatch = activeB;
-      await realReply(...args);
-    };
-    try {
-      const raceAtWrite = await post(progress, sourceA.messageId);
-      const fence = (await post('alpha write fence')).body;
-      await waitFor(() => decisions.alpha!.includes(fence));
-      assert.equal(staleAtWrite, true);
-      assert.equal(replyFor(raceAtWrite.messageId), undefined, 'a stale result cannot be committed after the run changes');
-      assert.equal(admissions.length, 1);
-    } finally {
-      channel.head.reply = realReply;
-      activeDispatch = activeA;
-    }
     switchDuringRead = activeB;
     const race = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(race.messageId));
     assert.equal(replyFor(race.messageId)?.body, 'I cannot verify the current status.');
-    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id, a.session.id], 'each race reads once and never retries on B');
-    assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'unavailable' });
+    assert.deepEqual(sessionReads, [a.session.id, a.session.id, a.session.id, a.session.id], 'each race reads once and never retries on B');
+    assert.ok(!canonicalDecisions.at(-1)!.tasks?.some(task => task.messageId === sourceA.messageId));
     assert.equal(admissions.length, 1);
 
     switchDuringRead = undefined;
@@ -346,7 +322,7 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     activeDispatch = activeA;
     const duringReview = await post(progress, sourceA.messageId);
     await waitFor(() => !!replyFor(duringReview.messageId));
-    assert.deepEqual((composeInputs.at(-1) as { evidence: unknown }).evidence, { status: 'running' },
+    assert.deepEqual(canonicalDecisions.at(-1)!.tasks, [{ messageId: sourceA.messageId, status: 'running' }],
       'pending review may not expose the recorded plan');
     assert.equal(admissions.length, 1);
 
@@ -374,6 +350,10 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
     assert.equal(decisions.alpha!.length, beforeOfficial + 1, 'resident events or own output must not start another judgment');
     assert.equal(published.filter(({ message }) => message.body === finalA).length, 1, 'official result uses only the existing Channel bridge');
     assert.equal(admissions.length, 1);
+    const completedCheck = await post(progress, sourceA.messageId);
+    await waitFor(() => !!replyFor(completedCheck.messageId));
+    assert.equal(replyFor(completedCheck.messageId)?.body, 'A completed.');
+    assert.deepEqual(canonicalDecisions.at(-1)!.tasks, [{ messageId: sourceA.messageId, status: 'completed' }]);
 
     // Real Host coordinator, scripted model, and controlled execution settlement.
     const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
@@ -388,15 +368,19 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       seen.push(request);
       let wait;
       while ((wait = coordinator.dispatchWriteBarrier(request.signal))) await wait;
-      coordinator.submitDispatch(async () => { started.push(request.origin!.id); });
+      coordinator.submitDispatch(async () => { started.push(request.origin!.id); }, undefined, {
+        dispatchId: request.dispatchId!, origin: request.origin, scope: request.scope,
+        sessionId: request.session?.id, enqueuedAt: new Date().toISOString(),
+      });
     };
     const timeout = new AbortController();
     const normalTimeout = AbortSignal.timeout.bind(AbortSignal);
     const clock = t.mock.method(AbortSignal, 'timeout', (ms: number) => ms === 30_000 ? timeout.signal : normalTimeout(ms));
     try {
+      const blocker = { ...activeA, dispatchId: 'controlled-blocker', origin: undefined };
       duringDecision = () => {
-        coordinator.submitDispatch(async () => { await heldA; }, undefined, activeA, { stop: () => true });
-        assert.equal(coordinator.getQueueSnapshot().activeDispatch?.dispatchId, activeA.dispatchId);
+        coordinator.submitDispatch(async () => { await heldA; }, undefined, blocker, { stop: () => true });
+        assert.equal(coordinator.getQueueSnapshot().activeDispatch?.dispatchId, blocker.dispatchId);
       };
       const raceTask = await post(becameBusy);
       await waitFor(() => !!replyFor(raceTask.messageId));
@@ -406,25 +390,27 @@ test('production Head stays scoped to its Channel, samples only live runs, and s
       assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1, 'Host queues new work if the slot became busy');
       assert.deepEqual(started, []);
 
-      lifecycle('running');
+      const queueCheck = await post(progress, raceTask.messageId);
+      await waitFor(() => !!replyFor(queueCheck.messageId));
+      assert.equal(replyFor(queueCheck.messageId)?.body, 'A is queued.');
       const readsBeforeNewWork = sessionReads.length;
-      const busyTask = await post(alreadyBusy);
+      const busyTask = await post(alreadyBusy, sourceA.messageId);
       await waitFor(() => !!replyFor(busyTask.messageId));
+      assert.equal(replyFor(busyTask.messageId)?.body, 'A completed.');
       assert.equal(seen[1]?.origin?.id, busyTask.messageId);
       assert.equal(seen[1]?.session?.id, a.session.id);
-      assert.equal(sessionReads.length, readsBeforeNewWork, 'new work does not depend on progress evidence');
+      assert.ok(sessionReads.length <= readsBeforeNewWork + 1, 'at most one Session sample before the decision');
       assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 2);
 
-      assert.equal(coordinator.stopDispatch(activeA.dispatchId), true);
-      lifecycle('interrupted');
-      const timedOut = await post(expires);
+      assert.equal(coordinator.stopDispatch(blocker.dispatchId), true);
+      const timedOut = await post(expires, sourceA.messageId);
       await waitFor(() => seen.length === 3);
       assert.equal(seen[2]?.delivery, undefined);
       assert.equal(replyFor(timedOut.messageId), undefined);
       timeout.abort(new DOMException('Controlled timeout', 'TimeoutError'));
       await waitFor(() => handled.includes(timedOut.messageId));
       assert.match(headFailures.get(timedOut.messageId) ?? '', /dispatch timed out/);
-      assert.equal(replyFor(timedOut.messageId), undefined);
+      assert.match(replyFor(timedOut.messageId)?.body ?? '', /^A completed\.[\s\S]*本次没有入队/);
       clock.mock.restore();
 
       const waiting = await post(afterStop);

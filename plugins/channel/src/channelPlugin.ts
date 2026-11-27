@@ -64,10 +64,10 @@ export type ChannelPlugin = StudioPlugin & {
 
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
-  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
+  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }) => Promise<void>;
   dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string) => Promise<void>;
   readBoundSessionId: (channelId: string, petId: string) => Promise<string | undefined>;
-  readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
+  readSessionPlan: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
     => Promise<{ requestId: string; recordedPlan?: AgentPlan } | undefined>;
 };
 
@@ -247,7 +247,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
-    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {
+    readSessionPlan: async (channelId, petId, sessionId, signal, isCurrent) => {
       const service = channelService();
       const studio = host();
       const authorized = async () => {

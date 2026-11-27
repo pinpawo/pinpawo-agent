@@ -626,7 +626,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       },
     },
   };
-  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown; stage: 'relevance' | 'idle' }> = [];
+  const calls: Array<{ url: string; model: string; petId: string; thinking?: unknown; stage: 'relevance' | 'dispatch' }> = [];
   const tracingKeys = ['LANGSMITH_TRACING', 'LANGSMITH_TRACING_V2', 'LANGCHAIN_TRACING', 'LANGCHAIN_TRACING_V2'];
   const tracing = tracingKeys.map(key => process.env[key]);
   for (const key of tracingKeys) process.env[key] = 'false';
@@ -653,7 +653,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       assert.equal(request.tool_choice, undefined);
       schema = JSON.parse(system.content.split('\n').at(-1));
     }
-    const stage = 'relevant' in schema.properties ? 'relevance' : 'idle';
+    const stage = 'relevant' in schema.properties ? 'relevance' : 'dispatch';
     const name = `pet_head_${stage}`;
     assert.deepEqual(Object.keys(schema.properties), stage === 'relevance' ? ['relevant'] : ['shouldDispatch', 'reply']);
     assert.deepEqual(schema.required, Object.keys(schema.properties));
@@ -719,7 +719,7 @@ test('buildStudio connects each Pet Head to its configured model profile and the
       { petId: 'official', model: 'deepseek-flash', url: 'https://api.deepseek.com/v1/chat/completions', thinking: undefined },
       { petId: 'planner', model: 'deepseek-flash', url: 'https://specialist.example.test/v1/chat/completions', thinking: undefined },
       { petId: 'writer', model: 'default-model', url: 'https://default.example.test/v1/chat/completions', thinking: undefined },
-    ].flatMap(call => ([{ ...call, stage: 'relevance' }, { ...call, stage: 'idle' }])));
+    ].flatMap(call => ([{ ...call, stage: 'relevance' }, { ...call, stage: 'dispatch' }])));
     assert.deepEqual(replies.map(({ petId, messageId }) => ({ petId, messageId })).sort((a, b) => a.petId.localeCompare(b.petId)), [
       { petId: 'official', messageId: 'message-1' },
       { petId: 'planner', messageId: 'message-1' },

@@ -320,7 +320,7 @@ export class ChannelService {
    * With an externalRef already saved for this author, the earlier message
    * is returned and `created` is false.
    */
-  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; headReplyTo?: string; signal?: AbortSignal; preventPetMentions?: boolean; assertCurrent?: () => void } = {}): Promise<{
+  async postMessage(author: MemberRef, channelId: string, input: unknown, options: { externalRef?: string; headReplyTo?: string; signal?: AbortSignal; preventPetMentions?: boolean } = {}): Promise<{
     message: ChannelMessage; created: boolean; mentionError?: string;
   }> {
     const value = channelMessageSchema.parse(input);
@@ -359,7 +359,6 @@ export class ChannelService {
       // A Head may be stopped while membership or context lookups are pending.
       // Do not begin its write after cancellation.
       options.signal?.throwIfAborted();
-      options.assertCurrent?.();
       const messageId = randomUUID();
       const message = await store.appendMessage({
         messageId, channelId: channel.channelId, author: trustedAuthor, occurredAt: new Date().toISOString(),

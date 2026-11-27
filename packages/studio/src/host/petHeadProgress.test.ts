@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
-import { observeHeadRun } from './petHead';
-import { readHeadProgress } from './petHeadProgress';
+import { observeHeadDispatch, readHeadProgress } from './petHeadProgress';
 
 const active = { dispatchId: 'dispatch-a', sessionId: 'shared-session', messageId: 'question-a' };
 const run = { invocationId: active.dispatchId, sessionId: active.sessionId, requestId: 'run-a' };
@@ -13,33 +12,6 @@ function event(type: string, overrides: Record<string, unknown> = {}): StudioEve
     payload: { petId: 'pet-a', invocationId: active.dispatchId, sessionId: active.sessionId, requestId: run.requestId,
       scope: { namespace: 'channel', id: 'team' }, request: 'raw original request', ...overrides } };
 }
-test('Head observes only its instance topic and exact scope, with no payload retention or replay', async () => {
-  let listener: StudioEventHandler | undefined;
-  let filter: StudioEventSubscriptionFilter | undefined;
-  const observation = observeHeadRun((handler, selected) => {
-    listener = handler; filter = selected; return () => { listener = undefined; };
-  }, 'pet-a', 'team', signal);
-  assert.deepEqual(filter, { source: 'resident-pet', topic: 'pet-a' });
-  await listener?.({ ...event('running'), topic: 'other' });
-  await listener?.({ ...event('running'), source: 'channel' });
-  await listener?.(event('running', { petId: 'other' }));
-  await listener?.(event('running', { scope: { namespace: 'channel', id: 'other' } }));
-  await listener?.(event('queued'));
-  assert.equal(observation.read(active), undefined);
-  await listener?.(event('running'));
-  assert.deepEqual(observation.read(active), run);
-  assert.equal(observation.read({ ...active, sessionId: 'other' }), undefined);
-  await listener?.(event('message', { message: { type: 'message.completed', messageId: 'public', text: 'do not retain result text' } }));
-  await listener?.(event('completed', { requestId: 'old' }));
-  assert.deepEqual(observation.read(active), run);
-  await listener?.(event('completed', { reply: 'never republish' }));
-  assert.equal(observation.read(active), undefined);
-  await listener?.(event('running'));
-  observation.close();
-  assert.equal(listener, undefined);
-  assert.equal(observation.read(active), undefined);
-});
-
 test('one exact Session status sample yields only running', async () => {
   let reads = 0;
   const result = await readHeadProgress({ run, signal, isCurrent: () => true,
@@ -76,4 +48,49 @@ test('no active status, changed run, abort and read failure yield unavailable wi
   }
   assert.deepEqual(await readHeadProgress({ run, signal, isCurrent: () => false,
     readSessionRun: async () => assert.fail('no Session read for stale work') }), { status: 'unavailable' });
+});
+
+test('readSession combines scoped coordinator facts and one Session Plan, not raw events', async () => {
+  let listener: StudioEventHandler | undefined;
+  let filter: StudioEventSubscriptionFilter | undefined;
+  const a = { ...active, enqueuedAt: '2026-11-20T01:01:00Z',
+    scope: { namespace: 'channel', id: 'team' }, origin: { namespace: 'channel', id: active.messageId } };
+  const b = { ...a, dispatchId: 'dispatch-b', origin: { ...a.origin, id: 'question-b' } };
+  const other = { ...a, dispatchId: 'other', scope: { ...a.scope, id: 'other' } };
+  let current: typeof a | undefined = a;
+  const observer = observeHeadDispatch({
+    petId: 'pet-a', channelId: 'team',
+    subscribe: (handler, selected) => {
+      listener = handler; filter = selected;
+      return () => { listener = undefined; };
+    },
+    snapshot: () => ({ state: current ? 'busy' : 'open', activeOperation: current ? 'dispatch' : null,
+      queuedConversations: 0, queuedDispatches: 2, entries: [b, other], activeDispatch: current }),
+  }, signal);
+  const sources = new Set(['question-a', 'question-b']);
+  const readSession = () => observer.readSession(active.sessionId, sources, async (id) => {
+    assert.equal(id, active.sessionId);
+    return { requestId: run.requestId,
+      recordedPlan: { items: [{ id: 'internal', capability: 'internal', task: 'Latest recorded step', status: 'completed' }] } };
+  });
+  assert.deepEqual(filter, { source: 'resident-pet', topic: 'pet-a' });
+  await listener?.({ ...event('running'), topic: 'other' });
+  assert.ok((await readSession()).every(fact => fact.plan === undefined));
+  await listener?.(event('running', { origin: a.origin }));
+  await listener?.(event('completed', { requestId: 'old', origin: a.origin }));
+  assert.deepEqual(await readSession(), [
+    { messageId: 'question-b', status: 'queued' },
+    { messageId: 'question-a', status: 'running', plan: [{ status: 'completed', description: 'Latest recorded step' }] },
+  ]);
+  current = undefined;
+  assert.deepEqual(await readSession(), [{ messageId: 'question-b', status: 'queued' }], 'queue absence never means completion');
+  await listener?.(event('waiting', { origin: a.origin }));
+  assert.equal((await readSession()).find(fact => fact.messageId === 'question-a')?.status, 'waiting');
+  current = a; // The Coordinator can still hold its slot during final settlement.
+  await listener?.(event('completed', { reply: 'contents not retained' }));
+  assert.deepEqual(await readSession(), [
+    { messageId: 'question-a', status: 'completed' }, { messageId: 'question-b', status: 'queued' },
+  ]);
+  observer.close();
+  assert.equal(listener, undefined);
 });

@@ -2,8 +2,8 @@ import { AIMessage } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
 import type { StudioModelEndpoint } from '../studioContract';
-import type { HeadIdleResult, HeadInput, HeadRelevance, HeadReplyInput } from './petHead';
-import { headIdleMessages, headRelevanceMessages, headReplyMessages } from './petHeadPrompts';
+import type { HeadDispatchDecision, HeadDispatchInput, HeadInput, HeadRelevance } from './petHead';
+import { headDispatchMessages, headRelevanceMessages } from './petHeadPrompts';
 
 export type HeadRelevanceDiagnostic = {
   petId: string; channelId: string; messageId: string;
@@ -11,7 +11,7 @@ export type HeadRelevanceDiagnostic = {
 };
 
 const relevanceSchema = z.object({ relevant: z.boolean() }).strict();
-const idleSchema = z.object({ shouldDispatch: z.boolean(), reply: z.union([z.string(), z.null()]) }).strict();
+const dispatchSchema = z.object({ shouldDispatch: z.boolean(), reply: z.union([z.string(), z.null()]) }).strict();
 
 class StructuredFailure extends Error {
   constructor(readonly code: string) { super('Invalid Pet Head model output.'); }
@@ -38,7 +38,7 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     return cached = { method, model };
   }
 
-  async function runStructured<Schema extends typeof relevanceSchema | typeof idleSchema>(
+  async function runStructured<Schema extends typeof relevanceSchema | typeof dispatchSchema>(
     name: string,
     schema: Schema,
     messages: (format: string) => Array<[string, string]>,
@@ -87,22 +87,13 @@ export function createHeadModel(resolve: () => StudioModelEndpoint, options: { o
     }
   }
 
-  async function handleIdle(input: HeadInput, signal: AbortSignal): Promise<HeadIdleResult> {
+  async function decideDispatch(input: HeadDispatchInput, signal: AbortSignal): Promise<HeadDispatchDecision> {
     try {
-      return await runStructured('pet_head_idle', idleSchema, format => headIdleMessages(input, format), signal);
+      return await runStructured('pet_head_dispatch', dispatchSchema, format => headDispatchMessages(input, format), signal);
     } catch {
-      throw new Error(signal.aborted ? 'Pet Head idle handler aborted.' : 'Invalid Pet Head idle result.');
+      throw new Error(signal.aborted ? 'Pet Head dispatch judgment aborted.' : 'Invalid Pet Head dispatch judgment.');
     }
   }
 
-  /** Write only public reply text. Never bind tools, request another judgment, or retry. */
-  async function composeReply(input: HeadReplyInput, signal: AbortSignal): Promise<string> {
-    signal.throwIfAborted();
-    const reply = await client().model.invoke(headReplyMessages(input), { signal });
-    signal.throwIfAborted();
-    if (failedFinish(reply)) throw new Error('Pet Head progress reply did not finish.');
-    return reply.text.trim();
-  }
-
-  return { assessRelevance, handleIdle, composeReply };
+  return { assessRelevance, decideDispatch };
 }

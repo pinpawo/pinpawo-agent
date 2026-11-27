@@ -313,39 +313,24 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-An idle slot or a registered Channel Session uses
-`handleIdle`, whose strict output is
-`{ shouldDispatch: boolean, reply: string | null }`. It interprets the canonical
-source's actual meaning: a direct answer, independent work, acknowledgement plus
-work, or neither. A bare mention does not by itself require work or a reply.
-A live run does not block submission of an independent assignment. If no work
-is selected and a reply is needed in a non-idle slot, Head uses factual
-composition or silence rather than publishing an unverified reply.
+After relevance, readSession combines the owning Pet's Dispatch Coordinator
+snapshot and observed lifecycle with the authorized Agent Session's Plan.
+It describes same-Channel tasks with visible source messages: queued, running,
+waiting, or an observed terminal outcome. Queue absence is not completion.
+The live observer keeps up to ten recent outcomes for the current activation;
+it is not permanent task history. The Head does not read Session message bodies,
+tool output or sub-agent state. A recorded Plan can predate this execution.
+Its completed items do not prove the entire task completed.
 
-After relevance, the Head can use the owning Pet's live queue slot and run event
-to identify an active ordinary dispatch for a reply. This is not a submission
-condition. To check progress, it needs its
-same-Channel public source to predate the inquiry and match any explicit
-reference. After verifying membership and the exact Session binding, the
-Channel reads one snapshot. The reply model receives the sampled status
-(running or unavailable). From that same snapshot, the Head passes only each
-recorded plan item's status (completed, active or pending) and unchanged task
-description to the reply model. The Pet Agent must keep sensitive details out of
-plan descriptions; the Head does not redact or truncate them. An active item may
-be awaiting review; a completed item does not mean the whole task is complete.
-The recorded plan may predate this execution. Without a plan, the reply reports
-only the checked status. Attachment contents, raw Session messages, and tool
-output are not used as progress evidence. Reviewed work resuming outside the
-ordinary dispatch slot is not sampled. Asking for progress alone
-never dispatches. A registered Session submits independently selected new work
-through ordinary Dispatch. Host, not Head, owns admission, FIFO and Stop waits.
-No Head path interrupts or changes the active execution.
-
-For registered Sessions, a submission-related reply is held until admission;
-no reply is published for a timed-out submission. First-time Session registration
-keeps the idle-only path and may acknowledge before attempting admission.
-Cancellation fences remaining actions. A reply does not prove completion. The Head never executes a model tool;
-explicit scheduler, trigger and Host dispatch remain available.
+decideDispatch receives these facts and the original Channel context in one
+model call, returning { shouldDispatch: boolean, reply: string | null }.
+Status reporting and independent new work can coexist; a bare mention or
+progress question alone does not require execution. The runtime submits the
+original message. Host owns admission, FIFO and Stop waits; the Head does not
+interrupt or change existing work. First-time Session registration retains
+Host's idle-only admission. During the admission wait the Head stays silent;
+a failed submission does not discard a separate factual reply and is not
+reported as admitted. Cancellation fences remaining actions.
 
 Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
 internal Head-write option that always checks active membership and the actual
@@ -358,7 +343,7 @@ ignores acknowledgement-only chatter while allowing useful peer contributions.
 
 Each structured stage uses the resolved profile's `structuredOutputMethod`.
 Function-calling profiles must return one valid named declaration:
-`pet_head_relevance` or `pet_head_idle`, each with its own strict schema. Invalid or failed decisions do not produce a reply
+`pet_head_relevance` or `pet_head_dispatch`, each with its own strict schema. Invalid or failed decisions do not produce a reply
 or dispatch. The Head does not repair output, retry, or switch formats.
 
 Safe `pet.head.relevance` diagnostics identify Pet, Channel, source message,

@@ -69,7 +69,7 @@ async function fixture() {
             : petId === 'target' && source === queuedRequest ? 'QUEUED' : '';
           const action = route ? 'dispatch' : 'ignore';
           const stage = headFixtureStage(input);
-          if (stage === 'idle' || !route) heads.push({ petId, messageId: head.message.messageId, action, addressed: head.addressed });
+          if (stage === 'dispatch' || !route) heads.push({ petId, messageId: head.message.messageId, action, addressed: head.addressed });
           content = JSON.stringify(stage === 'relevance' ? { relevant: !!route } : { shouldDispatch: !!route, reply: null });
         } else if (composition) {
           assert.deepEqual(names, [], 'reply composition cannot expose scheduling or execution tools');
@@ -187,7 +187,7 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       assert.deepEqual(queued.mentions.map(mention => mention.participantId), ['pet:target']);
       assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId),
         [{ petId: 'target', messageId: queued.messageId, action: 'dispatch', addressed: true }], 'mention skips relevance, not the work decision');
-      assert.deepEqual(sampled, [], 'independent work does not read the running Session for progress');
+      assert.deepEqual(sampled, [binding!.sessionId], 'second stage samples the bound Session once, without controlling admission');
       assert.deepEqual(model.composed, [], 'independent work does not compose a progress reply');
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().queuedExecutions, 0);

@@ -143,7 +143,7 @@ async function fixture() {
 }
 
 for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor of ['human', 'peer'] as const) {
-  test(`busy ${queuedAuthor} mention preserves active ${activeAuthor} subject without admitting more work`, { timeout: 120_000 }, async () => {
+  test(`busy ${queuedAuthor} mention queues independent work without interrupting active ${activeAuthor} work`, { timeout: 120_000 }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'studio-queued-peer-'));
     const model = await fixture();
     const channel = createChannelPlugin({ httpRoute: false });
@@ -180,36 +180,37 @@ for (const activeAuthor of ['human', 'peer'] as const) for (const queuedAuthor o
       const original = (await messages()).find(m => m.body === (activeAuthor === 'human' ? 'ACTIVE_HUMAN' : 'ACTIVE_PEER'))!;
       assert.deepEqual(sampled, [], 'idle admission does not read Session contents');
       await channel.service.postMessage(human, channelId, { body: queuedAuthor === 'human' ? queuedRequest : 'EMIT_QUEUED_PEER', mentions: [] });
-      await until(() => model.composed.length === 1);
+      await until(() => target.resident.dispatch.getQueueSnapshot().queuedDispatches === 1);
       const queued = (await messages()).find(m => m.body === queuedRequest)!;
       assert.ok(queued);
       assert.equal(queued.author.kind, queuedAuthor === 'human' ? 'human' : 'pet');
       assert.deepEqual(queued.mentions.map(mention => mention.participantId), ['pet:target']);
-      assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId), [], 'canonical mention establishes relevance without asking the idle admission model');
-      assert.deepEqual(sampled, [binding!.sessionId], 'busy work samples only the target’s exact Session once');
-      assert.deepEqual(model.composed, [queued.messageId], 'text-only follow-up has the same path for human and peer mentions');
+      assert.deepEqual(model.heads.filter(turn => turn.petId === 'target' && turn.messageId === queued.messageId),
+        [{ petId: 'target', messageId: queued.messageId, action: 'dispatch', addressed: true }], 'mention skips relevance, not the work decision');
+      assert.deepEqual(sampled, [], 'independent work does not read the running Session for progress');
+      assert.deepEqual(model.composed, [], 'independent work does not compose a progress reply');
       assert.equal(model.state().aborted, false);
       assert.equal(model.state().queuedExecutions, 0);
       assert.equal(lifecycle.filter(e => e.state === 'running').length, 1);
       model.release();
-      await until(() => lifecycle.filter(e => e.state === 'completed').length === 1);
-      await until(async () => (await messages()).filter(m => m.author.id === 'target').length === 1);
+      await until(() => lifecycle.filter(e => e.state === 'completed').length === 2);
+      await until(async () => (await messages()).filter(m => m.author.id === 'target').length === 2);
       const final = await messages();
       const targetReplies = final.filter(m => m.author.kind === 'pet' && m.author.id === 'target');
-      assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE']);
+      assert.deepEqual(targetReplies.map(m => m.body), ['RESULT_ACTIVE', 'RESULT_QUEUED']);
       await until(() => targetReplies.every(m => model.heads.some(h => h.petId === 'origin' && h.messageId === m.messageId && h.action === 'ignore')));
       assert.equal(model.state().aborted, false);
-      assert.equal(model.state().parentResumes, 1, 'Original parent receives its delegated result without a second execution');
-      assert.equal(model.state().queuedExecutions, 0, 'busy follow-up is never admitted');
+      assert.equal(model.state().parentResumes, 1, 'Original parent receives its own delegated result');
+      assert.equal(model.state().queuedExecutions, 1, 'queued follow-up runs exactly once after active work settles');
       assert.equal(lifecycle.some(e => ['failed', 'interrupted', 'cancelled'].includes(e.state)), false);
-      assert.equal(lifecycle.filter(e => e.state === 'message').length, 1);
+      assert.equal(lifecycle.filter(e => e.state === 'message').length, 2);
       assert.ok(lifecycle.filter(e => e.state === 'completed').every(e => e.sessionId === binding!.sessionId));
       assert.equal((await channel.service.getSession(channelId, 'target'))?.sessionId, binding!.sessionId);
       const snapshot = await built.residentPets.get('target')!.sessions.snapshot(binding!.sessionId);
       assert.equal(snapshot.session.activeRun, null);
       const userMessages = snapshot.session.timeline.filter(e => e.type === 'message' && e.role === 'user');
       assert.ok(userMessages.some(e => e.type === 'message' && e.text.includes(original.messageId)));
-      assert.equal(userMessages.some(e => e.type === 'message' && e.text.includes(queued.messageId)), false, 'busy follow-up does not enter the execution Session');
+      assert.equal(userMessages.filter(e => e.type === 'message' && e.text.includes(queued.messageId)).length, 1, 'the original queued message enters the same Session exactly once');
       assert.deepEqual(model.errors, []);
     } finally {
       model.release();

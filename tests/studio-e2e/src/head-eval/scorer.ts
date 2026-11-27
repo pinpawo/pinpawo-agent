@@ -7,7 +7,7 @@ export function score(test: EvalCase, value?: Observation, error?: string): Scor
   if (!valid || !value) return { valid: false, relevancePass: false, routePass: false, pass: false, error: error ?? 'invalid-observation' };
   const route: Route = value.dispatched ? (value.hasReply ? 'combined' : 'dispatch-only') : (value.hasReply ? 'reply-only' : 'silent');
   const relevancePass = test.relevance.includes(value.relevant);
-  const routePass = test.routes.includes(route) && (test.state === 'idle' || !value.dispatched);
+  const routePass = test.routes.includes(route);
   return { valid: true, route, relevancePass, routePass, pass: relevancePass && routePass };
 }
 export function summarize(rows: Array<{ kind: EvalCase['kind']; score: Score }>) {

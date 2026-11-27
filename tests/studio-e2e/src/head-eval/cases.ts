@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { HeadInput, HeadMessage } from '../../../../packages/studio/src/host/petHead';
-export const fixtureVersion = 'head-relevance-idle-v1';
+export const fixtureVersion = 'head-relevance-dispatch-v2';
 export type Route = 'silent' | 'reply-only' | 'dispatch-only' | 'combined';
 export type EvalCase = { id: string; kind: 'contrast' | 'organic'; input: HeadInput; routes: Route[]; relevance: boolean[]; state: 'idle' | 'busy' | 'unknown' };
 const message = (id: string, body: string, kind: 'human' | 'pet' = 'human'): HeadMessage => ({
@@ -50,9 +50,9 @@ const fixtures: Array<{ id: string; kind: EvalCase['kind']; input: HeadInput; ro
   { id: 'no-at-followup', kind: 'contrast', input: { ...base('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), message: { ...message('no-at-followup', '请继续你刚才的核对，把差异按月份归类。'), replyTo: 'prior-answer' }, context: { messages: [{ ...message('prior-answer', '我已核对总额，下一步可以逐月归类。', 'pet'), author: { kind: 'pet', id: 'analyst' }, sequence: 1 }] } }, routes: ['dispatch-only', 'combined'] },
   { id: 'progress-only', kind: 'contrast', input: queued('progress-only', '当前收入核对进行到哪了？', 'human'), routes: ['reply-only'] },
   { id: 'conditional-work', kind: 'contrast', input: queued('conditional-work', '只有当前收入核对还没完成，你才去整理下周指标清单；不需要回复。', 'human'), routes: ['silent'] },
-  { id: 'conditional-and-independent-work', kind: 'contrast', input: queued('conditional-and-independent-work', '只有当前收入核对还没完成，才去整理下周指标清单。另外，不论核对结果如何，请独立对比四月的两张报表。', 'human'), routes: ['reply-only'] },
-  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？另外帮我整理下周的指标清单。', 'human'), routes: ['reply-only'] },
-  { id: 'busy-independent-work', kind: 'contrast', input: queued('busy-independent-work', '请另外独立整理下周的指标清单。', 'human'), routes: ['reply-only'] },
+  { id: 'conditional-and-independent-work', kind: 'contrast', input: queued('conditional-and-independent-work', '只有当前收入核对还没完成，才去整理下周指标清单。另外，不论核对结果如何，请独立对比四月的两张报表。', 'human'), routes: ['dispatch-only', 'combined'] },
+  { id: 'progress-and-addition', kind: 'contrast', input: queued('progress-and-addition', '当前收入核对进行到哪了？另外帮我整理下周的指标清单。', 'human'), routes: ['combined'] },
+  { id: 'busy-independent-work', kind: 'contrast', input: queued('busy-independent-work', '请另外独立整理下周的指标清单。', 'human'), routes: ['dispatch-only', 'combined'] },
   ...(['human', 'pet'] as const).flatMap(author => [
     { id: `queue-${author}`, kind: 'contrast' as const, input: queued(`queue-${author}`, '当前核对完成后，再整理下周的指标清单，不要打断当前工作。', author), routes: ['silent', 'reply-only'] as Route[] },
     { id: `unsupported-edit-${author}`, kind: 'contrast' as const, input: queued(`unsupported-edit-${author}`, '刚确认当前报告所用源表版本错误，请立即停止基于旧表的核对，先确认正确版本再继续，旧结论不能发布。', author), routes: ['silent', 'reply-only'] as Route[] },

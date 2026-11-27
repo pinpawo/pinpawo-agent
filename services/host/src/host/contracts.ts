@@ -94,6 +94,8 @@ export function readPetDispatchMessage(event: AgentRuntimeEvent): PetDispatchMes
  * execution handle: callers cannot cancel, resume, or read model output here.
  */
 export type PetDispatchLifecycleEvent = {
+  /** Public source identity for read-only correlation, not execution context. */
+  origin?: PetInvocationScope;
   dispatchId: string;
   request: string;
   state: PetDispatchLifecycleState;

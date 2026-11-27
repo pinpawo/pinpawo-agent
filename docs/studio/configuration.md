@@ -313,34 +313,24 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-Only a verified idle slot permits `handleIdle`, whose strict output is
-`{ shouldDispatch: boolean, reply: string | null }`. It interprets the canonical
-source's actual meaning: a direct answer, independent work, acknowledgement plus
-work, or neither. A bare mention does not by itself require work or a reply.
-Busy or unknown state uses factual composition or silence, never idle admission.
+After relevance, readSession combines the owning Pet's Dispatch Coordinator
+snapshot and observed lifecycle with the authorized Agent Session's Plan.
+It describes same-Channel tasks with visible source messages: queued, running,
+waiting, or an observed terminal outcome. Queue absence is not completion.
+The live observer keeps up to ten recent outcomes for the current activation;
+it is not permanent task history. The Head does not read Session message bodies,
+tool output or sub-agent state. A recorded Plan can predate this execution.
+Its completed items do not prove the entire task completed.
 
-After relevance, the Head uses the owning Pet's live queue slot and run event
-to identify an active ordinary dispatch. To check progress, it needs its
-same-Channel public source to predate the inquiry and match any explicit
-reference. After verifying membership and the exact Session binding, the
-Channel reads one snapshot. The reply model receives the sampled status
-(running or unavailable). From that same snapshot, the Head passes only each
-recorded plan item's status (completed, active or pending) and unchanged task
-description to the reply model. The Pet Agent must keep sensitive details out of
-plan descriptions; the Head does not redact or truncate them. An active item may
-be awaiting review; a completed item does not mean the whole task is complete.
-The recorded plan may predate this execution. Without a plan, the reply reports
-only the checked status. Attachment contents, raw Session messages, and tool
-output are not used as progress evidence. Reviewed work resuming outside the
-ordinary dispatch slot is not sampled. Asking for progress alone
-never dispatches. Busy or unknown state never admits an addition, even when it
-is independent work; it does not interrupt or change the active execution.
-
-Reply and execution are independent: failure of publication does not suppress
-an independent dispatch, and failure of dispatch does not roll back a committed
-reply. Cancellation fences remaining actions. An acknowledgement does not
-prove admission or completion. The Head never executes a model tool;
-explicit scheduler, trigger and Host dispatch remain available.
+decideDispatch receives these facts and the original Channel context in one
+model call, returning { shouldDispatch: boolean, reply: string | null }.
+Status reporting and independent new work can coexist; a bare mention or
+progress question alone does not require execution. The runtime submits the
+original message. Host owns admission, FIFO and Stop waits; the Head does not
+interrupt or change existing work. First-time Session registration retains
+Host's idle-only admission. During the admission wait the Head stays silent;
+a failed submission does not discard a separate factual reply and is not
+reported as admitted. Cancellation fences remaining actions.
 
 Direct Head replies deduplicate durably by Channel/Pet/trigger through a distinct
 internal Head-write option that always checks active membership and the actual
@@ -353,7 +343,7 @@ ignores acknowledgement-only chatter while allowing useful peer contributions.
 
 Each structured stage uses the resolved profile's `structuredOutputMethod`.
 Function-calling profiles must return one valid named declaration:
-`pet_head_relevance` or `pet_head_idle`, each with its own strict schema. Invalid or failed decisions do not produce a reply
+`pet_head_relevance` or `pet_head_dispatch`, each with its own strict schema. Invalid or failed decisions do not produce a reply
 or dispatch. The Head does not repair output, retry, or switch formats.
 
 Safe `pet.head.relevance` diagnostics identify Pet, Channel, source message,
@@ -479,24 +469,20 @@ For dispatch, gate, and event behavior, read the [Studio API](../reference/api/s
 ### Historical timing trial and current routing
 
 The earlier reply/action/intent/timing experiment is historical, not the current
-contract. The current contract separates relevance from semantic idle handling.
-Only a freshly verified idle slot permits admission. A busy/unknown slot permits
-factual composition or silence, not queued additions or model-requested preemption.
+contract. The current contract separates relevance from independent-work decisions
+and factual progress replies. Ordinary Dispatch owns admission for registered
+Sessions; Head does not request preemption.
 Explicit Stop and review retain their own existing interfaces. This does not add
 durable responsibility tracking, restart recovery or autonomous-loop guarantees.
 See [the operative mechanism and historical diagram link](../design/studio/pet-head-mechanism.md).
 
-### Official DeepSeek Head decision budget
+### Pet Head model settings
 
-Only Studio Head calls are tagged with the invocation-local `pet-head` purpose.
-For the official HTTPS `api.deepseek.com` OpenAI-compatible route and the
-`deepseek-flash` / `deepseek-v4-pro` models, this purpose sends
-`thinking: { type: disabled }`. This keeps the Head's bounded 512-token decision
-budget available for its structured answer. It does not edit the saved profile,
-Agent models, gateway routes, other model names or Anthropic-compatible routes.
+Pet Head inherits its resolved model profile's output budget. It does not
+override the provider's thinking behavior.
 Each structured stage uses the same schema across tool output and JSON mode.
-When idle, explicit requests to acknowledge before processing can select both
-reply and dispatch without claiming admission has already succeeded.
+An explicit acknowledgement request can select both reply and dispatch.
+Registered-Session submissions acknowledge only after Host admission.
 Routine dispatch still need not produce an acknowledgement.
 
 A prior six-call isolated synthetic A/B reproduced truncated JSON when default

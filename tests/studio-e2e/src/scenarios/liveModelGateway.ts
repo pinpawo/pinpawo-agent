@@ -19,7 +19,7 @@ const toolFields: Record<string, readonly string[]> = {
 // tool or an assistant/tool exchange admitted into execution history.
 const headDeclarations: Record<string, readonly string[]> = {
   pet_head_relevance: ['relevant'],
-  pet_head_idle: ['shouldDispatch', 'reply'],
+  pet_head_dispatch: ['shouldDispatch', 'reply'],
 };
 function headToolName(tool: unknown): string | undefined {
   return record(tool) && record(tool.function) && typeof tool.function.name === 'string'

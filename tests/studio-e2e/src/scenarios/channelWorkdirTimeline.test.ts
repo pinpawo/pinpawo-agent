@@ -54,7 +54,7 @@ async function createWorkdirModel() {
         if (input.response_format?.type === 'json_object' && names.length === 0) {
           const { pet, message } = JSON.parse(wireText(input.messages.find(message => message.role === 'user')?.content)) as HeadInput;
           assert.equal(message.author.kind, 'human');
-          if (headFixtureStage(input) === 'idle') decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
+          if (headFixtureStage(input) === 'dispatch') decisions.push({ petId: pet.petId, channelId: message.channelId, messageId: message.messageId });
           content = JSON.stringify(headFixtureStage(input) === 'relevance' ? { relevant: true } : { shouldDispatch: true, reply: null });
         } else if (names.includes('plan_request')) {
           call = { name: 'plan_request', args: { goal: 'Read marker.txt and report the exact result.' } };

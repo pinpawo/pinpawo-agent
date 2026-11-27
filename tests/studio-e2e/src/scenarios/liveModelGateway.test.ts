@@ -113,7 +113,7 @@ test('the complete synthetic runtime tool surface and text-only history remain u
 
 for (const [name, properties, args] of [
   ['pet_head_relevance', { relevant: { type: 'boolean' } }, { relevant: false }],
-  ['pet_head_idle', { shouldDispatch: { type: 'boolean' }, reply: { type: ['string', 'null'] } }, { shouldDispatch: false, reply: null }],
+  ['pet_head_dispatch', { shouldDispatch: { type: 'boolean' }, reply: { type: ['string', 'null'] } }, { shouldDispatch: false, reply: null }],
 ] as const) {
   test(`Head ${name} declaration supports configured formats, never execution history`, async t => {
     const decision = { id: 'call', type: 'function', function: { name, arguments: JSON.stringify(args) } };

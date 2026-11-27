@@ -23,13 +23,12 @@ test('Busy additions are relevant but cannot admit work for either author', () =
     assert.equal(score(item, { relevant: true, dispatched: true, hasReply: false }).pass, false);
   }
 });
-test('A busy progress question cannot pass with no reply or with another admission', () => {
-  for (const id of ['progress-only', 'progress-and-addition', 'busy-independent-work']) {
-    const item = fixture(id);
-    assert.equal(score(item, { relevant: true, dispatched: false, hasReply: true }).pass, true, id);
-    assert.equal(score(item, { relevant: true, dispatched: false, hasReply: false }).pass, false, id);
-    assert.equal(score(item, { relevant: true, dispatched: true, hasReply: true }).pass, false, id);
-  }
+test('Busy progress and independent work have distinct observable outcomes', () => {
+  assert.equal(score(fixture('progress-only'), { relevant: true, dispatched: false, hasReply: true }).pass, true);
+  assert.equal(score(fixture('progress-only'), { relevant: true, dispatched: true, hasReply: true }).pass, false);
+  assert.equal(score(fixture('progress-and-addition'), { relevant: true, dispatched: true, hasReply: true }).pass, true);
+  assert.equal(score(fixture('progress-and-addition'), { relevant: true, dispatched: true, hasReply: false }).pass, false);
+  assert.equal(score(fixture('busy-independent-work'), { relevant: true, dispatched: true, hasReply: false }).pass, true);
 });
 test('Fixture identities do not disclose route labels and preserve references', () => {
   for (const item of cases) {
@@ -38,18 +37,17 @@ test('Fixture identities do not disclose route labels and preserve references', 
     if (item.input.message.replyTo) assert.ok(item.input.context.messages.some(message => message.messageId === item.input.message.replyTo));
   }
 });
-test('Production routing exercise separates relevance, idle semantics and busy composer', async () => {
+test('Production routing exercise runs relevance then one Dispatch decision', async () => {
   for (const id of ['combined', 'queue-human', 'bare-mention-idle', 'bare-mention-busy', 'bare-mention-unknown', 'ignore-unrelated']) {
     const item = fixture(id);
     const calls: string[] = [];
     const result = await exercise(item, {
       assessRelevance: async () => { calls.push('relevance'); return { relevant: id !== 'ignore-unrelated' }; },
-      handleIdle: async () => { calls.push('idle'); return { shouldDispatch: id === 'combined', reply: id === 'combined' ? '收到' : null }; },
-      composeReply: async () => { calls.push('composer'); return ''; },
+      decideDispatch: async () => { calls.push('idle'); return { shouldDispatch: id === 'combined', reply: id === 'combined' ? '收到' : null }; },
     }, new AbortController().signal);
     assert.equal(score(item, result).pass, true, id);
     if (id.startsWith('bare-mention')) assert.equal(calls.includes('relevance'), false, 'canonical mention is relevance, not model routing');
-    if (item.state !== 'idle') { assert.equal(calls.includes('idle'), false); assert.equal(result.dispatched, false); }
+    if (id.startsWith('bare-mention')) assert.deepEqual(calls, ['idle']);
     if (id === 'ignore-unrelated') assert.deepEqual(calls, ['relevance']);
     if (id === 'combined') assert.deepEqual(calls, ['relevance', 'idle']);
   }

@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
 import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import { toJsonSchema, Validator } from '@langchain/core/utils/json_schema';
-import { PetDispatchRefusedError, buildModel } from 'pinpawo/host-runtime';
+import { buildModel } from 'pinpawo/host-runtime';
 import test from 'node:test';
-import { bindPetHeadChannel, createPetHead, isHeadAddressed, readHeadWorkState, type HeadMessage, type PetHeadChannel } from './petHead';
+import { bindPetHeadChannel, createPetHead, isHeadAddressed, type HeadMessage, type PetHeadChannel } from './petHead';
 import { createHeadModel } from './petHeadModel';
 import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
-const idle = () => ({ kind: 'idle' as const });
 const relevant = async () => ({ relevant: true });
-const noIdle = async (): Promise<never> => assert.fail('idle handler called outside a verified idle path');
+const noDispatchDecision = async (): Promise<never> => assert.fail('unexpected Dispatch decision');
 const pet = (petId: string, channelId = 'team'): StudioPetRegistration => ({
   petId, channelId, definitionId: 'assistant', name: petId, createdAt: '2026-01-01T00:00:00Z',
 });
@@ -98,7 +97,7 @@ test('only live messages in the owned Channel reach each Head; reactivation neve
   };
   const make = (petId: string, channelId = 'team') => activate({
     pet: pet(petId, channelId), channel,
-    readWorkState: idle, handleIdle: noIdle,
+    decideDispatch: noDispatchDecision,
     assessRelevance: async input => { seen.push({ petId: input.pet.petId, message: input.message }); return { relevant: false }; },
   }, events);
   await events.publish(message('1')); // no instances are subscribed
@@ -121,7 +120,7 @@ test('a Head ignores its own messages and messages in other Channels', async () 
   const seen: unknown[] = [];
   const unsubscribe = activate({ pet: pet('a'),
     channel: { readContext: async () => ({ messages: [] }), reply: async () => {}, dispatch: async () => {} },
-    readWorkState: idle, handleIdle: noIdle,
+    decideDispatch: noDispatchDecision,
     assessRelevance: async input => { seen.push(input.message); return { relevant: false }; },
   }, events);
   await events.publish(message('1', { author: { kind: 'pet', id: 'a' } }));
@@ -130,7 +129,7 @@ test('a Head ignores its own messages and messages in other Channels', async () 
   unsubscribe();
 });
 
-test('verified idle can choose publication and dispatch independently with exact attribution', async () => {
+test('the Dispatch decision can choose publication and dispatch independently with exact attribution', async () => {
   for (const shouldDispatch of [false, true]) for (const reply of [null, 'Acknowledged']) {
     const calls: unknown[][] = [];
     const source = message('1', { author: { kind: 'pet', id: 'peer' }, replyTo: 'older' });
@@ -138,13 +137,13 @@ test('verified idle can choose publication and dispatch independently with exact
     const handler = createPetHead({ pet: pet('a'),
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async (...args) => { calls.push(['reply', ...args]); }, dispatch: async (...args) => { calls.push(['dispatch', ...args]); } },
-      readWorkState: idle, assessRelevance: relevant, handleIdle: async () => ({ shouldDispatch, reply }),
+      assessRelevance: relevant, decideDispatch: async () => ({ shouldDispatch, reply }),
     });
     await handler(source, signal);
     assert.equal(calls.filter(call => call[0] === 'reply').length, reply ? 1 : 0);
     assert.equal(calls.filter(call => call[0] === 'dispatch').length, shouldDispatch ? 1 : 0);
-    if (reply) assert.deepEqual(calls[0], ['reply', 'a', '1', reply, signal, { preventPetMentions: true }]);
-    if (shouldDispatch) assert.deepEqual(calls.at(-1), ['dispatch', 'a', source.messageId, signal]);
+    if (reply) assert.deepEqual(calls.at(-1), ['reply', 'a', '1', reply, signal, { preventPetMentions: true }]);
+    if (shouldDispatch) assert.deepEqual(calls[0], ['dispatch', 'a', source.messageId, signal]);
   }
 });
 
@@ -155,13 +154,13 @@ test('publication and admission failures are independent and do not leak provide
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async () => { calls.push('reply'); if (fail !== 'dispatch') throw new Error('private reply detail'); },
         dispatch: async () => { calls.push('dispatch'); if (fail !== 'reply') throw new Error('private dispatch detail'); } },
-      readWorkState: idle, assessRelevance: relevant,
-      handleIdle: async () => ({ shouldDispatch: true, reply: 'I can look into this.' }),
+      assessRelevance: relevant,
+      decideDispatch: async () => ({ shouldDispatch: true, reply: 'I can look into this.' }),
     });
     await assert.rejects(handler(message('1'), new AbortController().signal), error => {
       assert.equal((error as Error).message, 'Pet Head processing failed: ' + (fail === 'both' ? 'reply, dispatch' : fail) + '.'); return true;
     });
-    assert.deepEqual(calls, ['reply', 'dispatch']);
+    assert.deepEqual(calls, ['dispatch', 'reply']);
   }
 });
 
@@ -173,7 +172,7 @@ test('deactivation cancels an in-flight decision and never publishes or dispatch
   const handler = createPetHead({ pet: pet('a'),
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
       reply: async () => { effects.push('reply'); }, dispatch: async () => { effects.push('dispatch'); } },
-    readWorkState: idle, handleIdle: noIdle,
+    decideDispatch: noDispatchDecision,
     assessRelevance: async () => { started.resolve(); return pending.promise; },
   });
   const run = handler(message('1'), controller.signal);
@@ -183,19 +182,6 @@ test('deactivation cancels an in-flight decision and never publishes or dispatch
   assert.deepEqual(effects, []);
 });
 
-test('cancellation during publication prevents execution admission', async () => {
-  const controller = new AbortController();
-  let admissions = 0;
-  const handler = createPetHead({ pet: pet('a'),
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      reply: async () => { controller.abort(); }, dispatch: async () => { admissions++; } },
-    readWorkState: idle, assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: 'Acknowledged' }),
-  });
-  await assert.rejects(handler(message('1'), controller.signal), /aborted/);
-  assert.equal(admissions, 0);
-});
-
 test('cancellation while context is loading never starts a decision', async () => {
   const events = bus();
   const started = deferred<void>();
@@ -203,7 +189,7 @@ test('cancellation while context is loading never starts a decision', async () =
   let decisions = 0;
   const unsubscribe = activate({ pet: pet('a'),
     channel: { readContext: async () => { started.resolve(); return context.promise; }, reply: async () => {}, dispatch: async () => {} },
-    readWorkState: idle, handleIdle: noIdle,
+    decideDispatch: noDispatchDecision,
     assessRelevance: async () => { decisions++; return { relevant: false }; },
   }, events);
   const pending = events.publish(message('1'));
@@ -262,7 +248,7 @@ test('Head prompt keeps its prefix stable and sends ten prior public messages pl
 });
 const raw = (value: unknown) => new AIMessage(JSON.stringify(value));
 const relevanceName = 'pet_head_relevance';
-const idleName = 'pet_head_idle';
+const dispatchName = 'pet_head_dispatch';
 const tool = (args: Record<string, unknown>, name = relevanceName) => new AIMessage({ content: '', tool_calls: [{ name, args }] });
 const structured = (value: Record<string, unknown>, method: StudioModelEndpoint['structuredOutputMethod'] = 'jsonMode', name = relevanceName) =>
   ({ raw: method === 'functionCalling' ? tool(value, name) : raw(value), parsed: value });
@@ -294,7 +280,7 @@ function mockEndpoint(outputs: unknown[], method?: StudioModelEndpoint['structur
 const contracts = [
   { name: relevanceName, invoke: 'assessRelevance', value: { relevant: true },
     invalid: [{}, { relevant: 42 }, { relevant: true, shouldDispatch: true }] },
-  { name: idleName, invoke: 'handleIdle', value: { shouldDispatch: true, reply: null },
+  { name: dispatchName, invoke: 'decideDispatch', value: { shouldDispatch: true, reply: null },
     invalid: [{ shouldDispatch: true }, { shouldDispatch: true, reply: 42 }, { shouldDispatch: true, reply: null, intent: 'rewritten work' }] },
 ] as const;
 
@@ -341,12 +327,12 @@ test('failure at either model stage produces no reply or admission', async () =>
   ] as const) {
     const mock = mockEndpoint([...outputs]);
     const model = createHeadModel(() => mock.endpoint);
-    const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
+    const handle = createPetHead({ pet: pet('a'),
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async () => assert.fail('invalid output cannot publish'),
         dispatch: async () => assert.fail('invalid output cannot admit work'),
       },
-      assessRelevance: model.assessRelevance, handleIdle: model.handleIdle,
+      assessRelevance: model.assessRelevance, decideDispatch: model.decideDispatch,
     });
     await assert.rejects(handle(message('2'), new AbortController().signal), /Invalid Pet Head/);
     assert.equal(mock.calls.length, expectedCalls);
@@ -438,7 +424,7 @@ test('a custom DeepSeek gateway also receives the configured profile output budg
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   });
   const head = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-flash', 'jsonMode', 'https://gateway.test/v1'));
-  assert.deepEqual(await head.handleIdle(decisionInput, new AbortController().signal), { shouldDispatch: true, reply: null });
+  assert.deepEqual(await head.decideDispatch(decisionInput, new AbortController().signal), { shouldDispatch: true, reply: null });
   assert.deepEqual(requests, [4096]);
 });
 
@@ -469,14 +455,14 @@ test('an addressed human or peer artifact review uses idle admission, but its st
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   });
   const model = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-flash'));
-  const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
+  const handle = createPetHead({ pet: pet('a'),
     channel: { subscribe: () => () => {},
       readContext: async () => ({ messages: [], members: [{ kind: 'pet', id: 'a', participantId }] }),
       reply: async (_pet, id, text) => { replies.push([id, text]); },
       dispatch: async (_pet, id) => { admitted.push(id); },
     },
     assessRelevance: async () => assert.fail('canonical @ is already relevant'),
-    handleIdle: model.handleIdle,
+    decideDispatch: model.decideDispatch,
   });
   for (const { incoming } of fixtures) await handle(incoming, new AbortController().signal);
   assert.deepEqual(seen, fixtures.map(item => item.incoming.messageId));
@@ -484,7 +470,7 @@ test('an addressed human or peer artifact review uses idle admission, but its st
   assert.deepEqual(replies, fixtures.filter(item => !item.work).map(item => [item.incoming.messageId, cannotConfirm]));
 });
 
-test('native OpenAI schema keeps relevance boolean-only and idle reply required nullable', async t => {
+test('native OpenAI schema keeps relevance boolean-only and Dispatch reply required nullable', async t => {
   const outputs = [...contracts.map(contract => ({ ...contract, output: contract.value })),
     { ...contracts[1], output: { shouldDispatch: false, reply: 'Direct response.' } }];
   let requests = 0;
@@ -530,7 +516,7 @@ test('native Anthropic accepts exactly one tool for the stage and does not repai
     let attempts = 1;
     for (const [blocks, stop] of [
       [[{ type: 'text', text: JSON.stringify(contract.value) }], 'end_turn'],
-      [[declaration('wrong', contract.name === relevanceName ? idleName : relevanceName)], 'tool_use'],
+      [[declaration('wrong', contract.name === relevanceName ? dispatchName : relevanceName)], 'tool_use'],
       [[declaration('first'), declaration('second')], 'tool_use'],
       [[{ ...declaration('bad_shape'), input: contract.invalid[0] }], 'tool_use'],
       [[declaration('refused')], 'refusal'],
@@ -548,92 +534,6 @@ test('native Anthropic accepts exactly one tool for the stage and does not repai
   }
 });
 
-test('work state distinguishes positive idle from a scoped ordinary dispatch and unknown', () => {
-  const entry = { dispatchId: 'running', enqueuedAt: 'now', sessionId: 'session', scope: { namespace: 'channel', id: 'team' }, origin: { namespace: 'channel', id: 'original' } };
-  const idle = { state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 } as const;
-  const active = { ...idle, state: 'busy' as const, activeOperation: 'dispatch' as const, queuedDispatches: 1,
-    activeDispatch: entry, entries: [{ ...entry, dispatchId: 'queued' }] };
-  assert.deepEqual(readHeadWorkState('team', idle), { kind: 'idle' });
-  assert.deepEqual(readHeadWorkState('team', active), { kind: 'active', dispatch: { dispatchId: 'running', sessionId: 'session', messageId: 'original' } });
-  for (const queue of [
-    { ...idle, queuedConversations: 1 },
-    { ...idle, queuedDispatches: 1 },
-    { ...idle, state: 'busy' as const },
-    { ...idle, state: 'waiting' as const },
-    { ...idle, state: 'blocked' as const },
-    { ...active, activeOperation: 'conversation' as const },
-    { ...active, activeDispatch: undefined },
-    { ...active, activeDispatch: { ...entry, sessionId: undefined } },
-    { ...active, activeDispatch: { ...entry, scope: { namespace: 'channel', id: 'elsewhere' } } },
-  ]) assert.deepEqual(readHeadWorkState('team', queue), { kind: 'unknown' });
-});
-
-test('only relevant messages inspect the slot and ground an older public source before Session sampling', async () => {
-  const active = { dispatchId: 'old', sessionId: 'session', messageId: 'original' };
-  const original = message('original', { body: 'Calculate using the measured units.' });
-  for (const replyTo of [undefined, original.messageId]) {
-    for (const isRelevant of [false, true]) {
-      const calls: string[] = [];
-      const handler = createPetHead({ pet: pet('a'), readWorkState: () => {
-          assert.ok(calls.includes('relevance'), 'do not inspect the work slot before relevance');
-          return { kind: 'active', dispatch: active };
-        },
-        channel: { subscribe: () => () => {}, reply: async () => assert.fail('no prose'),
-          readContext: async (_pet, _before, reference) => {
-            calls.push('context');
-            return { messages: [], ...(reference === original.messageId ? { referencedMessage: original } : {}) };
-          },
-          dispatch: async () => assert.fail('status is never work') },
-        handleIdle: noIdle,
-        assessRelevance: async input => {
-          calls.push('relevance');
-          assert.deepEqual(Object.keys(input).sort(), ['addressed', 'context', 'message', 'pet']);
-          return { relevant: isRelevant };
-        },
-        progress: {
-          readRun: () => ({ invocationId: active.dispatchId, sessionId: active.sessionId, requestId: 'run' }),
-          readSessionRun: async key => { assert.equal(key, active.sessionId); calls.push('sample'); return { requestId: 'run' }; },
-          compose: async input => {
-            calls.push('compose');
-            assert.deepEqual(input.evidence, { status: 'running' });
-            assert.deepEqual(input.source, { messageId: original.messageId, body: original.body });
-            return '';
-          },
-        },
-      });
-      await handler(message('2', { replyTo }), new AbortController().signal);
-      assert.deepEqual(calls, !isRelevant ? ['context', 'relevance']
-        : ['context', 'relevance', ...(replyTo ? [] : ['context']), 'sample', 'compose']);
-    }
-  }
-});
-
-test('an explicit acknowledgement is published before slow independent execution admission', async () => {
-  const entered = deferred<void>();
-  const admission = deferred<void>();
-  const effects: string[] = [];
-  const source = message('1', { body: '先回应一下，再核对这两份数据。' });
-  const signal = new AbortController().signal;
-  const handler = createPetHead({ pet: pet('a'),
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      reply: async (id, replyTo, body, actualSignal) => {
-        assert.equal(id, 'a'); assert.equal(replyTo, source.messageId); assert.equal(actualSignal, signal);
-        effects.push(body);
-      },
-      dispatch: async (_id, actualSource) => {
-        assert.equal(actualSource, source.messageId);
-        entered.resolve(); await admission.promise; effects.push('admitted');
-      } },
-    readWorkState: idle, assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: '收到，我会先核对口径，再整理差异。' }),
-  });
-  const pending = handler(source, signal);
-  await entered.promise;
-  assert.deepEqual(effects, ['收到，我会先核对口径，再整理差异。']);
-  admission.resolve(); await pending;
-  assert.deepEqual(effects, ['收到，我会先核对口径，再整理差异。', 'admitted']);
-});
-
 test('a canonical mention establishes relevance, not dispatch; a label or quotation cannot', async () => {
   const participantId = 'pet:a%28b%29';
   const base = { pet: pet('a(b)'), context: { messages: [], members: [{ kind: 'pet' as const, id: 'a(b)', participantId }] } };
@@ -644,446 +544,50 @@ test('a canonical mention establishes relevance, not dispatch; a label or quotat
   assert.equal(isHeadAddressed(addressedInput), true);
   assert.equal(isHeadAddressed(lookalike), false);
   const calls: Array<[string, boolean | undefined]> = [];
-  const handle = createPetHead({ pet: base.pet, readWorkState: idle,
+  const handle = createPetHead({ pet: base.pet,
     channel: { subscribe: () => () => {}, readContext: async () => lookalike.context,
       reply: async () => assert.fail('bare mention need not produce text'),
       dispatch: async () => assert.fail('bare mention is not admission'),
     },
     assessRelevance: async input => { calls.push(['relevance', input.addressed]); return { relevant: false }; },
-    handleIdle: async input => { calls.push(['idle', input.addressed]); return { shouldDispatch: false, reply: null }; },
+    decideDispatch: async input => { calls.push(['dispatch', input.addressed]); return { shouldDispatch: false, reply: null }; },
   });
   const signal = new AbortController().signal;
   await handle(named, signal);
   await handle(matchingLabelOnly, signal);
-  assert.deepEqual(calls, [['idle', true], ['relevance', false]]);
+  assert.deepEqual(calls, [['dispatch', true], ['relevance', false]]);
 });
 
-test('progress composition uses only SDK text without binding tools or retrying', async () => {
-  const input = { message: message('4'), evidence: { status: 'unavailable' as const } };
-  for (const [reply, expected] of [
-    [new AIMessageChunk('  I cannot confirm that yet. '), 'I cannot confirm that yet.'],
-    [new AIMessage(''), ''],
-    [tool({ reply: 'Do not treat this as reply text' }), ''],
-    [new AIMessage({ contentBlocks: [
-      { type: 'reasoning', reasoning: 'private analysis' },
-      { type: 'text', text: 'Only the public prose is returned.' },
-    ], tool_calls: [{ name: 'unrequested', args: { ignore: true } }] }), 'Only the public prose is returned.'],
-  ] as const) {
-    const mock = mockEndpoint([reply], 'functionCalling');
-    assert.equal(await createHeadModel(() => mock.endpoint).composeReply(input, new AbortController().signal), expected);
-    assert.deepEqual(mock.calls.map(call => call.mode), ['unbound']);
-    assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
-      message: { channelId: 'team', messageId: '4', sequence: 4, author: input.message.author, body: input.message.body, mentions: [] },
-      evidence: input.evidence,
-    });
-    assert.equal(mock.binding(), undefined);
-  }
-});
-
-test('the status model receives each recorded plan description verbatim, without internal fields or deliverables', async () => {
-  const mentions = [{ participantId: 'pet:a', label: 'Analyst' }];
-  const current = message('20', { author: { kind: 'pet', id: 'reviewer' }, body: 'Check the status of this report.',
-    mentions, replyTo: '12', externalRef: 'internal-delivery-ref', deliverables: [{ uri: 'https://example.test/internal-report' }] });
-  const source = { messageId: '12', body: 'Prepare the report.' };
-  const objectives = [
-    { status: 'completed' as const, description: 'Collect source material.' },
-    { status: 'active' as const, description: 'Review the draft.' },
-    { status: 'pending' as const, description: 'Verify the figures.' },
-    { status: 'pending' as const, description: 'Test the sample form with password: fixture-only.' },
-    { status: 'pending' as const, description: '["one", "two"]' },
-    { status: 'pending' as const, description: '  Check [the example](https://example.test/guide) and /tmp/example.md.\n```ts\nconst example = 1;\n```\n' +
-      'Keep the rest of this plan description. '.repeat(12) + '  ' },
-  ];
-  const recordedPlan = { items: [
-    ...objectives.map(({ status, description }, i) => ({ id: `internal-${i}`, capability: 'private-capability', task: description, status })),
-  ] };
-  const mock = mockEndpoint([new AIMessage('The report is still running.')]);
-  const reply = await createHeadModel(() => mock.endpoint).composeReply({
-    message: current, evidence: { status: 'running', recordedPlan }, source,
-  }, new AbortController().signal);
-  assert.equal(reply, 'The report is still running.');
-  assert.deepEqual(JSON.parse((mock.calls[0]!.messages as string[][])[1]![1]!), {
-    message: { channelId: current.channelId, messageId: current.messageId, sequence: current.sequence, author: current.author,
-      body: current.body, replyTo: source.messageId, attachmentCount: 1, mentions },
-    evidence: { status: 'running', plan: objectives }, source,
+test('only relevant input reads task facts before one Dispatch decision', async () => {
+  const calls: string[] = [];
+  const source = message('1', { body: 'Do A.' });
+  const handle = createPetHead({
+    pet: pet('a'),
+    channel: { subscribe: () => () => {},
+      readContext: async () => ({ messages: [source, message('other', { channelId: 'elsewhere' })] }),
+      readBoundSessionId: async () => { calls.push('binding'); return 'session'; },
+      dispatch: async (_, id, _signal, sessionId) => { assert.equal(id, '3'); assert.equal(sessionId, 'session'); calls.push('submit'); },
+      reply: async (_, _id, text) => { assert.equal(text, 'A is done.'); calls.push('reply'); },
+    },
+    assessRelevance: async input => {
+      assert.equal('tasks' in input, false);
+      calls.push('relevance');
+      return { relevant: input.message.messageId === '3' };
+    },
+    readSession: async (sessionId, sources) => {
+      assert.equal(sessionId, 'session');
+      assert.deepEqual([...sources], ['1']);
+      calls.push('readSession');
+      return [{ messageId: '1', status: 'completed' }];
+    },
+    decideDispatch: async input => {
+      assert.deepEqual(input.tasks, [{ messageId: '1', status: 'completed' }]);
+      calls.push('decision');
+      return { shouldDispatch: true, reply: 'A is done.' };
+    },
   });
-});
-
-test('missing or empty plans and plans without a verified public source leave only checked status', async () => {
-  const current = message('21');
-  const source = { messageId: '12', body: 'Prepare the report.' };
-  const mock = mockEndpoint(Array.from({ length: 3 }, () => new AIMessage('running')));
-  const compose = createHeadModel(() => mock.endpoint).composeReply;
   const signal = new AbortController().signal;
-  const running = { status: 'running' as const };
-  const item = { id: 'p1', capability: 'internal', status: 'pending' as const };
-  await compose({ message: current, evidence: running, source }, signal);
-  await compose({ message: current, evidence: { ...running, recordedPlan: { items: [] } }, source }, signal);
-  await compose({ message: current, evidence: { ...running, recordedPlan: { items: [{ ...item, task: 'No public source' }] } } }, signal);
-  const inputs = mock.calls.map(call => JSON.parse((call.messages as string[][])[1]![1]!).evidence);
-  assert.deepEqual(inputs, [running, running, running]);
-});
-
-test('failed or cancelled progress composition does not return late or partial prose', async () => {
-  const input = { message: message('4'), evidence: { status: 'unavailable' as const } };
-  const truncated = mockEndpoint([new AIMessage({ content: 'A partial reply', response_metadata: { finish_reason: 'length' } })]);
-  await assert.rejects(createHeadModel(() => truncated.endpoint).composeReply(input, new AbortController().signal), /did not finish/);
-  assert.deepEqual(truncated.calls.map(call => call.mode), ['unbound']);
-  const controller = new AbortController();
-  const aborted = mockEndpoint([() => { controller.abort(); return new AIMessage('A late reply'); }]);
-  await assert.rejects(createHeadModel(() => aborted.endpoint).composeReply(input, controller.signal), { name: 'AbortError' });
-  assert.deepEqual(aborted.calls.map(call => call.mode), ['unbound']);
-});
-
-test('decision binding and unbound plain reply share one lazily resolved model client', async () => {
-  const assessed = { relevant: true };
-  const idleResult = { shouldDispatch: false, reply: null };
-  const mock = mockEndpoint([structured(assessed), new AIMessage({
-    content: [{ type: 'reasoning', reasoning: 'private analysis' }, { type: 'text', text: ' [Known update](https://example.test) ' }],
-  }), structured(idleResult)], 'jsonMode');
-  let resolved = 0;
-  const model = createHeadModel(() => { resolved++; return mock.endpoint; });
-  assert.equal(resolved, 0);
-  assert.equal(mock.factoryCalls(), 0);
-  const signal = new AbortController().signal;
-  assert.deepEqual(await model.assessRelevance(decisionInput, signal), assessed);
-  assert.equal(await model.composeReply({ message: decisionInput.message, evidence: { status: 'unavailable' } }, signal),
-    '[Known update](https://example.test)');
-  assert.deepEqual(await model.handleIdle(decisionInput, signal), idleResult);
-  assert.deepEqual(mock.calls.map(call => call.mode), ['structured', 'unbound', 'structured']);
-  assert.equal(resolved, 1);
-  assert.equal(mock.factoryCalls(), 1);
-});
-
-test('a run switch during busy composition cannot publish A as B or enqueue B', async () => {
-  const original = message('older');
-  const inquiry = message('2', { replyTo: original.messageId, body: 'How far is A? Also summarize the calendar.' });
-  const signal = new AbortController().signal;
-  const dispatchId = 'a-active';
-  let requestId = 'a-run';
-  let reads = 0;
-  const replies: string[] = [];
-  const admitted: string[] = [];
-  const handler = createPetHead({ pet: pet('a'),
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [original], referencedMessage: original }),
-      reply: async (_pet, _messageId, body) => { replies.push(body); }, dispatch: async (_pet, source) => { admitted.push(source); } },
-    readWorkState: () => ({ kind: 'active', dispatch: { dispatchId, messageId: original.messageId, sessionId: 'same-session' } }),
-    assessRelevance: relevant, handleIdle: noIdle,
-    progress: {
-      readRun: () => ({ invocationId: dispatchId, requestId, sessionId: 'same-session' }),
-      readSessionRun: async id => { assert.equal(id, 'same-session'); reads++; return { requestId }; },
-      compose: async input => {
-        assert.deepEqual(input.evidence, { status: 'running' });
-        // Even a different Host run in the same session/dispatch isn't A.
-        requestId = 'b-run';
-        return 'A is running.';
-      },
-    },
-  });
-  await handler(inquiry, signal);
-  assert.equal(reads, 1);
-  assert.deepEqual(replies, []);
-  assert.deepEqual(admitted, []);
-});
-
-test('unrelated explicit reply targets are not replaced by the latest run', async () => {
-  const source = message('current');
-  const old = message('different');
-  const inquiry = message('3', { replyTo: old.messageId });
-  let reads = 0;
-  const replies: string[] = [];
-  const handler = createPetHead({ pet: pet('a'),
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [source, old], referencedMessage: old }),
-      reply: async (_pet, id, text) => { assert.equal(id, inquiry.messageId); replies.push(text); },
-      dispatch: async () => { throw new Error('progress-only never dispatches'); } },
-    readWorkState: () => ({ kind: 'active', dispatch: { dispatchId: 'd', messageId: source.messageId, sessionId: 's' } }),
-    assessRelevance: relevant, handleIdle: noIdle,
-    progress: {
-      readRun: () => ({ invocationId: 'd', sessionId: 's', requestId: 'r' }),
-      readSessionRun: async () => { reads++; return undefined; },
-      compose: async input => {
-        assert.deepEqual(input.evidence, { status: 'unavailable' });
-        return 'I cannot confirm that work’s progress.';
-      },
-    },
-  });
-  await handler(inquiry, new AbortController().signal);
-  assert.equal(reads, 0);
-  assert.deepEqual(replies, ['I cannot confirm that work’s progress.']);
-});
-
-test('verified busy reads its exact run once; composer alone can answer, decline new work, or stay silent', async () => {
-  const source = message('original', { body: 'Create the inventory.' });
-  const active = { dispatchId: 'a', sessionId: 'same-session', messageId: source.messageId };
-  const run = { invocationId: active.dispatchId, requestId: 'a-run', sessionId: active.sessionId };
-  for (const [body, response] of [
-    ['How far is the inventory?', 'The inventory is still running.'],
-    ['How far is the inventory? Also summarize the calendar.', 'The inventory is still running. I did not start the calendar work.'],
-    ['Summarize the calendar after the inventory.', 'I have not scheduled the calendar work.'],
-    ['The finance team posted an inventory note.', ''],
-  ] as const) {
-    const incoming = message('20', { body });
-    const calls: string[] = [];
-    const handle = createPetHead({ pet: pet('a'), readWorkState: () => ({ kind: 'active', dispatch: active }),
-      channel: {
-        subscribe: () => () => {},
-        readContext: async () => ({ messages: [source] }),
-        reply: async (_pet, id, text) => {
-          assert.equal(id, incoming.messageId);
-          assert.equal(text, response);
-          calls.push('reply');
-        },
-        dispatch: async () => assert.fail('busy can never admit dispatch'),
-      },
-      assessRelevance: async () => { calls.push('relevance'); return { relevant: true }; },
-      handleIdle: noIdle,
-      progress: {
-        readRun: entry => { assert.deepEqual(entry, active); return run; },
-        readSessionRun: async (sessionId, _signal, isCurrent) => {
-          assert.equal(sessionId, active.sessionId);
-          assert.equal(isCurrent(), true);
-          calls.push('read');
-          return { requestId: run.requestId };
-        },
-        compose: async input => {
-          assert.equal(input.message, incoming);
-          assert.deepEqual(input.evidence, { status: 'running' });
-          calls.push('compose');
-          return response;
-        },
-      },
-    });
-    await handle(incoming, new AbortController().signal);
-    assert.deepEqual(calls, ['relevance', 'read', 'compose', ...(response ? ['reply'] : [])]);
-  }
-});
-
-test('a newer active source appearing during relevance is not evidence for an older inquiry', async () => {
-  const original = message('older', { sequence: 20, body: 'Create the report.' });
-  const inquiry = message('21', { body: 'How far is the report?' });
-  const newer = message('22', { body: 'Create another report.' });
-  let active = { dispatchId: 'a', sessionId: 'same-session', messageId: original.messageId };
-  const relevantGate = deferred<void>();
-  const started = deferred<void>();
-  const calls: string[] = [];
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => {
-      calls.push('slot');
-      return { kind: 'active', dispatch: active };
-    },
-    channel: { subscribe: () => () => {}, readContext: async (_pet, before, reference) => {
-      assert.equal(before, inquiry.sequence);
-      return { messages: [original], ...(reference === newer.messageId ? { referencedMessage: newer } : {}) };
-    },
-      reply: async (_pet, id, text) => { assert.equal(id, inquiry.messageId); calls.push(text); },
-      dispatch: async () => assert.fail('pure status never dispatches') },
-    assessRelevance: async () => { started.resolve(); await relevantGate.promise; return { relevant: true }; },
-    handleIdle: noIdle,
-    progress: {
-      readRun: entry => ({ invocationId: entry.dispatchId, sessionId: entry.sessionId, requestId: 'r' }),
-      readSessionRun: async () => assert.fail('do not read the Session of work sourced after the inquiry'),
-      compose: async input => {
-        assert.deepEqual(input.evidence, { status: 'unavailable' });
-        assert.equal(input.source, undefined);
-        return 'I cannot confirm its progress.';
-      },
-    },
-  });
-  const handling = handle(inquiry, new AbortController().signal);
-  await started.promise;
-  assert.deepEqual(calls, [], 'relevance pending means no slot lookup');
-  active = { dispatchId: 'b', sessionId: 'same-session', messageId: newer.messageId };
-  relevantGate.resolve();
-  await handling;
-  assert.equal(calls[0], 'slot');
-  assert.equal(calls.at(-1), 'I cannot confirm its progress.');
-});
-
-test('unknown can compose an unconfirmed reply, but cannot read a Session or admit work', async () => {
-  const calls: string[] = [];
-  const incoming = message('10', { body: 'How is A progressing? Also start B.' });
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => ({ kind: 'unknown' }),
-    channel: {
-      subscribe: () => () => {},
-      readContext: async () => ({ messages: [] }),
-      reply: async (_pet, source, body) => {
-        assert.equal(source, incoming.messageId);
-        calls.push(body);
-      },
-      dispatch: async () => assert.fail('unknown is not idle'),
-    },
-    assessRelevance: relevant, handleIdle: noIdle,
-    progress: {
-      readRun: () => assert.fail('no exact ordinary slot is known'),
-      readSessionRun: async () => assert.fail('do not open a Session without a verified run'),
-      compose: async input => {
-        assert.deepEqual(input.evidence, { status: 'unavailable' });
-        return 'I cannot confirm progress and did not start B.';
-      },
-    },
-  });
-  await handle(incoming, new AbortController().signal);
-  assert.deepEqual(calls, ['I cannot confirm progress and did not start B.']);
-});
-
-test('relevant input routes through the current idle slot even if the Pet was busy earlier', async () => {
-  const active = { dispatchId: 'a', sessionId: 's', messageId: 'older' };
-  let state: ReturnType<typeof readHeadWorkState> = { kind: 'active', dispatch: active };
-  const relevanceGate = deferred<void>();
-  const started = deferred<void>();
-  const calls: string[] = [];
-  const incoming = message('2');
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => { calls.push('slot'); return state; },
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      dispatch: async (_pet, id) => { assert.equal(id, incoming.messageId); calls.push('dispatch'); },
-      reply: async () => assert.fail('no idle reply selected'),
-    },
-    assessRelevance: async () => { started.resolve(); await relevanceGate.promise; return { relevant: true }; },
-    handleIdle: async () => { calls.push('idle'); return { shouldDispatch: true, reply: null }; },
-    progress: {
-      readRun: () => assert.fail('do not sample the earlier busy slot'),
-      readSessionRun: async () => assert.fail('no Session lookup while idle'),
-      compose: async () => assert.fail('the idle handler owns this input'),
-    },
-  });
-  const handling = handle(incoming, new AbortController().signal);
-  await started.promise;
-  assert.deepEqual(calls, []);
-  state = { kind: 'idle' };
-  relevanceGate.resolve();
-  await handling;
-  assert.equal(calls[0], 'slot');
-  assert.deepEqual(calls.filter(call => call !== 'slot'), ['idle', 'dispatch']);
-});
-
-test('unrelated input never inspects the slot or its Session', async () => {
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => assert.fail('unrelated messages must not inspect the slot'),
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      dispatch: async () => assert.fail('unrelated messages must not dispatch'),
-      reply: async () => assert.fail('unrelated messages must not publish'),
-    },
-    assessRelevance: async () => ({ relevant: false }), handleIdle: noIdle,
-    progress: {
-      readRun: () => assert.fail('unrelated messages must not check run identity'),
-      readSessionRun: async () => assert.fail('unrelated messages must not inspect Session'),
-      compose: async () => assert.fail('unrelated messages must not compose'),
-    },
-  });
-  await handle(message('2'), new AbortController().signal);
-});
-
-test('idle admission rechecks after publication and does not re-decide as busy', async () => {
-  let state: ReturnType<typeof readHeadWorkState> = { kind: 'idle' };
-  const calls: string[] = [];
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => state,
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      dispatch: async () => assert.fail('must not admit after idle was lost'),
-      reply: async () => { calls.push('reply'); state = { kind: 'unknown' }; },
-    },
-    assessRelevance: relevant,
-    handleIdle: async () => { calls.push('idle'); return { shouldDispatch: true, reply: 'I see the request.' }; },
-    progress: {
-      readRun: () => assert.fail('no late run sampling'),
-      readSessionRun: async () => assert.fail('no late Session read'),
-      compose: async () => assert.fail('no late busy redecision'),
-    },
-  });
-  await handle(message('2'), new AbortController().signal);
-  assert.deepEqual(calls, ['idle', 'reply']);
-});
-
-test('a refused idle-only admission is a skip rather than a failed Head handler', async () => {
-  const calls: string[] = [];
-  const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      dispatch: async () => { calls.push('admission'); throw new PetDispatchRefusedError(); },
-      reply: async () => { calls.push('acknowledgement'); },
-    },
-    assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: 'I see the request.' }),
-  });
-  await handle(message('2'), new AbortController().signal);
-  assert.deepEqual(calls, ['acknowledgement', 'admission']);
-});
-
-test('if the run changes inside the reply operation, its guard blocks stale status without queued B', async () => {
-  const original = message('older', { body: 'Create the report.' });
-  const inquiry = message('22', { replyTo: original.messageId, body: 'How far is the report? Also summarize the calendar.' });
-  const active = { dispatchId: 'same-invocation', sessionId: 'same-session', messageId: original.messageId };
-  let requestId = 'attempt-a';
-  const calls: string[] = [];
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => ({ kind: 'active', dispatch: active }),
-    channel: {
-      subscribe: () => () => {},
-      readContext: async () => ({ messages: [original], referencedMessage: original }),
-      reply: async (_pet, _source, _body, _signal, options) => {
-        assert.ok(options?.assertCurrent);
-        requestId = 'attempt-b';
-        options.assertCurrent();
-        calls.push('stale status posted');
-      },
-      dispatch: async (_pet, source) => {
-        assert.equal(source, inquiry.messageId);
-        calls.push('dispatch');
-      },
-    },
-    assessRelevance: relevant, handleIdle: noIdle,
-    progress: {
-      readRun: () => ({ invocationId: active.dispatchId, sessionId: active.sessionId, requestId }),
-      readSessionRun: async () => ({ requestId }),
-      compose: async ({ evidence, source }) => {
-        assert.deepEqual(evidence, { status: 'running' });
-        assert.deepEqual(source, { messageId: original.messageId, body: original.body });
-        return 'The report is still running.';
-      },
-    },
-  });
-  await handle(inquiry, new AbortController().signal);
-  assert.deepEqual(calls, []);
-});
-
-test('idle can answer an unconfirmed status request without a Session read or dispatch', async () => {
-  const replies: string[] = [];
-  const handle = createPetHead({ pet: pet('a'), readWorkState: idle,
-    channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
-      reply: async (_pet, _id, body) => { replies.push(body); },
-      dispatch: async () => assert.fail('status does not start work'),
-    },
-    assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: false, reply: 'I cannot confirm the report’s status.' }),
-    progress: {
-      readRun: () => assert.fail('idle has no verified run'),
-      readSessionRun: async () => assert.fail('idle cannot inspect a Session'),
-      compose: async () => assert.fail('idle has one handler, not a separate composer'),
-    },
-  });
-  await handle(message('2', { body: 'How far is the report?' }), new AbortController().signal);
-  assert.deepEqual(replies, ['I cannot confirm the report’s status.']);
-});
-
-test('idle mixed request can acknowledge unconfirmed earlier work and dispatch B without sampling', async () => {
-  const incoming = message('25', { replyTo: 'earlier-report', body: 'How far did the report get? Also summarize the calendar.' });
-  const calls: string[] = [];
-  const handle = createPetHead({ pet: pet('a'), readWorkState: () => ({ kind: 'idle' }),
-    channel: {
-      subscribe: () => () => {},
-      readContext: async () => ({ messages: [] }),
-      reply: async (_pet, id, body) => {
-        assert.equal(id, incoming.messageId);
-        calls.push(body);
-      },
-      dispatch: async (_pet, source) => {
-        assert.equal(source, incoming.messageId);
-        calls.push('dispatch');
-      },
-    },
-    assessRelevance: relevant,
-    handleIdle: async () => ({ shouldDispatch: true, reply: 'I cannot confirm the earlier report’s progress.' }),
-    progress: {
-      readRun: () => assert.fail('there is no currently bound attempt'),
-      readSessionRun: async () => assert.fail('idle work never reads Session'),
-      compose: async () => assert.fail('idle work never needs a second model call'),
-    },
-  });
-  await handle(incoming, new AbortController().signal);
-  assert.deepEqual(calls, ['I cannot confirm the earlier report’s progress.', 'dispatch']);
+  await handle(message('2'), signal);
+  await handle(message('3'), signal);
+  assert.deepEqual(calls, ['relevance', 'relevance', 'binding', 'readSession', 'decision', 'submit', 'reply']);
 });

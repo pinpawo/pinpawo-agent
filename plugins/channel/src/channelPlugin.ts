@@ -64,9 +64,10 @@ export type ChannelPlugin = StudioPlugin & {
 
 export type ChannelHeadPort = {
   readContext: (channelId: string, petId: string, before: number, replyTo?: string) => Promise<Awaited<ReturnType<ChannelService['readContext']>> & { referencedMessage?: ChannelMessage }>;
-  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean; assertCurrent?: () => void }) => Promise<void>;
-  dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal) => Promise<void>;
-  readProgressSession: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
+  reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }) => Promise<void>;
+  dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string) => Promise<void>;
+  readBoundSessionId: (channelId: string, petId: string) => Promise<string | undefined>;
+  readSessionPlan: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
     => Promise<{ requestId: string; recordedPlan?: AgentPlan } | undefined>;
 };
 
@@ -114,7 +115,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     petId: string,
     request: string,
     idempotencyKey?: string,
-    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string },
+    headInput?: { attachments?: readonly Deliverable[]; signal: AbortSignal; messageId: string; boundSessionId?: string },
   ): Promise<{ invocationId: string; binding: ChannelSessionBinding }> {
     const service = channelService();
     const studio = host();
@@ -125,12 +126,18 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     check();
     await service.requireMember(channelId, { kind: 'pet', id: petId });
     check();
-    const binding = await service.reserveSession(channelId, petId, () => studio.allocateSessionId(petId));
+    const boundSessionId = headInput?.boundSessionId;
+    const binding = boundSessionId
+      ? await service.getSession(channelId, petId)
+      : await service.reserveSession(channelId, petId, () => studio.allocateSessionId(petId));
     check();
+    if (!binding || (boundSessionId && (!binding.registered || binding.sessionId !== boundSessionId))) {
+      throw new ChannelAccessError('The registered Channel Session changed before dispatch.');
+    }
     const receipt = await studio.dispatch({
       petId, request,
       ...(headInput ? {
-        delivery: 'idle-only' as const,
+        ...(!boundSessionId ? { delivery: 'idle-only' as const } : {}),
         signal: headInput.signal,
         origin: { namespace: 'channel', id: headInput.messageId },
       } : {}),
@@ -240,7 +247,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
-    readProgressSession: async (channelId, petId, sessionId, signal, isCurrent) => {
+    readSessionPlan: async (channelId, petId, sessionId, signal, isCurrent) => {
       const service = channelService();
       const studio = host();
       const authorized = async () => {
@@ -261,7 +268,13 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       signal.throwIfAborted();
       await channelService().postMessage({ kind: 'pet', id: petId }, channelId, { replyTo, body }, { signal, ...options, headReplyTo: replyTo });
     },
-    dispatch: async (channelId, petId, messageId, signal) => {
+    readBoundSessionId: async (channelId, petId) => {
+      const service = channelService();
+      await service.requireMember(channelId, { kind: 'pet', id: petId });
+      const binding = await service.getSession(channelId, petId);
+      return binding?.registered ? binding.sessionId : undefined;
+    },
+    dispatch: async (channelId, petId, messageId, signal, boundSessionId) => {
       signal.throwIfAborted();
       const service = channelService();
       await service.requireMember(channelId, { kind: 'pet', id: petId });
@@ -271,7 +284,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       const referencedMessage = canonical.replyTo ? await service.getMessage(channelId, canonical.replyTo) : undefined;
       signal.throwIfAborted();
       const attachments = [...new Map([...(canonical.deliverables ?? []), ...(referencedMessage?.deliverables ?? [])].map(item => [item.uri, item])).values()];
-      await dispatchPet(channelId, petId, channelMessageInput(canonical, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId });
+      await dispatchPet(channelId, petId, channelMessageInput(canonical, referencedMessage), JSON.stringify(['head-dispatch', channelId, petId, canonical.messageId]), { attachments, signal, messageId: canonical.messageId, boundSessionId });
     },
   };
 

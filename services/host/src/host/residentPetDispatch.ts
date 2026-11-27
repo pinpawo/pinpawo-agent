@@ -82,7 +82,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     if (replacement && !target) throw new PetDispatchRefusedError('The target Session does not exist.');
     let pendingInterrupt: PendingInterruptProjection | undefined;
     const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
-      ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
+      ...event, ...(origin ? { origin: copyPetInvocationScope(origin) } : {}), ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
       ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
       ...(target ? { sessionId: target.id } : {}),
     });

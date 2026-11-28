@@ -117,6 +117,7 @@ test('shipped Plugins support explicit Wiki work and Knowledge without opening h
     definitions: configuration.resolved.definitions.map(({ definitionId, name }) => ({ definitionId, name })),
     assemblePet: async ({ petId }) => ({
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async ({ request }) => { received.push({ petId, request }); },

@@ -11,6 +11,7 @@ test('only Studio authority sets Channel prompts through authenticated HTTP', as
   const studio = await createStudioWithPets({
     studioId: 'channel-prompt-http', plugins: [channel, http],
     pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
     } }],

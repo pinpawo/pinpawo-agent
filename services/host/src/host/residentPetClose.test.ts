@@ -21,14 +21,14 @@ test('close waits for an active conversation and cancels conversation waiting be
   const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
   const release = deferred();
   const started = deferred();
-  const active = coordinator.enqueueDispatch(async () => { started.resolve(); await release.promise; });
+  coordinator.submitDispatch(async () => { started.resolve(); await release.promise; });
   await started.promise;
   let ran = false;
   const waiting = coordinator.holdForConversation(async () => { ran = true; });
   const refused = assert.rejects(waiting, /clos|cancel/i);
   const closing = coordinator.close();
   release.resolve();
-  await Promise.all([active, refused, closing]);
+  await Promise.all([refused, closing]);
   assert.equal(ran, false);
 
   const other = new ResidentPetCoordinator({ readSettledState: () => 'open' });
@@ -74,7 +74,7 @@ test('Host close cancels queued session changes and waits for the executing comm
   const active = activeSnapshot.snapshot.session.sessionId;
   const before = await readFile(config.tuiSessionPath, 'utf8');
   block = true;
-  const listing = host.interaction.request({ type: 'session.list', requestId: 'held-list' });
+  const executing = host.interaction.request({ type: 'session.resume', requestId: 'held-resume', sessionId: active });
   await entered.promise;
   const requests = [
     host.interaction.request({ type: 'session.new', requestId: 'queued-new' }),
@@ -87,7 +87,7 @@ test('Host close cancels queued session changes and waits for the executing comm
   await tick();
   assert.equal(closed, false, 'close must wait for the executing checkpoint read');
   release.resolve();
-  await Promise.all([listing, ...requests, closing]);
+  await Promise.all([executing, ...requests, closing]);
   assert.equal(await readFile(config.tuiSessionPath, 'utf8'), before, 'queued new/resume/model must not mutate session state');
   assert.equal(turns, 0);
   await host.close();
@@ -98,9 +98,8 @@ test('Host close cancels queued session changes and waits for the executing comm
 test('close cancels a selected dispatch before its first execution microtask', async () => {
   const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
   let turns = 0;
-  const admitted = coordinator.enqueueDispatch(async () => { turns++; });
-  const refused = assert.rejects(admitted, /clos|cancel/i);
-  await Promise.all([coordinator.close(), refused]);
+  coordinator.submitDispatch(async () => { turns++; });
+  await coordinator.close();
   assert.equal(turns, 0, 'selected but unstarted work must not begin after stop');
 });
 

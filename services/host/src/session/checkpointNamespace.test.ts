@@ -62,17 +62,18 @@ test('the current TUI namespace lists its own checkpoints without reading prior 
     loadContext: async () => ({ pet: { id: 'pet-a', name: 'Paw' } }),
   };
   const service = new ServerTuiSessionService(options);
-  const fresh = await service.listSessions(deps);
-  assert.equal(fresh.length, 1);
-  assert.notEqual(fresh[0]?.id, priorSession.id);
-  assert.equal(fresh[0]?.messageCount, 0);
+  assert.deepEqual(await service.listSessions(deps), []);
   const current = service.getActiveSession('pet-a');
+  assert.notEqual(current.id, priorSession.id);
+  assert.equal(current.messageCount, 0);
   await writeMessages(new FileSaver(runtimeConfig.tuiCheckpointPath), current.threadId, [
     new HumanMessage('Current request.'), new AIMessage('Current reply.'),
   ]);
 
   const restored = new ServerTuiSessionService(options);
+  const beforeList = await fs.readFile(runtimeConfig.tuiSessionPath, 'utf8');
   const listed = await restored.listSessions(deps);
+  assert.equal(await fs.readFile(runtimeConfig.tuiSessionPath, 'utf8'), beforeList);
   assert.deepEqual(listed.map(({ id, title, messageCount }) => ({ id, title, messageCount })), [
     { id: current.id, title: 'Current request.', messageCount: 2 },
   ]);

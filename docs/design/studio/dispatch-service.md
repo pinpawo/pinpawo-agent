@@ -10,6 +10,6 @@ An asynchronous readiness check is not a reservation of its candidate. The coord
 
 ### Review answers
 
-Studio and TUI submit Review answers through the same resident coordinator entry point. An answer reserves the Pet execution gate from admission through settlement, but never enters the Dispatch FIFO. A concurrent answer is refused, not queued. The Session still checks the target interrupt and uses its existing checkpoint to resume the same run. The coordinator does not decide how to answer, and queue Stop behavior is unchanged.
+Studio and TUI submit Review answers through the same resident coordinator entry point. An answer reserves the Pet execution gate from admission through settlement, but never enters the Dispatch FIFO. A concurrent answer is refused, not queued. Session and model listings are observations; they do not hold the execution gate or write the Session registry. The Session still checks the target interrupt and uses its existing checkpoint to resume the same run. The coordinator does not decide how to answer, and queue Stop behavior is unchanged.
 
 An answer to an interrupt left by a dispatched turn gets its own Dispatch ID and references the dispatch that left that interrupt. If resume fails and the same interrupt is still pending, the answer dispatch reports failure without taking ownership of the original interrupt. A successful continuation that suspends on a new interrupt leaves a new waiting Dispatch. A Session status is only as current as the Session read; the answer's outcome does not substitute for it.

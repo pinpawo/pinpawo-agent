@@ -9,6 +9,7 @@ import type { StudioModelEndpoint } from '../studioContract';
 import type { StudioPetRegistration } from '../types';
 import type { StudioEvent, StudioEventHandler, StudioEventSubscriptionFilter } from '../studioContract';
 
+const emptyExecution = () => ({ queued: [], recent: [] });
 const relevant = async () => ({ relevant: true });
 const noDispatchDecision = async (): Promise<never> => assert.fail('unexpected Dispatch decision');
 const pet = (petId: string, channelId = 'team'): StudioPetRegistration => ({
@@ -34,7 +35,7 @@ function bus() {
 }
 /** Exercise the same ownership contract as an active instance: abort and unsubscribe together. */
 function activate(
-  options: Omit<Parameters<typeof createPetHead>[0], 'channel'> & { channel: Omit<PetHeadChannel, 'subscribe'> },
+  options: Omit<Parameters<typeof createPetHead>[0], 'channel' | 'readExecution'> & { channel: Omit<PetHeadChannel, 'subscribe'> },
   events: ReturnType<typeof bus>,
 ) {
   const channel: PetHeadChannel = {
@@ -42,7 +43,7 @@ function activate(
     subscribe: handler => events.subscribe(options.pet.channelId, handler),
   };
   const controller = new AbortController();
-  const handle = createPetHead({ ...options, channel });
+  const handle = createPetHead({ ...options, readExecution: emptyExecution, channel });
   const unsubscribe = channel.subscribe(value => handle(value, controller.signal));
   return () => { controller.abort(); unsubscribe(); };
 }
@@ -134,7 +135,7 @@ test('the Dispatch decision can choose publication and dispatch independently wi
     const calls: unknown[][] = [];
     const source = message('1', { author: { kind: 'pet', id: 'peer' }, replyTo: 'older' });
     const signal = new AbortController().signal;
-    const handler = createPetHead({ pet: pet('a'),
+    const handler = createPetHead({ readExecution: emptyExecution, pet: pet('a'),
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async (...args) => { calls.push(['reply', ...args]); }, dispatch: async (...args) => { calls.push(['dispatch', ...args]); } },
       assessRelevance: relevant, decideDispatch: async () => ({ shouldDispatch, reply }),
@@ -150,7 +151,7 @@ test('the Dispatch decision can choose publication and dispatch independently wi
 test('publication and admission failures are independent and do not leak provider errors', async () => {
   for (const fail of ['reply', 'dispatch', 'both']) {
     const calls: string[] = [];
-    const handler = createPetHead({ pet: pet('a'),
+    const handler = createPetHead({ readExecution: emptyExecution, pet: pet('a'),
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async () => { calls.push('reply'); if (fail !== 'dispatch') throw new Error('private reply detail'); },
         dispatch: async () => { calls.push('dispatch'); if (fail !== 'reply') throw new Error('private dispatch detail'); } },
@@ -169,7 +170,7 @@ test('deactivation cancels an in-flight decision and never publishes or dispatch
   const started = deferred<void>();
   const pending = deferred<{ relevant: boolean }>();
   const effects: string[] = [];
-  const handler = createPetHead({ pet: pet('a'),
+  const handler = createPetHead({ readExecution: emptyExecution, pet: pet('a'),
     channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
       reply: async () => { effects.push('reply'); }, dispatch: async () => { effects.push('dispatch'); } },
     decideDispatch: noDispatchDecision,
@@ -327,7 +328,7 @@ test('failure at either model stage produces no reply or admission', async () =>
   ] as const) {
     const mock = mockEndpoint([...outputs]);
     const model = createHeadModel(() => mock.endpoint);
-    const handle = createPetHead({ pet: pet('a'),
+    const handle = createPetHead({ readExecution: emptyExecution, pet: pet('a'),
       channel: { subscribe: () => () => {}, readContext: async () => ({ messages: [] }),
         reply: async () => assert.fail('invalid output cannot publish'),
         dispatch: async () => assert.fail('invalid output cannot admit work'),
@@ -455,7 +456,7 @@ test('an addressed human or peer artifact review uses idle admission, but its st
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
   });
   const model = createHeadModel(() => nativeEndpoint('openai-compatible', 'deepseek-flash'));
-  const handle = createPetHead({ pet: pet('a'),
+  const handle = createPetHead({ readExecution: emptyExecution, pet: pet('a'),
     channel: { subscribe: () => () => {},
       readContext: async () => ({ messages: [], members: [{ kind: 'pet', id: 'a', participantId }] }),
       reply: async (_pet, id, text) => { replies.push([id, text]); },
@@ -544,7 +545,7 @@ test('a canonical mention establishes relevance, not dispatch; a label or quotat
   assert.equal(isHeadAddressed(addressedInput), true);
   assert.equal(isHeadAddressed(lookalike), false);
   const calls: Array<[string, boolean | undefined]> = [];
-  const handle = createPetHead({ pet: base.pet,
+  const handle = createPetHead({ readExecution: emptyExecution, pet: base.pet,
     channel: { subscribe: () => () => {}, readContext: async () => lookalike.context,
       reply: async () => assert.fail('bare mention need not produce text'),
       dispatch: async () => assert.fail('bare mention is not admission'),

@@ -488,6 +488,52 @@ test('Studio and TUI share one Review admission while ordinary work remains queu
   } finally { release.resolve(); await h.close(); }
 });
 
+test('Session and model listings neither occupy the dispatch gate nor block a Review answer', async () => {
+  const release = deferred();
+  let readsToBlock = 0;
+  let boundThread: string | undefined;
+  let h!: Awaited<ReturnType<typeof fixture>>;
+  h = await fixture(async turn => {
+    const threadId = turn.setup.input.threadId!;
+    if (turn.request.kind === 'resume') {
+      h.reviews.delete(threadId);
+      return reply(turn, 'review applied');
+    }
+    h.reviews.set(threadId, buildReviewSpec({
+      id: 'approval', view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    return { status: 'waiting' };
+  }, { beforeReadState: async threadId => {
+    if (threadId !== boundThread || !readsToBlock) return;
+    readsToBlock--;
+    await release.promise;
+  } });
+  const messages: AgentServerMessage[] = [];
+  const detach = h.interaction.subscribe(message => messages.push(message));
+  try {
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'original', request: 'review this' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'original' && event.state === 'waiting') &&
+      h.resident.dispatch.getQueueSnapshot().activeOperation === null);
+    await h.interaction.request({ type: 'session.resume', requestId: 'select', sessionId });
+    boundThread = h.context.sessions.getSession('worker', sessionId)?.threadId;
+    assert.ok(boundThread);
+    readsToBlock = 2;
+    const listing = h.interaction.request({ type: 'session.list', requestId: 'list' });
+    const models = h.interaction.request({ type: 'model.list', requestId: 'models', sessionId });
+    await waitFor(() => readsToBlock === 0);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedConversations, 0);
+    await h.sessions.review(sessionId, { interruptId: 'review-interrupt', requestId: 'approve',
+      value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
+    await waitFor(() => h.events.some(event => event.resumesDispatchId === 'original' && event.state === 'completed'));
+    assert.ok(!messages.some(message => message.type === 'session.list.result' || message.type === 'model.list.result'));
+    release.resolve();
+    await Promise.all([listing, models]);
+    assert.ok(messages.some(message => message.type === 'session.list.result'));
+    assert.ok(messages.some(message => message.type === 'model.list.result'));
+  } finally { release.resolve(); detach(); await h.close(); }
+});
+
 test('queued dispatches retain separate request and hint snapshots across scopes and an unscoped next run', async () => {
   const started = deferred(), release = deferred();
   const first = { source: 'domain', instruction: 'first instruction', focus: 'first focus' };

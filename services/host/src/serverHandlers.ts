@@ -164,19 +164,8 @@ export function createChatHostHandlers(
   });
   const sessionAdmission = new SessionAdmission();
   const sessionCommands = new SessionCommandQueue();
-  /**
-   * Commands are refused while a run is in flight.
-   *
-   * Every command either changes what the run is writing to (`/new`,
-   * `/resume`, `/model`, `/compact`, `/policy`) or reports state the run is
-   * still producing (`/refresh`, whose purpose is to re-read the UI *after* a
-   * run settles). Admitting any of them mid-run means acting on a session
-   * that is about to change under the caller.
-   *
-   * The rule lives at this boundary so a new command cannot be added without
-   * it, and on the server because that is the only place the invariant can be
-   * held — a client blocking its command panel is feedback, not enforcement.
-   */
+  // State-changing commands are serialized and refused while a run is active.
+  // Observations bypass this queue so they cannot delay a review resume.
   const runSessionCommand = (
     command: () => Promise<void>,
     refuse: () => void,
@@ -191,7 +180,7 @@ export function createChatHostHandlers(
     peer: ServerPeer,
     requestId: string,
     // Not 'snapshot': an observation is never refused.
-    operation: 'list' | 'new' | 'resume' | 'compact',
+    operation: 'new' | 'resume' | 'compact',
   ) => () => {
     peer.send({
       type: 'session.error',
@@ -275,14 +264,14 @@ export function createChatHostHandlers(
 
   const listModelProfiles = async (sessionId: string) => {
     const requestDeps = runtimeDeps.get();
-    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
-    if (!tuiSessions.getSession(requestDeps.petId, sessionId)) {
+    const activeSession = tuiSessions.getSession(requestDeps.petId, sessionId);
+    if (!activeSession) {
       throw Object.assign(
         new Error('session not found'),
         { code: 'session_not_found' },
       );
     }
-    if (activeSession.id !== sessionId) {
+    if (tuiSessions.peekActiveSessionId(requestDeps.petId) !== sessionId) {
       throw Object.assign(
         new Error('model listing requires the active session'),
         { code: 'session_not_active' },
@@ -754,18 +743,9 @@ export function createChatHostHandlers(
         snapshot: await loadSnapshot(client, message.timelineLimit),
       }),
     ),
-    onSessionList: (client, message) => runSessionCommand(
-      () => respondToSessionRequest(
-        client,
-        message.requestId,
-        'list',
-        async () => ({
-          type: 'session.list.result',
-          requestId: message.requestId,
-          sessions: await listSessions(),
-        }),
-      ),
-      refuseSessionCommand(client, message.requestId, 'list'),
+    onSessionList: (client, message) => respondToSessionRequest(
+      client, message.requestId, 'list',
+      async () => ({ type: 'session.list.result', requestId: message.requestId, sessions: await listSessions() }),
     ),
     onSessionNew: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
@@ -808,27 +788,24 @@ export function createChatHostHandlers(
       ),
       refuseSessionCommand(client, message.requestId, 'compact'),
     ),
-    onModelList: (client, message) => runSessionCommand(
-      async () => {
-        try {
-          client.send({
-            type: 'model.list.result',
-            requestId: message.requestId,
-            ...(await listModelProfiles(message.sessionId)),
-          });
-        } catch (error) {
-          sendModelSelectionError(
-            client,
-            message,
-            (error as { code?: string }).code === 'session_not_active'
-              ? 'session_not_active'
-              : 'session_not_found',
-            error instanceof Error ? error.message : 'session not found',
-          );
-        }
-      },
-      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
-    ),
+    onModelList: async (client, message) => {
+      try {
+        client.send({
+          type: 'model.list.result',
+          requestId: message.requestId,
+          ...(await listModelProfiles(message.sessionId)),
+        });
+      } catch (error) {
+        sendModelSelectionError(
+          client,
+          message,
+          (error as { code?: string }).code === 'session_not_active'
+            ? 'session_not_active'
+            : 'session_not_found',
+          error instanceof Error ? error.message : 'session not found',
+        );
+      }
+    },
     onModelSelect: (client, message) => runSessionCommand(
       () => selectModelProfile(client, message),
       () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),

@@ -141,8 +141,7 @@ export interface ResidentPetDispatchService {
 
 /** The capabilities exposed to callers that only observe and submit, such as Studio. */
 export type PetDispatchPort = Pick<ResidentPetDispatchService,
-  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch'> &
-  Partial<Pick<ResidentPetDispatchService, 'readExecution'>>;
+  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch' | 'readExecution'>;
 
 export interface ResidentPet {
   readonly dispatch: ResidentPetDispatchService;
@@ -231,8 +230,6 @@ export type QueuedOperation = {
   kind: 'conversation' | 'dispatch';
   ready?: () => Promise<boolean>;
   run: () => Promise<unknown>;
-  resolve: (value: unknown) => void;
-  reject: (error: unknown) => void;
   observation?: PetDispatchQueueEntry;
   stop?: () => boolean;
   confirmStop?: () => Promise<void>;

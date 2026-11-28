@@ -140,11 +140,11 @@ function admitConversationHandlers(
     // Snapshot is observational and already serialized per peer by the local
     // handler. It must remain reachable while a resident operation is active.
     onSessionSnapshotGet: handlers.onSessionSnapshotGet,
-    onSessionList: admit(handlers.onSessionList),
+    onSessionList: handlers.onSessionList,
     ...(handlers.onSessionCompact ? { onSessionCompact: admit(handlers.onSessionCompact) } : {}),
     onSessionNew: admit(handlers.onSessionNew),
     onSessionResume: admit(handlers.onSessionResume),
-    onModelList: admit(handlers.onModelList),
+    onModelList: handlers.onModelList,
     onModelSelect: admit(handlers.onModelSelect),
     onClose: handlers.onClose,
     ...(handlers.log ? { log: handlers.log } : {}),

@@ -190,6 +190,7 @@ test('a failed explicit run retains its reserved session for a retry', async () 
   const channel = createChannelPlugin({ httpRoute: false });
   const studio = await createStudioWithPets({ studioId: 'retry', plugins: [channel], pets: [{
     registration: { petId: 'one', name: 'One' }, dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
       dispatch: async input => { targets.push(input.session!.id); if (fail) throw Error('registration unavailable'); },

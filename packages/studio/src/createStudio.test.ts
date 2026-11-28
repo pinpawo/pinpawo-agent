@@ -56,6 +56,7 @@ function binding(
   run: (request: string) => void | Promise<void> = () => undefined,
 ): StudioPetBinding {
   const port: PetDispatchPort = {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({
       state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
     }),
@@ -107,6 +108,7 @@ test('Studio dispatches request-only input and returns no thread or continuation
 test('Studio routes resident dispatch lifecycle by Pet instance while preserving broadcast delivery', async (t) => {
   const lifecycleListeners = new Map<string, Parameters<PetDispatchPort['onDispatchLifecycle']>[0]>();
   const portFor = (petId: string): PetDispatchPort => ({
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({
       state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
     }),

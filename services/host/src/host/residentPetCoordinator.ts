@@ -259,17 +259,18 @@ export class ResidentPetCoordinator {
     }
   }
 
-  async enqueueDispatch<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
-    let wait;
-    while ((wait = this.dispatchWriteBarrier())) await wait;
-    return this.enqueue(operation, ready);
-  }
-
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
   submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'confirmStop' | 'onSuperseded'>): void {
     this.assertDispatchWritable();
     if (observation) this.recordDispatchId(observation.dispatchId);
-    void this.enqueue(operation, ready, observation, controls).catch((error) => this.reportDispatchFailure(error));
+    this.schedulingVersion++;
+    this.dispatchQueue.push({
+      kind: 'dispatch', run: operation, ready,
+      ...(observation ? { observation: structuredClone(observation) } : {}),
+      ...controls,
+    });
+    this.publishQueueSnapshot();
+    this.drain();
     // A pending review can be resolved through a reconnect or another
     // session client. Do not let the queue keep that old settled state and
     // strand a later one-way dispatch behind it.
@@ -308,15 +309,9 @@ export class ResidentPetCoordinator {
     this.recordDispatchId(entry.observation.dispatchId);
     for (const item of removed) this.dispatchQueue.splice(this.dispatchQueue.indexOf(item), 1);
     if (this.preferredDispatch && removed.includes(this.preferredDispatch)) this.preferredDispatch = undefined;
-    this.dispatchQueue.push({
-      ...entry, kind: 'dispatch', resolve: () => undefined,
-      reject: error => this.reportDispatchFailure(error),
-    });
+    this.dispatchQueue.push({ ...entry, kind: 'dispatch' });
     this.schedulingVersion++;
-    for (const item of removed) {
-      item.reject(new ResidentPetOperationCancelledError('Dispatch superseded.'));
-      item.onSuperseded?.();
-    }
+    for (const item of removed) item.onSuperseded?.();
     this.publishQueueSnapshot();
     void this.refreshState().catch(error => this.logError('[resident-pet] failed to refresh dispatch admission state:', error));
   }
@@ -346,8 +341,6 @@ export class ResidentPetCoordinator {
     this.schedulingVersion++;
     this.startDispatch({
       kind: 'dispatch', run: operation, observation: structuredClone(options.observation), stop: options.stop, confirmStop: options.confirmStop,
-      resolve: () => undefined,
-      reject: error => this.reportDispatchFailure(error),
     });
     options.onAdmitted();
     return true;
@@ -451,28 +444,11 @@ export class ResidentPetCoordinator {
     if (!this.closing) {
       this.closing = true;
       this.releaseStopBarrier();
-      this.cancelQueue(this.dispatchQueue);
+      this.dispatchQueue.length = 0;
+      this.publishQueueSnapshot();
     }
     // Execution failures belong to their callers, not to resource cleanup.
     await Promise.allSettled([this.active, this.refreshing, ...this.conversationHolds]);
-  }
-
-  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry, controls?: Pick<QueuedOperation, 'stop' | 'confirmStop' | 'onSuperseded'>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      this.assertDispatchWritable();
-      this.schedulingVersion++;
-      this.dispatchQueue.push({
-        kind: 'dispatch',
-        ready,
-        run: operation,
-        resolve: (value) => resolve(value as T),
-        reject,
-        ...(observation ? { observation: structuredClone(observation) } : {}),
-        ...controls,
-      });
-      this.publishQueueSnapshot();
-      this.drain();
-    });
   }
 
   private drain(): void {
@@ -550,14 +526,10 @@ export class ResidentPetCoordinator {
   private async run(entry: QueuedOperation): Promise<void> {
     // Selection reserves the slot before execution's first microtask. Stop
     // must also cancel that selected-but-unstarted entry, not only the queue.
-    if (this.closing) {
-      entry.reject(new ResidentPetOperationCancelledError('Resident Pet Host is closing.'));
-      return;
-    }
-    let value: unknown;
+    if (this.closing) return;
     let operationError: unknown;
     try {
-      value = await entry.run();
+      await entry.run();
     } catch (error) {
       operationError = error;
     }
@@ -569,8 +541,7 @@ export class ResidentPetCoordinator {
       if (operationError === undefined) operationError = error;
       else this.logError('[resident-pet] failed to refresh settled state:', error);
     }
-    if (operationError !== undefined) entry.reject(operationError);
-    else entry.resolve(value);
+    if (operationError !== undefined) this.reportDispatchFailure(operationError);
   }
 
   private async readNextSettledState(): Promise<PetDispatchSettledState> {
@@ -608,12 +579,5 @@ export class ResidentPetCoordinator {
         this.logError('[resident-pet] queue listener failed:', error);
       }
     }
-  }
-
-  private cancelQueue(queue: QueuedOperation[]): void {
-    for (const entry of queue.splice(0)) {
-      entry.reject(new ResidentPetOperationCancelledError('Resident Pet Host is closing.'));
-    }
-    this.publishQueueSnapshot();
   }
 }

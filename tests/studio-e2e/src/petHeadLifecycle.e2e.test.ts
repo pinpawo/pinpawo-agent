@@ -34,19 +34,20 @@ test('real Channel events follow Pet close, reopen and remove without replay or 
     studioId: 'head-lifecycle', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
     assemblePet: async () => ({
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async request => { dispatched.push(request); },
       }, close: async () => {},
     }),
-    subscribePetTimeline: ({ registration }, signal) => {
+    subscribePetTimeline: ({ registration, runtime }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, (handler, filter) => {
         assert.ok(filter);
         assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
         subscriptionTopics.push(filter.topic);
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: bound, assessRelevance: async () => ({ relevant: true }), decideDispatch });
+      const handle = createPetHead({ pet: registration, channel: bound, readExecution: runtime.dispatch.readExecution, assessRelevance: async () => ({ relevant: true }), decideDispatch });
       return bound.subscribe(message => handle(message, signal));
     },
   });
@@ -89,13 +90,14 @@ test('a live Head consumes Agent output once and a human reply, but not an autom
     studioId: 'head-external-ref', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
     assemblePet: async () => ({
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
       }, close: async () => {},
     }),
-    subscribePetTimeline: ({ registration }, signal) => {
+    subscribePetTimeline: ({ registration, runtime }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: bound, assessRelevance: async () => ({ relevant: true }),
+      const handle = createPetHead({ pet: registration, channel: bound, readExecution: runtime.dispatch.readExecution, assessRelevance: async () => ({ relevant: true }),
         decideDispatch: async ({ pet, message }) => { if (pet.petId === 'observer') observed.push(message.body); return { shouldDispatch: false, reply: null }; },
       });
       return bound.subscribe(message => handle(message, signal));
@@ -132,14 +134,15 @@ test('response and work both use Host admission without Head final text and pres
     studioId: 'head-delivery', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
     assemblePet: async () => ({
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async request => { dispatched.push(request); },
       }, close: async () => {},
     }),
-    subscribePetTimeline: ({ registration }, signal) => {
+    subscribePetTimeline: ({ registration, runtime }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, prepared.studio.subscribe);
-      const handle = createPetHead({ pet: registration, channel: bound, assessRelevance: async () => ({ relevant: true }),
+      const handle = createPetHead({ pet: registration, channel: bound, readExecution: runtime.dispatch.readExecution, assessRelevance: async () => ({ relevant: true }),
         decideDispatch: async (input) => {
           const { message } = input;
           observed.push(message.body);

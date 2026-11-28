@@ -116,7 +116,7 @@ export function attachPetHead(input: {
   description?: string;
   channel: PetHeadChannelOperations;
   subscribe: Studio['subscribe'];
-  readExecution?: PetDispatchPort['readExecution'];
+  readExecution: PetDispatchPort['readExecution'];
   readSession?: ReadSession;
   resolveModel: () => StudioModelEndpoint;
   onDiagnostic?: (event: HeadRelevanceDiagnostic) => void;
@@ -142,7 +142,7 @@ export function createPetHead(options: {
   pet: StudioPetRegistration;
   description?: string;
   channel: PetHeadChannel;
-  readExecution?: PetDispatchPort['readExecution'];
+  readExecution: PetDispatchPort['readExecution'];
   readSession?: ReadSession;
   assessRelevance: (input: HeadInput, signal: AbortSignal) => Promise<HeadRelevance>;
   decideDispatch: (input: HeadDispatchInput, signal: AbortSignal) => Promise<HeadDispatchDecision>;
@@ -164,7 +164,7 @@ export function createPetHead(options: {
     const boundSessionId = await options.channel.readBoundSessionId?.(options.pet.petId);
     if (signal.aborted) return;
     const execution = boundSessionId
-      ? options.readExecution?.({ sessionId: boundSessionId, scope: { namespace: 'channel', id: message.channelId } })
+      ? options.readExecution({ sessionId: boundSessionId, scope: { namespace: 'channel', id: message.channelId } })
       : undefined;
     if (signal.aborted) return;
     const { active, queued, recent } = execution ?? { queued: [], recent: [] };

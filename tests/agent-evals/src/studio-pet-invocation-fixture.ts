@@ -38,6 +38,7 @@ export async function assembleStudioPetInvocation(params: {
       studioId: 'synthetic-pet-role-eval', plugins: [channel],
       onPreparedContextResolver: value => { resolver = value; },
       pets: [{ registration: { petId: params.role, name: params.role }, dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async input => {

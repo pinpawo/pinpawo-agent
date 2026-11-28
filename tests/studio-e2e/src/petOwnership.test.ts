@@ -18,6 +18,7 @@ function deferred() {
 }
 function runtime(close = async () => {}): StudioPetRuntime {
   return { close, dispatch: {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
   } };

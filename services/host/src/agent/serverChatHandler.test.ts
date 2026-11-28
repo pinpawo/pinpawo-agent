@@ -238,11 +238,15 @@ test('replacement request waits for the previous thread invocation to settle', a
   const firstReleased = new Promise<void>((resolve) => {
     releaseFirst = resolve;
   });
+  let enterSettlement!: () => void;
+  let releaseSettlement!: () => void;
+  const settlementEntered = new Promise<void>(resolve => { enterSettlement = resolve; });
+  const settlementReleased = new Promise<void>(resolve => { releaseSettlement = resolve; });
   let replacementStarted = false;
   const handler = new ServerChatHandler({
     // The superseded run settles with nothing to continue, so it reports a
     // plain interruption.
-    graphService: { settleAbortedRun: async () => null } as never,
+    graphService: { settleAbortedRun: async () => { enterSettlement(); await settlementReleased; return null; } } as never,
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
@@ -302,7 +306,12 @@ test('replacement request waits for the previous thread invocation to settle', a
   );
 
   releaseFirst();
+  await settlementEntered;
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const startedBeforeSettlement = replacementStarted;
+  releaseSettlement();
   await Promise.all([oldRun, replacementRun]);
+  assert.equal(startedBeforeSettlement, false, 'the replacement must wait until checkpoint settlement finishes');
   assert.equal(replacementStarted, true);
   // A superseded run reports once through its runtime event; there is no
   // separate control message for a finished interruption.

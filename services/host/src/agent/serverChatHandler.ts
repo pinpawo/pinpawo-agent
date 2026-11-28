@@ -67,7 +67,7 @@ export type HostTurnOutcome =
   | { outcome: 'completed'; reply: string; pendingInterrupt: null; error?: never }
   | { outcome: 'waiting'; pendingInterrupt: PendingInterruptProjection; reply?: never; error?: never }
   | { outcome: 'interrupted'; pendingInterrupt?: null; reply?: never; error?: never }
-  | { outcome: 'failed' | 'fatal_failed'; error: unknown; pendingInterrupt?: PendingInterruptProjection | null; reply?: never };
+  | { outcome: 'failed' | 'fatal_failed'; error: unknown; pendingInterrupt?: PendingInterruptProjection | null; settlementFailed?: true; reply?: never };
 
 /** A Host adapter may attribute an already validated review to a Dispatch. */
 export type RunReviewTurn = (
@@ -321,6 +321,7 @@ export class ServerChatHandler {
     const isCurrent = invocation.isCurrent;
     let runStarted = false;
     let interruptedFinalized = false;
+    let turnSetup: ReturnType<ServerTuiSessionService['buildChatSetup']> | undefined;
     /**
      * Cancellation creates no interrupt. Preserve only a native review
      * that was already pending when the interruption arrived.
@@ -329,8 +330,15 @@ export class ServerChatHandler {
       // A settlement that fails leaves the thread in an unknown state, so it
       // takes the failure path rather than being reported as a clean
       // interruption. The caller decides how that failure is surfaced.
-      const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
-      const settled = await this.graphService.settleAbortedRun(setup);
+      const setup = turnSetup ?? this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
+      let settled: PendingInterrupt | null;
+      try {
+        settled = await this.graphService.settleAbortedRun(setup);
+      } catch (error) {
+        console.error('[chat-host] failed to confirm a cancelled run:', error);
+        const failure = await reportFailure(error, runStarted && !invocation.isSuperseded());
+        return { ...failure, settlementFailed: true };
+      }
       const usage = this.graphService.readSessionTokenUsage?.(setup);
       if (usage && !invocation.isSuperseded()) {
         this.publishRuntimeEvent(peer, { type: 'usage.updated', requestId, usage });
@@ -376,7 +384,7 @@ export class ServerChatHandler {
       err: unknown,
       isStillCurrent: boolean,
       pendingInterrupt?: PendingInterruptProjection | null,
-    ): Promise<HostTurnOutcome> => {
+    ): Promise<Extract<HostTurnOutcome, { error: unknown }>> => {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
       const diagnostics = describeAgentError(err);
@@ -423,7 +431,6 @@ export class ServerChatHandler {
       }
     };
 
-    let turnSetup: ReturnType<ServerTuiSessionService['buildChatSetup']> | undefined;
     try {
       await invocation.waitForTurn();
       if (!isCurrent()) {
@@ -490,7 +497,7 @@ export class ServerChatHandler {
         return { outcome: 'waiting', pendingInterrupt: projectPendingInterrupt(result.pendingInterrupt) };
       }
       if (result.status === 'interrupted') {
-        return settleCancellation();
+        return await settleCancellation();
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
@@ -503,7 +510,7 @@ export class ServerChatHandler {
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[chat-host] chat interrupted requestId=${requestId}`);
-        return settleCancellation();
+        return await settleCancellation();
       }
       let pendingInterrupt: PendingInterruptProjection | null | undefined;
       if (request.kind === 'resume' && turnSetup && this.runReviewTurn) {

@@ -24,74 +24,73 @@ function deferred() {
 }
 
 for (const entry of ['peer', 'request', 'session'] as const) {
-  for (const checkpointRead of [1, 2]) {
-    for (const decision of entry === 'session' ? ['approve'] as const : ['approve', 'cancel'] as const) {
-      test(`Host close fences ${entry} ${decision} while resume checkpoint read ${checkpointRead} is pending`, { timeout: 10_000 }, async t => {
-        const root = await mkdtemp(join(tmpdir(), 'pinpawo-resume-close-'));
-        const config = buildHostRuntimeConfig(root);
-        const reading = deferred();
-        const release = deferred();
-        const review = buildReviewSpec({ id: 'review', view: { kind: 'plain', body: 'Approve?' },
-          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] });
-        const pending = { interruptId: 'pending', payload: { kind: 'human_review' as const, reviews: [review] } };
-        let armed = false;
-        let reads = 0;
-        let turns = 0;
-        let settlements = 0;
-        let current: typeof pending | null = pending;
-        const messages: AgentServerMessage[] = [];
-        const runtime = await createResidentPetRuntime({
-          petId: 'pet', petName: 'Pet', runtimeConfig: config,
-          modelProfiles: createTestModelProfiles(), capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
-          checkpointer: new FileSaver(config.checkpointPath), sessionStatePath: config.tuiSessionPath,
-          toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
-          graphService: {
-            readThreadState: async () => {
-              // The exact-session surface reads a snapshot before admitting the resume.
-              if (armed && ++reads === checkpointRead + (entry === 'session' ? 1 : 0)) {
-                reading.resolve();
-                await release.promise;
-              }
-              return { messages: [], pendingInterrupt: current, acceptsResume: !!current, currentPlan: null };
-            },
-            settleAbortedRun: async () => { settlements++; return current; },
-          } as never,
-          runAgentTurn: async () => {
-            turns++;
-            current = null;
-            return { status: 'completed', reply: 'consumed' };
+  for (const decision of entry === 'session' ? ['approve'] as const : ['approve', 'cancel'] as const) {
+    test(`Host close fences ${entry} ${decision} while the current review is being read`, { timeout: 10_000 }, async t => {
+      const root = await mkdtemp(join(tmpdir(), 'pinpawo-resume-close-'));
+      const config = buildHostRuntimeConfig(root);
+      const reading = deferred();
+      const release = deferred();
+      const review = buildReviewSpec({ id: 'review', view: { kind: 'plain', body: 'Approve?' },
+        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] });
+      const pending = { interruptId: 'pending', payload: { kind: 'human_review' as const, reviews: [review] } };
+      let armed = false;
+      let reads = 0;
+      let turns = 0;
+      let settlements = 0;
+      let current: typeof pending | null = pending;
+      const messages: AgentServerMessage[] = [];
+      const runtime = await createResidentPetRuntime({
+        petId: 'pet', petName: 'Pet', runtimeConfig: config,
+        modelProfiles: createTestModelProfiles(), capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
+        checkpointer: new FileSaver(config.checkpointPath), sessionStatePath: config.tuiSessionPath,
+        toolAuthorizationMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
+        graphService: {
+          readThreadState: async () => {
+            if (armed && ++reads === 1) {
+              reading.resolve();
+              await release.promise;
+            }
+            return { messages: [], pendingInterrupt: current, acceptsResume: !!current, currentPlan: null };
           },
-        });
-        const context = readResidentPetRuntimeContext(runtime);
-        const interaction = createResidentPetInteraction(runtime);
-        const sessions = createResidentPetSessions(runtime);
-        const sessionId = context.sessions.getActiveSessionId('pet');
-        const peer: AgentSessionPeer = { isConnected: () => true, send: message => { messages.push(message); return true; } };
-        if (entry === 'peer') interaction.connect(peer);
-        else interaction.subscribe(message => messages.push(message));
-        t.after(async () => { release.resolve(); await context.close(); await rm(root, { recursive: true, force: true }); });
-        armed = true;
-        const value = { decisions: [{ interactionId: 'review', selectedOptionId: 'approve' }] };
-        const message = { type: 'interrupt.resume' as const, requestId: 'resume', interruptId: 'pending',
-          value: decision === 'cancel' ? { action: 'cancel' } : value };
-        const resuming = entry === 'peer' ? interaction.handle(peer, message)
-          : entry === 'request' ? interaction.request(message)
-          : sessions.review(sessionId, { requestId: 'resume', interruptId: 'pending', value });
-        await reading.promise;
-        let closed = false;
-        const closing = context.close().then(() => { closed = true; });
-        await new Promise<void>(resolve => setImmediate(resolve));
-        assert.equal(closed, false, 'close must wait for the admitted resume to settle');
-        release.resolve();
-        await Promise.all([resuming, closing]);
-        assert.equal(turns, 0, 'a close during checkpoint preflight must not invoke the Agent');
-        assert.equal(settlements, 0, 'an unstarted resume must not settle or cancel the checkpoint');
-        assert.deepEqual(current, pending, 'close must preserve the pending review unchanged');
-        assert.ok(!messages.some(message => message.type === 'event' && message.event.type === 'run.started'),
-          'an unstarted resume must not be announced as a run');
-        await assert.rejects(sessions.review(sessionId, { requestId: 'late', interruptId: 'pending', value }), /closed/);
+          settleAbortedRun: async () => { settlements++; return current; },
+        } as never,
+        runAgentTurn: async () => {
+          turns++;
+          current = null;
+          return { status: 'completed', reply: 'consumed' };
+        },
       });
-    }
+      const context = readResidentPetRuntimeContext(runtime);
+      const interaction = createResidentPetInteraction(runtime);
+      const sessions = createResidentPetSessions(runtime);
+      const sessionId = context.sessions.getActiveSessionId('pet');
+      const peer: AgentSessionPeer = { isConnected: () => true, send: message => { messages.push(message); return true; } };
+      if (entry === 'peer') interaction.connect(peer);
+      else interaction.subscribe(message => messages.push(message));
+      t.after(async () => { release.resolve(); await context.close(); await rm(root, { recursive: true, force: true }); });
+      armed = true;
+      const value = { decisions: [{ interactionId: 'review', selectedOptionId: 'approve' }] };
+      const message = { type: 'interrupt.resume' as const, requestId: 'resume', interruptId: 'pending',
+        value: decision === 'cancel' ? { action: 'cancel' } : value };
+      const resuming = entry === 'peer' ? interaction.handle(peer, message)
+        : entry === 'request' ? interaction.request(message)
+        : sessions.review(sessionId, { requestId: 'resume', interruptId: 'pending', value });
+      await reading.promise;
+      let closed = false;
+      const closing = context.close().then(() => { closed = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(closed, false, 'close must wait for the admitted resume to settle');
+      const settled = entry === 'session' ? assert.rejects(resuming, /closing/) : resuming;
+      release.resolve();
+      await Promise.all([settled, closing]);
+      assert.equal(reads, 1, 'the cancelled preflight does not reload the current review');
+      assert.equal(turns, 0, 'a close during checkpoint preflight must not invoke the Agent');
+      assert.equal(settlements, 0, 'an unstarted resume must not settle or cancel the checkpoint');
+      assert.deepEqual(current, pending, 'close must preserve the pending review unchanged');
+      assert.ok(!messages.some(message => message.type === 'event' && message.event.type === 'run.started'),
+        'an unstarted resume must not be announced as a run');
+      await assert.rejects(sessions.review(sessionId, { requestId: 'late', interruptId: 'pending', value }), /closed/);
+    });
   }
 }
 

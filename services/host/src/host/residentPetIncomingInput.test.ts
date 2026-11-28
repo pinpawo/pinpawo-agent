@@ -925,6 +925,47 @@ test('stop cannot settle a bound dispatch with the open TUI Session checkpoint',
   } finally { exit.resolve(); await h.close(); }
 });
 
+for (const failFirstRead of [false, true]) {
+  test(`a stopped turn does not retry a confirmed graph when the review link cannot save (first read fails: ${failFirstRead})`, async (t) => {
+    const started = deferred(), release = deferred();
+    let reads = 0;
+    let h!: Awaited<ReturnType<typeof fixture>>;
+    h = await fixture(async turn => {
+      if (turn.request.kind === 'user_message' && turn.request.message === 'stop me') {
+        started.resolve();
+        await release.promise;
+        h.reviews.set(turn.setup.input.threadId!, buildReviewSpec({ id: 'approval',
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        }));
+        turn.setup.input.signal!.throwIfAborted();
+      }
+      return reply(turn, 'done');
+    }, { beforeSettleAbort: async () => {
+      reads++;
+      if (failFirstRead && reads === 1) throw new Error('checkpoint unreadable once');
+    } });
+    try {
+      const dispatch = h.resident.dispatch;
+      const persist = t.mock.method(h.context.sessions, 'setPendingDispatch', () => {
+        throw new Error('review link write failed');
+      });
+      await dispatch.dispatch({ ...target, request: 'stop me', dispatchId: 'stopped' });
+      await started.promise;
+      assert.equal(dispatch.stop('stopped'), true);
+      release.resolve();
+      await waitFor(() => h.events.some(event => event.dispatchId === 'stopped' && event.state === 'failed'));
+      await waitFor(() => dispatch.getQueueSnapshot().activeOperation === null);
+      assert.equal(reads, failFirstRead ? 2 : 1);
+      assert.equal(persist.mock.callCount(), 1);
+      assert.equal(h.events.find(event => event.dispatchId === 'stopped' && event.state === 'failed')?.error, 'review link write failed');
+      await dispatch.dispatch({ request: 'other', dispatchId: 'other', session: { id: 'worker:00000002', create: true }, scope });
+      await waitFor(() => h.events.some(event => event.dispatchId === 'other' && event.state === 'completed'));
+      assert.equal(reads, failFirstRead ? 2 : 1);
+    } finally { release.resolve(); await h.close(); }
+  });
+}
+
 test('supersede of a missing Session cannot create a Session or admit work', async () => {
   const h = await fixture(async turn => reply(turn, 'unexpected'));
   const id = 'worker:000000ff';

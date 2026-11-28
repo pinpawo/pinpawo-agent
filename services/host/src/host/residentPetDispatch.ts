@@ -124,6 +124,13 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         // The run belongs to its target; a legacy dispatch runs in the active session.
         const opened = target ? openSessionPeer(target.id) : null;
         const execution: { setup?: AgentChannelSetup } = {};
+        const reportFailure = (failure: unknown) => publishLifecycle({
+          dispatchId,
+          request,
+          requestId,
+          state: 'failed',
+          error: failure instanceof Error ? failure.message : 'internal error',
+        });
         publishLifecycle({ dispatchId, request, requestId, state: 'running' });
         try {
           if (stopRequested) {
@@ -132,7 +139,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             return;
           }
           executingRequestId = requestId;
-          const { outcome, error, pendingInterrupt, reply } = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
+          const result = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
             requestId,
             message: request,
             ...(artifactReferences.length ? { artifactReferences } : {}),
@@ -154,6 +161,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             ),
           }, target?.id);
           executionEnded = true;
+          const { outcome, error, pendingInterrupt, reply } = result;
           if (outcome === 'completed') {
             publishLifecycle({ dispatchId, request, requestId, state: 'completed', reply });
             return;
@@ -168,34 +176,30 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             publishLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
             return;
           }
-          throw error ?? new Error('internal error');
-        } catch (failure) {
-          executionEnded = true;
-          const reportFailure = () => publishLifecycle({
-            dispatchId,
-            request,
-            requestId,
-            state: 'failed',
-            error: failure instanceof Error ? failure.message : 'internal error',
-          });
-          if (stopRequested && execution.setup) {
-            // The Host could not settle this stopped turn. Retry its own
-            // checkpoint, never the TUI's currently selected Session.
+          if (stopRequested && result.settlementFailed && execution.setup) {
+            // Retry an unconfirmed graph read, not an already-settled turn
+            // whose Dispatch metadata could not be saved.
             const setup = execution.setup;
             confirmFailedStop = async () => {
               const pending = await graphService.settleAbortedRun(setup);
-              if (pending) {
-                const pendingInterrupt = projectPendingInterrupt(pending);
-                suspend(setup.input.threadId, pendingInterrupt);
-                publishLifecycle({ dispatchId, request, requestId, state: 'waiting', pendingInterrupt });
-              } else {
-                reportFailure();
-              }
               confirmFailedStop = undefined;
+              if (pending) {
+                try {
+                  const pendingInterrupt = projectPendingInterrupt(pending);
+                  suspend(setup.input.threadId, pendingInterrupt);
+                  publishLifecycle({ dispatchId, request, requestId, state: 'waiting', pendingInterrupt });
+                } catch (failure) {
+                  reportFailure(failure);
+                }
+              } else {
+                reportFailure(error);
+              }
             };
-          } else {
-            reportFailure();
           }
+          throw error ?? new Error('internal error');
+        } catch (failure) {
+          executionEnded = true;
+          if (!confirmFailedStop) reportFailure(failure);
           throw failure;
         } finally {
           opened?.release();

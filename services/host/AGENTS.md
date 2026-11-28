@@ -1,0 +1,7 @@
+# Host boundaries
+
+- Host wires the checkpointer into LangGraph. Host business logic must use the graph adapter (`HostGraphService`) for thread state, resume, and intentional graph-state updates. Do not call saver methods directly, read or write checkpoint storage, or mutate raw checkpoint records from a business path. Implementing a saver is storage plumbing; it is not a business API.
+- The existing startup probe for adopting an old Studio thread is a migration exception. Do not copy it into new code or extend it to approval, Dispatch, or Session operations. Change that migration separately so existing sessions are not silently detached.
+- Approval admission and resume settlement belong to Host execution. Use the current interrupt from LangGraph, not a client Session snapshot, to decide whether a review is current. Return the execution outcome to the caller rather than re-reading graph state to classify the same result in another layer.
+- The Dispatch coordinator owns admission and Dispatch lifecycle. A review answer can be a new Dispatch while the graph resumes the same run. Dispatch maps the Host result to its own lifecycle; it does not validate approval choices or decide whether the graph completed, failed, or was interrupted.
+- Keep the contracts distinct: `@pinpawo/agent-contracts` defines common Agent/Host data; `@pinpawo/agent-session` defines runtime-neutral Session events, projections, and protocol. Neither owns Host execution or checkpoint storage.

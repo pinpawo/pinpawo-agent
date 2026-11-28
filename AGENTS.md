@@ -12,6 +12,8 @@
 
 Machine integration belongs in `services/` and `toolkits/`, outside the agent core.
 
+Before changing a module, read any nested `AGENTS.md` files on the path from the repository root to the files you will edit. For Host changes, see [Host boundaries](services/host/AGENTS.md).
+
 ## Commands
 
 - `npm install` installs workspace dependencies.

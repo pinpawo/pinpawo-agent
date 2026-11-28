@@ -142,7 +142,8 @@ export function resolveHumanReviewAnswer(
       decisions = validateHumanReviewResponses(reviews, requested.decisions);
     } catch (error) {
       console.warn('[human-review] response rejected:', error instanceof Error ? error.message : String(error));
-      return { code: 'interrupt_stale' };
+      const stale = error instanceof ReviewResponseResolutionError && error.code === 'stale_review';
+      return { code: stale ? 'interrupt_stale' : 'interrupt_response_invalid' };
     }
     const finalDecision = decisions.at(-1)!;
     return {

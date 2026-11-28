@@ -293,10 +293,7 @@ export class ServerTuiSessionService {
     return updated;
   }
 
-  async readSessionCheckpointPoint(
-    deps: ServerDeps,
-    session: TuiSessionRecord,
-  ): Promise<TuiCheckpointPoint> {
+  private async readSessionThreadState(deps: ServerDeps, session: TuiSessionRecord) {
     const ctx = await this.loadContext(deps.petId);
     let checkpointReaderProfileId = session.modelProfileId;
     try {
@@ -313,17 +310,21 @@ export class ServerTuiSessionService {
       session.threadId,
       checkpointReaderProfileId,
     );
-    const state = await this.graphService.readThreadState(setup);
-    const pendingInterrupt = state.pendingInterrupt
-      ? { sessionId: session.id, ...state.pendingInterrupt }
-      : null;
+    return this.graphService.readThreadState(setup);
+  }
+
+  async readSessionCheckpointPoint(
+    deps: ServerDeps,
+    session: TuiSessionRecord,
+  ): Promise<TuiCheckpointPoint> {
+    const state = await this.readSessionThreadState(deps, session);
     return {
       sessionId: session.id,
       modelProfileId: session.modelProfileId,
       requiredInputModalities: readTuiCheckpointInputModalities(state.messages),
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: state.sessionTokenUsage ?? readTuiCheckpointTokenUsage(state.messages),
-      pendingInterrupt,
+      pendingInterrupt: state.pendingInterrupt ? { sessionId: session.id, ...state.pendingInterrupt } : null,
       currentPlan: state.currentPlan,
     };
   }
@@ -363,15 +364,15 @@ export class ServerTuiSessionService {
   }
 
   async readActivePendingInterrupt(deps: ServerDeps): Promise<ActivePendingInterrupt | null> {
-    const session = this.getActiveSession(deps.petId);
-    return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
+    return this.readSessionPendingInterrupt(deps, this.getActiveSession(deps.petId));
   }
 
   async readSessionPendingInterrupt(
     deps: ServerDeps,
     session: TuiSessionRecord,
   ): Promise<ActivePendingInterrupt | null> {
-    return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
+    const { pendingInterrupt } = await this.readSessionThreadState(deps, session);
+    return pendingInterrupt ? { sessionId: session.id, ...pendingInterrupt } : null;
   }
 
   async readActiveCheckpointPoint(deps: ServerDeps) {

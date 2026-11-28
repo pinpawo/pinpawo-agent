@@ -31,9 +31,9 @@ function reviewSpec(id: string): ReviewSpec {
 test('human review interrupt rejects partial approval resumes', () => {
   const reviews = ['review-1', 'review-2'].map(reviewSpec);
 
-  assert.throws(() => validateHumanReviewResponses(reviews, [
-      { interactionId: 'review-1', selectedOptionId: 'approve' },
-    ]));
+  assert.deepEqual(resolveHumanReviewAnswer(reviews, {
+    decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+  }), { code: 'interrupt_response_invalid' });
 });
 
 test('human review interrupt resumes complete approvals as one payload', () => {

@@ -141,9 +141,11 @@ for (const decision of ['reject', 'cancel'] as const) {
       if (http) {
         const address = http.address();
         assert.ok(address);
-        const received: string[] = [];
+        const received = new Map<string, string | undefined>();
         const detach = await host.sessions.observe(binding.sessionId, message => {
-          if (message.type === 'event' && message.event.type === 'error') received.push(message.event.requestId);
+          if (message.type === 'event' && message.event.type === 'error') {
+            received.set(message.event.requestId, message.event.code);
+          }
         });
         try {
           const submit = (requestId: string, selectedOptionId: string, interruptId = pending.interruptId) =>
@@ -156,7 +158,9 @@ for (const decision of ['reject', 'cancel'] as const) {
             });
           assert.equal((await submit('closed', 'reject', 'closed')).status, 409);
           assert.equal((await submit('invalid-option', 'no-such-option')).status, 202);
-          await waitFor(() => received.includes('invalid-option') && host.resident.dispatch.getQueueSnapshot().queuedConversations === 0);
+          await waitFor(() => received.has('invalid-option') && host.resident.dispatch.getQueueSnapshot().queuedConversations === 0);
+          assert.equal(received.get('invalid-option'), 'interrupt_response_invalid');
+          assert.equal((await host.sessions.snapshot(binding.sessionId)).session.pendingInterrupt?.interruptId, pending.interruptId);
           assert.equal((await outputs(id)).length, 1);
           const accepted = await submit('decline', 'reject');
           assert.equal(accepted.status, 202);

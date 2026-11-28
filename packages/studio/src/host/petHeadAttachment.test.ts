@@ -14,11 +14,11 @@ const dependencies = {
     reply: async () => { throw new Error('unexpected reply'); },
     dispatch: async () => { throw new Error('unexpected dispatch'); },
   },
-  getQueueSnapshot: () => { throw new Error('activation must not read the runtime queue'); },
+  readExecution: () => { throw new Error('activation must not read the runtime queue'); },
   resolveModel: () => { throw new Error('activation must not build the model'); },
 };
 
-test('Head attachment rolls back the resident observation if Timeline subscription fails', () => {
+test('Head attachment only subscribes to its Timeline', () => {
   const failure = new Error('Timeline attachment failed');
   const attached = new Set<string>();
   const filters: StudioEventSubscriptionFilter[] = [];
@@ -33,11 +33,11 @@ test('Head attachment rolls back the resident observation if Timeline subscripti
       return () => { attached.delete(filter.topic); };
     },
   }, signal), failure);
-  assert.deepEqual(filters, [{ source: 'resident-pet', topic: pet.petId }, { source: 'channel', topic: pet.channelId }]);
+  assert.deepEqual(filters, [{ source: 'channel', topic: pet.channelId }]);
   assert.equal(attached.size, 0, 'nothing remains attached even before PetInstance aborts on activation failure');
 });
 
-test('Head attachment uses the given activation signal and releases both subscriptions', () => {
+test('Head attachment uses the given activation signal and releases its Timeline subscription', () => {
   const controller = new AbortController();
   const released: string[] = [];
   const close = attachPetHead({
@@ -49,7 +49,7 @@ test('Head attachment uses the given activation signal and releases both subscri
   }, controller.signal);
   controller.abort();
   close();
-  assert.deepEqual(released, ['channel', 'resident-pet']);
+  assert.deepEqual(released, ['channel']);
   assert.throws(() => attachPetHead({
     ...dependencies,
     subscribe: () => assert.fail('an already-aborted activation cannot subscribe'),

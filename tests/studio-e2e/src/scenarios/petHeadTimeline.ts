@@ -212,9 +212,8 @@ export async function runPetHeadTimelineTrial(input: {
     cases.push(caseResult(currentCase, {
       foreignEventCommittedAndPublished: published.some(message => message.messageId === foreign.messageId),
       foreignEventNeverEnteredHeadHandler: foreignEntries === 0,
-      ownerSubscriptionIsExact: filters.length === 2 &&
-        filters.some(filter => filter?.source === 'channel' && filter.topic === ownerId) &&
-        filters.some(filter => filter?.source === 'resident-pet' && filter.topic === petId),
+      ownerSubscriptionIsExact: filters.length === 1 &&
+        filters[0]?.source === 'channel' && filters[0].topic === ownerId,
       ownerHandlerStillActive: entries.some(message => message.messageId === barrier.messageId),
     }, { foreignHandlerEntries: foreignEntries, foreignPublishedEvents: published.filter(message => message.channelId === foreignId).length }));
   } catch (error) {

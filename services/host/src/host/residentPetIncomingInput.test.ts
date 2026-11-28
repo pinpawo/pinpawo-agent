@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { buildReviewSpec } from '@pinpawo/pet-agent';
+import type { AgentServerMessage } from '@pinpawo/agent-session';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
 import { createResidentPetRuntime, type CreateResidentPetRuntimeOptions } from '../residentPetHost';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
@@ -304,7 +305,9 @@ test('immediate input during review settlement cannot cancel a later human appro
     assert.equal(resumed, true, 'the incoming input must not leave a cancellation flag for the review resume');
     await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch, undefined);
-    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['first', 'next']);
+    const answer = h.events.find(event => event.resumesDispatchId === 'first' && event.state === 'completed');
+    assert.ok(answer && answer.dispatchId !== 'first');
+    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), [answer.dispatchId, 'next']);
   } finally { releaseSettlement.resolve(); await h.close(); }
 });
 
@@ -384,7 +387,7 @@ test('an immediate interruption that races with native review preserves approval
   h = await fixture(async turn => {
     if (turn.request.kind === 'resume') {
       resumed = true;
-      assert.equal(readPetInvocationContext()?.dispatchId, 'first');
+      assert.notEqual(readPetInvocationContext()?.dispatchId, 'first');
       assert.equal(turn.setup.input.context?.systemPromptSections?.find(section => section.id === 'domain')?.content, scope.id);
       h.reviews.delete(turn.setup.input.threadId!);
       resumeStarted.resolve(); await resumeBoundary.promise;
@@ -417,13 +420,119 @@ test('an immediate interruption that races with native review preserves approval
     await h.sessions.review(sessionId, { requestId: 'human-approval', interruptId: 'review-interrupt',
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
     await resumeStarted.promise;
+    const active = h.resident.dispatch.readExecution({ sessionId, scope });
+    const answerRunning = h.events.find(event => event.resumesDispatchId === 'first' && event.state === 'running');
+    assert.ok(answerRunning);
+    assert.equal(active.active?.dispatchId, answerRunning.dispatchId);
+    assert.deepEqual(active.queued.map(item => item.dispatchId), ['next']);
+    assert.ok(!active.recent.some(item => item.dispatchId === 'first' && item.state === 'waiting'));
+    assert.equal(h.resident.dispatch.getQueueSnapshot().activeDispatch, undefined, 'review answer does not enter FIFO');
     resumeBoundary.resolve();
     await waitFor(() => h.events.some(event => event.dispatchId === 'next' && event.state === 'completed'));
     assert.equal(h.context.sessions.getSession('worker', sessionId)?.pendingDispatch, undefined);
-    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), ['first', 'next']);
+    const answer = h.events.find(event => event.resumesDispatchId === 'first' && event.state === 'completed');
+    assert.ok(answer && answer.dispatchId !== 'first');
+    assert.deepEqual(h.events.filter(event => event.state === 'message').map(event => event.dispatchId), [answer.dispatchId, 'next']);
   } finally { resumeBoundary.resolve(); await h.close(); }
 });
 
+
+test('Studio and TUI share one Review admission while ordinary work remains queued', async () => {
+  const release = deferred();
+  let resumes = 0;
+  let h!: Awaited<ReturnType<typeof fixture>>;
+  h = await fixture(async turn => {
+    if (turn.request.kind === 'resume') {
+      resumes++;
+      await release.promise;
+      h.reviews.delete(turn.setup.input.threadId!);
+      return reply(turn, 'review applied');
+    }
+    if (turn.request.message === 'review this') {
+      h.reviews.set(turn.setup.input.threadId!, buildReviewSpec({
+        id: 'approval', view: { kind: 'plain', body: 'Approve?' },
+        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+      }));
+      return { status: 'waiting' };
+    }
+    return reply(turn, 'ordinary work');
+  });
+  const messages: AgentServerMessage[] = [];
+  const peer = { isConnected: () => true, send: (message: AgentServerMessage) => { messages.push(message); return true; } };
+  const answer = { interruptId: 'review-interrupt',
+    value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } };
+  try {
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'original', request: 'review this' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'original' && event.state === 'waiting') &&
+      h.context.activeRuns.read() === null);
+    await h.interaction.connect(peer);
+    await h.interaction.handle(peer, { type: 'session.resume', requestId: 'select', sessionId });
+    assert.equal(h.context.sessions.getActiveSessionId('worker'), sessionId);
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'queued', request: 'ordinary work' });
+    const tui = h.interaction.handle(peer, { ...answer, type: 'interrupt.resume', requestId: 'tui-answer' });
+    await waitFor(() => resumes === 1 || messages.some(message => message.type === 'event' && message.event.type === 'error' && message.event.requestId === 'tui-answer'));
+    assert.equal(resumes, 1, JSON.stringify(messages));
+
+    await assert.rejects(h.sessions.review(sessionId, { ...answer, requestId: 'studio-duplicate' }), { code: 'session_busy' });
+    await h.interaction.handle(peer, { ...answer, type: 'interrupt.resume', requestId: 'tui-duplicate' });
+    assert.ok(messages.some(message => message.type === 'event' && message.event.type === 'error' && message.event.requestId === 'tui-duplicate'));
+    const snapshot = h.resident.dispatch.readExecution({ sessionId, scope });
+    assert.ok(snapshot.active?.resumesDispatchId === 'original');
+    assert.deepEqual(snapshot.queued.map(entry => entry.dispatchId), ['queued']);
+
+    release.resolve();
+    await tui;
+    await waitFor(() => h.events.some(event => event.dispatchId === 'queued' && event.state === 'completed'));
+    assert.equal(resumes, 1);
+    assert.deepEqual(h.events.filter(event => event.resumesDispatchId === 'original').map(event => event.state), ['running', 'message', 'completed']);
+  } finally { release.resolve(); await h.close(); }
+});
+
+test('Session and model listings neither occupy the dispatch gate nor block a Review answer', async () => {
+  const release = deferred();
+  let readsToBlock = 0;
+  let boundThread: string | undefined;
+  let h!: Awaited<ReturnType<typeof fixture>>;
+  h = await fixture(async turn => {
+    const threadId = turn.setup.input.threadId!;
+    if (turn.request.kind === 'resume') {
+      h.reviews.delete(threadId);
+      return reply(turn, 'review applied');
+    }
+    h.reviews.set(threadId, buildReviewSpec({
+      id: 'approval', view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }));
+    return { status: 'waiting' };
+  }, { beforeReadState: async threadId => {
+    if (threadId !== boundThread || !readsToBlock) return;
+    readsToBlock--;
+    await release.promise;
+  } });
+  const messages: AgentServerMessage[] = [];
+  const detach = h.interaction.subscribe(message => messages.push(message));
+  try {
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'original', request: 'review this' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'original' && event.state === 'waiting') &&
+      h.resident.dispatch.getQueueSnapshot().activeOperation === null);
+    await h.interaction.request({ type: 'session.resume', requestId: 'select', sessionId });
+    boundThread = h.context.sessions.getSession('worker', sessionId)?.threadId;
+    assert.ok(boundThread);
+    readsToBlock = 2;
+    const listing = h.interaction.request({ type: 'session.list', requestId: 'list' });
+    const models = h.interaction.request({ type: 'model.list', requestId: 'models', sessionId });
+    await waitFor(() => readsToBlock === 0);
+    assert.equal(h.resident.dispatch.getQueueSnapshot().queuedConversations, 0);
+    await h.sessions.review(sessionId, { interruptId: 'review-interrupt', requestId: 'approve',
+      value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
+    await waitFor(() => h.events.some(event => event.resumesDispatchId === 'original' && event.state === 'completed'));
+    assert.ok(!messages.some(message => message.type === 'session.list.result' || message.type === 'model.list.result'));
+    release.resolve();
+    await Promise.all([listing, models]);
+    assert.ok(messages.some(message => message.type === 'session.list.result'));
+    assert.ok(messages.some(message => message.type === 'model.list.result'));
+  } finally { release.resolve(); detach(); await h.close(); }
+});
 
 test('queued dispatches retain separate request and hint snapshots across scopes and an unscoped next run', async () => {
   const started = deferred(), release = deferred();

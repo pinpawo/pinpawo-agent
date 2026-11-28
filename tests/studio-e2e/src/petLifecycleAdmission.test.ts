@@ -16,6 +16,7 @@ async function waitFor(predicate: () => boolean) {
 const human = { kind: 'human' as const, id: 'local' };
 function runtime(close = async () => {}): StudioPetRuntime {
   return { close, dispatch: {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
   } };

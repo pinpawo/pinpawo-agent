@@ -129,6 +129,7 @@ for (const delivery of ['boundary', 'interrupt'] as const) {
         storage: { kind: 'sqlite', path: join(root, 'studio.sqlite') },
         pets: [{ registration: { petId: 'worker', name: 'Worker' }, dispatch: host.resident.dispatch, sessions: host.sessions },
           { registration: { petId: 'reviewer', name: 'Reviewer' }, dispatch: {
+            readExecution: () => ({ queued: [], recent: [] }),
             getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
             onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
           } }],

@@ -27,6 +27,7 @@ async function setup(t: import('node:test').TestContext, close: () => Promise<vo
     assemble: async ({ petId }): Promise<StudioPetRuntime> => {
       assembled.push(petId);
       return { close: async () => { closes++; await close(); }, dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
       } };

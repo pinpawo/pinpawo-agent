@@ -32,6 +32,7 @@ async function waitFor(done: () => boolean | Promise<boolean>) {
 type Dispatched = { request: string; session?: { id: string; create?: boolean }; scope?: PetInvocationScope };
 const fakePet = (petId: string, dispatched: Dispatched[]) => ({
   registration: { petId, name: petId[0]!.toUpperCase() + petId.slice(1) }, dispatch: {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
     dispatch: async (input: Dispatched) => { dispatched.push(input); },

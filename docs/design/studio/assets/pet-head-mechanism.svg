@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480" role="img" aria-labelledby="title desc">
   <title id="title">Pet Head system structure</title>
-  <desc id="desc">Committed Channel Timeline messages reach a Pet Head through the Studio EventBus. The Head requests execution through the Channel port and Studio Dispatch. The resident Pet Agent reports scoped lifecycle through the same EventBus. Channel's existing bridge commits public replies back to the Timeline. The Channel port validates membership and Session binding before sampling the exact current dispatch's bound Session.</desc>
+  <desc id="desc">Committed Channel Timeline messages reach a Pet Head through the Studio EventBus. The Head requests execution through the Channel port and Studio Dispatch. The resident Pet Agent reports scoped lifecycle through the same EventBus. Channel's existing bridge commits public replies back to the Timeline. After the Channel checks membership and binding, the Head reads one scoped execution snapshot from Dispatch. While work is active the Head separately reads the bound Agent Session snapshot.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0L8 4L0 8Z" fill="#425b7b"/>
@@ -29,7 +29,7 @@
       <text x="500" y="140">Studio EventBus</text>
       <text x="855" y="140">Pet Head</text>
       <text x="145" y="340">Agent Session</text>
-      <text x="500" y="340">Resident Pet Agent</text>
+      <text x="500" y="340">Dispatch Coordinator</text>
       <text x="855" y="340">Channel port</text>
     </g>
     <g text-anchor="middle" font-size="13" fill="#435874">
@@ -54,14 +54,16 @@
       <text x="322" y="123" text-anchor="middle">committed event</text>
       <text x="322" y="183" text-anchor="middle">public reply bridge</text>
       <text x="679" y="133" text-anchor="middle">Channel topic</text>
-      <text x="844" y="243" text-anchor="end">reply / dispatch / status</text>
+      <text x="844" y="243" text-anchor="end">reply / dispatch</text>
       <text x="679" y="334" text-anchor="middle">admission</text>
       <text x="512" y="241">dispatch.*</text>
       <text x="512" y="260">Pet topic + Channel scope</text>
-      <text x="322" y="334" text-anchor="middle">Session state</text>
+      <text x="322" y="334" text-anchor="middle">executes work in</text>
     </g>
 
-    <path d="M855 384V434H145V391" fill="none" stroke="#7150a0" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#read-arrow)"/>
-    <text x="550" y="421" text-anchor="middle" font-size="14" font-weight="600" fill="#63468d">After Channel authorization: one scoped Session status sample</text>
+    <path d="M903 184V434H500V391" fill="none" stroke="#7150a0" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#read-arrow)"/>
+    <path d="M500 434H145V391" fill="none" stroke="#7150a0" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#read-arrow)"/>
+    <text x="290" y="421" text-anchor="middle" font-size="13" fill="#63468d">Separate Session snapshot</text>
+    <text x="685" y="421" text-anchor="middle" font-size="14" font-weight="600" fill="#63468d">Head reads one scoped execution snapshot</text>
   </g>
 </svg>

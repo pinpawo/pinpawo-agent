@@ -32,6 +32,7 @@ test('each Channel dispatch supplies only its own current prompt to its own Pet 
     studioId: 'channel-prompt', plugins: [channel],
     onPreparedContextResolver: value => { resolver = value; },
     pets: ['one', 'two'].map(petId => ({ registration: { petId, name: petId }, dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
       dispatch: async (input: Dispatched) => {
@@ -99,6 +100,7 @@ test('provider uses the persisted binding and current membership after Studio re
   let resolver!: StudioContextProvider;
   const marker = randomUUID();
   const pet = (petId: string, name: string) => ({ registration: { petId, name }, dispatch: {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
     dispatch: async (input: Dispatched) => {

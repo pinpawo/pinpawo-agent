@@ -85,6 +85,7 @@ test('an existing Studio can migrate its Wiki and preserve customized Pet instru
     pets: [{
       registration: { petId: 'wiki', name: 'Wiki' },
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {}, dispatch: async () => {},
       },

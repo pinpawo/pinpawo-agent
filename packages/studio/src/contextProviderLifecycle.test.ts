@@ -47,6 +47,7 @@ test('a failed Plugin start rolls back its context provider and a new Studio can
   const received: Parameters<PetDispatchPort['dispatch']>[0][] = [];
   const resolved: unknown[] = [];
   const dispatch: PetDispatchPort = {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => undefined,
     onDispatchLifecycle: () => () => undefined,
@@ -75,6 +76,7 @@ test('a failed Plugin start rolls back its context provider and a new Studio can
 test('a declared context namespace fails closed until its provider is active', async () => {
   let received = 0;
   const dispatch: PetDispatchPort = {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
     onQueueChange: () => () => undefined,
     onDispatchLifecycle: () => () => undefined,
@@ -124,6 +126,7 @@ for (const action of ['unregister', 'shutdown'] as const) {
     const started = new Promise<void>(resolve => { markStarted = resolve; });
     let received = 0;
     const dispatch: PetDispatchPort = {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
       onQueueChange: () => () => undefined,
       onDispatchLifecycle: () => () => undefined,

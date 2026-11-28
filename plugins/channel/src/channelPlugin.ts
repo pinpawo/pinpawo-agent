@@ -1,7 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { Deliverable } from '@pinpawo/agent-contracts';
-import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { readStudioInvocation, StudioPetError, type StudioPlugin, type StudioPluginContext, type StudioPluginStorage } from '@pinpawo/studio-core';
 import type { StudioHttpRoute, StudioHttpRouteRequest, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
@@ -67,8 +66,7 @@ export type ChannelHeadPort = {
   reply: (channelId: string, petId: string, replyTo: string, body: string, signal: AbortSignal, options?: { preventPetMentions?: boolean }) => Promise<void>;
   dispatch: (channelId: string, petId: string, messageId: string, signal: AbortSignal, boundSessionId?: string) => Promise<void>;
   readBoundSessionId: (channelId: string, petId: string) => Promise<string | undefined>;
-  readSessionPlan: (channelId: string, petId: string, sessionId: string, signal: AbortSignal, isCurrent: () => boolean)
-    => Promise<{ requestId: string; recordedPlan?: AgentPlan } | undefined>;
+  readMessage: (channelId: string, petId: string, messageId: string) => Promise<ChannelMessage | undefined>;
 };
 
 const runOriginSchema = z.object({ kind: z.enum(['scheduler', 'trigger']), id: z.string().trim().min(1).max(256) }).strict();
@@ -247,22 +245,13 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         : undefined;
       return { ...context, ...(referencedMessage ? { referencedMessage } : {}) };
     },
-    readSessionPlan: async (channelId, petId, sessionId, signal, isCurrent) => {
+    readMessage: async (channelId, petId, messageId) => {
       const service = channelService();
-      const studio = host();
-      const authorized = async () => {
-        if (signal.aborted || current !== service || context !== studio || !isCurrent()) return false;
-        await service.requireMember(channelId, { kind: 'pet', id: petId });
-        const binding = await service.getSession(channelId, petId);
-        return !signal.aborted && current === service && context === studio && isCurrent() &&
-          binding?.registered === true && binding.sessionId === sessionId;
-      };
-      if (!await authorized()) return;
-      const { session } = await studio.petSessions.snapshot(petId, sessionId, { timelineLimit: 1 });
-      if (session.sessionId === sessionId && session.activeRun?.state === 'running' && await authorized()) {
-        return { requestId: session.activeRun.requestId,
-          ...(!session.pendingInterrupt && session.currentPlan?.items.length ? { recordedPlan: session.currentPlan } : {}) };
-      }
+      const actor = { kind: 'pet' as const, id: petId };
+      await service.requireMember(channelId, actor);
+      const message = await service.getMessage(channelId, messageId);
+      await service.requireMember(channelId, actor);
+      if (current === service) return message;
     },
     reply: async (channelId, petId, replyTo, body, signal, options) => {
       signal.throwIfAborted();

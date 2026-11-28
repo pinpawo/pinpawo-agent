@@ -138,11 +138,13 @@ for (const decision of ['reject', 'cancel'] as const) {
       await waitFor(async () => (await outputs(id)).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [4, 3, 0, 0]);
       assert.equal((await channel.service.getSession(id, 'one'))?.sessionId, binding.sessionId);
-      // The declined dispatch reports its own ending to the Channel before queued work runs.
+      // The review answer reports through its own lifecycle before queued work runs.
       const replyOf = (externalRef?: string) => events.find(event => event.type === 'dispatch.message' && event.payload.message.messageId === externalRef)?.payload;
-      assert.equal(replyOf((await outputs(id))[1]!.externalRef)?.invocationId, waiting!.invocationId);
-      assert.equal(replyOf((await outputs(id))[1]!.externalRef)?.sessionId, binding.sessionId);
-      assert.ok(events.some(event => event.type === 'dispatch.completed' && event.payload.invocationId === waiting!.invocationId));
+      const answer = replyOf((await outputs(id))[1]!.externalRef);
+      assert.ok(answer?.invocationId && answer.invocationId !== waiting!.invocationId);
+      assert.equal(answer.resumesInvocationId, waiting!.invocationId);
+      assert.equal(answer.sessionId, binding.sessionId);
+      assert.ok(events.some(event => event.type === 'dispatch.completed' && event.payload.invocationId === answer.invocationId));
       assert.ok((await outputs(id))[2]!.body.includes('Continue with different constraints.'));
       assert.ok((await outputs(id))[3]!.body.includes('Use staging.'));
       const completed = await host.interaction.snapshot();

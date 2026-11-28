@@ -13,7 +13,12 @@ export async function exercise(test: EvalCase, model: ReturnType<typeof createHe
       reply: async (_pet, _source, body) => { result.hasReply ||= !!body.trim(); },
       readBoundSessionId: async () => 's-4f8a',
       dispatch: async () => { result.dispatched = true; } },
-    readSession: async () => test.state === 'busy' && source ? [{ messageId: source.messageId, status: 'running' }] : [],
+    readExecution: () => ({
+      ...(test.state === 'busy' && source ? { active: {
+        dispatchId: 'active-work', enqueuedAt: source.occurredAt, origin: { namespace: 'channel', id: source.messageId },
+      } } : {}),
+      queued: [], recent: [],
+    }),
 
     assessRelevance: async (input, signal) => {
       const relevance = await model.assessRelevance(input, signal);

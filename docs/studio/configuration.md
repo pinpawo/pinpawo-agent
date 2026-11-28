@@ -313,14 +313,15 @@ files; editing a Channel announcement uses the next-run behavior described above
 An online Pet Head first establishes relevance. A server-resolved mention of
 this Pet establishes relevance without a model call; otherwise `assessRelevance`
 returns only `{ relevant: boolean }`. Relevance never grants execution admission.
-After relevance, readSession combines the owning Pet's Dispatch Coordinator
-snapshot and observed lifecycle with the authorized Agent Session's Plan.
-It describes same-Channel tasks with visible source messages: queued, running,
-waiting, or an observed terminal outcome. Queue absence is not completion.
-The live observer keeps up to ten recent outcomes for the current activation;
-it is not permanent task history. The Head does not read Session message bodies,
-tool output or sub-agent state. A recorded Plan can predate this execution.
-Its completed items do not prove the entire task completed.
+After relevance, the Head reads one scoped execution snapshot from Dispatch.
+The snapshot includes the active and queued dispatches and up to ten recent live
+outcomes for the bound Channel and Session, independent of the chat window.
+Queue absence is not completion. When there is an active dispatch, the Head also
+samples the existing bound Session snapshot. It passes the Session's run state
+and optional recorded Plan separately, not as facts attributed to a dispatch.
+An unavailable Session snapshot does not affect admission. No Session transcript
+or tool output goes to the model. If needed, the Head fetches the active
+dispatch's single public source message without expanding the history window.
 
 decideDispatch receives these facts and the original Channel context in one
 model call, returning { shouldDispatch: boolean, reply: string | null }.

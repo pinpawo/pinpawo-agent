@@ -6,14 +6,14 @@
 
 - **Channel Timeline → EventBus → Head。** Head 跟随 Pet 实例，订阅自己的 Channel。离线不补投，自己的消息和其他 Head 的自动回复不触发新判断。
 - **Head → Studio Dispatch → Host Dispatch Coordinator。** Head 只判断是否提交独立工作。Channel 校验成员和绑定，交付原消息、附件和一层明确引用。Coordinator 负责接纳、FIFO 和 Stop 等待；Head 不复制队列规则。
-- **Coordinator + Agent Session → `readSession` → Head。** 队列和生命周期回答「这次派发是什么状态」，Session 的 Plan 回答「记录了哪些步骤」。Head 组装两种事实，不从 Agent 内部消息猜进度。
+- **Dispatch Coordinator → `readExecution` → Head。** 协调器提供本 Pet、当前 Channel 和绑定 Session 的执行事实。Head 不另行订阅派发生命周期，也不在 Dispatch 中读取 Agent Session。
 
 ## 2. 两阶段
 
 1. **相关性判断。** 规范 `@Pet` 直接通过；其他消息用 `assessRelevance` 判断，只返回 `{ relevant }`。无关则结束，不读 Session。
 2. **派发判断。** 先取得已绑定 Session 的任务事实，再单次调用 `decideDispatch`，返回 `{ shouldDispatch, reply }`。回复和提交不是互斥分支。模型不改写原任务，不根据忙闲决定是否允许提交。
 
-`readSession` 是运行时准备上下文的只读入口，不增加模型工具调用。仅关联本 Pet、Channel、绑定 Session 及可见的原消息。进行中的普通派发最多核对一次 Session，若运行切换则不携带旧 Plan。已排队只报未开始，挂起等待与完成区分。完成必须有真实生命周期事件，不从队列消失推断。首版复用现有事件，在线实例只保留最近十项状态，不保存消息原文、不补历史；超出窗口或重启后无法查证就明说。正式交付仍经现有 Channel 桥接，不让 Head 再发布一次。
+`readExecution` 是运行时准备上下文的只读入口，不增加模型工具。当前执行、队列和最多十项近期生命周期不受聊天窗口限制。原消息 ID 标注来源，不用来匹配或过滤任务；当前执行的原消息不在窗口里时，只补读这条公开消息。存在当前执行时，Head 另外取一次已绑定 Session 的现有快照，只提供执行状态和可选的已记录 Plan。这个快照和 Dispatch 事实独立，不把 Plan 和任何一条派发绑定。不读取 Session 消息给模型。快照不可用时仍可报告已知状态和提交独立工作。完成必须有真实生命周期事件，不从队列消失推断；重启后不重建历史。正式交付仍经原有 Channel 桥接。
 
 ```mermaid
 sequenceDiagram
@@ -28,10 +28,11 @@ sequenceDiagram
         M-->>H: relevant
     end
     Note over H: 无关则结束
-    H->>D: 读队列状态与已观察的派发结果
-    opt 当前普通派发可核对
-        H->>S: 经 Channel 授权读绑定 Session 的 Plan
-        S-->>H: 已记录的步骤
+    H->>D: 一次读取当前绑定的执行快照
+    D-->>H: 当前执行、排队和近期结果
+    opt 存在当前执行
+        H->>S: 读一次绑定 Session 快照
+        S-->>H: 快照状态及可选的已记录 Plan
     end
     H->>M: 原消息、公开上下文和任务事实
     M-->>H: shouldDispatch, reply

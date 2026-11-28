@@ -35,6 +35,7 @@ function channelStudioPet(petId: string, dispatched: StudioDispatchRequest[]) {
   return {
     registration: { petId, name: petId },
     dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({
         state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
       }),
@@ -61,6 +62,7 @@ test('Trigger projects direct service mutations through Studio events', async (t
     pets: [{
       registration: { petId: 'worker', name: 'Worker' },
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({
           state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
         }),
@@ -103,6 +105,7 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
     pets: [{
       registration: { petId: 'wiki', name: 'Wiki' },
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({
           state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
         }),
@@ -153,6 +156,7 @@ test('Trigger keys event deliveries by event identity, not by the millisecond', 
     pets: [{
       registration: { petId: 'wiki', name: 'Wiki' },
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({
           state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
         }),
@@ -197,6 +201,7 @@ test('Trigger resolves an explicit event payload target and records a retryable 
     pets: [{
       registration: { petId: 'executor', name: 'Executor' },
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({
           state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
         }), onQueueChange: () => () => undefined,

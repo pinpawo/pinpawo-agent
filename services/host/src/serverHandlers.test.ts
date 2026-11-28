@@ -592,23 +592,18 @@ test('model selection is rejected while the active session is running', async ()
     if (snapshot?.type !== 'session.snapshot.result') return;
     assert.equal(snapshot.snapshot.session.activeRun?.requestId, 'chat-running');
 
-    // Commands are refused while a run holds the session.
+    // Lists are observations as well; only the model change is refused.
     await handlers.peerHandlers.onSessionList(peer, {
       type: 'session.list',
       requestId: 'list-running',
     });
-    const refusals = sent.filter((message) => (
-      message.type === 'session.error'
-      && ['snapshot-running', 'list-running'].includes(message.requestId)
-    )) as Array<{ requestId: string; message: string; code?: string }>;
-    assert.deepEqual(
-      refusals.map((message) => message.requestId).sort(),
-      ['list-running'],
-      'commands are refused; an observation is not',
-    );
-    for (const refusal of refusals) {
-      assert.equal(refusal.code, 'run_in_flight');
-    }
+    assert.ok(sent.some(message => message.type === 'session.list.result' && message.requestId === 'list-running'));
+    await handlers.peerHandlers.onModelList(peer, {
+      type: 'model.list',
+      requestId: 'models-running',
+      sessionId: created.session.id,
+    });
+    assert.ok(sent.some(message => message.type === 'model.list.result' && message.requestId === 'models-running'));
 
     await handlers.peerHandlers.onModelSelect(peer, {
       type: 'model.select',

@@ -57,7 +57,7 @@ test('Coordinator keeps the active operation non-preemptive and holds dispatch b
   const releaseFirst = deferred();
   const events: string[] = [];
 
-  const firstDispatch = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     events.push('dispatch-1:start');
     firstStarted.resolve();
     await releaseFirst.promise;
@@ -65,7 +65,7 @@ test('Coordinator keeps the active operation non-preemptive and holds dispatch b
   });
   await firstStarted.promise;
 
-  const secondDispatch = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     events.push('dispatch-2');
   });
   // Conversation no longer queues: it waits out the active dispatch, then
@@ -88,11 +88,10 @@ test('Coordinator keeps the active operation non-preemptive and holds dispatch b
   assert.deepEqual(events, ['dispatch-1:start']);
   releaseFirst.resolve();
   await Promise.all([
-    firstDispatch,
-    secondDispatch,
     firstConversation,
     secondConversation,
   ]);
+  await waitFor(() => events.includes('dispatch-2'), 'dispatch did not run after conversation');
   // The queued dispatch runs only after both conversations release the gate.
   assert.equal(events[0], 'dispatch-1:start');
   assert.equal(events[1], 'dispatch-1:end');
@@ -119,7 +118,7 @@ test('state listeners cannot reenter admission while an operation is becoming ac
     });
   });
 
-  const dispatch = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     events.push('dispatch:start');
     dispatchStarted.resolve();
     await releaseDispatch.promise;
@@ -129,7 +128,7 @@ test('state listeners cannot reenter admission while an operation is becoming ac
   assert.deepEqual(events, ['dispatch:start']);
 
   releaseDispatch.resolve();
-  await Promise.all([dispatch, queuedFromListener]);
+  await queuedFromListener;
   assert.deepEqual(events, ['dispatch:start', 'dispatch:end', 'conversation']);
 });
 
@@ -143,7 +142,7 @@ test('waiting state holds dispatch while conversation can reopen the gate', asyn
   });
   coordinator.onStateChange((state) => states.push(state));
 
-  const dispatch = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     events.push('dispatch');
   });
   await Promise.resolve();
@@ -153,8 +152,7 @@ test('waiting state holds dispatch while conversation can reopen the gate', asyn
     events.push('conversation');
     settledState = 'open';
   });
-  await dispatch;
-
+  await waitFor(() => events.includes('dispatch') && coordinator.getState() === 'open', 'dispatch did not settle');
   assert.deepEqual(events, ['conversation', 'dispatch']);
   assert.deepEqual(states, ['busy', 'open', 'busy', 'open']);
 });
@@ -184,13 +182,13 @@ test('a queued dispatch reads the active conversation thread only when it starts
   const firstStarted = deferred();
   const releaseFirst = deferred();
   const observedThreads: string[] = [];
-  const first = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     observedThreads.push(activeThread);
     firstStarted.resolve();
     await releaseFirst.promise;
   });
   await firstStarted.promise;
-  const second = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     observedThreads.push(activeThread);
   });
   const switchConversation = coordinator.holdForConversation(async () => {
@@ -198,7 +196,8 @@ test('a queued dispatch reads the active conversation thread only when it starts
   });
 
   releaseFirst.resolve();
-  await Promise.all([first, switchConversation, second]);
+  await switchConversation;
+  await waitFor(() => observedThreads.length === 2, 'queued dispatch did not start');
 
   assert.deepEqual(observedThreads, ['thread-old', 'thread-new']);
 });
@@ -210,15 +209,16 @@ test('Coordinator close cancels queued work and waits for the active operation',
   });
   const activeStarted = deferred();
   const releaseActive = deferred();
-  const active = coordinator.enqueueDispatch(async () => {
+  coordinator.submitDispatch(async () => {
     activeStarted.resolve();
     await releaseActive.promise;
   });
   await activeStarted.promise;
-  const queued = coordinator.enqueueDispatch(async () => undefined);
+  let queuedRan = false;
+  coordinator.submitDispatch(async () => { queuedRan = true; });
   const closed = coordinator.close();
 
-  await assert.rejects(queued, /closing/i);
+  assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 0);
   let closeSettled = false;
   void closed.then(() => {
     closeSettled = true;
@@ -227,7 +227,8 @@ test('Coordinator close cancels queued work and waits for the active operation',
   assert.equal(closeSettled, false);
 
   releaseActive.resolve();
-  await Promise.all([active, closed]);
+  await closed;
+  assert.equal(queuedRan, false);
   assert.equal(closeSettled, true);
   await assert.rejects(
     coordinator.holdForConversation(async () => undefined),
@@ -1033,13 +1034,14 @@ test('targeted waiting work does not strand a legacy dispatch on an open active 
   const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
   let targetReady = false;
   const events: string[] = [];
-  const target = coordinator.enqueueDispatch(async () => { events.push('target'); }, async () => targetReady);
+  coordinator.submitDispatch(async () => { events.push('target'); }, async () => targetReady);
   await waitFor(() => coordinator.getState() === 'waiting', 'target was not reported waiting');
-  await coordinator.enqueueDispatch(async () => { events.push('legacy'); });
+  coordinator.submitDispatch(async () => { events.push('legacy'); });
+  await waitFor(() => events.includes('legacy'), 'unscoped dispatch did not run');
   assert.deepEqual(events, ['legacy']);
   targetReady = true;
   await coordinator.refreshState();
-  await target;
+  await waitFor(() => events.includes('target'), 'targeted dispatch did not run');
   assert.deepEqual(events, ['legacy', 'target']);
   await coordinator.close();
 });
@@ -1049,21 +1051,18 @@ test('a failed readiness read keeps targeted work queued and blocks the gate unt
   const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open', logError: (_message, error) => errors.push(error) });
   let fail = true;
   const ran: string[] = [];
-  let settled = false;
-  const target = coordinator.enqueueDispatch(async () => { ran.push('target'); }, async () => {
+  coordinator.submitDispatch(async () => { ran.push('target'); }, async () => {
     if (fail) throw new Error('checkpoint unavailable');
     return true;
   });
-  void target.finally(() => { settled = true; });
   try {
     await waitFor(() => coordinator.getState() === 'blocked', 'a failed readiness read did not block the gate');
     assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1);
-    assert.equal(settled, false, 'a read failure must not settle the queued work');
-    assert.deepEqual(ran, []);
+    assert.equal(ran.length, 0);
     assert.match(String(errors[0]), /checkpoint unavailable/);
     fail = false;
     await coordinator.refreshState();
-    await target;
+    await waitFor(() => ran.includes('target'), 'targeted dispatch did not run');
     assert.deepEqual(ran, ['target']);
   } finally { await coordinator.close(); }
 });
@@ -1075,17 +1074,16 @@ test('a failed settled-state read during a target scan keeps legacy work queued'
     logError: () => undefined,
   });
   const ran: string[] = [];
-  const target = coordinator.enqueueDispatch(async () => { ran.push('target'); }, async () => false);
-  void target.catch(() => undefined);
+  coordinator.submitDispatch(async () => { ran.push('target'); }, async () => false);
   try {
     await waitFor(() => coordinator.getState() === 'waiting', 'target was not reported waiting');
     fail = true;
-    const legacy = coordinator.enqueueDispatch(async () => { ran.push('legacy'); });
+    coordinator.submitDispatch(async () => { ran.push('legacy'); });
     await waitFor(() => coordinator.getState() === 'blocked', 'a failed settled-state read did not block the gate');
     assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 2);
     fail = false;
     await coordinator.refreshState();
-    await legacy;
+    await waitFor(() => ran.includes('legacy'), 'unscoped dispatch did not run');
     assert.deepEqual(ran, ['legacy']);
   } finally { await coordinator.close(); }
 });
@@ -1166,30 +1164,26 @@ for (const wakeup of ['enqueue', 'refresh'] as const) {
     const calls: string[] = [];
     let ready = false;
     let checks = 0;
-    let incoming: Promise<void> | undefined;
     let triggered = false;
     coordinator.onStateChange(state => {
       if (state !== 'waiting' || triggered) return;
       triggered = true;
       // The scan has exhausted its candidates but still owns `active`.
       if (wakeup === 'enqueue') {
-        incoming = coordinator.enqueueDispatch(async () => { calls.push('new'); }, async () => true);
+        coordinator.submitDispatch(async () => { calls.push('new'); }, async () => true);
       } else {
         ready = true;
         void coordinator.refreshState();
       }
     });
-    const waiting = coordinator.enqueueDispatch(async () => { calls.push('waiting'); }, async () => {
+    coordinator.submitDispatch(async () => { calls.push('waiting'); }, async () => {
       checks++; checked.resolve(); await release.promise; return ready;
     });
-    // Close may cancel the intentionally waiting job.
-    void waiting.catch(() => {});
     try {
       await checked.promise;
       release.resolve();
       await new Promise<void>(resolve => setImmediate(resolve));
       assert.deepEqual(calls, [wakeup === 'enqueue' ? 'new' : 'waiting']);
-      await incoming;
       const settledChecks = checks;
       await new Promise<void>(resolve => setImmediate(resolve));
       assert.equal(checks, settledChecks, 'an unchanged all-waiting queue must not spin');
@@ -1249,4 +1243,57 @@ test('a dispatch fails through the conversation pipeline: a broken tool history 
     assert.match(lifecycle.at(-1)?.error ?? '', /must be followed by tool messages/);
     assert.notEqual(sessions.getActiveSessionId('failure-pet'), before);
   } finally { await close(); }
+});
+
+test('the Dispatch port returns scoped active, pending and settled facts without reading the Session Plan', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-dispatch-execution-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const releaseA = deferred();
+  const releaseB = deferred();
+  const runtime = await createResidentPetRuntime({
+    petId: 'snapshot-pet', petName: 'Snapshot', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, toolAuthorizationMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(),
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: {
+      readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }),
+    } as never,
+    runAgentTurn: async ({ request }) => {
+      if (request.kind === 'user_message') {
+        if (request.message === 'A') await releaseA.promise;
+        if (request.message === 'B') await releaseB.promise;
+      }
+      return { status: 'completed', reply: 'official result' };
+    },
+  });
+  const { sessions, close } = readResidentPetRuntimeContext(runtime);
+  const { dispatch } = createResidentPet(runtime);
+  const sessionId = sessions.getActiveSessionId('snapshot-pet');
+  const scope = { namespace: 'channel', id: 'ch-1' };
+  const target = { sessionId, scope };
+  const queue = (id: string, channel = scope) => dispatch.dispatch({
+    request: id, dispatchId: id, session: { id: sessionId }, scope: channel, origin: { namespace: 'channel', id: `msg-${id}` },
+  });
+  const lifecycle: PetDispatchLifecycleEvent[] = [];
+  dispatch.onDispatchLifecycle(event => { lifecycle.push(event); });
+  try {
+    await queue('A');
+    await waitFor(() => lifecycle.some(event => event.dispatchId === 'A' && event.state === 'running'), 'A did not start');
+    await queue('B');
+    await queue('other', { ...scope, id: 'ch-2' });
+    const current = dispatch.readExecution(target);
+    assert.equal(current.active?.origin?.id, 'msg-A');
+    assert.deepEqual(current.queued.map(item => item.origin?.id), ['msg-B']);
+    assert.deepEqual(current.recent, []);
+    assert.deepEqual(dispatch.readExecution({ ...target, sessionId: 'wrong' }), { queued: [], recent: [] });
+    releaseA.resolve();
+    await waitFor(() => lifecycle.some(event => event.dispatchId === 'B' && event.state === 'running'), 'B did not start');
+    const next = dispatch.readExecution(target);
+    assert.equal(next.active?.origin?.id, 'msg-B');
+    assert.deepEqual(next.recent, [{ dispatchId: 'A', origin: { namespace: 'channel', id: 'msg-A' }, state: 'completed' }]);
+  } finally {
+    releaseA.resolve();
+    releaseB.resolve();
+    await close();
+  }
 });

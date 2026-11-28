@@ -47,6 +47,15 @@ export type PetDispatchQueueEntry = {
 /** A continuation is only eligible for this exact, explicitly addressed domain session. */
 export type PetDispatchTarget = { sessionId: string; scope: PetInvocationScope };
 
+/** Scoped execution facts; not an admission check or a durable history. */
+export type PetDispatchExecution = {
+  active?: PetDispatchQueueEntry & Pick<PetDispatchLifecycleEvent, 'resumesDispatchId'>;
+  queued: PetDispatchQueueEntry[];
+  recent: Array<Pick<PetDispatchLifecycleEvent, 'dispatchId' | 'origin' | 'resumesDispatchId'> & {
+    state: Exclude<PetDispatchLifecycleState, 'queued' | 'running' | 'message'>;
+  }>;
+};
+
 export type PetDispatchRequest = {
   /** Source identity for queue observation only; not execution or review context. */
   origin?: PetInvocationScope;
@@ -94,6 +103,8 @@ export function readPetDispatchMessage(event: AgentRuntimeEvent): PetDispatchMes
  * execution handle: callers cannot cancel, resume, or read model output here.
  */
 export type PetDispatchLifecycleEvent = {
+  /** Independent answer to the interrupt left by this earlier dispatch. */
+  resumesDispatchId?: string;
   /** Public source identity for read-only correlation, not execution context. */
   origin?: PetInvocationScope;
   dispatchId: string;
@@ -114,6 +125,7 @@ type ScopedDispatchRequest = Omit<PetDispatchRequest, 'delivery' | 'session' | '
 
 export interface ResidentPetDispatchService {
   getQueueSnapshot(): PetDispatchQueueSnapshot;
+  readExecution(target: PetDispatchTarget): PetDispatchExecution;
   onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input for resident execution, which is observed through Agent Session. */
@@ -129,7 +141,7 @@ export interface ResidentPetDispatchService {
 
 /** The capabilities exposed to callers that only observe and submit, such as Studio. */
 export type PetDispatchPort = Pick<ResidentPetDispatchService,
-  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch'>;
+  'getQueueSnapshot' | 'onQueueChange' | 'onDispatchLifecycle' | 'dispatch' | 'readExecution'>;
 
 export interface ResidentPet {
   readonly dispatch: ResidentPetDispatchService;
@@ -210,6 +222,7 @@ export type ResidentPetCoordinatorOptions = {
   initialState?: PetDispatchSettledState;
   /** Read the authoritative active-thread checkpoint after an operation settles. */
   readSettledState: () => MaybePromise<PetDispatchState>;
+  hasActiveRun?: () => boolean;
   logError?: (message: string, error: unknown) => void;
 };
 
@@ -217,8 +230,6 @@ export type QueuedOperation = {
   kind: 'conversation' | 'dispatch';
   ready?: () => Promise<boolean>;
   run: () => Promise<unknown>;
-  resolve: (value: unknown) => void;
-  reject: (error: unknown) => void;
   observation?: PetDispatchQueueEntry;
   stop?: () => boolean;
   confirmStop?: () => Promise<void>;

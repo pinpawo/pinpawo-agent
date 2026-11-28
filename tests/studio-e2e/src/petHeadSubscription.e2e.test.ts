@@ -36,17 +36,18 @@ test('live Timeline subscriptions isolate slow instances and discard queued and 
     studioId: 'head-subscription-fifo', definitions: [{ definitionId: 'worker', name: 'Worker' }], plugins: [channel],
     assemblePet: async registration => ({
       dispatch: {
+        readExecution: () => ({ queued: [], recent: [] }),
         getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
         onQueueChange: () => () => {}, onDispatchLifecycle: () => () => {},
         dispatch: async () => { dispatches.push(registration.petId); },
       }, close: async () => {},
     }),
-    subscribePetTimeline: ({ registration }, signal) => {
+    subscribePetTimeline: ({ registration, runtime }, signal) => {
       const bound = bindPetHeadChannel(registration.channelId, channel.head, (handler, filter) => {
         assert.deepEqual(filter, { source: 'channel', topic: registration.channelId });
         return prepared.studio.subscribe(handler, filter);
       });
-      const handle = createPetHead({ pet: registration, channel: bound, assessRelevance: async () => ({ relevant: true }), decideDispatch });
+      const handle = createPetHead({ pet: registration, channel: bound, readExecution: runtime.dispatch.readExecution, assessRelevance: async () => ({ relevant: true }), decideDispatch });
       return bound.subscribe(message => handle(message, signal));
     },
   });

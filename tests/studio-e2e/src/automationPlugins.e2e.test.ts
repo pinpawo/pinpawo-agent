@@ -43,6 +43,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
   const worker: LivePet = {
     registration: { petId: 'worker', name: 'Worker' },
     dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({
         state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
       }),
@@ -134,6 +135,7 @@ test('Scheduler queue audit creates a durable Notice without dispatching recover
   const worker: LivePet = {
     registration: { petId: 'worker', name: 'Worker' },
     dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({
         state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
       }),
@@ -195,6 +197,7 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
   const worker: LivePet = {
     registration: { petId: 'reviewer', name: 'Reviewer' },
     dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({
         state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
       }),

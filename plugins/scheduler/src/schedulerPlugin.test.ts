@@ -16,6 +16,7 @@ function recordingPet(petId: string, dispatched: StudioDispatchRequest[]) {
   return {
     registration: { petId, name: petId },
     dispatch: {
+      readExecution: () => ({ queued: [], recent: [] }),
       getQueueSnapshot: () => ({
         state: 'open' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
       }),

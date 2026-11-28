@@ -261,6 +261,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
 
   const dispatch: ResidentPet['dispatch'] = {
     getQueueSnapshot: () => coordinator.getQueueSnapshot(),
+    readExecution: target => coordinator.readExecution(target),
     onQueueChange: listener => coordinator.onQueueChange(listener),
     onDispatchLifecycle: listener => {
       dispatchLifecycleListeners.add(listener);

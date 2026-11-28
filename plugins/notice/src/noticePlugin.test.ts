@@ -7,6 +7,7 @@ import { createStudioWithPets, type LivePet } from '../../../tests/support/liveP
 const worker: LivePet = {
   registration: { petId: 'worker', name: 'Worker' },
   dispatch: {
+    readExecution: () => ({ queued: [], recent: [] }),
     getQueueSnapshot: () => ({
       state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
     }),

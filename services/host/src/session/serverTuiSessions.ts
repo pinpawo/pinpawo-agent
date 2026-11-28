@@ -387,21 +387,12 @@ export class ServerTuiSessionService {
   }
 
   async listSessions(deps: ServerDeps) {
-    this.getActiveSession(deps.petId);
     const sessions = listTuiSessions(this.state, deps.petId);
     const enriched = await Promise.all(sessions.map(async (session) => {
       const messages = await this.readSessionCheckpointMessages(deps, session);
       const summary = summarizeTuiCheckpointMessages(messages, session.updatedAt);
-      const updated = updateTuiSessionSummary(this.state, session.id, summary) ?? session;
-      return {
-        ...updated,
-        active: session.active,
-        messageCount: summary.messageCount,
-        title: summary.title,
-        updatedAt: summary.updatedAt,
-      };
+      return { ...session, ...summary };
     }));
-    this.save();
     return enriched.sort((a, b) => Number(b.active) - Number(a.active) || b.updatedAt.localeCompare(a.updatedAt));
   }
 

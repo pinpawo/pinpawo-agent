@@ -94,9 +94,8 @@ for (const entry of ['peer', 'request', 'session'] as const) {
   }
 }
 
-// acceptRoute is synchronous, but its caller awaits its result before starting
-// the run. Close in that gap must have the same fence as the checkpoint reads.
-test('Host close fences a resume after accepting its review route', { timeout: 10_000 }, async t => {
+// Closing after the answer is validated still must fence graph execution.
+test('Host close fences a validated approval before graph execution', { timeout: 10_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resume-route-close-'));
   const config = buildHostRuntimeConfig(root);
   const review = buildReviewSpec({ id: 'review', view: { kind: 'plain', body: 'Approve?' },
@@ -116,18 +115,16 @@ test('Host close fences a resume after accepting its review route', { timeout: 1
   const peer: AgentSessionPeer = { isConnected: () => true, send: () => true };
   interaction.connect(peer);
   t.after(async () => { await context.close(); await rm(root, { recursive: true, force: true }); });
-  const getActiveSessionId = context.sessions.getActiveSessionId.bind(context.sessions);
-  let lookups = 0;
+  const peekActiveSessionId = context.sessions.peekActiveSessionId.bind(context.sessions);
   let closing: Promise<void> | undefined;
-  context.sessions.getActiveSessionId = petId => {
-    const id = getActiveSessionId(petId);
-    // The first lookup claims the active run; the second accepts the route.
-    if (++lookups === 2) queueMicrotask(() => { closing = context.close(); });
+  context.sessions.peekActiveSessionId = petId => {
+    const id = peekActiveSessionId(petId);
+    closing ??= context.close();
     return id;
   };
   await interaction.handle(peer, { type: 'interrupt.resume', requestId: 'resume', interruptId: 'pending',
     value: { decisions: [{ interactionId: 'review', selectedOptionId: 'approve' }] } });
-  assert.ok(closing, 'the route acceptance must trigger the close');
+  assert.ok(closing, 'the active-session guard must trigger the close');
   await closing;
-  assert.equal(turns, 0, 'an accepted route must not start after Host close');
+  assert.equal(turns, 0, 'a validated answer must not start after Host close');
 });

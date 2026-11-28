@@ -1,7 +1,6 @@
 import {
   projectHumanReviewRequest,
   type PendingInterrupt,
-  type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import {
@@ -33,8 +32,7 @@ import type { TuiSessionRecord } from '../session/tuiSessionRegistry';
 import type { ServerDeps } from '../serverTypes';
 import { createOperationRegistryForAgentSetup } from '../runtimeOperationRegistry';
 import {
-  resolvePendingHumanReviewInterrupt,
-  type PendingHumanReviewInterruptRoute,
+  resolveHumanReviewAnswer,
   type HumanReviewResolutionSource,
 } from '../pendingHumanReviewInterrupt';
 import {
@@ -76,16 +74,7 @@ export type RunReviewTurn = (
   run: (runner?: RunAgentSessionTurn) => Promise<HostTurnOutcome>,
 ) => Promise<HostTurnOutcome>;
 
-type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
-  requestId: string;
-  sessionId?: string;
-};
-
-/**
- * The session a turn runs in when it is not the active one. A review resume
- * addressed to an exact session and a dispatch bound to one carry it; every
- * other turn runs in the active session.
- */
+/** A Session resolved at the Host boundary, before loading or running the graph. */
 export type ChatTurnTarget = TuiSessionRecord;
 
 export type PendingInterruptSnapshot = {
@@ -147,26 +136,6 @@ export class ServerChatHandler {
     this.closed = true;
   }
 
-  private buildPendingInterruptRoute(params: {
-    requestId: string;
-    interruptId: string;
-    reviews: ReviewSpec[];
-    sessionId?: string;
-  }): PendingInterruptRoute {
-    return {
-      requestId: params.requestId,
-      interruptId: params.interruptId,
-      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
-      reviews: params.reviews,
-    };
-  }
-
-  private readPendingInterrupt(deps: ServerDeps, target?: ChatTurnTarget) {
-    return target
-      ? this.tuiSessions.readSessionPendingInterrupt(deps, target)
-      : this.tuiSessions.readActivePendingInterrupt(deps);
-  }
-
   buildPendingInterruptSnapshot(
     _deps: ServerDeps,
     pending: ActivePendingInterrupt | null,
@@ -213,14 +182,37 @@ export class ServerChatHandler {
     target?: ChatTurnTarget,
     onReceipt?: (current: boolean) => void,
   ) {
-    const pending = await this.readPendingInterrupt(deps, target);
+    const session = target ?? this.tuiSessions.getActiveSession(deps.petId);
+    const pending = await this.tuiSessions.readSessionPendingInterrupt(deps, session);
     const current = pending?.interruptId === msg.interruptId;
     onReceipt?.(current);
     if (!current) {
       this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
-    await this.resolvePendingReview(peer, msg, deps, pending, target);
+    const answer = resolveHumanReviewAnswer(pending.payload.reviews, msg.value);
+    if ('code' in answer) {
+      if (answer.code === 'interrupt_closed') this.sendClosedReviewError(peer, msg.requestId);
+      else this.publishRuntimeEvent(peer, agentErrorEvent(msg.requestId, { code: answer.code }));
+      return;
+    }
+    // The implicit TUI target must still be selected, but Studio's explicit
+    // target is independent of which Session the TUI currently has open.
+    if (!target && this.tuiSessions.peekActiveSessionId(deps.petId) !== session.id) {
+      sendAgentSessionPeerEvent(peer, agentErrorEvent(msg.requestId, { code: 'interrupt_wrong_session' }));
+      return;
+    }
+    if (!peer.isConnected()) return;
+
+    const request = {
+      kind: 'resume' as const,
+      requestId: msg.requestId,
+      resume: { interruptId: pending.interruptId, value: answer.resume },
+    };
+    const run = (runner?: RunAgentSessionTurn) =>
+      this.runChatRequest(peer, request, deps, answer.source, session, runner, !target);
+    if (this.runReviewTurn) await this.runReviewTurn(session, request, run);
+    else await run();
   }
 
   /**
@@ -284,6 +276,7 @@ export class ServerChatHandler {
     source: ChatTurnSource,
     target?: ChatTurnTarget,
     runAgentTurn = this.runAgentTurn,
+    allowHistoryRecovery = !target,
   ): Promise<HostTurnOutcome> {
     // Resume validation awaits checkpoint reads before registering an inflight
     // run. Close may already have aborted every registered run in that gap.
@@ -394,10 +387,10 @@ export class ServerChatHandler {
         JSON.stringify({ requestId, diagnostics }),
       );
       // A history the provider rejects is switched away from, never deleted: the old
-      // session stays in the session list. A targeted turn never switches sessions.
+      // session stays in the list. Studio exact-session turns never switch the TUI.
       const detail = err instanceof Error ? err.message : 'internal error';
       let protocolRecovery: AgentErrorNotice | null = null;
-      if (!target && isToolProtocolHistoryError(err)) {
+      if (allowHistoryRecovery && isToolProtocolHistoryError(err)) {
         try {
           this.tuiSessions.createNewSession(deps.petId);
           protocolRecovery = { code: 'history_rejected_session_switched', params: { detail } };
@@ -527,65 +520,6 @@ export class ServerChatHandler {
     } finally {
       invocation.settle();
     }
-  }
-
-  private async resolvePendingReview(
-    peer: ServerPeer,
-    msg: InterruptResumeMessage,
-    deps: ServerDeps,
-    pending: ActivePendingInterrupt,
-    target?: ChatTurnTarget,
-  ) {
-    await resolvePendingHumanReviewInterrupt({
-      message: msg,
-      route: this.buildPendingInterruptRoute({
-        requestId: msg.requestId,
-        interruptId: pending.interruptId,
-        reviews: pending.payload.reviews,
-        sessionId: pending.sessionId,
-      }),
-      emitClosed: () => {
-        console.warn(
-          `[chat-host] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
-        );
-        this.sendClosedReviewError(peer, msg.requestId);
-      },
-      emitEvent: (event) => {
-        this.publishRuntimeEvent(peer, event);
-      },
-      acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps, target),
-      isConnected: peer.isConnected,
-      run: (route, resume, source) => {
-        const request = {
-          kind: 'resume' as const,
-          requestId: msg.requestId,
-          resume: { interruptId: route.interruptId, value: resume },
-        };
-        if (!this.runReviewTurn) return this.runChatRequest(peer, request, deps, source, target);
-        return this.runReviewTurn(target ?? this.tuiSessions.getActiveSession(deps.petId), request, (runAgentTurn) =>
-          this.runChatRequest(peer, request, deps, source, target, runAgentTurn),
-        );
-      },
-    });
-  }
-
-  private acceptReviewRoute(
-    peer: ServerPeer,
-    route: PendingInterruptRoute,
-    message: InterruptResumeMessage,
-    deps: ServerDeps,
-    target?: ChatTurnTarget,
-  ) {
-    const expectedSessionId = target?.id ?? this.tuiSessions.getActiveSessionId(deps.petId);
-    if (route.sessionId && expectedSessionId && route.sessionId !== expectedSessionId) {
-      console.warn(
-        `[chat-host] interrupt.resume rejected: route sessionId=${route.sessionId} `
-        + `does not match ${target ? 'target' : 'active'} session=${expectedSessionId}`,
-      );
-      sendAgentSessionPeerEvent(peer, agentErrorEvent(message.requestId, { code: 'interrupt_wrong_session' }));
-      return false;
-    }
-    return true;
   }
 
   private sendStreamToolOperationEvent(

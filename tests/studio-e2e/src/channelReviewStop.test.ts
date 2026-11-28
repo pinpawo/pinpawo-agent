@@ -129,10 +129,14 @@ for (const decision of ['reject', 'cancel'] as const) {
       await ask('Use staging.', question.messageId);
       await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedDispatches === 2);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 1, 0, 0]);
-      await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });
+      if (!http) {
+        await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });
+      }
       const snapshot = await host.interaction.snapshot();
       if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
-      const pending = snapshot.snapshot.session.pendingInterrupt;
+      const activeSessionId = snapshot.snapshot.session.sessionId;
+      if (http) assert.notEqual(activeSessionId, binding.sessionId);
+      const pending = (await host.sessions.snapshot(binding.sessionId)).session.pendingInterrupt;
       assert.ok(pending);
       if (http) {
         const address = http.address();
@@ -177,7 +181,8 @@ for (const decision of ['reject', 'cancel'] as const) {
       assert.ok((await outputs(id))[3]!.body.includes('Use staging.'));
       const completed = await host.interaction.snapshot();
       if (completed.type !== 'session.snapshot.result') throw Error('snapshot');
-      assert.equal(completed.snapshot.session.pendingInterrupt, null);
+      assert.equal(completed.snapshot.session.sessionId, activeSessionId);
+      assert.equal((await host.sessions.snapshot(binding.sessionId)).session.pendingInterrupt, null);
     } finally { await host.close(); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
   });
 }

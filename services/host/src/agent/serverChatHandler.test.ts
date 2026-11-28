@@ -333,10 +333,14 @@ test('run interrupt during a review resume neither supersedes nor resolves it', 
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      refreshActiveSessionSummary: async () => {},
-      readActivePendingInterrupt: async () => ({
+      refreshSessionSummary: async () => {},
+      readActivePendingInterrupt(this: { readSessionPendingInterrupt(): Promise<unknown> }) {
+        return this.readSessionPendingInterrupt();
+      },
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -386,10 +390,14 @@ test('run interrupt re-announces a review that became pending before the client 
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      refreshActiveSessionSummary: async () => {},
-      readActivePendingInterrupt: async () => ({
+      refreshSessionSummary: async () => {},
+      readActivePendingInterrupt(this: { readSessionPendingInterrupt(): Promise<unknown> }) {
+        return this.readSessionPendingInterrupt();
+      },
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-race',
         payload: { kind: 'human_review', reviews: [{
@@ -441,9 +449,10 @@ test('a review decision resume rejects a stale canonical interactionId before fo
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
-    getActiveSessionId: () => 'sess-active',
+    getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+    peekActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
-    readActivePendingInterrupt: async () => ({
+    readSessionPendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
       payload: { kind: 'human_review', reviews: [{
@@ -484,7 +493,7 @@ test('a review decision resume rejects a stale canonical interactionId before fo
   assert.equal(event.event?.code, 'interrupt_stale');
 });
 
-test('a review decision resume consumes matching canonical review route once', async () => {
+test('a review decision resume consumes the matching current review once', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
@@ -499,9 +508,10 @@ test('a review decision resume consumes matching canonical review route once', a
     }] },
   };
   const tuiSessions = {
-    getActiveSessionId: () => 'sess-active',
+    getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+    peekActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
-    readActivePendingInterrupt: async () => pendingInterrupt,
+    readSessionPendingInterrupt: async () => pendingInterrupt,
   } as never;
   const handler = new ServerChatHandler({
     graphService: {} as never,
@@ -575,9 +585,10 @@ test('a review decision resume keeps single-review review as batch resume shape'
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [review] },
@@ -623,16 +634,17 @@ test('a review decision resume keeps single-review review as batch resume shape'
   });
 });
 
-test('a review decision resume recovers missing route from active checkpoint review', async () => {
+test('a review decision resume uses the current review from the active Session', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -688,9 +700,10 @@ test('a review decision resume releases a recovered review when its peer disconn
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -730,9 +743,10 @@ test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', (
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         reviews: [review],
       }),
@@ -768,9 +782,10 @@ test('a review cancel resume resumes pending review with run interruption contro
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => (reviewResumed ? null : {
+      readSessionPendingInterrupt: async () => (reviewResumed ? null : {
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -843,16 +858,17 @@ test('a review cancel resume resumes pending review with run interruption contro
   assert.equal(event.event?.code, 'interrupt_closed');
 });
 
-test('a review cancel resume recovers missing route from active checkpoint review', async () => {
+test('a review cancel resume uses the current review from the active Session', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -924,9 +940,10 @@ test('a review cancel resume interrupts an approve-only pending review', async (
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => pendingInterrupt,
+      readSessionPendingInterrupt: async () => pendingInterrupt,
     } as never,
     inflightRequests: new InflightRequestController({
       emitOperation: () => {},
@@ -974,9 +991,10 @@ test('a review decision resume forwards canonical selected option without resolv
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
-    getActiveSessionId: () => 'sess-active',
+    getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+    peekActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
-    readActivePendingInterrupt: async () => ({
+    readSessionPendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
       payload: { kind: 'human_review', reviews: [{
@@ -1043,20 +1061,27 @@ test('a review decision resume rejects canonical review response from a differen
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   let activeSessionId = 'sess-origin';
+  let switchDuringRead = true;
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
-    getActiveSessionId: () => activeSessionId,
+    getActiveSession: () => ({ id: activeSessionId, threadId: 'thread-x' }),
+    peekActiveSessionId: () => activeSessionId,
     getChatThreadId: () => 'thread-x',
-    readActivePendingInterrupt: async () => ({
-      sessionId: 'sess-origin',
-      interruptId: 'interrupt-1',
-      payload: { kind: 'human_review', reviews: [{
-        id: 'review-current',
-        schemaVersion: 1,
-        view: { kind: 'plain', body: 'Approve?' },
-        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-      }] },
-    }),
+    readSessionPendingInterrupt: async (_deps: unknown, session: { id: string }) => {
+      assert.equal(session.id, 'sess-origin');
+      await Promise.resolve();
+      if (switchDuringRead) activeSessionId = 'sess-other';
+      return {
+        sessionId: 'sess-origin',
+        interruptId: 'interrupt-1',
+        payload: { kind: 'human_review', reviews: [{
+            id: 'review-current',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        }] },
+      };
+    },
   } as never;
   const handler = new ServerChatHandler({
     graphService: {} as never,
@@ -1070,7 +1095,6 @@ test('a review decision resume rejects canonical review response from a differen
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  activeSessionId = 'sess-other';
 
   await handler.handleInterruptResume(
     fakePeer,
@@ -1084,6 +1108,13 @@ test('a review decision resume rejects canonical review response from a differen
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.equal(event.event?.code, 'interrupt_wrong_session');
+
+  switchDuringRead = false;
+  activeSessionId = 'sess-origin';
+  await handler.handleInterruptResume(fakePeer, humanReviewResponse('review-current'), { petId: 'pet-1' } as never);
+  assert.equal(handleChatCalls.length, 1);
+  assert.deepEqual((handleChatCalls[0] as unknown[])[4], { id: 'sess-origin', threadId: 'thread-x' });
+  assert.equal(sentEvents.length, 1);
 });
 
 test('a review decision resume forwards effect-bearing options without local authorization side effects', async () => {
@@ -1099,9 +1130,10 @@ test('a review decision resume forwards effect-bearing options without local aut
       },
     } as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -1186,9 +1218,10 @@ test('a review decision resume does not validate authorization effect context in
       },
     } as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{
@@ -1322,10 +1355,11 @@ test('a review resolution that settles into a task pause finalizes as waiting, n
   const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
+      getActiveSession: () => ({ id: 'sess-active', threadId: 'thread-x' }),
+      peekActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      refreshActiveSessionSummary: async () => {},
-      readActivePendingInterrupt: async () => ({
+      refreshSessionSummary: async () => {},
+      readSessionPendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         payload: { kind: 'human_review', reviews: [{

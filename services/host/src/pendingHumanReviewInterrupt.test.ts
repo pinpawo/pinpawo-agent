@@ -4,10 +4,9 @@ import type { ReviewSpec } from '@pinpawo/pet-agent';
 import {
   buildHumanReviewCancelResumeValue,
   buildHumanReviewResumeValue,
-  resolvePendingHumanReviewInterrupt,
+  resolveHumanReviewAnswer,
   validateHumanReviewResponses,
 } from './pendingHumanReviewInterrupt';
-import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 function reviewSpec(id: string): ReviewSpec {
   return {
@@ -29,36 +28,29 @@ function reviewSpec(id: string): ReviewSpec {
   };
 }
 
-function reviewRoute(ids: string[], interruptId = 'interrupt-1') {
-  return {
-    interruptId,
-    reviews: ids.map(reviewSpec),
-  };
-}
-
 test('human review interrupt rejects partial approval resumes', () => {
-  const route = reviewRoute(['review-1', 'review-2']);
+  const reviews = ['review-1', 'review-2'].map(reviewSpec);
 
-  assert.throws(() => validateHumanReviewResponses(route, [
+  assert.throws(() => validateHumanReviewResponses(reviews, [
       { interactionId: 'review-1', selectedOptionId: 'approve' },
     ]));
 });
 
 test('human review interrupt resumes complete approvals as one payload', () => {
-  const route = reviewRoute(['review-1', 'review-2'], 'interrupt-1');
-  const decisions = validateHumanReviewResponses(route, [
+  const reviews = ['review-1', 'review-2'].map(reviewSpec);
+  const decisions = validateHumanReviewResponses(reviews, [
       { interactionId: 'review-1', selectedOptionId: 'approve' },
       { interactionId: 'review-2', selectedOptionId: 'approve' },
     ]);
 
   // The value carries the decisions only; the interrupt id travels on the
-  // route and is reattached at the graph service's adapter boundary.
+  // request and is reattached at the graph service's adapter boundary.
   assert.deepEqual(buildHumanReviewResumeValue(decisions), { decisions });
 });
 
 test('human review interrupt resolves a single interaction as batch shape', () => {
-  const route = reviewRoute(['review-1'], 'interrupt-1');
-  const decisions = validateHumanReviewResponses(route, [{ interactionId: 'review-1', selectedOptionId: 'approve' }]);
+  const reviews = ['review-1'].map(reviewSpec);
+  const decisions = validateHumanReviewResponses(reviews, [{ interactionId: 'review-1', selectedOptionId: 'approve' }]);
 
   assert.deepEqual(buildHumanReviewResumeValue(decisions), {
     decisions: [{
@@ -69,117 +61,33 @@ test('human review interrupt resolves a single interaction as batch shape', () =
 });
 
 test('human review interrupt rejects decisions for mismatched interaction order', () => {
-  const route = reviewRoute(['review-1', 'review-2']);
+  const reviews = ['review-1', 'review-2'].map(reviewSpec);
 
-  assert.throws(() => validateHumanReviewResponses(route, [
+  assert.throws(() => validateHumanReviewResponses(reviews, [
       { interactionId: 'review-2', selectedOptionId: 'approve' },
       { interactionId: 'review-1', selectedOptionId: 'approve' },
     ]));
 });
 
-test('human review response validation runs before the route boundary guard', async () => {
-  const route = {
-    ...reviewRoute(['review-1'], 'interrupt-1'),
-    requestId: 'req-1',
-  };
-  const events: AgentRuntimeEvent[] = [];
-  let guardCalls = 0;
-
-  await resolvePendingHumanReviewInterrupt({
-    message: {
-      type: 'interrupt.resume',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      value: { decisions: [{ interactionId: 'review-stale', selectedOptionId: 'approve' }] },
-    },
-    route,
-    emitClosed: () => undefined,
-    emitEvent: (event) => {
-      events.push(event);
-    },
-    acceptRoute: () => {
-      guardCalls += 1;
-      return false;
-    },
-    isConnected: () => true,
-    run: async () => 'completed',
-  });
-
-  assert.equal(guardCalls, 0);
-  assert.equal(
-    (events[0] as Extract<AgentRuntimeEvent, { type: 'error' }> | undefined)?.code,
-    'interrupt_stale',
-  );
+test('a stale decision cannot produce a resume', () => {
+  assert.deepEqual(resolveHumanReviewAnswer([reviewSpec('review-1')], {
+    decisions: [{ interactionId: 'review-stale', selectedOptionId: 'approve' }],
+  }), { code: 'interrupt_stale' });
 });
 
-test('human review cancellation interrupts an approve-only review without fabricating a decision', async () => {
-  const route = {
-    ...reviewRoute(['review-1'], 'interrupt-1'),
-    requestId: 'req-1',
-  };
-  const runs: unknown[] = [];
-
-  await resolvePendingHumanReviewInterrupt({
-    message: {
-      type: 'interrupt.resume',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      value: { action: 'cancel' },
-    },
-    route,
-    emitClosed: () => undefined,
-    emitEvent: () => undefined,
-    isConnected: () => true,
-    run: async (_route, resume, source) => {
-      runs.push({ resume, source });
-      return 'interrupted';
-    },
-  });
-
+test('human review cancellation does not fabricate a decision', () => {
   assert.deepEqual(buildHumanReviewCancelResumeValue(), { action: 'interrupt_run' });
-  assert.deepEqual(runs, [{
+  assert.deepEqual(resolveHumanReviewAnswer([reviewSpec('review-1')], { action: 'cancel' }), {
     resume: { action: 'interrupt_run' },
-    source: {
-      type: 'review_cancel',
-      interactionId: 'review-1',
-      decisionCount: 0,
-    },
-  }]);
+    source: { type: 'review_cancel', interactionId: 'review-1', decisionCount: 0 },
+  });
 });
 
-test('human review rejection resumes with a reject decision', async () => {
-  const route = {
-    ...reviewRoute(['review-1'], 'interrupt-1'),
-    requestId: 'req-1',
-  };
-  const runs: unknown[] = [];
-
-  await resolvePendingHumanReviewInterrupt({
-    message: {
-      type: 'interrupt.resume',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'reject' }] },
-    },
-    route,
-    emitClosed: () => undefined,
-    emitEvent: () => undefined,
-    isConnected: () => true,
-    run: async (_route, resume, source) => {
-      runs.push({ resume, source });
-      return 'interrupted';
-    },
+test('human review rejection preserves the chosen option', () => {
+  assert.deepEqual(resolveHumanReviewAnswer([reviewSpec('review-1')], {
+    decisions: [{ interactionId: 'review-1', selectedOptionId: 'reject' }],
+  }), {
+    resume: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
+    source: { type: 'review_decision', interactionId: 'review-1', selectedOptionId: 'reject', decisionCount: 1 },
   });
-
-  assert.deepEqual(runs, [{
-    resume: {
-      decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }],
-    },
-    source: {
-      type: 'review_decision',
-      interactionId: 'review-1',
-      selectedOptionId: 'reject',
-      decisionCount: 1,
-    },
-  }]);
 });

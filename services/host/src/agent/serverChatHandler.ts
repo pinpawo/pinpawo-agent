@@ -76,16 +76,25 @@ type ChatTurnHooks = {
   runAgentTurn?: RunAgentSessionTurn;
   /** Receives the error behind a `failed` or `fatal_failed` outcome. */
   onFailure?: (error: unknown) => void;
-  /** Receives the native review a cancelled run settled into. */
-  onSettledInterrupt?: (pending: PendingInterruptProjection) => void;
+  /** Receives the confirmed review state after a turn. */
+  onSettledInterrupt?: (pending: PendingInterruptProjection | null) => void;
+  onReply?: (reply: string) => void;
 };
 
 export type HostTurnOutcome = {
   outcome: ChatRunOutcome;
   error?: unknown;
-  /** The review a cancellation settled into, when the outcome is `waiting`. */
-  pendingInterrupt?: PendingInterruptProjection;
+  /** Undefined means the state was not confirmed; null means no review remains. */
+  pendingInterrupt?: PendingInterruptProjection | null;
+  reply?: string;
 };
+
+/** A Host adapter may attribute an already validated review to a Dispatch. */
+export type RunReviewTurn = (
+  session: ChatTurnTarget,
+  request: Extract<ChatTurnRequest, { kind: 'resume' }>,
+  run: (runner?: RunAgentSessionTurn) => Promise<HostTurnOutcome>,
+) => Promise<HostTurnOutcome>;
 
 type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
@@ -119,6 +128,7 @@ export class ServerChatHandler {
   private readonly inflightRequests: InflightRequestController<ServerPeer>;
   private readonly loadContext: typeof loadAgentContext;
   private readonly runAgentTurn: RunAgentSessionTurn;
+  private readonly runReviewTurn?: RunReviewTurn;
   private readonly publishRuntimeEvent: (
     origin: ServerPeer,
     event: AgentRuntimeEvent,
@@ -133,6 +143,7 @@ export class ServerChatHandler {
     inflightRequests: InflightRequestController<ServerPeer>;
     loadContext?: typeof loadAgentContext;
     runAgentTurn?: RunAgentSessionTurn;
+    runReviewTurn?: RunReviewTurn;
     publishRuntimeEvent?: (
       origin: ServerPeer,
       event: AgentRuntimeEvent,
@@ -144,6 +155,7 @@ export class ServerChatHandler {
     this.inflightRequests = options.inflightRequests;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
+    this.runReviewTurn = options.runReviewTurn;
     this.publishRuntimeEvent = options.publishRuntimeEvent
       ?? ((peer, event) => {
         sendAgentSessionPeerEvent(peer, event);
@@ -173,33 +185,6 @@ export class ServerChatHandler {
     return target
       ? this.tuiSessions.readSessionPendingInterrupt(deps, target)
       : this.tuiSessions.readActivePendingInterrupt(deps);
-  }
-
-  private async recoverPendingInterruptRoute(
-    requestId: string,
-    deps: ServerDeps,
-    target?: ChatTurnTarget,
-  ) {
-    try {
-      const pending = await this.readPendingInterrupt(deps, target);
-      // Recover only the pending native review and its original action identity.
-      if (!pending || pending.payload.kind !== 'human_review') {
-        return null;
-      }
-      const route = this.buildPendingInterruptRoute({
-        requestId,
-        interruptId: pending.interruptId,
-        reviews: pending.payload.reviews,
-        sessionId: pending.sessionId,
-      });
-      return route;
-    } catch (err) {
-      console.warn(
-        '[chat-host] failed to recover pending human_review from checkpoint:',
-        err instanceof Error ? err.message : err,
-      );
-      return null;
-    }
   }
 
   buildPendingInterruptSnapshot(
@@ -246,26 +231,16 @@ export class ServerChatHandler {
     msg: InterruptResumeMessage,
     deps: ServerDeps,
     target?: ChatTurnTarget,
+    onReceipt?: (current: boolean) => void,
   ) {
     const pending = await this.readPendingInterrupt(deps, target);
-    if (!pending || pending.interruptId !== msg.interruptId) {
+    const current = pending?.interruptId === msg.interruptId;
+    onReceipt?.(current);
+    if (!current) {
       this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
-    if (pending.payload.kind === 'human_review') {
-      await this.resolvePendingReview(peer, msg, deps, target);
-      return;
-    }
-    if (target) {
-      // A targeted resume answers reviews only.
-      this.sendClosedReviewError(peer, msg.requestId);
-      return;
-    }
-    await this.runChatRequest(peer, {
-      kind: 'resume',
-      requestId: msg.requestId,
-      resume: { interruptId: msg.interruptId, value: msg.value },
-    }, deps, { type: 'chat_request' });
+    await this.resolvePendingReview(peer, msg, deps, pending, target);
   }
 
   /**
@@ -279,23 +254,24 @@ export class ServerChatHandler {
     deps: ServerDeps,
     target?: ChatTurnTarget,
   ): Promise<HostTurnOutcome> {
-    let error: unknown;
-    let pendingInterrupt: PendingInterruptProjection | undefined;
-    const outcome = await this.runChatRequest(peer, {
+    return this.captureTurn((hooks) => this.runChatRequest(peer, {
       kind: 'user_message',
       requestId: turn.requestId,
       message: turn.message,
       ...(turn.artifactReferences ? { artifactReferences: turn.artifactReferences } : {}),
-    }, deps, { type: 'host_dispatch' }, target, {
-      ...(turn.runAgentTurn ? { runAgentTurn: turn.runAgentTurn } : {}),
+    }, deps, { type: 'host_dispatch' }, target, { ...hooks, runAgentTurn: turn.runAgentTurn }));
+  }
+
+  private async captureTurn(run: (hooks: ChatTurnHooks) => Promise<ChatRunOutcome>): Promise<HostTurnOutcome> {
+    let error: unknown;
+    let pendingInterrupt: PendingInterruptProjection | null | undefined;
+    let reply: string | undefined;
+    const outcome = await run({
       onFailure: (failure) => { error = failure; },
       onSettledInterrupt: (pending) => { pendingInterrupt = pending; },
+      onReply: (text) => { reply = text; },
     });
-    return {
-      outcome,
-      ...(error === undefined ? {} : { error }),
-      ...(pendingInterrupt ? { pendingInterrupt } : {}),
-    };
+    return { outcome, error, pendingInterrupt, reply };
   }
 
   async handleRunInterrupt(
@@ -405,6 +381,7 @@ export class ServerChatHandler {
         await refreshSummary();
         return 'waiting';
       }
+      hooks.onSettledInterrupt?.(null);
       finalizeInterrupted();
       return 'interrupted';
     };
@@ -470,6 +447,19 @@ export class ServerChatHandler {
       return failure.kind === 'fatal' ? 'fatal_failed' : 'failed';
     };
 
+    const settleCancellation = async () => {
+      try {
+        return await settleInterrupted();
+      } catch (error) {
+        console.error('[chat-host] failed to settle an aborted run:', error);
+        // A started run still owes its observers a terminal event unless
+        // a replacement run owns the thread now.
+        return reportFailure(error, runStarted && !invocation.isSuperseded());
+      }
+    };
+
+    let turnSetup: ReturnType<ServerTuiSessionService['buildChatSetup']> | undefined;
+    let reportedInterrupt: PendingInterruptProjection | undefined;
     try {
       await invocation.waitForTurn();
       if (!isCurrent()) {
@@ -491,7 +481,7 @@ export class ServerChatHandler {
         return 'interrupted';
       }
 
-      const setup = this.tuiSessions.buildChatSetup(deps, ctx, threadId);
+      const setup = turnSetup = this.tuiSessions.buildChatSetup(deps, ctx, threadId);
       configureInflightOperationRegistry(
         inflight,
         createOperationRegistryForAgentSetup(setup),
@@ -503,6 +493,7 @@ export class ServerChatHandler {
         graphService: this.graphService,
         isCurrent,
         emitEvent: (event) => {
+          if (event.type === 'interrupt.requested') reportedInterrupt = event.pendingInterrupt;
           if (!isCurrent()) return;
           this.publishRuntimeEvent(peer, event);
         },
@@ -526,6 +517,12 @@ export class ServerChatHandler {
           : {}),
       });
       if (result.status === 'waiting') {
+        if (hooks.onSettledInterrupt) {
+          const pending = reportedInterrupt ?? await this.graphService.readThreadState(setup)
+            .then(({ pendingInterrupt }) => pendingInterrupt && projectPendingInterrupt(pendingInterrupt));
+          if (!pending) throw new Error('A waiting turn has no pending interrupt.');
+          hooks.onSettledInterrupt(pending);
+        }
         // Every kind settles here. The run's own operations close, and the
         // interrupt.requested event already told the interface what it is
         // waiting on and under which id.
@@ -536,8 +533,10 @@ export class ServerChatHandler {
         return 'waiting';
       }
       if (result.status === 'interrupted') {
-        return await settleInterrupted();
+        return settleCancellation();
       }
+      hooks.onSettledInterrupt?.(null);
+      hooks.onReply?.(result.reply);
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
       await refreshSummary();
@@ -549,17 +548,16 @@ export class ServerChatHandler {
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[chat-host] chat interrupted requestId=${requestId}`);
+        return settleCancellation();
+      }
+      if (request.kind === 'resume' && turnSetup && hooks.onSettledInterrupt) {
+        // A failure and a pending review can coexist. An unreadable state is
+        // unknown, not an empty checkpoint; preserve the original failure.
         try {
-          return await settleInterrupted();
-        } catch (settleError) {
-          console.error(
-            '[chat-host] failed to settle an aborted run:',
-            settleError instanceof Error ? (settleError.stack ?? settleError.message) : settleError,
-          );
-          // The run was aborted, so it is no longer current; yet a started
-          // run that nothing replaced still owes its observers one terminal
-          // event. Only a superseded run leaves that to its successor.
-          return await reportFailure(settleError, runStarted && !invocation.isSuperseded());
+          const pending = await this.graphService.settleAbortedRun(turnSetup);
+          hooks.onSettledInterrupt(pending ? projectPendingInterrupt(pending) : null);
+        } catch (readError) {
+          console.warn('[chat-host] failed to confirm review state after resume failure:', readError);
         }
       }
       return await reportFailure(err, isCurrent());
@@ -572,11 +570,17 @@ export class ServerChatHandler {
     peer: ServerPeer,
     msg: InterruptResumeMessage,
     deps: ServerDeps,
+    pending: ActivePendingInterrupt,
     target?: ChatTurnTarget,
   ) {
     await resolvePendingHumanReviewInterrupt({
       message: msg,
-      recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps, target),
+      recover: async () => this.buildPendingInterruptRoute({
+        requestId: msg.requestId,
+        interruptId: pending.interruptId,
+        reviews: pending.payload.reviews,
+        sessionId: pending.sessionId,
+      }),
       emitClosed: () => {
         console.warn(
           `[chat-host] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
@@ -588,11 +592,19 @@ export class ServerChatHandler {
       },
       acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps, target),
       isConnected: peer.isConnected,
-      run: (route, resume, source) => this.runChatRequest(peer, {
-        kind: 'resume',
-        requestId: msg.requestId,
-        resume: { interruptId: route.interruptId, value: resume },
-      }, deps, source, target),
+      run: (route, resume, source) => {
+        const request = {
+          kind: 'resume' as const,
+          requestId: msg.requestId,
+          resume: { interruptId: route.interruptId, value: resume },
+        };
+        if (!this.runReviewTurn) return this.runChatRequest(peer, request, deps, source, target);
+        return this.runReviewTurn(target ?? this.tuiSessions.getActiveSession(deps.petId), request, (runAgentTurn) =>
+          this.captureTurn((hooks) => this.runChatRequest(
+            peer, request, deps, source, target, { ...hooks, runAgentTurn },
+          )),
+        );
+      },
     });
   }
 

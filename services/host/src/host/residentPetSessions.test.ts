@@ -48,7 +48,9 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
   const turns: string[] = [];
   const promptSnapshots: Array<{ threadId: string; kind: string; sections: readonly { id: string; owner?: string; content: string }[]; hint?: AgentInvocationHint }> = [];
   // Tests hold a resumed run, or one checkpoint read, open on these.
-  const gates: { resume?: Promise<void>; read?: Promise<void> } = {};
+  const gates: { resume?: Promise<void>; read?: Promise<void>; resumeFailure?: Error } = {};
+  const reads: string[] = [];
+  const settlements: string[] = [];
   const host = await createResidentPetHost({
     petId: 'pet',
     petName: 'Pet',
@@ -63,7 +65,9 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
     ...(resolveInvocationContext ? { resolveInvocationContext } : {}),
     graphService: {
       readThreadState: async (setup: { input: { threadId?: string } }) => {
-        const thread = threads.get(setup.input.threadId ?? '');
+        const threadId = setup.input.threadId ?? '';
+        reads.push(threadId);
+        const thread = threads.get(threadId);
         const read = gates.read;
         gates.read = undefined;
         await read;
@@ -76,7 +80,13 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
           currentPlan: null,
         };
       },
-      settleAbortedRun: async () => null,
+      settleAbortedRun: async (setup: { input: { threadId?: string } }) => {
+        const threadId = setup.input.threadId ?? '';
+        settlements.push(threadId);
+        return threads.get(threadId)?.reviewing
+          ? { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } }
+          : null;
+      },
     } as never,
     runAgentTurn: async ({ request, setup, emitEvent }) => {
       const threadId = setup.input.threadId ?? '';
@@ -95,6 +105,7 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
         return { status: 'waiting' };
       }
       await gates.resume;
+      if (gates.resumeFailure) throw gates.resumeFailure;
       threads.set(threadId, { messages: [new AIMessage('approved')], reviewing: false });
       emitEvent({
         type: 'message.completed', requestId: request.requestId, messageId: 'm-approved', role: 'assistant', text: 'approved',
@@ -104,7 +115,7 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
   });
   const lifecycle: PetDispatchLifecycleEvent[] = [];
   host.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
-  return { host, threads, turns, lifecycle, gates, promptSnapshots };
+  return { host, threads, turns, lifecycle, gates, promptSnapshots, reads, settlements };
 }
 
 test('an exact session is read, followed and reviewed without changing the active session', async () => {
@@ -178,6 +189,46 @@ test('an exact session is read, followed and reviewed without changing the activ
   } finally {
     await host.close();
   }
+});
+
+test('review receipt uses one native read and a provider timeout stays failed in both surfaces', async (t) => {
+  const { host, turns, lifecycle, gates, reads, settlements } = await createWaitingHost();
+  t.after(() => host.close());
+  const sessionId = 'pet:0000000b';
+  const scope = { namespace: 'channel', id: 'review-channel' };
+  await host.resident.dispatch.dispatch({ request: 'review', dispatchId: 'original', session: { id: sessionId, create: true }, scope });
+  await waitFor(() => lifecycle.some(event => event.state === 'waiting') &&
+    !host.resident.dispatch.getQueueSnapshot().activeDispatch, 'original dispatch did not settle');
+  const threadId = turns[0]!.split(':user_message')[0]!;
+  const observed: AgentServerMessage[] = [];
+  const detach = await host.sessions.observe(sessionId, message => observed.push(message));
+  t.after(detach);
+  reads.length = 0;
+  const answer = (requestId: string, selectedOptionId: string) => host.sessions.review(sessionId, {
+    requestId, interruptId: 'interrupt-1', value: { decisions: [{ interactionId: 'review-1', selectedOptionId }] },
+  });
+
+  await answer('invalid-option', 'unknown');
+  await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedConversations === 0, 'invalid answer did not settle');
+  assert.equal(reads.filter(id => id === threadId).length, 1, 'receipt and validation share one native read');
+  assert.equal(turns.length, 1);
+  assert.ok(events(observed).some(event => event.type === 'error' && event.requestId === 'invalid-option'));
+  assert.equal(lifecycle.some(event => event.requestId === 'invalid-option'), false);
+
+  gates.resumeFailure = new DOMException('provider timed out', 'TimeoutError');
+  await answer('timeout', 'approve');
+  await waitFor(() => lifecycle.some(event => event.requestId === 'timeout' && event.state !== 'running'),
+    'answer did not settle');
+  assert.deepEqual(lifecycle.filter(event => event.requestId === 'timeout').map(event => event.state), ['running', 'failed']);
+  assert.ok(events(observed).some(event => event.type === 'error' && event.requestId === 'timeout'));
+  assert.deepEqual(settlements, [threadId]);
+  assert.equal((await host.sessions.snapshot(sessionId)).session.pendingInterrupt?.interruptId, 'interrupt-1');
+
+  gates.resumeFailure = undefined;
+  await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedConversations === 0, 'timeout did not release the gate');
+  await answer('retry', 'approve');
+  await waitFor(() => lifecycle.some(event => event.requestId === 'retry' && event.state === 'completed'), 'retry did not complete');
+  assert.equal(lifecycle.find(event => event.requestId === 'retry' && event.state === 'completed')?.resumesDispatchId, 'original');
 });
 
 test('provider snapshots stay scoped across dispatch, mutation, resume and ordinary chat', async () => {

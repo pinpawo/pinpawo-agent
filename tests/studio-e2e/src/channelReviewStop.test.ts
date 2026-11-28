@@ -13,6 +13,7 @@ import { buildOrchestratorRunInput, buildReviewSpec, compileAgentRegistry, creat
   defineInstructionDocument, readPendingInterrupt, type AgentModels } from '@pinpawo/pet-agent';
 import { withScriptedDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
+import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -95,10 +96,12 @@ for (const decision of ['reject', 'cancel'] as const) {
       graphService: graphService as never,
     });
     const channel = createChannelPlugin({ httpRoute: false });
-    const studio = await createStudioWithPets({ studioId: 'review-stop', plugins: [channel],
+    const authToken = 'test-channel-review-token';
+    const http = decision === 'reject' ? createStudioHttpPlugin({ authToken, port: 0 }) : undefined;
+    const studio = await createStudioWithPets({ studioId: 'review-stop', plugins: http ? [channel, http] : [channel],
       onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
-      pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
+      pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch, sessions: host.sessions }],
     });
     const outputs = async (id: string) => (await channel.service.readContext(me, id)).messages.filter(message => message.author.kind === 'pet');
     const events: Array<{ type: string; payload?: any }> = [];
@@ -131,10 +134,35 @@ for (const decision of ['reject', 'cancel'] as const) {
       if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
       const pending = snapshot.snapshot.session.pendingInterrupt;
       assert.ok(pending);
-      await host.interaction.request({ type: 'interrupt.resume', requestId: 'decline', interruptId: pending.interruptId,
-        value: decision === 'cancel' ? { action: 'cancel' }
-          : { decisions: [{ interactionId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId: 'reject' }] },
-      });
+      if (http) {
+        const address = http.address();
+        assert.ok(address);
+        const received: string[] = [];
+        const detach = await host.sessions.observe(binding.sessionId, message => {
+          if (message.type === 'event' && message.event.type === 'error') received.push(message.event.requestId);
+        });
+        try {
+          const submit = (requestId: string, selectedOptionId: string, interruptId = pending.interruptId) =>
+            fetch(`http://127.0.0.1:${address.port}/pet-sessions/review`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ petId: 'one', sessionId: binding.sessionId, requestId, interruptId,
+                value: { decisions: [{ interactionId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId }] },
+              }),
+            });
+          assert.equal((await submit('closed', 'reject', 'closed')).status, 409);
+          assert.equal((await submit('invalid-option', 'no-such-option')).status, 202);
+          await waitFor(() => received.includes('invalid-option') && host.resident.dispatch.getQueueSnapshot().queuedConversations === 0);
+          assert.equal((await outputs(id)).length, 1);
+          const accepted = await submit('decline', 'reject');
+          assert.equal(accepted.status, 202);
+          assert.deepEqual(await accepted.json(), { requestId: 'decline' });
+        } finally { detach(); }
+      } else {
+        await host.interaction.request({ type: 'interrupt.resume', requestId: 'decline', interruptId: pending.interruptId,
+          value: { action: 'cancel' },
+        });
+      }
       await waitFor(async () => (await outputs(id)).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [4, 3, 0, 0]);
       assert.equal((await channel.service.getSession(id, 'one'))?.sessionId, binding.sessionId);

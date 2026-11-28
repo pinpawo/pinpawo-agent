@@ -3,179 +3,17 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
+import type { AgentSessionTurnOptions } from '../agent/chatSessionAdapter';
+import type { HostTurnOutcome } from '../agent/serverChatHandler';
 import { ensureActiveTuiSession, loadTuiSessionState, saveTuiSessionState, setTuiSessionPendingDispatch } from '../session/tuiSessionRegistry';
-import type { TuiSessionPendingDispatch } from '../session/tuiSessionRegistry';
 import type { PetDispatchLifecycleEvent } from './contracts';
-import { continueSuspendedDispatch } from './dispatchContinuation';
+import { attributeReviewDispatch } from './dispatchContinuation';
 import { ResidentPetCoordinator } from './residentPetCoordinator';
 import { readPetInvocationContext } from './petInvocationContext';
 
-const review = (interruptId: string) => ({
-  interruptId,
-  payload: { kind: 'human_review', interactions: [] },
-}) as never;
-
-function harness(pendingAfterStop: string | null = null) {
-  const session = {
-    id: 'pet:00000001',
-    threadId: 'thread-1',
-    pendingDispatch: {
-      interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it',
-      scope: { namespace: 'channel', id: 'ch-1' },
-    } as TuiSessionPendingDispatch | undefined,
-  };
-  const events: PetDispatchLifecycleEvent[] = [];
-  const contexts: unknown[] = [];
-  const graph = {
-    settle: async (): Promise<unknown> => pendingAfterStop ? { interruptId: pendingAfterStop, payload: { reviews: [] } } : null,
-  };
-  const sessions = {
-    findSessionByThread: (_petId: string, threadId: string | undefined) => threadId === session.threadId ? session : null,
-    setPendingDispatch: (_id: string, value: TuiSessionPendingDispatch | null) => {
-      session.pendingDispatch = value ?? undefined;
-    },
-  };
-  const turn = (interruptId: string) => ({
-    request: { kind: 'resume', requestId: 'req-2', resume: { interruptId, value: {} } },
-    setup: { input: { threadId: session.threadId } },
-    graphService: {
-      settleAbortedRun: () => graph.settle(),
-      readThreadState: async () => ({ pendingInterrupt: null }),
-    },
-    emitEvent: () => {},
-  }) as unknown as AgentSessionTurnOptions;
-  const continueWith = (result: () => Promise<AgentSessionTurnResult>, emitted?: string) => continueSuspendedDispatch({
-    coordinator: new ResidentPetCoordinator({ readSettledState: () => 'open' }),
-    petId: 'pet', sessions: sessions as never, publishLifecycle: (event) => events.push(event),
-    run: async (options) => {
-      contexts.push(readPetInvocationContext());
-      if (emitted) options.emitEvent({ type: 'interrupt.requested', requestId: 'req-2', pendingInterrupt: review(emitted) });
-      return result();
-    },
-  });
-  return { session, events, contexts, graph, turn, continueWith };
-}
-
-test('a resume for another interrupt is an ordinary conversation turn', async () => {
-  const h = harness();
-  await h.continueWith(async () => ({ status: 'completed', reply: 'chat' }))(h.turn('other-review'));
-  assert.deepEqual(h.events, []);
-  assert.deepEqual(h.contexts, [undefined]);
-  assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
-});
-
-test('answering the recorded review continues the Session under a separate dispatch identity', async () => {
-  const h = harness();
-  await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-1'));
-  const id = h.events[0]?.dispatchId;
-  assert.ok(id && id !== 'dispatch-1' && id !== 'req-2');
-  assert.ok(h.events.every(event => event.resumesDispatchId === 'dispatch-1'));
-  assert.deepEqual(h.contexts, [{ petId: 'pet', dispatchId: id, sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } }]);
-  assert.deepEqual(h.events.map((event) => [event.state, event.dispatchId, event.scope?.id, event.reply]), [
-    ['running', id, 'ch-1', undefined],
-    ['completed', id, 'ch-1', 'done'],
-  ]);
-  assert.equal(h.session.pendingDispatch, undefined);
-});
-
-test('a continuation that stops on another review stays suspended on it', async () => {
-  const h = harness();
-  h.session.pendingDispatch!.systemPromptSections = [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }];
-  await h.continueWith(async () => ({ status: 'waiting' }), 'review-2')(h.turn('review-1'));
-  assert.equal(h.events.at(-1)?.state, 'waiting');
-  assert.equal(h.events.at(-1)?.pendingInterrupt?.interruptId, 'review-2');
-  assert.equal(h.session.pendingDispatch?.interruptId, 'review-2');
-  assert.equal(h.session.pendingDispatch?.dispatchId, h.events[0]?.dispatchId);
-  assert.deepEqual(h.session.pendingDispatch?.systemPromptSections, [{ id: 'channel:collaboration', owner: 'channel', content: 'original channel prompt' }]);
-  const firstAnswer = h.events[0]?.dispatchId;
-  await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-2'));
-  const nextAnswer = h.events.at(-1);
-  assert.ok(nextAnswer && nextAnswer.dispatchId !== firstAnswer);
-  assert.equal(nextAnswer.resumesDispatchId, firstAnswer);
-  assert.equal(nextAnswer.sessionId, h.session.id);
-});
-
-test('a stop that leaves the review pending keeps the dispatch waiting', async () => {
-  const h = harness('review-1');
-  await h.continueWith(async () => ({ status: 'interrupted' }))(h.turn('review-1'));
-  assert.equal(h.events.at(-1)?.state, 'waiting');
-  assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
-});
-
-test('a stop with nothing pending interrupts the dispatch', async () => {
-  const h = harness();
-  await h.continueWith(async () => ({ status: 'interrupted' }))(h.turn('review-1'));
-  assert.equal(h.events.at(-1)?.state, 'interrupted');
-  assert.equal(h.session.pendingDispatch, undefined);
-});
-
-test('a failed continuation reports the review answer failed and rethrows', async () => {
-  const h = harness();
-  await assert.rejects(h.continueWith(async () => { throw new Error('model down'); })(h.turn('review-1')), /model down/);
-  assert.deepEqual(h.events.map((event) => [event.state, event.error]), [['running', undefined], ['failed', 'model down']]);
-  assert.equal(h.session.pendingDispatch, undefined);
-});
-
-test('a failed review answer does not take ownership of the same pending interrupt', async () => {
-  const h = harness('review-1');
-  await assert.rejects(h.continueWith(async () => { throw new Error('model down'); })(h.turn('review-1')), /model down/);
-  assert.deepEqual(h.events.map(({ state }) => state), ['running', 'failed']);
-  assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
-  assert.equal(h.session.pendingDispatch?.dispatchId, 'dispatch-1');
-  await h.continueWith(async () => ({ status: 'completed', reply: 'retry succeeded' }))(h.turn('review-1'));
-  assert.equal(h.events.at(-1)?.resumesDispatchId, 'dispatch-1');
-  assert.notEqual(h.events.at(-1)?.dispatchId, h.events[0]?.dispatchId);
-});
-
-test('a stop thrown as AbortError with nothing pending interrupts the dispatch', async () => {
-  const h = harness();
-  const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
-  await assert.rejects(h.continueWith(async () => { throw abort; })(h.turn('review-1')), /aborted/);
-  assert.deepEqual(h.events.map((event) => event.state), ['running', 'interrupted']);
-  assert.equal(h.session.pendingDispatch, undefined);
-});
-
-test('an unreadable outcome keeps the suspension so a retry still continues the dispatch', async () => {
-  const h = harness();
-  h.graph.settle = async () => { throw new Error('checkpoint unavailable'); };
-  await assert.rejects(h.continueWith(async () => { throw new Error('state read failed'); })(h.turn('review-1')), /checkpoint unavailable/);
-  await assert.rejects(h.continueWith(async () => ({ status: 'interrupted' }))(h.turn('review-1')), /checkpoint unavailable/);
-  assert.deepEqual(h.events.map((event) => event.state), ['running', 'failed', 'running', 'failed']);
-  assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
-
-  h.graph.settle = async () => null;
-  await h.continueWith(async () => ({ status: 'completed', reply: 'done' }))(h.turn('review-1'));
-  const id = h.events.at(-1)?.dispatchId;
-  assert.equal(new Set(h.events.map(event => event.dispatchId)).size, 3);
-  assert.deepEqual(h.contexts.at(-1), { petId: 'pet', dispatchId: id, sessionId: 'pet:00000001', scope: { namespace: 'channel', id: 'ch-1' } });
-  assert.deepEqual([h.events.at(-1)?.state, h.events.at(-1)?.dispatchId, h.events.at(-1)?.scope?.id], ['completed', id, 'ch-1']);
-  assert.equal(h.session.pendingDispatch, undefined);
-});
-
-test('the continued run reply reports under the review answer identity', async () => {
-  const h = harness();
-  const settled = { type: 'message.completed', requestId: 'req-2', messageId: 'm1', role: 'assistant', text: 'done' } as const;
-  await continueSuspendedDispatch({
-    coordinator: new ResidentPetCoordinator({ readSettledState: () => 'open' }),
-    petId: 'pet', sessions: { findSessionByThread: () => h.session, setPendingDispatch: () => {} } as never,
-    publishLifecycle: (event) => h.events.push(event),
-    run: async (options) => { options.emitEvent(settled); return { status: 'completed', reply: 'done' }; },
-  })({ ...h.turn('review-1'), emitEvent: () => {} } as never);
-  const id = h.events[0]?.dispatchId;
-  assert.notEqual(id, 'dispatch-1');
-  assert.deepEqual(h.events.map((event) => [event.state, event.dispatchId, event.scope?.id, event.message?.type]), [
-    ['running', id, 'ch-1', undefined],
-    ['message', id, 'ch-1', 'message.completed'],
-    ['completed', id, 'ch-1', undefined],
-  ]);
-});
-
-
-test('resuming a persisted dispatch after restart restores its original prompt and hint snapshot', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'dispatch-prompt-'));
-  const filePath = join(directory, 'sessions.json');
-  const state = loadTuiSessionState(filePath);
+async function harness() {
+  const file = join(await mkdtemp(join(tmpdir(), 'dispatch-prompt-')), 'sessions.json');
+  const state = loadTuiSessionState(file);
   const original = ensureActiveTuiSession(state, 'pet', 'test-profile');
   setTuiSessionPendingDispatch(state, original.id, {
     interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it',
@@ -183,37 +21,85 @@ test('resuming a persisted dispatch after restart restores its original prompt a
     systemPromptSections: [{ id: 'channel:collaboration', owner: 'channel', content: 'before restart' }],
     hint: { source: 'channel', instruction: 'original instruction', focus: 'original focus' },
   });
-  saveTuiSessionState(state, filePath);
-
-  // Loading a fresh registry models a Host restart, including its serialized snapshot.
-  const restarted = loadTuiSessionState(filePath);
-  const session = restarted.sessions[original.id]!;
-  const h = harness();
-  let observed: unknown;
-  let observedHint: unknown;
-  const resume = continueSuspendedDispatch({
-    coordinator: new ResidentPetCoordinator({ readSettledState: () => 'open' }),
+  saveTuiSessionState(state, file);
+  const restored = loadTuiSessionState(file);
+  const coordin = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+  const events: PetDispatchLifecycleEvent[] = [];
+  const context: unknown[] = [];
+  const bridge = attributeReviewDispatch({
+    coordinator: coordin,
     petId: 'pet',
-    sessions: {
-      findSessionByThread: () => session,
-      setPendingDispatch: (id: string, value: TuiSessionPendingDispatch | null) => setTuiSessionPendingDispatch(restarted, id, value),
-    } as never,
-    publishLifecycle: () => {},
+    sessions: { setPendingDispatch: (id, value) => setTuiSessionPendingDispatch(restored, id, value) },
+    publishLifecycle: (event) => events.push(event),
     run: async (options) => {
-      observed = options.setup.input.context?.systemPromptSections;
-      observedHint = options.setup.input.context?.hint;
-      return { status: 'completed', reply: 'done' };
+      context.push([readPetInvocationContext(), options.setup.input.context]);
+      options.emitEvent({ type: 'message.completed', requestId: 'req-2', messageId: 'm1', role: 'assistant', text: 'reply' });
+      return { status: 'completed', reply: 'reply' };
     },
   });
-  await resume({
-    ...h.turn('review-1'),
-    setup: { input: { threadId: session.threadId, context: { systemPromptSections: [{ id: 'pet:document', content: 'pet identity' }], hint: { source: 'other', instruction: 'unrelated resume hint' } } } },
-  } as never);
-  assert.deepEqual(observed, [
-    { id: 'pet:document', content: 'pet identity' },
-    { id: 'channel:collaboration', owner: 'channel', content: 'before restart' },
-  ]);
-  assert.deepEqual(observedHint, { source: 'channel', instruction: 'original instruction', focus: 'original focus' });
-  assert.ok(Object.isFrozen(session.pendingDispatch?.hint));
-  assert.equal(restarted.sessions[session.id]?.pendingDispatch, undefined);
+  const getSession = () => restored.sessions[original.id]!;
+  const deliver = (outcome: HostTurnOutcome, interruptId = 'review-1') => {
+    const session = getSession();
+    const request = { kind: 'resume' as const, requestId: 'req-2', resume: { interruptId, value: {} } };
+    return bridge(session, request, async (runner) => {
+      await runner?.({
+        request,
+        setup: { input: { threadId: session.threadId, context: { systemPromptSections: [{ id: 'pet:document', content: 'pet identity' }] } } },
+        emitEvent: () => {},
+      } as unknown as AgentSessionTurnOptions);
+      return outcome;
+    });
+  };
+  return { deliver, events, context, getSession };
+}
+
+test('attributes a validated resume using the original invocation context after restart', async () => {
+  const h = await harness();
+  await h.deliver({ outcome: 'completed', reply: 'reply', pendingInterrupt: null });
+  const answer = h.events[0]?.dispatchId;
+  assert.ok(answer && answer !== 'dispatch-1' && answer !== 'req-2');
+  assert.ok(h.events.every(event => event.dispatchId === answer && event.resumesDispatchId === 'dispatch-1'));
+  assert.deepEqual(h.events.map(event => event.state), ['running', 'message', 'completed']);
+  assert.equal(h.events.at(-1)?.reply, 'reply');
+  assert.equal(h.getSession().pendingDispatch, undefined);
+  assert.deepEqual(h.context, [[
+    { petId: 'pet', dispatchId: answer, sessionId: h.getSession().id, scope: { namespace: 'channel', id: 'ch-1' } },
+    {
+      systemPromptSections: [
+        { id: 'pet:document', content: 'pet identity' },
+        { id: 'channel:collaboration', owner: 'channel', content: 'before restart' },
+      ],
+      hint: { source: 'channel', instruction: 'original instruction', focus: 'original focus' },
+    },
+  ]]);
+});
+
+test('a non-dispatched review resumes without creating a Dispatch', async () => {
+  const h = await harness();
+  const result = { outcome: 'completed' } as const;
+  assert.equal(await h.deliver(result, 'other'), result);
+  assert.deepEqual(h.events, []);
+  assert.equal(h.getSession().pendingDispatch?.dispatchId, 'dispatch-1');
+});
+
+test('waiting links the next approval to the answer Dispatch; failure stays failure', async () => {
+  const h = await harness();
+  const firstPending = { interruptId: 'review-1', payload: { kind: 'human_review' as const, interactions: [] } };
+  const timeout = new DOMException('provider timed out', 'TimeoutError');
+  await h.deliver({ outcome: 'failed', error: timeout, pendingInterrupt: firstPending });
+  assert.equal(h.events.at(-1)?.state, 'failed');
+  assert.equal(h.events.at(-1)?.error, 'provider timed out');
+  assert.equal(h.getSession().pendingDispatch?.dispatchId, 'dispatch-1');
+  await h.deliver({ outcome: 'failed', error: new Error('unconfirmed') });
+  assert.equal(h.getSession().pendingDispatch?.dispatchId, 'dispatch-1');
+  const nextPending = { ...firstPending, interruptId: 'review-2' };
+  await h.deliver({ outcome: 'waiting', pendingInterrupt: nextPending });
+  const answer = h.events.at(-1)!.dispatchId;
+  assert.equal(h.events.at(-1)?.state, 'waiting');
+  assert.equal(h.getSession().pendingDispatch?.dispatchId, answer);
+  assert.equal(h.getSession().pendingDispatch?.interruptId, nextPending.interruptId);
+  await h.deliver({ outcome: 'interrupted', pendingInterrupt: null }, 'review-2');
+  assert.equal(h.events.at(-1)?.resumesDispatchId, answer);
+  assert.equal(h.events.at(-1)?.state, 'interrupted');
+  assert.equal(h.getSession().pendingDispatch, undefined);
 });

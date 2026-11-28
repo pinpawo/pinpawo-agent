@@ -223,6 +223,7 @@ export type ResidentPetCoordinatorOptions = {
   initialState?: PetDispatchSettledState;
   /** Read the authoritative active-thread checkpoint after an operation settles. */
   readSettledState: () => MaybePromise<PetDispatchState>;
+  hasActiveRun?: () => boolean;
   logError?: (message: string, error: unknown) => void;
 };
 

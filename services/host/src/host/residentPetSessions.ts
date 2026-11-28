@@ -33,8 +33,6 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
   const assertOpen = () => {
     if (context.isClosing()) throw new Error('Resident Pet sessions are closed.');
   };
-  // An answer is being resumed; the next one waits for its outcome.
-  let reviewing = false;
   const readSnapshot = async (sessionId: string, timelineLimit?: number) => {
     try {
       return await context.localHandlers.readSessionSnapshot(sessionId, timelineLimit);
@@ -74,18 +72,19 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
       if (!context.sessions.getSession(runtime.petId, sessionId)) {
         throw new PetSessionNotFoundError(sessionId);
       }
-      // One Pet runs one turn at a time, so a second answer would only fail
-      // once admitted. Claim synchronously, before any await, so two answers
-      // arriving together cannot both pass.
-      if (reviewing || context.activeRuns.read()) {
-        throw new PetSessionReviewRefusedError(
-          'session_busy',
-          'This Pet is running another turn. Wait for it to finish, then answer the current review.',
-        );
-      }
-      reviewing = true;
-      let handedOff = false;
-      try {
+      const { completion } = await context.coordinator.submitReviewAnswer(async () => {
+        const { peer, release } = context.openSessionPeer(sessionId);
+        try {
+          await context.localHandlers.resumeSessionInterrupt(peer, sessionId, {
+            type: 'interrupt.resume',
+            requestId: request.requestId,
+            interruptId: request.interruptId,
+            value: { decisions: request.value.decisions },
+          });
+        } finally {
+          release();
+        }
+      }, async () => {
         const snapshot = await readSnapshot(sessionId);
         if (snapshot.session.pendingInterrupt?.interruptId !== request.interruptId) {
           throw new PetSessionReviewRefusedError(
@@ -93,31 +92,13 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
             'This review is no longer current. Reload the session and answer what is pending now.',
           );
         }
-        const { peer, release } = context.openSessionPeer(sessionId);
-        // The Host owns the answer from here, independently of the caller.
-        const operation = context.coordinator.holdForConversation(
-          () => context.localHandlers.resumeSessionInterrupt(peer, sessionId, {
-            type: 'interrupt.resume',
-            requestId: request.requestId,
-            interruptId: request.interruptId,
-            value: { decisions: request.value.decisions },
-          }),
-        );
-        handedOff = true;
-        void operation.catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('[resident-pet] session review failed:', message);
-          // The caller already has its 202; the outcome belongs on the stream.
-          context.publishSessionEvent(sessionId, {
-            type: 'error', requestId: request.requestId, message,
-          });
-        }).finally(() => {
-          release();
-          reviewing = false;
-        });
-      } finally {
-        if (!handedOff) reviewing = false;
-      }
+      });
+      // The caller already has its 202; the outcome belongs on the stream.
+      void completion.catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[resident-pet] session review failed:', message);
+        context.publishSessionEvent(sessionId, { type: 'error', requestId: request.requestId, message });
+      });
     },
   };
 }

@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import {
   ResidentPetOperationCancelledError,
   PetDispatchRefusedError,
+  PetSessionReviewRefusedError,
   type PetDispatchQueueSnapshot,
   type PetDispatchQueueEntry,
   type PetDispatchTarget,
@@ -11,6 +13,8 @@ import {
   type QueuedOperation,
   type ResidentPetCoordinatorOptions,
 } from './contracts';
+
+type ReviewDispatchUpdate = Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'message'>;
 
 const STOP_WRITE_WAIT_MS = 30_000;
 
@@ -25,6 +29,7 @@ export class ResidentPetCoordinator {
   private readonly admittedDispatchIds = new Set<string>();
   /** Conversations currently holding the gate busy; they never enter a queue. */
   private conversations = 0;
+  private reviewAnswer: Promise<void> | undefined;
   private readonly conversationHolds = new Set<Promise<void>>();
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
   private readonly recent = new Map<string, PetDispatchExecution['recent'][number] & PetDispatchTarget>();
@@ -32,6 +37,7 @@ export class ResidentPetCoordinator {
   private activeLifecycle?: { dispatchId: string; state: 'running' | 'settled' };
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
+  private readonly hasActiveRun: NonNullable<ResidentPetCoordinatorOptions['hasActiveRun']>;
   private readonly logError: NonNullable<ResidentPetCoordinatorOptions['logError']>;
   private state: PetDispatchState;
   private active: Promise<void> | null = null;
@@ -47,6 +53,7 @@ export class ResidentPetCoordinator {
   constructor(options: ResidentPetCoordinatorOptions) {
     this.state = options.initialState ?? 'open';
     this.readSettledState = options.readSettledState;
+    this.hasActiveRun = options.hasActiveRun ?? (() => false);
     this.logError = options.logError ?? defaultLogError;
   }
 
@@ -147,6 +154,11 @@ export class ResidentPetCoordinator {
    * interrupt raised by the conversation leaves the gate `waiting`.
    */
   async holdForConversation<T>(operation: () => Promise<T>): Promise<T> {
+    while (this.reviewAnswer) await this.reviewAnswer;
+    return this.holdConversationGate(operation);
+  }
+
+  private async holdConversationGate<T>(operation: () => Promise<T>): Promise<T> {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
@@ -192,6 +204,58 @@ export class ResidentPetCoordinator {
         this.conversationHolds.delete(settled);
         release();
       }
+    }
+  }
+
+  /** Admit outside FIFO, with the same Pet gate held from validation through settlement. */
+  async submitReviewAnswer(
+    resume: () => Promise<void>,
+    validate?: () => Promise<void>,
+  ): Promise<{ completion: Promise<void> }> {
+    if (this.reviewAnswer || this.conversations > 0 || this.hasActiveRun()) {
+      throw new PetSessionReviewRefusedError(
+        'session_busy',
+        'This Pet is running another turn. Wait for it to finish, then answer the current review.',
+      );
+    }
+    let admit!: () => void;
+    let refuse!: (error: unknown) => void;
+    const admitted = new Promise<void>((resolve, reject) => { admit = resolve; refuse = reject; });
+    let release!: () => void;
+    this.reviewAnswer = new Promise<void>(resolve => { release = resolve; });
+    const completion = this.holdConversationGate(async () => {
+      if (validate) await validate();
+      if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+      admit();
+      await resume();
+    }).finally(() => {
+      this.reviewAnswer = undefined;
+      release();
+    });
+    // Before admission, return validation errors to the caller. Afterwards the
+    // caller owns completion (Studio returns 202; the TUI awaits the outcome).
+    void completion.catch(refuse);
+    await admitted;
+    return { completion };
+  }
+
+  async runReviewDispatch<T>(
+    source: Pick<PetDispatchLifecycleEvent, 'resumesDispatchId' | 'sessionId' | 'scope' | 'request' | 'requestId'>,
+    publish: (event: PetDispatchLifecycleEvent) => void,
+    resume: (dispatchId: string, report: (update: ReviewDispatchUpdate) => void) => Promise<T>,
+  ): Promise<T> {
+    const dispatchId = randomUUID();
+    let settled = false;
+    const report = (update: ReviewDispatchUpdate) => {
+      settled ||= update.state !== 'running' && update.state !== 'message';
+      publish({ ...source, ...update, dispatchId });
+    };
+    report({ state: 'running' });
+    try {
+      return await resume(dispatchId, report);
+    } catch (error) {
+      if (!settled) report({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
+      throw error;
     }
   }
 

@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
 import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import type { ServerTuiSessionService } from '../session/serverTuiSessions';
 import { readPetDispatchMessage, type PetDispatchLifecycleEvent } from './contracts';
+import type { ResidentPetCoordinator } from './residentPetCoordinator';
 import { withPetInvocationContext } from './petInvocationContext';
 import { withInvocationContext } from './invocationSystemContext';
 
@@ -17,86 +17,81 @@ function isAbortError(error: unknown): boolean {
 export function continueSuspendedDispatch(options: {
   petId: string;
   sessions: ServerTuiSessionService;
+  coordinator: ResidentPetCoordinator;
   publishLifecycle: (event: PetDispatchLifecycleEvent) => void;
   run: RunAgentTurn;
 }): RunAgentTurn {
-  const { petId, sessions, publishLifecycle, run } = options;
+  const { petId, sessions, coordinator, publishLifecycle, run } = options;
   return async (turn) => {
     if (turn.request.kind !== 'resume') return run(turn);
     const session = sessions.findSessionByThread(petId, turn.setup.input.threadId);
     const suspended = session?.pendingDispatch;
     if (!session || suspended?.interruptId !== turn.request.resume.interruptId) return run(turn);
 
-    const { dispatchId: resumesDispatchId, scope } = suspended;
-    const dispatchId = randomUUID();
-    let reportedEnd = false;
-    const requestId = turn.request.requestId;
-    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'message'>) => {
-      reportedEnd ||= event.state !== 'running' && event.state !== 'message';
-      publishLifecycle({
-        ...event, dispatchId, resumesDispatchId, request: suspended.request, requestId,
-        sessionId: session.id, ...(scope ? { scope } : {}),
-      });
-    };
-    const suspend = (pendingInterrupt: PendingInterruptProjection) => {
-      sessions.setPendingDispatch(session.id, { ...suspended, dispatchId, interruptId: pendingInterrupt.interruptId });
-      report({ state: 'waiting', pendingInterrupt });
-    };
-    const settle = (event: Parameters<typeof report>[0]) => {
-      sessions.setPendingDispatch(session.id, null);
-      report(event);
-    };
-    // A stop or failure can leave a review pending, the answered one included.
-    // The dispatch is then still waiting on it rather than finished.
-    const readPending = async () => {
-      const pending = await turn.graphService.settleAbortedRun(turn.setup);
-      return pending ? projectPendingInterrupt(pending) : null;
-    };
+    return coordinator.runReviewDispatch(
+      {
+        resumesDispatchId: suspended.dispatchId, scope: suspended.scope,
+        request: suspended.request, requestId: turn.request.requestId, sessionId: session.id,
+      },
+      publishLifecycle,
+      async (dispatchId, report) => {
+        const remember = (pending: PendingInterruptProjection | null) => {
+          if (!pending) sessions.setPendingDispatch(session.id, null);
+          else if (pending.interruptId !== suspended.interruptId) {
+            sessions.setPendingDispatch(session.id, { ...suspended, dispatchId, interruptId: pending.interruptId });
+          }
+        };
+        const suspend = (pending: PendingInterruptProjection) => {
+          sessions.setPendingDispatch(session.id, { ...suspended, dispatchId, interruptId: pending.interruptId });
+          report({ state: 'waiting', pendingInterrupt: pending });
+        };
+        const readPending = async () => {
+          const pending = await turn.graphService.settleAbortedRun(turn.setup);
+          return pending ? projectPendingInterrupt(pending) : null;
+        };
 
-    let pendingInterrupt: PendingInterruptProjection | undefined;
-    report({ state: 'running' });
-    try {
-      let result: AgentSessionTurnResult;
-      try {
-        result = await withPetInvocationContext(
-          { petId, dispatchId, sessionId: session.id, ...(scope ? { scope } : {}) },
-          () => run({
-            ...turn,
-            setup: withInvocationContext(turn.setup, suspended),
-            emitEvent: (event) => {
-              if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
-              const message = readPetDispatchMessage(event);
-              if (message) report({ state: 'message', message });
-              turn.emitEvent(event);
-            },
-          }),
-        );
-      } catch (error) {
-        // An unreadable outcome is not "nothing pending": keep the suspension so
-        // a retry of the same review still continues this dispatch.
-        const pending = await readPending();
-        if (pending) suspend(pending);
-        else if (turn.setup.input.signal?.aborted || isAbortError(error)) settle({ state: 'interrupted' });
-        else settle({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
-        throw error;
-      }
-      if (result.status === 'completed') {
-        settle({ state: 'completed', reply: result.reply });
-      } else if (result.status === 'waiting') {
-        const read = pendingInterrupt ? null : (await turn.graphService.readThreadState(turn.setup)).pendingInterrupt;
-        const pending = pendingInterrupt ?? (read ? projectPendingInterrupt(read) : null);
-        if (!pending) throw new Error('A waiting dispatch has no pending interrupt.');
-        suspend(pending);
-      } else {
-        const pending = await readPending();
-        if (pending) suspend(pending);
-        else settle({ state: 'interrupted' });
-      }
-      return result;
-    } finally {
-      // Even if checkpoint settlement failed, this answer is no longer running.
-      // Leave the existing pending interrupt available for the Session to retry.
-      if (!reportedEnd) report({ state: 'failed' });
-    }
+        let pendingInterrupt: PendingInterruptProjection | undefined;
+        let result: AgentSessionTurnResult;
+        try {
+          result = await withPetInvocationContext(
+            { petId, dispatchId, sessionId: session.id, ...(suspended.scope ? { scope: suspended.scope } : {}) },
+            () => run({
+              ...turn,
+              setup: withInvocationContext(turn.setup, suspended),
+              emitEvent: (event) => {
+                if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
+                const message = readPetDispatchMessage(event);
+                if (message) report({ state: 'message', message });
+                turn.emitEvent(event);
+              },
+            }),
+          );
+        } catch (error) {
+          // Checkpoint recovery does not turn a failed answer into a waiting answer.
+          const pending = await readPending();
+          if (turn.setup.input.signal?.aborted || isAbortError(error)) {
+            if (pending) suspend(pending);
+            else { remember(null); report({ state: 'interrupted' }); }
+          } else {
+            remember(pending);
+          }
+          throw error;
+        }
+        if (result.status === 'completed') {
+          remember(null);
+          report({ state: 'completed', reply: result.reply });
+        } else if (result.status === 'waiting') {
+          const read = pendingInterrupt ? null : (await turn.graphService.readThreadState(turn.setup)).pendingInterrupt;
+          const pending = pendingInterrupt ?? (read ? projectPendingInterrupt(read) : null);
+          if (!pending) throw new Error('A waiting dispatch has no pending interrupt.');
+          suspend(pending);
+        } else {
+          const pending = await readPending();
+          if (pending) suspend(pending);
+          else { remember(null); report({ state: 'interrupted' }); }
+        }
+        return result;
+      },
+    );
   };
 }

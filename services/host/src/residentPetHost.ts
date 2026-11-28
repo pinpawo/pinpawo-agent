@@ -119,7 +119,19 @@ function admitConversationHandlers(
     // starts the run — the gate hold also covers the queue wait before it,
     // which is not yet a run.
     onChatRequest: admit(handlers.onChatRequest),
-    onInterruptResume: admit(handlers.onInterruptResume),
+    onInterruptResume: async (peer, message) => {
+      try {
+        const { completion } = await coordinator.submitReviewAnswer(
+          async () => { await handlers.onInterruptResume(peer, message); },
+        );
+        await completion;
+      } catch (error) {
+        peer.send(buildAgentEventEnvelope({
+          type: 'error', requestId: message.requestId,
+          message: error instanceof Error ? error.message : 'Review answer failed.',
+        }));
+      }
+    },
     // These controls must reach the active conversation instead of waiting
     // behind it in the same queue.
     onRunInterrupt: handlers.onRunInterrupt,
@@ -199,10 +211,10 @@ export async function createResidentPetRuntime(
     if (state.pendingInterrupt) return 'waiting';
     return 'open';
   };
-  const coordinator = new ResidentPetCoordinator({ readSettledState });
+  const activeRuns = new ActiveRunRegister();
+  const coordinator = new ResidentPetCoordinator({ readSettledState, hasActiveRun: () => activeRuns.read() !== null });
   const interactivePeer: { current: AgentSessionPeer | null } = { current: null };
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
-  const activeRuns = new ActiveRunRegister();
   const messageListeners = new Set<(message: AgentServerMessage) => void>();
   const sessionListeners = new Map<string, Set<(message: AgentServerMessage) => void>>();
   const sessionPeers = new WeakMap<AgentSessionPeer, string>();
@@ -323,7 +335,7 @@ export async function createResidentPetRuntime(
     }
   });
   const runConversationTurn = continueSuspendedDispatch({
-    petId: deps.petId, sessions, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
+    petId: deps.petId, sessions, coordinator, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
   });
   const localHandlers: ReturnType<typeof createChatHostHandlers> = createChatHostHandlers(runtimeDeps, {
     persistToolAuthorizationMode: options.persistToolAuthorizationMode,

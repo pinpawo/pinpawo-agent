@@ -8,6 +8,7 @@ import { ensureActiveTuiSession, loadTuiSessionState, saveTuiSessionState, setTu
 import type { TuiSessionPendingDispatch } from '../session/tuiSessionRegistry';
 import type { PetDispatchLifecycleEvent } from './contracts';
 import { continueSuspendedDispatch } from './dispatchContinuation';
+import { ResidentPetCoordinator } from './residentPetCoordinator';
 import { readPetInvocationContext } from './petInvocationContext';
 
 const review = (interruptId: string) => ({
@@ -45,6 +46,7 @@ function harness(pendingAfterStop: string | null = null) {
     emitEvent: () => {},
   }) as unknown as AgentSessionTurnOptions;
   const continueWith = (result: () => Promise<AgentSessionTurnResult>, emitted?: string) => continueSuspendedDispatch({
+    coordinator: new ResidentPetCoordinator({ readSettledState: () => 'open' }),
     petId: 'pet', sessions: sessions as never, publishLifecycle: (event) => events.push(event),
     run: async (options) => {
       contexts.push(readPetInvocationContext());
@@ -115,6 +117,17 @@ test('a failed continuation reports the review answer failed and rethrows', asyn
   assert.equal(h.session.pendingDispatch, undefined);
 });
 
+test('a failed review answer does not take ownership of the same pending interrupt', async () => {
+  const h = harness('review-1');
+  await assert.rejects(h.continueWith(async () => { throw new Error('model down'); })(h.turn('review-1')), /model down/);
+  assert.deepEqual(h.events.map(({ state }) => state), ['running', 'failed']);
+  assert.equal(h.session.pendingDispatch?.interruptId, 'review-1');
+  assert.equal(h.session.pendingDispatch?.dispatchId, 'dispatch-1');
+  await h.continueWith(async () => ({ status: 'completed', reply: 'retry succeeded' }))(h.turn('review-1'));
+  assert.equal(h.events.at(-1)?.resumesDispatchId, 'dispatch-1');
+  assert.notEqual(h.events.at(-1)?.dispatchId, h.events[0]?.dispatchId);
+});
+
 test('a stop thrown as AbortError with nothing pending interrupts the dispatch', async () => {
   const h = harness();
   const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -144,6 +157,7 @@ test('the continued run reply reports under the review answer identity', async (
   const h = harness();
   const settled = { type: 'message.completed', requestId: 'req-2', messageId: 'm1', role: 'assistant', text: 'done' } as const;
   await continueSuspendedDispatch({
+    coordinator: new ResidentPetCoordinator({ readSettledState: () => 'open' }),
     petId: 'pet', sessions: { findSessionByThread: () => h.session, setPendingDispatch: () => {} } as never,
     publishLifecycle: (event) => h.events.push(event),
     run: async (options) => { options.emitEvent(settled); return { status: 'completed', reply: 'done' }; },
@@ -178,6 +192,7 @@ test('resuming a persisted dispatch after restart restores its original prompt a
   let observed: unknown;
   let observedHint: unknown;
   const resume = continueSuspendedDispatch({
+    coordinator: new ResidentPetCoordinator({ readSettledState: () => 'open' }),
     petId: 'pet',
     sessions: {
       findSessionByThread: () => session,

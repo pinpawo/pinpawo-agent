@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { buildReviewSpec } from '@pinpawo/pet-agent';
+import type { AgentServerMessage } from '@pinpawo/agent-session';
 import type { AgentSessionTurnOptions, AgentSessionTurnResult } from '../agent/chatSessionAdapter';
 import { createResidentPetRuntime, type CreateResidentPetRuntimeOptions } from '../residentPetHost';
 import { buildHostRuntimeConfig } from '../config/runtimeConfig';
@@ -435,6 +436,57 @@ test('an immediate interruption that races with native review preserves approval
   } finally { resumeBoundary.resolve(); await h.close(); }
 });
 
+
+test('Studio and TUI share one Review admission while ordinary work remains queued', async () => {
+  const release = deferred();
+  let resumes = 0;
+  let h!: Awaited<ReturnType<typeof fixture>>;
+  h = await fixture(async turn => {
+    if (turn.request.kind === 'resume') {
+      resumes++;
+      await release.promise;
+      h.reviews.delete(turn.setup.input.threadId!);
+      return reply(turn, 'review applied');
+    }
+    if (turn.request.message === 'review this') {
+      h.reviews.set(turn.setup.input.threadId!, buildReviewSpec({
+        id: 'approval', view: { kind: 'plain', body: 'Approve?' },
+        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+      }));
+      return { status: 'waiting' };
+    }
+    return reply(turn, 'ordinary work');
+  });
+  const messages: AgentServerMessage[] = [];
+  const peer = { isConnected: () => true, send: (message: AgentServerMessage) => { messages.push(message); return true; } };
+  const answer = { interruptId: 'review-interrupt',
+    value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } };
+  try {
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'original', request: 'review this' });
+    await waitFor(() => h.events.some(event => event.dispatchId === 'original' && event.state === 'waiting') &&
+      h.context.activeRuns.read() === null);
+    await h.interaction.connect(peer);
+    await h.interaction.handle(peer, { type: 'session.resume', requestId: 'select', sessionId });
+    assert.equal(h.context.sessions.getActiveSessionId('worker'), sessionId);
+    await h.resident.dispatch.dispatch({ ...target, dispatchId: 'queued', request: 'ordinary work' });
+    const tui = h.interaction.handle(peer, { ...answer, type: 'interrupt.resume', requestId: 'tui-answer' });
+    await waitFor(() => resumes === 1 || messages.some(message => message.type === 'event' && message.event.type === 'error' && message.event.requestId === 'tui-answer'));
+    assert.equal(resumes, 1, JSON.stringify(messages));
+
+    await assert.rejects(h.sessions.review(sessionId, { ...answer, requestId: 'studio-duplicate' }), { code: 'session_busy' });
+    await h.interaction.handle(peer, { ...answer, type: 'interrupt.resume', requestId: 'tui-duplicate' });
+    assert.ok(messages.some(message => message.type === 'event' && message.event.type === 'error' && message.event.requestId === 'tui-duplicate'));
+    const snapshot = h.resident.dispatch.readExecution({ sessionId, scope });
+    assert.ok(snapshot.active?.resumesDispatchId === 'original');
+    assert.deepEqual(snapshot.queued.map(entry => entry.dispatchId), ['queued']);
+
+    release.resolve();
+    await tui;
+    await waitFor(() => h.events.some(event => event.dispatchId === 'queued' && event.state === 'completed'));
+    assert.equal(resumes, 1);
+    assert.deepEqual(h.events.filter(event => event.resumesDispatchId === 'original').map(event => event.state), ['running', 'message', 'completed']);
+  } finally { release.resolve(); await h.close(); }
+});
 
 test('queued dispatches retain separate request and hint snapshots across scopes and an unscoped next run', async () => {
   const started = deferred(), release = deferred();

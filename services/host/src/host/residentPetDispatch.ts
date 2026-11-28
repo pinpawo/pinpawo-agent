@@ -80,19 +80,14 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         : sessions.ensureDispatchSession(petId, session.id, session.create === true)
       : undefined;
     if (replacement && !target) throw new PetDispatchRefusedError('The target Session does not exist.');
-    let pendingInterrupt: PendingInterruptProjection | undefined;
     const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
       ...event, ...(origin ? { origin: copyPetInvocationScope(origin) } : {}), ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
-      ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
       ...(target ? { sessionId: target.id } : {}),
     });
     const readTargetSetup = async () => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(petId), target!.id);
-    const readSetup = async () => target
-      ? readTargetSetup()
-      : sessions.buildChatSetup(runtimeDeps.get(), await loadContext(petId));
-    // Whoever resumes this review continues the dispatch; see continueSuspendedDispatch.
-    const suspend = (setup: AgentChannelSetup, pending: PendingInterruptProjection) => {
-      const session = target ?? sessions.findSessionByThread(petId, setup.input.threadId);
+    // Whoever resumes this review continues the dispatch; see attributeReviewDispatch.
+    const suspend = (threadId: string | undefined, pending: PendingInterruptProjection) => {
+      const session = target ?? sessions.findSessionByThread(petId, threadId);
       if (!session) throw new Error('A waiting dispatch has no session to resume from.');
       sessions.setPendingDispatch(session.id, {
         interruptId: pending.interruptId, dispatchId, request, ...(scope ? { scope } : {}),
@@ -128,8 +123,14 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         }
         // The run belongs to its target; a legacy dispatch runs in the active session.
         const opened = target ? openSessionPeer(target.id) : null;
-        let turnSetup: AgentChannelSetup | null = null;
-        let reply = '';
+        const execution: { setup?: AgentChannelSetup } = {};
+        const reportFailure = (failure: unknown) => publishLifecycle({
+          dispatchId,
+          request,
+          requestId,
+          state: 'failed',
+          error: failure instanceof Error ? failure.message : 'internal error',
+        });
         publishLifecycle({ dispatchId, request, requestId, state: 'running' });
         try {
           if (stopRequested) {
@@ -138,81 +139,67 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             return;
           }
           executingRequestId = requestId;
-          const { outcome, error, pendingInterrupt: settledInterrupt } = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
+          const result = await localHandlers.runHostTurn(opened?.peer ?? hostPeer, {
             requestId,
             message: request,
             ...(artifactReferences.length ? { artifactReferences } : {}),
             runAgentTurn: (turn) => withPetInvocationContext(
               { petId, dispatchId, scope, sessionId: target?.id },
               async () => {
-                turnSetup = turn.setup;
-                const result = await runAgentTurn({
+                execution.setup = turn.setup;
+                return runAgentTurn({
                   ...turn,
                   setup: withInvocationContext(turn.setup, invocationContext),
                   emitEvent: (event) => {
-                    if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
                     // Dispatch observers follow the conversation whichever session is on screen.
                     const message = readPetDispatchMessage(event);
                     if (message) publishLifecycle({ dispatchId, request, requestId, state: 'message', message });
                     turn.emitEvent(event);
                   },
                 });
-                if (result.status === 'completed') reply = result.reply;
-                return result;
               },
             ),
           }, target?.id);
           executionEnded = true;
+          const { outcome, error, pendingInterrupt, reply } = result;
           if (outcome === 'completed') {
             publishLifecycle({ dispatchId, request, requestId, state: 'completed', reply });
             return;
           }
           if (outcome === 'waiting') {
-            // A cancellation that settled into a review hands that review back,
-            // so ownership is saved from what the settlement already knew.
-            if (settledInterrupt) pendingInterrupt = settledInterrupt;
-            const setup = turnSetup ?? await readSetup();
-            if (!pendingInterrupt) {
-              const pending = (await graphService.readThreadState(setup)).pendingInterrupt;
-              if (pending) pendingInterrupt = projectPendingInterrupt(pending);
-            }
-            if (!pendingInterrupt) throw new Error('A waiting dispatch has no pending interrupt.');
-            suspend(setup, pendingInterrupt);
-            publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
+            // The Session's result already names the review that holds this turn.
+            suspend(execution.setup?.input.threadId, pendingInterrupt);
+            publishLifecycle({ dispatchId, request, requestId, state: 'waiting', pendingInterrupt });
             return;
           }
           if (outcome === 'interrupted') {
             publishLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
             return;
           }
+          if (stopRequested && result.settlementFailed && execution.setup) {
+            // Retry an unconfirmed graph read, not an already-settled turn
+            // whose Dispatch metadata could not be saved.
+            const setup = execution.setup;
+            confirmFailedStop = async () => {
+              const pending = await graphService.settleAbortedRun(setup);
+              confirmFailedStop = undefined;
+              if (pending) {
+                try {
+                  const pendingInterrupt = projectPendingInterrupt(pending);
+                  suspend(setup.input.threadId, pendingInterrupt);
+                  publishLifecycle({ dispatchId, request, requestId, state: 'waiting', pendingInterrupt });
+                } catch (failure) {
+                  reportFailure(failure);
+                }
+              } else {
+                reportFailure(error);
+              }
+            };
+          }
           throw error ?? new Error('internal error');
         } catch (failure) {
           executionEnded = true;
-          const reportFailure = () => publishLifecycle({
-            dispatchId,
-            request,
-            requestId,
-            state: 'failed',
-            error: failure instanceof Error ? failure.message : 'internal error',
-          });
-          if (stopRequested && turnSetup) {
-            // The Host could not settle this stopped turn. Retry its own
-            // checkpoint, never the TUI's currently selected Session.
-            const setup = turnSetup;
-            confirmFailedStop = async () => {
-              const pending = await graphService.settleAbortedRun(setup);
-              if (pending) {
-                pendingInterrupt = projectPendingInterrupt(pending);
-                suspend(setup, pendingInterrupt);
-                publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
-              } else {
-                reportFailure();
-              }
-              confirmFailedStop = undefined;
-            };
-          } else {
-            reportFailure();
-          }
+          if (!confirmFailedStop) reportFailure(failure);
           throw failure;
         } finally {
           opened?.release();

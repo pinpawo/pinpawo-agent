@@ -88,7 +88,7 @@ for (const finalDecision of ['approve', 'cancel'] as const) {
       emitEvent: event => events.push(event), emitToolEvent: () => {},
     });
 
-    assert.deepEqual(await consume({ kind: 'user_message', requestId: 'initial', message: 'Inspect.' }), { status: 'waiting' });
+    assert.equal((await consume({ kind: 'user_message', requestId: 'initial', message: 'Inspect.' })).status, 'waiting');
     const originalPending = (await new HostGraphService().readThreadState(makeSetup())).pendingInterrupt;
     assert.ok(originalPending);
     const reviewId = originalPending.payload.reviews[0]?.id;
@@ -105,9 +105,9 @@ for (const finalDecision of ['approve', 'cancel'] as const) {
     ];
     for (const [index, value] of invalidResponses.entries()) {
       const eventStart = events.length;
-      assert.deepEqual(await consume({ kind: 'resume', requestId: `invalid-${index}`, resume: {
+      assert.equal((await consume({ kind: 'resume', requestId: `invalid-${index}`, resume: {
         interruptId: originalPending.interruptId, value,
-      } }), { status: 'waiting' });
+      } })).status, 'waiting');
       const pending = (await new HostGraphService().readThreadState(makeSetup())).pendingInterrupt;
       assert.equal(pending?.interruptId, originalPending.interruptId);
       assert.equal(pending?.payload.reviews[0]?.id, reviewId);
@@ -132,10 +132,10 @@ for (const finalDecision of ['approve', 'cancel'] as const) {
 
     // A structurally valid response still passes through the Runtime's
     // option-specific semantic validation and keeps the action parked.
-    assert.deepEqual(await consume({ kind: 'resume', requestId: 'missing-text-input', resume: {
+    assert.equal((await consume({ kind: 'resume', requestId: 'missing-text-input', resume: {
       interruptId: originalPending.interruptId,
       value: { decisions: [{ reviewId, selectedOptionId: 'respond' }] },
-    } }), { status: 'waiting' });
+    } })).status, 'waiting');
     assert.equal(policyCalls, 1);
     assert.equal(modelCalls, 1);
     assert.equal(toolRuns, 0);

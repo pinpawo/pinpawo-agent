@@ -1,7 +1,7 @@
 import { readPetInvocationContext, withoutPetInvocationContext } from './host/petInvocationContext';
 import type { PetDispatchTarget } from './host/contracts';
 import { withPetExecutionIdentity } from './host/petCredentials';
-import { continueSuspendedDispatch } from './host/dispatchContinuation';
+import { attributeReviewDispatch } from './host/dispatchContinuation';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
 import { runAgentSessionTurn } from './agent/chatSessionAdapter';
@@ -122,7 +122,7 @@ function admitConversationHandlers(
     onInterruptResume: async (peer, message) => {
       try {
         const { completion } = await coordinator.submitReviewAnswer(
-          async () => { await handlers.onInterruptResume(peer, message); },
+          async (admit) => { admit(); await handlers.onInterruptResume(peer, message); },
         );
         await completion;
       } catch (error) {
@@ -334,7 +334,7 @@ export async function createResidentPetRuntime(
       if (scopedTurn === current) scopedTurn = undefined;
     }
   });
-  const runConversationTurn = continueSuspendedDispatch({
+  const runReviewTurn = attributeReviewDispatch({
     petId: deps.petId, sessions, coordinator, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
   });
   const localHandlers: ReturnType<typeof createChatHostHandlers> = createChatHostHandlers(runtimeDeps, {
@@ -342,7 +342,8 @@ export async function createResidentPetRuntime(
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    runAgentTurn: (input) => withoutPetInvocationContext(() => runConversationTurn(input)),
+    runAgentTurn: (input) => withoutPetInvocationContext(() => runAgentTurn(input)),
+    runReviewTurn,
     // A session-bound origin publishes to its session; any other origin is a
     // turn of the active session.
     publishRuntimeEvent: (origin, event) => {

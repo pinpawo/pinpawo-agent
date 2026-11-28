@@ -240,6 +240,7 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   };
   let capturedThreadId: string | undefined;
   let readCount = 0;
+  let allowMessageRead = true;
   const checkpointer = {
     deleteThread: async () => {},
   } as unknown as TuiSessionCheckpointer;
@@ -253,9 +254,12 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
         readCount += 1;
         capturedThreadId = setup.input.threadId;
         return {
-          messages: [new HumanMessage('checkpoint prompt')],
+          get messages() {
+            assert.ok(allowMessageRead, 'a review-only read must not project messages');
+            return [new HumanMessage('checkpoint prompt')];
+          },
           pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } },
-        acceptsResume: true,
+          acceptsResume: true,
         };
       },
     } as never,
@@ -269,11 +273,12 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   });
 
   const session = service.getActiveSession('pet-a');
-  const checkpoint = await service.readActiveCheckpointPoint({
+  const deps = {
     runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-session-test'),
     petId: 'pet-a',
     ...createTestModelServerDeps(),
-  } as never);
+  } as ServerDeps;
+  const checkpoint = await service.readActiveCheckpointPoint(deps);
 
   assert.deepEqual(checkpoint.pendingInterrupt, {
     sessionId: session.id,
@@ -284,6 +289,13 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.equal(checkpoint.sessionTokenUsage, null);
   assert.equal(capturedThreadId, session.threadId);
   assert.equal(readCount, 1);
+
+  allowMessageRead = false;
+  const other = service.createNewSession('pet-a');
+  assert.deepEqual(await service.readSessionPendingInterrupt(deps, session), checkpoint.pendingInterrupt);
+  assert.equal(capturedThreadId, session.threadId);
+  assert.equal(service.getActiveSessionId('pet-a'), other.id);
+  assert.equal(readCount, 2);
 });
 
 test('reserved dispatch sessions retry failed persistence without changing the active TUI session', () => {

@@ -72,7 +72,7 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
       if (!context.sessions.getSession(runtime.petId, sessionId)) {
         throw new PetSessionNotFoundError(sessionId);
       }
-      const { completion } = await context.coordinator.submitReviewAnswer(async () => {
+      const { completion } = await context.coordinator.submitReviewAnswer(async (admit) => {
         const { peer, release } = context.openSessionPeer(sessionId);
         try {
           await context.localHandlers.resumeSessionInterrupt(peer, sessionId, {
@@ -80,17 +80,17 @@ export function createResidentPetSessions(runtime: ResidentPetRuntime): PetSessi
             requestId: request.requestId,
             interruptId: request.interruptId,
             value: { decisions: request.value.decisions },
+          }, (current) => {
+            if (!current) {
+              throw new PetSessionReviewRefusedError(
+                'review_closed',
+                'This review is no longer current. Reload the session and answer what is pending now.',
+              );
+            }
+            admit();
           });
         } finally {
           release();
-        }
-      }, async () => {
-        const snapshot = await readSnapshot(sessionId);
-        if (snapshot.session.pendingInterrupt?.interruptId !== request.interruptId) {
-          throw new PetSessionReviewRefusedError(
-            'review_closed',
-            'This review is no longer current. Reload the session and answer what is pending now.',
-          );
         }
       });
       // The caller already has its 202; the outcome belongs on the stream.

@@ -13,6 +13,7 @@ import { buildOrchestratorRunInput, buildReviewSpec, compileAgentRegistry, creat
   defineInstructionDocument, readPendingInterrupt, type AgentModels } from '@pinpawo/pet-agent';
 import { withScriptedDelegation } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import { createChannelPlugin } from '@pinpawo-plugin/channel';
+import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 
 import { buildHostRuntimeConfig, createResidentPetHost, FileSaver } from 'pinpawo/host-runtime';
 import { createTestModelProfiles } from '../../../services/host/src/testing/modelProfiles';
@@ -95,10 +96,12 @@ for (const decision of ['reject', 'cancel'] as const) {
       graphService: graphService as never,
     });
     const channel = createChannelPlugin({ httpRoute: false });
-    const studio = await createStudioWithPets({ studioId: 'review-stop', plugins: [channel],
+    const authToken = 'test-channel-review-token';
+    const http = decision === 'reject' ? createStudioHttpPlugin({ authToken, port: 0 }) : undefined;
+    const studio = await createStudioWithPets({ studioId: 'review-stop', plugins: http ? [channel, http] : [channel],
       onPreparedContextResolver: contextBridge.onPreparedContextResolver,
       storage: { kind: 'sqlite', path: join(root, 'channel.sqlite') },
-      pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
+      pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch, sessions: host.sessions }],
     });
     const outputs = async (id: string) => (await channel.service.readContext(me, id)).messages.filter(message => message.author.kind === 'pet');
     const events: Array<{ type: string; payload?: any }> = [];
@@ -126,15 +129,48 @@ for (const decision of ['reject', 'cancel'] as const) {
       await ask('Use staging.', question.messageId);
       await waitFor(() => host.resident.dispatch.getQueueSnapshot().queuedDispatches === 2);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 1, 0, 0]);
-      await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });
+      if (!http) {
+        await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: binding.sessionId });
+      }
       const snapshot = await host.interaction.snapshot();
       if (snapshot.type !== 'session.snapshot.result') throw Error('snapshot');
-      const pending = snapshot.snapshot.session.pendingInterrupt;
+      const activeSessionId = snapshot.snapshot.session.sessionId;
+      if (http) assert.notEqual(activeSessionId, binding.sessionId);
+      const pending = (await host.sessions.snapshot(binding.sessionId)).session.pendingInterrupt;
       assert.ok(pending);
-      await host.interaction.request({ type: 'interrupt.resume', requestId: 'decline', interruptId: pending.interruptId,
-        value: decision === 'cancel' ? { action: 'cancel' }
-          : { decisions: [{ interactionId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId: 'reject' }] },
-      });
+      if (http) {
+        const address = http.address();
+        assert.ok(address);
+        const received = new Map<string, string | undefined>();
+        const detach = await host.sessions.observe(binding.sessionId, message => {
+          if (message.type === 'event' && message.event.type === 'error') {
+            received.set(message.event.requestId, message.event.code);
+          }
+        });
+        try {
+          const submit = (requestId: string, selectedOptionId: string, interruptId = pending.interruptId) =>
+            fetch(`http://127.0.0.1:${address.port}/pet-sessions/review`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ petId: 'one', sessionId: binding.sessionId, requestId, interruptId,
+                value: { decisions: [{ interactionId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId }] },
+              }),
+            });
+          assert.equal((await submit('closed', 'reject', 'closed')).status, 409);
+          assert.equal((await submit('invalid-option', 'no-such-option')).status, 202);
+          await waitFor(() => received.has('invalid-option') && host.resident.dispatch.getQueueSnapshot().queuedConversations === 0);
+          assert.equal(received.get('invalid-option'), 'interrupt_response_invalid');
+          assert.equal((await host.sessions.snapshot(binding.sessionId)).session.pendingInterrupt?.interruptId, pending.interruptId);
+          assert.equal((await outputs(id)).length, 1);
+          const accepted = await submit('decline', 'reject');
+          assert.equal(accepted.status, 202);
+          assert.deepEqual(await accepted.json(), { requestId: 'decline' });
+        } finally { detach(); }
+      } else {
+        await host.interaction.request({ type: 'interrupt.resume', requestId: 'decline', interruptId: pending.interruptId,
+          value: { action: 'cancel' },
+        });
+      }
       await waitFor(async () => (await outputs(id)).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [4, 3, 0, 0]);
       assert.equal((await channel.service.getSession(id, 'one'))?.sessionId, binding.sessionId);
@@ -149,7 +185,8 @@ for (const decision of ['reject', 'cancel'] as const) {
       assert.ok((await outputs(id))[3]!.body.includes('Use staging.'));
       const completed = await host.interaction.snapshot();
       if (completed.type !== 'session.snapshot.result') throw Error('snapshot');
-      assert.equal(completed.snapshot.session.pendingInterrupt, null);
+      assert.equal(completed.snapshot.session.sessionId, activeSessionId);
+      assert.equal((await host.sessions.snapshot(binding.sessionId)).session.pendingInterrupt, null);
     } finally { await host.close(); await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
   });
 }

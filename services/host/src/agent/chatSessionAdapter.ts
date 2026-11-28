@@ -55,7 +55,7 @@ const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮
 export type AgentSessionTurnResult =
   | { status: 'completed'; reply: string }
   /** The run is waiting on a pending interrupt of any kind. */
-  | { status: 'waiting' }
+  | { status: 'waiting'; pendingInterrupt: PendingInterrupt }
   | { status: 'interrupted' };
 
 export type AgentSessionTurnRequest =
@@ -104,18 +104,19 @@ async function waitForGraphRunSettlement(run: HostGraphEventStream | null) {
  * payload onto the wire and carries the id; it does not decide what the
  * interface should do with either.
  */
-function emitInterruptRequested(params: {
+function waitOnInterrupt(params: {
   pendingInterrupt: PendingInterrupt;
   requestId: string;
   usage?: TokenUsageSnapshot | null;
   emitEvent: (event: AgentRuntimeEvent) => void;
-}) {
+}): AgentSessionTurnResult {
   params.emitEvent({
     type: 'interrupt.requested',
     requestId: params.requestId,
     pendingInterrupt: projectPendingInterrupt(params.pendingInterrupt),
     ...(params.usage ? { usage: params.usage } : {}),
   });
+  return { status: 'waiting', pendingInterrupt: params.pendingInterrupt };
 }
 
 function readCustomEventData(data: unknown): Record<string, unknown> | null {
@@ -307,12 +308,11 @@ export async function runAgentSessionTurn(
     if (message.trim() || attachments.length > 0 || request.artifactReferences?.length) {
       emitEvent(agentSystemNoticeEvent(requestId, { code: 'review_pending_input_not_sent' }));
     }
-    emitInterruptRequested({
+    return waitOnInterrupt({
       pendingInterrupt: initialThreadState.pendingInterrupt,
       requestId,
       emitEvent,
     });
-    return { status: 'waiting' };
   }
 
   if (isResumeRequest && !initialThreadState.acceptsResume) {
@@ -325,12 +325,11 @@ export async function runAgentSessionTurn(
     // LangGraph records an addressed resume map before the interrupt consumes
     // and validates it. Reject malformed input before constructing that map;
     // the Runtime owns its schema and the existing invalid-decision view.
-    emitInterruptRequested({
+    return waitOnInterrupt({
       pendingInterrupt: withInvalidReviewResponseNotice(initialThreadState.pendingInterrupt),
       requestId,
       emitEvent,
     });
-    return { status: 'waiting' };
   }
 
   // The reply stays structured all the way down; the LangGraph `Command` is
@@ -459,7 +458,7 @@ export async function runAgentSessionTurn(
             tasks: [{ interrupts: chatEvent.interrupts }],
           });
           if (pendingInterrupt) {
-            emitInterruptRequested({
+            return waitOnInterrupt({
               pendingInterrupt,
               requestId,
               usage: latestSessionUsage ?? readRunTokenUsage({
@@ -469,7 +468,6 @@ export async function runAgentSessionTurn(
               }),
               emitEvent,
             });
-            return { status: 'waiting' };
           }
           break;
         }
@@ -533,13 +531,12 @@ export async function runAgentSessionTurn(
   });
   if (finalThreadState.pendingInterrupt) {
     // A native review remains pending until its explicit approval response.
-    emitInterruptRequested({
+    return waitOnInterrupt({
       pendingInterrupt: finalThreadState.pendingInterrupt,
       requestId,
       usage: finalUsage,
       emitEvent,
     });
-    return { status: 'waiting' };
   }
 
   // Only new public AI text can become a conversation reply. Tool results,

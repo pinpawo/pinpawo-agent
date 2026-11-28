@@ -22,7 +22,7 @@ import { sendAgentSessionPeerEvent, type ServerPeer } from './wire/peer';
 import type { AgentSessionPeerHandlers } from './wire/messageDispatcher';
 import { SessionAdmission } from './session/sessionAdmission';
 import { SessionCommandQueue } from './session/sessionCommandQueue';
-import { ServerChatHandler, type HostTurnOutcome } from './agent/serverChatHandler';
+import { ServerChatHandler, type HostTurnOutcome, type RunReviewTurn } from './agent/serverChatHandler';
 import type {
   AgentSessionTurnOptions,
   AgentSessionTurnResult,
@@ -57,6 +57,7 @@ export type ServerHandlers = {
     peer: ServerPeer,
     sessionId: string,
     message: InterruptResumeMessage,
+    onReceipt: (current: boolean) => void,
   ) => Promise<void>;
   /**
    * Run one Host-initiated turn (a resident dispatch) through the chat
@@ -90,6 +91,7 @@ export type ServerHandlerOptions = {
   runAgentTurn?: (
     options: AgentSessionTurnOptions,
   ) => Promise<AgentSessionTurnResult>;
+  runReviewTurn?: RunReviewTurn;
   /** Publish one run event to every observer of the resident Agent Session. */
   publishRuntimeEvent?: (origin: ServerPeer, event: AgentRuntimeEvent) => void;
   /** Optional Host-owned run control used by resident headless inputs. */
@@ -161,6 +163,7 @@ export function createChatHostHandlers(
     ...(options.interruptHostRun ? { interruptHostRun: options.interruptHostRun } : {}),
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runAgentTurn ? { runAgentTurn: options.runAgentTurn } : {}),
+    ...(options.runReviewTurn ? { runReviewTurn: options.runReviewTurn } : {}),
   });
   const sessionAdmission = new SessionAdmission();
   const sessionCommands = new SessionCommandQueue();
@@ -818,7 +821,7 @@ export function createChatHostHandlers(
   return {
     peerHandlers,
     readSessionSnapshot,
-    resumeSessionInterrupt: async (peer, sessionId, message) => {
+    resumeSessionInterrupt: async (peer, sessionId, message, onReceipt) => {
       const requestDeps = runtimeDeps.get();
       const session = tuiSessions.getSession(requestDeps.petId, sessionId);
       if (!session) {
@@ -827,7 +830,7 @@ export function createChatHostHandlers(
       await admitHumanMessage(
         peer,
         message.requestId,
-        () => chatHandler.handleInterruptResume(peer, message, runtimeDeps.get(), session),
+        () => chatHandler.handleInterruptResume(peer, message, runtimeDeps.get(), session, onReceipt),
         session.id,
       );
     },

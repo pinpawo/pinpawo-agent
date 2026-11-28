@@ -209,8 +209,7 @@ export class ResidentPetCoordinator {
 
   /** Admit outside FIFO, with the same Pet gate held from validation through settlement. */
   async submitReviewAnswer(
-    resume: () => Promise<void>,
-    validate?: () => Promise<void>,
+    resume: (admit: () => void) => Promise<void>,
   ): Promise<{ completion: Promise<void> }> {
     if (this.reviewAnswer || this.conversations > 0 || this.hasActiveRun()) {
       throw new PetSessionReviewRefusedError(
@@ -224,17 +223,20 @@ export class ResidentPetCoordinator {
     let release!: () => void;
     this.reviewAnswer = new Promise<void>(resolve => { release = resolve; });
     const completion = this.holdConversationGate(async () => {
-      if (validate) await validate();
-      if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
-      admit();
-      await resume();
+      await resume(() => {
+        if (this.closing) throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+        admit();
+      });
     }).finally(() => {
       this.reviewAnswer = undefined;
       release();
     });
     // Before admission, return validation errors to the caller. Afterwards the
     // caller owns completion (Studio returns 202; the TUI awaits the outcome).
-    void completion.catch(refuse);
+    void completion.then(
+      () => refuse(new ResidentPetOperationCancelledError('Review answer was not admitted.')),
+      refuse,
+    );
     await admitted;
     return { completion };
   }

@@ -680,7 +680,8 @@ test('runAgentSessionTurn projects review interrupts to public interaction contr
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'waiting' });
+  assert.equal(result.status, 'waiting');
+  assert.ok(result.pendingInterrupt.interruptId);
   const event = emittedEvents[0];
   assert.equal(event?.type, 'interrupt.requested');
   assert.deepEqual(reviewInteractions(event), [projectHumanReviewRequest(review)]);
@@ -797,7 +798,8 @@ test('runAgentSessionTurn reports waiting_human when a resume raises a new revie
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'waiting' });
+  assert.equal(result.status, 'waiting');
+  assert.ok(result.pendingInterrupt.interruptId);
   assert.equal(emittedEvents[0]?.type, 'interrupt.requested');
   assert.equal(reviewInteractions(emittedEvents[0])[0]?.interactionId, 'review-next');
 });
@@ -993,7 +995,8 @@ test('runAgentSessionTurn does not map pending review free text to review respon
     },
   });
 
-  assert.deepEqual(result, { status: 'waiting' });
+  assert.equal(result.status, 'waiting');
+  assert.ok(result.pendingInterrupt.interruptId);
   assert.deepEqual(streamInputs, []);
   assert.deepEqual(setup.input.messages, []);
   assert.equal(preparedUserMessages, 0);

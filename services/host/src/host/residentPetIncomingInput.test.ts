@@ -283,7 +283,7 @@ test('immediate input during review settlement cannot cancel a later human appro
         options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
       }));
       blockRead = true;
-      return { status: 'waiting' };
+      return { status: 'waiting', pendingInterrupt: { interruptId: 'review-interrupt', payload: { kind: 'human_review', reviews: [h.reviews.get(turn.setup.input.threadId!)!] } } };
     }
     return reply(turn, turn.request.message);
   }, { beforeReadState: async () => {
@@ -453,7 +453,7 @@ test('Studio and TUI share one Review admission while ordinary work remains queu
         id: 'approval', view: { kind: 'plain', body: 'Approve?' },
         options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
       }));
-      return { status: 'waiting' };
+      return { status: 'waiting', pendingInterrupt: { interruptId: 'review-interrupt', payload: { kind: 'human_review', reviews: [h.reviews.get(turn.setup.input.threadId!)!] } } };
     }
     return reply(turn, 'ordinary work');
   });
@@ -503,7 +503,7 @@ test('Session and model listings neither occupy the dispatch gate nor block a Re
       id: 'approval', view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
     }));
-    return { status: 'waiting' };
+    return { status: 'waiting', pendingInterrupt: { interruptId: 'review-interrupt', payload: { kind: 'human_review', reviews: [h.reviews.get(turn.setup.input.threadId!)!] } } };
   }, { beforeReadState: async threadId => {
     if (threadId !== boundThread || !readsToBlock) return;
     readsToBlock--;

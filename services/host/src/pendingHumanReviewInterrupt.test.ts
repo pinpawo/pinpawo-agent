@@ -77,83 +77,6 @@ test('human review interrupt rejects decisions for mismatched interaction order'
     ]));
 });
 
-test('human review interrupt reloads checkpoint authority for every attempt', async () => {
-  const route = {
-    ...reviewRoute(['review-1'], 'interrupt-1'),
-    requestId: 'req-1',
-  };
-  let pending: typeof route | null = route;
-  const runs: unknown[] = [];
-  const events: AgentRuntimeEvent[] = [];
-  let closed = 0;
-  const message = {
-    type: 'interrupt.resume' as const,
-    requestId: 'req-1',
-    interruptId: 'interrupt-1',
-    value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
-  };
-  const resolve = () => resolvePendingHumanReviewInterrupt({
-    message,
-    recover: async () => pending,
-    emitClosed: () => {
-      closed += 1;
-    },
-    emitEvent: (event) => {
-      events.push(event);
-    },
-    isConnected: () => true,
-    run: async (_route, resume, source) => {
-      runs.push({ resume, source });
-      pending = null;
-      return 'completed';
-    },
-  });
-
-  await resolve();
-  await resolve();
-
-  assert.deepEqual(runs, [{
-    resume: {
-      decisions: [{ reviewId: 'review-1', selectedOptionId: 'approve' }],
-    },
-    source: {
-      type: 'review_decision',
-      interactionId: 'review-1',
-      selectedOptionId: 'approve',
-      decisionCount: 1,
-    },
-  }]);
-  assert.deepEqual(events, []);
-  assert.equal(closed, 1);
-});
-
-test('a same-id re-ask is read from the latest checkpoint', async () => {
-  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
-  const reasked = { ...reviewRoute(['review-2'], 'interrupt-1'), requestId: 'req-1' };
-  let pending = route;
-
-  await resolvePendingHumanReviewInterrupt({
-    message: {
-      type: 'interrupt.resume',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
-    },
-    recover: async () => pending,
-    emitClosed: () => undefined,
-    emitEvent: () => undefined,
-    isConnected: () => true,
-    run: async () => {
-      pending = reasked;
-      return 'waiting';
-    },
-  });
-
-  // The next attempt sees the re-asked interrupt, because every resolution
-  // reloads the authoritative checkpoint rather than caching a route.
-  assert.deepEqual(pending, reasked);
-});
-
 test('human review response validation runs before the route boundary guard', async () => {
   const route = {
     ...reviewRoute(['review-1'], 'interrupt-1'),
@@ -169,7 +92,7 @@ test('human review response validation runs before the route boundary guard', as
       interruptId: 'interrupt-1',
       value: { decisions: [{ interactionId: 'review-stale', selectedOptionId: 'approve' }] },
     },
-    recover: async () => route,
+    route,
     emitClosed: () => undefined,
     emitEvent: (event) => {
       events.push(event);
@@ -203,7 +126,7 @@ test('human review cancellation interrupts an approve-only review without fabric
       interruptId: 'interrupt-1',
       value: { action: 'cancel' },
     },
-    recover: async () => route,
+    route,
     emitClosed: () => undefined,
     emitEvent: () => undefined,
     isConnected: () => true,
@@ -238,7 +161,7 @@ test('human review rejection resumes with a reject decision', async () => {
       interruptId: 'interrupt-1',
       value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'reject' }] },
     },
-    recover: async () => route,
+    route,
     emitClosed: () => undefined,
     emitEvent: () => undefined,
     isConnected: () => true,
@@ -259,56 +182,4 @@ test('human review rejection resumes with a reject decision', async () => {
       decisionCount: 1,
     },
   }]);
-});
-
-test('a fatal run failure leaves checkpoint authority available for a later retry', async () => {
-  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
-  let runs = 0;
-
-  const resolve = () => resolvePendingHumanReviewInterrupt({
-    message: {
-      type: 'interrupt.resume',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      value: { action: 'cancel' },
-    },
-    recover: async () => route,
-    emitClosed: () => {},
-    emitEvent: () => {},
-    isConnected: () => true,
-    run: async () => {
-      runs += 1;
-      return runs === 1 ? 'fatal_failed' : 'completed';
-    },
-  });
-
-  await resolve();
-  await resolve();
-  assert.equal(runs, 2);
-});
-
-test('a recoverable run failure re-reads the pending interrupt on retry', async () => {
-  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
-  let runs = 0;
-
-  const resolve = () => resolvePendingHumanReviewInterrupt({
-    message: {
-      type: 'interrupt.resume',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      value: { action: 'cancel' },
-    },
-    recover: async () => route,
-    emitClosed: () => {},
-    emitEvent: () => {},
-    isConnected: () => true,
-    run: async () => {
-      runs += 1;
-      return runs === 1 ? 'failed' : 'completed';
-    },
-  });
-
-  await resolve();
-  await resolve();
-  assert.equal(runs, 2);
 });

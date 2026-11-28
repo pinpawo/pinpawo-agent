@@ -49,7 +49,7 @@ export function attributeReviewDispatch(options: {
           report({ state: 'failed', error: error instanceof Error ? error.message : 'internal error' });
         } else {
           report({ state: outcome, ...(reply === undefined ? {} : { reply }),
-            ...(outcome === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
+            ...(outcome === 'waiting' ? { pendingInterrupt } : {}),
           });
         }
         return result;

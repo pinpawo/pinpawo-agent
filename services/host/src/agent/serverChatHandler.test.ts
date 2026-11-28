@@ -347,7 +347,7 @@ test('run interrupt during a review resume neither supersedes nor resolves it', 
     runAgentTurn: async () => {
       runCount += 1;
       // The review resume settles into a pending interrupt of its own.
-      return { status: 'waiting' as const };
+      return { status: 'waiting' as const, pendingInterrupt: { interruptId: 'next-interrupt', payload: { kind: 'human_review' as const, reviews: [] } } };
     },
   });
   const resolution = handler.handleInterruptResume(
@@ -403,7 +403,7 @@ test('run interrupt re-announces a review that became pending before the client 
     runAgentTurn: async (options) => {
       requests.push(options.request);
       // A review cancellation settles into a task pause; the handler finalizes it.
-      return { status: 'waiting' };
+      return { status: 'waiting', pendingInterrupt: { interruptId: 'next-interrupt', payload: { kind: 'human_review' as const, reviews: [] } } };
     },
   });
   // The TUI chose run.interrupt from stale thinking state, but the active
@@ -1339,7 +1339,7 @@ test('a review resolution that settles into a task pause finalizes as waiting, n
       sendControl: (_peer, message) => controls.push(message),
     }),
     loadContext: async () => ({} as never),
-    runAgentTurn: async () => ({ status: 'waiting' }),
+    runAgentTurn: async () => ({ status: 'waiting', pendingInterrupt: { interruptId: 'next-interrupt', payload: { kind: 'human_review' as const, reviews: [] } } }),
   });
 
   await handler.handleInterruptResume(fakePeer, reviewCancel('interrupt-1', 'req-1'), { petId: 'pet-1' } as never);

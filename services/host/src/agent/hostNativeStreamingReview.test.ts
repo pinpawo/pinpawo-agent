@@ -86,7 +86,8 @@ for (const decision of ['respond', 'reject'] as const) {
       setup: makeSetup(), graphService: new HostGraphService(), isCurrent: () => true,
       emitEvent: (event) => observed.push(event), emitToolEvent: () => {},
     });
-    assert.deepEqual(initial, { status: 'waiting' });
+    assert.equal(initial.status, 'waiting');
+    assert.ok(initial.pendingInterrupt.interruptId);
     const restartedService = new HostGraphService();
     const restartedSetup = makeSetup();
     const pending = (await restartedService.readThreadState(restartedSetup)).pendingInterrupt;

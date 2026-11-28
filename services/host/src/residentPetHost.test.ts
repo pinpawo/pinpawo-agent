@@ -302,7 +302,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
           messages: [new AIMessage('waiting for approval')],
           pendingInterrupt: review,
         });
-        return { status: 'waiting' };
+        return { status: 'waiting', pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } } };
       }
       states.set(threadId, { ...state, pendingInterrupt: null });
       return { status: 'completed', reply: 'approved' };

@@ -76,7 +76,7 @@ test('attributes a validated resume using the original invocation context after 
 
 test('a non-dispatched review resumes without creating a Dispatch', async () => {
   const h = await harness();
-  const result = { outcome: 'completed' } as const;
+  const result = { outcome: 'completed', reply: 'reply', pendingInterrupt: null } as const;
   assert.equal(await h.deliver(result, 'other'), result);
   assert.deepEqual(h.events, []);
   assert.equal(h.getSession().pendingDispatch?.dispatchId, 'dispatch-1');

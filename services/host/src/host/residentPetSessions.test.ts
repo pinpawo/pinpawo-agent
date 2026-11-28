@@ -102,7 +102,7 @@ async function createWaitingHost(resolveInvocationContext?: Parameters<typeof cr
             payload: { kind: 'human_review', interactions: [] },
           },
         });
-        return { status: 'waiting' };
+        return { status: 'waiting', pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } } };
       }
       await gates.resume;
       if (gates.resumeFailure) throw gates.resumeFailure;

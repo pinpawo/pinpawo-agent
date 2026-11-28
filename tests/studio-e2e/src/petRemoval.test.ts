@@ -101,7 +101,7 @@ for (const action of ['close', 'remove'] as const) {
         threads.set(setup.input.threadId ?? '', { reviewing: true });
         emitEvent({ type: 'interrupt.requested', requestId: request.requestId,
           pendingInterrupt: { interruptId: 'pending', payload: { kind: 'human_review', interactions: [] } } });
-        return { status: 'waiting' };
+        return { status: 'waiting', pendingInterrupt: { interruptId: 'pending', payload: { kind: 'human_review', reviews: [review] } } };
       },
     });
     const channel = createChannelPlugin({ httpRoute: false });
@@ -161,7 +161,7 @@ test('confirmed Close and Reopen rebuild a real Host on the same identity, owner
             reviewing.add(setup.input.threadId ?? '');
             emitEvent({ type: 'interrupt.requested', requestId: request.requestId,
               pendingInterrupt: { interruptId: 'reopen-pending', payload: { kind: 'human_review', interactions: [] } } });
-            return { status: 'waiting' };
+            return { status: 'waiting', pendingInterrupt: { interruptId: 'reopen-pending', payload: { kind: 'human_review', reviews: [review] } } };
           }
           return { status: 'completed', reply: 'settled' };
         },

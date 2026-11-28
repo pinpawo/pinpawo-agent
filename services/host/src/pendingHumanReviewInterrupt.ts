@@ -37,13 +37,6 @@ export type PendingHumanReviewInterruptRoute = {
   reviews: ReviewSpec[];
 };
 
-export function matchesPendingHumanReviewInterrupt(
-  route: PendingHumanReviewInterruptRoute,
-  interruptId: string,
-) {
-  return interruptId === route.interruptId;
-}
-
 export function readHumanReviewResponses(
   responses: HumanReviewResponse[],
 ): ReviewResponse[] {
@@ -148,7 +141,7 @@ type ResolvableHumanReviewRoute = PendingHumanReviewInterruptRoute & { requestId
 
 type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
   message: HumanReviewResolutionMessage;
-  recover: () => Promise<TRoute | null>;
+  route: TRoute;
   emitClosed: () => void;
   emitEvent: (event: AgentRuntimeEvent) => void;
   acceptRoute?: (
@@ -164,26 +157,15 @@ type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
 };
 
 /**
- * Executes the transport-independent human-review projection of a pending
- * interrupt. The function retains no lifecycle state: every attempt reloads
- * the authoritative checkpoint, validates the response, and builds a resume.
+ * Validate an answer against the current interrupt supplied by Host execution
+ * and build the resume value without loading state again.
  * Session scoping, event delivery, and the resumed run stay at the handler
  * boundary.
  */
 export async function resolvePendingHumanReviewInterrupt<
   TRoute extends ResolvableHumanReviewRoute,
 >(options: HumanReviewResolutionOptions<TRoute>) {
-  const { message } = options;
-  const route = await options.recover();
-  if (!route) {
-    options.emitClosed();
-    return;
-  }
-
-  if (!matchesPendingHumanReviewInterrupt(route, message.interruptId)) {
-    options.emitEvent(agentErrorEvent(message.requestId, { code: 'interrupt_stale' }));
-    return;
-  }
+  const { message, route } = options;
   const requested = readReviewResumeValue(message.value);
   if (!requested) {
     options.emitEvent(agentErrorEvent(message.requestId, { code: 'interrupt_response_invalid' }));
